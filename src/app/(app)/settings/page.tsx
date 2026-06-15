@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportButtons } from "@/components/ExportButtons";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 
@@ -14,6 +15,8 @@ export default function SettingsPage() {
   const refreshAiStatus = useScanStore((s) => s.refreshAiStatus);
   const setEmergencyStop = useScanStore((s) => s.setEmergencyStop);
   const catalog = useScanStore((s) => s.catalog);
+  // AI/provider + catalog-internals sections are platformOwner-only (customer-facing UI must not expose them).
+  const isPlatform = useIsPlatformOwner();
 
   useEffect(() => {
     void refreshAiStatus();
@@ -22,14 +25,20 @@ export default function SettingsPage() {
   const verifiedCatalogCount = catalog.filter((e) => e.verificationStatus === "verified").length;
   const pendingCatalogCount = catalog.filter((e) => e.verificationStatus === "pending").length;
 
+  const [cacheMsg, setCacheMsg] = useState("");
   function handleClearCache() {
     const ok =
       typeof window === "undefined" ||
       window.confirm(
-        "Clear local cache? This wipes this browser's scan session, learned aliases, and pending " +
-          "sync, then reloads clean demo data. It does NOT touch any production or external system.",
+        "Clear LOCAL browser cache? This wipes this browser's scan session, pending sync, and local " +
+          "cached data only. Your cloud data is NOT deleted.",
       );
-    if (ok) clearLocalCache();
+    if (!ok) return;
+    clearLocalCache();
+    setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
+    // Reload cleanly so cloud data re-loads fresh (and a poisoned alias that returns proves it is in
+    // cloud data, to be fixed via the alias repair path, not local cache).
+    if (typeof window !== "undefined") setTimeout(() => window.location.reload(), 1400);
   }
 
   return (
@@ -40,6 +49,7 @@ export default function SettingsPage() {
         </Row>
       </Section>
 
+      {isPlatform && (<>
       <Section title="AI lookup">
         <Toggle
           label="Enable AI lookup for unknown codes"
@@ -175,6 +185,8 @@ export default function SettingsPage() {
         </button>
       </Section>
 
+      </>)}
+
       <Section title="Scanner">
         <Row label="Submit mode">
           <select
@@ -216,6 +228,7 @@ export default function SettingsPage() {
         <ExportButtons />
       </Section>
 
+      {isPlatform && (<>
       <Section title="Auto-catalog learning">
         <Toggle
           label="Auto-save strong matches to the verified catalog (fewer manual approvals)"
@@ -271,6 +284,8 @@ export default function SettingsPage() {
         </p>
       </Section>
 
+      </>)}
+
       <Section title="Clean up inventory">
         <CleanupRecommendations />
       </Section>
@@ -290,6 +305,11 @@ export default function SettingsPage() {
         >
           Clear local cache
         </button>
+        {cacheMsg && (
+          <p className="mt-2 text-sm font-medium text-green-700" data-testid="clear-cache-message">
+            {cacheMsg}
+          </p>
+        )}
       </div>
     </div>
   );
