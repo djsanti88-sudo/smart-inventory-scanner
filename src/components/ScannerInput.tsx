@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ScanEvent } from "@/types";
+import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 
 // Dedicated hardware-scanner input.
 //
@@ -34,6 +36,12 @@ export function ScannerInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lastResult, setLastResult] = useState<ScanEvent | null>(null);
+  // Role-aware scan confirmation. platformOwner sees the technical detail (clean code + match type);
+  // a customer ("business") must NEVER see the raw/clean code (denylisted) or internal match type - they
+  // see the product NAME + PART NUMBER (primarySku) instead, so the confirmation matches the rest of the
+  // customer-safe UI. Data-access truth is still server/serializer-enforced; this only shapes the message.
+  const isPlatform = useIsPlatformOwner();
+  const getProduct = useScanStore((s) => s.getProduct);
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();
@@ -81,6 +89,29 @@ export function ScannerInput({
           ? "text-amber-700"
           : "text-red-700";
 
+  // Build the confirmation text. Customer messages carry NO raw/clean code and NO internal match type.
+  function statusMessage(ev: ScanEvent): string {
+    if (isPlatform) {
+      return ev.status === "known"
+        ? `Counted: ${ev.cleanCode} (${ev.matchType}). New quantity ${ev.quantityAfterScan}.`
+        : ev.status === "conflict"
+          ? `Conflict: ${ev.cleanCode} matches more than one product. Sent to Needs Review.`
+          : `Unknown: ${ev.cleanCode}. Sent to Needs Review.`;
+    }
+    // Customer view: product-facing only.
+    if (ev.status === "known") {
+      const product = getProduct(ev.matchedProductId);
+      const name = product?.name || "Product";
+      const partNumber = product?.primarySku;
+      const partLabel = partNumber ? ` (part no. ${partNumber})` : "";
+      return `Counted: ${name}${partLabel}. New quantity ${ev.quantityAfterScan}.`;
+    }
+    if (ev.status === "conflict") {
+      return "Conflict: this code matches more than one product. Sent to Needs Review.";
+    }
+    return "Unknown code. Sent to Needs Review.";
+  }
+
   return (
     <div className="w-full">
       <label htmlFor="scanner-input" className="mb-1 block text-sm font-medium text-zinc-700">
@@ -101,13 +132,7 @@ export function ScannerInput({
         className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-4 text-lg text-zinc-900 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
       />
       <p className={`mt-2 min-h-5 text-sm ${resultClass}`} data-testid="scan-status">
-        {lastResult == null
-          ? "Ready to scan."
-          : lastResult.status === "known"
-            ? `Counted: ${lastResult.cleanCode} (${lastResult.matchType}). New quantity ${lastResult.quantityAfterScan}.`
-            : lastResult.status === "conflict"
-              ? `Conflict: ${lastResult.cleanCode} matches more than one product. Sent to Needs Review.`
-              : `Unknown: ${lastResult.cleanCode}. Sent to Needs Review.`}
+        {lastResult == null ? "Ready to scan." : statusMessage(lastResult)}
       </p>
     </div>
   );
