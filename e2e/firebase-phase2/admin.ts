@@ -19,6 +19,20 @@ export const KNOWN_BARCODE = "1111111111";
 export const ALIAS_CODE = "2222222222";
 export const UNKNOWN_CODE = "9999999999";
 
+// ---- Controlled automated pilot (Stage 2): isolated tire-domain business + owner/counter/viewer roles.
+// Kept in its OWN business so it never interferes with the firebase-flow spec's business (BIZ).
+export const PILOT_BIZ = "biz-pilot";
+export const PILOT_COUNTER_UID = "pilot-counter";
+export const PILOT_COUNTER_EMAIL = "counter@test.local";
+export const PILOT_VIEWER_UID = "pilot-viewer";
+export const PILOT_VIEWER_EMAIL = "viewer@test.local";
+export const PILOT_ROLE_PASSWORD = "test1234";
+// A real tire product (factual spec fields only) + alias SKU; plus an unknown tire code to approve.
+export const PILOT_TIRE_PRODUCT_ID = "prod-pilot-tire";
+export const PILOT_TIRE_BARCODE = "4019238847352"; // sample GTIN-shaped code for the pilot tire
+export const PILOT_TIRE_SKU = "MICH-PS4-2454018"; // alias SKU for the same tire
+export const PILOT_TIRE_UNKNOWN = "8888888888"; // unknown tire code -> Needs Review -> approve
+
 function adminApp(): App {
   const existing = getApps().find((a) => a.name === "e2e-fb-admin");
   if (existing) return existing;
