@@ -260,6 +260,10 @@ export interface ScanState {
   evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
   /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
   clearMismatchWarning: () => void;
+  /** Repair a bad alias: unlink it (stops resolving; soft delete, scan history kept). Audited. */
+  unlinkAlias: (aliasId: string) => void;
+  /** Repair a bad alias: move it to the correct product. Audited. */
+  moveAlias: (aliasId: string, toProductId: string) => void;
   /** Append a private feedback/event-log entry (the "smarter over time" substrate). */
   recordFeedback: (
     type: FeedbackEventType,
@@ -1673,6 +1677,48 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       clearMismatchWarning: () => set({ lastMismatchWarning: null }),
+
+      unlinkAlias: (aliasId) => {
+        const state = get();
+        const alias = state.aliases.find((a) => a.id === aliasId);
+        if (!alias) return;
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, `${aliasId}:unlink:${idFactory()}`, "RESOLVE_ALIAS");
+        const updated: Alias = { ...alias, approved: false, updatedAt: now(), syncStatus: "pending", idempotencyKey: key };
+        // Mark related feed rows as needing review again (scan HISTORY is preserved, just no longer "known").
+        const scanFeed = state.scanFeed.map((e) =>
+          e.matchedProductId === alias.productId && e.cleanCode === alias.cleanCode
+            ? { ...e, status: "needs_review" as const, resolverStatus: "needs_review" as const, matchedProductId: null }
+            : e,
+        );
+        set((s) => ({
+          aliases: s.aliases.map((a) => (a.id === aliasId ? updated : a)),
+          scanFeed,
+          pendingSyncQueue: [
+            ...s.pendingSyncQueue,
+            makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Alias", entityId: aliasId, operation: "RESOLVE_ALIAS", payload: updated, idempotencyKey: key, scanEventId: null }),
+          ],
+        }));
+        emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_moved_or_unlinked", metadata: { fromProduct: alias.productId, toProduct: "", cleanCode: alias.cleanCode, normalizedCode: alias.normalizedCode, reason: "human_mistake_repair" } });
+        get().syncPending();
+      },
+
+      moveAlias: (aliasId, toProductId) => {
+        const state = get();
+        const alias = state.aliases.find((a) => a.id === aliasId);
+        if (!alias || !toProductId || toProductId === alias.productId) return;
+        const fromProduct = alias.productId;
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, `${aliasId}:move:${idFactory()}`, "RESOLVE_ALIAS");
+        const updated: Alias = { ...alias, productId: toProductId, approved: true, updatedAt: now(), syncStatus: "pending", idempotencyKey: key };
+        set((s) => ({
+          aliases: s.aliases.map((a) => (a.id === aliasId ? updated : a)),
+          pendingSyncQueue: [
+            ...s.pendingSyncQueue,
+            makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Alias", entityId: aliasId, operation: "RESOLVE_ALIAS", payload: updated, idempotencyKey: key, scanEventId: null }),
+          ],
+        }));
+        emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_moved_or_unlinked", metadata: { fromProduct, toProduct: toProductId, cleanCode: alias.cleanCode, normalizedCode: alias.normalizedCode, reason: "human_mistake_repair" } });
+        get().syncPending();
+      },
 
       importProductsCsv: (text) => {
         const state = get();
