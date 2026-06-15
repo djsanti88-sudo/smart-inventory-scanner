@@ -25,9 +25,15 @@ source-discovery go/no-go and quality gates pass and spend stays within caps.
 | stage | status | verified-scannable | candidate-scannable | spec-only | conflicted | rejected | metered $ | firecrawl credits |
 |-------|--------|--------------------|--------------------|-----------|------------|----------|-----------|-------------------|
 | discovery | DONE | — | — | — | — | — | $0 | 0 |
-| 100 | _pending_ | — | — | — | — | — | — | — |
+| 100 | DONE (candidate-grade) | 0 | 0 | 10 | 0 | 10 | $0 | ~80 (94 cumulative w/ benchmark) |
 | 500 | NO-GO | — | — | — | — | — | — | — |
 | 5000 | NO-GO | — | — | — | — | — | — | — |
+
+## 100-stage result
+20 real, source-backed records via `scripts/tire-discovery.ts` (Firecrawl, robots-checked, facts-only).
+**0 verified-scannable, 0 active candidate-scannable, 10 spec-only candidates (manufacturer sources),
+10 held (retailer), 0 conflicts.** Confirms the discovery finding: no free/legal source publishes
+scannable tire UPC/GTIN. See `reports/tire-db/stage_100_summary.md`. STOP before 500/5000.
 
 ## Source-discovery result (gate)
 See `reports/tire-db/source_inventory.md` + `.json`. **Binding finding: no safe, free, bulk source of
