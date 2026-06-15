@@ -173,6 +173,10 @@ export interface ScanState {
   businessId: string;
   userId: string | null; // signed-in user (Firebase backend); null on the local/mock path
   businessContextReady: boolean; // true once a REAL business context is set (or always on the mock path)
+  // Cloud backend: true once loadBusinessData has finished (products/aliases/session/counts in store), so
+  // the UI does not let a scan run against an empty catalog before the business's data arrives. Always
+  // true on the mock/local path.
+  businessDataLoaded: boolean;
   currentSession: InventorySession | null;
   sessionId: string;
   settings: Settings;
@@ -370,9 +374,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       }
     };
 
-    // Cloud drain: async, awaits db.apply, and REQUIRES a real business context first (no fake/default
-    // business writes). The mock/local path keeps the original SYNCHRONOUS syncPending below unchanged.
-    const syncPendingCloud = async (force: boolean) => {
+    // Serialize cloud drains: rapid scans each call syncPending, and overlapping async drains would
+    // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
+    // each drain after the previous completes; every enqueue still triggers a drain that picks up the
+    // latest queue. Per-item idempotency (transaction + ledger) remains the guarantee against true retries.
+    let drainChain: Promise<void> = Promise.resolve();
+    const syncPendingCloud = (force: boolean): Promise<void> => {
+      drainChain = drainChain.then(() => drainCloudOnce(force)).catch(() => {});
+      return drainChain;
+    };
+
+    // Cloud drain (one pass): async, awaits db.apply, and REQUIRES a real business context first (no
+    // fake/default business writes). The mock/local path keeps the original SYNCHRONOUS syncPending below.
+    const drainCloudOnce = async (force: boolean) => {
       const state = get();
       if (!state.online && !force) return;
       if (state.pendingSyncQueue.length === 0) return;
@@ -380,10 +394,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         set({ lastSyncError: "Select or create a business before syncing to the cloud." });
         return; // pause: keep everything pending, write nothing
       }
-      const stillPending: PendingSyncItem[] = [];
+      // Snapshot the batch to process. We must NOT overwrite the whole queue at the end (items enqueued
+      // by rapid scans DURING this async loop would be clobbered + silently lost). Instead, track this
+      // batch's outcome by item id and reconcile against the LATEST queue, preserving anything new.
+      const batch = state.pendingSyncQueue;
       const syncedIds = new Set(get().syncedScanEventIds);
+      const appliedIds = new Set<string>();
+      const erroredById = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
-      for (const item of state.pendingSyncQueue) {
+      for (const item of batch) {
         let res;
         try {
           res = await db.apply(item);
@@ -391,20 +410,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           res = { ok: false, alreadyApplied: false, error: e instanceof Error ? e.message : String(e) };
         }
         if (res.ok) {
+          appliedIds.add(item.id);
           if (item.scanEventId) syncedIds.add(item.scanEventId);
         } else {
-          stillPending.push({ ...item, status: "error", retryCount: item.retryCount + 1, lastError: res.error ?? "sync failed", updatedAt: now() });
+          erroredById.set(item.id, { ...item, status: "error", retryCount: item.retryCount + 1, lastError: res.error ?? "sync failed", updatedAt: now() });
           lastErr = res.error ?? "sync failed";
         }
       }
-      const cur = get();
-      const recomputed = recomputeSyncStatus({
-        scanFeed: cur.scanFeed,
-        finalCounts: cur.finalCounts,
-        needsReviewQueue: cur.needsReviewQueue,
-        pendingSyncQueue: stillPending,
+      set((cur) => {
+        // Reconcile against the CURRENT queue: drop applied items, replace errored with their updated
+        // version, and KEEP any items enqueued while this pass was awaiting (the mutex's next pass drains
+        // them). This avoids the read-modify-write race that previously dropped concurrent scans.
+        const nextQueue = cur.pendingSyncQueue
+          .filter((it) => !appliedIds.has(it.id))
+          .map((it) => erroredById.get(it.id) ?? it);
+        const recomputed = recomputeSyncStatus({
+          scanFeed: cur.scanFeed,
+          finalCounts: cur.finalCounts,
+          needsReviewQueue: cur.needsReviewQueue,
+          pendingSyncQueue: nextQueue,
+        });
+        return { pendingSyncQueue: nextQueue, syncedScanEventIds: [...syncedIds], lastSyncError: lastErr, ...recomputed };
       });
-      set({ pendingSyncQueue: stillPending, syncedScanEventIds: [...syncedIds], lastSyncError: lastErr, ...recomputed });
     };
 
     return {
@@ -412,6 +439,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       userId: null,
       // Mock/local path needs no business context; cloud path must wait for setBusinessContext().
       businessContextReady: !cloudBackend,
+      businessDataLoaded: !cloudBackend, // mock path has no remote data to load
+
       sessionId: "session-1",
       currentSession: {
         id: "session-1",
@@ -448,7 +477,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
       setBusinessContext: (businessId, userId) => {
-        set({ businessId, userId, businessContextReady: true, lastSyncError: null });
+        const needsLoad = cloudBackend && !!deps.loadBusinessData;
+        set({ businessId, userId, businessContextReady: true, businessDataLoaded: !needsLoad, lastSyncError: null });
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
           // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
@@ -469,9 +499,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 next.sessionId = restored.id;
                 next.finalCounts = data.counts.filter((c) => c.sessionId === restored.id);
               }
+              next.businessDataLoaded = true;
               set(next);
             } catch (e) {
-              set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data" });
+              // Surface the error but mark loaded so the UI does not hang forever (sync still paused on error).
+              set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data", businessDataLoaded: true });
             }
             get().syncPending();
           })();

@@ -5,6 +5,9 @@ import { defineConfig, devices } from "@playwright/test";
 // spec in e2e/scan.spec.ts to e2e/proof/.
 export default defineConfig({
   testDir: "./e2e",
+  // The Firebase-backed specs live in e2e/firebase-phase2 and run via playwright.firebase.config.ts
+  // (real Firebase backend + emulator). Keep them OUT of the mock run so the 11 mock specs stay isolated.
+  testIgnore: ["**/firebase-phase2/**"],
   fullyParallel: false,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],

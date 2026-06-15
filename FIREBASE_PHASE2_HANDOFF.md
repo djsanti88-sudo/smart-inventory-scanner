@@ -12,7 +12,8 @@ Branch: `firebase-cloud-phase2` (off `master`). Emulator-side build; cloud Loop 
 | 4b | `businessDataLoader` + `setBusinessContext` loads products/aliases (alias resolves after refresh) | `4131702` | emulator + store |
 | 3 | Session/count persistence + survive-refresh (`SAVE_SESSION` op + explicit MockDb handling, `finishSession`, reverse mappers, `loadBusinessData` reads sessions+counts, `setBusinessContext` reconstructs active session + finalCounts) | `c5e61bd` | emulator + store |
 | 6 | Audit writes (fire-and-forget injectable `audit()` -> append-only `auditLog`; wired to session start/finish, unknown-review create, alias approve/reject, product create; never blocks/breaks the scanner) | `8f86f80` | emulator + store |
-| 5 | CSV import/export MVP (`csvImport.ts`: parse + products/approved-aliases with dup/conflict detection; `exportQuantityAdjustments`; `importProductsCsv` writes via SAVE_PRODUCT/RESOLVE_ALIAS + audit; export audited; import/export UI) | _this pass_ | emulator + store + unit |
+| 5 | CSV import/export MVP (`csvImport.ts`: parse + products/approved-aliases with dup/conflict detection; `exportQuantityAdjustments`; `importProductsCsv` writes via SAVE_PRODUCT/RESOLVE_ALIAS + audit; export audited; import/export UI) | `3485b92` | emulator + store + unit |
+| 7 | Real business-context UI wiring (`BusinessContextGate` + Select/Finish buttons + `selectedBusiness`) + Firebase-backed Playwright proof (real Auth-emulator sign-in, separate config, survive-refresh, Admin-SDK assertions). Fixed a real cloud-sync data-loss race (drain clobbered concurrently-enqueued items) + serialized drains. | _this pass_ | Firebase Playwright + emulator + store |
 
 Gates at `4131702`: `test:firebase` 20/20 · `vitest` 323 passed/20 skipped · `tsc` clean · `eslint` clean ·
 `next build` OK · `playwright` 11/11 (mock e2e intact).
@@ -51,11 +52,21 @@ Gates after Loop 3: `test:firebase` 24/24 · `vitest` 328 passed/24 skipped · `
   firewall). DEFERRED (documented): ImportJob/ExportJob tracking entities; quantity-adjustment has no
   prior "system quantity" baseline (counted qty == adjustment). Proven: `csvImport.test.ts`,
   `csvImport.store.test.ts`, `csvExport.test.ts` (qty-adjustment), emulator `csvImport.rules.test.ts`.
-- **Loop 7 - Firebase Playwright.** New `e2e/firebase-phase2/` running the app with
-  `NEXT_PUBLIC_FIREBASE_BACKEND=1` against the emulator (separate Playwright project/webserver +
-  emulator running + a seeded user/business). Flow: create business -> session -> scan known/alias/
-  unknown -> approve -> rescan resolves -> retry no double count -> refresh persists -> finish -> export
-  -> audit. Screenshots -> `e2e/proof/firebase-phase2/`. Largest/most orchestration-heavy.
+- **Loop 7 - DONE (this pass).** Real business-context UI wiring: `BusinessContextGate` (resolves the
+  signed-in user + selected business, verifies a real membership, then calls `setBusinessContext`; shows
+  a clear message + waits for `businessDataLoaded` before scanning) on `/scan` and `/review` (NOT
+  `/business`, which would deadlock the selector); a Select button per membership (`selectedBusiness.ts`
+  persists the choice); a Finish-session button. Firebase-backed Playwright at `e2e/firebase-phase2/`
+  (`playwright.firebase.config.ts`, run via `npm run test:e2e:firebase` wrapping `firebase emulators:exec`
+  on auth+firestore; `global-setup.ts` seeds a real Auth user + business + membership + known product/
+  aliases via the Admin SDK). Flow: real login UI -> select business -> start session -> scan known +
+  alias -> scan unknown -> approve (create product+alias) -> rescan resolves Known -> refresh reloads
+  session/counts/products/aliases from Firestore -> finish -> export CSV; asserts persisted state directly
+  against the emulator (counts, sessions, aliases, audit). Screenshots -> `e2e/proof/firebase-phase2/`.
+  **Found + fixed a real cloud-sync data-loss bug:** `syncPendingCloud` overwrote the queue with its
+  start-of-pass snapshot, clobbering items enqueued during the async apply loop (rapid scans were lost
+  even though "pending" reached 0). Now: a promise-chain mutex serializes drains, and the write-back is
+  id-based (drop applied, replace errored, keep newly-enqueued). Regression: `cloudDrainRace.store.test.ts`.
 
 ## Cloud Loop 8 (blocked)
 Need owner's 6 `NEXT_PUBLIC_FIREBASE_*` values (+ Firestore & Email/Password enabled in
@@ -66,8 +77,12 @@ auth/rules/isolation smoke, report separately. No fake cloud proof; nothing depl
 1. ~~**Loop 3** - session/count persistence and survive-refresh.~~ DONE (this pass).
 2. ~~**Loop 6** - audit writes.~~ DONE (this pass).
 3. ~~**Loop 5** - CSV import/export MVP.~~ DONE (this pass).
-4. **Loop 7** - Firebase-backed Playwright proof. (NEXT)
-5. **Loop 8** - cloud auth/rules/isolation smoke (only AFTER the owner provides the Web App config).
+4. ~~**Loop 7** - Firebase-backed Playwright proof.~~ DONE (this pass).
+5. **Loop 8** - cloud auth/rules/isolation smoke (only AFTER the owner provides the Web App config). STILL BLOCKED.
+
+## Final gates (after Loop 7)
+`test:firebase` 29/29 · `vitest` 346 passed/29 skipped · `tsc` clean · `eslint` 0 errors ·
+`next build` OK · `playwright` (mock) 11/11 · `test:e2e:firebase` 1/1 (stable). Emulator only - no cloud.
 
 ## KNOWN BLOCKER
 Waiting on the owner's 6 `NEXT_PUBLIC_FIREBASE_*` values (Firebase Web App config for

@@ -1,0 +1,3 @@
+﻿quantity,product_name,brand,category,specs,primary_sku,primary_barcode,gtin,upc,ean,aliases,image_url,product_url,location,notes,counted_at,session_id,sync_status,scan_event_ids
+2,FB Mystery,,,,,9999999999,,,,,,,,,,session-8bdbc7c8-6603-4e87-8db5-48fb3363fa44,synced,dfa938df-319b-4cf5-ba28-2e2b946c4e87 | 36f5e479-b212-42f3-b362-432e86723b5b
+2,FB Known Widget,Acme,Test,,,1111111111,,,,,,,,,,session-8bdbc7c8-6603-4e87-8db5-48fb3363fa44,synced,66552ab5-9ad6-4244-a87e-25b6d3e5b99c | 2dca269f-e6d9-40c1-af9d-cba36201c6ff
