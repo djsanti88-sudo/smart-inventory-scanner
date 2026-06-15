@@ -1,0 +1,9 @@
+{
+  "unit": "credits",
+  "cap": 500,
+  "perDomainCap": 50,
+  "credits": 0,
+  "note": "Firecrawl is prepaid/abundant (owner: 'don't be shy') so it is NOT counted against the $30 cash cap, but it is NOT unlimited. Hard task cap 500 credits; <=50 pages per source domain unless owner/vendor file or explicitly-safe bulk file. Stop if usage looks abnormal. Report in every stage summary.",
+  "perDomain": {},
+  "entries": []
+}
