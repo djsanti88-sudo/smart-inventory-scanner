@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
-import { logout } from "@/lib/auth";
+import { signOut } from "@/lib/auth";
 
 // App navigation. Shows an open-review count badge so unknown codes are obvious but not disruptive.
 export function Nav() {
@@ -43,8 +43,8 @@ export function Nav() {
         })}
         <button
           type="button"
-          onClick={() => {
-            logout();
+          onClick={async () => {
+            await signOut();
             router.replace("/login");
           }}
           className="ml-auto rounded px-3 py-1.5 text-sm font-medium text-zinc-500 hover:bg-zinc-50"

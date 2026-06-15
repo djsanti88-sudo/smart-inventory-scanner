@@ -1,7 +1,7 @@
 import type { CatalogCandidate, CatalogEntry, LookupDecision, ShopOverride } from "./catalogTypes";
 
 // The seam a future cloud database implements. The app only ever talks to this interface, so swapping
-// LocalCatalogProvider for a Supabase/Postgres/Firebase implementation later requires no caller changes.
+// LocalCatalogProvider for a Firebase implementation later requires no caller changes.
 //
 // Lookup precedence (the deterministic local alias/product check happens BEFORE the catalog, in the
 // resolver): shop override -> verified catalog -> weak catalog -> none. AI is the caller's fallback.

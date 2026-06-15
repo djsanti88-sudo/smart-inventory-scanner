@@ -34,3 +34,12 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Backend (Launch MVP) — Firebase
+
+The backend foundation is Firebase (Auth + Cloud Firestore + Security Rules), developed emulator-first.
+- Setup: see [FIREBASE_SETUP.md](FIREBASE_SETUP.md). Security model: [FIREBASE_SECURITY.md](FIREBASE_SECURITY.md).
+- Local: `npm run emulators` (Auth+Firestore) and `npm run test:firebase` (tenant-isolation + repo proof).
+- Data lives in subcollections `/businesses/{businessId}/...`; tenancy + roles enforced by `firestore.rules`.
+- The live scan/count flow still runs locally; wiring it onto the Firebase repositories is Phase 2.
+- The previous Supabase foundation is archived under `archive/supabase-foundation/`.
