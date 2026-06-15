@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import type { SyncResult } from "@/services/mockDb";
-import type { PendingSyncItem } from "@/types";
+import type { PendingSyncItem, Product, Alias } from "@/types";
 
 // Loop 2 proof (store logic, no emulator needed): with the Firebase (cloud) backend, sync uses the ASYNC
 // drain and REQUIRES a real business context. Without businessId+userId it PAUSES with a visible error
@@ -57,6 +57,34 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(target.applied.length).toBeGreaterThan(0); // queued items drained
     expect(store.getState().lastSyncError).toBeNull();
     expect(store.getState().pendingSyncQueue).toHaveLength(0);
+  });
+
+  it("setBusinessContext loads the business's products/aliases so a scan resolves the approved alias", async () => {
+    const CODE = "012345678905";
+    const product = {
+      id: "p-loaded", businessId: "biz-real", name: "Loaded Widget", brand: "", category: "", specsShort: "", specsFull: "",
+      primarySku: "", primaryBarcode: CODE, gtin: "", upc: CODE, ean: "", vendorCodes: [], aliases: [CODE], imageUrl: "",
+      productUrl: "", location: "", notes: "", status: "active", source: "human_review", confidence: 1, verified: true,
+      createdAt: "t", updatedAt: "t", createdBy: "human", updatedBy: "human",
+    } as Product;
+    const alias = {
+      id: "a-loaded", businessId: "biz-real", productId: "p-loaded", rawCodeExample: CODE, cleanCode: CODE,
+      normalizedCode: CODE, aliasType: "upc", source: "human_review", confidence: 1, approved: true, createdAt: "t",
+      updatedAt: "t", createdBy: "human", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k",
+    } as Alias;
+
+    const store = createTestScanStore({
+      db: new FakeAsyncTarget(),
+      cloudBackend: true,
+      loadBusinessData: async () => ({ products: [product], aliases: [alias] }),
+    });
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+    expect(store.getState().products.some((p) => p.id === "p-loaded")).toBe(true);
+
+    const ev = store.getState().processScan(CODE);
+    expect(ev?.resolverStatus).toBe("known"); // resolved from the loaded approved alias
+    expect(ev?.matchedProductId).toBe("p-loaded");
   });
 
   it("the mock/local path is unchanged: synchronous drain, no business context required", () => {
