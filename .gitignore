@@ -12,6 +12,11 @@
 
 # testing
 /coverage
+/test-results
+/playwright-report
+/blob-report
+/.playwright
+# keep e2e/proof/ screenshots (they are deliberate proof artifacts)
 
 # next.js
 /.next/

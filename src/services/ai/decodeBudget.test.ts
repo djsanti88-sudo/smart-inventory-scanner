@@ -1,0 +1,32 @@
+import { describe, it, expect } from "vitest";
+import {
+  clampDecodeBudgetMs,
+  DECODE_BUDGET_MIN_MS,
+  DECODE_BUDGET_MAX_MS,
+  DECODE_BUDGET_DEFAULT_MS,
+} from "@/services/ai/decodeBudget";
+
+describe("clampDecodeBudgetMs (server-side safety clamp)", () => {
+  it("passes a valid in-range budget through", () => {
+    expect(clampDecodeBudgetMs(8000)).toBe(8000);
+  });
+
+  it("clamps an abusive large budget to the max", () => {
+    expect(clampDecodeBudgetMs(600_000)).toBe(DECODE_BUDGET_MAX_MS);
+  });
+
+  it("clamps a too-small budget to the min", () => {
+    expect(clampDecodeBudgetMs(100)).toBe(DECODE_BUDGET_MIN_MS);
+  });
+
+  it("falls back to the default for missing or invalid input", () => {
+    expect(clampDecodeBudgetMs(undefined)).toBe(DECODE_BUDGET_DEFAULT_MS);
+    expect(clampDecodeBudgetMs("nonsense")).toBe(DECODE_BUDGET_DEFAULT_MS);
+    expect(clampDecodeBudgetMs(0)).toBe(DECODE_BUDGET_DEFAULT_MS);
+    expect(clampDecodeBudgetMs(-5)).toBe(DECODE_BUDGET_DEFAULT_MS);
+  });
+
+  it("clamps an out-of-range fallback too", () => {
+    expect(clampDecodeBudgetMs(undefined, 999_999)).toBe(DECODE_BUDGET_MAX_MS);
+  });
+});

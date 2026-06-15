@@ -1,0 +1,181 @@
+# Testing and Proof
+
+## Commands
+- `npm run test` — run all Vitest unit suites once (services + store).
+- `npm run test:watch` — Vitest watch mode.
+- `npx playwright install chromium` — one-time, before the first E2E run.
+- `npm run test:e2e` — Playwright E2E (auto-starts dev server on port 3100, writes proof to e2e/proof/).
+- `npm run dev` — manual run (http://localhost:3000, or `npm run dev -- --port 3100`).
+
+## Unit test coverage (pure services + store)
+- cleanScanCode / buildNormalizedCandidates (incl. `T432119%RU1%`, `2881-6861`, `28816861`)
+- detectCodeType (UPC-A 12, EAN/GTIN-13, numeric/alpha SKU, messy)
+- sanitizeForAiLookup (phone, email, names, COST/price/margin patterns)
+- buildIdempotencyKey (stable, includes operation)
+- matchAlias / matchProductByIdentifiers / resolveScanToProduct (priority + accurate matchType + conflict)
+- incrementInventoryCount / applyScanEventOnce (dedupe by scanEventId)
+- routeUnknownCode (creates Needs Review item)
+- aiCircuitBreaker (closed -> open at cap -> half_open -> closed)
+- csvExport (escaping, BOM, injection guard, grouped-by-product)
+- scanStore optimistic update + persist shape
+- decode firewall: isUsableProductName / cleanProductName reject site/aggregator/nav titles + AI hedges,
+  strip "— UPC/EAN <code> — Go-UPC" and "| EAN-Search" style cruft, keep real names (decode.test.ts)
+- decodeBudget: clampDecodeBudgetMs clamps client budget to [5000, 20000], falls back to default
+- liveDecode sends the configured budgetMs in the decode request (autoDecode.test.ts)
+- junkCleanup.findJunkCounts: flags junk-named/orphan counts, never a product with a surviving good count
+- cleanupJunkCounts/undoCleanup: removes only junk, additive Undo preserves post-cleanup scans, no-op when
+  clean, idempotent; applyCleanupSelections removes only selected ids (cleanupJunk.test.ts)
+- catalog: sanitizeCatalogEntry drops private fields + restricts URLs; isCatalogWritable rejects junk
+  (sanitizeCatalog.test.ts); decideLookup precedence override>verified-catalog>weak>none; upsertVerified
+  strengthens; applyAiCandidate NEVER overwrites a verified entry; observeScan bumps usage (localCatalogProvider.test.ts)
+- catalog-first store: verified hit resolves with NO fetch/AI; override wins over catalog; miss -> AI; AI auto-add
+  writes a pending catalog entry; human approval writes a verified entry + feedback (catalogFirst.test.ts)
+- feedback: appendFeedback ring-buffer caps + ordering (feedback.test.ts)
+- cleanup recommendations: per-reason classification, grouping, high=checked / weak=unchecked defaults,
+  orphan + conflict detection, removesProduct/aliasIds safety (recommendations.test.ts)
+
+NOTE: always run vitest/tsc/eslint with an explicit `cd` into the inventory dir. A bare `vitest run` from the
+parent directory matches hundreds of unrelated test files (false green).
+
+## E2E coverage additions
+- cleanup.spec.ts (rewritten): decode budget persists across reload; cleanup review is a safe no-op when clean;
+  recommendation-first flow (review grouped recs -> backup downloads -> remove selected -> Undo restores).
+- auto-verify.spec.ts: strong evidence-backed scan auto-verifies + counts (no review); exactly ONE decode call;
+  second scan of the same barcode makes ZERO AI calls; weak/no-evidence scan -> Needs Review.
+
+## Auto-verify unit coverage
+- sourceTrust: tier classification (registry/retailer/barcode-db/unknown) + junk-page (search/cart/login/category)
+  blocking + bestTier (sourceTrust.test.ts)
+- evidenceScoring: additive/subtractive table, caps (AI-only<=60, Tier3<=79, Tier4<=50), thresholds, conflict/unsafe
+  gates before threshold, trusted-source-off teeth, learning-off auto_count (evidenceScoring.test.ts)
+- catalogAutoVerify.planAutoVerify: strong->auto_verify, AI-only->review, verified-conflict->review, junk source,
+  vendor code (catalogAutoVerify.test.ts)
+- store auto-verify: strong auto-verifies+counts no approval; NO extra network (exactly one decode call); 2nd scan
+  no AI; weak->review; lowered threshold can't bypass; verified entry resolves without AI (autoVerify.store.test.ts)
+
+NOTE: the blanket auto-add policy changed to confidence-gated auto-verify; suggested-without-exact-evidence now goes
+to Needs Review (updated autoDecode.test.ts, scanStore.test.ts, catalogFirst.test.ts, auto-decode.spec.ts).
+
+## Hotfix coverage (verified-decode fast path)
+- evidenceScoring: app-verified strong evidence bypasses the Tier-3 single-provider cap (>=80) and auto-verifies;
+  fast path still respects conflict; exact-evidence-without-usable-name returns the explicit reason (evidenceScoring.test.ts)
+- store REGRESSION: a single-provider Tier-3 app-verified decode auto-saves + counts (not "Verified + Unknown"),
+  feed decodeStatus ends "verified" (autoVerify.store.test.ts)
+- E2E verified-decode-not-unknown.spec.ts: codes 7705471100046 / 816218028015 (single-provider Tier-3, app-confirmed)
+  show the product + count, catalog learns them, 2nd scan makes no AI call; a no-usable-name case -> Needs Review with
+  the explicit reason. Screenshot e2e/proof/verified-decode-not-unknown.png.
+
+## E2E coverage (Playwright, mocked via IS_E2E=1)
+- scan flow, scanner focus, resolver trust, image hover, pending sync/retry (existing specs)
+- cleanup.spec.ts: decode-budget setting persists across reload; junk cleanup no-op when clean; seeded
+  junk row is backed up (JSON download) + removed (good row kept) + restored via Undo. The junk-present
+  case seeds a v3 localStorage blob so the persist migrate (which clears finalCounts) is skipped.
+- pendingSyncQueue + retrySync + retrySyncDoesNotDoubleCount (run retry repeatedly = safe)
+- humanResolutionSavesAlias + resolveAliasSyncIsIdempotent
+
+## E2E proof (Playwright -> e2e/proof/*.png)
+1. Login / local access screen
+2. Scan screen before scanning
+3. Live scan feed after the test sequence
+4. Final count table grouped by product
+5. Needs Review with UNKNOWN123
+6. Image hover preview / modal
+7. CSV export works (download triggered / file artifact)
+8. Pending sync warning + pending count
+9. Retry sync action present and safe (no double count)
+
+## Acceptance scan sequence
+Scan, in order:
+`6419440485331, T432119%RU1%, T432119, 848983012906, 2881-6861, 28816861, 049000028904, 7262, UNKNOWN123`
+
+Expected:
+- Nokian Outpost APT quantity = 3
+- Falken Sincera ST80 quantity = 3
+- Coca-Cola 12 pack quantity = 2
+- UNKNOWN123 appears in Needs Review (not counted)
+- Raw scan feed contains all 9 events
+- Final count table groups by product, not by code
+- CSV export contains grouped final quantities + sync_status + scan_event_ids
+- AI is NOT called for any of the known codes
+- Rapid scanner-style input is not truncated; focused dedicated input captures full codes
+- Unrelated form fields are not hijacked by the scanner buffer
+- Failed sync keeps scans visible as syncStatus "pending"; Retry sync attempts re-sync
+- Re-running Retry sync multiple times never double counts
+
+## Resolver accuracy regression (hotfix)
+Unit (`src/services/resolver.test.ts`, `codeTypeDetector.test.ts`, `scanStore.test.ts`):
+- 855724007602 / 078742051451 never resolve to a wrong product -> Needs Review.
+- 855724007602 resolves to a product ONLY if a verified seed/manual record carries that code.
+- X004DY7YUT classified as `vendor_label`; routes to Needs Review with no approved alias.
+- Vendor label resolves to Known once a human-approved alias links it.
+- Unapproved alias / unverified product identifier never yield Known.
+- AI suggestion never creates a product/alias/count; review stays open; only human approval saves.
+- Conflict (one code -> two verified products) routes to Needs Review.
+
+E2E (`e2e/resolver.spec.ts` -> e2e/proof/resolver-*.png):
+- Clear cache -> scan the 3 bad codes -> none counted, page never shows Laird/Leviton, all 3 in
+  Needs Review (X004DY7YUT labeled a vendor label) -> approve one -> re-scan is deterministic Known
+  -> AI never called. Screenshots resolver-01..04.
+
+Run: `npm run test` (94 unit) and `npm run test:e2e` (2 specs: resolver + full-flow).
+
+## Evidence verification + cross-check (live decode) - ALL MOCKED, no live tokens
+Unit (`src/services/ai/evidenceVerifier.test.ts`, `crossCheckEngine.test.ts`, `decode.test.ts`,
+`scanStore.test.ts`):
+- Model self-claim exactCodeEvidence with no real match -> NOT verified.
+- Exact code in snippet/grounding/fetched -> verified with that strength; numeric codes match across
+  spaces/hyphens; url-only is weak unless trusted host.
+- Cross-check: agreement / brand conflict / barcode conflict / single_provider / weak.
+- decideDecode: verified only (public barcode + strong evidence + agreement/single + threshold +
+  identity); vendor label never verified; below threshold/empty identity not verified.
+- liveDecode (mocked fetch): verified decode does NOT auto-save by default; agreement w/o app-verified
+  evidence stays Suggested; verified auto-saves only when autoAcceptVerifiedDecodes on; re-scan of an
+  approved alias calls fetch zero times.
+
+E2E (`e2e/decode.spec.ts` -> e2e/proof/decode-*.png), provider responses mocked via `page.route`,
+webServer `IS_E2E=1`:
+- verified / suggested / conflict / vendor-label statuses shown; verified stays in review (default);
+  human approves -> verified product + approved alias; re-scan is deterministic Known with zero AI hits.
+
+Test-safety guarantees: no live Gemini/OpenAI during `npm run test` or `npm run test:e2e`.
+Live providers run only in manual/dev use with a key present (the route still mocks under IS_E2E=1).
+
+## Manual verification (if Playwright browsers cannot install)
+1. `npm run dev` and open the scan screen.
+2. Click the scan input, type each code above + Enter.
+3. Confirm the three grouped quantities and UNKNOWN123 in Needs Review.
+4. Resolve UNKNOWN123 to a product; re-scan it and confirm it now matches deterministically.
+5. Toggle "simulate sync failure" in settings/mock; confirm pending count + Retry; click Retry twice; confirm no double count.
+6. Export CSV; confirm grouped counts and sync columns.
+
+## Hotfix: decode diagnostics + open-web source discovery (2026-06-14)
+
+Unit (Vitest, all mocked - no live providers, no Firecrawl credits):
+- `decodeOrchestrator.test.ts` (+3): a 429 -> `rate_limited`, a timeout -> `timeout`, success -> `ok`
+  (proves provider errors are captured, not swallowed).
+- `urlSafety.test.ts` (NEW): SSRF guard blocks loopback/127.0.0.1/::1/private/link-local/CGNAT/
+  169.254.169.254 metadata/`file://`/non-http(s)/bare-host/`.local`; allows real public product URLs.
+- `firecrawlProvider.test.ts` (NEW, Firecrawl REST mocked): finds the product when Faire is NOT result
+  #1 (scrapes down the list until the exact code appears); `no_match` when no page has the code; a 429
+  search -> `rate_limited` (not a fake not-found); never scrapes an unsafe candidate (SSRF).
+- `pageFetch.test.ts` (+): reads AI-cited `extraUrls` (Faire-type), not just the hardcoded DBs; ignores
+  a "Product Not Found" page that echoes the code and uses a sibling site with the real product; returns
+  NO product when every page only echoes the code in a not-found error.
+- `decodeFallback.test.ts` (NEW): `shouldRunFallback` is false on success/timeout/conflict/E2E and true
+  only on a real Stage-1 miss; `decodeReasonCode` maps to honest codes (rate-limited/timeout/error/
+  not-found-after-search/search-unavailable/fallback-found).
+
+E2E (`e2e/decode-diagnostics-open-web-fallback.spec.ts` -> `e2e/proof/decode-diagnostics-open-web-fallback.png`),
+provider + Firecrawl fully mocked via `page.route`, webServer `IS_E2E=1`:
+1. **Fast path** - strong product shows + counts in exactly ONE POST (no extra fallback round-trips).
+2. **Faire-type open-web fallback** - `810118139604` resolves to "Acrylic Paint Markers Set, 24 Metallic
+   Colors" and counts; no generic message.
+3. **Provider rate-limit** - Needs Review shows an HONEST "rate-limited" reason, never "No provider
+   returned a usable product".
+4. **Truly unlisted** - Needs Review shows "no product matched" only after a search was attempted.
+
+Test-safety: `FIRECRAWL_API_KEY` is never read in tests; Firecrawl `FcFetch` is injected/mocked; no live
+Gemini/OpenAI/Firecrawl during `npm run test` or `npm run test:e2e`.
+
+Full gate run (2026-06-14, C:\Users\djsan\inventory): vitest 274/274, tsc clean, eslint clean,
+next build success, playwright 10/10.
