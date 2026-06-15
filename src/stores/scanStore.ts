@@ -20,7 +20,10 @@ import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector
 import { resolveScan } from "@/services/resolver";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
-import { MockDb, getMockDb, type IncrementPayload } from "@/services/mockDb";
+import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/services/db/syncTarget";
+import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
+import { getDb } from "@/lib/firebaseClient";
 import {
   evaluateAiGate,
   initBreaker,
@@ -103,10 +106,13 @@ function evaluateAutoDecode(p: {
 // using idempotency keys so a retry can never double-count.
 
 export interface ScanStoreDeps {
-  db: MockDb;
+  db: SyncTarget; // MockDb (local, sync) or FirebaseSyncTarget (cloud/emulator, async)
   idFactory: () => string;
   now: () => string;
   persistName: string | null; // null disables persistence (used by tests)
+  // When true (Firebase backend), syncPending uses the async drain and REQUIRES a real business context
+  // (businessId + userId) before any write. Default/mock path is unchanged (sync, no context required).
+  cloudBackend?: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -137,8 +143,10 @@ const DEFAULT_SETTINGS: Settings = {
 export interface ScanState {
   // identity / config
   businessId: string;
-  sessionId: string;
+  userId: string | null; // signed-in user (Firebase backend); null on the local/mock path
+  businessContextReady: boolean; // true once a REAL business context is set (or always on the mock path)
   currentSession: InventorySession | null;
+  sessionId: string;
   settings: Settings;
 
   // deterministic lookup data (seeded; learned aliases are appended and persisted)
@@ -175,6 +183,8 @@ export interface ScanState {
 
   // actions
   setHasHydrated: (v: boolean) => void;
+  /** Set the signed-in business context (Firebase backend). Enables cloud sync + drains the queue. */
+  setBusinessContext: (businessId: string, userId: string) => void;
   startSession: (name: string, location: string) => void;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
@@ -300,6 +310,7 @@ function idForReview(r: UnknownCodeReview): string {
 
 export function buildScanInitializer(deps: ScanStoreDeps) {
   const { db, idFactory, now } = deps;
+  const cloudBackend = deps.cloudBackend ?? false;
 
   return (
     set: (partial: Partial<ScanState> | ((s: ScanState) => Partial<ScanState>)) => void,
@@ -313,8 +324,48 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       get().syncPending();
     };
 
+    // Cloud drain: async, awaits db.apply, and REQUIRES a real business context first (no fake/default
+    // business writes). The mock/local path keeps the original SYNCHRONOUS syncPending below unchanged.
+    const syncPendingCloud = async (force: boolean) => {
+      const state = get();
+      if (!state.online && !force) return;
+      if (state.pendingSyncQueue.length === 0) return;
+      if (!state.businessContextReady || !state.userId || !state.businessId) {
+        set({ lastSyncError: "Select or create a business before syncing to the cloud." });
+        return; // pause: keep everything pending, write nothing
+      }
+      const stillPending: PendingSyncItem[] = [];
+      const syncedIds = new Set(get().syncedScanEventIds);
+      let lastErr: string | null = null;
+      for (const item of state.pendingSyncQueue) {
+        let res;
+        try {
+          res = await db.apply(item);
+        } catch (e) {
+          res = { ok: false, alreadyApplied: false, error: e instanceof Error ? e.message : String(e) };
+        }
+        if (res.ok) {
+          if (item.scanEventId) syncedIds.add(item.scanEventId);
+        } else {
+          stillPending.push({ ...item, status: "error", retryCount: item.retryCount + 1, lastError: res.error ?? "sync failed", updatedAt: now() });
+          lastErr = res.error ?? "sync failed";
+        }
+      }
+      const cur = get();
+      const recomputed = recomputeSyncStatus({
+        scanFeed: cur.scanFeed,
+        finalCounts: cur.finalCounts,
+        needsReviewQueue: cur.needsReviewQueue,
+        pendingSyncQueue: stillPending,
+      });
+      set({ pendingSyncQueue: stillPending, syncedScanEventIds: [...syncedIds], lastSyncError: lastErr, ...recomputed });
+    };
+
     return {
       businessId: DEMO_BUSINESS_ID,
+      userId: null,
+      // Mock/local path needs no business context; cloud path must wait for setBusinessContext().
+      businessContextReady: !cloudBackend,
       sessionId: "session-1",
       currentSession: {
         id: "session-1",
@@ -349,6 +400,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       _hasHydrated: deps.persistName ? false : true,
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
+
+      setBusinessContext: (businessId, userId) => {
+        set({ businessId, userId, businessContextReady: true, lastSyncError: null });
+        get().syncPending(); // drain anything queued now that we have a real business context
+      },
 
       recordFeedback: (type, payload) =>
         set((s) => ({
@@ -605,6 +661,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       syncPending: (force = false) => {
+        // Cloud backend: async drain (preserves the local optimistic UI; never blocks the scan input).
+        if (cloudBackend) {
+          void syncPendingCloud(force);
+          return;
+        }
         const state = get();
         if (!state.online && !force) return; // offline: keep everything pending, lose nothing
         if (state.pendingSyncQueue.length === 0) return;
@@ -616,7 +677,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         let lastErr: string | null = null;
 
         for (const item of state.pendingSyncQueue) {
-          const res = db.apply(item);
+          // This branch only runs for the local mock backend (cloudBackend === false), whose apply() is
+          // synchronous, so the cast is safe.
+          const res = db.apply(item) as SyncResult;
           if (res.ok) {
             if (item.scanEventId) syncedIds.add(item.scanEventId);
           } else {
@@ -1393,8 +1456,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
 // --- App store (persisted) ---------------------------------------------------------------------
 
+// Backend selection: Firebase (cloud/emulator) when NEXT_PUBLIC_FIREBASE_BACKEND=1, else the local mock
+// (default + legacy E2E -> existing behavior unchanged). The Firebase target is constructed ONLY in that
+// branch, so the mock/test path never initializes Firebase.
+const useFirebaseBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
 const appDeps: ScanStoreDeps = {
-  db: getMockDb(),
+  db: useFirebaseBackend
+    ? new FirebaseSyncTarget(getDb(), { emulator: process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATOR === "1" })
+    : getMockDb(),
+  cloudBackend: useFirebaseBackend,
   idFactory: () => crypto.randomUUID(),
   now: () => new Date().toISOString(),
   persistName: "sis-scan-v1",
@@ -1455,6 +1525,7 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
     idFactory: overrides?.idFactory ?? (() => `id-${++n}`),
     now: overrides?.now ?? (() => "2026-06-12T10:00:00.000Z"),
     persistName: null,
+    cloudBackend: overrides?.cloudBackend ?? false,
   };
   return create<ScanState>()(buildScanInitializer(deps));
 }
