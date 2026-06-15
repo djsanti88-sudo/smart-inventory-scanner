@@ -21,6 +21,7 @@
     "qa:bots:security": "playwright test --config=playwright.bots.config.ts export-leak-protection security",
     "qa:bots:ux": "playwright test --config=playwright.bots.config.ts ux-no-training manager",
     "qa:bots:all": "playwright test --config=playwright.bots.config.ts",
+    "qa:bots:live": "playwright test --config=playwright.bots.cloud.config.ts",
     "qa:revision": "npx tsc --noEmit && npx eslint src e2e && npx next build && npx playwright test && npm run test:firebase && npm run qa:bots"
   },
   "dependencies": {

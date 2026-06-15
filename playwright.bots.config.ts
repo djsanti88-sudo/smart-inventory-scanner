@@ -10,6 +10,7 @@ import { defineConfig, devices } from "@playwright/test";
 // truthfully (today every authenticated user can see codes) rather than pretending role gates exist.
 export default defineConfig({
   testDir: "./e2e/human-bots",
+  testIgnore: ["**/cloud/**"], // the live-cloud bots run via playwright.bots.cloud.config.ts (real login)
   fullyParallel: false,
   workers: 1,
   reporter: [["list"], ["html", { outputFolder: "reports/human-bots/playwright-report", open: "never" }], ["json", { outputFile: "reports/human-bots/latest/playwright-results.json" }]],

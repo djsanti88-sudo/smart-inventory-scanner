@@ -1796,8 +1796,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }),
 
       clearLocalCache: () => {
-        // Wipe the mock backend and any persisted (possibly poisoned) state, then reload clean seed.
-        db.reset();
+        // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
+        // guards against a destructive cloud wipe and throws) and must NEVER reseed mock data over the
+        // real cloud catalog - the cloud data re-loads on the next page load. In MOCK mode, reset the
+        // local MockDb and reload clean seed (the original behavior).
+        if (!cloudBackend) db.reset();
         if (typeof window !== "undefined" && window.localStorage) {
           try {
             window.localStorage.removeItem("sis-scan-v1");
@@ -1806,10 +1809,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // ignore
           }
         }
-        const fresh = getSeed();
-        set({
-          products: fresh.products,
-          aliases: fresh.aliases,
+        const common = {
           scanFeed: [],
           finalCounts: [],
           needsReviewQueue: [],
@@ -1817,12 +1817,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           syncedScanEventIds: [],
           aiLookupLogs: [],
           lastSyncError: null,
+          lastMismatchWarning: null,
           breaker: initBreaker(),
           lastCleanupBackup: null,
           catalog: [],
           shopOverrides: [],
           feedbackEvents: [],
-        });
+        };
+        if (cloudBackend) {
+          // Cloud: empty the local catalog; products/aliases re-load from Firestore on reload. No reseed.
+          set({ ...common, products: [], aliases: [] });
+        } else {
+          const fresh = getSeed();
+          set({ ...common, products: fresh.products, aliases: fresh.aliases });
+        }
       },
 
       applyCleanupSelections: (selectedCountIds) => {
