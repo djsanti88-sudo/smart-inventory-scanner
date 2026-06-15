@@ -510,3 +510,32 @@ zero spend.
 ### Pending owner input
 - Drop ~100 real barcodes into `benchmarks/phase1_100_codes.csv` -> `npm run benchmark` for the full run.
 - Phase 2 is PLANNED ONLY (PHASE2_TIRE_DB_PLAN.md); not started. Awaiting "approve Phase 2".
+
+## Launch MVP Phase 1: Supabase backend, schema, RLS, Auth, business separation (2026-06-14)
+
+NOTE: the earlier "Phase 1: decode benchmark" entry was the **Lookup Benchmark Sprint** (renamed; see
+LOOKUP_BENCHMARK_SPRINT.md), NOT this Launch MVP Phase 1.
+
+Branch: `phase1-supabase-foundation`. Scope = foundation + proof ONLY (scan/count NOT rewired; Phase 2).
+
+### Done
+- Local Supabase (CLI + Docker). Ports remapped to 553xx (Windows reserves 542xx). `supabase start` +
+  `supabase db reset` clean.
+- Migrations: `supabase/migrations/20260614000001_init.sql` (12 tables, every tenant table has
+  business_id) + `..._2_rls.sql` (RLS on all tables, is_member/has_role helpers, create_business RPC,
+  grants). `supabase/seed.sql` (demo AUTO + TIRE shop, sample products, global catalog).
+- Auth: Supabase email/password (`src/lib/auth.ts`, `supabaseClient.ts`, `supabaseServer.ts`,
+  `AuthGuard.tsx`, `login/page.tsx`). Guarded E2E bypass (`src/services/auth/authBypass.ts`) - impossible
+  in production, proven by `authBypass.test.ts`.
+- Business creation + admin/counter membership: `create_business` RPC + `/business` page.
+- Typed repositories: `src/services/db/repositories.ts` (+ generated `database.types.ts`).
+- Security: service-role key server-only (`server-only` import); `keySafety.test.ts` extended.
+
+### Proof (all PASS, captured in PHASE1_LAUNCH_REPORT.md)
+supabase start OK; db reset OK (migrations + seed clean); **tenant-isolation 6/6 via authenticated user
+clients**; repositories integration OK; vitest 318 passed / 7 skipped; tsc clean; eslint clean; next
+build OK; playwright 11/11 (auth bypass keeps them green).
+
+### Next owner decision
+Review the Phase 1 proof. Phase 2 (wire scanStore + count/session mutations onto the repositories,
+audit-log writes, alias-approval + CSV on backend) does NOT start until approved.

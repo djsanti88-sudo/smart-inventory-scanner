@@ -216,3 +216,27 @@ fallback product shows, a verified code re-scans from the client catalog with NO
 needs-review shows honest reason, not-found shows product_not_found_after_search. Screenshot saved.
 
 Gate run (2026-06-14): vitest 313/313, tsc clean, eslint clean, next build success, playwright 11/11.
+
+## Launch MVP Phase 1: Supabase foundation (2026-06-14)
+
+Unit (run in `npm test`, no Docker needed):
+- `src/services/auth/authBypass.test.ts`: the E2E auth bypass is FALSE in production even with all flags
+  set; TRUE only under test+IS_E2E=1 (or dev + explicit public flag).
+- `src/services/keySafety.test.ts` (extended): client dirs (incl. src/lib) never reference the
+  service-role key / @/lib/supabaseServer / getSupabaseServiceClient; server-only files are exempt.
+
+Integration (SKIP unless the local Supabase env is set; run with the SUPABASE_* env):
+- `src/services/db/tenantIsolation.integration.test.ts` (6 tests) - the RLS negative proof via
+  AUTHENTICATED user clients (service role only for user setup/cleanup):
+  (a) User A reads/writes Business A; (b) User B cannot READ A's rows; (c) User B cannot INSERT a forged
+  business_id=A (WITH CHECK rejects); (d) cannot UPDATE A's rows; (e) cannot DELETE A's rows;
+  plus create_business makes the creator an admin member.
+- `src/services/db/repositories.integration.test.ts` - typed repo round-trip (product upsert/list/
+  find-by-barcode, alias upsert/approve) as an authenticated user.
+
+Run the proof:
+  SUPABASE_URL=http://127.0.0.1:55321 SUPABASE_ANON_KEY=<anon> SUPABASE_SERVICE_ROLE_KEY=<service> \
+    npx vitest run src/services/db/tenantIsolation.integration.test.ts src/services/db/repositories.integration.test.ts
+
+Gate run (2026-06-14): supabase start OK; db reset OK; isolation 6/6 + repo 1/1 (live local);
+vitest 318 passed / 7 skipped; tsc clean; eslint clean; next build OK; playwright 11/11.

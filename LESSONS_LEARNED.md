@@ -78,3 +78,25 @@ coverage gap, not the data. Sequential top-N + a one-size timeout hides both.
 A deep open-web decode costs real time and credits. Once it succeeds, the same barcode must never pay
 again. A tiny per-process decode cache (successes only) plus the durable client catalog/alias layer makes
 the expensive path a one-time cost per code. Proven: 2nd live call returned in 7ms, cached, zero spend.
+
+---
+
+## L6 - Windows reserves the default Supabase ports (2026-06-14)
+
+`supabase start` failed binding 54322 with "An attempt was made to access a socket in a way forbidden by
+its access permissions." That is NOT a port-in-use error - Windows WinNAT/Hyper-V reserves port ranges
+(`netsh interface ipv4 show excludedportrange protocol=tcp`), and the default Supabase 542xx ports fell
+inside them. Fix: remap all ports in `supabase/config.toml` to 553xx (above every excluded range). Check
+the excluded ranges first rather than guessing.
+
+## L7 - This CLI gates `gen types` behind a token even for local (2026-06-14)
+
+`supabase gen types typescript --local` (and `--db-url`) errored with LegacyPlatformAuthRequiredError.
+Workaround: set any `SUPABASE_ACCESS_TOKEN` value and use `--db-url` against the local Postgres - it
+introspects directly (pulls postgres-meta once). Documented in SUPABASE_SETUP.md.
+
+## L8 - Prove RLS with authenticated clients, never the service role (2026-06-14)
+
+The service role BYPASSES RLS, so a "tenant isolation" test that uses it proves nothing. The real proof
+signs in as two normal users and asserts User B cannot read/insert(forged)/update/delete User A's rows.
+Service role is fine ONLY for setup/teardown (creating/deleting test users). Encoded as a standing rule.

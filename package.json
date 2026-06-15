@@ -14,6 +14,7 @@
     "benchmark": "node scripts/benchmark-decodes.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.1",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -32,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "jsdom": "^29.1.1",
+    "supabase": "^2.106.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.8"

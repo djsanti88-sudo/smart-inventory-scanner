@@ -89,3 +89,15 @@ No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migr
 | 5 | Grounded AI providers time out, adding latency/cost with no wins | Med | Observed | Documented; Firecrawl + page-fetch carry resolution; recommend owner consider trimming grounded-AI in fallback (separate tuning) | Noted |
 | 6 | Phase 2 naive per-barcode scrape => ~35k credits for 5,000 tires | High | Would occur if built naively | Phase 2 PLAN mandates catalog-page harvest + 100-record pilot to measure real per-record cost BEFORE scaling; not executed | Planned/controlled |
 | 7 | Phase 2 executed prematurely | High | Low | Hard phase boundary; plan-only doc; no DB/scrape/large Firecrawl; waits for explicit "approve Phase 2" | Controlled |
+
+## Launch MVP Phase 1: Supabase foundation (2026-06-14)
+
+| # | Risk | Sev | Likelihood | Mitigation | Status |
+|---|------|-----|-----------|------------|--------|
+| 1 | Cross-tenant data leak (Business B reads/writes A) | Critical | Was unguarded | RLS on every tenant table (is_member/has_role); proven by 6/6 authenticated-client negative test incl. forged business_id | Fixed |
+| 2 | Recursive RLS via helper functions | High | Possible | Helpers SECURITY DEFINER + search_path='' owned by postgres (BYPASSRLS) -> no re-eval of memberships RLS; documented | Mitigated |
+| 3 | Service-role key leaked to client bundle | Critical | Low | server-only import on supabaseServer.ts; keySafety.test.ts fails on service-role usage/import/NEXT_PUBLIC in client dirs | Mitigated |
+| 4 | E2E auth bypass usable in production | High | Low | NODE_ENV==="production" hard-off; browser needs explicit webServer-only flag; proven by authBypass.test.ts | Mitigated |
+| 5 | create_business privilege/bootstrap abuse | Med | Low | SECURITY DEFINER + search_path=''; rejects unauthenticated; atomic business+admin membership; execute granted to authenticated only | Mitigated |
+| 6 | Windows port conflicts block local stack | Med | Was occurring | Ports remapped to 553xx (outside WinNAT excluded ranges); documented in SUPABASE_SETUP.md | Fixed |
+| 7 | Breaking the 11 e2e specs / scan path via auth swap | Med | Low | E2E bypass; scanStore untouched; full gate sweep green | Mitigated |

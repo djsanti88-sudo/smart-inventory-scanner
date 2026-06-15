@@ -236,3 +236,19 @@ Why each choice was made. Newest decisions at the bottom of each section.
   cost ~7 Firecrawl credits via per-barcode fallback (~35k for 5,000). Phase 2 plans bulk catalog-page
   harvesting to amortize cost per record, measured by a 100-record pilot before any scale. See
   PHASE2_TIRE_DB_PLAN.md.
+
+## Launch MVP Phase 1: Supabase foundation (2026-06-14)
+- **Local Supabase, not cloud** (owner). Ports remapped to 553xx because Windows WinNAT reserves the
+  default 542xx range ("socket access forbidden" on 54322).
+- **RLS helper recursion-safety**: `is_member`/`has_role` are SECURITY DEFINER + `SET search_path=''`,
+  owned by postgres (BYPASSRLS), so their internal read of memberships does not re-trigger memberships'
+  RLS -> no recursive loop. EXECUTE granted to `authenticated` only.
+- **Proof via authenticated user clients** (owner guardrail): service role used ONLY to create/delete
+  test users; all isolation assertions run as real signed-in User A / User B sessions.
+- **E2E auth bypass is production-impossible**: `NODE_ENV==="production"` short-circuits it off; browser
+  path needs an explicit `NEXT_PUBLIC_E2E_AUTH_BYPASS` set only in the Playwright webServer. Proven by a
+  unit test. Kept the 11 e2e specs green without coupling them to a live Supabase.
+- **Scope held**: scan/count/sync NOT rewired to Supabase this phase (owner). Auth state kept OUT of
+  scanStore to avoid destabilizing the proven scan path; repositories are the Phase-2 seam.
+- **Tables jsonb catch-alls**: unknown_code_reviews.suggested + settings.data hold the sprawling
+  suggested*/settings fields so the schema stays lean; repos map in Phase 2.

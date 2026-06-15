@@ -1,32 +1,55 @@
 "use client";
 
-// Local mock auth for the private V1. No real provider is wired; this just gates the UI behind a
-// demo login flag in localStorage. The real path (Firebase Auth) is documented in .env.example
-// and CLAUDE.md. Never treat this as real security.
+import type { Session } from "@supabase/supabase-js";
+import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+import { isAuthBypassEnabled } from "@/services/auth/authBypass";
+import type { Database } from "@/services/db/database.types";
 
-const KEY = "sis-auth";
+// Supabase Auth for the launch MVP. Replaces the old localStorage mock. The service-role key is NEVER
+// used here (client). See supabaseServer.ts for privileged server-side ops. The guarded E2E/test bypass
+// (isAuthBypassEnabled) keeps Playwright specs green and is impossible in production.
 
-export function isAuthed(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(KEY) === "1";
-  } catch {
-    return false;
-  }
+export { isAuthBypassEnabled };
+export type Membership = Database["public"]["Tables"]["memberships"]["Row"];
+export type AppRole = "admin" | "counter";
+
+export async function getSession(): Promise<Session | null> {
+  if (isAuthBypassEnabled()) return { user: { id: "e2e-user" } } as unknown as Session;
+  const { data } = await getSupabaseBrowserClient().auth.getSession();
+  return data.session;
 }
 
-export function login(): void {
-  try {
-    window.localStorage.setItem(KEY, "1");
-  } catch {
-    // ignore
-  }
+export function onAuthChange(cb: (session: Session | null) => void): () => void {
+  if (isAuthBypassEnabled()) return () => {};
+  const { data } = getSupabaseBrowserClient().auth.onAuthStateChange((_e, session) => cb(session));
+  return () => data.subscription.unsubscribe();
 }
 
-export function logout(): void {
-  try {
-    window.localStorage.removeItem(KEY);
-  } catch {
-    // ignore
-  }
+export async function signInWithPassword(email: string, password: string) {
+  return getSupabaseBrowserClient().auth.signInWithPassword({ email, password });
+}
+
+export async function signUp(email: string, password: string) {
+  return getSupabaseBrowserClient().auth.signUp({ email, password });
+}
+
+export async function signOut(): Promise<void> {
+  if (isAuthBypassEnabled()) return;
+  await getSupabaseBrowserClient().auth.signOut();
+}
+
+/** Create a business and become its first admin (atomic, hardened SECURITY DEFINER RPC). */
+export async function createBusiness(name: string): Promise<{ businessId: string | null; error: string | null }> {
+  const { data, error } = await getSupabaseBrowserClient().rpc("create_business", { p_name: name });
+  return { businessId: (data as string) ?? null, error: error?.message ?? null };
+}
+
+/** The signed-in user's memberships (RLS scopes this to their own businesses). */
+export async function listMemberships(): Promise<Membership[]> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("memberships")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) return [];
+  return data ?? [];
 }
