@@ -20,6 +20,14 @@ that motivated this gate (a tire part number resolving to a cigarette product) p
 `npm run qa:revision` chains the standard gate + bots. If cloud credentials are unavailable, run the
 emulator/local equivalent and clearly mark cloud-specific items untested.
 
+## Track 1 bot commands (per changed area — see docs/AGENT_BOT_ROLES.md)
+- `npm run qa:bots:tire` — scanner/resolution/normalization changes (+ `qa:bots:live` with GOD creds for the real account)
+- `npm run qa:bots:security` — roles/auth/exports/products/catalog/aliases/API/Firebase rules/localStorage/customer UI
+- `npm run qa:bots:data` — sync/cache/import/export/counting changes
+- `npm run qa:bots:ux` — any UI change
+- `npm run qa:bots:manager`, `npm run qa:bots:performance` — workflow / perf-sensitive changes
+- `npm run qa:bots:all` — everything (mock). Every bot writes screenshots + JSON + a markdown report.
+
 ## Handoff statement (required)
 Every "ready" report must state, per claim, whether it was **automated / mocked / live / manual / untested**,
 and must answer for scanner/resolution changes: *did a browser bot paste the code and prove the result?*
