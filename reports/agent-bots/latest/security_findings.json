@@ -59,54 +59,6 @@
       "finding": "internal field present in client store: rawCodeExample",
       "severity": "P1",
       "detail": "field serialized into the browser store"
-    },
-    {
-      "surface": "/products",
-      "finding": "Products page shows raw code columns (barcode/GTIN/UPC/EAN/aliases)",
-      "severity": "P0",
-      "detail": "no role gate; visible to any logged-in user"
-    },
-    {
-      "surface": "/review",
-      "finding": "customer-facing UI exposes term \"provider\"",
-      "severity": "P1",
-      "detail": "internal/AI mechanics shown to customer-facing roles"
-    },
-    {
-      "surface": "/settings",
-      "finding": "customer-facing UI exposes term \"Gemini\"",
-      "severity": "P1",
-      "detail": "internal/AI mechanics shown to customer-facing roles"
-    },
-    {
-      "surface": "/settings",
-      "finding": "customer-facing UI exposes term \"OpenAI\"",
-      "severity": "P1",
-      "detail": "internal/AI mechanics shown to customer-facing roles"
-    },
-    {
-      "surface": "/settings",
-      "finding": "customer-facing UI exposes term \"AI lookup\"",
-      "severity": "P2",
-      "detail": "internal/AI mechanics shown to customer-facing roles"
-    },
-    {
-      "surface": "/settings",
-      "finding": "customer-facing UI exposes term \"AI decode\"",
-      "severity": "P2",
-      "detail": "internal/AI mechanics shown to customer-facing roles"
-    },
-    {
-      "surface": "/settings",
-      "finding": "customer-facing UI exposes term \"provider\"",
-      "severity": "P1",
-      "detail": "internal/AI mechanics shown to customer-facing roles"
-    },
-    {
-      "surface": "/settings",
-      "finding": "customer-facing UI exposes term \"evidence\"",
-      "severity": "P2",
-      "detail": "internal/AI mechanics shown to customer-facing roles"
     }
   ]
 }

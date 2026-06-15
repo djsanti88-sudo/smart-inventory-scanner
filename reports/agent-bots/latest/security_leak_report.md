@@ -1,10 +1,12 @@
 # SecurityLeakBot report (safe, non-destructive)
 
-> Client-side role gating (platformOwner vs customer) is NOT implemented yet (DEFERRED foundation). So
-> today EVERY authenticated user sees these. This run documents the current exposure honestly; it does
-> not exploit anything. Once the role/data-protection foundation lands, these become hard failures.
+> Status: UI hiding + export sanitization + customer de-branding are now in place (Sec-1/2/3) for
+> non-platformOwner roles, so the Products code columns and AI/provider wording no longer appear here.
+> What REMAINS (Sec-4/5, the architecture cutover) is that the customer browser still DOWNLOADS + PERSISTS
+> the alias/catalog DB (localStorage + network) until server-side customer resolution lands. This run is
+> report-only and non-destructive; remaining P0 items are the localStorage/network DB, listed below.
 
-- P0 findings: **3**  |  P1: **12**  |  P2: **3**
+- P0 findings: **2**  |  P1: **8**  |  P2: **0**
 
 | severity | surface | finding | detail |
 |----------|---------|---------|--------|
@@ -18,14 +20,6 @@
 | P1 | localStorage | internal field present in client store: upc | field serialized into the browser store |
 | P1 | localStorage | internal field present in client store: ean | field serialized into the browser store |
 | P1 | localStorage | internal field present in client store: rawCodeExample | field serialized into the browser store |
-| P0 | /products | Products page shows raw code columns (barcode/GTIN/UPC/EAN/aliases) | no role gate; visible to any logged-in user |
-| P1 | /review | customer-facing UI exposes term "provider" | internal/AI mechanics shown to customer-facing roles |
-| P1 | /settings | customer-facing UI exposes term "Gemini" | internal/AI mechanics shown to customer-facing roles |
-| P1 | /settings | customer-facing UI exposes term "OpenAI" | internal/AI mechanics shown to customer-facing roles |
-| P2 | /settings | customer-facing UI exposes term "AI lookup" | internal/AI mechanics shown to customer-facing roles |
-| P2 | /settings | customer-facing UI exposes term "AI decode" | internal/AI mechanics shown to customer-facing roles |
-| P1 | /settings | customer-facing UI exposes term "provider" | internal/AI mechanics shown to customer-facing roles |
-| P2 | /settings | customer-facing UI exposes term "evidence" | internal/AI mechanics shown to customer-facing roles |
 
 ## Headline (P0, before any pilot with non-owner users)
 - The customer browser holds the full alias/catalog database in localStorage, and code columns/exports

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportButtons } from "@/components/ExportButtons";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 
@@ -14,6 +15,8 @@ export default function SettingsPage() {
   const refreshAiStatus = useScanStore((s) => s.refreshAiStatus);
   const setEmergencyStop = useScanStore((s) => s.setEmergencyStop);
   const catalog = useScanStore((s) => s.catalog);
+  // AI/provider + catalog-internals sections are platformOwner-only (customer-facing UI must not expose them).
+  const isPlatform = useIsPlatformOwner();
 
   useEffect(() => {
     void refreshAiStatus();
@@ -46,6 +49,7 @@ export default function SettingsPage() {
         </Row>
       </Section>
 
+      {isPlatform && (<>
       <Section title="AI lookup">
         <Toggle
           label="Enable AI lookup for unknown codes"
@@ -181,6 +185,8 @@ export default function SettingsPage() {
         </button>
       </Section>
 
+      </>)}
+
       <Section title="Scanner">
         <Row label="Submit mode">
           <select
@@ -222,6 +228,7 @@ export default function SettingsPage() {
         <ExportButtons />
       </Section>
 
+      {isPlatform && (<>
       <Section title="Auto-catalog learning">
         <Toggle
           label="Auto-save strong matches to the verified catalog (fewer manual approvals)"
@@ -276,6 +283,8 @@ export default function SettingsPage() {
           never shop, customer, or pricing data.
         </p>
       </Section>
+
+      </>)}
 
       <Section title="Clean up inventory">
         <CleanupRecommendations />

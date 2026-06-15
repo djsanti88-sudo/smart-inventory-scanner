@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ScannerInput } from "@/components/ScannerInput";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
@@ -28,6 +29,7 @@ export default function ScanPage() {
   }, [refreshAiStatus]);
 
   const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
+  const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page
   const autoDecodeOn = settings.aiLookupEnabled && aiStatus.autoDecodeOnScan && aiStatus.liveEnabled && hasKey && !aiStatus.emergencyStop;
 
   return (
@@ -90,23 +92,25 @@ export default function ScanPage() {
           {/* Clear Cache intentionally lives ONLY on Settings - a focused button here would
               capture the scanner's trailing Enter and fire its confirm dialog mid-scan. */}
 
-          <span className="ml-auto flex items-center gap-3 text-xs text-zinc-500">
-            <span data-testid="auto-decode-status">
-              Auto decode on scan:{" "}
-              <strong className={autoDecodeOn ? "text-green-700" : "text-zinc-700"}>
-                {autoDecodeOn ? "On" : "Off"}
-              </strong>
-            </span>
-            <span data-testid="ai-status">AI lookup: {settings.aiLookupEnabled ? "On" : "Off"}</span>
-            {settings.aiLookupEnabled && !hasKey && (
-              <span className="text-red-600" data-testid="missing-keys">
-                Missing keys: {aiStatus.missingKeys.join(", ") || "GEMINI_API_KEY, OPENAI_API_KEY"}
+          {isPlatform && (
+            <span className="ml-auto flex items-center gap-3 text-xs text-zinc-500">
+              <span data-testid="auto-decode-status">
+                Auto decode on scan:{" "}
+                <strong className={autoDecodeOn ? "text-green-700" : "text-zinc-700"}>
+                  {autoDecodeOn ? "On" : "Off"}
+                </strong>
               </span>
-            )}
-            <span>
-              Daily lookups: {settings.dailyLookupCount}/{settings.dailyLookupLimit}
+              <span data-testid="ai-status">AI lookup: {settings.aiLookupEnabled ? "On" : "Off"}</span>
+              {settings.aiLookupEnabled && !hasKey && (
+                <span className="text-red-600" data-testid="missing-keys">
+                  Missing keys: {aiStatus.missingKeys.join(", ") || "GEMINI_API_KEY, OPENAI_API_KEY"}
+                </span>
+              )}
+              <span>
+                Daily lookups: {settings.dailyLookupCount}/{settings.dailyLookupLimit}
+              </span>
             </span>
-          </span>
+          )}
         </div>
 
         <SyncStatusBar />

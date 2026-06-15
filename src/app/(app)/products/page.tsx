@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
 import type { Product } from "@/types";
 
 export default function ProductsPage() {
   const products = useScanStore((s) => s.products);
+  // Raw codes (barcode/GTIN/UPC/EAN), the alias "Codes" panel, and the source (which can reveal the
+  // lookup origin) are platformOwner-only. Customers see product-facing columns + the part number (SKU).
+  const isPlatform = useIsPlatformOwner();
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
@@ -23,18 +27,18 @@ export default function ProductsPage() {
                 <th className="px-3 py-2">Brand</th>
                 <th className="px-3 py-2">Category</th>
                 <th className="px-3 py-2">Specs</th>
-                <th className="px-3 py-2">Primary SKU</th>
-                <th className="px-3 py-2">Primary barcode</th>
-                <th className="px-3 py-2">GTIN/UPC/EAN</th>
-                <th className="px-3 py-2">Codes</th>
+                <th className="px-3 py-2">Part number</th>
+                {isPlatform && <th className="px-3 py-2">Primary barcode</th>}
+                {isPlatform && <th className="px-3 py-2">GTIN/UPC/EAN</th>}
+                {isPlatform && <th className="px-3 py-2">Codes</th>}
                 <th className="px-3 py-2">Image</th>
                 <th className="px-3 py-2">Location</th>
-                <th className="px-3 py-2">Source</th>
+                {isPlatform && <th className="px-3 py-2">Source</th>}
               </tr>
             </thead>
             <tbody data-testid="products-body">
               {products.map((p) => (
-                <ProductRow key={p.id} product={p} allProducts={products} />
+                <ProductRow key={p.id} product={p} allProducts={products} isPlatform={isPlatform} />
               ))}
             </tbody>
           </table>
@@ -44,7 +48,7 @@ export default function ProductsPage() {
   );
 }
 
-function ProductRow({ product: p, allProducts }: { product: Product; allProducts: Product[] }) {
+function ProductRow({ product: p, allProducts, isPlatform }: { product: Product; allProducts: Product[]; isPlatform: boolean }) {
   // Select the STABLE aliases array reference, then filter in the render body. Filtering inside the
   // selector returns a new array every call and trips React's "getSnapshot should be cached" infinite loop.
   const allAliasesForRow = useScanStore((s) => s.aliases);
@@ -62,18 +66,20 @@ function ProductRow({ product: p, allProducts }: { product: Product; allProducts
         <td className="px-3 py-2">{p.category}</td>
         <td className="px-3 py-2">{p.specsShort}</td>
         <td className="px-3 py-2 font-mono text-xs">{p.primarySku || "-"}</td>
-        <td className="px-3 py-2 font-mono text-xs">{p.primaryBarcode || "-"}</td>
-        <td className="px-3 py-2 font-mono text-xs text-zinc-500">{[p.gtin, p.upc, p.ean].filter(Boolean).join(" / ") || "-"}</td>
-        <td className="px-3 py-2 text-xs">
-          <button type="button" onClick={() => setOpen((v) => !v)} className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-50" data-testid={`manage-codes-${p.id}`}>
-            {approvedCount} {open ? "▲" : "▼"}
-          </button>
-        </td>
+        {isPlatform && <td className="px-3 py-2 font-mono text-xs">{p.primaryBarcode || "-"}</td>}
+        {isPlatform && <td className="px-3 py-2 font-mono text-xs text-zinc-500">{[p.gtin, p.upc, p.ean].filter(Boolean).join(" / ") || "-"}</td>}
+        {isPlatform && (
+          <td className="px-3 py-2 text-xs">
+            <button type="button" onClick={() => setOpen((v) => !v)} className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-50" data-testid={`manage-codes-${p.id}`}>
+              {approvedCount} {open ? "▲" : "▼"}
+            </button>
+          </td>
+        )}
         <td className="px-3 py-2"><ImageHoverPreview imageUrl={p.imageUrl} alt={p.name} /></td>
         <td className="px-3 py-2">{p.location || "-"}</td>
-        <td className="px-3 py-2 text-xs text-zinc-500">{p.source}</td>
+        {isPlatform && <td className="px-3 py-2 text-xs text-zinc-500">{p.source}</td>}
       </tr>
-      {open && (
+      {isPlatform && open && (
         <tr className="bg-zinc-50" data-testid={`codes-panel-${p.id}`}>
           <td colSpan={11} className="px-3 py-2">
             <p className="mb-1 text-xs font-semibold text-zinc-600">Codes for {p.name} (unlink a wrong code, or move it to the correct product)</p>

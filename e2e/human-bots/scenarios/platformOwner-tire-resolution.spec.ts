@@ -18,9 +18,10 @@ async function scan(page: Page, code: string) {
   await page.waitForTimeout(150); // let the optimistic UI settle
 }
 
-// Read the most relevant feed row for a scanned clean code and classify what it resolved to.
-async function classifyResult(page: Page, cleanCode: string): Promise<{ product: string; status: string; rowText: string }> {
-  const row = page.getByTestId("scan-feed-body").locator("tr", { hasText: cleanCode }).first();
+// Read the MOST RECENT feed row (top; feed prepends) and classify what it resolved to. Role-agnostic:
+// classifies by the visible Product column (raw/clean code columns are hidden from customer roles).
+async function classifyResult(page: Page, _cleanCode: string): Promise<{ product: string; status: string; rowText: string }> {
+  const row = page.getByTestId("scan-feed-body").locator("tr").first();
   const rowText = (await row.count()) ? ((await row.innerText()).replace(/\s+/g, " ").trim()) : "(no feed row)";
   const lower = rowText.toLowerCase();
   let product = "(none)";
