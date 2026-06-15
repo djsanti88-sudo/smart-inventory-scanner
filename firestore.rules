@@ -110,6 +110,14 @@ service cloud.firestore {
         allow create: if isMember(bid) && bizFieldOk(bid);
         allow update, delete: if false;
       }
+
+      // _appliedKeys: idempotency ledger written by FirebaseSyncTarget transactions. Append-only; a
+      // member who can write scans/counts may create a key; never updated/deleted.
+      match /_appliedKeys/{key} {
+        allow read: if isMember(bid);
+        allow create: if hasRole(bid, ['owner', 'admin', 'counter']);
+        allow update, delete: if false;
+      }
     }
 
     // ----- shared global catalog: read by any signed-in user; writes are SERVER-ONLY (Admin SDK). -----
