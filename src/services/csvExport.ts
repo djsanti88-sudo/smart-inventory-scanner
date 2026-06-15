@@ -82,6 +82,50 @@ export function exportFinalCounts(
   return buildCsv(headers, rows);
 }
 
+/**
+ * Quantity-adjustment CSV: one row per counted product with its code(s) + counted quantity, formatted
+ * for pushing adjustments into an inventory system. This MVP does not track a prior "system quantity"
+ * baseline, so the counted quantity IS the adjustment value (system_quantity is left blank). Built from
+ * the persisted finalCounts so it reflects what synced to Firebase.
+ */
+export function exportQuantityAdjustments(
+  counts: InventoryCount[],
+  products: Product[],
+  sessionId: string,
+): string {
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const headers = [
+    "product_name",
+    "primary_sku",
+    "primary_barcode",
+    "gtin",
+    "upc",
+    "ean",
+    "counted_quantity",
+    "system_quantity",
+    "adjustment",
+    "location",
+    "session_id",
+  ];
+  const rows = counts.map((c) => {
+    const p = byId.get(c.productId);
+    return [
+      p?.name ?? "",
+      p?.primarySku ?? "",
+      p?.primaryBarcode ?? "",
+      p?.gtin ?? "",
+      p?.upc ?? "",
+      p?.ean ?? "",
+      c.quantity,
+      "", // system_quantity: not tracked in this MVP
+      c.quantity, // adjustment == counted quantity when there is no baseline
+      p?.location ?? "",
+      sessionId,
+    ];
+  });
+  return buildCsv(headers, rows);
+}
+
 export function exportRawScanLog(scanFeed: ScanEvent[]): string {
   const headers = [
     "time",

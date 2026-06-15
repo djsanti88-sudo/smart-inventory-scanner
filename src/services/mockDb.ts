@@ -1,4 +1,4 @@
-import type { Alias, PendingSyncItem, ScanEvent, UnknownCodeReview } from "@/types";
+import type { Alias, InventorySession, PendingSyncItem, Product, ScanEvent, UnknownCodeReview } from "@/types";
 
 // A local mock of the backend. Its ONLY job for proof purposes is to be IDEMPOTENT:
 // applying the same sync operation (same idempotencyKey / scanEvent id) more than once must not
@@ -20,6 +20,8 @@ export interface MockDbState {
   counts: Record<string, ServerCount>; // key = `${sessionId}|${productId}`
   aliases: Record<string, Alias>; // key = `${businessId}|${cleanCode}|${productId}`
   reviews: Record<string, UnknownCodeReview>;
+  products: Record<string, Product>; // key = product id
+  sessions: Record<string, InventorySession>; // key = session id
   appliedKeys: string[];
 }
 
@@ -33,7 +35,7 @@ export interface SyncResult {
 export type FailureMode = "none" | "always" | { failTimes: number };
 
 function emptyState(): MockDbState {
-  return { scanEvents: {}, counts: {}, aliases: {}, reviews: {}, appliedKeys: [] };
+  return { scanEvents: {}, counts: {}, aliases: {}, reviews: {}, products: {}, sessions: {}, appliedKeys: [] };
 }
 
 const countKey = (sessionId: string, productId: string) => `${sessionId}|${productId}`;
@@ -90,6 +92,14 @@ export class MockDb {
       case "RESOLVE_ALIAS":
         this.upsertAlias(item.payload as Alias);
         break;
+      case "SAVE_PRODUCT":
+        this.upsertProduct(item.payload as Product);
+        break;
+      case "SAVE_SESSION":
+        // Explicit, deterministic handling (NOT a silent no-op): upsert the session by id so the mock
+        // path stays predictable and idempotent, matching FirebaseSyncTarget's countSessions write.
+        this.upsertSession(item.payload as InventorySession);
+        break;
       default:
         return { ok: false, alreadyApplied: false, error: `Unknown operation ${item.operation}` };
     }
@@ -136,6 +146,11 @@ export class MockDb {
     };
   }
 
+  upsertProduct(product: Product) {
+    // Upsert by id: re-saving the same product id never creates a duplicate.
+    this.state.products[product.id] = { ...product };
+  }
+
   upsertAlias(alias: Alias) {
     // Dedupe by (businessId, cleanCode, productId): the same mapping is never duplicated.
     this.state.aliases[aliasKey(alias.businessId, alias.cleanCode, alias.productId)] = {
@@ -148,6 +163,12 @@ export class MockDb {
     this.state.reviews[review.id] = { ...review, syncStatus: "synced" };
   }
 
+  upsertSession(session: InventorySession) {
+    // Upsert by id: re-saving the same session id (start, then finish) never duplicates; the latest
+    // status/completedAt wins. Idempotent like every other op.
+    this.state.sessions[session.id] = { ...session, syncStatus: "synced" };
+  }
+
   // --- read helpers ---
   getServerCount(sessionId: string, productId: string): ServerCount | undefined {
     return this.state.counts[countKey(sessionId, productId)];
@@ -157,6 +178,9 @@ export class MockDb {
   }
   getAlias(businessId: string, cleanCode: string, productId: string): Alias | undefined {
     return this.state.aliases[aliasKey(businessId, cleanCode, productId)];
+  }
+  getSession(id: string): InventorySession | undefined {
+    return this.state.sessions[id];
   }
   snapshot(): MockDbState {
     return JSON.parse(JSON.stringify(this.state));

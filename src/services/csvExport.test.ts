@@ -3,6 +3,7 @@ import {
   escapeCsvField,
   buildCsv,
   exportFinalCounts,
+  exportQuantityAdjustments,
   exportRawScanLog,
 } from "@/services/csvExport";
 import type { InventoryCount, Product, ScanEvent } from "@/types";
@@ -89,6 +90,13 @@ describe("exportFinalCounts", () => {
 
   it("works from local state even while sync is pending (no throw)", () => {
     expect(() => exportFinalCounts([count], [product], "sess")).not.toThrow();
+  });
+
+  it("exports a quantity-adjustment CSV with counted_quantity == adjustment (no baseline tracked)", () => {
+    const csv = exportQuantityAdjustments([count], [product], "sess");
+    expect(csv).toContain("product_name,primary_sku,primary_barcode,gtin,upc,ean,counted_quantity,system_quantity,adjustment");
+    // Nokian Outpost APT, T432119, 6419440485331, 6419440485331, "", "", 3, "", 3, Bay A, sess
+    expect(csv).toContain("Nokian Outpost APT,T432119,6419440485331,6419440485331,,,3,,3,Bay A,sess");
   });
 });
 

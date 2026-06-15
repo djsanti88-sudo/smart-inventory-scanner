@@ -13,7 +13,9 @@
     "live-decode-smoke": "node scripts/live-decode-smoke.ts",
     "benchmark": "node scripts/benchmark-decodes.ts",
     "emulators": "firebase emulators:start --project demo-smart-inventory --only auth,firestore",
-    "test:firebase": "firebase emulators:exec --project demo-smart-inventory --only firestore \"vitest run src/services/db/firebase\""
+    "test:firebase": "firebase emulators:exec --project demo-smart-inventory --only firestore \"vitest run src/services/db/firebase\"",
+    "test:e2e:firebase": "firebase emulators:exec --project demo-smart-inventory --only auth,firestore \"playwright test --config=playwright.firebase.config.ts\"",
+    "test:firebase:cloud-smoke": "node scripts/cloud-smoke.mjs"
   },
   "dependencies": {
     "firebase": "^12.14.0",
