@@ -1,0 +1,62 @@
+{
+  "question": "Does the Falken part number resolve to Camel Crush Menthol Silver Cigarettes?",
+  "resolvedToCamelAnywhere": false,
+  "dashed": {
+    "code": "2881-6861",
+    "label": "dashed (the original failing scan)",
+    "product": "Falken",
+    "status": "known",
+    "rowText": "11:54:06 AM 2881-6861 2881-6861 Exact alias Falken Sincera ST80 A/S 2 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+    "resolvedToCamel": false
+  },
+  "noDash": {
+    "code": "28816861",
+    "label": "no separator (found Falken online)",
+    "product": "Falken",
+    "status": "known",
+    "rowText": "11:54:06 AM 28816861 28816861 Exact alias Falken Sincera ST80 A/S 3 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+    "resolvedToCamel": false
+  },
+  "results": [
+    {
+      "code": "848983012906",
+      "label": "retail barcode",
+      "product": "Falken",
+      "status": "known",
+      "rowText": "11:54:05 AM 848983012906 848983012906 Exact alias Falken Sincera ST80 A/S 1 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "resolvedToCamel": false
+    },
+    {
+      "code": "2881-6861",
+      "label": "dashed (the original failing scan)",
+      "product": "Falken",
+      "status": "known",
+      "rowText": "11:54:06 AM 2881-6861 2881-6861 Exact alias Falken Sincera ST80 A/S 2 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "resolvedToCamel": false
+    },
+    {
+      "code": "28816861",
+      "label": "no separator (found Falken online)",
+      "product": "Falken",
+      "status": "known",
+      "rowText": "11:54:06 AM 28816861 28816861 Exact alias Falken Sincera ST80 A/S 3 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "resolvedToCamel": false
+    },
+    {
+      "code": "2881 6861",
+      "label": "space separated",
+      "product": "Falken",
+      "status": "known",
+      "rowText": "11:54:06 AM 2881 6861 2881 6861 Alias Falken Sincera ST80 A/S 4 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "resolvedToCamel": false
+    },
+    {
+      "code": "2881/6861",
+      "label": "slash separated",
+      "product": "Falken",
+      "status": "known",
+      "rowText": "11:54:06 AM 2881/6861 2881/6861 Alias Falken Sincera ST80 A/S 5 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "resolvedToCamel": false
+    }
+  ]
+}

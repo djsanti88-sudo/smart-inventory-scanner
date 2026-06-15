@@ -173,3 +173,9 @@ no keys in client; tests pass or failures explained; proof artifacts + final rep
 - No platform-specific positioning. Multi-trade product.
 - Keep services pure and testable outside the UI (no React / next/* imports in src/services).
 - Reuse existing patterns. Do not break existing functionality. Prefer isolated additions.
+
+## Human Bot Proof Gate
+Human bot proof is required before handoff for scanner, inventory, role, export, catalog, alias, and
+product-resolution changes. Unit tests are NOT sufficient. See `docs/REVISION_GATE.md` + `docs/QA_BOTS.md`.
+Run `npm run qa:bots` (or `qa:revision`) and do not claim a resolution fix works unless a browser bot
+proved it through the real UI with a screenshot.
