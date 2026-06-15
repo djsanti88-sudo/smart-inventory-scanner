@@ -107,3 +107,58 @@ The E2E also asserts zero requests to `/api/ai-lookup` during the known-code seq
 5. MCP/tool connectors (read-only first) to product catalogs and vendor databases, with write actions behind approval gates.
 6. Per-business billing and a simple admin to manage locations, categories, and users.
 7. Multi-device live session sync and a session history/audit view.
+
+---
+
+# Final Report - Hotfix: decode diagnostics + open-web source discovery (2026-06-14)
+
+1. **Goal.** Stop real products (e.g. UPC `810118139604`, on faire.com) from being wrongly stuck in
+   "Needs Review - No provider returned a usable product," without slowing the fast path.
+
+2. **Root causes (verified in code).** Only 5 hardcoded barcode-DB URLs were fetched (open web never
+   searched); AI-cited URLs were never read; provider errors were swallowed (`.catch(()=>{})`); one
+   generic message masked rate-limit/timeout/error/not-found/never-searched.
+
+3. **Design.** Two-stage decode. Stage 1 (fast path) unchanged - zero extra calls on success. Stage 2
+   (AI-cited URLs first, then Firecrawl) runs ONLY on a Stage-1 miss.
+
+4. **Diagnostics.** Per-provider `ProviderStatus` captured (ok/no_match/rate_limited/timeout/error)
+   instead of swallowed.
+
+5. **Open-web discovery.** `firecrawlProvider.ts` (REST `/v2/search`+`/scrape`), gated by
+   `FIRECRAWL_API_KEY`, capped <=3 scrapes, provider-cited URLs first, always mocked in tests.
+
+6. **Honest reasons.** `decodeFallback.ts` reason codes; the Needs-Review row shows the server's honest
+   reason; never "not found" when a provider failed; `product_not_found_after_search` only after a real
+   search attempt.
+
+7. **Security.** `urlSafety.ts` SSRF guard on every arbitrary URL (block loopback/private/link-local/
+   CGNAT/metadata/file/non-http(s)); reader rejects "Product Not Found" pages that echo the code.
+
+8. **Cheap-only models.** Reader fallback uses `gemini-flash-latest`; OpenAI `gpt-5-mini`; gemini-flash
+   first always.
+
+9. **Files.** New: `urlSafety.ts`, `firecrawlProvider.ts`, `decodeFallback.ts` (+ tests). Changed:
+   `decodeOrchestrator.ts`, `pageFetch.ts`, `route.ts`, `scanStore.ts`.
+
+10. **Tests added.** orchestrator status (3), urlSafety (SSRF), firecrawlProvider (mocked discovery/
+    no_match/rate_limited/SSRF), pageFetch extraUrls + not-found rejection, decodeFallback gate+codes.
+
+11. **Regression.** `810118139604` resolves in a mocked end-to-end fallback (unit + E2E).
+
+12. **Gates (run from C:\Users\djsan\inventory).** vitest 274/274, tsc clean, eslint clean, next build
+    success, playwright 10/10.
+
+13. **Proof.** `e2e/proof/decode-diagnostics-open-web-fallback.png` - fast path / Faire-type fallback /
+    rate-limit honest reason / truly-unlisted.
+
+14. **No regressions.** Catalog-first + auto-verify + "AI never overwrites verified" intact; no
+    persist-version bump; fast path unchanged (E2E asserts exactly one POST on success).
+
+15. **Saved.** Private GitHub repo `djsanti88-sudo/smart-inventory-scanner` (master). `.env.local`
+    git-ignored and confirmed absent from the remote; no secrets committed.
+
+16. **Pending owner action.** Add `FIRECRAWL_API_KEY=fc-...` to `.env.local` (the tool was blocked from
+    editing it) + restart dev server to enable the LIVE open-web fallback. Until then it is gracefully
+    disabled (`search_provider_unavailable`) and everything else works. Optional: one live smoke of
+    `810118139604` after the key is set.
