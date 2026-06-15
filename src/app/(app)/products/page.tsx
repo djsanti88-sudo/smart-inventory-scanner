@@ -45,9 +45,12 @@ export default function ProductsPage() {
 }
 
 function ProductRow({ product: p, allProducts }: { product: Product; allProducts: Product[] }) {
-  const aliases = useScanStore((s) => s.aliases.filter((a) => a.productId === p.id));
+  // Select the STABLE aliases array reference, then filter in the render body. Filtering inside the
+  // selector returns a new array every call and trips React's "getSnapshot should be cached" infinite loop.
+  const allAliasesForRow = useScanStore((s) => s.aliases);
   const unlinkAlias = useScanStore((s) => s.unlinkAlias);
   const moveAlias = useScanStore((s) => s.moveAlias);
+  const aliases = allAliasesForRow.filter((a) => a.productId === p.id);
   const [open, setOpen] = useState(false);
   const approvedCount = aliases.filter((a) => a.approved).length;
 
