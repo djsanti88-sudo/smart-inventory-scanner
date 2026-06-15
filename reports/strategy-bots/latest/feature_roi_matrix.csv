@@ -1,0 +1,28 @@
+feature,customer_value,willingness_to_pay,impl_difficulty,risk,retention,demo_value,moat_value,classification,tier
+Scan inventory (core),5,5,1,1,5,5,3,must-have core,all paid
+Live count table,5,4,1,1,5,5,1,must-have core,all paid
+Duplicate prevention,5,4,1,1,5,4,2,must-have core,all paid
+Multi-code alias learning (separator-insensitive),5,5,2,2,5,5,5,paid core,paid core
+Wrong-category mismatch guard,4,4,2,2,4,5,4,paid core,paid core
+Needs Review workflow,4,3,2,2,4,4,3,must-have core,all paid
+CSV export,5,4,1,1,4,4,1,must-have core,all paid
+CSV import (products),4,4,2,2,4,3,2,paid core,paid core
+Manager scan logs / live feed,4,3,2,1,4,3,1,paid core,paid core
+Audit history (UI),3,3,2,1,3,2,2,paid core,Shop+
+Bad-link repair (unlink/move),4,3,2,2,3,4,3,paid core,paid core
+Role-based permissions (enforced),5,4,4,3,4,3,4,paid core,Shop+
+PlatformOwner-protected code DB (no customer extraction),5,3,4,2,4,2,5,must-have core,all paid (moat)
+Offline queue,4,3,2,2,4,3,1,paid core,all paid
+Product enrichment (auto-identify unknowns),4,4,3,3,4,5,4,add-on,add-on
+Part-number-only CSV enrichment,4,4,4,3,3,3,4,add-on,add-on
+Product image lookup,2,2,3,3,2,3,1,wait,nice-to-have
+Tire catalog import / enrichment,4,4,4,3,4,4,5,premium,premium add-on
+Vendor import templates,4,4,2,2,3,3,2,add-on,add-on
+Stock target memory,4,4,3,2,4,3,2,add-on,Shop+ / add-on
+Low-stock alerts,4,4,3,2,5,4,2,add-on,Shop+ / add-on
+Overstock alerts,3,3,3,2,3,3,1,add-on,add-on
+Multi-location inventory,4,5,5,4,4,3,3,enterprise,Multi-site/Enterprise
+Employee accountability reports,4,4,3,2,4,3,2,add-on,Shop+ / add-on
+Advanced exports (custom/scheduled),3,4,3,2,3,2,2,add-on,add-on
+API integrations (Shop-Ware/QuickBooks),4,5,5,4,4,3,2,enterprise,Pro/Enterprise
+Product search/filter,4,2,1,1,3,2,1,paid core,all paid
