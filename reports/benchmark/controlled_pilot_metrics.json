@@ -1,0 +1,41 @@
+{
+  "pilotType": "controlled_automated_pilot",
+  "note": "Controlled automated pilot against the Firebase emulator. NOT a physical shop pilot.",
+  "business": "biz-pilot",
+  "roles": {
+    "owner": "owner",
+    "counter": "counter",
+    "viewer": "viewer"
+  },
+  "rolesEnforcementProvenIn": [
+    "src/services/db/firebase/tenantIsolation.rules.test.ts",
+    "scripts/cloud-smoke.mjs"
+  ],
+  "knownTireCountedQuantity": 3,
+  "doubleCountObserved": false,
+  "learnedProductPersisted": true,
+  "sessionCompleted": true,
+  "auditActions": [
+    "unknown_review_created",
+    "session_completed",
+    "csv_export",
+    "product_created",
+    "session_started",
+    "alias_approved"
+  ],
+  "liveAiCalls": 0,
+  "steps": {
+    "signInAndSelectBusiness": true,
+    "knownAndAliasResolve": true,
+    "repeatIncrements": true,
+    "unknownApproved": true,
+    "learnedCodeResolves": true,
+    "surviveRefreshNoDoubleCount": true,
+    "finishAndExport": true,
+    "noLiveAi": true,
+    "auditTrail": true,
+    "threeRolesSeeded": true
+  },
+  "proofDir": "e2e/proof/controlled-pilot",
+  "exportedCsv": "e2e/proof/controlled-pilot/final-counts.csv"
+}

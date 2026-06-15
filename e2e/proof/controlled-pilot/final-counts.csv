@@ -1,0 +1,3 @@
+﻿quantity,product_name,brand,category,specs,primary_sku,primary_barcode,gtin,upc,ean,aliases,image_url,product_url,location,notes,counted_at,session_id,sync_status,scan_event_ids
+2,Pilot Mystery Tire,,,,,8888888888,,,,,,,,,,session-fc5da4b8-0052-449b-84ee-22c051e7a871,synced,bd921c5e-f129-42d0-a2d6-195342b2accd | d9097f54-5c04-4123-83bb-d6f5fec289c0
+3,Michelin Pilot Sport 4,Michelin,Tire,245/40R18 97Y,MICH-PS4-2454018,4019238847352,,,,,,,,,,session-fc5da4b8-0052-449b-84ee-22c051e7a871,synced,46118119-90b1-4dbe-aa5d-3584d0af6d24 | fbd3a38d-20ec-43ec-a18d-a81d18973ca6 | 9284e013-4fe3-453f-a6b3-439b23e2a9f1
