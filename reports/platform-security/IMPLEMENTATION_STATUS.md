@@ -1,5 +1,30 @@
 # P0 Customer Data-Protection — Implementation Status (honest)
 
+## Commit & review status (this pass)
+- **Branch:** `p0-platform-customer-security-audit`
+- **Commit:** `a11d265` (`a11d26598281216b82b7321487a427f0a36eb565`) — "P0 customer data protection foundation"
+- **Sec-1/2/3:** preserved (prior commits on this branch; unchanged this pass).
+- **Sec-5 server-side resolve endpoint:** built + contract-proven (`/api/resolve-scan`, `resolveScanForRole`).
+- **Sec-4 customer localStorage/catalog leak:** CLOSED in bot proof (no alias/catalog/code data persisted).
+- **Sec-6 Firestore rules:** reviewed + emulator-tested (30 pass); left unchanged (correct).
+- **SecurityLeakBot final:** P0 0 / P1 0 / P2 0 — `reports/agent-bots/latest/security_findings.json` = `{ "findings": [] }`; now assertive.
+- **ExportBot final:** PASS (customer exports carry no code-bearing columns).
+- **Data bot final (DataIntegrityBot):** PASS (increment correctness + refresh persistence + unknown→Needs Review).
+- **Customer browser receives/persists alias/catalog DB?** NO (bot-verified).
+- **Customer exports still contain code fields?** NO.
+- **platformOwner full view still works?** YES (mock 11/11 + firebase E2E + platformOwner-tire bot).
+- **Falken/Camel mock regression passes?** YES (`platformOwner-tire-resolution` bot).
+- **`qa:bots:live` run this pass?** NO — `GOD_EMAIL`/`GOD_PASSWORD` absent from env, and the live bot writes
+  scans/counts to Santiago's REAL inventory (gated live action). Unchanged by construction (platformOwner →
+  "platform" branch is byte-identical; loader/resolver untouched); prior pass's PASS stands.
+- **Real-cloud `/api/resolve-scan` blocker:** needs a Firebase Admin service-account credential in the
+  deploy/runtime env — `FIREBASE_SERVICE_ACCOUNT_PATH` (local JSON path, git-ignored) OR
+  `GOOGLE_APPLICATION_CREDENTIALS`, set as a Vercel/runtime secret for production. The endpoint returns
+  503 `server_resolution_unavailable` until then (no scan crash). Emulator needs no creds and is proven.
+- **No public deploy.** **No auto-merge.** **Branch ready for a review PR** (not opened; awaiting your go).
+
+---
+
 Branch `p0-platform-customer-security-audit`. The two remaining SecurityLeakBot P0s (customer browser
 holds the alias DB + the global catalog in localStorage) are now **CLEARED and guarded**. The central
 security layer (Sec-1/2/3) plus the customer localStorage split (Sec-4) and the protected server-side
