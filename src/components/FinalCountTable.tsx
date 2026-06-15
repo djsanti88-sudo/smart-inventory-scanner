@@ -1,14 +1,16 @@
 "use client";
 
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { SyncBadge } from "@/components/badges";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
 
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). This is the clean
-// inventory the user exports.
+// inventory the user exports. Raw codes (barcode + aliases) are platformOwner-only.
 export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
   const getProduct = useScanStore((s) => s.getProduct);
+  const isPlatform = useIsPlatformOwner();
 
   const rows = finalCounts
     .map((c) => ({ count: c, product: getProduct(c.productId) }))
@@ -30,9 +32,9 @@ export function FinalCountTable() {
               <th className="px-3 py-2">Brand</th>
               <th className="px-3 py-2">Category</th>
               <th className="px-3 py-2">Specs</th>
-              <th className="px-3 py-2">Primary SKU</th>
-              <th className="px-3 py-2">Primary barcode</th>
-              <th className="px-3 py-2">Aliases</th>
+              <th className="px-3 py-2">Part number</th>
+              {isPlatform && <th className="px-3 py-2">Primary barcode</th>}
+              {isPlatform && <th className="px-3 py-2">Aliases</th>}
               <th className="px-3 py-2">Image</th>
               <th className="px-3 py-2">Location</th>
               <th className="px-3 py-2">Last scanned</th>
@@ -57,8 +59,8 @@ export function FinalCountTable() {
                   <td className="px-3 py-2">{product!.category}</td>
                   <td className="px-3 py-2">{product!.specsShort}</td>
                   <td className="px-3 py-2 font-mono text-xs">{product!.primarySku || "-"}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{product!.primaryBarcode || "-"}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-zinc-500">{count.aliasesSeen.join(", ")}</td>
+                  {isPlatform && <td className="px-3 py-2 font-mono text-xs">{product!.primaryBarcode || "-"}</td>}
+                  {isPlatform && <td className="px-3 py-2 font-mono text-xs text-zinc-500">{count.aliasesSeen.join(", ")}</td>}
                   <td className="px-3 py-2">
                     <ImageHoverPreview imageUrl={product!.imageUrl} alt={product!.name} />
                   </td>

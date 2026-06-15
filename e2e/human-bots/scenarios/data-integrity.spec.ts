@@ -38,9 +38,10 @@ test("DataIntegrityBot: increment correctness, refresh persistence, unknown -> N
   const persisted = await page.getByTestId("final-count-body").locator("tr", { hasText: "Coca-Cola" }).count();
   checks.push({ check: "count persists after refresh", pass: persisted > 0, detail: `coke rows after reload=${persisted}` });
 
-  // 3. An unknown code goes to Needs Review (never auto-resolved to a wrong product).
+  // 3. An unknown code goes to Needs Review (never auto-resolved). Read the most-recent feed row
+  //    (top; feed prepends) by STATUS, since the raw code column is hidden from customer roles.
   await scan(page, "999000111222");
-  const feedRow = page.getByTestId("scan-feed-body").locator("tr", { hasText: "999000111222" }).first();
+  const feedRow = page.getByTestId("scan-feed-body").locator("tr").first();
   const feedText = (await feedRow.innerText()).toLowerCase();
   checks.push({ check: "unknown code -> Needs Review (not auto-resolved)", pass: /needs review|unknown/.test(feedText), detail: feedText.slice(0, 80) });
   await page.screenshot({ path: `${PROOF}/02-unknown.png`, fullPage: true });

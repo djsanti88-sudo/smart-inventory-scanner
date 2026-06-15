@@ -69,9 +69,11 @@ test("SecurityLeakBot: report sensitive-field exposure to a customer browser (sa
   const bySev = (s: string) => unique.filter((f) => f.severity === s);
   const md = `# SecurityLeakBot report (safe, non-destructive)
 
-> Client-side role gating (platformOwner vs customer) is NOT implemented yet (DEFERRED foundation). So
-> today EVERY authenticated user sees these. This run documents the current exposure honestly; it does
-> not exploit anything. Once the role/data-protection foundation lands, these become hard failures.
+> Status: UI hiding + export sanitization + customer de-branding are now in place (Sec-1/2/3) for
+> non-platformOwner roles, so the Products code columns and AI/provider wording no longer appear here.
+> What REMAINS (Sec-4/5, the architecture cutover) is that the customer browser still DOWNLOADS + PERSISTS
+> the alias/catalog DB (localStorage + network) until server-side customer resolution lands. This run is
+> report-only and non-destructive; remaining P0 items are the localStorage/network DB, listed below.
 
 - P0 findings: **${bySev("P0").length}**  |  P1: **${bySev("P1").length}**  |  P2: **${bySev("P2").length}**
 

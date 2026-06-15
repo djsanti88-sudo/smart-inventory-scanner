@@ -2,31 +2,33 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
 import type { UnknownCodeReview } from "@/types";
 
 // Shows the decode pipeline outcome. "Verified AI Decode" requires the app to have independently
 // verified the exact code in strong evidence AND cross-checked providers - it is never the model's
 // self-claim, and it still requires human approval to count (unless the owner opts into auto-accept).
-function DecodeBadge({ review }: { review: UnknownCodeReview }) {
+function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlatform: boolean }) {
+  // Customer-facing labels avoid "AI"/"providers"; platformOwner sees the technical wording.
   const status = review.decodeStatus ?? "none";
   if (status === "verified" && review.exactCodeEvidenceVerifiedByApp) {
     return (
       <span className="w-fit rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-800" data-testid="decode-status">
-        Verified AI Decode (app-verified)
+        {isPlatform ? "Verified AI Decode (app-verified)" : "Verified match"}
       </span>
     );
   }
   if (status === "conflict") {
     return (
       <span className="w-fit rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800" data-testid="decode-status">
-        Conflict - providers disagree
+        {isPlatform ? "Conflict - providers disagree" : "Conflict - needs review"}
       </span>
     );
   }
   return (
     <span className="w-fit rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800" data-testid="decode-status">
-      Suggested - not trusted
+      {isPlatform ? "Suggested - not trusted" : "Suggested product"}
     </span>
   );
 }
@@ -36,6 +38,7 @@ function DecodeBadge({ review }: { review: UnknownCodeReview }) {
 // about that code again.
 export function NeedsReviewTable() {
   const reviews = useScanStore((s) => s.needsReviewQueue);
+  const isPlatform = useIsPlatformOwner();
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -51,12 +54,12 @@ export function NeedsReviewTable() {
         <table className="w-full border-collapse text-left text-sm">
           <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
             <tr>
-              <th className="px-3 py-2">Raw code</th>
-              <th className="px-3 py-2">Clean code</th>
+              {isPlatform && <th className="px-3 py-2">Raw code</th>}
+              {isPlatform && <th className="px-3 py-2">Clean code</th>}
               <th className="px-3 py-2">Reason</th>
-              <th className="px-3 py-2">Suggested (not trusted)</th>
+              <th className="px-3 py-2">Suggested product</th>
               <th className="px-3 py-2">Confidence</th>
-              <th className="px-3 py-2">Provider</th>
+              {isPlatform && <th className="px-3 py-2">Provider</th>}
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Sync</th>
               <th className="px-3 py-2">Actions</th>
@@ -65,12 +68,12 @@ export function NeedsReviewTable() {
           <tbody data-testid="review-body">
             {reviews.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-zinc-400">
+                <td colSpan={isPlatform ? 9 : 6} className="px-3 py-6 text-center text-zinc-400">
                   Nothing to review. Unknown codes will appear here.
                 </td>
               </tr>
             ) : (
-              reviews.map((r) => <ReviewRow key={r.id} review={r} />)
+              reviews.map((r) => <ReviewRow key={r.id} review={r} isPlatform={isPlatform} />)
             )}
           </tbody>
         </table>
@@ -79,7 +82,7 @@ export function NeedsReviewTable() {
   );
 }
 
-function ReviewRow({ review }: { review: UnknownCodeReview }) {
+function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatform: boolean }) {
   const products = useScanStore((s) => s.products);
   const resolveUnknown = useScanStore((s) => s.resolveUnknown);
   const liveDecode = useScanStore((s) => s.liveDecode);
@@ -98,8 +101,8 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
 
   return (
     <tr className="border-t border-zinc-100 align-top" data-testid={`review-row-${review.cleanCode}`}>
-      <td className="px-3 py-2 font-mono text-xs">{review.rawCode}</td>
-      <td className="px-3 py-2 font-mono text-xs">{review.cleanCode}</td>
+      {isPlatform && <td className="px-3 py-2 font-mono text-xs">{review.rawCode}</td>}
+      {isPlatform && <td className="px-3 py-2 font-mono text-xs">{review.cleanCode}</td>}
       <td className="max-w-48 px-3 py-2 text-xs text-zinc-600" data-testid="review-reason">
         {review.reason || "Unknown code."}
         {typeof review.autoVerifyScore === "number" && (
@@ -118,8 +121,8 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
       <td className="max-w-56 px-3 py-2 text-xs">
         {review.hasSuggestion || review.sourceUrls.length > 0 ? (
           <div className="flex flex-col gap-1">
-            <DecodeBadge review={review} />
-            {review.evidenceStrength && review.evidenceStrength !== "none" && (
+            <DecodeBadge review={review} isPlatform={isPlatform} />
+            {isPlatform && review.evidenceStrength && review.evidenceStrength !== "none" && (
               <span className="text-zinc-500" data-testid="evidence-strength">
                 Evidence: {review.evidenceStrength.replace(/_/g, " ")} - app-verified:{" "}
                 {review.exactCodeEvidenceVerifiedByApp ? "yes" : "no"}
@@ -131,7 +134,7 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
                 ? `${review.suggestedProductName}${review.suggestedBrand ? ` - ${review.suggestedBrand}` : ""}`
                 : "No product identified - check the sources below"}
             </span>
-            {review.decodeProviderSummaries && review.decodeProviderSummaries.length > 0 && (
+            {isPlatform && review.decodeProviderSummaries && review.decodeProviderSummaries.length > 0 && (
               <span className="text-zinc-500" data-testid="provider-results">
                 {review.decodeProviderSummaries
                   .map((p) => `${p.provider}: ${p.productName || "no result"} (${p.sources} src)`)
@@ -144,7 +147,7 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
             {review.guesses.length > 0 && (
               <span className="text-zinc-400">Guesses: {review.guesses.join("; ")}</span>
             )}
-            {review.sourceUrls.length > 0 && (
+            {isPlatform && review.sourceUrls.length > 0 && (
               <span className="flex flex-wrap gap-1">
                 {review.sourceUrls.map((u, i) => (
                   <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
@@ -161,7 +164,7 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
       <td className="px-3 py-2 text-xs tabular-nums">
         {review.confidence > 0 ? `${Math.round(review.confidence * 100)}%` : "-"}
       </td>
-      <td className="px-3 py-2 text-xs">{review.providerName || "-"}</td>
+      {isPlatform && <td className="px-3 py-2 text-xs">{review.providerName || "-"}</td>}
       <td className="px-3 py-2">
         <StatusBadge status={review.status === "open" ? "needs_review" : (review.status as "resolved" | "ignored")} />
       </td>
@@ -312,20 +315,22 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
             >
               Ignore
             </button>
-            <button
-              type="button"
-              data-testid="live-decode"
-              onClick={() => void liveDecode(review.id)}
-              title={
-                aiEnabled
-                  ? "Run a live AI decode (cross-checked + app-verified evidence). Result is a suggestion you approve."
-                  : "AI lookup is off (enable it in Settings)"
-              }
-              className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-500 disabled:opacity-40"
-              disabled={!aiEnabled}
-            >
-              Live decode
-            </button>
+            {isPlatform && (
+              <button
+                type="button"
+                data-testid="live-decode"
+                onClick={() => void liveDecode(review.id)}
+                title={
+                  aiEnabled
+                    ? "Run a live AI decode (cross-checked + app-verified evidence). Result is a suggestion you approve."
+                    : "AI lookup is off (enable it in Settings)"
+                }
+                className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-500 disabled:opacity-40"
+                disabled={!aiEnabled}
+              >
+                Live decode
+              </button>
+            )}
             <label className="flex items-center gap-1 text-xs text-zinc-500">
               <input type="checkbox" checked={applyToCount} onChange={(e) => setApplyToCount(e.target.checked)} />
               count it

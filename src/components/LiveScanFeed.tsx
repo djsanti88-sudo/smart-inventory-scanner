@@ -1,12 +1,16 @@
 "use client";
 
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
 
-// Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail.
+// Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail. Raw/clean
+// codes are platformOwner-only; customers see the product + status of each scan, not the code strings.
 export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
   const getProduct = useScanStore((s) => s.getProduct);
+  const isPlatform = useIsPlatformOwner();
+  const colSpan = isPlatform ? 9 : 7;
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -19,8 +23,8 @@ export function LiveScanFeed() {
           <thead className="sticky top-0 bg-zinc-50 text-xs uppercase text-zinc-500">
             <tr>
               <th className="px-3 py-2">Time</th>
-              <th className="px-3 py-2">Raw code</th>
-              <th className="px-3 py-2">Clean code</th>
+              {isPlatform && <th className="px-3 py-2">Raw code</th>}
+              {isPlatform && <th className="px-3 py-2">Clean code</th>}
               <th className="px-3 py-2">Match</th>
               <th className="px-3 py-2">Product</th>
               <th className="px-3 py-2">Qty after</th>
@@ -32,7 +36,7 @@ export function LiveScanFeed() {
           <tbody data-testid="scan-feed-body">
             {scanFeed.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-zinc-400">
+                <td colSpan={colSpan} className="px-3 py-6 text-center text-zinc-400">
                   No scans yet. Click the scan box and scan a code.
                 </td>
               </tr>
@@ -44,8 +48,8 @@ export function LiveScanFeed() {
                     <td className="px-3 py-2 text-xs text-zinc-500">
                       {e.createdAt ? new Date(e.createdAt).toLocaleTimeString() : "-"}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">{e.rawCode}</td>
-                    <td className="px-3 py-2 font-mono text-xs">{e.cleanCode}</td>
+                    {isPlatform && <td className="px-3 py-2 font-mono text-xs">{e.rawCode}</td>}
+                    {isPlatform && <td className="px-3 py-2 font-mono text-xs">{e.cleanCode}</td>}
                     <td className="px-3 py-2">
                       <MatchBadge type={e.matchType} />
                     </td>
