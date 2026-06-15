@@ -40,31 +40,31 @@
     "failed": 0,
     "latency": {
       "count": 4,
-      "avg": 13633,
-      "median": 101,
-      "p95": 40073,
-      "min": 85,
-      "max": 40073
+      "avg": 15775,
+      "median": 136,
+      "p95": 40027,
+      "min": 51,
+      "max": 40027
     },
     "slowest": [
       {
         "code": "710154236681",
-        "latencyMs": 40073,
+        "latencyMs": 40027,
         "path": "needs_review"
       },
       {
         "code": "810118139604",
-        "latencyMs": 14274,
+        "latencyMs": 22884,
         "path": "firecrawl_fallback"
       },
       {
-        "code": "6977228152610",
-        "latencyMs": 101,
+        "code": "070330645936",
+        "latencyMs": 136,
         "path": "fast_page_fetch"
       },
       {
-        "code": "070330645936",
-        "latencyMs": 85,
+        "code": "6977228152610",
+        "latencyMs": 51,
         "path": "fast_page_fetch"
       }
     ],
@@ -83,13 +83,13 @@
       "productName": "Wholesale Acrylic Paint Markers Set – 24 Metallic Colors, 2mm Bullet Tip, Water-Based, Multi-Surface",
       "decision": "verified",
       "reasonCode": "fallback_discovery_found_product",
-      "latencyMs": 14274,
-      "serverLatencyMs": 10012,
+      "latencyMs": 22884,
+      "serverLatencyMs": 10006,
       "cached": false,
       "firecrawlCredits": 7,
       "geminiCalls": 1,
       "openaiCalls": 1,
-      "cachedLatencyMs": 31,
+      "cachedLatencyMs": 7,
       "cachedConfirmed": true
     },
     {
@@ -100,13 +100,13 @@
       "productName": "Exclusive Smokes Bic Lighter Texas",
       "decision": "verified",
       "reasonCode": "ok",
-      "latencyMs": 85,
-      "serverLatencyMs": 55,
+      "latencyMs": 136,
+      "serverLatencyMs": 127,
       "cached": false,
       "firecrawlCredits": 0,
       "geminiCalls": 0,
       "openaiCalls": 0,
-      "cachedLatencyMs": 20,
+      "cachedLatencyMs": 5,
       "cachedConfirmed": true
     },
     {
@@ -117,13 +117,13 @@
       "productName": "Phatoil Lavender Essential Oil Premium Grade 100ml 3.38fl Oz Two Packs Unopened",
       "decision": "verified",
       "reasonCode": "ok",
-      "latencyMs": 101,
-      "serverLatencyMs": 53,
+      "latencyMs": 51,
+      "serverLatencyMs": 45,
       "cached": false,
       "firecrawlCredits": 0,
       "geminiCalls": 0,
       "openaiCalls": 0,
-      "cachedLatencyMs": 23,
+      "cachedLatencyMs": 5,
       "cachedConfirmed": true
     },
     {
@@ -134,8 +134,8 @@
       "productName": "",
       "decision": "needs_review",
       "reasonCode": "provider_timeout",
-      "latencyMs": 40073,
-      "serverLatencyMs": 10013,
+      "latencyMs": 40027,
+      "serverLatencyMs": 10002,
       "cached": false,
       "firecrawlCredits": 7,
       "geminiCalls": 2,

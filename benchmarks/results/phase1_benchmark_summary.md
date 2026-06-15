@@ -20,19 +20,19 @@ Resolved: **3** / 4  |  Needs Review: **1**  |  Failed: **0**
 ## Latency (wall-clock per code, ms)
 | metric | ms |
 |--------|---:|
-| average | 13,633 |
-| median (p50) | 101 |
-| p95 | 40,073 |
-| min | 85 |
-| max | 40,073 |
+| average | 15,775 |
+| median (p50) | 136 |
+| p95 | 40,027 |
+| min | 51 |
+| max | 40,027 |
 
 ### Slowest 10
 | # | code | path | ms |
 |--:|------|------|---:|
-| 1 | 710154236681 | needs_review | 40,073 |
-| 2 | 810118139604 | firecrawl_fallback | 14,274 |
-| 3 | 6977228152610 | fast_page_fetch | 101 |
-| 4 | 070330645936 | fast_page_fetch | 85 |
+| 1 | 710154236681 | needs_review | 40,027 |
+| 2 | 810118139604 | firecrawl_fallback | 22,884 |
+| 3 | 070330645936 | fast_page_fetch | 136 |
+| 4 | 6977228152610 | fast_page_fetch | 51 |
 
 ## Cache proof
 - resolved codes re-run: **3**
