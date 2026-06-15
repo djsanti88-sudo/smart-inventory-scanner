@@ -10,7 +10,7 @@ export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
   const getProduct = useScanStore((s) => s.getProduct);
   const isPlatform = useIsPlatformOwner();
-  const colSpan = isPlatform ? 9 : 7;
+  const colSpan = isPlatform ? 10 : 8;
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -27,6 +27,7 @@ export function LiveScanFeed() {
               {isPlatform && <th className="px-3 py-2">Clean code</th>}
               <th className="px-3 py-2">Match</th>
               <th className="px-3 py-2">Product</th>
+              <th className="px-3 py-2">Part number</th>
               <th className="px-3 py-2">Qty after</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Reason</th>
@@ -54,6 +55,9 @@ export function LiveScanFeed() {
                       <MatchBadge type={e.matchType} />
                     </td>
                     <td className="px-3 py-2">{product ? product.name : "-"}</td>
+                    <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-part-number-${e.id}`}>
+                      {product ? product.primarySku || "Part number missing" : "-"}
+                    </td>
                     <td className="px-3 py-2 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
                     <td className="px-3 py-2">
                       {e.decodeStatus && e.decodeStatus !== "none" ? (
