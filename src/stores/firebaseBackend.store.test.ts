@@ -76,7 +76,7 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     const store = createTestScanStore({
       db: new FakeAsyncTarget(),
       cloudBackend: true,
-      loadBusinessData: async () => ({ products: [product], aliases: [alias] }),
+      loadBusinessData: async () => ({ products: [product], aliases: [alias], sessions: [], counts: [] }),
     });
     store.getState().setBusinessContext("biz-real", "user-real");
     await flush();

@@ -114,9 +114,18 @@ export interface ScanStoreDeps {
   // When true (Firebase backend), syncPending uses the async drain and REQUIRES a real business context
   // (businessId + userId) before any write. Default/mock path is unchanged (sync, no context required).
   cloudBackend?: boolean;
-  // Cloud backend only: loads a business's products/aliases from Firestore when its context is set, so
-  // the deterministic resolver works after a refresh / on a fresh device. Injectable for tests.
-  loadBusinessData?: (businessId: string, userId: string) => Promise<{ products: Product[]; aliases: Alias[] }>;
+  // Cloud backend only: loads a business's products/aliases/sessions/counts from Firestore when its
+  // context is set, so the deterministic resolver works and the active session + finalCounts are
+  // reconstructed after a refresh / on a fresh device. Injectable for tests.
+  loadBusinessData?: (
+    businessId: string,
+    userId: string,
+  ) => Promise<{
+    products: Product[];
+    aliases: Alias[];
+    sessions: InventorySession[];
+    counts: InventoryCount[];
+  }>;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -190,6 +199,8 @@ export interface ScanState {
   /** Set the signed-in business context (Firebase backend). Enables cloud sync + drains the queue. */
   setBusinessContext: (businessId: string, userId: string) => void;
   startSession: (name: string, location: string) => void;
+  /** Mark the current session completed (status=completed, completedAt set) and persist it. */
+  finishSession: () => void;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
   retrySync: () => void;
@@ -414,7 +425,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           void (async () => {
             try {
               const data = await loader(businessId, userId);
-              set({ products: data.products, aliases: data.aliases });
+              // Reconstruct the active count session + its finalCounts (survive-refresh). Prefer the most
+              // recent ACTIVE session; else the most recent overall. finalCounts are the persisted count
+              // lines for that session, mapped back to store shape. No session -> keep current defaults.
+              const byStartedAtDesc = (a: InventorySession, b: InventorySession) =>
+                (b.startedAt ?? "").localeCompare(a.startedAt ?? "");
+              const sessions = [...data.sessions].sort(byStartedAtDesc);
+              const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
+              const next: Partial<ScanState> = { products: data.products, aliases: data.aliases };
+              if (restored) {
+                next.currentSession = restored;
+                next.sessionId = restored.id;
+                next.finalCounts = data.counts.filter((c) => c.sessionId === restored.id);
+              }
+              set(next);
             } catch (e) {
               set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data" });
             }
@@ -440,20 +464,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       startSession: (name, location) => {
         const id = `session-${idFactory()}`;
+        const businessId = get().businessId;
+        const session: InventorySession = {
+          id,
+          businessId,
+          name: name || "Session",
+          location: location || "Main",
+          status: "active",
+          startedAt: now(),
+          completedAt: null,
+          createdBy: get().userId ?? "demo",
+          notes: "",
+          syncStatus: "synced",
+        };
         set({
           sessionId: id,
-          currentSession: {
-            id,
-            businessId: get().businessId,
-            name: name || "Session",
-            location: location || "Main",
-            status: "active",
-            startedAt: now(),
-            completedAt: null,
-            createdBy: "demo",
-            notes: "",
-            syncStatus: "synced",
-          },
+          currentSession: session,
           scanFeed: [],
           finalCounts: [],
           needsReviewQueue: [],
@@ -461,6 +487,44 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           syncedScanEventIds: [],
           lastSyncError: null,
         });
+        // Persist the session through the SAME durable queue as scans/counts (never blocks the UI).
+        // Distinct idempotency key per lifecycle state ("active") so finishSession's write still applies.
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory,
+            now,
+            businessId,
+            sessionId: id,
+            entityType: "CountSession",
+            entityId: id,
+            operation: "SAVE_SESSION",
+            payload: session,
+            idempotencyKey: buildIdempotencyKey(businessId, id, `${id}-active`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
+      },
+
+      finishSession: () => {
+        const cur = get().currentSession;
+        if (!cur) return;
+        const completed: InventorySession = { ...cur, status: "completed", completedAt: now() };
+        set({ currentSession: completed });
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory,
+            now,
+            businessId: completed.businessId,
+            sessionId: completed.id,
+            entityType: "CountSession",
+            entityId: completed.id,
+            operation: "SAVE_SESSION",
+            payload: completed,
+            // Distinct key from the "active" write so the completed state is not deduped as alreadyApplied.
+            idempotencyKey: buildIdempotencyKey(completed.businessId, completed.id, `${completed.id}-completed`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
       },
 
       processScan: (rawInput) => {

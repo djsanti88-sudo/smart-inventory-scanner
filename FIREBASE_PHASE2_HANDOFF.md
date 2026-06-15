@@ -10,9 +10,11 @@ Branch: `firebase-cloud-phase2` (off `master`). Emulator-side build; cloud Loop 
 | 2 | scanStore backend toggle (`NEXT_PUBLIC_FIREBASE_BACKEND`) + async drain + business-context guard + `setBusinessContext` | `6192e4b` | store + gates |
 | 4a | `SAVE_PRODUCT` op (products persist to Firestore, idempotent) | `9db142b` | emulator |
 | 4b | `businessDataLoader` + `setBusinessContext` loads products/aliases (alias resolves after refresh) | `4131702` | emulator + store |
+| 3 | Session/count persistence + survive-refresh (`SAVE_SESSION` op + explicit MockDb handling, `finishSession`, reverse mappers, `loadBusinessData` reads sessions+counts, `setBusinessContext` reconstructs active session + finalCounts) | _this pass_ | emulator + store |
 
 Gates at `4131702`: `test:firebase` 20/20 · `vitest` 323 passed/20 skipped · `tsc` clean · `eslint` clean ·
 `next build` OK · `playwright` 11/11 (mock e2e intact).
+Gates after Loop 3: `test:firebase` 24/24 · `vitest` 328 passed/24 skipped · `tsc` clean · `eslint` 0 errors.
 
 ## Key seam (reuse it)
 - Durable writes funnel through `appDeps.db.apply(item)` (`SyncTarget`). MockDb (sync) + `FirebaseSyncTarget`
@@ -24,12 +26,12 @@ Gates at `4131702`: `test:firebase` 20/20 · `vitest` 323 passed/20 skipped · `
 - Firestore↔store mappers live in `businessDataLoader.ts` (`toStoreProduct`, `toStoreAlias`).
 
 ## Remaining (emulator-side)
-- **Loop 3 - count session persistence + survive-refresh.** Foundation ready: extend `loadBusinessData`
-  to also read `countSessions` + `inventoryCounts` and reconstruct `finalCounts`; add session-write
-  (a `persistSession` injectable -> `countSessionsRepository`, or a `SAVE_SESSION` sync op) in
-  `startSession`; add a `finishSession()` action (set `completedAt`/`status=completed`); `setBusinessContext`
-  restores `currentSession` + `finalCounts`. Map Firestore `inventoryCounts` {countSessionId, productId,
-  countedQuantity, scanEventIds} -> store `InventoryCount` {sessionId, productId, quantity, scanEventIds}.
+- **Loop 3 - DONE (this pass).** `SAVE_SESSION` sync op added to the durable queue (transaction +
+  `_appliedKeys` ledger, distinct active/completed keys); explicit deterministic `MockDb` handling
+  (not a silent no-op); `finishSession()` action; reverse mappers `toStoreSession`/`toStoreCount`;
+  `loadBusinessData` now reads `countSessions` + `inventoryCounts`; `setBusinessContext` reconstructs
+  the active session (else most recent) + its `finalCounts`. Proven: emulator
+  (`sessionPersistence.rules.test.ts`) + store (`sessionPersistence.store.test.ts`).
 - **Loop 6 - audit.** Injectable `audit(event)` (cloud -> `auditRepository.append`, fire-and-forget, never
   blocks the scanner) wired on session start/finish, alias approve/reject, scan/unknown create, CSV
   import/export. Emulator test for append-only + business scope.
@@ -48,8 +50,8 @@ Need owner's 6 `NEXT_PUBLIC_FIREBASE_*` values (+ Firestore & Email/Password ena
 auth/rules/isolation smoke, report separately. No fake cloud proof; nothing deployed yet.
 
 ## EXACT NEXT ORDER (resume here, fresh focused pass)
-1. **Loop 3** - session/count persistence and survive-refresh.
-2. **Loop 6** - audit writes.
+1. ~~**Loop 3** - session/count persistence and survive-refresh.~~ DONE (this pass).
+2. **Loop 6** - audit writes. (NEXT)
 3. **Loop 5** - CSV import/export MVP.
 4. **Loop 7** - Firebase-backed Playwright proof.
 5. **Loop 8** - cloud auth/rules/isolation smoke (only AFTER the owner provides the Web App config).
