@@ -46,8 +46,18 @@ import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
+import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import type { AiStatus } from "@/types";
+
+/** Result summary of a CSV product import (shown in the UI). */
+export interface CsvImportSummary {
+  rowsParsed: number;
+  productsCreated: number;
+  aliasesCreated: number;
+  duplicates: number;
+  conflicts: ImportConflict[];
+}
 
 /** Snapshot of rows removed by a junk cleanup, so the action is fully reversible (Undo). */
 export interface CleanupBackup {
@@ -240,6 +250,10 @@ export interface ScanState {
     type: FeedbackEventType,
     payload: { code: string; productId?: string | null; meta?: Record<string, string | number | boolean> },
   ) => void;
+  /** Import products + approved aliases from CSV text (MVP). Writes via the durable queue + audits. */
+  importProductsCsv: (text: string) => CsvImportSummary;
+  /** Audit a CSV export (called by the export UI). Fire-and-forget; never blocks. */
+  auditCsvExport: (kind: string, rowCount: number) => void;
   pendingCount: () => number;
   getProduct: (id: string | null) => Product | undefined;
   clearSession: () => void;
@@ -1476,6 +1490,68 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         } else {
           get().syncPending();
         }
+      },
+
+      importProductsCsv: (text) => {
+        const state = get();
+        const { rows } = parseCsv(text);
+        const plan = buildProductImport({
+          rows,
+          existingProducts: state.products,
+          existingAliases: state.aliases,
+          businessId: state.businessId,
+          idFactory,
+          now,
+        });
+
+        if (plan.products.length > 0 || plan.aliases.length > 0) {
+          set((s) => ({ products: [...s.products, ...plan.products], aliases: [...s.aliases, ...plan.aliases] }));
+
+          // Queue idempotent SAVE_PRODUCT (each new product) BEFORE its aliases, then RESOLVE_ALIAS, so a
+          // reloaded alias always references a persisted product. Same durable path Loop 4 proved.
+          const items: PendingSyncItem[] = [];
+          for (const p of plan.products) {
+            items.push(makeQueueItem({
+              idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
+              entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: p,
+              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, p.id, "SAVE_PRODUCT"),
+              scanEventId: null,
+            }));
+          }
+          for (const a of plan.aliases) {
+            items.push(makeQueueItem({
+              idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
+              entityType: "Alias", entityId: a.id, operation: "RESOLVE_ALIAS", payload: a,
+              idempotencyKey: a.idempotencyKey, scanEventId: null,
+            }));
+          }
+          enqueueAndSync(items);
+        }
+
+        emitAudit({
+          entityType: "ImportBatch",
+          entityId: `import-${idFactory()}`,
+          action: "csv_import",
+          metadata: {
+            rowsParsed: plan.rowsParsed,
+            productsCreated: plan.products.length,
+            aliasesCreated: plan.aliases.length,
+            duplicates: plan.duplicates.length,
+            conflicts: plan.conflicts.length,
+          },
+        });
+
+        return {
+          rowsParsed: plan.rowsParsed,
+          productsCreated: plan.products.length,
+          aliasesCreated: plan.aliases.length,
+          duplicates: plan.duplicates.length,
+          conflicts: plan.conflicts,
+        };
+      },
+
+      auditCsvExport: (kind, rowCount) => {
+        emitAudit({ entityType: "Export", entityId: kind, action: "csv_export", metadata: { kind, rowCount } });
       },
 
       pendingCount: () => get().pendingSyncQueue.length,

@@ -11,7 +11,8 @@ Branch: `firebase-cloud-phase2` (off `master`). Emulator-side build; cloud Loop 
 | 4a | `SAVE_PRODUCT` op (products persist to Firestore, idempotent) | `9db142b` | emulator |
 | 4b | `businessDataLoader` + `setBusinessContext` loads products/aliases (alias resolves after refresh) | `4131702` | emulator + store |
 | 3 | Session/count persistence + survive-refresh (`SAVE_SESSION` op + explicit MockDb handling, `finishSession`, reverse mappers, `loadBusinessData` reads sessions+counts, `setBusinessContext` reconstructs active session + finalCounts) | `c5e61bd` | emulator + store |
-| 6 | Audit writes (fire-and-forget injectable `audit()` -> append-only `auditLog`; wired to session start/finish, unknown-review create, alias approve/reject, product create; never blocks/breaks the scanner) | _this pass_ | emulator + store |
+| 6 | Audit writes (fire-and-forget injectable `audit()` -> append-only `auditLog`; wired to session start/finish, unknown-review create, alias approve/reject, product create; never blocks/breaks the scanner) | `8f86f80` | emulator + store |
+| 5 | CSV import/export MVP (`csvImport.ts`: parse + products/approved-aliases with dup/conflict detection; `exportQuantityAdjustments`; `importProductsCsv` writes via SAVE_PRODUCT/RESOLVE_ALIAS + audit; export audited; import/export UI) | _this pass_ | emulator + store + unit |
 
 Gates at `4131702`: `test:firebase` 20/20 · `vitest` 323 passed/20 skipped · `tsc` clean · `eslint` clean ·
 `next build` OK · `playwright` 11/11 (mock e2e intact).
@@ -41,9 +42,15 @@ Gates after Loop 3: `test:firebase` 24/24 · `vitest` 328 passed/24 skipped · `
   durable record via `SAVE_SCAN_EVENT`; a per-scan audit row would be redundant + high-volume). CSV
   import/export audit lands with Loop 5. Proven: emulator (`audit.rules.test.ts`: append-only,
   business-scoped, cross-business write denied, non-member read denied) + store (`auditWrites.store.test.ts`).
-- **Loop 5 - CSV MVP.** Import: products + approved aliases into Firestore (dup/conflict validation),
-  audit. Export: completed session -> full-count + quantity-adjustment CSV (reuse `csvExport.ts`), audit.
-  ImportJob/ExportJob tracking: defer (document).
+- **Loop 5 - DONE (this pass).** Import: `csvImport.ts` (pure RFC4180-ish `parseCsv` + `buildProductImport`)
+  creates products + approved aliases from sku/barcode/gtin/upc/ean/vendor codes, with duplicate (skipped)
+  and conflict (a code already mapped to a different product -> NOT applied) detection. `importProductsCsv`
+  store action writes via the durable queue (`SAVE_PRODUCT` + `RESOLVE_ALIAS`) and audits (`csv_import`).
+  Export: `exportQuantityAdjustments` (full-count export already existed); export UI audits (`csv_export`
+  via `auditCsvExport`). Import/export UI in `ExportButtons.tsx`. Treats CSV as UNTRUSTED (semantic
+  firewall). DEFERRED (documented): ImportJob/ExportJob tracking entities; quantity-adjustment has no
+  prior "system quantity" baseline (counted qty == adjustment). Proven: `csvImport.test.ts`,
+  `csvImport.store.test.ts`, `csvExport.test.ts` (qty-adjustment), emulator `csvImport.rules.test.ts`.
 - **Loop 7 - Firebase Playwright.** New `e2e/firebase-phase2/` running the app with
   `NEXT_PUBLIC_FIREBASE_BACKEND=1` against the emulator (separate Playwright project/webserver +
   emulator running + a seeded user/business). Flow: create business -> session -> scan known/alias/
@@ -58,8 +65,8 @@ auth/rules/isolation smoke, report separately. No fake cloud proof; nothing depl
 ## EXACT NEXT ORDER (resume here, fresh focused pass)
 1. ~~**Loop 3** - session/count persistence and survive-refresh.~~ DONE (this pass).
 2. ~~**Loop 6** - audit writes.~~ DONE (this pass).
-3. **Loop 5** - CSV import/export MVP. (NEXT)
-4. **Loop 7** - Firebase-backed Playwright proof.
+3. ~~**Loop 5** - CSV import/export MVP.~~ DONE (this pass).
+4. **Loop 7** - Firebase-backed Playwright proof. (NEXT)
 5. **Loop 8** - cloud auth/rules/isolation smoke (only AFTER the owner provides the Web App config).
 
 ## KNOWN BLOCKER
