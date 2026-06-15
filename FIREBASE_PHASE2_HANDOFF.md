@@ -10,7 +10,8 @@ Branch: `firebase-cloud-phase2` (off `master`). Emulator-side build; cloud Loop 
 | 2 | scanStore backend toggle (`NEXT_PUBLIC_FIREBASE_BACKEND`) + async drain + business-context guard + `setBusinessContext` | `6192e4b` | store + gates |
 | 4a | `SAVE_PRODUCT` op (products persist to Firestore, idempotent) | `9db142b` | emulator |
 | 4b | `businessDataLoader` + `setBusinessContext` loads products/aliases (alias resolves after refresh) | `4131702` | emulator + store |
-| 3 | Session/count persistence + survive-refresh (`SAVE_SESSION` op + explicit MockDb handling, `finishSession`, reverse mappers, `loadBusinessData` reads sessions+counts, `setBusinessContext` reconstructs active session + finalCounts) | _this pass_ | emulator + store |
+| 3 | Session/count persistence + survive-refresh (`SAVE_SESSION` op + explicit MockDb handling, `finishSession`, reverse mappers, `loadBusinessData` reads sessions+counts, `setBusinessContext` reconstructs active session + finalCounts) | `c5e61bd` | emulator + store |
+| 6 | Audit writes (fire-and-forget injectable `audit()` -> append-only `auditLog`; wired to session start/finish, unknown-review create, alias approve/reject, product create; never blocks/breaks the scanner) | _this pass_ | emulator + store |
 
 Gates at `4131702`: `test:firebase` 20/20 · `vitest` 323 passed/20 skipped · `tsc` clean · `eslint` clean ·
 `next build` OK · `playwright` 11/11 (mock e2e intact).
@@ -32,9 +33,14 @@ Gates after Loop 3: `test:firebase` 24/24 · `vitest` 328 passed/24 skipped · `
   `loadBusinessData` now reads `countSessions` + `inventoryCounts`; `setBusinessContext` reconstructs
   the active session (else most recent) + its `finalCounts`. Proven: emulator
   (`sessionPersistence.rules.test.ts`) + store (`sessionPersistence.store.test.ts`).
-- **Loop 6 - audit.** Injectable `audit(event)` (cloud -> `auditRepository.append`, fire-and-forget, never
-  blocks the scanner) wired on session start/finish, alias approve/reject, scan/unknown create, CSV
-  import/export. Emulator test for append-only + business scope.
+- **Loop 6 - DONE (this pass).** Injectable fire-and-forget `audit(event)` (`src/services/audit/audit.ts`
+  + `auditRepository.append`) wired on session start/finish, unknown-review create, alias approve/reject,
+  product create. Guarded: emits ONLY with a real business context (no fake businessId/actor); swallows
+  errors so a failed audit never blocks/breaks the scanner. `toAuditEvent` omits undefined fields
+  (Firestore rejects `undefined`). Per-known-scan audit intentionally DEFERRED (the scan is already the
+  durable record via `SAVE_SCAN_EVENT`; a per-scan audit row would be redundant + high-volume). CSV
+  import/export audit lands with Loop 5. Proven: emulator (`audit.rules.test.ts`: append-only,
+  business-scoped, cross-business write denied, non-member read denied) + store (`auditWrites.store.test.ts`).
 - **Loop 5 - CSV MVP.** Import: products + approved aliases into Firestore (dup/conflict validation),
   audit. Export: completed session -> full-count + quantity-adjustment CSV (reuse `csvExport.ts`), audit.
   ImportJob/ExportJob tracking: defer (document).
@@ -51,8 +57,8 @@ auth/rules/isolation smoke, report separately. No fake cloud proof; nothing depl
 
 ## EXACT NEXT ORDER (resume here, fresh focused pass)
 1. ~~**Loop 3** - session/count persistence and survive-refresh.~~ DONE (this pass).
-2. **Loop 6** - audit writes. (NEXT)
-3. **Loop 5** - CSV import/export MVP.
+2. ~~**Loop 6** - audit writes.~~ DONE (this pass).
+3. **Loop 5** - CSV import/export MVP. (NEXT)
 4. **Loop 7** - Firebase-backed Playwright proof.
 5. **Loop 8** - cloud auth/rules/isolation smoke (only AFTER the owner provides the Web App config).
 
