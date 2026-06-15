@@ -3,18 +3,21 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 // Proves secrets are read SERVER-SIDE ONLY. Client code (components, stores, app pages, browser libs)
-// must never read provider API keys OR the Supabase service-role key - that would leak the secret into
-// the browser bundle. Only server route handlers + provider modules + supabaseServer.ts may read them.
+// must never read provider API keys OR the Firebase Admin service account - that would leak a secret into
+// the browser bundle. Only server route handlers + provider modules + firebaseAdmin.ts may read them.
 
 const CLIENT_DIRS = ["src/components", "src/stores", "src/app/(app)", "src/app/login", "src/lib"];
 const FORBIDDEN = [
   "process.env.GEMINI_API_KEY",
   "process.env.OPENAI_API_KEY",
-  // Supabase service-role key must never appear in / be reachable from client code (guardrail 5).
-  // Patterns are precise so a prose mention of the filename in a comment is not a false positive:
-  "SUPABASE_SERVICE_ROLE_KEY", // the env var itself
-  "@/lib/supabaseServer", // importing the server-only client
-  "getSupabaseServiceClient(", // calling the service-role factory
+  // Firebase Admin (service account / privileged SDK) must never be reachable from client code.
+  // Patterns are precise so a prose mention in a comment is not a false positive:
+  "@/lib/firebaseAdmin", // importing the server-only Admin client
+  "firebase-admin", // the Admin SDK package
+  "FIREBASE_SERVICE_ACCOUNT_PATH", // local service-account path env
+  "GOOGLE_APPLICATION_CREDENTIALS", // ADC path env
+  "getAdminDb(", // calling the Admin Firestore factory
+  "getAdminAuth(", // calling the Admin Auth factory
 ];
 
 function walk(dir: string): string[] {

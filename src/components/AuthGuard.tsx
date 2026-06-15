@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSession, onAuthChange, isAuthBypassEnabled } from "@/lib/auth";
 
-// Client-side gate for protected pages. Checks a real Supabase session (async) and redirects to /login
+// Client-side gate for protected pages. Checks a real Firebase auth session (async) and redirects to /login
 // when there is none. The E2E/test bypass (isAuthBypassEnabled) keeps existing Playwright specs green
 // and is impossible in production.
 

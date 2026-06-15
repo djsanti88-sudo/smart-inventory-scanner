@@ -240,3 +240,16 @@ Run the proof:
 
 Gate run (2026-06-14): supabase start OK; db reset OK; isolation 6/6 + repo 1/1 (live local);
 vitest 318 passed / 7 skipped; tsc clean; eslint clean; next build OK; playwright 11/11.
+
+## Backend pivot: Firebase foundation (2026-06-14)
+- `npm run test:firebase` -> `firebase emulators:exec --only firestore "vitest run src/services/db/firebase"`.
+  Emulator tests SKIP under plain `npx vitest run` (gated on FIRESTORE_EMULATOR_HOST), so the normal gate
+  stays green without Java/emulator.
+- `src/services/db/firebase/tenantIsolation.rules.test.ts` (9) - RLS via AUTHENTICATED users under the
+  real firestore.rules (service role only seeds): A reads(get+list)/writes A; B cannot read/insert/update/
+  delete A; audit append-only; catalog client-read-only; userProfiles self-only.
+- `src/services/db/firebase/repositories.rules.test.ts` (1) - typed repo CRUD as an authenticated member.
+- `keySafety.test.ts` extended for Firebase Admin (no service-account/Admin in client). authBypass test
+  unchanged (production-off proof).
+- Gate run (2026-06-14): emulator 10/10; vitest 318 passed/10 skipped; tsc clean; eslint clean; next build
+  OK; playwright 11/11.

@@ -1,0 +1,126 @@
+rules_version = '2';
+
+// Multi-tenant security for the Smart Inventory Scanner (Launch MVP Phase 1, Firebase).
+// Business-scoped data lives in SUBCOLLECTIONS under /businesses/{businessId}/... so every rule derives
+// the tenant from the PATH (businessId wildcard) - which works uniformly for get, list, create, update,
+// and delete (no reliance on `resource`, which is null during list/query authorization). A user may only
+// touch a business's data if they are a member with the required role; writing outside your business's
+// path is impossible, so forged-businessId writes are blocked by construction. Membership docs are keyed
+// `${businessId}_${uid}` so rules read them with a single exists()/get().
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function memberPath(bid) {
+      return /databases/$(database)/documents/businessMembers/$(bid + '_' + uid());
+    }
+    function isMember(bid) { return isSignedIn() && exists(memberPath(bid)); }
+    function roleOf(bid) { return get(memberPath(bid)).data.role; }
+    function hasRole(bid, roles) { return isMember(bid) && (roleOf(bid) in roles); }
+    // A business-scoped doc, if it carries a businessId field, must match its path (defense in depth).
+    function bizFieldOk(bid) {
+      return !('businessId' in request.resource.data) || request.resource.data.businessId == bid;
+    }
+
+    // ----- user profiles: each user only their own (doc id = uid) -----
+    match /userProfiles/{userId} {
+      allow read, create, update: if isSignedIn() && userId == uid();
+      allow delete: if false;
+    }
+
+    // ----- business memberships (doc id = `${businessId}_${userId}`) -----
+    match /businessMembers/{memberId} {
+      allow read: if isSignedIn() && resource != null
+        && (resource.data.userId == uid() || isMember(resource.data.businessId));
+      // Bootstrap: a user may create their OWN owner membership (the create-business flow). Otherwise
+      // only an owner/admin of that business may add members. memberId must equal `${businessId}_${userId}`.
+      allow create: if isSignedIn()
+        && memberId == (request.resource.data.businessId + '_' + request.resource.data.userId)
+        && (
+          (request.resource.data.userId == uid() && request.resource.data.role == 'owner')
+          || hasRole(request.resource.data.businessId, ['owner', 'admin'])
+        );
+      allow update, delete: if hasRole(resource.data.businessId, ['owner', 'admin']);
+    }
+
+    // ----- businesses + their scoped subcollections -----
+    match /businesses/{bid} {
+      allow read: if isMember(bid);
+      allow create: if isSignedIn() && request.resource.data.createdBy == uid();
+      allow update: if hasRole(bid, ['owner', 'admin']);
+      allow delete: if hasRole(bid, ['owner']);
+
+      // products / aliases / settings / shopOverrides: managed by owner/admin; read by any member.
+      match /products/{id} {
+        allow read: if isMember(bid);
+        allow create, update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow delete: if hasRole(bid, ['owner', 'admin']);
+      }
+      match /aliases/{id} {
+        allow read: if isMember(bid);
+        allow create, update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow delete: if hasRole(bid, ['owner', 'admin']);
+      }
+      match /settings/{id} {
+        allow read: if isMember(bid);
+        allow create, update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow delete: if false;
+      }
+      match /shopOverrides/{id} {
+        allow read: if isMember(bid);
+        allow create, update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow delete: if hasRole(bid, ['owner', 'admin']);
+      }
+
+      // countSessions: started/managed by owner/admin; counters may update; members read.
+      match /countSessions/{id} {
+        allow read: if isMember(bid);
+        allow create: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow update: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow delete: if hasRole(bid, ['owner', 'admin']);
+      }
+
+      // scanEvents: counters (and up) create; immutable to non-admins.
+      match /scanEvents/{id} {
+        allow read: if isMember(bid);
+        allow create: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow update, delete: if hasRole(bid, ['owner', 'admin']);
+      }
+
+      // inventoryCounts: counters (and up) create/update.
+      match /inventoryCounts/{id} {
+        allow read: if isMember(bid);
+        allow create, update: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow delete: if hasRole(bid, ['owner', 'admin']);
+      }
+
+      // unknownCodeReviews: counters create; owner/admin review.
+      match /unknownCodeReviews/{id} {
+        allow read: if isMember(bid);
+        allow create: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow delete: if hasRole(bid, ['owner', 'admin']);
+      }
+
+      // auditLog: append-only. Any member may create; nobody may edit/delete; owner/admin read.
+      match /auditLog/{id} {
+        allow read: if hasRole(bid, ['owner', 'admin']);
+        allow create: if isMember(bid) && bizFieldOk(bid);
+        allow update, delete: if false;
+      }
+    }
+
+    // ----- shared global catalog: read by any signed-in user; writes are SERVER-ONLY (Admin SDK). -----
+    match /catalogEntries/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

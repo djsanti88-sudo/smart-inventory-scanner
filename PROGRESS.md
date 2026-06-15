@@ -539,3 +539,31 @@ build OK; playwright 11/11 (auth bypass keeps them green).
 ### Next owner decision
 Review the Phase 1 proof. Phase 2 (wire scanStore + count/session mutations onto the repositories,
 audit-log writes, alias-approval + CSV on backend) does NOT start until approved.
+
+## Backend pivot: Supabase -> Firebase foundation (2026-06-14)
+
+Owner changed backend direction (already has a Firebase/Google account). Replaced the Supabase Phase-1
+foundation with an equivalent, PROVEN Firebase foundation. Branch: `firebase-foundation`. EMULATOR-FIRST,
+SECRET-FREE (demo project `demo-smart-inventory`); foundation + proof only (scan/count NOT wired - Phase 2).
+
+### Done
+- Deps: +firebase, +firebase-admin, +@firebase/rules-unit-testing; removed @supabase/* + supabase CLI;
+  stopped the Supabase Docker stack.
+- Firebase config: firebase.json (auth+firestore emulators), .firebaserc, firestore.rules,
+  firestore.indexes.json; scripts `emulators` + `test:firebase`.
+- Libs: src/lib/firebaseClient.ts (browser, emulator-aware), src/lib/firebaseAdmin.ts (server-only).
+- Data model src/services/db/types.ts; subcollection repositories src/services/db/firebase/repositories.ts
+  (/businesses/{bid}/...). Auth rewritten to Firebase (auth.ts/AuthGuard/login/business page); kept the
+  provider-agnostic authBypass.
+- Security: firestore.rules - tenancy by path, owner/admin/counter/viewer roles, append-only audit,
+  global catalog read-only, forged-businessId impossible. keySafety.test.ts retargeted to Firebase Admin.
+- Supabase removed from runtime (src grep clean) + archived to archive/supabase-foundation/.
+
+### Proof (all green)
+Firebase emulator: tenant-isolation 9/9 (authenticated users) + repo round-trip 1/1 = **10/10**.
+vitest 318 passed / 10 skipped (emulator tests skip w/o emulator); tsc clean; eslint clean; next build OK;
+playwright 11/11 (auth bypass). No secrets committed; .env* git-ignored.
+
+### Deferred (Phase 2)
+Wire scanStore scan/count/session onto the Firebase repos; audit writes; alias approval; CSV; member-mgmt
+UI; create the real cloud project (`smart-inventory-scanner`) + deploy rules.

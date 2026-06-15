@@ -101,3 +101,16 @@ No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migr
 | 5 | create_business privilege/bootstrap abuse | Med | Low | SECURITY DEFINER + search_path=''; rejects unauthenticated; atomic business+admin membership; execute granted to authenticated only | Mitigated |
 | 6 | Windows port conflicts block local stack | Med | Was occurring | Ports remapped to 553xx (outside WinNAT excluded ranges); documented in SUPABASE_SETUP.md | Fixed |
 | 7 | Breaking the 11 e2e specs / scan path via auth swap | Med | Low | E2E bypass; scanStore untouched; full gate sweep green | Mitigated |
+
+## Backend pivot: Firebase foundation (2026-06-14)
+
+| # | Risk | Sev | Likelihood | Mitigation | Status |
+|---|------|-----|-----------|------------|--------|
+| 1 | Cross-tenant data leak | Critical | Was a concern | Path-based subcollection rules; proven by 9/9 authenticated-user isolation test (read/list/insert/update/delete all blocked for non-members) | Fixed |
+| 2 | Forged businessId write | High | Possible | Writes only under /businesses/{bid} you're a member of; bizFieldOk check; proven | Mitigated |
+| 3 | list/query auth bypass or breakage | High | Was occurring (top-level) | Subcollections make list rules path-based (no null-resource error); list proven for member + denied for non-member | Fixed |
+| 4 | Service account / Admin leaked to client | Critical | Low | firebaseAdmin.ts server-only; keySafety retargeted to Firebase Admin patterns | Mitigated |
+| 5 | E2E bypass usable in production | High | Low | NODE_ENV==="production" hard-off; proven by authBypass.test.ts | Mitigated |
+| 6 | Half-Supabase/half-Firebase runtime | Med | Was a risk | Supabase removed from runtime (src grep clean) + deps removed + archived; single backend | Fixed |
+| 7 | Accidental cloud writes / secrets | High | Low | Emulator-first demo project; no cloud project/deploy; no service account; .env* git-ignored | Mitigated |
+| 8 | Windows emulator port conflicts | Low | Low | Auth 9099 / Firestore 8080 / UI 4001 (outside WinNAT excluded ranges) | Mitigated |

@@ -252,3 +252,18 @@ Why each choice was made. Newest decisions at the bottom of each section.
   scanStore to avoid destabilizing the proven scan path; repositories are the Phase-2 seam.
 - **Tables jsonb catch-alls**: unknown_code_reviews.suggested + settings.data hold the sprawling
   suggested*/settings fields so the schema stays lean; repos map in Phase 2.
+
+## Backend pivot: Supabase -> Firebase (2026-06-14)
+- **Firebase over Supabase** (owner: existing Google/Firebase account). Done before real users/data, so
+  no data migration - replace the foundation outright.
+- **Emulator-first, secret-free**: a `demo-` project runs the full proof offline. No service account, no
+  web config, no cloud project this phase. Real cloud + deploy deferred (needs approval).
+- **Subcollections /businesses/{bid}/... over top-level collections.** Top-level tenant collections can't
+  securely support `list` (Firestore `resource` is null during query authorization -> evaluation error).
+  Path-based tenancy makes get/list/create/update/delete uniformly enforced by `isMember(bid)` from the
+  PATH and makes forged-businessId writes impossible by construction. (Owner spec allowed non-top-level.)
+- **Membership docs keyed `${businessId}_${uid}`** so rules check membership with a single exists()/get()
+  (no collection query inside rules; no recursion).
+- **Admin SDK server-only**; client never imports it; keySafety enforces it. E2E bypass reused unchanged
+  (production-impossible).
+- **Roles owner|admin|counter|viewer** per the owner's model.

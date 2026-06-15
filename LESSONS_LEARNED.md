@@ -100,3 +100,21 @@ introspects directly (pulls postgres-meta once). Documented in SUPABASE_SETUP.md
 The service role BYPASSES RLS, so a "tenant isolation" test that uses it proves nothing. The real proof
 signs in as two normal users and asserts User B cannot read/insert(forged)/update/delete User A's rows.
 Service role is fine ONLY for setup/teardown (creating/deleting test users). Encoded as a standing rule.
+
+---
+
+## L9 - Firestore multi-tenant LIST needs path-based tenancy (subcollections) (2026-06-14)
+
+Top-level tenant collections with a rule like `allow read: if isMember(resource.data.businessId)` work
+for single-doc `get` but FAIL on `list`/query with "evaluation error" - during query authorization
+Firestore evaluates the rule with `resource == null`, so dereferencing `resource.data` throws. The robust
+fix is to store business data in SUBCOLLECTIONS `/businesses/{businessId}/...` and derive the tenant from
+the PATH wildcard. Then get/list/create/update/delete all enforce `isMember(bid)` uniformly and forged
+businessId is impossible. Lesson: design Firestore multi-tenancy around the path, not a resource field.
+
+## L10 - Isolate rules-unit-testing by projectId; don't share one emulator project across files (2026-06-14)
+
+Two test files using the same projectId (+ singleProjectMode) and running in parallel had their
+`clearFirestore()` calls race, producing intermittent "evaluation error"/denials. Fix: a unique
+`projectId` per test file in `initializeTestEnvironment` (and drop `singleProjectMode`) so each file gets
+an isolated emulator namespace. Deterministic and parallel-safe.

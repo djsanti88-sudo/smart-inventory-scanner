@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { signInWithPassword, signUp, isAuthBypassEnabled } from "@/lib/auth";
 
-// Supabase email/password login for the launch MVP. In E2E/test bypass mode (never production) the form
+// Firebase email/password login for the launch MVP. In E2E/test bypass mode (never production) the form
 // just routes to /scan so existing Playwright specs keep working without a live auth backend.
 export default function LoginPage() {
   const router = useRouter();
@@ -27,12 +27,7 @@ export default function LoginPage() {
     const res = mode === "signup" ? await signUp(email, password) : await signInWithPassword(email, password);
     setBusy(false);
     if (res.error) {
-      setError(res.error.message);
-      return;
-    }
-    if (mode === "signup" && !res.data.session) {
-      setNotice("Account created. Check your email to confirm, then sign in.");
-      setMode("signin");
+      setError(res.error);
       return;
     }
     router.replace(mode === "signup" ? "/business" : "/scan");
