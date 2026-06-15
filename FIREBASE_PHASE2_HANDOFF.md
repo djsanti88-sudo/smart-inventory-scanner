@@ -47,7 +47,30 @@ Need owner's 6 `NEXT_PUBLIC_FIREBASE_*` values (+ Firestore & Email/Password ena
 `smart-inventory-scanner`). Then: write to `.env.local` only, deploy rules/indexes, run real-user cloud
 auth/rules/isolation smoke, report separately. No fake cloud proof; nothing deployed yet.
 
-## Guardrails held
+## EXACT NEXT ORDER (resume here, fresh focused pass)
+1. **Loop 3** - session/count persistence and survive-refresh.
+2. **Loop 6** - audit writes.
+3. **Loop 5** - CSV import/export MVP.
+4. **Loop 7** - Firebase-backed Playwright proof.
+5. **Loop 8** - cloud auth/rules/isolation smoke (only AFTER the owner provides the Web App config).
+
+## KNOWN BLOCKER
+Waiting on the owner's 6 `NEXT_PUBLIC_FIREBASE_*` values (Firebase Web App config for
+`smart-inventory-scanner`, with Cloud Firestore + Email/Password enabled). Loop 8 cannot start until then.
+
+## NON-NEGOTIABLES (carry into every remaining loop)
+- No double count (transaction + idempotency ledger; prove with concurrent retry).
+- No fake/default businessId/userId - no Firebase write without a real business context.
+- No destructive cloud reset (`reset()` throws against real cloud).
+- No fake cloud proof (cloud only after real config; real Email/Password users).
+- Scanner UX stays fast (optimistic local first; sync via the queue; never block the input).
+- Decode / cache / Firecrawl behavior untouched.
+- No 100-code benchmark.
+- No tire database.
+- No public app deploy.
+- No secrets committed (`.env.local` git-ignored).
+
+## Guardrails held (this pass)
 Scanner UX/optimistic feedback/focus/keyboard-wedge preserved; decode/cache/Firecrawl untouched; no
 double count; no writes without real businessId+userId; reset guarded; no secrets; `.env.local`
 git-ignored; Supabase out of runtime; tire scrape / 100-code benchmark / public deploy not started.
