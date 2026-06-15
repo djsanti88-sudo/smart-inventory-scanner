@@ -1,0 +1,30 @@
+{
+  "business": "biz-nDPz45mqDMaaucovnl4y5v5vhSH3",
+  "results": [
+    {
+      "code": "2881-6861",
+      "rowText": "2:00:54 PM 2881-6861 2881-6861 Exact alias UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire 14 Known Matched UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire via an approved alias. Pending",
+      "resolvedToCamel": false,
+      "resolvedToFalken": true
+    },
+    {
+      "code": "28816861",
+      "rowText": "2:00:54 PM 28816861 28816861 Alias UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire 15 Known Matched UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire via an approved alias. Pending",
+      "resolvedToCamel": false,
+      "resolvedToFalken": true
+    },
+    {
+      "code": "2881 6861",
+      "rowText": "2:00:55 PM 2881 6861 2881 6861 Alias UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire 16 Known Matched UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire via an approved alias. Pending",
+      "resolvedToCamel": false,
+      "resolvedToFalken": true
+    },
+    {
+      "code": "2881/6861",
+      "rowText": "2:00:55 PM 2881/6861 2881/6861 Alias UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire 17 Known Matched UPC 848983012906 - Falken Sincera ST80 A/S All Season 215/70R15 98T Passenger Tire via an approved alias. Pending",
+      "resolvedToCamel": false,
+      "resolvedToFalken": true
+    }
+  ],
+  "resolvedToCamelAnywhere": false
+}

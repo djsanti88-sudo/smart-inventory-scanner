@@ -2,14 +2,18 @@
 
 import { useRef, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useAccessLevel } from "@/services/security/useAccessLevel";
 import {
   exportAliases,
   exportFinalCounts,
+  exportFinalCountsCustomer,
   exportPendingQueue,
   exportProducts,
   exportQuantityAdjustments,
+  exportQuantityAdjustmentsCustomer,
   exportRawScanLog,
   exportUnknowns,
+  exportUnknownsCustomer,
 } from "@/services/csvExport";
 
 function download(filename: string, csv: string) {
@@ -32,50 +36,27 @@ export function ExportButtons() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [importMsg, setImportMsg] = useState("");
 
-  const buttons: Array<{ label: string; testid: string; rows: number; run: () => void }> = [
-    {
-      label: "Final counts CSV",
-      testid: "export-final-counts",
-      rows: s.finalCounts.length,
-      run: () => download("final-counts.csv", exportFinalCounts(s.finalCounts, s.products, s.sessionId)),
-    },
-    {
-      label: "Quantity adjustments CSV",
-      testid: "export-qty-adjustments",
-      rows: s.finalCounts.length,
-      run: () => download("quantity-adjustments.csv", exportQuantityAdjustments(s.finalCounts, s.products, s.sessionId)),
-    },
-    {
-      label: "Raw scan log",
-      testid: "export-raw-log",
-      rows: s.scanFeed.length,
-      run: () => download("raw-scan-log.csv", exportRawScanLog(s.scanFeed)),
-    },
-    {
-      label: "Unknowns",
-      testid: "export-unknowns",
-      rows: s.needsReviewQueue.length,
-      run: () => download("unknown-codes.csv", exportUnknowns(s.needsReviewQueue)),
-    },
-    {
-      label: "Products",
-      testid: "export-products",
-      rows: s.products.length,
-      run: () => download("products.csv", exportProducts(s.products)),
-    },
-    {
-      label: "Aliases",
-      testid: "export-aliases",
-      rows: s.aliases.length,
-      run: () => download("aliases.csv", exportAliases(s.aliases)),
-    },
-    {
-      label: "Pending queue",
-      testid: "export-pending",
-      rows: s.pendingSyncQueue.length,
-      run: () => download("pending-sync.csv", exportPendingQueue(s.pendingSyncQueue)),
-    },
+  // platformOwner (Santiago) gets full internal exports; every customer role gets sanitized,
+  // product-facing exports only (no barcode/gtin/upc/ean/aliases/raw codes). Server/serializer-enforced
+  // truth lives in the export builders; this gate also hides code-only export buttons from customers.
+  const level = useAccessLevel();
+  const isPlatform = level === "platform";
+
+  const platformButtons: Array<{ label: string; testid: string; rows: number; run: () => void }> = [
+    { label: "Final counts CSV", testid: "export-final-counts", rows: s.finalCounts.length, run: () => download("final-counts.csv", exportFinalCounts(s.finalCounts, s.products, s.sessionId)) },
+    { label: "Quantity adjustments CSV", testid: "export-qty-adjustments", rows: s.finalCounts.length, run: () => download("quantity-adjustments.csv", exportQuantityAdjustments(s.finalCounts, s.products, s.sessionId)) },
+    { label: "Raw scan log", testid: "export-raw-log", rows: s.scanFeed.length, run: () => download("raw-scan-log.csv", exportRawScanLog(s.scanFeed)) },
+    { label: "Unknowns", testid: "export-unknowns", rows: s.needsReviewQueue.length, run: () => download("unknown-codes.csv", exportUnknowns(s.needsReviewQueue)) },
+    { label: "Products", testid: "export-products", rows: s.products.length, run: () => download("products.csv", exportProducts(s.products)) },
+    { label: "Aliases", testid: "export-aliases", rows: s.aliases.length, run: () => download("aliases.csv", exportAliases(s.aliases)) },
+    { label: "Pending queue", testid: "export-pending", rows: s.pendingSyncQueue.length, run: () => download("pending-sync.csv", exportPendingQueue(s.pendingSyncQueue)) },
   ];
+  const customerButtons: Array<{ label: string; testid: string; rows: number; run: () => void }> = [
+    { label: "Final counts CSV", testid: "export-final-counts", rows: s.finalCounts.length, run: () => download("final-counts.csv", exportFinalCountsCustomer(s.finalCounts, s.products, s.sessionId)) },
+    { label: "Quantity adjustments CSV", testid: "export-qty-adjustments", rows: s.finalCounts.length, run: () => download("quantity-adjustments.csv", exportQuantityAdjustmentsCustomer(s.finalCounts, s.products, s.sessionId)) },
+    { label: "Unknowns", testid: "export-unknowns", rows: s.needsReviewQueue.length, run: () => download("unknown-codes.csv", exportUnknownsCustomer(s.needsReviewQueue)) },
+  ];
+  const buttons = isPlatform ? platformButtons : customerButtons;
 
   async function handleImport(file: File) {
     const text = await file.text();

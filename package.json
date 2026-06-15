@@ -15,7 +15,18 @@
     "emulators": "firebase emulators:start --project demo-smart-inventory --only auth,firestore",
     "test:firebase": "firebase emulators:exec --project demo-smart-inventory --only firestore \"vitest run src/services/db/firebase\"",
     "test:e2e:firebase": "firebase emulators:exec --project demo-smart-inventory --only auth,firestore \"playwright test --config=playwright.firebase.config.ts\"",
-    "test:firebase:cloud-smoke": "node scripts/cloud-smoke.mjs"
+    "test:firebase:cloud-smoke": "node scripts/cloud-smoke.mjs",
+    "qa:bots": "playwright test --config=playwright.bots.config.ts",
+    "qa:bots:tire": "playwright test --config=playwright.bots.config.ts platformOwner-tire-resolution",
+    "qa:bots:security": "playwright test --config=playwright.bots.config.ts role-security-leak export-leak",
+    "qa:bots:ux": "playwright test --config=playwright.bots.config.ts ux-no-training",
+    "qa:bots:manager": "playwright test --config=playwright.bots.config.ts manager-workflow",
+    "qa:bots:data": "playwright test --config=playwright.bots.config.ts data-integrity",
+    "qa:bots:performance": "playwright test --config=playwright.bots.config.ts performance-smoke",
+    "qa:bots:all": "playwright test --config=playwright.bots.config.ts",
+    "qa:bots:live": "playwright test --config=playwright.bots.cloud.config.ts",
+    "qa:revision": "npx tsc --noEmit && npx eslint src e2e && npx next build && npx playwright test && npm run test:firebase && npm run qa:bots",
+    "qa:weekly-report": "npm run qa:bots:security && npm run qa:bots:data && npm run qa:bots:tire && npm run qa:bots:ux"
   },
   "dependencies": {
     "firebase": "^12.14.0",

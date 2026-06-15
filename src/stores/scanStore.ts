@@ -16,6 +16,8 @@ import type {
   UnknownCodeReview,
 } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
+import { normalizeCode } from "@/services/codeNormalizer";
+import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismatchGuard";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
 import { incrementInventoryCount } from "@/services/inventory";
@@ -48,6 +50,7 @@ import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/se
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
+import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import type { AiStatus } from "@/types";
 
 /** Result summary of a CSV product import (shown in the UI). */
@@ -196,6 +199,9 @@ export interface ScanState {
   online: boolean;
   simulateSyncFailure: boolean;
   lastSyncError: string | null;
+  // Transient (not persisted): set when a link to a product was BLOCKED by the human-mistake guard.
+  // The UI shows the warning and may re-call resolveUnknown with confirmedMismatch: true to override.
+  lastMismatchWarning: { reviewId: string; productId: string; verdict: MismatchVerdict } | null;
 
   // AI lookup (fallback only, for unknown codes)
   aiLookupLogs: AiLookupLog[];
@@ -247,8 +253,18 @@ export interface ScanState {
         evidenceSummary: string;
         sourceUrls: string[];
       };
+      /** Owner override: proceed with a link the mismatch guard flagged high-risk (audited). */
+      confirmedMismatch?: boolean;
     },
   ) => void;
+  /** Evaluate (without committing) whether linking a review's code to a product looks like a mistake. */
+  evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
+  /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
+  clearMismatchWarning: () => void;
+  /** Repair a bad alias: unlink it (stops resolving; soft delete, scan history kept). Audited. */
+  unlinkAlias: (aliasId: string) => void;
+  /** Repair a bad alias: move it to the correct product. Audited. */
+  moveAlias: (aliasId: string, toProductId: string) => void;
   /** Append a private feedback/event-log entry (the "smarter over time" substrate). */
   recordFeedback: (
     type: FeedbackEventType,
@@ -299,6 +315,76 @@ function makeQueueItem(params: {
     idempotencyKey: params.idempotencyKey,
     scanEventId: params.scanEventId,
   };
+}
+
+/**
+ * Multi-code: build an APPROVED alias for every OTHER scannable code on a product (part number / SKU /
+ * GTIN / UPC / EAN / vendor codes), beyond the code(s) already aliased. This is what makes a tire's
+ * barcode AND its part-number QR both resolve to the same product. Pure builder; caller commits to state.
+ */
+function buildProductCodeAliases(params: {
+  product: Product;
+  alreadyAliasedCleanCodes: string[];
+  businessId: string;
+  sessionId: string;
+  idFactory: () => string;
+  now: () => string;
+}): { aliases: Alias[]; queued: PendingSyncItem[] } {
+  const { product, alreadyAliasedCleanCodes, businessId, sessionId, idFactory, now } = params;
+  const rawCodes = [
+    product.primaryBarcode,
+    product.primarySku,
+    product.gtin,
+    product.upc,
+    product.ean,
+    ...(product.vendorCodes ?? []),
+  ];
+  const seen = new Set(alreadyAliasedCleanCodes.filter(Boolean));
+  const aliases: Alias[] = [];
+  const queued: PendingSyncItem[] = [];
+  for (const code of rawCodes) {
+    if (!code) continue;
+    const n = normalizeCode(code);
+    const cleanCode = n.clean;
+    if (!cleanCode || seen.has(cleanCode)) continue;
+    seen.add(cleanCode);
+    const aliasId = `alias-${idFactory()}`;
+    const key = buildIdempotencyKey(businessId, sessionId, aliasId, "RESOLVE_ALIAS");
+    const alias: Alias = {
+      id: aliasId,
+      businessId,
+      productId: product.id,
+      rawCodeExample: code,
+      cleanCode,
+      normalizedCode: n.noSeparators || cleanCode,
+      aliasType: codeTypeToAliasType(detectCodeType(cleanCode)),
+      source: product.source ?? "human_review",
+      confidence: 1,
+      approved: true,
+      createdAt: now(),
+      updatedAt: now(),
+      createdBy: "multi_code",
+      lastSeenAt: now(),
+      syncStatus: "pending",
+      idempotencyKey: key,
+    };
+    aliases.push(alias);
+    queued.push(
+      makeQueueItem({
+        idFactory,
+        now,
+        businessId,
+        sessionId,
+        entityType: "Alias",
+        entityId: aliasId,
+        operation: "RESOLVE_ALIAS",
+        payload: alias,
+        idempotencyKey: key,
+        scanEventId: null,
+      }),
+    );
+  }
+  return { aliases, queued };
 }
 
 /** Recompute syncStatus on feed/counts/reviews from what remains in the pending queue. */
@@ -465,6 +551,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       online: true,
       simulateSyncFailure: false,
       lastSyncError: null,
+      lastMismatchWarning: null,
       aiLookupLogs: [],
       breaker: initBreaker(),
       aiStatus: { ...DEFAULT_AI_STATUS },
@@ -1363,6 +1450,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         if (!productId) return;
 
+        // Human-mistake guard: before linking a code to an EXISTING product, check it doesn't look like
+        // a different product entirely (e.g. a Falken tire part number being linked to Camel cigarettes).
+        // High-risk links are BLOCKED until the human explicitly overrides (confirmedMismatch: true).
+        if (action === "link_existing") {
+          const target = state.products.find((p) => p.id === productId);
+          const hasSuggestion = !!(review.suggestedProductName || review.suggestedBrand || review.suggestedCategory);
+          const verdict = evaluateMismatch({
+            scannedCode: review.cleanCode,
+            suggested: hasSuggestion
+              ? { name: review.suggestedProductName, brand: review.suggestedBrand, category: review.suggestedCategory }
+              : undefined,
+            target: { name: target?.name, brand: target?.brand, category: target?.category },
+          });
+          if (verdict.risk === "high_risk" && !payload.confirmedMismatch) {
+            set({ lastMismatchWarning: { reviewId, productId, verdict } });
+            emitAudit({ entityType: "Alias", entityId: review.cleanCode, action: "alias_link_warning_shown", metadata: { code: review.cleanCode, productId, reason: verdict.reason, suggestedName: verdict.suggestedName ?? "", targetProductName: target?.name ?? "" } });
+            return; // do NOT link until the owner explicitly confirms the override
+          }
+          if (verdict.risk === "high_risk" && payload.confirmedMismatch) {
+            emitAudit({ entityType: "Alias", entityId: review.cleanCode, action: "alias_link_override", metadata: { code: review.cleanCode, productId, targetProductName: target?.name ?? "", suggestedName: verdict.suggestedName ?? "", suggestedDomain: verdict.suggestedDomain ?? "", reason: verdict.reason } });
+          }
+        }
+
         // Permanently learn the alias (deterministic from now on, even before sync completes).
         const aliasId = `alias-${idFactory()}`;
         const aliasKeyOp = buildIdempotencyKey(
@@ -1420,7 +1530,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : e,
         );
 
-        set({ products, aliases, needsReviewQueue, scanFeed });
+        set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null });
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
@@ -1459,6 +1569,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         if (queued.length > 0) {
           set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
+        }
+
+        // Multi-code: a newly created product registers an approved alias for EVERY other code it carries
+        // (part number / SKU / GTIN / UPC / EAN), so scanning the tire's barcode OR its part-number QR both
+        // resolve to the same product. Deduped against the scanned alias and any pre-existing aliases.
+        if (createdProduct) {
+          const extra = buildProductCodeAliases({
+            product: createdProduct,
+            alreadyAliasedCleanCodes: [newAlias.cleanCode],
+            businessId: state.businessId,
+            sessionId: state.sessionId,
+            idFactory,
+            now,
+          });
+          const existingForProduct = new Set(
+            get().aliases.filter((a) => a.productId === createdProduct!.id).map((a) => a.cleanCode),
+          );
+          const freshAliases = extra.aliases.filter((a) => !existingForProduct.has(a.cleanCode));
+          if (freshAliases.length > 0) {
+            const freshIds = new Set(freshAliases.map((a) => a.id));
+            set((s) => ({
+              aliases: [...s.aliases, ...freshAliases],
+              pendingSyncQueue: [...s.pendingSyncQueue, ...extra.queued.filter((q) => freshIds.has(q.entityId))],
+            }));
+            for (const a of freshAliases) {
+              emitAudit({ entityType: "Alias", entityId: a.id, action: "alias_approved", metadata: { code: a.cleanCode, productId: createdProduct.id, origin: "multi_code" } });
+            }
+          }
         }
 
         // Audit the human/system resolution (product creation + alias approval). Fire-and-forget.
@@ -1522,6 +1660,65 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         } else {
           get().syncPending();
         }
+      },
+
+      evaluateLinkMismatch: (reviewId, productId) => {
+        const state = get();
+        const review = state.needsReviewQueue.find((r) => r.id === reviewId);
+        if (!review) return null;
+        const target = state.products.find((p) => p.id === productId);
+        const hasSuggestion = !!(review.suggestedProductName || review.suggestedBrand || review.suggestedCategory);
+        return evaluateMismatch({
+          scannedCode: review.cleanCode,
+          suggested: hasSuggestion
+            ? { name: review.suggestedProductName, brand: review.suggestedBrand, category: review.suggestedCategory }
+            : undefined,
+          target: { name: target?.name, brand: target?.brand, category: target?.category },
+        });
+      },
+
+      clearMismatchWarning: () => set({ lastMismatchWarning: null }),
+
+      unlinkAlias: (aliasId) => {
+        const state = get();
+        const alias = state.aliases.find((a) => a.id === aliasId);
+        if (!alias) return;
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, `${aliasId}:unlink:${idFactory()}`, "RESOLVE_ALIAS");
+        const updated: Alias = { ...alias, approved: false, updatedAt: now(), syncStatus: "pending", idempotencyKey: key };
+        // Mark related feed rows as needing review again (scan HISTORY is preserved, just no longer "known").
+        const scanFeed = state.scanFeed.map((e) =>
+          e.matchedProductId === alias.productId && e.cleanCode === alias.cleanCode
+            ? { ...e, status: "needs_review" as const, resolverStatus: "needs_review" as const, matchedProductId: null }
+            : e,
+        );
+        set((s) => ({
+          aliases: s.aliases.map((a) => (a.id === aliasId ? updated : a)),
+          scanFeed,
+          pendingSyncQueue: [
+            ...s.pendingSyncQueue,
+            makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Alias", entityId: aliasId, operation: "RESOLVE_ALIAS", payload: updated, idempotencyKey: key, scanEventId: null }),
+          ],
+        }));
+        emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_moved_or_unlinked", metadata: { fromProduct: alias.productId, toProduct: "", cleanCode: alias.cleanCode, normalizedCode: alias.normalizedCode, reason: "human_mistake_repair" } });
+        get().syncPending();
+      },
+
+      moveAlias: (aliasId, toProductId) => {
+        const state = get();
+        const alias = state.aliases.find((a) => a.id === aliasId);
+        if (!alias || !toProductId || toProductId === alias.productId) return;
+        const fromProduct = alias.productId;
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, `${aliasId}:move:${idFactory()}`, "RESOLVE_ALIAS");
+        const updated: Alias = { ...alias, productId: toProductId, approved: true, updatedAt: now(), syncStatus: "pending", idempotencyKey: key };
+        set((s) => ({
+          aliases: s.aliases.map((a) => (a.id === aliasId ? updated : a)),
+          pendingSyncQueue: [
+            ...s.pendingSyncQueue,
+            makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Alias", entityId: aliasId, operation: "RESOLVE_ALIAS", payload: updated, idempotencyKey: key, scanEventId: null }),
+          ],
+        }));
+        emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_moved_or_unlinked", metadata: { fromProduct, toProduct: toProductId, cleanCode: alias.cleanCode, normalizedCode: alias.normalizedCode, reason: "human_mistake_repair" } });
+        get().syncPending();
       },
 
       importProductsCsv: (text) => {
@@ -1600,8 +1797,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }),
 
       clearLocalCache: () => {
-        // Wipe the mock backend and any persisted (possibly poisoned) state, then reload clean seed.
-        db.reset();
+        // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
+        // guards against a destructive cloud wipe and throws) and must NEVER reseed mock data over the
+        // real cloud catalog - the cloud data re-loads on the next page load. In MOCK mode, reset the
+        // local MockDb and reload clean seed (the original behavior).
+        if (!cloudBackend) db.reset();
         if (typeof window !== "undefined" && window.localStorage) {
           try {
             window.localStorage.removeItem("sis-scan-v1");
@@ -1610,10 +1810,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // ignore
           }
         }
-        const fresh = getSeed();
-        set({
-          products: fresh.products,
-          aliases: fresh.aliases,
+        const common = {
           scanFeed: [],
           finalCounts: [],
           needsReviewQueue: [],
@@ -1621,12 +1818,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           syncedScanEventIds: [],
           aiLookupLogs: [],
           lastSyncError: null,
+          lastMismatchWarning: null,
           breaker: initBreaker(),
           lastCleanupBackup: null,
           catalog: [],
           shopOverrides: [],
           feedbackEvents: [],
-        });
+        };
+        if (cloudBackend) {
+          // Cloud: empty the local catalog; products/aliases re-load from Firestore on reload. No reseed.
+          set({ ...common, products: [], aliases: [] });
+        } else {
+          const fresh = getSeed();
+          set({ ...common, products: fresh.products, aliases: fresh.aliases });
+        }
       },
 
       applyCleanupSelections: (selectedCountIds) => {
@@ -1727,13 +1932,16 @@ const appDeps: ScanStoreDeps = {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 3,
+    version: 4,
     storage: createJSONStorage(() => localStorage),
     skipHydration: true,
     // v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
     // We cannot reliably tell poisoned from good learned data, so reset products/aliases to clean
     // verified seed and clear session/queues. User settings are preserved (merged with new
     // defaults). Use the in-app "Clear local cache" button for a full wipe including the mock DB.
+    // v4 (Sec-4): the customer-data wipe of any legacy sensitive localStorage keys (aliases/catalog/
+    // raw codes) is enforced by the role-aware `partialize` below on the first post-hydration write
+    // (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
     migrate: (persisted: unknown) => {
       const p = (persisted ?? {}) as Record<string, unknown>;
       const fresh = getSeed();
@@ -1749,24 +1957,14 @@ export const useScanStore = create<ScanState>()(
         settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
       } as never;
     },
-    partialize: (s) => ({
-      businessId: s.businessId,
-      sessionId: s.sessionId,
-      currentSession: s.currentSession,
-      settings: s.settings,
-      products: s.products,
-      aliases: s.aliases,
-      scanFeed: s.scanFeed,
-      finalCounts: s.finalCounts,
-      needsReviewQueue: s.needsReviewQueue,
-      pendingSyncQueue: s.pendingSyncQueue,
-      syncedScanEventIds: s.syncedScanEventIds,
-      simulateSyncFailure: s.simulateSyncFailure,
-      lastCleanupBackup: s.lastCleanupBackup,
-      catalog: s.catalog,
-      shopOverrides: s.shopOverrides,
-      feedbackEvents: s.feedbackEvents,
-    }),
+    // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
+    // code database (aliases / global catalog / shop overrides / barcodes / raw+clean+normalized codes /
+    // decode traces). The level is computed from the signed-in uid (same source of truth as the UI), and
+    // defaults to "business" when the user is unknown - so a customer's post-hydration write also WIPES
+    // any sensitive keys an older build left in this browser's localStorage. This governs ONLY what is
+    // written to disk; the in-memory store keeps the full data it needs to render/resolve in-session
+    // (seed in mock, the loader in cloud), so resolution is unaffected.
+    partialize: (s) => buildPersistedScanState(s as unknown as PersistableScanState),
     onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
   }),
 );

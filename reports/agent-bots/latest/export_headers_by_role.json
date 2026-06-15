@@ -1,0 +1,30 @@
+{
+  "role": "current (auth-bypass; role gating not yet implemented)",
+  "exports": [
+    {
+      "export": "final counts",
+      "header": "quantity,product_name,brand,category,specs,part_number,location,counted_at,session_id",
+      "codeFields": []
+    },
+    {
+      "export": "products",
+      "header": "(button not present)",
+      "codeFields": []
+    },
+    {
+      "export": "aliases",
+      "header": "(button not present)",
+      "codeFields": []
+    },
+    {
+      "export": "raw scan log",
+      "header": "(button not present)",
+      "codeFields": []
+    },
+    {
+      "export": "unknowns",
+      "header": "suggested_product_name,suggested_brand,suggested_category,status",
+      "codeFields": []
+    }
+  ]
+}

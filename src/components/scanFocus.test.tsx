@@ -33,7 +33,8 @@ describe("Scan page focus safety", () => {
     render(<ScanPage />);
     const input = screen.getByTestId("scanner-input") as HTMLInputElement;
     await user.type(input, "6419440485331{Enter}");
-    expect(screen.getByTestId("scan-feed-body")).toHaveTextContent("6419440485331");
+    // Customer-safe: the feed shows the resolved PRODUCT (raw/clean code columns are platformOwner-only).
+    expect(screen.getByTestId("scan-feed-body")).toHaveTextContent("Nokian");
     expect(input).toHaveFocus();
     expect(input.value).toBe("");
   });

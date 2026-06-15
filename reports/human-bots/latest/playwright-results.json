@@ -1,0 +1,537 @@
+{
+  "config": {
+    "configFile": "C:\\Users\\djsan\\inventory\\playwright.bots.config.ts",
+    "rootDir": "C:/Users/djsan/inventory/e2e/human-bots",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/djsan/inventory/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "C:/Users/djsan/inventory/e2e/human-bots",
+        "testIgnore": [
+          "**/cloud/**"
+        ],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "html",
+        {
+          "outputFolder": "reports/human-bots/playwright-report",
+          "open": "never"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "reports/human-bots/latest/playwright-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.60.0",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev -- --port 3300",
+      "url": "http://localhost:3300",
+      "reuseExistingServer": true,
+      "timeout": 180000,
+      "stdout": "pipe",
+      "env": {
+        "ACSetupSvcPort": "23210",
+        "AI_AGENT": "claude-code_2-1-172_agent",
+        "ALLUSERSPROFILE": "C:\\ProgramData",
+        "ANTHROPIC_API_KEY": "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",
+        "APPDATA": "C:\\Users\\djsan\\AppData\\Roaming",
+        "APPLICATIONINSIGHTS_CONFIGURATION_CONTENT": "{}",
+        "APPLICATION_INSIGHTS_NO_DIAGNOSTIC_CHANNEL": "1",
+        "CHROME_CRASHPAD_PIPE_NAME": "\\\\.\\pipe\\crashpad_23132_WPYMFPLEGWYROJRR",
+        "CLAUDECODE": "1",
+        "CLAUDE_AGENT_SDK_VERSION": "0.3.172",
+        "CLAUDE_CODE_CHILD_SESSION": "1",
+        "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING": "true",
+        "CLAUDE_CODE_ENABLE_TASKS": "0",
+        "CLAUDE_CODE_ENTRYPOINT": "claude-vscode",
+        "CLAUDE_CODE_EXECPATH": "C:\\Users\\djsan\\.vscode\\extensions\\anthropic.claude-code-2.1.172-win32-x64\\resources\\native-binary\\claude.exe",
+        "CLAUDE_CODE_SESSION_ID": "a6f4ed50-976b-4700-b50b-6e9f444693fe",
+        "CLAUDE_EFFORT": "high",
+        "COLOR": "0",
+        "COMMONPROGRAMFILES": "C:\\Program Files\\Common Files",
+        "CommonProgramFiles(x86)": "C:\\Program Files (x86)\\Common Files",
+        "CommonProgramW6432": "C:\\Program Files\\Common Files",
+        "COMPUTERNAME": "PREDATOR",
+        "COMSPEC": "C:\\Windows\\system32\\cmd.exe",
+        "COREPACK_ENABLE_AUTO_PIN": "0",
+        "DriverData": "C:\\Windows\\System32\\Drivers\\DriverData",
+        "EDITOR": "C:\\Windows\\notepad.exe",
+        "EFC_10616_1592913036": "1",
+        "EFC_10616_2946480783": "1",
+        "EFC_10616_4126798990": "1",
+        "ELECTRON_RUN_AS_NODE": "1",
+        "EXEPATH": "C:\\Program Files\\Git\\bin",
+        "GIT_EDITOR": "true",
+        "HOME": "C:\\Users\\djsan",
+        "HOMEDRIVE": "C:",
+        "HOMEPATH": "\\Users\\djsan",
+        "INIT_CWD": "C:\\Users\\djsan\\inventory",
+        "JAVA_HOME": "C:\\Program Files\\Microsoft\\jdk-21.0.11.10-hotspot\\",
+        "LOCALAPPDATA": "C:\\Users\\djsan\\AppData\\Local",
+        "LOGONSERVER": "\\\\PREDATOR",
+        "MCP_CONNECTION_NONBLOCKING": "true",
+        "MSYSTEM": "MINGW64",
+        "NODE": "C:\\Program Files\\nodejs\\node.exe",
+        "NoDefaultCurrentDirectoryInExePath": "1",
+        "npm_command": "run",
+        "npm_config_cache": "C:\\Users\\djsan\\AppData\\Local\\npm-cache",
+        "npm_config_globalconfig": "C:\\Users\\djsan\\AppData\\Roaming\\npm\\etc\\npmrc",
+        "npm_config_global_prefix": "C:\\Users\\djsan\\AppData\\Roaming\\npm",
+        "npm_config_init_module": "C:\\Users\\djsan\\.npm-init.js",
+        "npm_config_local_prefix": "C:\\Users\\djsan\\inventory",
+        "npm_config_node_gyp": "C:\\Program Files\\nodejs\\node_modules\\npm\\node_modules\\node-gyp\\bin\\node-gyp.js",
+        "npm_config_noproxy": "",
+        "npm_config_npm_version": "11.12.1",
+        "npm_config_prefix": "C:\\Users\\djsan\\AppData\\Roaming\\npm",
+        "npm_config_userconfig": "C:\\Users\\djsan\\.npmrc",
+        "npm_config_user_agent": "npm/11.12.1 node/v24.15.0 win32 x64 workspaces/false",
+        "npm_execpath": "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "npm_lifecycle_event": "qa:bots:all",
+        "npm_lifecycle_script": "playwright test --config=playwright.bots.config.ts",
+        "npm_node_execpath": "C:\\Program Files\\nodejs\\node.exe",
+        "npm_package_json": "C:\\Users\\djsan\\inventory\\package.json",
+        "npm_package_name": "inventory",
+        "npm_package_version": "0.1.0",
+        "NUMBER_OF_PROCESSORS": "24",
+        "OLDPWD": "C:/Users/djsan/inventory",
+        "OneDrive": "C:\\Users\\djsan\\OneDrive",
+        "OneDriveConsumer": "C:\\Users\\djsan\\OneDrive",
+        "OS": "Windows_NT",
+        "PATH": "C:\\Users\\djsan\\inventory\\node_modules\\.bin;C:\\Users\\djsan\\node_modules\\.bin;C:\\Users\\node_modules\\.bin;C:\\node_modules\\.bin;C:\\Program Files\\nodejs\\node_modules\\npm\\node_modules\\@npmcli\\run-script\\lib\\node-gyp-bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\bin;C:\\Program Files\\Git\\mingw64\\bin;C:\\Program Files\\Git\\usr\\local\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\mingw64\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Users\\djsan\\bin;C:\\Program Files\\Microsoft\\jdk-21.0.11.10-hotspot\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Windows\\System32\\OpenSSH;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR;C:\\Program Files\\dotnet;C:\\Program Files\\Git\\cmd;C:\\Program Files\\nodejs;C:\\Program Files\\Docker\\Docker\\resources\\bin;C:\\Program Files\\GitHub CLI;C:\\Users\\djsan\\.local\\bin;C:\\Users\\djsan\\AppData\\Local\\Programs\\Python\\Python313\\Scripts;C:\\Users\\djsan\\AppData\\Local\\Programs\\Python\\Python313;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\djsan\\.lmstudio\\bin;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\djsan\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;C:\\Users\\djsan\\AppData\\Roaming\\npm;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1-full_build\\bin;C:\\Users\\djsan\\AppData\\Local\\Python\\bin;C:\\Program Files\\GitHub CLI;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gitleaks.Gitleaks_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Program Files\\Git\\usr\\bin\\vendor_perl;C:\\Program Files\\Git\\usr\\bin\\core_perl;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\frontend-design\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\context7\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-review\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-simplifier\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\skill-creator\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\playwright\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\feature-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\claude-md-management\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\ralph-loop\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\typescript-lsp\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\anthropic-agent-skills\\document-skills\\575462609294\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\anthropic-agent-skills\\example-skills\\575462609294\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\pyright-lsp\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\agent-sdk-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\commit-commands\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\pr-review-toolkit\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-modernization\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\security-guidance\\2.0.6\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\hookify\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\session-report\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\firebase\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\github\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\supply-chain-risk-auditor\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\git-cleanup\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-code-workflows\\accessibility-compliance\\1.2.2\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-code-workflows\\ui-design\\1.0.3\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\agricidaniel-seo\\claude-seo\\1.9.6\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\vercel\\0.43.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\figma\\2.2.50\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\claude-code-setup\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\chrome-devtools-mcp\\1.2.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\plugin-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\greptile\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\firecrawl\\1.0.9\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\huggingface-skills\\1.0.8\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\playground\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\supabase\\0.1.11\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\serena\\unknown\\bin",
+        "PATHEXT": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC",
+        "PLINK_PROTOCOL": "ssh",
+        "PROCESSOR_ARCHITECTURE": "AMD64",
+        "PROCESSOR_IDENTIFIER": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+        "PROCESSOR_LEVEL": "6",
+        "PROCESSOR_REVISION": "b701",
+        "ProgramData": "C:\\ProgramData",
+        "PROGRAMFILES": "C:\\Program Files",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+        "ProgramW6432": "C:\\Program Files",
+        "PROMPT": "$P$G",
+        "PSModulePath": "C:\\Program Files\\WindowsPowerShell\\Modules;C:\\Windows\\system32\\WindowsPowerShell\\v1.0\\Modules",
+        "PUBLIC": "C:\\Users\\Public",
+        "PWD": "C:/Users/djsan/inventory",
+        "RlsSvcPort": "22112",
+        "SERPAPI_KEY": "cb4cc79c31ccdf84230b2405269a4dfd310e7919155414e7ab393f129459b4bc",
+        "SESSIONNAME": "Console",
+        "SHELL": "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+        "SHLVL": "2",
+        "SYSTEMDRIVE": "C:",
+        "SYSTEMROOT": "C:\\Windows",
+        "TEMP": "C:\\Users\\djsan\\AppData\\Local\\Temp",
+        "TERM": "xterm-256color",
+        "TMP": "C:\\Users\\djsan\\AppData\\Local\\Temp",
+        "USERDOMAIN": "PREDATOR",
+        "USERDOMAIN_ROAMINGPROFILE": "PREDATOR",
+        "USERNAME": "djsan",
+        "USERPROFILE": "C:\\Users\\djsan",
+        "VSCODE_CODE_CACHE_PATH": "C:\\Users\\djsan\\AppData\\Roaming\\Code\\CachedData\\1b50d58d73426c9171299ec4037d01365d995b78",
+        "VSCODE_CRASH_REPORTER_PROCESS_TYPE": "extensionHost",
+        "VSCODE_CWD": "C:\\Users\\djsan\\AppData\\Local\\Programs\\Microsoft VS Code",
+        "VSCODE_ESM_ENTRYPOINT": "vs/workbench/api/node/extensionHostProcess",
+        "VSCODE_HANDLES_UNCAUGHT_ERRORS": "true",
+        "VSCODE_IPC_HOOK": "\\\\.\\pipe\\fdc6bf58-1.124.0-main-sock",
+        "VSCODE_L10N_BUNDLE_LOCATION": "",
+        "VSCODE_NLS_CONFIG": "{\"userLocale\":\"en-us\",\"osLocale\":\"en-us\",\"resolvedLanguage\":\"en\",\"defaultMessagesFile\":\"C:\\\\Users\\\\djsan\\\\AppData\\\\Local\\\\Programs\\\\Microsoft VS Code\\\\1b50d58d73\\\\resources\\\\app\\\\out\\\\nls.messages.json\",\"locale\":\"en-us\",\"availableLanguages\":{}}",
+        "VSCODE_PID": "23132",
+        "WINDIR": "C:\\Windows",
+        "ZES_ENABLE_SYSMAN": "1",
+        "_": "C:/Program Files/nodejs/node.exe",
+        "__COMPAT_LAYER": "DetectorsAppHealth",
+        "IS_E2E": "1",
+        "NEXT_PUBLIC_E2E_AUTH_BYPASS": "1",
+        "NEXT_PUBLIC_FIREBASE_BACKEND": "0",
+        "NEXT_PUBLIC_FIREBASE_USE_EMULATOR": "0"
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "scenarios\\data-integrity.spec.ts",
+      "file": "scenarios/data-integrity.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "DataIntegrityBot: increment correctness, refresh persistence, unknown -> Needs Review",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1397,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-15T21:30:52.612Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\djsan\\inventory\\test-results\\scenarios-data-integrity-D-b0322-ence-unknown---Needs-Review-chromium\\test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "b04ce6d98c5f215b2760-128652e29d83be51b036",
+          "file": "scenarios/data-integrity.spec.ts",
+          "line": 20,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "scenarios\\export-leak.spec.ts",
+      "file": "scenarios/export-leak.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "ExportBot: capture export headers and flag code-bearing exports",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 766,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-15T21:30:54.096Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\djsan\\inventory\\test-results\\scenarios-export-leak-Expo-c40f7-d-flag-code-bearing-exports-chromium\\test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "63e58e6d6835dcb239ba-7ad99a890d6d14bb6753",
+          "file": "scenarios/export-leak.spec.ts",
+          "line": 35,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "scenarios\\manager-workflow.spec.ts",
+      "file": "scenarios/manager-workflow.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "ManagerBot: shop-manager workflow coverage",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 722,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-15T21:30:54.870Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\djsan\\inventory\\test-results\\scenarios-manager-workflow-8b484-p-manager-workflow-coverage-chromium\\test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4e2923b923c76f0ea64c-7e631325245cfdea57ef",
+          "file": "scenarios/manager-workflow.spec.ts",
+          "line": 15,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "scenarios\\performance-smoke.spec.ts",
+      "file": "scenarios/performance-smoke.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "PerformanceBot: load + scan responsiveness + local payload smoke",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 397,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-15T21:30:55.599Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\djsan\\inventory\\test-results\\scenarios-performance-smok-7f7f2-iveness-local-payload-smoke-chromium\\test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "e6399b38bcdb53188a86-d0f1d3d2b27a961157cc",
+          "file": "scenarios/performance-smoke.spec.ts",
+          "line": 16,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "scenarios\\platformOwner-tire-resolution.spec.ts",
+      "file": "scenarios/platformOwner-tire-resolution.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "PlatformOwnerBot: Falken part number never resolves to Camel (every separator shape)",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2322,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-15T21:30:56.009Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\djsan\\inventory\\test-results\\scenarios-platformOwner-ti-a6306-amel-every-separator-shape--chromium\\test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "e2715a6506a9462823bd-bfac1e31b23c29f8617c",
+          "file": "scenarios/platformOwner-tire-resolution.spec.ts",
+          "line": 34,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "scenarios\\role-security-leak.spec.ts",
+      "file": "scenarios/role-security-leak.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "SecurityLeakBot: report sensitive-field exposure to a customer browser (safe)",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1524,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-15T21:30:58.339Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\djsan\\inventory\\test-results\\scenarios-role-security-le-878a6-to-a-customer-browser-safe--chromium\\test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "54e20dbf1312c8f4fc89-12453ee0233f34318379",
+          "file": "scenarios/role-security-leak.spec.ts",
+          "line": 27,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "scenarios\\ux-no-training.spec.ts",
+      "file": "scenarios/ux-no-training.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "ConfusedHumanBot: no-training usability scorecard",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 862,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-06-15T21:30:59.870Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "C:\\Users\\djsan\\inventory\\test-results\\scenarios-ux-no-training-C-15161-raining-usability-scorecard-chromium\\test-finished-1.png"
+                    }
+                  ]
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "7258e2dd22d8c80ac7aa-b8f15536ad7e56645429",
+          "file": "scenarios/ux-no-training.spec.ts",
+          "line": 18,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-06-15T21:30:50.086Z",
+    "duration": 11146.074,
+    "expected": 7,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}
