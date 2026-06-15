@@ -1,12 +1,14 @@
-import { test, type Page } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// SecurityLeakBot (SAFE, non-destructive). It does NOT exploit anything. It loads the app as the current
-// (mock/auth-bypass) user and REPORTS which sensitive internal fields a customer browser can see or holds
-// locally. Because client-side role gating is part of the DEFERRED foundation, this run documents the
-// CURRENT exposure honestly (everything is visible to everyone today) and classifies severity. Once roles
-// land, this bot flips to hard assertions per the platformOwner-vs-customer model.
+// SecurityLeakBot (SAFE, non-destructive). It does NOT exploit anything. It loads the app as a customer
+// (mock/auth-bypass = business level; this suite does NOT set NEXT_PUBLIC_E2E_PLATFORM_OWNER) and inspects
+// which sensitive internal fields the customer browser can see or holds locally. The P0 customer
+// data-protection foundation has LANDED (Sec-1/2/3 UI+export hiding; Sec-4 localStorage split; Sec-5
+// server resolution), so this bot now ASSERTS the customer browser holds NO reusable code database
+// (no alias cleanCode/normalizedCode, no global catalog) and shows no code columns - a hard regression
+// guard. It still writes its report for the audit trail.
 
 const PROOF = "e2e/proof/agent-bots/security";
 const OUT = "reports/agent-bots/latest";
@@ -69,26 +71,35 @@ test("SecurityLeakBot: report sensitive-field exposure to a customer browser (sa
   const bySev = (s: string) => unique.filter((f) => f.severity === s);
   const md = `# SecurityLeakBot report (safe, non-destructive)
 
-> Status: UI hiding + export sanitization + customer de-branding are now in place (Sec-1/2/3) for
-> non-platformOwner roles, so the Products code columns and AI/provider wording no longer appear here.
-> What REMAINS (Sec-4/5, the architecture cutover) is that the customer browser still DOWNLOADS + PERSISTS
-> the alias/catalog DB (localStorage + network) until server-side customer resolution lands. This run is
-> report-only and non-destructive; remaining P0 items are the localStorage/network DB, listed below.
+> Status: the P0 customer data-protection foundation has LANDED. UI hiding + export sanitization +
+> customer de-branding (Sec-1/2/3), the customer localStorage split so the alias/catalog DB is never
+> persisted to a customer browser (Sec-4), and the protected server-side resolution endpoint (Sec-5)
+> are all in place for non-platformOwner roles. This run is an assertive regression guard: it FAILS if a
+> customer browser ever again receives/persists the reusable code database or shows code columns.
 
 - P0 findings: **${bySev("P0").length}**  |  P1: **${bySev("P1").length}**  |  P2: **${bySev("P2").length}**
 
 | severity | surface | finding | detail |
 |----------|---------|---------|--------|
-${unique.map((f) => `| ${f.severity} | ${f.surface} | ${f.finding} | ${f.detail} |`).join("\n")}
+${unique.length ? unique.map((f) => `| ${f.severity} | ${f.surface} | ${f.finding} | ${f.detail} |`).join("\n") : "| - | - | (no findings) | customer browser holds no reusable code data |"}
 
-## Headline (P0, before any pilot with non-owner users)
-- The customer browser holds the full alias/catalog database in localStorage, and code columns/exports
-  are visible to all roles. This is exactly what the DEFERRED foundation must fix (server-side customer
-  resolution + role-aware serializers + customer code hiding). See docs/HOTFIX_FOLLOWUPS.md.
+## Headline
+- ${unique.filter((f) => f.severity === "P0").length === 0
+    ? "PASS: the customer browser holds no alias/catalog database in localStorage and shows no code columns. The two prior P0 localStorage leaks are cleared."
+    : "REGRESSION: a P0 leak reappeared - see the table above."}
 
 Screenshots: ${PROOF}/
 `;
   writeFileSync(resolve(process.cwd(), `${OUT}/security_leak_report.md`), md);
   writeFileSync(resolve(process.cwd(), `${OUT}/security_findings.json`), JSON.stringify({ findings: unique }, null, 2) + "\n");
-  // Report-only: the bot succeeds when it has produced its report. (Becomes assertive once roles exist.)
+
+  // HARD ASSERTIONS (regression guard). The P0 customer data-protection foundation has landed, so the
+  // customer browser must hold NO reusable code database and show NO code columns. These are the exact
+  // two P0 leaks that were previously open; this bot now fails if either ever returns.
+  expect(aliasCount, "customer localStorage must not hold alias cleanCode values").toBe(0);
+  expect(catalogPresent, "customer localStorage must not hold the global catalog").toBe(false);
+  expect(
+    unique.filter((f) => f.severity === "P0"),
+    "no P0 leak may be visible to a customer browser",
+  ).toHaveLength(0);
 });

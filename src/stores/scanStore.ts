@@ -50,6 +50,7 @@ import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/se
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
+import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import type { AiStatus } from "@/types";
 
 /** Result summary of a CSV product import (shown in the UI). */
@@ -1931,13 +1932,16 @@ const appDeps: ScanStoreDeps = {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 3,
+    version: 4,
     storage: createJSONStorage(() => localStorage),
     skipHydration: true,
     // v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
     // We cannot reliably tell poisoned from good learned data, so reset products/aliases to clean
     // verified seed and clear session/queues. User settings are preserved (merged with new
     // defaults). Use the in-app "Clear local cache" button for a full wipe including the mock DB.
+    // v4 (Sec-4): the customer-data wipe of any legacy sensitive localStorage keys (aliases/catalog/
+    // raw codes) is enforced by the role-aware `partialize` below on the first post-hydration write
+    // (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
     migrate: (persisted: unknown) => {
       const p = (persisted ?? {}) as Record<string, unknown>;
       const fresh = getSeed();
@@ -1953,24 +1957,14 @@ export const useScanStore = create<ScanState>()(
         settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
       } as never;
     },
-    partialize: (s) => ({
-      businessId: s.businessId,
-      sessionId: s.sessionId,
-      currentSession: s.currentSession,
-      settings: s.settings,
-      products: s.products,
-      aliases: s.aliases,
-      scanFeed: s.scanFeed,
-      finalCounts: s.finalCounts,
-      needsReviewQueue: s.needsReviewQueue,
-      pendingSyncQueue: s.pendingSyncQueue,
-      syncedScanEventIds: s.syncedScanEventIds,
-      simulateSyncFailure: s.simulateSyncFailure,
-      lastCleanupBackup: s.lastCleanupBackup,
-      catalog: s.catalog,
-      shopOverrides: s.shopOverrides,
-      feedbackEvents: s.feedbackEvents,
-    }),
+    // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
+    // code database (aliases / global catalog / shop overrides / barcodes / raw+clean+normalized codes /
+    // decode traces). The level is computed from the signed-in uid (same source of truth as the UI), and
+    // defaults to "business" when the user is unknown - so a customer's post-hydration write also WIPES
+    // any sensitive keys an older build left in this browser's localStorage. This governs ONLY what is
+    // written to disk; the in-memory store keeps the full data it needs to render/resolve in-session
+    // (seed in mock, the loader in cloud), so resolution is unaffected.
+    partialize: (s) => buildPersistedScanState(s as unknown as PersistableScanState),
     onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
   }),
 );

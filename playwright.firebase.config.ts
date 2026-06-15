@@ -31,6 +31,13 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_BACKEND: "1",
       NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "1",
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-smart-inventory",
+      // This spec exercises the FULL platformOwner end-to-end workflow (scan unknown -> Needs Review ->
+      // create product -> learn alias -> export code-bearing CSV) and asserts that workflow survives a
+      // full-page refresh. That is the platformOwner view, so we force it here exactly as the mock suite
+      // does (Sec-4 deliberately does NOT persist the customer's Needs-Review queue / code data to a
+      // customer browser, so the owner workflow must run with platform access). The customer restriction
+      // is proven separately by the SecurityLeakBot (business view) + the resolveScanServer contract test.
+      NEXT_PUBLIC_E2E_PLATFORM_OWNER: "1",
       // Keep AI mock-only so the run can never call live providers.
       IS_E2E: "1",
     },
