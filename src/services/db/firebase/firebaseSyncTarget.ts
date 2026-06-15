@@ -1,5 +1,5 @@
 import { type Firestore, doc, runTransaction, serverTimestamp } from "firebase/firestore";
-import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview, Product } from "@/types";
+import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview, Product, InventorySession } from "@/types";
 import type { SyncResult, FailureMode, IncrementPayload } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { COLLECTIONS } from "@/services/db/types";
@@ -80,6 +80,18 @@ export class FirebaseSyncTarget implements SyncTarget {
           case "SAVE_PRODUCT": {
             const pr = item.payload as Product;
             tx.set(sub(COLLECTIONS.products, pr.id), { ...pr, businessId: bid, updatedAt: serverTimestamp() }, { merge: true });
+            break;
+          }
+          case "SAVE_SESSION": {
+            // Persist the count session (start AND finish funnel through here, each with a distinct
+            // idempotency key so the completed-state write is not deduped). merge:true so finishing a
+            // session updates status/completedAt without clobbering the original start metadata.
+            const sess = item.payload as InventorySession;
+            tx.set(
+              sub(COLLECTIONS.countSessions, sess.id),
+              { ...sess, businessId: bid, updatedAt: serverTimestamp() },
+              { merge: true },
+            );
             break;
           }
           case "INCREMENT_COUNT": {

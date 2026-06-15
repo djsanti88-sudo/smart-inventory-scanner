@@ -70,7 +70,8 @@ export type SyncOperation =
   | "INCREMENT_COUNT"
   | "SAVE_UNKNOWN_SCAN"
   | "RESOLVE_ALIAS"
-  | "SAVE_PRODUCT";
+  | "SAVE_PRODUCT"
+  | "SAVE_SESSION";
 
 export type PendingItemStatus = "pending" | "syncing" | "synced" | "error";
 
@@ -259,7 +260,7 @@ export interface PendingSyncItem {
   id: string;
   businessId: string;
   sessionId: string;
-  entityType: "ScanEvent" | "InventoryCount" | "Alias" | "UnknownCodeReview" | "Product";
+  entityType: "ScanEvent" | "InventoryCount" | "Alias" | "UnknownCodeReview" | "Product" | "CountSession";
   entityId: string;
   operation: SyncOperation;
   payload: unknown;
