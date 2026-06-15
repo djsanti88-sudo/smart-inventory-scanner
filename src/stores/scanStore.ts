@@ -17,6 +17,7 @@ import type {
 } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { normalizeCode } from "@/services/codeNormalizer";
+import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismatchGuard";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
 import { incrementInventoryCount } from "@/services/inventory";
@@ -197,6 +198,9 @@ export interface ScanState {
   online: boolean;
   simulateSyncFailure: boolean;
   lastSyncError: string | null;
+  // Transient (not persisted): set when a link to a product was BLOCKED by the human-mistake guard.
+  // The UI shows the warning and may re-call resolveUnknown with confirmedMismatch: true to override.
+  lastMismatchWarning: { reviewId: string; productId: string; verdict: MismatchVerdict } | null;
 
   // AI lookup (fallback only, for unknown codes)
   aiLookupLogs: AiLookupLog[];
@@ -248,8 +252,14 @@ export interface ScanState {
         evidenceSummary: string;
         sourceUrls: string[];
       };
+      /** Owner override: proceed with a link the mismatch guard flagged high-risk (audited). */
+      confirmedMismatch?: boolean;
     },
   ) => void;
+  /** Evaluate (without committing) whether linking a review's code to a product looks like a mistake. */
+  evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
+  /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
+  clearMismatchWarning: () => void;
   /** Append a private feedback/event-log entry (the "smarter over time" substrate). */
   recordFeedback: (
     type: FeedbackEventType,
@@ -536,6 +546,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       online: true,
       simulateSyncFailure: false,
       lastSyncError: null,
+      lastMismatchWarning: null,
       aiLookupLogs: [],
       breaker: initBreaker(),
       aiStatus: { ...DEFAULT_AI_STATUS },
@@ -1434,6 +1445,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         if (!productId) return;
 
+        // Human-mistake guard: before linking a code to an EXISTING product, check it doesn't look like
+        // a different product entirely (e.g. a Falken tire part number being linked to Camel cigarettes).
+        // High-risk links are BLOCKED until the human explicitly overrides (confirmedMismatch: true).
+        if (action === "link_existing") {
+          const target = state.products.find((p) => p.id === productId);
+          const hasSuggestion = !!(review.suggestedProductName || review.suggestedBrand || review.suggestedCategory);
+          const verdict = evaluateMismatch({
+            scannedCode: review.cleanCode,
+            suggested: hasSuggestion
+              ? { name: review.suggestedProductName, brand: review.suggestedBrand, category: review.suggestedCategory }
+              : undefined,
+            target: { name: target?.name, brand: target?.brand, category: target?.category },
+          });
+          if (verdict.risk === "high_risk" && !payload.confirmedMismatch) {
+            set({ lastMismatchWarning: { reviewId, productId, verdict } });
+            emitAudit({ entityType: "Alias", entityId: review.cleanCode, action: "alias_link_warning_shown", metadata: { code: review.cleanCode, productId, reason: verdict.reason, suggestedName: verdict.suggestedName ?? "", targetProductName: target?.name ?? "" } });
+            return; // do NOT link until the owner explicitly confirms the override
+          }
+          if (verdict.risk === "high_risk" && payload.confirmedMismatch) {
+            emitAudit({ entityType: "Alias", entityId: review.cleanCode, action: "alias_link_override", metadata: { code: review.cleanCode, productId, targetProductName: target?.name ?? "", suggestedName: verdict.suggestedName ?? "", suggestedDomain: verdict.suggestedDomain ?? "", reason: verdict.reason } });
+          }
+        }
+
         // Permanently learn the alias (deterministic from now on, even before sync completes).
         const aliasId = `alias-${idFactory()}`;
         const aliasKeyOp = buildIdempotencyKey(
@@ -1491,7 +1525,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : e,
         );
 
-        set({ products, aliases, needsReviewQueue, scanFeed });
+        set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null });
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
@@ -1622,6 +1656,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           get().syncPending();
         }
       },
+
+      evaluateLinkMismatch: (reviewId, productId) => {
+        const state = get();
+        const review = state.needsReviewQueue.find((r) => r.id === reviewId);
+        if (!review) return null;
+        const target = state.products.find((p) => p.id === productId);
+        const hasSuggestion = !!(review.suggestedProductName || review.suggestedBrand || review.suggestedCategory);
+        return evaluateMismatch({
+          scannedCode: review.cleanCode,
+          suggested: hasSuggestion
+            ? { name: review.suggestedProductName, brand: review.suggestedBrand, category: review.suggestedCategory }
+            : undefined,
+          target: { name: target?.name, brand: target?.brand, category: target?.category },
+        });
+      },
+
+      clearMismatchWarning: () => set({ lastMismatchWarning: null }),
 
       importProductsCsv: (text) => {
         const state = get();

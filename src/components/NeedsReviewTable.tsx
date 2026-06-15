@@ -84,6 +84,10 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
   const resolveUnknown = useScanStore((s) => s.resolveUnknown);
   const liveDecode = useScanStore((s) => s.liveDecode);
   const aiEnabled = useScanStore((s) => s.settings.aiLookupEnabled);
+  const lastMismatchWarning = useScanStore((s) => s.lastMismatchWarning);
+  const clearMismatchWarning = useScanStore((s) => s.clearMismatchWarning);
+  // Show the human-mistake warning only on the row + product it was raised for.
+  const warn = lastMismatchWarning && lastMismatchWarning.reviewId === review.id ? lastMismatchWarning : null;
 
   const [mode, setMode] = useState<"idle" | "create">("idle");
   const [linkId, setLinkId] = useState(products[0]?.id ?? "");
@@ -165,6 +169,25 @@ function ReviewRow({ review }: { review: UnknownCodeReview }) {
         <SyncBadge status={review.syncStatus} />
       </td>
       <td className="px-3 py-2">
+        {warn && (
+          <div className="mb-2 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-800" data-testid="mismatch-warning">
+            <p className="font-semibold">Possible wrong product</p>
+            <p className="mt-0.5">{warn.verdict.message}</p>
+            <div className="mt-1.5 flex gap-1">
+              <button
+                type="button"
+                data-testid="mismatch-override"
+                onClick={() => resolveUnknown(review.id, "link_existing", { productId: warn.productId, applyToCount, confirmedMismatch: true })}
+                className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
+              >
+                Link anyway
+              </button>
+              <button type="button" data-testid="mismatch-cancel" onClick={() => clearMismatchWarning()} className="rounded border border-zinc-300 px-2 py-1">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {resolved ? (
           <span className="text-xs text-zinc-400">{review.resolutionAction ?? review.status}</span>
         ) : mode === "create" ? (
