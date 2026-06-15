@@ -1,7 +1,9 @@
 {
+  "run": "real_limited_4_code",
+  "honest_note": "Real 100-code benchmark blocked because no 100-code owner file was provided. This is the LIVE run on the 4 real codes available in benchmarks/phase1_100_codes.csv.",
   "base": "http://localhost:3000",
   "file": "benchmarks/phase1_100_codes.csv",
-  "status": {
+  "providerStatus": {
     "liveEnabled": true,
     "autoDecodeOnScan": true,
     "geminiEnabled": true,
@@ -23,7 +25,11 @@
     "missingKeys": [],
     "e2e": false
   },
-  "stoppedEarly": null,
+  "false_known": 0,
+  "cache": {
+    "tested": 3,
+    "confirmedZeroSpend": 3
+  },
   "summary": {
     "total": 4,
     "byPath": {

@@ -1,0 +1,32 @@
+{
+  "cashCapUsd": 30,
+  "cashSpentUsd": 0.02,
+  "cashEntries": [
+    {
+      "ts": "",
+      "provider": "gemini+openai",
+      "usd": 0.02,
+      "note": "real-limited-4 benchmark: 3 gemini + 3 openai calls (estimated, placeholder rates)"
+    }
+  ],
+  "firecrawlCap": 500,
+  "firecrawlCreditsUsed": 14,
+  "firecrawlPerDomain": {
+    "benchmark-mixed": 14
+  },
+  "perRun": {
+    "seed_benchmark": {
+      "paidCalls": 0,
+      "firecrawlCredits": 0,
+      "note": "deterministic, $0"
+    },
+    "real_limited_4": {
+      "firecrawlCredits": 14,
+      "geminiCalls": 3,
+      "openaiCalls": 3,
+      "estimatedMeteredUsd": 0.02,
+      "note": "estimated metered cost; Firecrawl prepaid"
+    }
+  },
+  "honest_note": "Real 100-code benchmark blocked because no 100-code owner file was provided."
+}

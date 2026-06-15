@@ -16,5 +16,11 @@ Tracks each benchmark run for the Smart Inventory Scanner lookup pipeline.
 
 | date | run | codes | metered $ | firecrawl credits | false_known | dup-prevention | notes |
 |------|-----|-------|-----------|-------------------|-------------|----------------|-------|
-| _pending_ | seed_benchmark | 5 (+repeat,+unknown) | 0 | 0 | — | — | deterministic, mock path |
-| _pending_ | real_limited_4 | 4 real | — | — | — | — | live providers, 4 real codes only |
+| 2026-06-15 | seed_benchmark | 14 (5 products, 6 aliases, 2 repeats, 1 unknown) | $0.00 | 0 | 0 | 100% | deterministic resolver+inventory+CSV; 8/8 gated test passes; CSV round-trip PASS |
+| 2026-06-15 | real_limited_4 | 4 real | ~$0.02 (est) | 14 | 0 | n/a (decode path) | live Gemini/OpenAI/Firecrawl; 3 resolved / 1 honest needs_review; cache 3/3 zero-spend on repeat |
+
+## Result
+- **Real 100-code benchmark: BLOCKED** — no 100-code owner file provided (template at `data/benchmark/100_code_template.csv`).
+- Seed benchmark gates: false_known=0, duplicate prevention=100%, alias resolution 6/6, CSV round-trip PASS, $0 spend.
+- Live 4-code benchmark: no wrong-product Known result; repeat scans served from cache at $0; metered spend ~$0.02 of $5 sub-cap; Firecrawl 14/500 credits.
+- Artifacts: `reports/benchmark/seed_benchmark_*`, `reports/benchmark/real_limited_4_code_results.*`, `lookup_path_distribution.csv`, `cost_report.json`.

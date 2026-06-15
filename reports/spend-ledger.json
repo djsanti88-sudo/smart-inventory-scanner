@@ -1,7 +1,14 @@
 {
   "currency": "USD",
   "cap": 30,
-  "totalUsd": 0,
+  "totalUsd": 0.02,
   "note": "Cash cap governs Gemini, OpenAI, UPCitemdb, Go-UPC, Barcode Lookup, and any other paid API. Firecrawl is tracked separately in firecrawl-ledger.json (prepaid/abundant, not cash-budgeted).",
-  "entries": []
+  "entries": [
+    {
+      "ts": "",
+      "provider": "gemini+openai",
+      "usd": 0.02,
+      "note": "real-limited-4 benchmark: 3 gemini + 3 openai calls (estimated, placeholder rates)"
+    }
+  ]
 }

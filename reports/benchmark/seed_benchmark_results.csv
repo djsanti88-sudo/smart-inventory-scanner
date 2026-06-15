@@ -1,0 +1,15 @@
+label,raw_code,clean_code,expected_product_id,resolved_product_id,resolver_status,match_type,correct,false_known,latency_ms
+nokian-barcode,6419440485331,6419440485331,prod-nokian,prod-nokian,known,exact_alias,true,false,0.228
+falken-barcode,848983012906,848983012906,prod-falken,prod-falken,known,exact_alias,true,false,0.034
+coke-upc,049000028904,049000028904,prod-coke,prod-coke,known,exact_alias,true,false,0.010
+whey-upc,850012345678,850012345678,prod-supplement,prod-supplement,known,exact_alias,true,false,0.008
+dewalt-upc,885911484047,885911484047,prod-tool,prod-tool,known,exact_alias,true,false,0.007
+nokian-sku,T432119,T432119,prod-nokian,prod-nokian,known,exact_alias,true,false,0.022
+nokian-messy,T432119%RU1%,T432119%RU1%,prod-nokian,prod-nokian,known,exact_alias,true,false,0.016
+falken-hyphen-sku,2881-6861,2881-6861,prod-falken,prod-falken,known,exact_alias,true,false,0.016
+coke-internal,7262,7262,prod-coke,prod-coke,known,exact_alias,true,false,0.014
+whey-sku,VWP-VAN-2LB,VWP-VAN-2LB,prod-supplement,prod-supplement,known,exact_alias,true,false,0.018
+dewalt-sku,DCF887B,DCF887B,prod-tool,prod-tool,known,exact_alias,true,false,0.012
+nokian-barcode-repeat,6419440485331,6419440485331,prod-nokian,prod-nokian,known,exact_alias,true,false,0.007
+coke-upc-repeat,049000028904,049000028904,prod-coke,prod-coke,known,exact_alias,true,false,0.004
+unknown-code,999999999999,999999999999,,,needs_review,unknown,true,false,0.132
