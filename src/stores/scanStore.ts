@@ -24,6 +24,7 @@ import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/ser
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
+import { auditRepository } from "@/services/db/firebase/repositories";
 import { getDb } from "@/lib/firebaseClient";
 import {
   evaluateAiGate,
@@ -44,6 +45,7 @@ import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
+import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import type { AiStatus } from "@/types";
 
@@ -126,6 +128,9 @@ export interface ScanStoreDeps {
     sessions: InventorySession[];
     counts: InventoryCount[];
   }>;
+  // Fire-and-forget audit sink (cloud -> auditRepository.append). Optional: when absent (mock/default)
+  // audit is a no-op. It must never throw into the scanner path; the store also guards every call.
+  audit?: (event: AuditEventInput) => void;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -339,6 +344,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       get().syncPending();
     };
 
+    // Fire-and-forget audit. NEVER blocks or throws into the scanner/UI. Only emits with a REAL business
+    // context (no fake businessId/actor); a no-op when no audit sink is wired (mock/default path).
+    const emitAudit = (e: { entityType: string; entityId: string; action: string; metadata?: Record<string, unknown> }) => {
+      const { businessId, userId, businessContextReady } = get();
+      if (!deps.audit || !businessContextReady || !userId || !businessId) return;
+      try {
+        deps.audit({ businessId, actorUserId: userId, ...e });
+      } catch {
+        // An audit failure must never break the scanner or any action. Swallow it.
+      }
+    };
+
     // Cloud drain: async, awaits db.apply, and REQUIRES a real business context first (no fake/default
     // business writes). The mock/local path keeps the original SYNCHRONOUS syncPending below unchanged.
     const syncPendingCloud = async (force: boolean) => {
@@ -503,6 +520,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             scanEventId: null,
           }),
         ]);
+        emitAudit({ entityType: "CountSession", entityId: id, action: "session_started", metadata: { name: session.name, location: session.location } });
       },
 
       finishSession: () => {
@@ -525,6 +543,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             scanEventId: null,
           }),
         ]);
+        emitAudit({ entityType: "CountSession", entityId: completed.id, action: "session_completed", metadata: { completedAt: completed.completedAt } });
       },
 
       processScan: (rawInput) => {
@@ -694,6 +713,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               scanEventId,
             }),
           ]);
+          emitAudit({ entityType: "UnknownCodeReview", entityId: review.id, action: "unknown_review_created", metadata: { code: cleaned.cleanCode } });
 
           if (resolution.resolverStatus === "conflict") {
             get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
@@ -1251,6 +1271,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             ),
           });
           get().recordFeedback("product_rejected", { code: review.cleanCode });
+          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "alias_rejected", metadata: { code: review.cleanCode } });
           return;
         }
 
@@ -1392,6 +1413,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         if (queued.length > 0) {
           set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
+        }
+
+        // Audit the human/system resolution (product creation + alias approval). Fire-and-forget.
+        if (createdProduct) {
+          emitAudit({ entityType: "Product", entityId: createdProduct.id, action: "product_created", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
+        }
+        if (!aliasExists) {
+          emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_approved", metadata: { code: review.cleanCode, productId, origin: payload.origin ?? "human" } });
         }
 
         // Feed the shared knowledge base (privacy-safe; only barcode/product/evidence is written).
@@ -1569,6 +1598,19 @@ const appDeps: ScanStoreDeps = {
     : getMockDb(),
   cloudBackend: useFirebaseBackend,
   loadBusinessData: useFirebaseBackend ? (businessId) => loadBusinessData(getDb(), businessId) : undefined,
+  // Cloud audit sink: append-only auditLog. Fire-and-forget; swallows its own errors so a failed audit
+  // write can never break a scan/resolution. No-op on the mock/default path (undefined).
+  audit: useFirebaseBackend
+    ? (event) => {
+        try {
+          void auditRepository(getDb(), event.businessId)
+            .append(toAuditEvent(event, crypto.randomUUID()))
+            .catch(() => {});
+        } catch {
+          // never propagate
+        }
+      }
+    : undefined,
   idFactory: () => crypto.randomUUID(),
   now: () => new Date().toISOString(),
   persistName: "sis-scan-v1",
@@ -1631,6 +1673,7 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
     persistName: null,
     cloudBackend: overrides?.cloudBackend ?? false,
     loadBusinessData: overrides?.loadBusinessData,
+    audit: overrides?.audit,
   };
   return create<ScanState>()(buildScanInitializer(deps));
 }
