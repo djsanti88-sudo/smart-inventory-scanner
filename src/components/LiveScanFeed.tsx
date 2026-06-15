@@ -5,12 +5,13 @@ import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
 
 // Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail. Raw/clean
-// codes are platformOwner-only; customers see the product + status of each scan, not the code strings.
+// codes AND the internal match type are platformOwner-only; customers see the product name + part number
+// and the scan status of each scan, never the code strings or how the code matched internally.
 export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
   const getProduct = useScanStore((s) => s.getProduct);
   const isPlatform = useIsPlatformOwner();
-  const colSpan = isPlatform ? 10 : 8;
+  const colSpan = isPlatform ? 10 : 7;
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -25,7 +26,7 @@ export function LiveScanFeed() {
               <th className="px-3 py-2">Time</th>
               {isPlatform && <th className="px-3 py-2">Raw code</th>}
               {isPlatform && <th className="px-3 py-2">Clean code</th>}
-              <th className="px-3 py-2">Match</th>
+              {isPlatform && <th className="px-3 py-2">Match</th>}
               <th className="px-3 py-2">Product</th>
               <th className="px-3 py-2">Part number</th>
               <th className="px-3 py-2">Qty after</th>
@@ -51,9 +52,11 @@ export function LiveScanFeed() {
                     </td>
                     {isPlatform && <td className="px-3 py-2 font-mono text-xs">{e.rawCode}</td>}
                     {isPlatform && <td className="px-3 py-2 font-mono text-xs">{e.cleanCode}</td>}
-                    <td className="px-3 py-2">
-                      <MatchBadge type={e.matchType} />
-                    </td>
+                    {isPlatform && (
+                      <td className="px-3 py-2">
+                        <MatchBadge type={e.matchType} />
+                      </td>
+                    )}
                     <td className="px-3 py-2">{product ? product.name : "-"}</td>
                     <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-part-number-${e.id}`}>
                       {product ? product.primarySku || "Part number missing" : "-"}
