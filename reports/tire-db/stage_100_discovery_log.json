@@ -1,0 +1,27 @@
+{
+  "observations": 20,
+  "scrapes": 20,
+  "firecrawlCredits": 94,
+  "log": [
+    "scraped Michelin Pilot Sport 4S <- www.michelinman.com (size=245/40ZR18 ls=93Y upc=none)",
+    "scraped Michelin Defender T+H <- www.discounttirecenters.com (size=215/60R16 ls= upc=none)",
+    "scraped Goodyear Assurance WeatherReady <- www.tiremart.com (size=225/65R17 ls=102H upc=none)",
+    "scraped Goodyear Eagle F1 Asymmetric 6 <- www.tirerack.com (size=245/40R18 ls= upc=none)",
+    "scraped Bridgestone Turanza QuietTrack <- www.bestonetire.com (size=215/55R17 ls=94V upc=none)",
+    "scraped Bridgestone Blizzak WS90 <- www.tirerack.com (size=205/55R16 ls= upc=none)",
+    "scraped Continental ExtremeContact DWS06 Plus <- continentaltire.com (size=245/40R18 ls= upc=none)",
+    "scraped Pirelli P Zero <- www.pirelli.com (size=225/60R16 ls=97V upc=none)",
+    "scraped Falken Sincera ST80 <- www.tiremart.com (size=215/70R15 ls=98T upc=none)",
+    "scraped Toyo Open Country A/T III <- www.toyotires.com (size=265/70R17 ls= upc=none)",
+    "scraped Nitto NT555 G2 <- www.nittotire.com (size=275/40R20 ls= upc=none)",
+    "scraped Nexen Roadian GTX <- www.tiremart.com (size=235/60R18 ls=107V upc=none)",
+    "scraped Hankook Kinergy PT H737 <- www.hankooktire.com (size=225/65R17 ls= upc=none)",
+    "scraped Kumho Crugen HP71 <- www.tiremart.com (size=245/60R18 ls=105H upc=none)",
+    "scraped Cooper Discoverer AT3 4S <- www.coopertire.com (size=235/75R16 ls= upc=none)",
+    "scraped BFGoodrich All-Terrain T/A KO2 <- www.bfgoodrichtires.com (size=265/70R17 ls= upc=none)",
+    "scraped Yokohama Geolandar A/T G015 <- www.yokohamatire.com (size=265/70R17 ls= upc=none)",
+    "scraped General Grabber A/TX <- generaltire.com (size=265/70R17 ls= upc=none)",
+    "scraped Dunlop Grandtrek AT20 <- www.fulsheartireandauto.com (size=265/70R16 ls= upc=none)",
+    "scraped Sailun Terramax CVR <- www.tires-easy.com (size=265/65R18 ls=114T upc=none)"
+  ]
+}

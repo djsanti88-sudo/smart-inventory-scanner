@@ -1,0 +1,31 @@
+{
+  "counts": {
+    "total": 20,
+    "verifiedScannable": 0,
+    "candidateScannable": 0,
+    "specOnlyCandidate": 10,
+    "conflicted": 0,
+    "rejectedHeld": 10
+  },
+  "firecrawlCredits": 94,
+  "firecrawlPerDomain": {
+    "benchmark-mixed": 14,
+    "firecrawl-search": 0,
+    "www.michelinman.com": 2,
+    "www.discounttirecenters.com": 2,
+    "www.tiremart.com": 8,
+    "www.tirerack.com": 4,
+    "www.bestonetire.com": 2,
+    "continentaltire.com": 2,
+    "www.pirelli.com": 2,
+    "www.toyotires.com": 2,
+    "www.nittotire.com": 2,
+    "www.hankooktire.com": 2,
+    "www.coopertire.com": 2,
+    "www.bfgoodrichtires.com": 2,
+    "www.yokohamatire.com": 2,
+    "generaltire.com": 2,
+    "www.fulsheartireandauto.com": 2,
+    "www.tires-easy.com": 2
+  }
+}

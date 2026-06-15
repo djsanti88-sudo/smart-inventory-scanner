@@ -2,10 +2,27 @@
   "unit": "credits",
   "cap": 500,
   "perDomainCap": 50,
-  "credits": 14,
+  "credits": 94,
   "note": "Firecrawl is prepaid/abundant (owner: 'don't be shy') so it is NOT counted against the $30 cash cap, but it is NOT unlimited. Hard task cap 500 credits; <=50 pages per source domain unless owner/vendor file or explicitly-safe bulk file. Stop if usage looks abnormal. Report in every stage summary.",
   "perDomain": {
-    "benchmark-mixed": 14
+    "benchmark-mixed": 14,
+    "firecrawl-search": 0,
+    "www.michelinman.com": 2,
+    "www.discounttirecenters.com": 2,
+    "www.tiremart.com": 8,
+    "www.tirerack.com": 4,
+    "www.bestonetire.com": 2,
+    "continentaltire.com": 2,
+    "www.pirelli.com": 2,
+    "www.toyotires.com": 2,
+    "www.nittotire.com": 2,
+    "www.hankooktire.com": 2,
+    "www.coopertire.com": 2,
+    "www.bfgoodrichtires.com": 2,
+    "www.yokohamatire.com": 2,
+    "generaltire.com": 2,
+    "www.fulsheartireandauto.com": 2,
+    "www.tires-easy.com": 2
   },
   "entries": [
     {
@@ -14,6 +31,566 @@
       "credits": 14,
       "pages": 14,
       "note": "real-limited-4 benchmark search+scrape"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Michelin Pilot Sport 4S"
+    },
+    {
+      "ts": "",
+      "domain": "www.michelinman.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Michelin Pilot Sport 4S"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Michelin Defender T+H"
+    },
+    {
+      "ts": "",
+      "domain": "www.discounttirecenters.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Michelin Defender T+H"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Goodyear Assurance WeatherReady"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Goodyear Assurance WeatherReady"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Goodyear Eagle F1 Asymmetric 6"
+    },
+    {
+      "ts": "",
+      "domain": "www.tirerack.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Goodyear Eagle F1 Asymmetric 6"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Bridgestone Turanza QuietTrack"
+    },
+    {
+      "ts": "",
+      "domain": "www.bestonetire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Bridgestone Turanza QuietTrack"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Bridgestone Blizzak WS90"
+    },
+    {
+      "ts": "",
+      "domain": "www.tirerack.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Bridgestone Blizzak WS90"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Continental ExtremeContact DWS06 Plus"
+    },
+    {
+      "ts": "",
+      "domain": "continentaltire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Continental ExtremeContact DWS06 Plus"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Pirelli P Zero"
+    },
+    {
+      "ts": "",
+      "domain": "www.pirelli.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Pirelli P Zero"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Falken Sincera ST80"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Falken Sincera ST80"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Toyo Open Country A/T III"
+    },
+    {
+      "ts": "",
+      "domain": "www.toyotires.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Toyo Open Country A/T III"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Nitto NT555 G2"
+    },
+    {
+      "ts": "",
+      "domain": "www.nittotire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Nitto NT555 G2"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Nexen Roadian GTX"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Nexen Roadian GTX"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Hankook Kinergy PT H737"
+    },
+    {
+      "ts": "",
+      "domain": "www.hankooktire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Hankook Kinergy PT H737"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Kumho Crugen HP71"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Kumho Crugen HP71"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Cooper Discoverer AT3 4S"
+    },
+    {
+      "ts": "",
+      "domain": "www.coopertire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Cooper Discoverer AT3 4S"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: BFGoodrich All-Terrain T/A KO2"
+    },
+    {
+      "ts": "",
+      "domain": "www.bfgoodrichtires.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: BFGoodrich All-Terrain T/A KO2"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Yokohama Geolandar A/T G015"
+    },
+    {
+      "ts": "",
+      "domain": "www.yokohamatire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Yokohama Geolandar A/T G015"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: General Grabber A/TX"
+    },
+    {
+      "ts": "",
+      "domain": "generaltire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: General Grabber A/TX"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Dunlop Grandtrek AT20"
+    },
+    {
+      "ts": "",
+      "domain": "www.fulsheartireandauto.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Dunlop Grandtrek AT20"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Sailun Terramax CVR"
+    },
+    {
+      "ts": "",
+      "domain": "www.tires-easy.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Sailun Terramax CVR"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Michelin Pilot Sport 4S"
+    },
+    {
+      "ts": "",
+      "domain": "www.michelinman.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Michelin Pilot Sport 4S"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Michelin Defender T+H"
+    },
+    {
+      "ts": "",
+      "domain": "www.discounttirecenters.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Michelin Defender T+H"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Goodyear Assurance WeatherReady"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Goodyear Assurance WeatherReady"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Goodyear Eagle F1 Asymmetric 6"
+    },
+    {
+      "ts": "",
+      "domain": "www.tirerack.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Goodyear Eagle F1 Asymmetric 6"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Bridgestone Turanza QuietTrack"
+    },
+    {
+      "ts": "",
+      "domain": "www.bestonetire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Bridgestone Turanza QuietTrack"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Bridgestone Blizzak WS90"
+    },
+    {
+      "ts": "",
+      "domain": "www.tirerack.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Bridgestone Blizzak WS90"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Continental ExtremeContact DWS06 Plus"
+    },
+    {
+      "ts": "",
+      "domain": "continentaltire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Continental ExtremeContact DWS06 Plus"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Pirelli P Zero"
+    },
+    {
+      "ts": "",
+      "domain": "www.pirelli.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Pirelli P Zero"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Falken Sincera ST80"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Falken Sincera ST80"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Toyo Open Country A/T III"
+    },
+    {
+      "ts": "",
+      "domain": "www.toyotires.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Toyo Open Country A/T III"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Nitto NT555 G2"
+    },
+    {
+      "ts": "",
+      "domain": "www.nittotire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Nitto NT555 G2"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Nexen Roadian GTX"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Nexen Roadian GTX"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Hankook Kinergy PT H737"
+    },
+    {
+      "ts": "",
+      "domain": "www.hankooktire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Hankook Kinergy PT H737"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Kumho Crugen HP71"
+    },
+    {
+      "ts": "",
+      "domain": "www.tiremart.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Kumho Crugen HP71"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Cooper Discoverer AT3 4S"
+    },
+    {
+      "ts": "",
+      "domain": "www.coopertire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Cooper Discoverer AT3 4S"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: BFGoodrich All-Terrain T/A KO2"
+    },
+    {
+      "ts": "",
+      "domain": "www.bfgoodrichtires.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: BFGoodrich All-Terrain T/A KO2"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Yokohama Geolandar A/T G015"
+    },
+    {
+      "ts": "",
+      "domain": "www.yokohamatire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Yokohama Geolandar A/T G015"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: General Grabber A/TX"
+    },
+    {
+      "ts": "",
+      "domain": "generaltire.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: General Grabber A/TX"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Dunlop Grandtrek AT20"
+    },
+    {
+      "ts": "",
+      "domain": "www.fulsheartireandauto.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Dunlop Grandtrek AT20"
+    },
+    {
+      "ts": "",
+      "domain": "firecrawl-search",
+      "credits": 1,
+      "pages": 0,
+      "note": "search: Sailun Terramax CVR"
+    },
+    {
+      "ts": "",
+      "domain": "www.tires-easy.com",
+      "credits": 1,
+      "pages": 1,
+      "note": "scrape: Sailun Terramax CVR"
     }
   ]
 }
