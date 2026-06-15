@@ -68,10 +68,20 @@ Gates after Loop 3: `test:firebase` 24/24 · `vitest` 328 passed/24 skipped · `
   even though "pending" reached 0). Now: a promise-chain mutex serializes drains, and the write-back is
   id-based (drop applied, replace errored, keep newly-enqueued). Regression: `cloudDrainRace.store.test.ts`.
 
-## Cloud Loop 8 (blocked)
-Need owner's 6 `NEXT_PUBLIC_FIREBASE_*` values (+ Firestore & Email/Password enabled in
-`smart-inventory-scanner`). Then: write to `.env.local` only, deploy rules/indexes, run real-user cloud
-auth/rules/isolation smoke, report separately. No fake cloud proof; nothing deployed yet.
+## Cloud Loop 8 - DONE (real cloud, proven)
+Project `smart-inventory-scanner-app` (Blaze). Public Web App config written to `.env.local` ONLY
+(git-ignored, untracked; existing AI/Supabase secrets preserved). Deployed Firestore rules + indexes
+via `firebase deploy --only firestore:rules,firestore:indexes --project smart-inventory-scanner-app`.
+Real Email/Password cloud smoke (`scripts/cloud-smoke.mjs`, `npm run test:firebase:cloud-smoke`,
+per-actor isolated apps, self-cleaning): PASSED - A bootstraps business+owner, owner read/write,
+tenant isolation (B denied read/list/write), **forge-membership DENIED**, counter can scan/count but
+not manage products, viewer read-only, audit append-only. **Security fix shipped this loop:** the
+membership bootstrap rule now ties self-owner creation to `businesses/{bid}.createdBy == uid`
+(previously ANY signed-in user could self-grant owner of ANY business - a tenant-isolation breach).
+Regression: `tenantIsolation.rules.test.ts` (b2). No service-account JSON; no public app deploy.
+Residual clearly-named test data: append-only `auditLog` rows under `loop8-biz*` cannot be client-
+deleted (by design) and a couple of orphaned `loop8-biz*` business docs from harness iteration remain -
+harmless, optionally removable from the console.
 
 ## EXACT NEXT ORDER (resume here, fresh focused pass)
 1. ~~**Loop 3** - session/count persistence and survive-refresh.~~ DONE (this pass).
