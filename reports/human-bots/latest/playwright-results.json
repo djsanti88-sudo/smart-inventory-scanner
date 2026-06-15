@@ -134,10 +134,11 @@
         "npm_package_name": "inventory",
         "npm_package_version": "0.1.0",
         "NUMBER_OF_PROCESSORS": "24",
+        "OLDPWD": "C:/Users/djsan/inventory",
         "OneDrive": "C:\\Users\\djsan\\OneDrive",
         "OneDriveConsumer": "C:\\Users\\djsan\\OneDrive",
         "OS": "Windows_NT",
-        "PATH": "C:\\Users\\djsan\\inventory\\node_modules\\.bin;C:\\Users\\djsan\\node_modules\\.bin;C:\\Users\\node_modules\\.bin;C:\\node_modules\\.bin;C:\\Program Files\\nodejs\\node_modules\\npm\\node_modules\\@npmcli\\run-script\\lib\\node-gyp-bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\bin;C:\\Program Files\\Git\\mingw64\\bin;C:\\Program Files\\Git\\usr\\local\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\mingw64\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Users\\djsan\\bin;C:\\Program Files\\Microsoft\\jdk-21.0.11.10-hotspot\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Windows\\System32\\OpenSSH;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR;C:\\Program Files\\dotnet;C:\\Program Files\\Git\\cmd;C:\\Program Files\\nodejs;C:\\Program Files\\Docker\\Docker\\resources\\bin;C:\\Program Files\\GitHub CLI;C:\\Users\\djsan\\.local\\bin;C:\\Users\\djsan\\AppData\\Local\\Programs\\Python\\Python313\\Scripts;C:\\Users\\djsan\\AppData\\Local\\Programs\\Python\\Python313;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\djsan\\.lmstudio\\bin;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\djsan\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;C:\\Users\\djsan\\AppData\\Roaming\\npm;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1-full_build\\bin;C:\\Users\\djsan\\AppData\\Local\\Python\\bin;C:\\Program Files\\GitHub CLI;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gitleaks.Gitleaks_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Program Files\\Git\\usr\\bin\\vendor_perl;C:\\Program Files\\Git\\usr\\bin\\core_perl;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\frontend-design\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\context7\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-review\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-simplifier\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\skill-creator\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\playwright\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\feature-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\claude-md-management\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\ralph-loop\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\typescript-lsp\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\anthropic-agent-skills\\document-skills\\575462609294\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\anthropic-agent-skills\\example-skills\\575462609294\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\pyright-lsp\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\agent-sdk-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\commit-commands\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\pr-review-toolkit\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-modernization\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\security-guidance\\2.0.6\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\hookify\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\session-report\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\firebase\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\github\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\supply-chain-risk-auditor\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\git-cleanup\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-code-workflows\\accessibility-compliance\\1.2.2\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-code-workflows\\ui-design\\1.0.3\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\agricidaniel-seo\\claude-seo\\1.9.6\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\vercel\\0.43.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\figma\\2.2.50\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\claude-code-setup\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\chrome-devtools-mcp\\1.2.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\plugin-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\greptile\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\firecrawl\\1.0.9\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\huggingface-skills\\1.0.8\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\playground\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\supabase\\0.1.11\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\serena\\unknown\\bin",
+        "PATH": "C:\\Users\\djsan\\inventory\\node_modules\\.bin;C:\\Users\\djsan\\node_modules\\.bin;C:\\Users\\node_modules\\.bin;C:\\node_modules\\.bin;C:\\Program Files\\nodejs\\node_modules\\npm\\node_modules\\@npmcli\\run-script\\lib\\node-gyp-bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\hooks\\shims;C:\\Users\\djsan\\bin;C:\\Program Files\\Git\\mingw64\\bin;C:\\Program Files\\Git\\usr\\local\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Program Files\\Git\\mingw64\\bin;C:\\Program Files\\Git\\usr\\bin;C:\\Users\\djsan\\bin;C:\\Program Files\\Microsoft\\jdk-21.0.11.10-hotspot\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Windows\\System32\\OpenSSH;C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common;C:\\Program Files\\NVIDIA Corporation\\NVIDIA App\\NvDLISR;C:\\Program Files\\dotnet;C:\\Program Files\\Git\\cmd;C:\\Program Files\\nodejs;C:\\Program Files\\Docker\\Docker\\resources\\bin;C:\\Program Files\\GitHub CLI;C:\\Users\\djsan\\.local\\bin;C:\\Users\\djsan\\AppData\\Local\\Programs\\Python\\Python313\\Scripts;C:\\Users\\djsan\\AppData\\Local\\Programs\\Python\\Python313;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WindowsApps;C:\\Users\\djsan\\.lmstudio\\bin;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Users\\djsan\\AppData\\Local\\Programs\\Microsoft VS Code\\bin;C:\\Users\\djsan\\AppData\\Roaming\\npm;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1-full_build\\bin;C:\\Users\\djsan\\AppData\\Local\\Python\\bin;C:\\Program Files\\GitHub CLI;C:\\Users\\djsan\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gitleaks.Gitleaks_Microsoft.Winget.Source_8wekyb3d8bbwe;C:\\Program Files\\Git\\usr\\bin\\vendor_perl;C:\\Program Files\\Git\\usr\\bin\\core_perl;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\frontend-design\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\context7\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-review\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-simplifier\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\skill-creator\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\playwright\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\feature-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\claude-md-management\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\ralph-loop\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\typescript-lsp\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\anthropic-agent-skills\\document-skills\\575462609294\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\anthropic-agent-skills\\example-skills\\575462609294\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\pyright-lsp\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\agent-sdk-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\commit-commands\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\pr-review-toolkit\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\code-modernization\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\security-guidance\\2.0.6\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\hookify\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\session-report\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\firebase\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\github\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\modern-python\\1.5.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\supply-chain-risk-auditor\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\gh-cli\\1.4.1\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\trailofbits\\git-cleanup\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-code-workflows\\accessibility-compliance\\1.2.2\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-code-workflows\\ui-design\\1.0.3\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\agricidaniel-seo\\claude-seo\\1.9.6\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\vercel\\0.43.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\figma\\2.2.50\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\claude-code-setup\\1.0.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\chrome-devtools-mcp\\1.2.0\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\plugin-dev\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\greptile\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\firecrawl\\1.0.9\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\huggingface-skills\\1.0.8\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\playground\\unknown\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\supabase\\0.1.11\\bin;C:\\Users\\djsan\\.claude\\plugins\\cache\\claude-plugins-official\\serena\\unknown\\bin",
         "PATHEXT": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC",
         "PLINK_PROTOCOL": "ssh",
         "PROCESSOR_ARCHITECTURE": "AMD64",
@@ -209,12 +210,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1382,
+                  "duration": 1397,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-06-15T17:58:23.842Z",
+                  "startTime": "2026-06-15T21:30:52.612Z",
                   "annotations": [],
                   "attachments": [
                     {
@@ -257,12 +258,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 855,
+                  "duration": 766,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-06-15T17:58:25.311Z",
+                  "startTime": "2026-06-15T21:30:54.096Z",
                   "annotations": [],
                   "attachments": [
                     {
@@ -305,12 +306,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 758,
+                  "duration": 722,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-06-15T17:58:26.174Z",
+                  "startTime": "2026-06-15T21:30:54.870Z",
                   "annotations": [],
                   "attachments": [
                     {
@@ -353,12 +354,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 395,
+                  "duration": 397,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-06-15T17:58:26.940Z",
+                  "startTime": "2026-06-15T21:30:55.599Z",
                   "annotations": [],
                   "attachments": [
                     {
@@ -401,12 +402,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2402,
+                  "duration": 2322,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-06-15T17:58:27.346Z",
+                  "startTime": "2026-06-15T21:30:56.009Z",
                   "annotations": [],
                   "attachments": [
                     {
@@ -422,7 +423,7 @@
           ],
           "id": "e2715a6506a9462823bd-bfac1e31b23c29f8617c",
           "file": "scenarios/platformOwner-tire-resolution.spec.ts",
-          "line": 33,
+          "line": 34,
           "column": 5
         }
       ]
@@ -449,12 +450,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1460,
+                  "duration": 1524,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-06-15T17:58:29.756Z",
+                  "startTime": "2026-06-15T21:30:58.339Z",
                   "annotations": [],
                   "attachments": [
                     {
@@ -470,7 +471,7 @@
           ],
           "id": "54e20dbf1312c8f4fc89-12453ee0233f34318379",
           "file": "scenarios/role-security-leak.spec.ts",
-          "line": 25,
+          "line": 27,
           "column": 5
         }
       ]
@@ -497,12 +498,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 761,
+                  "duration": 862,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-06-15T17:58:31.223Z",
+                  "startTime": "2026-06-15T21:30:59.870Z",
                   "annotations": [],
                   "attachments": [
                     {
@@ -526,8 +527,8 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-06-15T17:58:21.411Z",
-    "duration": 11075.498,
+    "startTime": "2026-06-15T21:30:50.086Z",
+    "duration": 11146.074,
     "expected": 7,
     "skipped": 0,
     "unexpected": 0,

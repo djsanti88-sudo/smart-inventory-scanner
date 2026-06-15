@@ -5,13 +5,12 @@
 - Current inventory count (final count table)
 - Start/finish inventory session
 - Export final count
-- Export raw scan log
 - Needs Review queue
 - Product database
-- Alias repair (Codes panel - platformOwner-scope today)
 
 ## Present-check came back absent
-- (none)
+- Export raw scan log
+- Alias repair (Codes panel - platformOwner-scope today)
 
 ## Missing but recommended (classified)
 - [important soon] Who scanned what (per-user attribution in the feed)

@@ -50,3 +50,15 @@ export function accessLevelServer(identity: Identity): AccessLevel {
 export function accessLevelClient(identity: Identity): AccessLevel {
   return isPlatformOwnerClient(identity) ? "platform" : "business";
 }
+
+/**
+ * Client access level honoring the legacy-mock E2E override. The 11 mock Playwright specs exercise the
+ * FULL platformOwner view (playwright.config.ts sets NEXT_PUBLIC_E2E_PLATFORM_OWNER=1); the human-bot
+ * suite does NOT set it, so it stays a customer ("business"). Real cloud ignores the flag (it is never
+ * set there) and uses the actual NEXT_PUBLIC_PLATFORM_OWNER_* allowlist. SINGLE source of truth shared
+ * by the React hook (useAccessLevel) and the store persist split (Sec-4 partialize), so they never drift.
+ */
+export function effectiveClientAccessLevel(identity: Identity): AccessLevel {
+  if (process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER === "1") return "platform";
+  return accessLevelClient(identity);
+}
