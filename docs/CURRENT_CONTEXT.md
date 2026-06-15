@@ -61,3 +61,21 @@ low-risk obvious UX copy fixes. Safe (non-destructive) security checks only.
 ## 10. What Track 1 must NOT touch
 No public deploy, no auto-merge, no destructive cloud writes, no secrets, `.env.local` stays untracked,
 no service-account JSON, no Marketing/Competition bots, no Firecrawl competitor research (Track 2 later).
+
+---
+
+# P0 Security Audit (audit-first) — context
+
+1. **Tire/Falken/Camel live cloud issue: FIXED** — alias 2881-6861 moved off Camel → Falken on the real god account; proven by `qa:bots:live`.
+2. **Separator normalization exists** for dash, no-dash, space, slash, backslash, underscore, dot (`scanCleaner.buildNormalizedCandidates`).
+3. **Clear local cache cloud-mode crash: FIXED** (no `FirebaseSyncTarget.reset()` in cloud mode).
+4. **Products page infinite-render bug: FIXED** (stable aliases selector).
+5. **Human/live bot system exists** (`qa:bots:*`, `qa:bots:live`, revision gate).
+6. **P0 security risk (confirmed by this audit):** customer browsers download the full alias table + product
+   code fields (and the global `catalogEntries` collection is readable by any signed-in user); persisted to
+   localStorage; exportable; visible in UI — with NO platformOwner concept and NO role gating.
+7. **Track 2 recommends** the customer-safe foundation as the next milestone (this audit is its prerequisite).
+8. **PR #4** does NOT include the later fixes (normalization beyond slash, Products/clearLocalCache fixes, bots) — those are on qa-human-bots/qa-agent-army-track1; this audit branch is off qa-agent-army-track1.
+9. **This task is the P0 data-protection AUDIT + execution plan only.** Audit reports written:
+   `reports/platform-security/{preflight,data_flow_audit,PLATFORM_CUSTOMER_SECURITY_AUDIT_REPORT}.md`.
+   **Implementation (Phases 2–9) is NOT started — awaiting Santiago "Approved".**
