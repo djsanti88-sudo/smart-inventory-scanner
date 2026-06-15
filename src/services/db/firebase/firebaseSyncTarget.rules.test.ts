@@ -103,6 +103,22 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
     expect((alias.data() as { approved: boolean }).approved).toBe(true);
   });
 
+  it("SAVE_PRODUCT persists the product and retry does not duplicate", async () => {
+    const t = target();
+    const pItem: PendingSyncItem = { ...incItem("sp1", "pp1", 0), operation: "SAVE_PRODUCT", entityType: "Product", entityId: "prod1", payload: { id: "prod1", businessId: BIZ, name: "Widget", primaryBarcode: "012345678905", verified: true } };
+    expect((await t.apply(pItem)).alreadyApplied).toBe(false);
+    expect((await t.apply(pItem)).alreadyApplied).toBe(true); // idempotent retry -> no duplicate
+    const got = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "products", "prod1"));
+    expect(got.exists()).toBe(true);
+    expect((got.data() as { name: string }).name).toBe("Widget");
+  });
+
+  it("SAVE_PRODUCT fails cleanly with a missing businessId", async () => {
+    const t = target();
+    const bad: PendingSyncItem = { ...incItem("sp2", "pp2", 0), operation: "SAVE_PRODUCT", entityType: "Product", payload: { id: "prodX", name: "X" }, businessId: "" };
+    expect((await t.apply(bad)).ok).toBe(false);
+  });
+
   it("reset() throws against real cloud, is a no-op in emulator mode", () => {
     const db = env.authenticatedContext(UID).firestore() as unknown as Firestore;
     expect(() => new FirebaseSyncTarget(db, { emulator: false }).reset()).toThrow();

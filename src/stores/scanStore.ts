@@ -1174,6 +1174,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Determine target product (existing or newly created).
         let products = state.products;
         let productId = payload.productId ?? "";
+        let createdProduct: Product | null = null; // persisted to Firestore (cloud backend) via SAVE_PRODUCT
 
         if (action === "create_new") {
           productId = `prod-${idFactory()}`;
@@ -1207,6 +1208,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             updatedBy: "human",
           };
           products = [...products, newProduct];
+          createdProduct = newProduct;
         }
 
         if (!productId) return;
@@ -1270,25 +1272,43 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         set({ products, aliases, needsReviewQueue, scanFeed });
 
-        // Queue idempotent RESOLVE_ALIAS sync.
+        // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
+        // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
+        const queued: PendingSyncItem[] = [];
+        if (createdProduct) {
+          queued.push(
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: state.businessId,
+              sessionId: state.sessionId,
+              entityType: "Product",
+              entityId: createdProduct.id,
+              operation: "SAVE_PRODUCT",
+              payload: createdProduct,
+              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, createdProduct.id, "SAVE_PRODUCT"),
+              scanEventId: null,
+            }),
+          );
+        }
         if (!aliasExists) {
-          set((s) => ({
-            pendingSyncQueue: [
-              ...s.pendingSyncQueue,
-              makeQueueItem({
-                idFactory,
-                now,
-                businessId: state.businessId,
-                sessionId: state.sessionId,
-                entityType: "Alias",
-                entityId: aliasId,
-                operation: "RESOLVE_ALIAS",
-                payload: newAlias,
-                idempotencyKey: aliasKeyOp,
-                scanEventId: null,
-              }),
-            ],
-          }));
+          queued.push(
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: state.businessId,
+              sessionId: state.sessionId,
+              entityType: "Alias",
+              entityId: aliasId,
+              operation: "RESOLVE_ALIAS",
+              payload: newAlias,
+              idempotencyKey: aliasKeyOp,
+              scanEventId: null,
+            }),
+          );
+        }
+        if (queued.length > 0) {
+          set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
         }
 
         // Feed the shared knowledge base (privacy-safe; only barcode/product/evidence is written).
