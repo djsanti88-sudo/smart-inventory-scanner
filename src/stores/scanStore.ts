@@ -23,6 +23,7 @@ import { buildIdempotencyKey } from "@/services/idempotency";
 import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
+import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
 import { getDb } from "@/lib/firebaseClient";
 import {
   evaluateAiGate,
@@ -113,6 +114,9 @@ export interface ScanStoreDeps {
   // When true (Firebase backend), syncPending uses the async drain and REQUIRES a real business context
   // (businessId + userId) before any write. Default/mock path is unchanged (sync, no context required).
   cloudBackend?: boolean;
+  // Cloud backend only: loads a business's products/aliases from Firestore when its context is set, so
+  // the deterministic resolver works after a refresh / on a fresh device. Injectable for tests.
+  loadBusinessData?: (businessId: string, userId: string) => Promise<{ products: Product[]; aliases: Alias[] }>;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -403,7 +407,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       setBusinessContext: (businessId, userId) => {
         set({ businessId, userId, businessContextReady: true, lastSyncError: null });
-        get().syncPending(); // drain anything queued now that we have a real business context
+        const loader = deps.loadBusinessData;
+        if (cloudBackend && loader) {
+          // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
+          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI.
+          void (async () => {
+            try {
+              const data = await loader(businessId, userId);
+              set({ products: data.products, aliases: data.aliases });
+            } catch (e) {
+              set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data" });
+            }
+            get().syncPending();
+          })();
+        } else {
+          get().syncPending(); // drain anything queued now that we have a real business context
+        }
       },
 
       recordFeedback: (type, payload) =>
@@ -1485,6 +1504,7 @@ const appDeps: ScanStoreDeps = {
     ? new FirebaseSyncTarget(getDb(), { emulator: process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATOR === "1" })
     : getMockDb(),
   cloudBackend: useFirebaseBackend,
+  loadBusinessData: useFirebaseBackend ? (businessId) => loadBusinessData(getDb(), businessId) : undefined,
   idFactory: () => crypto.randomUUID(),
   now: () => new Date().toISOString(),
   persistName: "sis-scan-v1",
@@ -1546,6 +1566,7 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
     now: overrides?.now ?? (() => "2026-06-12T10:00:00.000Z"),
     persistName: null,
     cloudBackend: overrides?.cloudBackend ?? false,
+    loadBusinessData: overrides?.loadBusinessData,
   };
   return create<ScanState>()(buildScanInitializer(deps));
 }
