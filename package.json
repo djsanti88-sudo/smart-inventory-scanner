@@ -25,7 +25,13 @@
     "qa:bots:performance": "playwright test --config=playwright.bots.config.ts performance-smoke",
     "qa:bots:all": "playwright test --config=playwright.bots.config.ts",
     "qa:bots:live": "playwright test --config=playwright.bots.cloud.config.ts",
-    "qa:revision": "npx tsc --noEmit && npx eslint src e2e && npx next build && npx playwright test && npm run test:firebase && npm run qa:bots"
+    "qa:revision": "npx tsc --noEmit && npx eslint src e2e && npx next build && npx playwright test && npm run test:firebase && npm run qa:bots",
+    "strategy:bots": "node scripts/strategy-bots.mjs",
+    "strategy:marketing": "node scripts/strategy-bots.mjs marketing",
+    "strategy:competition": "node scripts/strategy-bots.mjs competition",
+    "strategy:pricing": "node scripts/strategy-bots.mjs pricing",
+    "strategy:roi": "node scripts/strategy-bots.mjs roi",
+    "strategy:buyer": "node scripts/strategy-bots.mjs buyer"
   },
   "dependencies": {
     "firebase": "^12.14.0",
