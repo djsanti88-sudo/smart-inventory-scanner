@@ -1,0 +1,15 @@
+barcode,expected_product_name,expected_brand,expected_category,source,notes,repeat_test,must_be_known,acceptable_aliases,expected_outcome
+# Drop a REAL 100-code barcode file here (overwrite this template) to unblock the real 100-code benchmark.
+# Columns:
+#   barcode                - the scanned code (UPC/EAN/GTIN/SKU/vendor label)
+#   expected_product_name  - ground-truth product name
+#   expected_brand         - ground-truth brand
+#   expected_category      - ground-truth category
+#   source                 - where the ground truth came from (your shelf, vendor sheet, etc.)
+#   notes                  - free text
+#   repeat_test            - yes/no: also scan this code twice to prove cache + no-double-count
+#   must_be_known          - yes/no: this code MUST resolve Known (false-known on miss is a hard fail)
+#   acceptable_aliases     - pipe-separated alternate codes that should resolve to the same product
+#   expected_outcome       - known | needs_review | conflict
+# Example row (delete before use):
+049000028904,Coca-Cola 12 pack 12 oz cans,Coca-Cola,Beverage,owner shelf,known seed product,yes,yes,7262,known
