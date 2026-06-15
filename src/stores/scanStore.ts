@@ -16,6 +16,7 @@ import type {
   UnknownCodeReview,
 } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
+import { normalizeCode } from "@/services/codeNormalizer";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
 import { incrementInventoryCount } from "@/services/inventory";
@@ -299,6 +300,76 @@ function makeQueueItem(params: {
     idempotencyKey: params.idempotencyKey,
     scanEventId: params.scanEventId,
   };
+}
+
+/**
+ * Multi-code: build an APPROVED alias for every OTHER scannable code on a product (part number / SKU /
+ * GTIN / UPC / EAN / vendor codes), beyond the code(s) already aliased. This is what makes a tire's
+ * barcode AND its part-number QR both resolve to the same product. Pure builder; caller commits to state.
+ */
+function buildProductCodeAliases(params: {
+  product: Product;
+  alreadyAliasedCleanCodes: string[];
+  businessId: string;
+  sessionId: string;
+  idFactory: () => string;
+  now: () => string;
+}): { aliases: Alias[]; queued: PendingSyncItem[] } {
+  const { product, alreadyAliasedCleanCodes, businessId, sessionId, idFactory, now } = params;
+  const rawCodes = [
+    product.primaryBarcode,
+    product.primarySku,
+    product.gtin,
+    product.upc,
+    product.ean,
+    ...(product.vendorCodes ?? []),
+  ];
+  const seen = new Set(alreadyAliasedCleanCodes.filter(Boolean));
+  const aliases: Alias[] = [];
+  const queued: PendingSyncItem[] = [];
+  for (const code of rawCodes) {
+    if (!code) continue;
+    const n = normalizeCode(code);
+    const cleanCode = n.clean;
+    if (!cleanCode || seen.has(cleanCode)) continue;
+    seen.add(cleanCode);
+    const aliasId = `alias-${idFactory()}`;
+    const key = buildIdempotencyKey(businessId, sessionId, aliasId, "RESOLVE_ALIAS");
+    const alias: Alias = {
+      id: aliasId,
+      businessId,
+      productId: product.id,
+      rawCodeExample: code,
+      cleanCode,
+      normalizedCode: n.noSeparators || cleanCode,
+      aliasType: codeTypeToAliasType(detectCodeType(cleanCode)),
+      source: product.source ?? "human_review",
+      confidence: 1,
+      approved: true,
+      createdAt: now(),
+      updatedAt: now(),
+      createdBy: "multi_code",
+      lastSeenAt: now(),
+      syncStatus: "pending",
+      idempotencyKey: key,
+    };
+    aliases.push(alias);
+    queued.push(
+      makeQueueItem({
+        idFactory,
+        now,
+        businessId,
+        sessionId,
+        entityType: "Alias",
+        entityId: aliasId,
+        operation: "RESOLVE_ALIAS",
+        payload: alias,
+        idempotencyKey: key,
+        scanEventId: null,
+      }),
+    );
+  }
+  return { aliases, queued };
 }
 
 /** Recompute syncStatus on feed/counts/reviews from what remains in the pending queue. */
@@ -1459,6 +1530,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         if (queued.length > 0) {
           set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
+        }
+
+        // Multi-code: a newly created product registers an approved alias for EVERY other code it carries
+        // (part number / SKU / GTIN / UPC / EAN), so scanning the tire's barcode OR its part-number QR both
+        // resolve to the same product. Deduped against the scanned alias and any pre-existing aliases.
+        if (createdProduct) {
+          const extra = buildProductCodeAliases({
+            product: createdProduct,
+            alreadyAliasedCleanCodes: [newAlias.cleanCode],
+            businessId: state.businessId,
+            sessionId: state.sessionId,
+            idFactory,
+            now,
+          });
+          const existingForProduct = new Set(
+            get().aliases.filter((a) => a.productId === createdProduct!.id).map((a) => a.cleanCode),
+          );
+          const freshAliases = extra.aliases.filter((a) => !existingForProduct.has(a.cleanCode));
+          if (freshAliases.length > 0) {
+            const freshIds = new Set(freshAliases.map((a) => a.id));
+            set((s) => ({
+              aliases: [...s.aliases, ...freshAliases],
+              pendingSyncQueue: [...s.pendingSyncQueue, ...extra.queued.filter((q) => freshIds.has(q.entityId))],
+            }));
+            for (const a of freshAliases) {
+              emitAudit({ entityType: "Alias", entityId: a.id, action: "alias_approved", metadata: { code: a.cleanCode, productId: createdProduct.id, origin: "multi_code" } });
+            }
+          }
         }
 
         // Audit the human/system resolution (product creation + alias approval). Fire-and-forget.
