@@ -92,9 +92,13 @@ function pageReader(): ((pageText: string, code: string) => Promise<Partial<AiLo
 export async function GET() {
   const geminiConfigured = !!process.env.GEMINI_API_KEY;
   const openaiConfigured = !!process.env.OPENAI_API_KEY;
+  // firecrawlConfigured gates the Stage-2 open-web fallback. Absent is NOT a blocker (decode still
+  // works via barcode DBs + AI-cited URLs); the client just knows open-web discovery is unavailable.
+  const firecrawlConfigured = !!process.env.FIRECRAWL_API_KEY;
   const missingKeys: string[] = [];
   if (!geminiConfigured) missingKeys.push("GEMINI_API_KEY");
   if (!openaiConfigured) missingKeys.push("OPENAI_API_KEY");
+  if (!firecrawlConfigured) missingKeys.push("FIRECRAWL_API_KEY");
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
     autoDecodeOnScan: process.env.ENABLE_AUTO_DECODE_ON_SCAN !== "false",
@@ -102,6 +106,8 @@ export async function GET() {
     openaiEnabled: process.env.ENABLE_OPENAI_LOOKUP !== "false",
     geminiConfigured,
     openaiConfigured,
+    firecrawlConfigured,
+    openWebFallback: firecrawlConfigured,
     geminiSearchGrounding: process.env.ENABLE_GEMINI_SEARCH_GROUNDING !== "false",
     openaiWebSearch: process.env.ENABLE_OPENAI_WEB_SEARCH !== "false",
     geminiModel: GEMINI_FAST_MODEL,
