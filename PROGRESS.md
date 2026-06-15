@@ -479,3 +479,34 @@ vitest 291/291, tsc clean, eslint clean, next build success, playwright 10/10.
 810118139604 -> **verified** "Acrylic Paint Markers Set, 24 Metallic Colors" (Faire, SKU 409-24M) in
 **16s** (was 66s); Firecrawl won in 6s opening 6 candidates in parallel. Second call **7ms, cached**,
 zero spend.
+
+## Phase 1: decode benchmark harness + validation run (2026-06-14)
+
+### Built (approved)
+- `src/services/benchmark/benchmarkAnalysis.ts` (+22 unit tests): pure CSV parse, path classifier,
+  honest accuracy verdict, latency stats (p50/p95), Firecrawl-credit + AI-call estimators, summarizer.
+- `scripts/benchmark-decodes.ts` (`npm run benchmark`): reads `benchmarks/phase1_100_codes.csv`,
+  sequential decode via the real `/api/ai-lookup`, records latency/path/verdict/cache/credits, cache
+  double-run proof, HARD 400-credit Firecrawl guard, writes csv/json/summary.md/cost.md.
+- `benchmarks/` templates (`phase1_100_codes.csv` seeded w/ 4 real codes, `.sample.csv`, `README.md`).
+- Route: `debug.firecrawlCreditsEstimated` + `firecrawlCandidates` (reserved worst-case up front so the
+  fallback hard-cap can't hide spend from the cost guard).
+- E2E `e2e/phase1-benchmark.spec.ts`: fast / fallback / catalog-cache (no 2nd POST) / needs-review /
+  not-found -> `e2e/proof/phase1-100-code-benchmark.png`.
+
+### Harness-validation run (4 real codes - NOT the 100-code benchmark; the 100 needs the owner's list)
+- fast path: 070330645936 **85ms**, 6977228152610 **101ms** (p50 101ms) - barcode-DB hits, 0 credits.
+- fallback: 810118139604 **14.3s** verified via Firecrawl (7 credits).
+- not-found: 710154236681 **40s** honest needs_review (7 credits reserved+spent searching).
+- cache: **3/3** resolved codes confirmed cached on 2nd call (20-31ms, 0 spend).
+- Validation caught + fixed 2 harness bugs: cache-confirmation false-negative; Firecrawl credit
+  under-count on cap-abort.
+- Finding: 6977228152610 failed under back-to-back load (go-upc rate-limited us) but resolved in 101ms
+  clean - fast path depends on barcode-DB availability. Grounded AI providers consistently time out and
+  contributed no wins (page-fetch + Firecrawl did the resolving).
+
+### Gates: vitest 313/313, tsc clean, eslint clean, next build success, playwright 11/11.
+
+### Pending owner input
+- Drop ~100 real barcodes into `benchmarks/phase1_100_codes.csv` -> `npm run benchmark` for the full run.
+- Phase 2 is PLANNED ONLY (PHASE2_TIRE_DB_PLAN.md); not started. Awaiting "approve Phase 2".

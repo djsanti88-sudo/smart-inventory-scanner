@@ -1,0 +1,4 @@
+code,expectedName,expectedBrand,expectedCategory,expectedSku,expectedSource,notes
+810118139604,"Acrylic Paint Markers Set, 24 Metallic Colors",KINGART,Art Supplies,409-24M,faire.com,sample - only the code column is required
+036000291452,,,,,,sample - code only; accuracy will be reported as resolved_without_ground_truth
+00000000000000,,,,,,sample - a code with no real product becomes needs_review/failed (honest)

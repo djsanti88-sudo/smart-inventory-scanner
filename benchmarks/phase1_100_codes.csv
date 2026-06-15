@@ -1,0 +1,5 @@
+code,expectedName,expectedBrand,expectedCategory,expectedSku,expectedSource,notes
+810118139604,"Acrylic Paint Markers Set, 24 Metallic Colors",KINGART,Art Supplies,409-24M,faire.com,real - resolves via Firecrawl open-web fallback
+070330645936,BIC Pocket Lighter,BIC,Lighter,,go-upc.com,real - fast path
+6977228152610,PHATOIL Lavender Essential Oil 100ml,PHATOIL,Essential Oil,,go-upc.com,real - fast path
+710154236681,,,,,,real - honest needs-review (not in DBs/open web)

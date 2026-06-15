@@ -1,0 +1,5 @@
+code,path,verdict,productName,decision,reasonCode,latencyMs,serverLatencyMs,cached,firecrawlCredits,geminiCalls,openaiCalls,cachedLatencyMs,cachedConfirmed,verdictReason
+810118139604,firecrawl_fallback,partial,"Wholesale Acrylic Paint Markers Set – 24 Metallic Colors, 2mm Bullet Tip, Water-Based, Multi-Surface",verified,fallback_discovery_found_product,14274,10012,false,7,1,1,31,true,"Brand/name partially matched (name overlap 47%)."
+070330645936,fast_page_fetch,partial,"Exclusive Smokes Bic Lighter Texas",verified,ok,85,55,false,0,0,0,20,true,"Brand/name partially matched (name overlap 40%)."
+6977228152610,fast_page_fetch,partial,"Phatoil Lavender Essential Oil Premium Grade 100ml 3.38fl Oz Two Packs Unopened",verified,ok,101,53,false,0,0,0,23,true,"Brand/name partially matched (name overlap 38%)."
+710154236681,needs_review,needs_review,"",needs_review,provider_timeout,40073,10013,false,7,2,2,,,"The AI provider timed out. Retry live decode."

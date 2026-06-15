@@ -77,3 +77,15 @@ No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migr
 | 4 | Firecrawl credit/cost blowup (6 parallel scrapes per fail) | Med | Low | Only on hard fails; decode cache means a barcode never re-pays; product-URL preference spends the budget on pages that can carry a product; best-effort credit tracking | Mitigated |
 | 5 | Double AI spend (fast pass + deep re-run) | Low | Confirmed | Accepted per owner spec (deep grounded re-run is the point); only on hard fails; cached after first success | Accepted |
 | 6 | Stale cache serves wrong product | Low | Low | Cache keyed by exact code; product identity is stable; successes only; per-process (cleared on restart); client catalog is the durable layer | Mitigated |
+
+## Phase 1: benchmark + Phase 2 planning (2026-06-14)
+
+| # | Risk | Sev | Likelihood | Mitigation | Status |
+|---|------|-----|-----------|------------|--------|
+| 1 | Benchmark burns uncontrolled Firecrawl credits | High | Low | Runner tracks credits (reserved worst-case up front) + HARD stop at 400; cache means re-runs re-pay nothing; sequential | Mitigated |
+| 2 | Fake/invented benchmark codes misrepresent accuracy | High | Was possible | No invented codes; validated on 4 real codes; accuracy only graded with ground truth; honest verdict buckets | Mitigated |
+| 3 | Cost under-counted (cap-abort hides Firecrawl spend) | Med | Was occurring | Reserve credits before the call, refine to actual after; validation caught + fixed | Fixed |
+| 4 | Fast path fragile under load (barcode-DB rate limiting) | Med | Observed | Documented finding (6977228152610 failed under load, fine clean); fallback covers it; Phase 2 reduces DB dependence by preloading the catalog | Noted |
+| 5 | Grounded AI providers time out, adding latency/cost with no wins | Med | Observed | Documented; Firecrawl + page-fetch carry resolution; recommend owner consider trimming grounded-AI in fallback (separate tuning) | Noted |
+| 6 | Phase 2 naive per-barcode scrape => ~35k credits for 5,000 tires | High | Would occur if built naively | Phase 2 PLAN mandates catalog-page harvest + 100-record pilot to measure real per-record cost BEFORE scaling; not executed | Planned/controlled |
+| 7 | Phase 2 executed prematurely | High | Low | Hard phase boundary; plan-only doc; no DB/scrape/large Firecrawl; waits for explicit "approve Phase 2" | Controlled |

@@ -198,3 +198,21 @@ Full gate run (2026-06-14): vitest 291/291, tsc clean, eslint clean, next build 
 
 LIVE (owner-authorized, 1 paid + 1 cached): 810118139604 -> verified product in 16s; repeat call 7ms
 cached, zero spend. See LIVE_FALLBACK_PROOF.md.
+
+## Phase 1: benchmark harness (2026-06-14)
+
+Unit (`src/services/benchmark/benchmarkAnalysis.test.ts`, 22 tests, all pure/mocked): CSV parse w/
+quoted commas; path classifier (cache/fast_page_fetch/gemini_flash/firecrawl_fallback/ai_deep_fallback/
+needs_review/failed); honest accuracy (pass/partial/fail/needs_manual_review, never "correct" without
+ground truth, cached distinct); latency p50/p95/min/max; Firecrawl credit estimate (reported vs 1+candidates
+vs skipped=0); isUsableName junk rejection; summarize counts.
+
+Runner: `npm run benchmark` (hits real `/api/ai-lookup`; 400-credit hard stop; cache double-run proof;
+outputs to benchmarks/results/). Live harness-validation (4 real codes): fast 85-101ms, fallback 14.3s,
+not-found 40s, cache 3/3 confirmed.
+
+E2E `e2e/phase1-benchmark.spec.ts`: representative UI proof (mocked) - fast products show + count,
+fallback product shows, a verified code re-scans from the client catalog with NO new API POST (cache),
+needs-review shows honest reason, not-found shows product_not_found_after_search. Screenshot saved.
+
+Gate run (2026-06-14): vitest 313/313, tsc clean, eslint clean, next build success, playwright 11/11.

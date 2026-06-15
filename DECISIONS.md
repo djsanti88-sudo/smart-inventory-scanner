@@ -218,3 +218,21 @@ Why each choice was made. Newest decisions at the bottom of each section.
   instantly. The durable cache is still the client catalog/alias layer; this stops repeat spend in-process.
 - **Honest to the end.** Added `fallback_coverage_missed` (searched but couldn't open the result that may
   have held the product) and forced the needs-review reason to the honest text, never the generic string.
+
+## Phase 1: benchmark approach (2026-06-14)
+- **API-level runner, not 100 browser runs.** The expensive thing to measure (latency, lookup path,
+  cache, Firecrawl/AI cost) is the decode ENGINE, which lives behind `/api/ai-lookup`. The runner hits
+  that route headlessly (fast, scriptable, sequential to mimic scanning). Playwright proves the UI on a
+  REPRESENTATIVE set, not all 100 (per owner's instruction).
+- **No fake barcodes.** No 100-code list existed; rather than invent live codes, we built the full
+  harness + templates and validated on the 4 real codes we have ground truth for, then asked the owner
+  for the real list. Honest accuracy: never "correct" without `expectedName`/`Brand`.
+- **Cost guard reserves Firecrawl credits up front.** A cache-abort could otherwise hide spend; we
+  reserve worst-case (1 search + maxScrape) then refine to actual, so the 400-credit guard can't be
+  under-counted. Safe to over-count.
+- **Cache hit => zero spend by definition.** A cached payload still carries the original credit number;
+  cache confirmation keys off `debug.cached`, not the stored credits (fixed a false-negative).
+- **Phase 2 cost model: catalog-page harvest, not per-barcode search.** Phase 1 showed tires would each
+  cost ~7 Firecrawl credits via per-barcode fallback (~35k for 5,000). Phase 2 plans bulk catalog-page
+  harvesting to amortize cost per record, measured by a 100-record pilot before any scale. See
+  PHASE2_TIRE_DB_PLAN.md.

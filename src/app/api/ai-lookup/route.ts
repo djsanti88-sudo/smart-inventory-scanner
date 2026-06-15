@@ -193,6 +193,8 @@ export async function POST(request: Request) {
       let decision = run.decision;
       let fallbackFound = false;
       let coverageMissed = false;
+      let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
+      let firecrawlCandidates = 0;
 
       const hasProduct = () => results.some((r) => isUsableProductName(r.productName));
       const eligibleForFallback = shouldRunFallback({ hasProduct: hasProduct(), timedOut: run.timedOut, decisionStatus: decision.status, e2e: e2eMode() });
@@ -242,8 +244,15 @@ export async function POST(request: Request) {
           finders.push({
             name: "firecrawl",
             run: async (signal) => {
+              // RESERVE worst-case credits up front so the fallback hard-cap can never hide Firecrawl
+              // spend from the cost guard (safe to over-count; refined down to actual after it returns).
+              firecrawlCreditsEstimated = 1 + FIRECRAWL_MAX_SCRAPE;
+              firecrawlCandidates = FIRECRAWL_MAX_SCRAPE;
               const disc = await discoverViaFirecrawl(code, codeType, { apiKey: key, signal }, { maxScrape: FIRECRAWL_MAX_SCRAPE });
               providerStatuses = [...providerStatuses, { provider: "firecrawl", status: disc.status, latencyMs: disc.latencyMs, sourceUrlsReturned: disc.searchCount, exactCodeFound: !!disc.result, identityFound: !!disc.result }];
+              firecrawlCandidates = disc.searchCount;
+              // Actual credits if the API reported them, else estimate 1 search + 1 per candidate opened.
+              firecrawlCreditsEstimated = disc.creditsUsed > 0 ? disc.creditsUsed : 1 + disc.searchCount;
               if (disc.coverageMissed) coverageMissed = true;
               if (disc.result) return { result: disc.result, evidence: disc.evidence, providerName: "firecrawl" };
               return null;
@@ -294,6 +303,8 @@ export async function POST(request: Request) {
           reasonCode,
           fallbackFound,
           coverageMissed,
+          firecrawlCreditsEstimated,
+          firecrawlCandidates,
           cached: false,
         },
         sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },

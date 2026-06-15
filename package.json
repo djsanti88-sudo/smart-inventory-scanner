@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "live-decode-smoke": "node scripts/live-decode-smoke.ts"
+    "live-decode-smoke": "node scripts/live-decode-smoke.ts",
+    "benchmark": "node scripts/benchmark-decodes.ts"
   },
   "dependencies": {
     "next": "16.2.9",

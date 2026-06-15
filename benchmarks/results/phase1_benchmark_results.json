@@ -1,0 +1,145 @@
+{
+  "base": "http://localhost:3000",
+  "file": "benchmarks/phase1_100_codes.csv",
+  "status": {
+    "liveEnabled": true,
+    "autoDecodeOnScan": true,
+    "geminiEnabled": true,
+    "openaiEnabled": true,
+    "geminiConfigured": true,
+    "openaiConfigured": true,
+    "firecrawlConfigured": true,
+    "openWebFallback": true,
+    "geminiSearchGrounding": true,
+    "openaiWebSearch": true,
+    "geminiModel": "gemini-flash-latest",
+    "openaiModel": "gpt-5-mini",
+    "geminiProModel": "gemini-2.5-pro",
+    "openaiProModel": "gpt-5",
+    "pageFetchAndRead": true,
+    "premiumFallback": true,
+    "mode": "aggressive",
+    "dailyLimit": 100,
+    "missingKeys": [],
+    "e2e": false
+  },
+  "stoppedEarly": null,
+  "summary": {
+    "total": 4,
+    "byPath": {
+      "firecrawl_fallback": 1,
+      "fast_page_fetch": 2,
+      "needs_review": 1
+    },
+    "byVerdict": {
+      "partial": 3,
+      "needs_review": 1
+    },
+    "resolved": 3,
+    "needsReview": 1,
+    "failed": 0,
+    "latency": {
+      "count": 4,
+      "avg": 13633,
+      "median": 101,
+      "p95": 40073,
+      "min": 85,
+      "max": 40073
+    },
+    "slowest": [
+      {
+        "code": "710154236681",
+        "latencyMs": 40073,
+        "path": "needs_review"
+      },
+      {
+        "code": "810118139604",
+        "latencyMs": 14274,
+        "path": "firecrawl_fallback"
+      },
+      {
+        "code": "6977228152610",
+        "latencyMs": 101,
+        "path": "fast_page_fetch"
+      },
+      {
+        "code": "070330645936",
+        "latencyMs": 85,
+        "path": "fast_page_fetch"
+      }
+    ],
+    "firecrawlCreditsTotal": 14,
+    "aiCallsTotal": {
+      "gemini": 3,
+      "openai": 3
+    }
+  },
+  "rows": [
+    {
+      "code": "810118139604",
+      "path": "firecrawl_fallback",
+      "verdict": "partial",
+      "verdictReason": "Brand/name partially matched (name overlap 47%).",
+      "productName": "Wholesale Acrylic Paint Markers Set – 24 Metallic Colors, 2mm Bullet Tip, Water-Based, Multi-Surface",
+      "decision": "verified",
+      "reasonCode": "fallback_discovery_found_product",
+      "latencyMs": 14274,
+      "serverLatencyMs": 10012,
+      "cached": false,
+      "firecrawlCredits": 7,
+      "geminiCalls": 1,
+      "openaiCalls": 1,
+      "cachedLatencyMs": 31,
+      "cachedConfirmed": true
+    },
+    {
+      "code": "070330645936",
+      "path": "fast_page_fetch",
+      "verdict": "partial",
+      "verdictReason": "Brand/name partially matched (name overlap 40%).",
+      "productName": "Exclusive Smokes Bic Lighter Texas",
+      "decision": "verified",
+      "reasonCode": "ok",
+      "latencyMs": 85,
+      "serverLatencyMs": 55,
+      "cached": false,
+      "firecrawlCredits": 0,
+      "geminiCalls": 0,
+      "openaiCalls": 0,
+      "cachedLatencyMs": 20,
+      "cachedConfirmed": true
+    },
+    {
+      "code": "6977228152610",
+      "path": "fast_page_fetch",
+      "verdict": "partial",
+      "verdictReason": "Brand/name partially matched (name overlap 38%).",
+      "productName": "Phatoil Lavender Essential Oil Premium Grade 100ml 3.38fl Oz Two Packs Unopened",
+      "decision": "verified",
+      "reasonCode": "ok",
+      "latencyMs": 101,
+      "serverLatencyMs": 53,
+      "cached": false,
+      "firecrawlCredits": 0,
+      "geminiCalls": 0,
+      "openaiCalls": 0,
+      "cachedLatencyMs": 23,
+      "cachedConfirmed": true
+    },
+    {
+      "code": "710154236681",
+      "path": "needs_review",
+      "verdict": "needs_review",
+      "verdictReason": "The AI provider timed out. Retry live decode.",
+      "productName": "",
+      "decision": "needs_review",
+      "reasonCode": "provider_timeout",
+      "latencyMs": 40073,
+      "serverLatencyMs": 10013,
+      "cached": false,
+      "firecrawlCredits": 7,
+      "geminiCalls": 2,
+      "openaiCalls": 2
+    }
+  ]
+}
