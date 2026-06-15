@@ -60,3 +60,21 @@ The owner asked for a fix that makes "this class of failure" impossible, not a p
 That is why the hotfix added diagnostics (tell failure modes apart), open-web discovery (search where
 the product actually lives), honest reasons (never lie about why), and SSRF safety (because arbitrary
 URLs are now in scope) - not just a special-case for `810118139604`.
+
+---
+
+## L4 - Diagnose with separate budgets before blaming "the product" (2026-06-14)
+
+The first hotfix's honest diagnostics were what finally showed the truth: 810118139604 failed live not
+because it's unfindable, but because (a) the AI providers timed out at 10s and (b) Firecrawl scraped only
+the top 3 results sequentially while the real listing (Faire) ranks #4. The fix was operational, not a
+mystery: give the FALLBACK its own deeper budget and parallelism while keeping the fast path fast, and
+race the finders so the first verified result wins. Lesson: when a lookup "should work but doesn't,"
+instrument each stage with its own timing/coverage signal first - the failure is usually a budget or
+coverage gap, not the data. Sequential top-N + a one-size timeout hides both.
+
+## L5 - Cache hard-won lookups so you never re-pay (2026-06-14)
+
+A deep open-web decode costs real time and credits. Once it succeeds, the same barcode must never pay
+again. A tiny per-process decode cache (successes only) plus the durable client catalog/alias layer makes
+the expensive path a one-time cost per code. Proven: 2nd live call returned in 7ms, cached, zero spend.

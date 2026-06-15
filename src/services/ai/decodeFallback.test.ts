@@ -38,6 +38,12 @@ describe("decodeReasonCode (honest, specific reasons)", () => {
   it("product_not_found_after_search only when Firecrawl actually searched and missed", () => {
     expect(decodeReasonCode({ ...base, statuses: [st({ provider: "firecrawl", status: "no_match" })] })).toBe("product_not_found_after_search");
   });
+  it("fallback_coverage_missed when Firecrawl found more results than it could open", () => {
+    expect(decodeReasonCode({ ...base, coverageMissed: true, statuses: [st({ provider: "firecrawl", status: "no_match" })] })).toBe("fallback_coverage_missed");
+  });
+  it("provider_rate_limited still wins over coverage gaps (a hard quota stop is more specific)", () => {
+    expect(decodeReasonCode({ ...base, coverageMissed: true, statuses: [st({ status: "rate_limited" })] })).toBe("provider_rate_limited");
+  });
   it("search_provider_unavailable when there is no Firecrawl key", () => {
     expect(decodeReasonCode({ ...base, firecrawlKey: false })).toBe("search_provider_unavailable");
   });

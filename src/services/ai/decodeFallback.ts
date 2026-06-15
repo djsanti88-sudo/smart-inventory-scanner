@@ -20,6 +20,7 @@ export const REASON_TEXT: Record<string, string> = {
   provider_rate_limited: "The AI provider was rate-limited (quota). Retry shortly.",
   provider_timeout: "The AI provider timed out. Retry live decode.",
   provider_error: "The AI provider returned an error. Retry live decode.",
+  fallback_coverage_missed: "The open-web search found more results than it could open - the product may be on a page we didn't reach. Retry live decode to search deeper.",
   product_not_found_after_search: "Searched the barcode databases and the open web - no product matched this barcode.",
   search_provider_unavailable: "Not in the databases, and open-web fallback is unavailable (no Firecrawl key).",
 };
@@ -32,11 +33,15 @@ export function decodeReasonCode(a: {
   decisionStatus: string;
   statuses: ProviderStatus[];
   firecrawlKey: boolean;
+  coverageMissed?: boolean;
 }): string {
   if (a.hasProduct) return a.fallbackFound ? "fallback_discovery_found_product" : "ok";
   if (a.decisionStatus === "conflict") return "conflicting_product_identity";
   if (a.timedOut) return "lookup_budget_exceeded";
   if (a.statuses.some((s) => s.status === "rate_limited")) return "provider_rate_limited";
+  // Firecrawl searched but couldn't open the result that may have held the product (coverage gap) -
+  // distinct from a genuine "searched everything and it's not there".
+  if (a.coverageMissed) return "fallback_coverage_missed";
   if (a.statuses.some((s) => s.status === "timeout")) return "provider_timeout";
   if (a.statuses.some((s) => s.status === "error")) return "provider_error";
   if (a.statuses.some((s) => s.provider === "firecrawl" && s.status === "no_match")) return "product_not_found_after_search";

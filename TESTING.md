@@ -179,3 +179,22 @@ Gemini/OpenAI/Firecrawl during `npm run test` or `npm run test:e2e`.
 
 Full gate run (2026-06-14, C:\Users\djsan\inventory): vitest 274/274, tsc clean, eslint clean,
 next build success, playwright 10/10.
+
+## Hotfix pt.2: deep + parallel fallback (2026-06-14)
+
+Unit (all mocked):
+- `fallbackRunner.test.ts` (NEW): finders run CONCURRENTLY (max-in-flight == N, not 1); the first usable
+  hit wins and the losers are ABORTED; null-returning finders are ignored; all-miss -> null; a hard cap
+  stops an unbounded finder; a throwing finder never rejects the race.
+- `decodeCache.test.ts` (NEW): compute runs once then the cache serves repeats (no repeat spend); a
+  FAILURE is not cached (stays retryable); per-code keys independent; key trimming; empty code ignored.
+- `firecrawlProvider.test.ts` (+): finds a listing at rank #4 (old code only scraped top 3); parallel
+  resilience (an earlier scrape failing still recovers the match); `coverageMissed` true when more safe
+  results existed than maxScrape and none matched, false when all were opened; `urlPreferenceScore`
+  prefers product/listing URLs over search/cart/login; a product page is opened before a search page.
+- `decodeFallback.test.ts` (+): `fallback_coverage_missed`; rate-limit still wins over a coverage gap.
+
+Full gate run (2026-06-14): vitest 291/291, tsc clean, eslint clean, next build success, playwright 10/10.
+
+LIVE (owner-authorized, 1 paid + 1 cached): 810118139604 -> verified product in 16s; repeat call 7ms
+cached, zero spend. See LIVE_FALLBACK_PROOF.md.

@@ -448,3 +448,34 @@ no fallback) / Faire-type open-web fallback (810118139604 found + counts) / prov
 - Add `FIRECRAWL_API_KEY=fc-...` to `.env.local` (tool-blocked from editing it). Until then the live
   open-web fallback is gracefully disabled (`search_provider_unavailable`); everything else works.
 - Optional: one live smoke of 810118139604 after the key is set + dev server restart.
+
+## Hotfix pt.2: deep + parallel fallback with separate budgets (2026-06-14)
+
+### Why
+The first hotfix's diagnostics proved 810118139604 still failed live for two reasons: AI providers timed
+out at 10s (never cited the Faire URL) and Firecrawl scraped only the top 3 results sequentially (Faire
+ranks #4) in 56s. Owner approved a tuning with SEPARATE budgets: keep the fast path fast, give the
+fallback real time + coverage.
+
+### What shipped
+- **Separate budgets.** Fast path unchanged (~13s, no Firecrawl on success). Fallback runs ONLY on a
+  hard fail and gets a deep budget: grounded AI re-run (25s per provider) + Firecrawl, with a ~30s hard
+  cap on the whole fallback.
+- **Parallel racing fallback** (`fallbackRunner.ts` `raceFinders`): the deep AI re-run (gemini grounded
+  + openai mini + page-fetch via the orchestrator with `requireVerifiedEarlyExit`) and Firecrawl run
+  CONCURRENTLY; the FIRST verified + usable product wins and the losers are aborted (saves time/credits).
+- **Firecrawl tuning** (`firecrawlProvider.ts`): opens up to 6 safe candidates IN PARALLEL; prefers
+  product/listing URLs over search/cart/login/category noise (`urlPreferenceScore`); reports
+  `coverageMissed` when more results existed than it could open; best-effort credit tracking.
+- **Decode cache** (`decodeCache.ts`): a decoded barcode never re-pays for AI/Firecrawl in the running
+  server (successes only; failures stay retryable).
+- **Reason codes**: added `fallback_coverage_missed`; the generic "no provider returned a usable product"
+  is replaced by the honest reason on every needs-review path.
+
+### Gates (C:\Users\djsan\inventory)
+vitest 291/291, tsc clean, eslint clean, next build success, playwright 10/10.
+
+### LIVE proof (owner-authorized, see LIVE_FALLBACK_PROOF.md)
+810118139604 -> **verified** "Acrylic Paint Markers Set, 24 Metallic Colors" (Faire, SKU 409-24M) in
+**16s** (was 66s); Firecrawl won in 6s opening 6 candidates in parallel. Second call **7ms, cached**,
+zero spend.

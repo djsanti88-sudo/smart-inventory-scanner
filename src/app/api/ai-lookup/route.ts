@@ -12,6 +12,15 @@ import { decideDecode, isUsableProductName } from "@/services/ai/decode";
 import { discoverViaFirecrawl } from "@/services/ai/firecrawlProvider";
 import { filterSafeUrls } from "@/services/ai/urlSafety";
 import { shouldRunFallback, decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
+import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
+import { withDecodeCache } from "@/services/ai/decodeCache";
+
+// Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
+// parallel fallback. Each value is env-overridable.
+const FALLBACK_AI_TIMEOUT_MS = Number(process.env.FALLBACK_AI_TIMEOUT_MS || 25_000); // grounded AI re-run
+const FALLBACK_HARD_CAP_MS = Number(process.env.FALLBACK_HARD_CAP_MS || 30_000); // whole-fallback ceiling
+const FALLBACK_PAGE_TIMEOUT_MS = Number(process.env.FALLBACK_PAGE_TIMEOUT_MS || 15_000);
+const FIRECRAWL_MAX_SCRAPE = Number(process.env.FIRECRAWL_MAX_SCRAPE || 6);
 
 const DECODE_BUDGET_MS = Number(process.env.DECODE_BUDGET_MS || 13_000);
 
@@ -157,96 +166,146 @@ export async function POST(request: Request) {
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
     const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
 
-    // FAST-FIRST, CONCURRENT, HARD 13s BUDGET. Providers + page-fetch race under one budget signal.
-    // On timeout the orchestrator aborts everything and returns Needs Review (never a partial).
-    const baseProviders = decodeProviders(); // fast models only (gemini-flash + gpt-5-mini)
-    const providers: DecodeProvider[] = baseProviders.map((p) => ({
-      name: p.name,
-      lookup: (signal) => p.lookup(req, signal),
-    }));
     const reader = pageReader();
-    const enrich = e2eMode()
-      ? undefined
-      : (signal: AbortSignal) => enrichWithPageFetch({ code, codeType, extract: reader, signal });
-
-    const run = await runDecode({
-      code,
-      codeType,
-      confidenceThreshold: threshold,
-      providers,
-      enrich,
-      budgetMs,
-      trustedHosts: TRUSTED_HOSTS,
-    });
-
-    // STAGE 2 - fallback source discovery. Runs ONLY when the fast path found no usable product (and
-    // not a timeout / provider conflict), so normal successful scans add ZERO extra calls. Order:
-    // (2a) read the URLs the AI already cited (free), then (2b) Firecrawl open-web search (gated by key).
-    let results = run.results;
-    let evidences = run.evidences;
-    let providerNames = run.providerNames;
-    let providerStatuses = run.providerStatuses;
-    let decision = run.decision;
-    let fallbackFound = false;
-
-    const hasProduct = () => results.some((r) => isUsableProductName(r.productName));
     const firecrawlKey = process.env.FIRECRAWL_API_KEY;
-    const eligibleForFallback = shouldRunFallback({ hasProduct: hasProduct(), timedOut: run.timedOut, decisionStatus: decision.status, e2e: e2eMode() });
 
-    if (eligibleForFallback && reader) {
-      // 2a: read AI-cited URLs (the app never did this before) through the SSRF-guarded page reader.
-      const citedUrls = filterSafeUrls(results.flatMap((r) => r.sourceUrls ?? []), 4);
-      if (citedUrls.length > 0) {
-        const t = Date.now();
-        try {
-          const fb = await enrichWithPageFetch({ code, codeType, extraUrls: citedUrls, extract: reader });
-          const ok = !!fb.result && isUsableProductName(fb.result.productName);
-          providerStatuses = [...providerStatuses, { provider: "ai-cited-urls", status: ok ? "ok" : "no_match", latencyMs: Date.now() - t, sourceUrlsReturned: citedUrls.length, exactCodeFound: fb.evidence.verified, identityFound: ok }];
-          if (ok && fb.result) { results = [fb.result, ...results]; evidences = [fb.evidence, ...evidences]; providerNames = ["ai-cited", ...providerNames]; fallbackFound = true; }
-        } catch {
-          providerStatuses = [...providerStatuses, { provider: "ai-cited-urls", status: "error", latencyMs: Date.now() - t, sourceUrlsReturned: citedUrls.length, exactCodeFound: false, identityFound: false }];
+    // The expensive decode (fast path + deep fallback) is cached by code: once a barcode resolves to a
+    // real product, a repeat scan in this server returns instantly with NO AI/Firecrawl spend. Only a
+    // SUCCESS (a usable product) is cached - a failure stays retryable. Skipped under E2E (mock-only).
+    const computeDecode = async () => {
+      // FAST PATH - CONCURRENT, HARD ~13s BUDGET. Providers + page-fetch race under one budget signal.
+      // On timeout the orchestrator aborts everything and returns Needs Review (never a partial).
+      const baseProviders = decodeProviders(); // fast models only (gemini-flash + gpt-5-mini)
+      const providers: DecodeProvider[] = baseProviders.map((p) => ({
+        name: p.name,
+        lookup: (signal) => p.lookup(req, signal),
+      }));
+      const enrich = e2eMode()
+        ? undefined
+        : (signal: AbortSignal) => enrichWithPageFetch({ code, codeType, extract: reader, signal });
+
+      const run = await runDecode({ code, codeType, confidenceThreshold: threshold, providers, enrich, budgetMs, trustedHosts: TRUSTED_HOSTS });
+
+      let results = run.results;
+      let evidences = run.evidences;
+      let providerNames = run.providerNames;
+      let providerStatuses = run.providerStatuses;
+      let decision = run.decision;
+      let fallbackFound = false;
+      let coverageMissed = false;
+
+      const hasProduct = () => results.some((r) => isUsableProductName(r.productName));
+      const eligibleForFallback = shouldRunFallback({ hasProduct: hasProduct(), timedOut: run.timedOut, decisionStatus: decision.status, e2e: e2eMode() });
+
+      // STAGE 2 - DEEP, PARALLEL fallback. Runs ONLY when the fast path found no usable product (so a
+      // normal successful scan adds ZERO extra calls). Gemini grounded + OpenAI mini (deep 25s budget)
+      // and Firecrawl (6 safe candidates, parallel scrapes) RACE; the first VERIFIED + usable product
+      // wins and the losers are aborted. A hard cap bounds the whole thing (no 60s+ chains).
+      if (eligibleForFallback) {
+        const citedFromFast = filterSafeUrls(results.flatMap((r) => r.sourceUrls ?? []), 4);
+        const finders: Finder[] = [];
+
+        // Finder A: deep grounded AI re-run. Reuses the orchestrator (gemini + openai + page-fetch run
+        // concurrently) with a longer per-provider timeout and VERIFIED-only early-exit, then reads any
+        // URLs the deeper providers cited (the fast pass's providers had timed out before citing any).
+        if (reader) {
+          finders.push({
+            name: "ai-deep",
+            run: async (signal) => {
+              const deep = await runDecode({
+                code, codeType, confidenceThreshold: threshold, providers,
+                enrich: (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, extraUrls: citedFromFast }),
+                budgetMs: FALLBACK_AI_TIMEOUT_MS + 5_000,
+                providerTimeoutMs: FALLBACK_AI_TIMEOUT_MS,
+                pageTimeoutMs: FALLBACK_PAGE_TIMEOUT_MS,
+                trustedHosts: TRUSTED_HOSTS,
+                requireVerifiedEarlyExit: true,
+              });
+              providerStatuses = [...providerStatuses, ...deep.providerStatuses.map((s) => ({ ...s, provider: `deep:${s.provider}` }))];
+              const i = deep.results.findIndex((r, idx) => isUsableProductName(r.productName) && deep.evidences[idx]?.verified);
+              if (i >= 0) return { result: deep.results[i], evidence: deep.evidences[i], providerName: deep.providerNames[i] ?? "ai-deep" };
+              const freshCited = filterSafeUrls(deep.results.flatMap((r) => r.sourceUrls ?? []), 4).filter((u) => !citedFromFast.includes(u));
+              if (freshCited.length && !signal.aborted) {
+                const fb = await enrichWithPageFetch({ code, codeType, extraUrls: freshCited, extract: reader, signal });
+                if (fb.result && isUsableProductName(fb.result.productName) && fb.evidence.verified) {
+                  return { result: fb.result, evidence: fb.evidence, providerName: "ai-cited-deep" };
+                }
+              }
+              return null;
+            },
+          });
         }
-      }
-      // 2b: Firecrawl open-web discovery (only if still no product). Gated by FIRECRAWL_API_KEY.
-      if (!hasProduct()) {
+
+        // Finder B: Firecrawl open-web discovery (6 safe candidates, scraped in PARALLEL).
         if (firecrawlKey) {
-          const disc = await discoverViaFirecrawl(code, codeType, { apiKey: firecrawlKey }, { maxScrape: 3 });
-          providerStatuses = [...providerStatuses, { provider: "firecrawl", status: disc.status, latencyMs: disc.latencyMs, sourceUrlsReturned: disc.searchCount, exactCodeFound: !!disc.result, identityFound: !!disc.result }];
-          if (disc.result) { results = [disc.result, ...results]; evidences = [disc.evidence, ...evidences]; providerNames = ["firecrawl", ...providerNames]; fallbackFound = true; }
+          const key = firecrawlKey;
+          finders.push({
+            name: "firecrawl",
+            run: async (signal) => {
+              const disc = await discoverViaFirecrawl(code, codeType, { apiKey: key, signal }, { maxScrape: FIRECRAWL_MAX_SCRAPE });
+              providerStatuses = [...providerStatuses, { provider: "firecrawl", status: disc.status, latencyMs: disc.latencyMs, sourceUrlsReturned: disc.searchCount, exactCodeFound: !!disc.result, identityFound: !!disc.result }];
+              if (disc.coverageMissed) coverageMissed = true;
+              if (disc.result) return { result: disc.result, evidence: disc.evidence, providerName: "firecrawl" };
+              return null;
+            },
+          });
         } else {
           providerStatuses = [...providerStatuses, { provider: "firecrawl", status: "skipped", latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false }];
         }
+
+        if (finders.length > 0) {
+          const outcome = await raceFinders(finders, { hardCapMs: FALLBACK_HARD_CAP_MS });
+          if (outcome.hit) {
+            results = [outcome.hit.result, ...results];
+            evidences = [outcome.hit.evidence, ...evidences];
+            providerNames = [outcome.hit.providerName, ...providerNames];
+            fallbackFound = true;
+            // Decide on the WINNER alone so leftover fast-path noise can't manufacture a false conflict.
+            decision = decideDecode({ codeType, results: [outcome.hit.result], evidences: [outcome.hit.evidence], confidenceThreshold: threshold });
+          }
+        }
       }
-      if (fallbackFound) decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold });
-    }
 
-    const reasonCode = decodeReasonCode({ hasProduct: hasProduct(), fallbackFound, timedOut: run.timedOut, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: !!firecrawlKey });
+      const reasonCode = decodeReasonCode({ hasProduct: hasProduct(), fallbackFound, timedOut: run.timedOut, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: !!firecrawlKey, coverageMissed });
+      const reasonText = REASON_TEXT[reasonCode] ?? "";
+      // Never surface the generic "no provider returned a usable product": prefer the honest reason.
+      if (decision.status !== "verified" && reasonText) decision = { ...decision, reason: reasonText };
 
-    return Response.json({
-      mode: "decode",
-      providerNames,
-      results,
-      evidences,
-      providerStatuses,
-      decision,
-      reasonCode,
-      reasonText: REASON_TEXT[reasonCode] ?? "",
-      timedOut: run.timedOut,
-      debug: {
-        providersAttempted: providerNames,
-        evidenceStrengths: evidences.map((e) => e.strength),
-        sourceCounts: results.map((r) => (r.sourceUrls ?? []).length),
-        geminiSearchGrounding: process.env.ENABLE_GEMINI_SEARCH_GROUNDING !== "false",
-        openaiWebSearch: process.env.ENABLE_OPENAI_WEB_SEARCH !== "false",
-        baseModels: [GEMINI_FAST_MODEL, OPENAI_FAST_MODEL],
-        latencyMs: run.latencyMs,
-        timedOut: run.timedOut,
-        budgetMs,
+      return {
+        mode: "decode" as const,
+        providerNames,
+        results,
+        evidences,
+        providerStatuses,
+        decision,
         reasonCode,
-        fallbackFound,
-      },
-      sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
-    });
+        reasonText,
+        timedOut: run.timedOut,
+        debug: {
+          providersAttempted: providerNames,
+          evidenceStrengths: evidences.map((e) => e.strength),
+          sourceCounts: results.map((r) => (r.sourceUrls ?? []).length),
+          geminiSearchGrounding: process.env.ENABLE_GEMINI_SEARCH_GROUNDING !== "false",
+          openaiWebSearch: process.env.ENABLE_OPENAI_WEB_SEARCH !== "false",
+          baseModels: [GEMINI_FAST_MODEL, OPENAI_FAST_MODEL],
+          latencyMs: run.latencyMs,
+          timedOut: run.timedOut,
+          budgetMs,
+          reasonCode,
+          fallbackFound,
+          coverageMissed,
+          cached: false,
+        },
+        sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+      };
+    };
+
+    const hasUsable = (p: Awaited<ReturnType<typeof computeDecode>>) => p.results.some((r) => isUsableProductName(r.productName));
+    const { value: payload, cached } = e2eMode()
+      ? { value: await computeDecode(), cached: false }
+      : await withDecodeCache(code, hasUsable, computeDecode);
+
+    return Response.json({ ...payload, debug: { ...payload.debug, cached } });
   }
 
   // --- lookup mode (single suggestion) ---

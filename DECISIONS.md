@@ -200,3 +200,21 @@ Why each choice was made. Newest decisions at the bottom of each section.
 - **Process lesson encoded as a rule.** Ground-truth product existence + the source that has it BEFORE
   changing decode thresholds/timeouts. Never assert "not found" from weak engines (Bing/DDG) or hidden
   provider failures. (See LESSONS_LEARNED.md.)
+
+## Hotfix pt.2: deep + parallel fallback, separate budgets (2026-06-14)
+- **Separate budgets, not one.** Normal scans must stay fast, so the fast path keeps its ~13s budget and
+  never calls Firecrawl on success. Only a hard-failed barcode enters the deep fallback (AI 25s grounded
+  + Firecrawl, ~30s hard cap). This is the owner's explicit rule: fast path fast, hard fails get depth.
+- **Race, don't chain.** The old fallback chained AI-cited-URL reading THEN Firecrawl, which stacked to
+  60s+. Now the deep AI re-run and Firecrawl run concurrently via `raceFinders`; the first VERIFIED +
+  usable result wins and the losers are aborted. Wall-clock = the fastest finder, not the sum.
+- **Fallback is stricter than the fast path.** The fast path trusts a usable AI name (speed). The
+  fallback requires app-VERIFIED exact-code evidence before it stops early (`requireVerifiedEarlyExit`),
+  because a slow deep result must be trustworthy, not a guess.
+- **Coverage over the barcode-DB noise.** Real listings (Faire) rank below barcode-DB pages, so Firecrawl
+  now opens 6 candidates IN PARALLEL and PREFERS product URLs over search/cart/login pages. Sequential
+  top-3 was both too shallow (missed #4) and too slow (56s).
+- **Cache so a barcode never re-pays.** A server-side decode cache returns a previously-found product
+  instantly. The durable cache is still the client catalog/alias layer; this stops repeat spend in-process.
+- **Honest to the end.** Added `fallback_coverage_missed` (searched but couldn't open the result that may
+  have held the product) and forced the needs-review reason to the honest text, never the generic string.

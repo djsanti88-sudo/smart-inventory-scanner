@@ -26,6 +26,10 @@ export interface DecodeRunParams {
   providerTimeoutMs?: number;
   pageTimeoutMs?: number;
   trustedHosts?: string[];
+  // Fast path (default): early-exit as soon as ANY provider returns a usable product name (trust-the-AI).
+  // Fallback path sets this true: only a fully app-VERIFIED decision (exact code in strong evidence)
+  // stops the wait early - so a hard-failed barcode's deeper, slower decode is trustworthy, not a guess.
+  requireVerifiedEarlyExit?: boolean;
 }
 
 // Per-provider/per-source outcome - so failures are SURFACED, never hidden behind a generic message.
@@ -103,10 +107,11 @@ export async function runDecode(p: DecodeRunParams): Promise<DecodeRunResult> {
   const confident = new Promise<void>((res) => (resolveConfident = res));
   const recheck = () => {
     if (results.length === 0) return;
-    // SPEED + trust-the-AI: stop as soon as ANY provider returns a usable product name. We do NOT wait
-    // for the slow page-fetch/cross-check to "fully verify" - that was the ~8s tail. The app still
-    // records evidence for catalog metadata, and the client routes conflicts/no-product to review.
-    if (results.some((r) => isUsableProductName(r.productName))) {
+    // SPEED + trust-the-AI (fast path): stop as soon as ANY provider returns a usable product name. We
+    // do NOT wait for the slow page-fetch/cross-check to "fully verify" - that was the ~8s tail. The app
+    // still records evidence for catalog metadata, and the client routes conflicts/no-product to review.
+    // Fallback path (requireVerifiedEarlyExit) skips this shortcut and waits for VERIFIED evidence.
+    if (!p.requireVerifiedEarlyExit && results.some((r) => isUsableProductName(r.productName))) {
       resolveConfident();
       return;
     }

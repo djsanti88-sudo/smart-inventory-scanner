@@ -66,3 +66,14 @@ Live smoke: 2 calls (owner-authorized cap), keys configured, e2e=false. No live 
 | 7 | A "Product Not Found" page that echoes the code is treated as a match | Med | Was possible | Reader rejects not-found pages that only echo the code; requires the exact code AND a usable identity; unit-tested | Fixed |
 
 No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migration, no persist-version bump.
+
+## Hotfix pt.2: deep + parallel fallback, separate budgets (2026-06-14)
+
+| # | Risk | Sev | Likelihood | Mitigation | Status |
+|---|------|-----|-----------|------------|--------|
+| 1 | Deep fallback slows NORMAL scans | High | Low | Separate budgets: fast path unchanged (~13s, no Firecrawl on success); deep fallback runs ONLY on a hard fail (`shouldRunFallback`); unit + e2e assert no fallback on success | Mitigated |
+| 2 | Fallback runs unbounded / 60s+ chains | High | Was occurring | Finders RACE concurrently (not chained); first verified wins, losers aborted; ~30s hard cap (`raceFinders`); live proof 16s (was 66s) | Fixed |
+| 3 | Fallback returns a wrong/guessed product | Med | Low | Fallback requires app-VERIFIED exact-code evidence (`requireVerifiedEarlyExit`) + usable identity before it wins; decided on the winner alone to avoid false conflicts | Mitigated |
+| 4 | Firecrawl credit/cost blowup (6 parallel scrapes per fail) | Med | Low | Only on hard fails; decode cache means a barcode never re-pays; product-URL preference spends the budget on pages that can carry a product; best-effort credit tracking | Mitigated |
+| 5 | Double AI spend (fast pass + deep re-run) | Low | Confirmed | Accepted per owner spec (deep grounded re-run is the point); only on hard fails; cached after first success | Accepted |
+| 6 | Stale cache serves wrong product | Low | Low | Cache keyed by exact code; product identity is stable; successes only; per-process (cleared on restart); client catalog is the durable layer | Mitigated |
