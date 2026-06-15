@@ -175,7 +175,8 @@ no keys in client; tests pass or failures explained; proof artifacts + final rep
 - Reuse existing patterns. Do not break existing functionality. Prefer isolated additions.
 
 ## Human Bot Proof Gate
-Human bot proof is required before handoff for scanner, inventory, role, export, catalog, alias, and
-product-resolution changes. Unit tests are NOT sufficient. See `docs/REVISION_GATE.md` + `docs/QA_BOTS.md`.
-Run `npm run qa:bots` (or `qa:revision`) and do not claim a resolution fix works unless a browser bot
-proved it through the real UI with a screenshot.
+Human-bot proof and safe security-leak checks are required before handoff for scanner, inventory, role,
+export, catalog, alias, product-resolution, and customer-facing changes. Unit tests are NOT sufficient.
+See `docs/REVISION_GATE.md`, `docs/QA_BOTS.md`, `docs/AGENT_BOT_ROLES.md`. Run the relevant `npm run qa:bots:*`
+(or `qa:revision`); for live-account resolution changes also run `qa:bots:live`. Do not claim a resolution
+or data-protection fix works unless a browser bot proved it through the real UI with a screenshot.

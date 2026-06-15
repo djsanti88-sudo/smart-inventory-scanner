@@ -1,0 +1,60 @@
+{
+  "role": "current (auth-bypass; role gating not yet implemented)",
+  "exports": [
+    {
+      "export": "final counts",
+      "header": "quantity,product_name,brand,category,specs,primary_sku,primary_barcode,gtin,upc,ean,aliases,image_url,product_url,location,notes,counted_at,session_id,sync_status,scan_event_ids",
+      "codeFields": [
+        "primary_barcode",
+        "gtin",
+        "upc",
+        "ean",
+        "aliases"
+      ]
+    },
+    {
+      "export": "products",
+      "header": "id,name,brand,category,specs,primary_sku,primary_barcode,gtin,upc,ean,aliases,image_url,location,source",
+      "codeFields": [
+        "primary_barcode",
+        "gtin",
+        "upc",
+        "ean",
+        "aliases"
+      ]
+    },
+    {
+      "export": "aliases",
+      "header": "id,product_id,raw_code_example,clean_code,normalized_code,alias_type,source,confidence,sync_status",
+      "codeFields": [
+        "ean",
+        "raw_code",
+        "clean_code",
+        "normalized",
+        "raw_code_example",
+        "normalized_code"
+      ]
+    },
+    {
+      "export": "raw scan log",
+      "header": "time,raw_code,clean_code,normalized_candidates,match_type,matched_product_id,status,quantity_after_scan,sync_status,idempotency_key",
+      "codeFields": [
+        "ean",
+        "raw_code",
+        "clean_code",
+        "normalized"
+      ]
+    },
+    {
+      "export": "unknowns",
+      "header": "raw_code,clean_code,normalized_candidates,suggested_product_name,suggested_brand,confidence,provider,status,sync_status",
+      "codeFields": [
+        "ean",
+        "raw_code",
+        "clean_code",
+        "normalized",
+        "provider"
+      ]
+    }
+  ]
+}

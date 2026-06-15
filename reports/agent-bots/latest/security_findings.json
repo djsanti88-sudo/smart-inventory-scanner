@@ -1,0 +1,112 @@
+{
+  "findings": [
+    {
+      "surface": "localStorage (sis-scan-v1)",
+      "finding": "Customer browser holds the alias database (cleanCode/normalizedCode values)",
+      "severity": "P0",
+      "detail": "~13 alias code entries persisted client-side"
+    },
+    {
+      "surface": "localStorage (sis-scan-v1)",
+      "finding": "Customer browser holds the shared catalog object",
+      "severity": "P0",
+      "detail": "global catalog persisted client-side (downloadable)"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: aliases",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: catalog",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: normalizedCode",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: cleanCode",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: gtin",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: upc",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: ean",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "localStorage",
+      "finding": "internal field present in client store: rawCodeExample",
+      "severity": "P1",
+      "detail": "field serialized into the browser store"
+    },
+    {
+      "surface": "/products",
+      "finding": "Products page shows raw code columns (barcode/GTIN/UPC/EAN/aliases)",
+      "severity": "P0",
+      "detail": "no role gate; visible to any logged-in user"
+    },
+    {
+      "surface": "/review",
+      "finding": "customer-facing UI exposes term \"provider\"",
+      "severity": "P1",
+      "detail": "internal/AI mechanics shown to customer-facing roles"
+    },
+    {
+      "surface": "/settings",
+      "finding": "customer-facing UI exposes term \"Gemini\"",
+      "severity": "P1",
+      "detail": "internal/AI mechanics shown to customer-facing roles"
+    },
+    {
+      "surface": "/settings",
+      "finding": "customer-facing UI exposes term \"OpenAI\"",
+      "severity": "P1",
+      "detail": "internal/AI mechanics shown to customer-facing roles"
+    },
+    {
+      "surface": "/settings",
+      "finding": "customer-facing UI exposes term \"AI lookup\"",
+      "severity": "P2",
+      "detail": "internal/AI mechanics shown to customer-facing roles"
+    },
+    {
+      "surface": "/settings",
+      "finding": "customer-facing UI exposes term \"AI decode\"",
+      "severity": "P2",
+      "detail": "internal/AI mechanics shown to customer-facing roles"
+    },
+    {
+      "surface": "/settings",
+      "finding": "customer-facing UI exposes term \"provider\"",
+      "severity": "P1",
+      "detail": "internal/AI mechanics shown to customer-facing roles"
+    },
+    {
+      "surface": "/settings",
+      "finding": "customer-facing UI exposes term \"evidence\"",
+      "severity": "P2",
+      "detail": "internal/AI mechanics shown to customer-facing roles"
+    }
+  ]
+}
