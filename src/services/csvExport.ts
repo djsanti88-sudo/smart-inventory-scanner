@@ -242,6 +242,37 @@ export function exportAliases(aliases: Alias[]): string {
   return buildCsv(headers, rows);
 }
 
+// ---- Customer-safe (sanitized) exports ----
+// For non-platformOwner roles. Product-facing columns ONLY: no barcode/gtin/upc/ean/aliases/raw codes/
+// scan-event ids. These are what ExportButtons offers when the access level is "business".
+
+export function exportFinalCountsCustomer(counts: InventoryCount[], products: Product[], sessionId: string): string {
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const headers = ["quantity", "product_name", "brand", "category", "specs", "part_number", "location", "counted_at", "session_id"];
+  const rows = counts.map((c) => {
+    const p = byId.get(c.productId);
+    return [c.quantity, p?.name ?? "", p?.brand ?? "", p?.category ?? "", p?.specsShort ?? "", p?.primarySku ?? "", p?.location ?? "", c.lastScannedAt, sessionId];
+  });
+  return buildCsv(headers, rows);
+}
+
+export function exportQuantityAdjustmentsCustomer(counts: InventoryCount[], products: Product[], sessionId: string): string {
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const headers = ["product_name", "brand", "category", "part_number", "counted_quantity", "system_quantity", "adjustment", "location", "session_id"];
+  const rows = counts.map((c) => {
+    const p = byId.get(c.productId);
+    return [p?.name ?? "", p?.brand ?? "", p?.category ?? "", p?.primarySku ?? "", c.quantity, "", c.quantity, p?.location ?? "", sessionId];
+  });
+  return buildCsv(headers, rows);
+}
+
+export function exportUnknownsCustomer(reviews: UnknownCodeReview[]): string {
+  // No raw/clean/normalized codes for customers — only the human-facing suggestion + status.
+  const headers = ["suggested_product_name", "suggested_brand", "suggested_category", "status"];
+  const rows = reviews.map((r) => [r.suggestedProductName, r.suggestedBrand, r.suggestedCategory, r.status]);
+  return buildCsv(headers, rows);
+}
+
 export function exportPendingQueue(items: PendingSyncItem[]): string {
   const headers = [
     "id",
