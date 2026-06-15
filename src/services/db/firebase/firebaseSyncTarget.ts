@@ -1,5 +1,5 @@
 import { type Firestore, doc, runTransaction, serverTimestamp } from "firebase/firestore";
-import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview } from "@/types";
+import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview, Product } from "@/types";
 import type { SyncResult, FailureMode, IncrementPayload } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { COLLECTIONS } from "@/services/db/types";
@@ -75,6 +75,11 @@ export class FirebaseSyncTarget implements SyncTarget {
           case "RESOLVE_ALIAS": {
             const a = item.payload as Alias;
             tx.set(sub(COLLECTIONS.aliases, a.id), { ...a, businessId: bid, updatedAt: serverTimestamp() });
+            break;
+          }
+          case "SAVE_PRODUCT": {
+            const pr = item.payload as Product;
+            tx.set(sub(COLLECTIONS.products, pr.id), { ...pr, businessId: bid, updatedAt: serverTimestamp() }, { merge: true });
             break;
           }
           case "INCREMENT_COUNT": {

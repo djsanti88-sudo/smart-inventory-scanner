@@ -1,4 +1,4 @@
-import type { Alias, PendingSyncItem, ScanEvent, UnknownCodeReview } from "@/types";
+import type { Alias, PendingSyncItem, Product, ScanEvent, UnknownCodeReview } from "@/types";
 
 // A local mock of the backend. Its ONLY job for proof purposes is to be IDEMPOTENT:
 // applying the same sync operation (same idempotencyKey / scanEvent id) more than once must not
@@ -20,6 +20,7 @@ export interface MockDbState {
   counts: Record<string, ServerCount>; // key = `${sessionId}|${productId}`
   aliases: Record<string, Alias>; // key = `${businessId}|${cleanCode}|${productId}`
   reviews: Record<string, UnknownCodeReview>;
+  products: Record<string, Product>; // key = product id
   appliedKeys: string[];
 }
 
@@ -33,7 +34,7 @@ export interface SyncResult {
 export type FailureMode = "none" | "always" | { failTimes: number };
 
 function emptyState(): MockDbState {
-  return { scanEvents: {}, counts: {}, aliases: {}, reviews: {}, appliedKeys: [] };
+  return { scanEvents: {}, counts: {}, aliases: {}, reviews: {}, products: {}, appliedKeys: [] };
 }
 
 const countKey = (sessionId: string, productId: string) => `${sessionId}|${productId}`;
@@ -90,6 +91,9 @@ export class MockDb {
       case "RESOLVE_ALIAS":
         this.upsertAlias(item.payload as Alias);
         break;
+      case "SAVE_PRODUCT":
+        this.upsertProduct(item.payload as Product);
+        break;
       default:
         return { ok: false, alreadyApplied: false, error: `Unknown operation ${item.operation}` };
     }
@@ -134,6 +138,11 @@ export class MockDb {
         ? [...existing.appliedIdempotencyKeys, p.idempotencyKey]
         : existing.appliedIdempotencyKeys,
     };
+  }
+
+  upsertProduct(product: Product) {
+    // Upsert by id: re-saving the same product id never creates a duplicate.
+    this.state.products[product.id] = { ...product };
   }
 
   upsertAlias(alias: Alias) {
