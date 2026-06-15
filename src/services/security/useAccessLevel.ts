@@ -8,6 +8,10 @@ import { accessLevelClient, type AccessLevel } from "@/services/security/roleAcc
 // platformOwner is the PLATFORM allowlist (NEXT_PUBLIC_PLATFORM_OWNER_*), never a business role.
 export function useAccessLevel(): AccessLevel {
   const userId = useScanStore((s) => s.userId);
+  // E2E override: the legacy mock E2E suite (playwright.config.ts) exercises the FULL platformOwner view,
+  // so it sets NEXT_PUBLIC_E2E_PLATFORM_OWNER=1. The human-bot suite does NOT set it (stays customer view
+  // so SecurityLeakBot can verify hiding). Real cloud ignores this and uses the actual allowlist.
+  if (process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER === "1") return "platform";
   return accessLevelClient({ uid: userId });
 }
 
