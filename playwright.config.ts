@@ -21,6 +21,8 @@ export default defineConfig({
     timeout: 180_000,
     stdout: "pipe",
     // TEST SAFETY: force the AI route to mock-only so E2E can never call live Gemini/OpenAI.
-    env: { ...process.env, IS_E2E: "1" },
+    // NEXT_PUBLIC_E2E_AUTH_BYPASS enables the client auth bypass for E2E only (impossible in production -
+    // see src/services/auth/authBypass.ts). This keeps specs auth-independent of a live Supabase.
+    env: { ...process.env, IS_E2E: "1", NEXT_PUBLIC_E2E_AUTH_BYPASS: "1" },
   },
 });

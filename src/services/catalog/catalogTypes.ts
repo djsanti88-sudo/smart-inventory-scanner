@@ -1,5 +1,5 @@
 // Shared barcode catalog domain types. Kept provider-agnostic so a future cloud database
-// (Supabase/Postgres/Firebase) can implement the same shapes with no caller changes.
+// (Firebase) can implement the same shapes with no caller changes.
 //
 // PRIVACY INVARIANT: `CatalogEntry` is the GLOBAL, shareable catalog. It must only ever hold
 // sanitized barcode/product/evidence data - never businessId, prices, margins, notes, or any
