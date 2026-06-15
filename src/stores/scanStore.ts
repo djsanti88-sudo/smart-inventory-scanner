@@ -20,7 +20,12 @@ import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector
 import { resolveScan } from "@/services/resolver";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
-import { MockDb, getMockDb, type IncrementPayload } from "@/services/mockDb";
+import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
+import type { SyncTarget } from "@/services/db/syncTarget";
+import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
+import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
+import { auditRepository } from "@/services/db/firebase/repositories";
+import { getDb } from "@/lib/firebaseClient";
 import {
   evaluateAiGate,
   initBreaker,
@@ -40,8 +45,19 @@ import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
+import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
+import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import type { AiStatus } from "@/types";
+
+/** Result summary of a CSV product import (shown in the UI). */
+export interface CsvImportSummary {
+  rowsParsed: number;
+  productsCreated: number;
+  aliasesCreated: number;
+  duplicates: number;
+  conflicts: ImportConflict[];
+}
 
 /** Snapshot of rows removed by a junk cleanup, so the action is fully reversible (Undo). */
 export interface CleanupBackup {
@@ -103,10 +119,28 @@ function evaluateAutoDecode(p: {
 // using idempotency keys so a retry can never double-count.
 
 export interface ScanStoreDeps {
-  db: MockDb;
+  db: SyncTarget; // MockDb (local, sync) or FirebaseSyncTarget (cloud/emulator, async)
   idFactory: () => string;
   now: () => string;
   persistName: string | null; // null disables persistence (used by tests)
+  // When true (Firebase backend), syncPending uses the async drain and REQUIRES a real business context
+  // (businessId + userId) before any write. Default/mock path is unchanged (sync, no context required).
+  cloudBackend?: boolean;
+  // Cloud backend only: loads a business's products/aliases/sessions/counts from Firestore when its
+  // context is set, so the deterministic resolver works and the active session + finalCounts are
+  // reconstructed after a refresh / on a fresh device. Injectable for tests.
+  loadBusinessData?: (
+    businessId: string,
+    userId: string,
+  ) => Promise<{
+    products: Product[];
+    aliases: Alias[];
+    sessions: InventorySession[];
+    counts: InventoryCount[];
+  }>;
+  // Fire-and-forget audit sink (cloud -> auditRepository.append). Optional: when absent (mock/default)
+  // audit is a no-op. It must never throw into the scanner path; the store also guards every call.
+  audit?: (event: AuditEventInput) => void;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -137,8 +171,14 @@ const DEFAULT_SETTINGS: Settings = {
 export interface ScanState {
   // identity / config
   businessId: string;
-  sessionId: string;
+  userId: string | null; // signed-in user (Firebase backend); null on the local/mock path
+  businessContextReady: boolean; // true once a REAL business context is set (or always on the mock path)
+  // Cloud backend: true once loadBusinessData has finished (products/aliases/session/counts in store), so
+  // the UI does not let a scan run against an empty catalog before the business's data arrives. Always
+  // true on the mock/local path.
+  businessDataLoaded: boolean;
   currentSession: InventorySession | null;
+  sessionId: string;
   settings: Settings;
 
   // deterministic lookup data (seeded; learned aliases are appended and persisted)
@@ -175,7 +215,11 @@ export interface ScanState {
 
   // actions
   setHasHydrated: (v: boolean) => void;
+  /** Set the signed-in business context (Firebase backend). Enables cloud sync + drains the queue. */
+  setBusinessContext: (businessId: string, userId: string) => void;
   startSession: (name: string, location: string) => void;
+  /** Mark the current session completed (status=completed, completedAt set) and persist it. */
+  finishSession: () => void;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
   retrySync: () => void;
@@ -210,6 +254,10 @@ export interface ScanState {
     type: FeedbackEventType,
     payload: { code: string; productId?: string | null; meta?: Record<string, string | number | boolean> },
   ) => void;
+  /** Import products + approved aliases from CSV text (MVP). Writes via the durable queue + audits. */
+  importProductsCsv: (text: string) => CsvImportSummary;
+  /** Audit a CSV export (called by the export UI). Fire-and-forget; never blocks. */
+  auditCsvExport: (kind: string, rowCount: number) => void;
   pendingCount: () => number;
   getProduct: (id: string | null) => Product | undefined;
   clearSession: () => void;
@@ -300,6 +348,7 @@ function idForReview(r: UnknownCodeReview): string {
 
 export function buildScanInitializer(deps: ScanStoreDeps) {
   const { db, idFactory, now } = deps;
+  const cloudBackend = deps.cloudBackend ?? false;
 
   return (
     set: (partial: Partial<ScanState> | ((s: ScanState) => Partial<ScanState>)) => void,
@@ -313,8 +362,85 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       get().syncPending();
     };
 
+    // Fire-and-forget audit. NEVER blocks or throws into the scanner/UI. Only emits with a REAL business
+    // context (no fake businessId/actor); a no-op when no audit sink is wired (mock/default path).
+    const emitAudit = (e: { entityType: string; entityId: string; action: string; metadata?: Record<string, unknown> }) => {
+      const { businessId, userId, businessContextReady } = get();
+      if (!deps.audit || !businessContextReady || !userId || !businessId) return;
+      try {
+        deps.audit({ businessId, actorUserId: userId, ...e });
+      } catch {
+        // An audit failure must never break the scanner or any action. Swallow it.
+      }
+    };
+
+    // Serialize cloud drains: rapid scans each call syncPending, and overlapping async drains would
+    // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
+    // each drain after the previous completes; every enqueue still triggers a drain that picks up the
+    // latest queue. Per-item idempotency (transaction + ledger) remains the guarantee against true retries.
+    let drainChain: Promise<void> = Promise.resolve();
+    const syncPendingCloud = (force: boolean): Promise<void> => {
+      drainChain = drainChain.then(() => drainCloudOnce(force)).catch(() => {});
+      return drainChain;
+    };
+
+    // Cloud drain (one pass): async, awaits db.apply, and REQUIRES a real business context first (no
+    // fake/default business writes). The mock/local path keeps the original SYNCHRONOUS syncPending below.
+    const drainCloudOnce = async (force: boolean) => {
+      const state = get();
+      if (!state.online && !force) return;
+      if (state.pendingSyncQueue.length === 0) return;
+      if (!state.businessContextReady || !state.userId || !state.businessId) {
+        set({ lastSyncError: "Select or create a business before syncing to the cloud." });
+        return; // pause: keep everything pending, write nothing
+      }
+      // Snapshot the batch to process. We must NOT overwrite the whole queue at the end (items enqueued
+      // by rapid scans DURING this async loop would be clobbered + silently lost). Instead, track this
+      // batch's outcome by item id and reconcile against the LATEST queue, preserving anything new.
+      const batch = state.pendingSyncQueue;
+      const syncedIds = new Set(get().syncedScanEventIds);
+      const appliedIds = new Set<string>();
+      const erroredById = new Map<string, PendingSyncItem>();
+      let lastErr: string | null = null;
+      for (const item of batch) {
+        let res;
+        try {
+          res = await db.apply(item);
+        } catch (e) {
+          res = { ok: false, alreadyApplied: false, error: e instanceof Error ? e.message : String(e) };
+        }
+        if (res.ok) {
+          appliedIds.add(item.id);
+          if (item.scanEventId) syncedIds.add(item.scanEventId);
+        } else {
+          erroredById.set(item.id, { ...item, status: "error", retryCount: item.retryCount + 1, lastError: res.error ?? "sync failed", updatedAt: now() });
+          lastErr = res.error ?? "sync failed";
+        }
+      }
+      set((cur) => {
+        // Reconcile against the CURRENT queue: drop applied items, replace errored with their updated
+        // version, and KEEP any items enqueued while this pass was awaiting (the mutex's next pass drains
+        // them). This avoids the read-modify-write race that previously dropped concurrent scans.
+        const nextQueue = cur.pendingSyncQueue
+          .filter((it) => !appliedIds.has(it.id))
+          .map((it) => erroredById.get(it.id) ?? it);
+        const recomputed = recomputeSyncStatus({
+          scanFeed: cur.scanFeed,
+          finalCounts: cur.finalCounts,
+          needsReviewQueue: cur.needsReviewQueue,
+          pendingSyncQueue: nextQueue,
+        });
+        return { pendingSyncQueue: nextQueue, syncedScanEventIds: [...syncedIds], lastSyncError: lastErr, ...recomputed };
+      });
+    };
+
     return {
       businessId: DEMO_BUSINESS_ID,
+      userId: null,
+      // Mock/local path needs no business context; cloud path must wait for setBusinessContext().
+      businessContextReady: !cloudBackend,
+      businessDataLoaded: !cloudBackend, // mock path has no remote data to load
+
       sessionId: "session-1",
       currentSession: {
         id: "session-1",
@@ -350,6 +476,42 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
+      setBusinessContext: (businessId, userId) => {
+        const needsLoad = cloudBackend && !!deps.loadBusinessData;
+        set({ businessId, userId, businessContextReady: true, businessDataLoaded: !needsLoad, lastSyncError: null });
+        const loader = deps.loadBusinessData;
+        if (cloudBackend && loader) {
+          // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
+          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI.
+          void (async () => {
+            try {
+              const data = await loader(businessId, userId);
+              // Reconstruct the active count session + its finalCounts (survive-refresh). Prefer the most
+              // recent ACTIVE session; else the most recent overall. finalCounts are the persisted count
+              // lines for that session, mapped back to store shape. No session -> keep current defaults.
+              const byStartedAtDesc = (a: InventorySession, b: InventorySession) =>
+                (b.startedAt ?? "").localeCompare(a.startedAt ?? "");
+              const sessions = [...data.sessions].sort(byStartedAtDesc);
+              const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
+              const next: Partial<ScanState> = { products: data.products, aliases: data.aliases };
+              if (restored) {
+                next.currentSession = restored;
+                next.sessionId = restored.id;
+                next.finalCounts = data.counts.filter((c) => c.sessionId === restored.id);
+              }
+              next.businessDataLoaded = true;
+              set(next);
+            } catch (e) {
+              // Surface the error but mark loaded so the UI does not hang forever (sync still paused on error).
+              set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data", businessDataLoaded: true });
+            }
+            get().syncPending();
+          })();
+        } else {
+          get().syncPending(); // drain anything queued now that we have a real business context
+        }
+      },
+
       recordFeedback: (type, payload) =>
         set((s) => ({
           feedbackEvents: appendFeedback(s.feedbackEvents, {
@@ -365,20 +527,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       startSession: (name, location) => {
         const id = `session-${idFactory()}`;
+        const businessId = get().businessId;
+        const session: InventorySession = {
+          id,
+          businessId,
+          name: name || "Session",
+          location: location || "Main",
+          status: "active",
+          startedAt: now(),
+          completedAt: null,
+          createdBy: get().userId ?? "demo",
+          notes: "",
+          syncStatus: "synced",
+        };
         set({
           sessionId: id,
-          currentSession: {
-            id,
-            businessId: get().businessId,
-            name: name || "Session",
-            location: location || "Main",
-            status: "active",
-            startedAt: now(),
-            completedAt: null,
-            createdBy: "demo",
-            notes: "",
-            syncStatus: "synced",
-          },
+          currentSession: session,
           scanFeed: [],
           finalCounts: [],
           needsReviewQueue: [],
@@ -386,6 +550,46 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           syncedScanEventIds: [],
           lastSyncError: null,
         });
+        // Persist the session through the SAME durable queue as scans/counts (never blocks the UI).
+        // Distinct idempotency key per lifecycle state ("active") so finishSession's write still applies.
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory,
+            now,
+            businessId,
+            sessionId: id,
+            entityType: "CountSession",
+            entityId: id,
+            operation: "SAVE_SESSION",
+            payload: session,
+            idempotencyKey: buildIdempotencyKey(businessId, id, `${id}-active`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
+        emitAudit({ entityType: "CountSession", entityId: id, action: "session_started", metadata: { name: session.name, location: session.location } });
+      },
+
+      finishSession: () => {
+        const cur = get().currentSession;
+        if (!cur) return;
+        const completed: InventorySession = { ...cur, status: "completed", completedAt: now() };
+        set({ currentSession: completed });
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory,
+            now,
+            businessId: completed.businessId,
+            sessionId: completed.id,
+            entityType: "CountSession",
+            entityId: completed.id,
+            operation: "SAVE_SESSION",
+            payload: completed,
+            // Distinct key from the "active" write so the completed state is not deduped as alreadyApplied.
+            idempotencyKey: buildIdempotencyKey(completed.businessId, completed.id, `${completed.id}-completed`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
+        emitAudit({ entityType: "CountSession", entityId: completed.id, action: "session_completed", metadata: { completedAt: completed.completedAt } });
       },
 
       processScan: (rawInput) => {
@@ -555,6 +759,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               scanEventId,
             }),
           ]);
+          emitAudit({ entityType: "UnknownCodeReview", entityId: review.id, action: "unknown_review_created", metadata: { code: cleaned.cleanCode } });
 
           if (resolution.resolverStatus === "conflict") {
             get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
@@ -605,6 +810,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       syncPending: (force = false) => {
+        // Cloud backend: async drain (preserves the local optimistic UI; never blocks the scan input).
+        if (cloudBackend) {
+          void syncPendingCloud(force);
+          return;
+        }
         const state = get();
         if (!state.online && !force) return; // offline: keep everything pending, lose nothing
         if (state.pendingSyncQueue.length === 0) return;
@@ -616,7 +826,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         let lastErr: string | null = null;
 
         for (const item of state.pendingSyncQueue) {
-          const res = db.apply(item);
+          // This branch only runs for the local mock backend (cloudBackend === false), whose apply() is
+          // synchronous, so the cast is safe.
+          const res = db.apply(item) as SyncResult;
           if (res.ok) {
             if (item.scanEventId) syncedIds.add(item.scanEventId);
           } else {
@@ -1105,12 +1317,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             ),
           });
           get().recordFeedback("product_rejected", { code: review.cleanCode });
+          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "alias_rejected", metadata: { code: review.cleanCode } });
           return;
         }
 
         // Determine target product (existing or newly created).
         let products = state.products;
         let productId = payload.productId ?? "";
+        let createdProduct: Product | null = null; // persisted to Firestore (cloud backend) via SAVE_PRODUCT
 
         if (action === "create_new") {
           productId = `prod-${idFactory()}`;
@@ -1144,6 +1358,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             updatedBy: "human",
           };
           products = [...products, newProduct];
+          createdProduct = newProduct;
         }
 
         if (!productId) return;
@@ -1207,25 +1422,51 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         set({ products, aliases, needsReviewQueue, scanFeed });
 
-        // Queue idempotent RESOLVE_ALIAS sync.
+        // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
+        // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
+        const queued: PendingSyncItem[] = [];
+        if (createdProduct) {
+          queued.push(
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: state.businessId,
+              sessionId: state.sessionId,
+              entityType: "Product",
+              entityId: createdProduct.id,
+              operation: "SAVE_PRODUCT",
+              payload: createdProduct,
+              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, createdProduct.id, "SAVE_PRODUCT"),
+              scanEventId: null,
+            }),
+          );
+        }
         if (!aliasExists) {
-          set((s) => ({
-            pendingSyncQueue: [
-              ...s.pendingSyncQueue,
-              makeQueueItem({
-                idFactory,
-                now,
-                businessId: state.businessId,
-                sessionId: state.sessionId,
-                entityType: "Alias",
-                entityId: aliasId,
-                operation: "RESOLVE_ALIAS",
-                payload: newAlias,
-                idempotencyKey: aliasKeyOp,
-                scanEventId: null,
-              }),
-            ],
-          }));
+          queued.push(
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: state.businessId,
+              sessionId: state.sessionId,
+              entityType: "Alias",
+              entityId: aliasId,
+              operation: "RESOLVE_ALIAS",
+              payload: newAlias,
+              idempotencyKey: aliasKeyOp,
+              scanEventId: null,
+            }),
+          );
+        }
+        if (queued.length > 0) {
+          set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
+        }
+
+        // Audit the human/system resolution (product creation + alias approval). Fire-and-forget.
+        if (createdProduct) {
+          emitAudit({ entityType: "Product", entityId: createdProduct.id, action: "product_created", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
+        }
+        if (!aliasExists) {
+          emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_approved", metadata: { code: review.cleanCode, productId, origin: payload.origin ?? "human" } });
         }
 
         // Feed the shared knowledge base (privacy-safe; only barcode/product/evidence is written).
@@ -1281,6 +1522,68 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         } else {
           get().syncPending();
         }
+      },
+
+      importProductsCsv: (text) => {
+        const state = get();
+        const { rows } = parseCsv(text);
+        const plan = buildProductImport({
+          rows,
+          existingProducts: state.products,
+          existingAliases: state.aliases,
+          businessId: state.businessId,
+          idFactory,
+          now,
+        });
+
+        if (plan.products.length > 0 || plan.aliases.length > 0) {
+          set((s) => ({ products: [...s.products, ...plan.products], aliases: [...s.aliases, ...plan.aliases] }));
+
+          // Queue idempotent SAVE_PRODUCT (each new product) BEFORE its aliases, then RESOLVE_ALIAS, so a
+          // reloaded alias always references a persisted product. Same durable path Loop 4 proved.
+          const items: PendingSyncItem[] = [];
+          for (const p of plan.products) {
+            items.push(makeQueueItem({
+              idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
+              entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: p,
+              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, p.id, "SAVE_PRODUCT"),
+              scanEventId: null,
+            }));
+          }
+          for (const a of plan.aliases) {
+            items.push(makeQueueItem({
+              idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
+              entityType: "Alias", entityId: a.id, operation: "RESOLVE_ALIAS", payload: a,
+              idempotencyKey: a.idempotencyKey, scanEventId: null,
+            }));
+          }
+          enqueueAndSync(items);
+        }
+
+        emitAudit({
+          entityType: "ImportBatch",
+          entityId: `import-${idFactory()}`,
+          action: "csv_import",
+          metadata: {
+            rowsParsed: plan.rowsParsed,
+            productsCreated: plan.products.length,
+            aliasesCreated: plan.aliases.length,
+            duplicates: plan.duplicates.length,
+            conflicts: plan.conflicts.length,
+          },
+        });
+
+        return {
+          rowsParsed: plan.rowsParsed,
+          productsCreated: plan.products.length,
+          aliasesCreated: plan.aliases.length,
+          duplicates: plan.duplicates.length,
+          conflicts: plan.conflicts,
+        };
+      },
+
+      auditCsvExport: (kind, rowCount) => {
+        emitAudit({ entityType: "Export", entityId: kind, action: "csv_export", metadata: { kind, rowCount } });
       },
 
       pendingCount: () => get().pendingSyncQueue.length,
@@ -1393,8 +1696,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
 // --- App store (persisted) ---------------------------------------------------------------------
 
+// Backend selection: Firebase (cloud/emulator) when NEXT_PUBLIC_FIREBASE_BACKEND=1, else the local mock
+// (default + legacy E2E -> existing behavior unchanged). The Firebase target is constructed ONLY in that
+// branch, so the mock/test path never initializes Firebase.
+const useFirebaseBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
 const appDeps: ScanStoreDeps = {
-  db: getMockDb(),
+  db: useFirebaseBackend
+    ? new FirebaseSyncTarget(getDb(), { emulator: process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATOR === "1" })
+    : getMockDb(),
+  cloudBackend: useFirebaseBackend,
+  loadBusinessData: useFirebaseBackend ? (businessId) => loadBusinessData(getDb(), businessId) : undefined,
+  // Cloud audit sink: append-only auditLog. Fire-and-forget; swallows its own errors so a failed audit
+  // write can never break a scan/resolution. No-op on the mock/default path (undefined).
+  audit: useFirebaseBackend
+    ? (event) => {
+        try {
+          void auditRepository(getDb(), event.businessId)
+            .append(toAuditEvent(event, crypto.randomUUID()))
+            .catch(() => {});
+        } catch {
+          // never propagate
+        }
+      }
+    : undefined,
   idFactory: () => crypto.randomUUID(),
   now: () => new Date().toISOString(),
   persistName: "sis-scan-v1",
@@ -1455,6 +1779,9 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
     idFactory: overrides?.idFactory ?? (() => `id-${++n}`),
     now: overrides?.now ?? (() => "2026-06-12T10:00:00.000Z"),
     persistName: null,
+    cloudBackend: overrides?.cloudBackend ?? false,
+    loadBusinessData: overrides?.loadBusinessData,
+    audit: overrides?.audit,
   };
   return create<ScanState>()(buildScanInitializer(deps));
 }

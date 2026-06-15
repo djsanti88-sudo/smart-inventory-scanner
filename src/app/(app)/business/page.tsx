@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createBusiness, listMemberships, signOut, type Membership } from "@/lib/auth";
+import { setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
 
 // Business-creation + membership flow. A signed-in user sees the businesses they belong to (with their
@@ -70,9 +71,19 @@ export default function BusinessPage() {
           <li className="text-sm text-zinc-500">No businesses yet. Create one below to get started.</li>
         )}
         {memberships.map((m) => (
-          <li key={m.id} className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-4 py-3">
+          <li key={m.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3">
             <span className="font-mono text-xs text-zinc-600">{m.businessId}</span>
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">{m.role}</span>
+            <span className="flex items-center gap-2">
+              <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">{m.role}</span>
+              <button
+                type="button"
+                data-testid={`select-business-${m.businessId}`}
+                onClick={() => { setSelectedBusinessId(m.businessId); router.push("/scan"); }}
+                className="rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+              >
+                Select
+              </button>
+            </span>
           </li>
         ))}
       </ul>

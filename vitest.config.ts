@@ -12,6 +12,12 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   test: {
+    // Emulator-backed rules tests (src/services/db/firebase/*.rules.test.ts) do real Firestore I/O
+    // against a single emulator; under parallel load on Windows the first op in a file can exceed the
+    // 5s default. Generous timeouts keep them reliable without weakening assertions (fast pure unit
+    // tests still complete in milliseconds).
+    testTimeout: 30000,
+    hookTimeout: 30000,
     projects: [
       {
         extends: true,

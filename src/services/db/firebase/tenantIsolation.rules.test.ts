@@ -79,6 +79,14 @@ describe.skipIf(!ready)("Firestore rules - tenant isolation (authenticated users
     await assertFails(getDoc(doc(bDb(), ...sub(BIZ_A, "auditLog", "auA"))));
   });
 
+  it("(b2) User B CANNOT forge an owner membership for Business A (bootstrap tied to the business creator)", async () => {
+    // The self-owner bootstrap is allowed ONLY for a business the requester created (bizA.createdBy = A).
+    // Without this, B could grant itself owner of bizA and read A's data - a tenant-isolation breach.
+    await assertFails(setDoc(doc(bDb(), "businessMembers", `${BIZ_A}_${B}`), { businessId: BIZ_A, userId: B, role: "owner" }));
+    // Also cannot self-create owner membership for a business that does not exist.
+    await assertFails(setDoc(doc(bDb(), "businessMembers", `bizGhost_${B}`), { businessId: "bizGhost", userId: B, role: "owner" }));
+  });
+
   it("(c) User B CANNOT insert into Business A (forged tenant write blocked by path membership)", async () => {
     await assertFails(setDoc(doc(bDb(), ...sub(BIZ_A, "products", "forgedP")), { businessId: BIZ_A, name: "forged" }));
     await assertFails(setDoc(doc(bDb(), ...sub(BIZ_A, "scanEvents", "forgedS")), { businessId: BIZ_A, cleanCode: "x" }));

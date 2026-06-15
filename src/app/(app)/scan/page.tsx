@@ -7,10 +7,12 @@ import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { ExportButtons } from "@/components/ExportButtons";
+import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 export default function ScanPage() {
   const processScan = useScanStore((s) => s.processScan);
   const startSession = useScanStore((s) => s.startSession);
+  const finishSession = useScanStore((s) => s.finishSession);
   const clearSession = useScanStore((s) => s.clearSession);
   const session = useScanStore((s) => s.currentSession);
   const settings = useScanStore((s) => s.settings);
@@ -30,6 +32,7 @@ export default function ScanPage() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
+      <BusinessContextGate>
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="grow">
@@ -62,10 +65,20 @@ export default function ScanPage() {
           </select>
           <button
             type="button"
+            data-testid="start-session"
             onClick={() => startSession(name || "Session", location)}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
           >
             Start new session
+          </button>
+          <button
+            type="button"
+            data-testid="finish-session"
+            onClick={() => finishSession()}
+            disabled={session?.status === "completed"}
+            className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Finish session
           </button>
           <button
             type="button"
@@ -102,6 +115,7 @@ export default function ScanPage() {
 
       <LiveScanFeed />
       <FinalCountTable />
+      </BusinessContextGate>
     </div>
   );
 }

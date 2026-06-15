@@ -31,15 +31,24 @@ service cloud.firestore {
     }
 
     // ----- business memberships (doc id = `${businessId}_${userId}`) -----
+    function businessCreatedBy(bid) {
+      return exists(/databases/$(database)/documents/businesses/$(bid))
+        && get(/databases/$(database)/documents/businesses/$(bid)).data.createdBy == uid();
+    }
     match /businessMembers/{memberId} {
       allow read: if isSignedIn() && resource != null
         && (resource.data.userId == uid() || isMember(resource.data.businessId));
-      // Bootstrap: a user may create their OWN owner membership (the create-business flow). Otherwise
-      // only an owner/admin of that business may add members. memberId must equal `${businessId}_${userId}`.
+      // Bootstrap: a user may self-create their OWN owner membership ONLY for a business THEY created
+      // (the create-business flow writes the business doc with createdBy=uid first). Without the
+      // createdBy check, ANY signed-in user could grant themselves owner of ANY existing business and
+      // read its data - a tenant-isolation breach. Otherwise only an owner/admin of that business may
+      // add members. memberId must equal `${businessId}_${userId}`.
       allow create: if isSignedIn()
         && memberId == (request.resource.data.businessId + '_' + request.resource.data.userId)
         && (
-          (request.resource.data.userId == uid() && request.resource.data.role == 'owner')
+          (request.resource.data.userId == uid()
+            && request.resource.data.role == 'owner'
+            && businessCreatedBy(request.resource.data.businessId))
           || hasRole(request.resource.data.businessId, ['owner', 'admin'])
         );
       allow update, delete: if hasRole(resource.data.businessId, ['owner', 'admin']);
@@ -108,6 +117,14 @@ service cloud.firestore {
       match /auditLog/{id} {
         allow read: if hasRole(bid, ['owner', 'admin']);
         allow create: if isMember(bid) && bizFieldOk(bid);
+        allow update, delete: if false;
+      }
+
+      // _appliedKeys: idempotency ledger written by FirebaseSyncTarget transactions. Append-only; a
+      // member who can write scans/counts may create a key; never updated/deleted.
+      match /_appliedKeys/{key} {
+        allow read: if isMember(bid);
+        allow create: if hasRole(bid, ['owner', 'admin', 'counter']);
         allow update, delete: if false;
       }
     }
