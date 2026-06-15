@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { accessLevelClient } from "@/services/security/roleAccess";
+import { useAccessLevel } from "@/services/security/useAccessLevel";
 import {
   exportAliases,
   exportFinalCounts,
@@ -39,7 +39,7 @@ export function ExportButtons() {
   // platformOwner (Santiago) gets full internal exports; every customer role gets sanitized,
   // product-facing exports only (no barcode/gtin/upc/ean/aliases/raw codes). Server/serializer-enforced
   // truth lives in the export builders; this gate also hides code-only export buttons from customers.
-  const level = accessLevelClient({ uid: s.userId });
+  const level = useAccessLevel();
   const isPlatform = level === "platform";
 
   const platformButtons: Array<{ label: string; testid: string; rows: number; run: () => void }> = [
