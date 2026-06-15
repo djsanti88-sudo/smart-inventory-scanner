@@ -24,7 +24,14 @@ source-discovery go/no-go and quality gates pass and spend stays within caps.
 
 | stage | status | verified-scannable | candidate-scannable | spec-only | conflicted | rejected | metered $ | firecrawl credits |
 |-------|--------|--------------------|--------------------|-----------|------------|----------|-----------|-------------------|
-| discovery | _pending_ | — | — | — | — | — | — | — |
+| discovery | DONE | — | — | — | — | — | $0 | 0 |
 | 100 | _pending_ | — | — | — | — | — | — | — |
-| 500 | _pending_ | — | — | — | — | — | — | — |
-| 5000 | _pending_ | — | — | — | — | — | — | — |
+| 500 | NO-GO | — | — | — | — | — | — | — |
+| 5000 | NO-GO | — | — | — | — | — | — | — |
+
+## Source-discovery result (gate)
+See `reports/tire-db/source_inventory.md` + `.json`. **Binding finding: no safe, free, bulk source of
+scannable tire barcodes exists** without an owner/vendor file, a paid license (Tireweb ~240k / TiresAddict),
+or a per-code paid API over the $30 cap (Go-UPC $74.95/mo, Barcode Lookup). Decision: build + test the
+pipeline, run a bounded honest 100-stage candidate sample (mostly spec/SKU, low verified-scannable), then
+**STOP before 500/5000** per the owner's `bulk_source_rule`.
