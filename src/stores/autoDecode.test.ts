@@ -173,6 +173,23 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect((lastReview(store).decodeNote ?? "").toLowerCase()).toMatch(/emergency|stop/);
   });
 
+  it("refreshAiStatus is server-authoritative: stale persisted off/cap-25 -> forced on + cap 200, gemini-first", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    // Simulate a STALE persisted client session from before AI was enabled.
+    store.getState().updateSettings({ aiLookupEnabled: false, dailyLookupLimit: 25, primaryProvider: "mock", fallbackProvider: "mock" });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: ["FIRECRAWL_API_KEY"] });
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    const s = store.getState().settings;
+    expect(s.aiLookupEnabled).toBe(true);    // forced on by the server confirming a key
+    expect(s.dailyLookupLimit).toBe(200);    // adopts AI_LOOKUP_DAILY_LIMIT from the server
+    expect(s.primaryProvider).toBe("gemini");
+    expect(s.fallbackProvider).toBe("openai");
+  });
+
   it("a KNOWN (approved) scan never calls AI", () => {
     const store = aggressiveStore();
     const { spy, restore } = stub(VERIFIED);
