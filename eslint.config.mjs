@@ -34,6 +34,11 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // CommonJS scripts (postinstall patches, etc.) legitimately use require().
+  {
+    files: ["**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -41,6 +46,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vercel build output (gitignored artifact - never our source to lint):
+    ".vercel/**",
   ]),
 ]);
 

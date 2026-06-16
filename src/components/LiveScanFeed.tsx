@@ -28,7 +28,7 @@ export function LiveScanFeed() {
               {isPlatform && <th className="px-3 py-2">Clean code</th>}
               {isPlatform && <th className="px-3 py-2">Match</th>}
               <th className="px-3 py-2">Product</th>
-              <th className="px-3 py-2">Part number</th>
+              <th className="px-3 py-2">SKU</th>
               <th className="px-3 py-2">Qty after</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Reason</th>
@@ -59,7 +59,7 @@ export function LiveScanFeed() {
                     )}
                     <td className="px-3 py-2">{product ? product.name : "-"}</td>
                     <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-part-number-${e.id}`}>
-                      {product ? product.primarySku || "Part number missing" : "-"}
+                      {product ? product.primarySku || "SKU missing" : "-"}
                     </td>
                     <td className="px-3 py-2 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
                     <td className="px-3 py-2">

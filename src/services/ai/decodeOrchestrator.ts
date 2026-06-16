@@ -26,9 +26,9 @@ export interface DecodeRunParams {
   providerTimeoutMs?: number;
   pageTimeoutMs?: number;
   trustedHosts?: string[];
-  // Fast path (default): early-exit as soon as ANY provider returns a usable product name (trust-the-AI).
-  // Fallback path sets this true: only a fully app-VERIFIED decision (exact code in strong evidence)
-  // stops the wait early - so a hard-failed barcode's deeper, slower decode is trustworthy, not a guess.
+  // Retained for the fallback caller. Early-exit is now ALWAYS gated on a fully app-VERIFIED decision
+  // (two independent sources agree), so this flag no longer changes behavior - a lone provider never
+  // stops the wait on either path. Kept so existing callers compile; safe to remove once unused.
   requireVerifiedEarlyExit?: boolean;
 }
 
@@ -107,16 +107,14 @@ export async function runDecode(p: DecodeRunParams): Promise<DecodeRunResult> {
   const confident = new Promise<void>((res) => (resolveConfident = res));
   const recheck = () => {
     if (results.length === 0) return;
-    // SPEED + trust-the-AI (fast path): stop as soon as ANY provider returns a usable product name. We
-    // do NOT wait for the slow page-fetch/cross-check to "fully verify" - that was the ~8s tail. The app
-    // still records evidence for catalog metadata, and the client routes conflicts/no-product to review.
-    // Fallback path (requireVerifiedEarlyExit) skips this shortcut and waits for VERIFIED evidence.
-    if (!p.requireVerifiedEarlyExit && results.some((r) => isUsableProductName(r.productName))) {
-      resolveConfident();
-      return;
-    }
+    // Auto-count requires TWO independent sources to agree (Gemini Flash + ChatGPT mini, plus the
+    // app's own page-fetch, all run in parallel). So we early-exit ONLY on a fully-VERIFIED decision -
+    // i.e. once two sources land on the same identity with strong app-verified evidence. A lone provider
+    // is no longer enough to stop the wait: we keep listening so the second source can agree (or the page
+    // fetch can supply it). If nothing else arrives, the all-settled / budget path still returns the best
+    // available result (Suggested -> human review), never a single-source auto-count.
     const d = decideDecode({ codeType: p.codeType, results, evidences, confidenceThreshold: p.confidenceThreshold });
-    if (d.status === "verified") resolveConfident(); // a fully-verified hit -> stop waiting early
+    if (d.status === "verified") resolveConfident();
   };
 
   const tasks: Promise<unknown>[] = p.providers.map((prov) => {
