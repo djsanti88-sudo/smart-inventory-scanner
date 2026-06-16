@@ -4,7 +4,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { accessLevelServer } from "@/services/security/roleAccess";
 import { resolveScanForRole } from "@/services/security/resolveScanServer";
-import { toStoreProduct, toStoreAlias } from "@/services/db/firebase/businessDataLoader";
+import { toStoreProduct, toStoreAlias } from "@/services/db/firebase/storeMappers";
 import type { Product, Alias } from "@/types";
 
 // Sec-5: PROTECTED server-side customer scan resolution.
