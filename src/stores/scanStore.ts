@@ -155,7 +155,7 @@ const DEFAULT_SETTINGS: Settings = {
   // server forces the mock provider regardless, so this only affects real-cloud lookups (keys server-side).
   primaryProvider: "gemini",
   fallbackProvider: "openai",
-  dailyLookupLimit: 25,
+  dailyLookupLimit: 200, // fallback if the server cap (AI_LOOKUP_DAILY_LIMIT) is unreachable
   dailyLookupCount: 0,
   lastResetDate: "1970-01-01",
   requireHumanApprovalForMerges: true,
@@ -970,21 +970,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const res = await fetch("/api/ai-lookup", { method: "GET" });
           if (!res.ok) return;
           const d = await res.json();
-          set((s) => ({
-            aiStatus: {
-              ...s.aiStatus,
-              liveEnabled: Boolean(d.liveEnabled),
-              autoDecodeOnScan: Boolean(d.autoDecodeOnScan),
-              geminiEnabled: Boolean(d.geminiEnabled),
-              openaiEnabled: Boolean(d.openaiEnabled),
-              geminiConfigured: Boolean(d.geminiConfigured),
-              openaiConfigured: Boolean(d.openaiConfigured),
-              premiumFallback: Boolean(d.premiumFallback),
-              mode: typeof d.mode === "string" ? d.mode : s.aiStatus.mode,
-              dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
-              missingKeys: Array.isArray(d.missingKeys) ? d.missingKeys : s.aiStatus.missingKeys,
-            },
-          }));
+          set((s) => {
+            const keyConfigured = Boolean(d.geminiConfigured) || Boolean(d.openaiConfigured);
+            return {
+              aiStatus: {
+                ...s.aiStatus,
+                liveEnabled: Boolean(d.liveEnabled),
+                autoDecodeOnScan: Boolean(d.autoDecodeOnScan),
+                geminiEnabled: Boolean(d.geminiEnabled),
+                openaiEnabled: Boolean(d.openaiEnabled),
+                geminiConfigured: Boolean(d.geminiConfigured),
+                openaiConfigured: Boolean(d.openaiConfigured),
+                premiumFallback: Boolean(d.premiumFallback),
+                mode: typeof d.mode === "string" ? d.mode : s.aiStatus.mode,
+                dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
+                missingKeys: Array.isArray(d.missingKeys) ? d.missingKeys : s.aiStatus.missingKeys,
+              },
+              // Live AI config is SERVER-AUTHORITATIVE so a stale persisted client value can't disable lookup
+              // or pin an old daily cap. When the server confirms a provider key, force lookup ON (always-on),
+              // adopt the server daily cap (AI_LOOKUP_DAILY_LIMIT), and set Gemini-first -> OpenAI fallback.
+              settings: {
+                ...s.settings,
+                aiLookupEnabled: keyConfigured ? true : s.settings.aiLookupEnabled,
+                dailyLookupLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.settings.dailyLookupLimit,
+                primaryProvider: d.geminiConfigured ? "gemini" : d.openaiConfigured ? "openai" : s.settings.primaryProvider,
+                fallbackProvider: d.openaiConfigured ? "openai" : s.settings.fallbackProvider,
+              },
+            };
+          });
         } catch {
           // leave existing status; auto-decode simply won't fire without confirmed keys
         }
