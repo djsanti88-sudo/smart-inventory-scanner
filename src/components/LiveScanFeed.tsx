@@ -11,7 +11,10 @@ export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
   const getProduct = useScanStore((s) => s.getProduct);
   const isPlatform = useIsPlatformOwner();
-  const colSpan = isPlatform ? 10 : 7;
+  // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
+  // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
+  // platformOwner-only. Customer columns: Time, Barcode, Product, SKU, Qty, Status, Reason, Sync = 8.
+  const colSpan = isPlatform ? 10 : 8;
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -25,7 +28,7 @@ export function LiveScanFeed() {
             <tr>
               <th className="px-3 py-2">Time</th>
               {isPlatform && <th className="px-3 py-2">Raw code</th>}
-              {isPlatform && <th className="px-3 py-2">Clean code</th>}
+              <th className="px-3 py-2">Barcode</th>
               {isPlatform && <th className="px-3 py-2">Match</th>}
               <th className="px-3 py-2">Product</th>
               <th className="px-3 py-2">SKU</th>
@@ -51,7 +54,7 @@ export function LiveScanFeed() {
                       {e.createdAt ? new Date(e.createdAt).toLocaleTimeString() : "-"}
                     </td>
                     {isPlatform && <td className="px-3 py-2 font-mono text-xs">{e.rawCode}</td>}
-                    {isPlatform && <td className="px-3 py-2 font-mono text-xs">{e.cleanCode}</td>}
+                    <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-barcode-${e.id}`}>{e.cleanCode || "-"}</td>
                     {isPlatform && (
                       <td className="px-3 py-2">
                         <MatchBadge type={e.matchType} />
@@ -59,7 +62,7 @@ export function LiveScanFeed() {
                     )}
                     <td className="px-3 py-2">{product ? product.name : "-"}</td>
                     <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-part-number-${e.id}`}>
-                      {product ? product.primarySku || "SKU missing" : "-"}
+                      {product ? product.primarySku || "-" : "-"}
                     </td>
                     <td className="px-3 py-2 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
                     <td className="px-3 py-2">
