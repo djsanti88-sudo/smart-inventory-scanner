@@ -11,7 +11,22 @@ function suggestion(): AiLookupResult {
 }
 
 describe("runDecode - time budget + concurrency", () => {
-  it("returns a VERIFIED result quickly when a provider + evidence verify (no timeout)", async () => {
+  it("returns a VERIFIED result quickly when TWO providers agree + evidence verifies (no timeout)", async () => {
+    // Auto-count requires two independent sources to agree (Gemini Flash + ChatGPT mini in parallel).
+    const a: DecodeProvider = { name: "gemini", lookup: async () => coke() };
+    const b: DecodeProvider = { name: "openai", lookup: async () => coke() };
+    const r = await runDecode({
+      code: "049000028904",
+      codeType: "upc_a",
+      confidenceThreshold: 0.8,
+      providers: [a, b],
+      budgetMs: 13_000,
+    });
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("verified");
+  });
+
+  it("a SINGLE provider on its own does NOT auto-verify - it is Suggested (needs a second agreeing source)", async () => {
     const p: DecodeProvider = { name: "openai", lookup: async () => coke() };
     const r = await runDecode({
       code: "049000028904",
@@ -21,7 +36,7 @@ describe("runDecode - time budget + concurrency", () => {
       budgetMs: 13_000,
     });
     expect(r.timedOut).toBe(false);
-    expect(r.decision.status).toBe("verified");
+    expect(r.decision.status).toBe("suggested");
   });
 
   it("on TIMEOUT, aborts pending work and returns needs_review with NO partial result", async () => {
@@ -84,8 +99,9 @@ describe("runDecode - time budget + concurrency", () => {
     expect(r.providerStatuses.find((s) => s.provider === "openai")?.status).toBe("ok");
   });
 
-  it("uses the page-fetch enrich result + reports latency", async () => {
-    // Provider finds nothing; the page-fetch result is authoritative.
+  it("uses the page-fetch enrich result (single source -> Suggested) + reports latency", async () => {
+    // Provider finds nothing; the page-fetch result is the ONLY source. One source alone cannot
+    // auto-count under the two-source rule, so it lands as Suggested (human review) - but it is used.
     const p: DecodeProvider = { name: "openai", lookup: async () => emptyResult() };
     const r = await runDecode({
       code: "049000028904",
@@ -96,7 +112,24 @@ describe("runDecode - time budget + concurrency", () => {
       budgetMs: 13_000,
     });
     expect(r.timedOut).toBe(false);
-    expect(r.decision.status).toBe("verified"); // page-fetch fetched_source verifies it
+    expect(r.decision.status).toBe("suggested"); // single source: shown + reviewable, not auto-counted
+    expect(r.results.some((x) => x.productName === "Coca-Cola Classic")).toBe(true); // page-fetch result IS used
     expect(typeof r.latencyMs).toBe("number");
+  });
+
+  it("a provider + the page-fetch enrich that AGREE verify (two independent sources)", async () => {
+    // The page-fetch acts as a second independent source: provider + page-fetch landing on the same
+    // identity is exactly the agreement the two-source rule wants -> auto-counted.
+    const p: DecodeProvider = { name: "openai", lookup: async () => coke() };
+    const r = await runDecode({
+      code: "049000028904",
+      codeType: "upc_a",
+      confidenceThreshold: 0.8,
+      providers: [p],
+      enrich: async () => ({ result: coke(), evidence: { verified: true, strength: "fetched_source", matchedCode: "049000028904", matchedSources: ["go-upc"], reason: "" } }),
+      budgetMs: 13_000,
+    });
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("verified");
   });
 });

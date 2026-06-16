@@ -40,13 +40,29 @@ export function buildLookupPrompt(req: AiLookupRequest): string {
     .filter(Boolean)
     .join("\n");
 
+  // The exact code as scanned, plus a dashes/separators-removed variant for the fallback search.
+  const exactCode = (req.cleanCodeSanitized || req.rawCodeSanitized || "").trim();
+  const noDashCode = exactCode.replace(/[\s\-_.]/g, "");
+
   return `<role>
 You are a product identification worker. You identify products from barcodes, SKUs, vendor codes, and messy scanner strings.
 </role>
 
+<search_procedure>
+Follow this search order EXACTLY:
+1. FIRST search Google (google.com) for the code BY ITSELF - just "${exactCode}" with NO other words
+   (do NOT add "UPC", "product", a brand, or any extra term). The bare number alone is the most reliable query.
+2. If that returns nothing useful, remove the dashes/separators and search Google again for the bare
+   code alias "${noDashCode}" by itself (still no other words).
+3. Only if both bare-code searches fail, go other routes: barcode databases, retailer/manufacturer
+   listings, and broader queries.
+Trust a result only when the page actually shows the exact scanned code.
+</search_procedure>
+
 <rules>
-Search the web for the EXACT scanned code (UPC/EAN/GTIN/SKU) to identify the product. Prefer
-retailer, manufacturer, and barcode-database pages that show the exact code.
+Search the web for the EXACT scanned code (UPC/EAN/GTIN/SKU) to identify the product, following the
+search order above (bare number first on google.com). Prefer retailer, manufacturer, and
+barcode-database pages that show the exact code.
 Return the most likely product even if you are not fully certain - put uncertainty in "guesses"
 and set a lower "confidence". Do not return an empty product if any reasonable match exists.
 Put every page you used in "sourceUrls". Quote the exact text that contains the code in "verifiedFacts".
