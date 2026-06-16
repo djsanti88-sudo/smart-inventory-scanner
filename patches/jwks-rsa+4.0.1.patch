@@ -1,0 +1,44 @@
+diff --git a/node_modules/jwks-rsa/src/index.js b/node_modules/jwks-rsa/src/index.js
+index 74fb91b..7edf396 100644
+--- a/node_modules/jwks-rsa/src/index.js
++++ b/node_modules/jwks-rsa/src/index.js
+@@ -3,7 +3,9 @@ const errors = require('./errors');
+ const { hapiJwt2Key, hapiJwt2KeyAsync } = require('./integrations/hapi');
+ const { expressJwtSecret } = require('./integrations/express');
+ const { koaJwtSecret } = require('./integrations/koa');
+-const { passportJwtSecret } = require('./integrations/passport');
++// NOTE (patched): the passport integration does a top-level `require('jose')`, which crashes under
++// bundler/external loaders that can't require the ESM-only jose. It is loaded lazily below so merely
++// importing jwks-rsa (e.g. via firebase-admin/auth, which never uses passport) does not trigger it.
+ 
+ module.exports = (options) => {
+   return new JwksClient(options);
+@@ -19,4 +21,8 @@ module.exports.expressJwtSecret = expressJwtSecret;
+ module.exports.hapiJwt2Key = hapiJwt2Key;
+ module.exports.hapiJwt2KeyAsync = hapiJwt2KeyAsync;
+ module.exports.koaJwtSecret = koaJwtSecret;
+-module.exports.passportJwtSecret = passportJwtSecret;
++Object.defineProperty(module.exports, 'passportJwtSecret', {
++  configurable: true,
++  enumerable: true,
++  get() { return require('./integrations/passport').passportJwtSecret; },
++});
+diff --git a/node_modules/jwks-rsa/src/utils.js b/node_modules/jwks-rsa/src/utils.js
+index ef3ffb5..1e289ad 100644
+--- a/node_modules/jwks-rsa/src/utils.js
++++ b/node_modules/jwks-rsa/src/utils.js
+@@ -1,4 +1,5 @@
+-const jose = require('jose');
++// jose v6 is ESM-only; require() of it fails (ERR_REQUIRE_ESM) under bundler/external loaders. Load it
++// lazily via dynamic import() inside the async consumer instead. (patched via patch-package)
+ const JwksError = require('./errors/JwksError');
+ 
+ function resolveAlg(jwk) {
+@@ -33,6 +34,7 @@ function resolveAlg(jwk) {
+ }
+ 
+ async function retrieveSigningKeys(jwks) {
++  const jose = await import('jose');
+   const results = [];
+ 
+   jwks = jwks
