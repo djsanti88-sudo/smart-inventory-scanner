@@ -1,10 +1,11 @@
 // Postinstall patch: jwks-rsa (pulled in by firebase-admin/auth) does top-level `require('jose')`, but
 // jose v6 is ESM-only -> ERR_REQUIRE_ESM crashes /api/resolve-scan on Vercel's Turbopack external loader.
-// Fix WITHOUT patch-package (which is fragile across line endings): string-replace the two offending sites.
-//   - utils.js (used by firebase-admin's token verification): load jose via dynamic import() in the async fn.
-//   - index.js: lazy-require the passport integration so its top-level require('jose') never fires on import
-//     (firebase-admin never uses passport).
-// Idempotent and safe if jwks-rsa is absent or already patched.
+// Fix WITHOUT patch-package (fragile across line endings) AND fully idempotently (no `const jose`
+// declaration, so it can never double-declare even if re-run on an already-patched/cached tree):
+//   - utils.js: drop the top-level require; call jose inline via `(await import('jose')).xxx` at each use.
+//   - index.js: lazy-require the passport integration so its top-level require('jose') never fires on
+//     import (firebase-admin never uses passport).
+// Each `from` string disappears after patching, so re-runs are no-ops. Safe if jwks-rsa is absent.
 const fs = require("fs");
 
 function patch(file, edits) {
@@ -18,8 +19,9 @@ function patch(file, edits) {
 }
 
 patch("node_modules/jwks-rsa/src/utils.js", [
-  ["const jose = require('jose');", "// jose is ESM-only; loaded via dynamic import() in retrieveSigningKeys (see scripts/patch-jwks-rsa.cjs)"],
-  ["async function retrieveSigningKeys(jwks) {", "async function retrieveSigningKeys(jwks) {\n  const jose = await import('jose');"],
+  ["const jose = require('jose');", "// jose (ESM-only) is imported inline below; see scripts/patch-jwks-rsa.cjs"],
+  ["await jose.importJWK(", "await (await import('jose')).importJWK("],
+  ["await jose.exportSPKI(", "await (await import('jose')).exportSPKI("],
 ]);
 
 patch("node_modules/jwks-rsa/src/index.js", [
