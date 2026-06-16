@@ -145,7 +145,8 @@ export interface ScanEvent {
   status: ScanStatus;
   resolverStatus: ResolverStatus; // trust outcome of the deterministic resolver
   codeType: CodeType;
-  reason: string; // human-readable explanation of why this status was chosen
+  reason: string; // customer-safe, product-facing explanation (no AI/provider/Settings mechanics)
+  decodeNote?: string; // platformOwner-only auto-decode detail (why AI did/didn't run); never shown to customers
   decodeStatus?: FeedDecodeStatus; // live-decode pipeline state for this scan row
   quantityDelta: number;
   quantityAfterScan: number;
@@ -209,7 +210,8 @@ export interface UnknownCodeReview {
   sourceUrls: string[];
   verifiedFacts: string[];
   guesses: string[];
-  reason: string;
+  reason: string; // customer-safe, product-facing (no AI/provider/Settings mechanics)
+  decodeNote?: string; // platformOwner-only auto-decode detail; never shown to customers
   providerName: string;
   confidence: number; // 0..1
   // Whether an AI/mock suggestion has been attached (display as "Suggested", never trusted).
