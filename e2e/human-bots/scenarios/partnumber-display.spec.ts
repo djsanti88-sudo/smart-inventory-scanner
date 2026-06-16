@@ -2,8 +2,9 @@ import { test, expect } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 
 // PartNumberBot (Window 2 demo-readiness proof). Runs in CUSTOMER ("business") mode under the bots config
-// (NEXT_PUBLIC_E2E_PLATFORM_OWNER is NOT set). Proves the customer sees the PART NUMBER (primarySku) on the
-// Live Scan Feed + Products table while the BARCODE/raw code stays hidden. Report-only; non-destructive.
+// (NEXT_PUBLIC_E2E_PLATFORM_OWNER is NOT set). Proves the customer sees the SKU (primarySku) AND the
+// just-scanned BARCODE number in the Live Scan Feed (owner-restored), while the catalog barcode/alias
+// DATABASE on the Products page stays hidden. Report-only; non-destructive.
 
 const PROOF = "e2e/proof/demo-readiness";
 
@@ -25,15 +26,18 @@ test("PartNumberBot: customer sees part number, not barcode (scan feed + product
   const feed = page.getByTestId("scan-feed-body");
   await expect(feed).toContainText(NOKIAN_NAME);
 
-  // 2. Part number IS visible to the customer in the feed.
+  // 2. Part number (SKU) IS visible to the customer in the feed.
   await expect(feed).toContainText(NOKIAN_PART_NUMBER);
 
-  // 3. Barcode / raw code is NOT visible to the customer anywhere on the scan page.
-  await expect(page.locator("body")).not.toContainText(NOKIAN_BARCODE);
+  // 3. The SCANNED barcode number IS now visible to the customer in the Live Scan Feed (owner-restored
+  //    "Barcode" column). This is the code the customer just physically scanned - their own input, held
+  //    in-memory only and never persisted - NOT the catalog/alias database.
+  await expect(feed).toContainText(NOKIAN_BARCODE);
 
   await page.screenshot({ path: `${PROOF}/01-customer-scan-part-number.png`, fullPage: true });
 
-  // 4. Products table: customer sees the "Part number" column, not the barcode.
+  // 4. Products table: customer sees the "SKU" column, but the catalog barcode database stays HIDDEN
+  //    (the products page must never expose the stored barcode/alias DB for every product).
   await page.goto("/products");
   const productsBody = page.getByTestId("products-body");
   await expect(productsBody).toContainText(NOKIAN_NAME);
