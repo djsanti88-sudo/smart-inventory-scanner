@@ -148,7 +148,9 @@ export interface ScanStoreDeps {
 
 const DEFAULT_SETTINGS: Settings = {
   businessId: DEMO_BUSINESS_ID,
-  aiLookupEnabled: false,
+  // Internal lookup is ALWAYS-ON by default: unknown codes auto-attempt the internal decode pipeline
+  // (when configured server-side) before going to Needs Review. The toggle remains platformOwner-only.
+  aiLookupEnabled: true,
   primaryProvider: "mock",
   fallbackProvider: "mock",
   dailyLookupLimit: 25,
@@ -782,12 +784,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           (r) => r.cleanCode === cleaned.cleanCode && r.status === "open",
         );
 
-        // The scan row shows "Decoding..." while the pipeline runs, or - if it cannot - the gate
-        // reason combined with the deterministic resolver reason (so vendor-label/no-match context
-        // is preserved alongside the why-no-AI explanation).
-        const passiveReason = autoGate.allowed ? autoGate.reason : `${resolution.reason} ${autoGate.reason}`;
+        // Customer-safe split: the feed REASON is the deterministic resolver explanation only (product-
+        // facing, no AI/provider/Settings mechanics). The auto-decode "why" (e.g. lookup not configured)
+        // goes to decodeNote, which LiveScanFeed shows ONLY to platformOwner. The internal gate reason
+        // text is unchanged (still used for aiLookupLogs/diagnostics).
         event.decodeStatus = existingOpen?.decodeStatus ?? (autoGate.allowed ? "decoding" : "needs_review");
-        event.reason = existingOpen?.reason ?? passiveReason;
+        event.reason = existingOpen?.reason ?? resolution.reason;
+        event.decodeNote = existingOpen?.decodeNote ?? autoGate.reason;
 
         set((s) => ({ scanFeed: [event, ...s.scanFeed] }));
 
@@ -815,7 +818,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             sourceUrls: [],
             verifiedFacts: [],
             guesses: [],
-            reason: passiveReason,
+            reason: resolution.reason,
+            decodeNote: autoGate.reason,
             providerName: resolution.resolverStatus === "conflict" ? "conflict" : "",
             confidence: 0,
             hasSuggestion: false,

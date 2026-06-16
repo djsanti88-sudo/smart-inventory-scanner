@@ -69,8 +69,9 @@ export function LiveScanFeed() {
                         <StatusBadge status={e.status} />
                       )}
                     </td>
-                    <td className="max-w-56 px-3 py-2 text-xs text-zinc-500" title={e.reason}>
+                    <td className="max-w-56 px-3 py-2 text-xs text-zinc-500" title={isPlatform && e.decodeNote ? `${e.reason} — ${e.decodeNote}` : e.reason}>
                       {e.reason}
+                      {isPlatform && e.decodeNote ? <span className="text-zinc-400"> — {e.decodeNote}</span> : null}
                     </td>
                     <td className="px-3 py-2">
                       <SyncBadge status={e.syncStatus} />
