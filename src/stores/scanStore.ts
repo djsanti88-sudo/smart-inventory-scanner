@@ -151,8 +151,10 @@ const DEFAULT_SETTINGS: Settings = {
   // Internal lookup is ALWAYS-ON by default: unknown codes auto-attempt the internal decode pipeline
   // (when configured server-side) before going to Needs Review. The toggle remains platformOwner-only.
   aiLookupEnabled: true,
-  primaryProvider: "mock",
-  fallbackProvider: "mock",
+  // Gemini Flash is the primary decode provider; OpenAI (gpt-5-mini) is the fallback. In mock/E2E mode the
+  // server forces the mock provider regardless, so this only affects real-cloud lookups (keys server-side).
+  primaryProvider: "gemini",
+  fallbackProvider: "openai",
   dailyLookupLimit: 25,
   dailyLookupCount: 0,
   lastResetDate: "1970-01-01",
