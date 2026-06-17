@@ -2,9 +2,32 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { normalizeCode } from "@/services/codeNormalizer";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
 import type { UnknownCodeReview } from "@/types";
+
+// W2: collect the discovered identifiers a decode/page-fetch surfaced (extra UPC/EAN/GTIN/SKU/codes),
+// deduped by clean code and excluding the scanned code itself (aliased on resolve). These are
+// SUGGESTIONS only - a human selects which to approve; nothing here is trusted or saved automatically.
+function buildDiscoveredIdentifiers(review: UnknownCodeReview): { code: string; label: string }[] {
+  const raw: { code: string; label: string }[] = [];
+  if (review.suggestedPrimarySku) raw.push({ code: review.suggestedPrimarySku, label: "Suggested SKU / part number" });
+  if (review.suggestedUpc) raw.push({ code: review.suggestedUpc, label: "Suggested UPC" });
+  if (review.suggestedEan) raw.push({ code: review.suggestedEan, label: "Suggested EAN" });
+  if (review.suggestedGtin) raw.push({ code: review.suggestedGtin, label: "Suggested GTIN" });
+  for (const a of review.suggestedAliases ?? []) raw.push({ code: a, label: "Suggested code" });
+  const scanned = normalizeCode(review.cleanCode).clean;
+  const seen = new Set<string>();
+  const out: { code: string; label: string }[] = [];
+  for (const r of raw) {
+    const clean = normalizeCode(r.code).clean;
+    if (!clean || clean === scanned || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(r);
+  }
+  return out;
+}
 
 // Shows the decode pipeline outcome. "Verified AI Decode" requires the app to have independently
 // verified the exact code in strong evidence AND cross-checked providers - it is never the model's
@@ -96,6 +119,16 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   const [linkId, setLinkId] = useState(products[0]?.id ?? "");
   const [applyToCount, setApplyToCount] = useState(true);
   const [np, setNp] = useState({ name: "", brand: "", category: "" });
+
+  // W2: discovered identifiers the human can approve as aliases. Default = all selected; the human
+  // unchecks to exclude. Approval still requires an explicit click (never auto-saved).
+  const discovered = buildDiscoveredIdentifiers(review);
+  const [deselected, setDeselected] = useState<string[]>([]);
+  const selectedCodes = discovered.map((d) => d.code).filter((c) => !deselected.includes(c));
+  const toggleCode = (code: string, on: boolean) =>
+    setDeselected((prev) => (on ? prev.filter((c) => c !== code) : Array.from(new Set([...prev, code]))));
+  const aliasConflicts = useScanStore((s) => s.lastAliasConflicts);
+  const myConflicts = (aliasConflicts ?? []).filter((c) => c.reviewId === review.id);
 
   const resolved = review.status !== "open";
 
@@ -191,6 +224,35 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             </div>
           </div>
         )}
+        {myConflicts.length > 0 && (
+          <div data-testid="alias-conflict" className="mb-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
+            <p className="font-semibold">Some identifiers already belong to another product</p>
+            <p className="mt-0.5">
+              {myConflicts.length} selected identifier(s) were not linked because they are already approved for a
+              different product. They were not overwritten.
+            </p>
+          </div>
+        )}
+        {isPlatform && !resolved && discovered.length > 0 && (
+          <div className="mb-2 rounded border border-zinc-200 bg-zinc-50 p-2" data-testid="discovered-identifiers">
+            <p className="text-[11px] font-medium text-zinc-600">Discovered identifiers (select to approve as aliases)</p>
+            <div className="mt-1 flex flex-col gap-0.5">
+              {discovered.map((d) => (
+                <label key={d.code} className="flex items-center gap-1 text-[11px] text-zinc-600">
+                  <input
+                    type="checkbox"
+                    data-testid={`discovered-${d.code}`}
+                    checked={selectedCodes.includes(d.code)}
+                    onChange={(e) => toggleCode(d.code, e.target.checked)}
+                  />
+                  <span>
+                    {d.label}: <span className="font-mono text-zinc-800">{d.code}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         {resolved ? (
           <span className="text-xs text-zinc-400">{review.resolutionAction ?? review.status}</span>
         ) : mode === "create" ? (
@@ -226,6 +288,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                   resolveUnknown(review.id, "create_new", {
                     newProduct: { name: np.name || review.cleanCode, brand: np.brand, category: np.category },
                     applyToCount,
+                    selectedAliasCodes: selectedCodes,
                   })
                 }
                 className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
@@ -263,6 +326,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                       imageUrl: review.suggestedImageUrl,
                       productUrl: review.suggestedProductUrl,
                     },
+                    selectedAliasCodes: selectedCodes,
                   })
                 }
                 title="Approve this AI suggestion and save it as a verified product + alias"
@@ -286,7 +350,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             <button
               type="button"
               data-testid="link-existing"
-              onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount })}
+              onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes })}
               className="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700"
             >
               Link
