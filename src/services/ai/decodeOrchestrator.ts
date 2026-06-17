@@ -26,9 +26,9 @@ export interface DecodeRunParams {
   providerTimeoutMs?: number;
   pageTimeoutMs?: number;
   trustedHosts?: string[];
-  // Fast path (default): early-exit as soon as ANY provider returns a usable product name (trust-the-AI).
-  // Fallback path sets this true: only a fully app-VERIFIED decision (exact code in strong evidence)
-  // stops the wait early - so a hard-failed barcode's deeper, slower decode is trustworthy, not a guess.
+  // DEPRECATED (v1.0.0 W1): no-op. Early-exit now ALWAYS requires an app-VERIFIED decision (exact code
+  // in strong evidence + agreement/single-provider on a public barcode); a usable product name alone
+  // never stops the wait. Retained only for caller compatibility until callers drop it.
   requireVerifiedEarlyExit?: boolean;
 }
 
@@ -107,16 +107,12 @@ export async function runDecode(p: DecodeRunParams): Promise<DecodeRunResult> {
   const confident = new Promise<void>((res) => (resolveConfident = res));
   const recheck = () => {
     if (results.length === 0) return;
-    // SPEED + trust-the-AI (fast path): stop as soon as ANY provider returns a usable product name. We
-    // do NOT wait for the slow page-fetch/cross-check to "fully verify" - that was the ~8s tail. The app
-    // still records evidence for catalog metadata, and the client routes conflicts/no-product to review.
-    // Fallback path (requireVerifiedEarlyExit) skips this shortcut and waits for VERIFIED evidence.
-    if (!p.requireVerifiedEarlyExit && results.some((r) => isUsableProductName(r.productName))) {
-      resolveConfident();
-      return;
-    }
+    // W1 (v1.0.0): early-exit ONLY on an app-VERIFIED decision (exact scanned code confirmed in strong
+    // evidence + provider agreement/single-provider on a public barcode). A usable product NAME alone is
+    // NOT enough - unverified/suggested/conflict keep running until a verified hit or the time budget.
+    // This removes the old "trust-the-AI fast path" that stopped on the first usable product name.
     const d = decideDecode({ codeType: p.codeType, results, evidences, confidenceThreshold: p.confidenceThreshold });
-    if (d.status === "verified") resolveConfident(); // a fully-verified hit -> stop waiting early
+    if (d.status === "verified") resolveConfident();
   };
 
   const tasks: Promise<unknown>[] = p.providers.map((prov) => {

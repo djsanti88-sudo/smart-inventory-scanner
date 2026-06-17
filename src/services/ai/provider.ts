@@ -1,4 +1,5 @@
 import type { AiLookupResult } from "@/types";
+import { capSnippets } from "@/services/ai/snippetCap";
 
 // AI provider abstraction. The app only ever calls a provider for UNKNOWN codes, after the
 // deterministic matcher has missed and the input has been sanitized. Providers return the strict
@@ -56,8 +57,10 @@ export function normalizeResult(raw: Partial<AiLookupResult> | null | undefined)
     sourceUrls: Array.isArray(raw.sourceUrls) ? raw.sourceUrls : [],
     verifiedFacts: Array.isArray(raw.verifiedFacts) ? raw.verifiedFacts : [],
     guesses: Array.isArray(raw.guesses) ? raw.guesses : [],
-    sourceSnippets: Array.isArray(raw.sourceSnippets) ? raw.sourceSnippets : [],
-    groundingChunks: Array.isArray(raw.groundingChunks) ? raw.groundingChunks : [],
+    // W4 (v1.0.0): cap each AI-bound snippet/grounding chunk to MAX_AI_SNIPPET_CHARS. The full fetched
+    // page text used by the EvidenceVerifier is a separate ProviderEvidence field and is never capped.
+    sourceSnippets: capSnippets(Array.isArray(raw.sourceSnippets) ? raw.sourceSnippets : []),
+    groundingChunks: capSnippets(Array.isArray(raw.groundingChunks) ? raw.groundingChunks : []),
     exactCodeEvidence: Boolean(raw.exactCodeEvidence),
     confidence,
     // The 0.85 rule: anything below is forced to human review regardless of provider claim.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { runDecode, type DecodeProvider } from "@/services/ai/decodeOrchestrator";
 import { emptyResult } from "@/services/ai/provider";
-import type { AiLookupResult } from "@/types";
+import type { AiLookupResult, EvidenceResult } from "@/types";
 
 function coke(): AiLookupResult {
   return { ...emptyResult(), productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "049000028904", sourceSnippets: ["UPC 049000028904 Coca-Cola"], confidence: 0.96 };
@@ -98,5 +98,86 @@ describe("runDecode - time budget + concurrency", () => {
     expect(r.timedOut).toBe(false);
     expect(r.decision.status).toBe("verified"); // page-fetch fetched_source verifies it
     expect(typeof r.latencyMs).toBe("number");
+  });
+});
+
+// --- W1 (v1.0.0): verified-only early exit. The old name-only "trust-the-AI" fast path is removed:
+// a usable product NAME no longer stops the wait; only an app-VERIFIED decision (or the budget) does.
+function namedWeak(name: string, brand: string): AiLookupResult {
+  // Usable product NAME but only weak (untrusted URL, no exact-code evidence) -> must NOT be trusted.
+  return { ...emptyResult(), productName: name, brand, upc: "049000028904", sourceUrls: ["https://untrusted.example"], confidence: 0.96 };
+}
+
+describe("runDecode - W1 verified-only early exit", () => {
+  it("does NOT early-exit on a usable product name alone; waits for the page-fetch to VERIFY", async () => {
+    const weakNamed: DecodeProvider = { name: "openai", lookup: async () => namedWeak("Coca-Cola Classic", "Coca-Cola") };
+    // The slower page-fetch supplies fetched_source evidence that actually verifies the exact code.
+    const enrich = (signal: AbortSignal) =>
+      new Promise<{ result: AiLookupResult; evidence: EvidenceResult }>((res, rej) => {
+        const t = setTimeout(
+          () =>
+            res({
+              result: { ...emptyResult(), productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "049000028904", confidence: 0.92 },
+              evidence: { verified: true, strength: "fetched_source", matchedCode: "049000028904", matchedSources: ["go-upc"], reason: "" },
+            }),
+          40,
+        );
+        signal.addEventListener("abort", () => {
+          clearTimeout(t);
+          rej(new Error("aborted"));
+        });
+      });
+    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [weakNamed], enrich, budgetMs: 13_000 });
+    // Old fast path would have stopped at the unverified name (suggested) and aborted the enrich.
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("verified");
+    expect(r.providerNames).toContain("page-fetch");
+  });
+
+  it("still exits early as soon as the decode is app-VERIFIED (does not wait for a hung provider)", async () => {
+    const fastVerified: DecodeProvider = { name: "gemini", lookup: async () => coke() };
+    // The hung provider would only settle at providerTimeoutMs (10s) > vitest's 5s test timeout. If the
+    // run did NOT early-exit on the verified result, this test would hang and fail - passing fast proves it.
+    const hung: DecodeProvider = {
+      name: "openai",
+      lookup: (signal) => new Promise<AiLookupResult>((_, rej) => signal.addEventListener("abort", () => rej(new Error("aborted")))),
+    };
+    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [fastVerified, hung], budgetMs: 13_000, providerTimeoutMs: 10_000 });
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("verified");
+  });
+
+  it("routes conflicting providers to conflict (never verified, never auto-counted)", async () => {
+    const a: DecodeProvider = { name: "gemini", lookup: async () => namedWeak("Powdered Creamer", "Laird") };
+    const b: DecodeProvider = { name: "openai", lookup: async () => namedWeak("Duplex Receptacle", "Leviton") };
+    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [a, b], budgetMs: 13_000 });
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("conflict");
+    expect(r.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
+  });
+
+  it("a single usable-but-weak provider stays Suggested, never Verified (no auto-count)", async () => {
+    const weak: DecodeProvider = { name: "openai", lookup: async () => namedWeak("Maybe Snack", "Generic") };
+    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [weak], budgetMs: 13_000 });
+    expect(r.decision.status).toBe("suggested");
+    expect(r.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
+  });
+
+  it("855724007602 (known live decode) still VERIFIES under the stricter pipeline when evidence is present", async () => {
+    const natureWise: DecodeProvider = {
+      name: "gemini",
+      lookup: async () => ({
+        ...emptyResult(),
+        productName: "NatureWise Omega 3 1000 Mg + Vitamin E",
+        brand: "NatureWise",
+        upc: "855724007602",
+        sourceSnippets: ["NatureWise Omega 3 1000 Mg + Vitamin E UPC 855724007602 fish oil supplement"],
+        confidence: 0.95,
+      }),
+    };
+    const r = await runDecode({ code: "855724007602", codeType: "upc_a", confidenceThreshold: 0.85, providers: [natureWise], budgetMs: 13_000 });
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("verified");
+    expect(r.results[0]?.productName).toMatch(/NatureWise Omega 3/);
   });
 });
