@@ -202,6 +202,9 @@ export interface ScanState {
   // Transient (not persisted): set when a link to a product was BLOCKED by the human-mistake guard.
   // The UI shows the warning and may re-call resolveUnknown with confirmedMismatch: true to override.
   lastMismatchWarning: { reviewId: string; productId: string; verdict: MismatchVerdict } | null;
+  // Transient (not persisted): SELECTED discovered identifiers that could NOT be approved because the
+  // clean code already belongs to a DIFFERENT product. Surfaced to the UI; never silently overwritten.
+  lastAliasConflicts: { reviewId: string; code: string; existingProductId: string }[] | null;
 
   // AI lookup (fallback only, for unknown codes)
   aiLookupLogs: AiLookupLog[];
@@ -255,12 +258,15 @@ export interface ScanState {
       };
       /** Owner override: proceed with a link the mismatch guard flagged high-risk (audited). */
       confirmedMismatch?: boolean;
+      /** Codes the human explicitly selected from the discovered identifiers to approve as aliases (W2). */
+      selectedAliasCodes?: string[];
     },
   ) => void;
   /** Evaluate (without committing) whether linking a review's code to a product looks like a mistake. */
   evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
   /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
   clearMismatchWarning: () => void;
+  clearAliasConflicts: () => void;
   /** Repair a bad alias: unlink it (stops resolving; soft delete, scan history kept). Audited. */
   unlinkAlias: (aliasId: string) => void;
   /** Repair a bad alias: move it to the correct product. Audited. */
@@ -385,6 +391,77 @@ function buildProductCodeAliases(params: {
     );
   }
   return { aliases, queued };
+}
+
+/**
+ * W2: build APPROVED aliases for an EXPLICIT list of human-selected discovered identifier codes, onto a
+ * target product (new or existing). Dedupes against codes already aliased for that product (idempotent),
+ * and NEVER overwrites a code that is an approved alias of a DIFFERENT product - those are returned as
+ * conflicts for the caller to surface. Pure builder; caller commits to state.
+ */
+function buildApprovedAliasesForCodes(params: {
+  product: Product;
+  codes: string[];
+  existingAliases: Alias[];
+  businessId: string;
+  sessionId: string;
+  idFactory: () => string;
+  now: () => string;
+}): { aliases: Alias[]; queued: PendingSyncItem[]; conflicts: { code: string; otherProductId: string }[] } {
+  const { product, codes, existingAliases, businessId, sessionId, idFactory, now } = params;
+  const ownCleanCodes = new Set(existingAliases.filter((a) => a.productId === product.id).map((a) => a.cleanCode));
+  const aliases: Alias[] = [];
+  const queued: PendingSyncItem[] = [];
+  const conflicts: { code: string; otherProductId: string }[] = [];
+  for (const raw of codes) {
+    if (!raw) continue;
+    const n = normalizeCode(raw);
+    const cleanCode = n.clean;
+    if (!cleanCode) continue;
+    if (ownCleanCodes.has(cleanCode)) continue; // already aliased to THIS product -> idempotent skip
+    const other = existingAliases.find((a) => a.cleanCode === cleanCode && a.productId !== product.id && a.approved);
+    if (other) {
+      conflicts.push({ code: cleanCode, otherProductId: other.productId });
+      continue; // belongs to a DIFFERENT product -> never overwrite
+    }
+    ownCleanCodes.add(cleanCode);
+    const aliasId = `alias-${idFactory()}`;
+    const key = buildIdempotencyKey(businessId, sessionId, aliasId, "RESOLVE_ALIAS");
+    const alias: Alias = {
+      id: aliasId,
+      businessId,
+      productId: product.id,
+      rawCodeExample: raw,
+      cleanCode,
+      normalizedCode: n.noSeparators || cleanCode,
+      aliasType: codeTypeToAliasType(detectCodeType(cleanCode)),
+      source: "human_review",
+      confidence: 1,
+      approved: true,
+      createdAt: now(),
+      updatedAt: now(),
+      createdBy: "human",
+      lastSeenAt: now(),
+      syncStatus: "pending",
+      idempotencyKey: key,
+    };
+    aliases.push(alias);
+    queued.push(
+      makeQueueItem({
+        idFactory,
+        now,
+        businessId,
+        sessionId,
+        entityType: "Alias",
+        entityId: aliasId,
+        operation: "RESOLVE_ALIAS",
+        payload: alias,
+        idempotencyKey: key,
+        scanEventId: null,
+      }),
+    );
+  }
+  return { aliases, queued, conflicts };
 }
 
 /** Recompute syncStatus on feed/counts/reviews from what remains in the pending queue. */
@@ -552,6 +629,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       simulateSyncFailure: false,
       lastSyncError: null,
       lastMismatchWarning: null,
+      lastAliasConflicts: null,
       aiLookupLogs: [],
       breaker: initBreaker(),
       aiStatus: { ...DEFAULT_AI_STATUS },
@@ -1530,7 +1608,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : e,
         );
 
-        set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null });
+        set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null, lastAliasConflicts: null });
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
@@ -1595,6 +1673,41 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             }));
             for (const a of freshAliases) {
               emitAudit({ entityType: "Alias", entityId: a.id, action: "alias_approved", metadata: { code: a.cleanCode, productId: createdProduct.id, origin: "multi_code" } });
+            }
+          }
+        }
+
+        // W2: approve the human-SELECTED discovered identifiers as APPROVED aliases onto the resolved
+        // product (new or existing). Only codes the human explicitly selected reach here; deduped per
+        // product; a code already owned by a DIFFERENT product is a conflict (surfaced, never overwritten).
+        const selectedAliasCodes = (payload.selectedAliasCodes ?? []).filter(Boolean);
+        if (selectedAliasCodes.length > 0) {
+          const targetProduct = get().products.find((p) => p.id === productId);
+          if (targetProduct) {
+            const built = buildApprovedAliasesForCodes({
+              product: targetProduct,
+              codes: selectedAliasCodes,
+              existingAliases: get().aliases,
+              businessId: state.businessId,
+              sessionId: state.sessionId,
+              idFactory,
+              now,
+            });
+            if (built.aliases.length > 0) {
+              const builtIds = new Set(built.aliases.map((a) => a.id));
+              set((s) => ({
+                aliases: [...s.aliases, ...built.aliases],
+                pendingSyncQueue: [...s.pendingSyncQueue, ...built.queued.filter((q) => builtIds.has(q.entityId))],
+              }));
+              for (const a of built.aliases) {
+                emitAudit({ entityType: "Alias", entityId: a.id, action: "alias_approved", metadata: { code: a.cleanCode, productId, origin: "human_discovered" } });
+              }
+            }
+            if (built.conflicts.length > 0) {
+              set({ lastAliasConflicts: built.conflicts.map((c) => ({ reviewId, code: c.code, existingProductId: c.otherProductId })) });
+              for (const c of built.conflicts) {
+                emitAudit({ entityType: "Alias", entityId: c.code, action: "alias_conflict_blocked", metadata: { code: c.code, attemptedProductId: productId, existingProductId: c.otherProductId } });
+              }
             }
           }
         }
@@ -1678,6 +1791,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       clearMismatchWarning: () => set({ lastMismatchWarning: null }),
+
+      clearAliasConflicts: () => set({ lastAliasConflicts: null }),
 
       unlinkAlias: (aliasId) => {
         const state = get();
@@ -1819,6 +1934,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           aiLookupLogs: [],
           lastSyncError: null,
           lastMismatchWarning: null,
+          lastAliasConflicts: null,
           breaker: initBreaker(),
           lastCleanupBackup: null,
           catalog: [],

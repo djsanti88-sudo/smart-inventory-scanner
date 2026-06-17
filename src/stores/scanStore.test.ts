@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
+import { normalizeCode } from "@/services/codeNormalizer";
 
 const SEQUENCE = [
   "6419440485331",
@@ -141,6 +142,107 @@ describe("scanStore - human resolution learns a permanent alias", () => {
 
     const learned = store.getState().aliases.filter((a) => a.cleanCode === "UNKNOWN123");
     expect(learned).toHaveLength(1);
+  });
+});
+
+describe("scanStore - W2 discovered-alias approval", () => {
+  const clean = (s: string) => normalizeCode(s).clean;
+
+  function openReview(store: ReturnType<typeof createTestScanStore>, code: string): string {
+    store.getState().processScan(code);
+    return store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
+  }
+
+  it("does NOT auto-save discovered identifiers as aliases before human approval", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const id = openReview(store, "UNKNOWNW2A");
+    // A decode surfaced extra identifiers as SUGGESTIONS on the review (never trusted).
+    store.setState((s) => ({
+      needsReviewQueue: s.needsReviewQueue.map((r) =>
+        r.id === id ? { ...r, suggestedAliases: ["DISCOVEREDA", "DISCOVEREDB"], hasSuggestion: true } : r,
+      ),
+    }));
+    expect(
+      store.getState().aliases.some((a) => [clean("DISCOVEREDA"), clean("DISCOVEREDB")].includes(a.cleanCode)),
+    ).toBe(false);
+    expect(store.getState().processScan("DISCOVEREDA")?.resolverStatus).not.toBe("known");
+  });
+
+  it("approves SELECTED discovered identifiers onto a NEW product; future scans then count automatically", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const id = openReview(store, "WIDGETMAIN");
+    store.getState().resolveUnknown(id, "create_new", {
+      newProduct: { name: "Widget Pro" },
+      selectedAliasCodes: ["WIDGETALT1", "012345678905"],
+      applyToCount: false,
+    });
+    const prod = store.getState().products.find((p) => p.name === "Widget Pro")!;
+    expect(prod).toBeTruthy();
+    const alt = store.getState().aliases.find((a) => a.cleanCode === clean("WIDGETALT1"));
+    expect(alt?.approved).toBe(true);
+    expect(alt?.source).toBe("human_review");
+    expect(alt?.productId).toBe(prod.id);
+    // scanned primary + the two selected discovered identifiers are all aliased to the new product
+    expect(store.getState().aliases.filter((a) => a.productId === prod.id && a.approved).length).toBeGreaterThanOrEqual(3);
+    // future scan of a discovered alias resolves Known and counts
+    const ev = store.getState().processScan("WIDGETALT1");
+    expect(ev?.resolverStatus).toBe("known");
+    expect(ev?.matchedProductId).toBe(prod.id);
+    expect(countFor(store, prod.id)).toBe(1);
+  });
+
+  it("approves SELECTED discovered identifiers onto an EXISTING product without creating a duplicate product", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const before = store.getState().products.length;
+    const id = openReview(store, "EXTRAUNKNOWN1");
+    store.getState().resolveUnknown(id, "link_existing", {
+      productId: "prod-coke",
+      selectedAliasCodes: ["COKEALT99"],
+      applyToCount: false,
+    });
+    expect(store.getState().products.length).toBe(before); // no duplicate product created
+    const alt = store.getState().aliases.find((a) => a.cleanCode === clean("COKEALT99"));
+    expect(alt?.productId).toBe("prod-coke");
+    expect(alt?.approved).toBe(true);
+    const ev = store.getState().processScan("COKEALT99");
+    expect(ev?.resolverStatus).toBe("known");
+    expect(ev?.matchedProductId).toBe("prod-coke");
+  });
+
+  it("prevents duplicate aliases (same code repeated, and the scanned primary code)", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const id = openReview(store, "DUPMAIN");
+    store.getState().resolveUnknown(id, "create_new", {
+      newProduct: { name: "Dup Prod" },
+      selectedAliasCodes: ["DUPALT", "DUPALT", "DUPMAIN"], // duplicate + the scanned primary
+      applyToCount: false,
+    });
+    const prod = store.getState().products.find((p) => p.name === "Dup Prod")!;
+    expect(store.getState().aliases.filter((a) => a.cleanCode === clean("DUPALT"))).toHaveLength(1);
+    expect(
+      store.getState().aliases.filter((a) => a.cleanCode === clean("DUPMAIN") && a.productId === prod.id),
+    ).toHaveLength(1);
+  });
+
+  it("does NOT silently overwrite an alias that already belongs to a DIFFERENT product (conflict)", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    // SHAREDCODE1 approved onto prod-coke first.
+    const id1 = openReview(store, "SHAREDCODE1");
+    store.getState().resolveUnknown(id1, "link_existing", { productId: "prod-coke" });
+    expect(store.getState().aliases.find((a) => a.cleanCode === clean("SHAREDCODE1"))?.productId).toBe("prod-coke");
+    // Now try to attach SHAREDCODE1 as a discovered alias onto prod-nokian via a different review.
+    const id2 = openReview(store, "OTHERUNKNOWN1");
+    store.getState().resolveUnknown(id2, "link_existing", { productId: "prod-nokian", selectedAliasCodes: ["SHAREDCODE1"] });
+    // Not overwritten: still belongs to coke; no nokian alias for it.
+    const shared = store.getState().aliases.filter((a) => a.cleanCode === clean("SHAREDCODE1") && a.approved);
+    expect(shared).toHaveLength(1);
+    expect(shared[0].productId).toBe("prod-coke");
+    expect(store.getState().aliases.some((a) => a.cleanCode === clean("SHAREDCODE1") && a.productId === "prod-nokian")).toBe(false);
+    // Conflict surfaced for the UI (never silently dropped).
+    const conflicts = store.getState().lastAliasConflicts ?? [];
+    expect(conflicts.some((c) => c.code === clean("SHAREDCODE1") && c.existingProductId === "prod-coke")).toBe(true);
+    // The primary resolution still succeeded (OTHERUNKNOWN1 -> nokian).
+    expect(store.getState().aliases.some((a) => a.cleanCode === clean("OTHERUNKNOWN1") && a.productId === "prod-nokian")).toBe(true);
   });
 });
 
