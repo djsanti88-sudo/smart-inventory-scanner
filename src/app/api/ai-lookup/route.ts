@@ -5,6 +5,7 @@ import { createGeminiProvider } from "@/services/ai/geminiProvider";
 import { createOpenAiProvider } from "@/services/ai/openaiProvider";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { detectCodeType } from "@/services/codeTypeDetector";
+import { formatGs1Hint } from "@/services/gs1Prefixes";
 import { enrichWithPageFetch } from "@/services/ai/pageFetch";
 import { runDecode, type DecodeProvider } from "@/services/ai/decodeOrchestrator";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
@@ -154,10 +155,15 @@ export async function POST(request: Request) {
   const cleanCodeSanitized = sanitizeForAiLookup(body.cleanCode ?? "").clean;
   const code = cleanCodeSanitized || rawCodeSanitized;
   const codeType = (body.codeType as ReturnType<typeof detectCodeType>) || detectCodeType(code);
+  // W3 (v1.0.0): app-derived GS1 numbering-authority region hint for PUBLIC barcodes (null otherwise).
+  // NON-AUTHORITATIVE prompt context only - it never changes resolver truth, alias approval, auto-count,
+  // or evidence thresholds, and is never placed in untrusted scraped text.
+  const gs1RegionHint = formatGs1Hint(code, codeType) ?? undefined;
   const req = {
     rawCodeSanitized,
     cleanCodeSanitized,
     allowImageSuggestions: body.allowImageSuggestions ?? false,
+    gs1RegionHint,
   };
 
   if (body.mode === "decode") {

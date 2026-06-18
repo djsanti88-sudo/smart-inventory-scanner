@@ -11,6 +11,9 @@ export interface AiLookupRequest {
   cleanCodeSanitized: string;
   contextSanitized?: string;
   allowImageSuggestions?: boolean;
+  // W3 (v1.0.0): app-derived GS1 numbering-authority region hint (public barcodes only). Injected into
+  // the TRUSTED prompt context as a NON-AUTHORITATIVE hint; never resolver/alias/evidence truth.
+  gs1RegionHint?: string;
 }
 
 export interface AiProvider {
