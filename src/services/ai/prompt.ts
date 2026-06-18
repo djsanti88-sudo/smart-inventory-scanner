@@ -64,7 +64,7 @@ ${req.allowImageSuggestions ? "You may suggest an imageUrl as a guess." : "Do no
 </rules>
 
 <trusted_context>
-${TRUSTED_CONTEXT}
+${TRUSTED_CONTEXT}${req.gs1RegionHint ? `\n${req.gs1RegionHint}` : ""}
 </trusted_context>
 
 <untrusted_input>
