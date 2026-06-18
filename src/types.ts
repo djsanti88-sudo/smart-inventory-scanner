@@ -231,6 +231,10 @@ export interface UnknownCodeReview {
   resolutionAction: ResolutionAction | null;
   syncStatus: SyncStatus;
   idempotencyKey: string;
+  // Phase 6 correction recheck (Gemini Pro, correction-only). Display/diagnostic; never auto-saves or counts.
+  correctionRecheckStatus?: "requested" | "verified_correction" | "insufficient_evidence" | "conflict" | "unavailable";
+  correctionRecheckedAt?: string | null;
+  correctionRecheckMissingKeys?: string[];
 }
 
 export type ResolutionAction =

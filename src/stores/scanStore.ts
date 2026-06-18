@@ -271,6 +271,20 @@ export interface ScanState {
   unlinkAlias: (aliasId: string) => void;
   /** Repair a bad alias: move it to the correct product. Audited. */
   moveAlias: (aliasId: string, toProductId: string) => void;
+  /** Phase 6: remove a product's count from the current session only (keeps product + aliases). Audited. */
+  removeFromCount: (productId: string) => void;
+  /** Phase 6: edit safe product fields (name/brand/category/specs/sku/image/location). No alias trust change. */
+  correctProduct: (
+    productId: string,
+    fields: Partial<Pick<Product, "name" | "brand" | "category" | "specsShort" | "specsFull" | "primarySku" | "imageUrl" | "location">>,
+  ) => void;
+  /** Phase 6: mark a counted product wrong - deactivate its scanned-code aliases, remove the session count,
+   *  reopen Needs Review for the code, and request a Gemini Pro correction recheck. Returns the reopened review id. */
+  markWrong: (productId: string, opts?: { reason?: string }) => Promise<string | null>;
+  /** Phase 6: reopen (or create) an OPEN Needs Review item for a clean code; clears stale suggestions. */
+  reopenNeedsReview: (cleanCode: string, reason: string) => string | null;
+  /** Phase 6: correction-only Gemini Pro recheck. Cost-guarded (one per code unless retry). Never auto-saves. */
+  correctionRecheck: (reviewId: string, opts?: { retry?: boolean; reason?: string }) => Promise<void>;
   /** Append a private feedback/event-log entry (the "smarter over time" substrate). */
   recordFeedback: (
     type: FeedbackEventType,
@@ -1834,6 +1848,196 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }));
         emitAudit({ entityType: "Alias", entityId: aliasId, action: "alias_moved_or_unlinked", metadata: { fromProduct, toProduct: toProductId, cleanCode: alias.cleanCode, normalizedCode: alias.normalizedCode, reason: "human_mistake_repair" } });
         get().syncPending();
+      },
+
+      // --- Phase 6: wrong-decode correction -------------------------------------------------------
+
+      removeFromCount: (productId) => {
+        const state = get();
+        const removed = state.finalCounts.find((c) => c.productId === productId);
+        if (!removed) return;
+        // Session-only: drop the count row. Product + aliases are untouched (reversible by re-scanning).
+        set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.productId !== productId) }));
+        emitAudit({ entityType: "InventoryCount", entityId: removed.id, action: "count_removed", metadata: { productId, quantity: removed.quantity, reason: "remove_from_count" } });
+      },
+
+      correctProduct: (productId, fields) => {
+        const state = get();
+        const product = state.products.find((p) => p.id === productId);
+        if (!product) return;
+        // Whitelist editable, product-facing fields only. Alias trust (approved/verified) is NEVER touched here.
+        const safe: Partial<Product> = {};
+        for (const k of ["name", "brand", "category", "specsShort", "specsFull", "primarySku", "imageUrl", "location"] as const) {
+          if (fields[k] !== undefined) safe[k] = fields[k];
+        }
+        const updated: Product = { ...product, ...safe, updatedAt: now(), updatedBy: "human" };
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, productId, "SAVE_PRODUCT");
+        set((s) => ({ products: s.products.map((p) => (p.id === productId ? updated : p)) }));
+        enqueueAndSync([
+          makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Product", entityId: productId, operation: "SAVE_PRODUCT", payload: updated, idempotencyKey: key, scanEventId: null }),
+        ]);
+        emitAudit({ entityType: "Product", entityId: productId, action: "product_corrected", metadata: { fields: Object.keys(safe).join(",") } });
+      },
+
+      reopenNeedsReview: (cleanCode, reason) => {
+        const state = get();
+        const code = (cleanCode ?? "").trim();
+        if (!code) return null;
+        const existing = state.needsReviewQueue.find((r) => r.cleanCode === code);
+        if (existing) {
+          set((s) => ({
+            needsReviewQueue: s.needsReviewQueue.map((r) =>
+              r.id === existing.id
+                ? {
+                    ...r, status: "open", reason, resolvedAt: null, resolvedBy: null, resolutionAction: null,
+                    hasSuggestion: false, suggestedProductName: "", suggestedBrand: "", suggestedCategory: "",
+                    suggestedSpecsShort: "", suggestedSpecsFull: "", suggestedPrimarySku: "", suggestedPrimaryBarcode: "",
+                    suggestedGtin: "", suggestedUpc: "", suggestedEan: "", suggestedImageUrl: "", suggestedProductUrl: "",
+                    suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [], confidence: 0, providerName: "",
+                    decodeStatus: "needs_review", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
+                    correctionRecheckStatus: undefined, correctionRecheckedAt: null, correctionRecheckMissingKeys: undefined,
+                  }
+                : r,
+            ),
+          }));
+          return existing.id;
+        }
+        const id = idFactory();
+        const review: UnknownCodeReview = {
+          id, businessId: state.businessId, sessionId: state.sessionId, rawCode: code, cleanCode: code,
+          normalizedCandidates: normalizeCode(code).searchVariants ?? [code],
+          suggestedProductName: "", suggestedBrand: "", suggestedCategory: "", suggestedSpecsShort: "", suggestedSpecsFull: "",
+          suggestedPrimarySku: "", suggestedPrimaryBarcode: "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
+          suggestedImageUrl: "", suggestedProductUrl: "", suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [],
+          reason, providerName: "", confidence: 0, hasSuggestion: false, decodeStatus: "needs_review",
+          evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
+          status: "open", createdAt: now(), resolvedAt: null, resolvedBy: null, resolutionAction: null,
+          syncStatus: "pending", idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, id, "SAVE_UNKNOWN_SCAN"),
+        };
+        set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
+        enqueueAndSync([
+          makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "UnknownCodeReview", entityId: id, operation: "SAVE_UNKNOWN_SCAN", payload: review, idempotencyKey: review.idempotencyKey, scanEventId: null }),
+        ]);
+        return id;
+      },
+
+      markWrong: async (productId, opts) => {
+        const state = get();
+        const product = state.products.find((p) => p.id === productId);
+        const count = state.finalCounts.find((c) => c.productId === productId);
+        // Codes that resolved to this product this session (scan feed is the reliable source; the count's
+        // aliasesSeen is a fallback). These approved aliases are the ones to deactivate.
+        const seenCodes = Array.from(
+          new Set([
+            ...state.scanFeed.filter((e) => e.matchedProductId === productId).map((e) => e.cleanCode),
+            ...(count?.aliasesSeen ?? []),
+          ]),
+        );
+        // 1. Deactivate the APPROVED aliases that mapped the scanned code(s) to this (wrong) product.
+        const deactivate = state.aliases.filter(
+          (a) => a.productId === productId && a.approved && (seenCodes.length === 0 || seenCodes.includes(a.cleanCode)),
+        );
+        if (deactivate.length > 0) {
+          const ids = new Set(deactivate.map((a) => a.id));
+          const queued: PendingSyncItem[] = [];
+          const updatedAliases = state.aliases.map((a) => {
+            if (!ids.has(a.id)) return a;
+            const key = buildIdempotencyKey(state.businessId, state.sessionId, `${a.id}:markwrong:${idFactory()}`, "RESOLVE_ALIAS");
+            const u: Alias = { ...a, approved: false, updatedAt: now(), syncStatus: "pending", idempotencyKey: key };
+            queued.push(makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Alias", entityId: a.id, operation: "RESOLVE_ALIAS", payload: u, idempotencyKey: key, scanEventId: null }));
+            emitAudit({ entityType: "Alias", entityId: a.id, action: "wrong_alias_removed", metadata: { productId, cleanCode: a.cleanCode, reason: opts?.reason ?? "marked_wrong" } });
+            return u;
+          });
+          set((s) => ({ aliases: updatedAliases, pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
+        }
+        // 2. Reset related feed rows to needs_review (scan history preserved; no longer "known").
+        set((s) => ({
+          scanFeed: s.scanFeed.map((e) =>
+            e.matchedProductId === productId && (seenCodes.length === 0 || seenCodes.includes(e.cleanCode))
+              ? { ...e, status: "needs_review" as const, resolverStatus: "needs_review" as const, matchedProductId: null }
+              : e,
+          ),
+        }));
+        // 3. Remove the session count (product + now-deactivated aliases are kept for audit/repair).
+        if (count) {
+          set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.productId !== productId) }));
+          emitAudit({ entityType: "InventoryCount", entityId: count.id, action: "count_removed", metadata: { productId, quantity: count.quantity, reason: "marked_wrong" } });
+        }
+        // 4. Reopen Needs Review for the representative scanned code.
+        const code = seenCodes[0] || product?.primaryBarcode || "";
+        const reviewId = code
+          ? get().reopenNeedsReview(code, `Marked wrong by owner. Previous match ${product?.name ? `"${product.name}"` : ""} removed - re-identify the product.`)
+          : null;
+        if (reviewId) {
+          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "needs_review_reopened", metadata: { code, fromProduct: productId } });
+          // 5. Stronger Gemini Pro correction recheck (cost-guarded; never auto-saves or counts).
+          await get().correctionRecheck(reviewId, { reason: opts?.reason });
+        }
+        return reviewId;
+      },
+
+      correctionRecheck: async (reviewId, opts) => {
+        const review = get().needsReviewQueue.find((r) => r.id === reviewId);
+        if (!review || review.status !== "open") return;
+        // Cost guard: one Pro recheck per marked-wrong code unless the user explicitly retries.
+        if (review.correctionRecheckStatus && review.correctionRecheckStatus !== "requested" && !opts?.retry) return;
+        const ai = get().aiStatus;
+        const patch = (extra: Partial<UnknownCodeReview>) =>
+          set((s) => ({ needsReviewQueue: s.needsReviewQueue.map((r) => (r.id === reviewId ? { ...r, ...extra } : r)) }));
+
+        emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_requested", metadata: { code: review.cleanCode, reason: opts?.reason ?? "" } });
+
+        // Config-missing: do NOT fail the correction. Mark unavailable, keep in Needs Review, report key NAMES only.
+        if (!ai.geminiConfigured) {
+          patch({ correctionRecheckStatus: "unavailable", correctionRecheckedAt: now(), correctionRecheckMissingKeys: ["GEMINI_API_KEY"] });
+          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_completed", metadata: { code: review.cleanCode, status: "unavailable", missing: "GEMINI_API_KEY" } });
+          return;
+        }
+
+        patch({ correctionRecheckStatus: "requested", correctionRecheckedAt: now() });
+        try {
+          const res = await fetch("/api/ai-lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            // proRecheck selects the strongest configured Gemini model server-side. Correction-only:
+            // it does NOT change normal scan provider order or premium fallback.
+            body: JSON.stringify({ mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85 }),
+          });
+          const data = await res.json();
+          const decision = data.decision;
+          const results: AiLookupResult[] = data.results ?? [];
+          const best = results[0] ?? null;
+          const status: "verified_correction" | "insufficient_evidence" | "conflict" =
+            decision?.status === "verified" ? "verified_correction" : decision?.status === "conflict" ? "conflict" : "insufficient_evidence";
+
+          if (status === "verified_correction" && best) {
+            // Recommendation is a SUGGESTION only - the human still approves it via Needs Review (no auto-save/count).
+            patch({
+              correctionRecheckStatus: status, correctionRecheckedAt: now(),
+              suggestedProductName: best.productName, suggestedBrand: best.brand, suggestedCategory: best.category,
+              suggestedSpecsShort: best.specsShort, suggestedPrimarySku: best.primarySku, suggestedPrimaryBarcode: best.primaryBarcode,
+              suggestedGtin: best.gtin, suggestedUpc: best.upc, suggestedEan: best.ean, suggestedAliases: best.aliases ?? [],
+              sourceUrls: best.sourceUrls ?? [], verifiedFacts: best.verifiedFacts ?? [], guesses: best.guesses ?? [],
+              hasSuggestion: true, decodeStatus: "verified", confidence: decision?.confidence ?? best.confidence ?? 0,
+              evidenceStrength: decision?.evidenceStrength ?? "none", exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
+              crossCheckDecision: decision?.crossCheck?.decision ?? "",
+              reason: "Gemini Pro recheck: verified correction suggested. Approve to save (still requires your confirmation).",
+            });
+          } else {
+            // insufficient_evidence | conflict -> keep in Needs Review, safe message, NO trusted suggestion.
+            patch({
+              correctionRecheckStatus: status, correctionRecheckedAt: now(),
+              decodeStatus: status === "conflict" ? "conflict" : "needs_review",
+              reason: status === "conflict"
+                ? "Gemini Pro recheck: providers conflict on identity. Kept in Needs Review - resolve manually."
+                : "Gemini Pro recheck: insufficient evidence to auto-correct. Kept in Needs Review.",
+            });
+          }
+          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_completed", metadata: { code: review.cleanCode, status } });
+        } catch {
+          patch({ correctionRecheckStatus: "unavailable", correctionRecheckedAt: now() });
+          emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "correction_recheck_completed", metadata: { code: review.cleanCode, status: "error" } });
+        }
       },
 
       importProductsCsv: (text) => {

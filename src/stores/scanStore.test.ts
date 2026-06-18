@@ -145,6 +145,176 @@ describe("scanStore - human resolution learns a permanent alias", () => {
   });
 });
 
+describe("scanStore - Phase 6 wrong-decode correction", () => {
+  function stub(resp: object) {
+    const original = globalThis.fetch;
+    const spy = vi.fn(async () => ({ ok: true, json: async () => resp })) as unknown as typeof fetch;
+    globalThis.fetch = spy;
+    return { spy, restore: () => (globalThis.fetch = original) };
+  }
+  function setGeminiConfigured(store: ReturnType<typeof createTestScanStore>, on: boolean) {
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, geminiConfigured: on } }));
+  }
+  // Simulate a wrong saved decode: a human linked an unknown code to a (wrong) product and counted it.
+  function wrongAlias(store: ReturnType<typeof createTestScanStore>, code: string, productId: string) {
+    store.getState().processScan(code);
+    const id = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
+    store.getState().resolveUnknown(id, "link_existing", { productId, applyToCount: true });
+  }
+  function aiResult(over: Record<string, unknown>) {
+    return {
+      productName: "", brand: "", category: "", specsShort: "", specsFull: "", primarySku: "",
+      primaryBarcode: "", gtin: "", upc: "", ean: "", aliases: [], imageUrl: "", productUrl: "",
+      sourceUrls: [], confidence: 0.9, verifiedFacts: [], guesses: [], needsHumanReview: false, ...over,
+    };
+  }
+
+  it("removeFromCount removes only the session count, never the product or alias; re-scan re-counts", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().processScan("T432119"); // -> prod-nokian (seed)
+    expect(countFor(store, "prod-nokian")).toBe(1);
+    store.getState().removeFromCount("prod-nokian");
+    expect(store.getState().finalCounts.some((c) => c.productId === "prod-nokian")).toBe(false);
+    expect(store.getState().products.some((p) => p.id === "prod-nokian")).toBe(true);
+    expect(store.getState().aliases.some((a) => a.productId === "prod-nokian" && a.approved)).toBe(true);
+    store.getState().processScan("T432119");
+    expect(countFor(store, "prod-nokian")).toBe(1);
+  });
+
+  it("correctProduct edits product fields without changing alias trust", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const before = store.getState().aliases.filter((a) => a.productId === "prod-coke" && a.approved).length;
+    store.getState().correctProduct("prod-coke", { name: "Coca-Cola Zero", brand: "Coca-Cola" });
+    const p = store.getState().products.find((x) => x.id === "prod-coke")!;
+    expect(p.name).toBe("Coca-Cola Zero");
+    expect(p.brand).toBe("Coca-Cola");
+    expect(store.getState().aliases.filter((a) => a.productId === "prod-coke" && a.approved).length).toBe(before);
+  });
+
+  it("markWrong deactivates the bad alias, removes the count, reopens Needs Review, and stops future counting", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    setGeminiConfigured(store, false); // recheck unavailable -> no fetch; focus on alias/count/review
+    wrongAlias(store, "WRONGCODE1", "prod-coke");
+    expect(countFor(store, "prod-coke")).toBe(1);
+    expect(store.getState().aliases.some((a) => a.cleanCode === "WRONGCODE1" && a.approved)).toBe(true);
+
+    const reviewId = await store.getState().markWrong("prod-coke", { reason: "this is wrong" });
+
+    expect(store.getState().aliases.find((a) => a.cleanCode === "WRONGCODE1")?.approved).toBe(false);
+    expect(store.getState().finalCounts.some((c) => c.productId === "prod-coke")).toBe(false);
+    expect(store.getState().products.some((p) => p.id === "prod-coke")).toBe(true); // product NOT deleted
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("open");
+    expect(review.cleanCode).toBe("WRONGCODE1");
+    expect(review.correctionRecheckStatus).toBe("unavailable");
+    expect(review.correctionRecheckMissingKeys).toContain("GEMINI_API_KEY");
+    // future scan of the same code no longer counts the wrong product
+    const ev = store.getState().processScan("WRONGCODE1");
+    expect(ev?.resolverStatus).not.toBe("known");
+    expect(store.getState().finalCounts.some((c) => c.productId === "prod-coke")).toBe(false);
+  });
+
+  it("after markWrong, relinking the code to the correct product makes future scans count the correct product", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    setGeminiConfigured(store, false);
+    wrongAlias(store, "RELINK1", "prod-coke");
+    const reviewId = await store.getState().markWrong("prod-coke");
+    store.getState().resolveUnknown(reviewId!, "link_existing", { productId: "prod-nokian", applyToCount: true });
+    expect(countFor(store, "prod-nokian")).toBe(1);
+    const ev = store.getState().processScan("RELINK1");
+    expect(ev?.resolverStatus).toBe("known");
+    expect(ev?.matchedProductId).toBe("prod-nokian");
+    expect(countFor(store, "prod-nokian")).toBe(2);
+  });
+
+  it("correctionRecheck verified_correction recommends but never auto-saves (human still approves)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    setGeminiConfigured(store, true);
+    const reviewId = store.getState().reopenNeedsReview("RECHECK1", "marked wrong")!;
+    const { spy, restore } = stub({
+      providerNames: ["gemini:pro"],
+      results: [aiResult({ productName: "Correct Product", brand: "Acme", primarySku: "RC-1", primaryBarcode: "RECHECK1", confidence: 0.95 })],
+      decision: { status: "verified", confidence: 0.95, evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+    });
+    try {
+      await store.getState().correctionRecheck(reviewId);
+    } finally {
+      restore();
+    }
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.correctionRecheckStatus).toBe("verified_correction");
+    expect(review.suggestedProductName).toBe("Correct Product");
+    expect(review.status).toBe("open"); // NOT auto-resolved
+    expect(store.getState().aliases.some((a) => a.cleanCode === "RECHECK1")).toBe(false); // NOT auto-saved
+    expect(store.getState().finalCounts.length).toBe(0); // NOT auto-counted
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("correctionRecheck insufficient_evidence keeps the code in Needs Review", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    setGeminiConfigured(store, true);
+    const reviewId = store.getState().reopenNeedsReview("RECHECK2", "marked wrong")!;
+    const { restore } = stub({ providerNames: ["gemini:pro"], results: [aiResult({ productName: "Maybe", confidence: 0.4 })], decision: { status: "suggested", confidence: 0.4 } });
+    try {
+      await store.getState().correctionRecheck(reviewId);
+    } finally {
+      restore();
+    }
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.correctionRecheckStatus).toBe("insufficient_evidence");
+    expect(review.status).toBe("open");
+    expect(store.getState().aliases.some((a) => a.cleanCode === "RECHECK2")).toBe(false);
+  });
+
+  it("correctionRecheck conflict keeps the code in Needs Review with a safe conflict message", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    setGeminiConfigured(store, true);
+    const reviewId = store.getState().reopenNeedsReview("RECHECK3", "marked wrong")!;
+    const { restore } = stub({ providerNames: ["gemini:pro", "openai"], results: [aiResult({ productName: "A", brand: "X", confidence: 0.5 })], decision: { status: "conflict", confidence: 0.2, crossCheck: { decision: "conflict" } } });
+    try {
+      await store.getState().correctionRecheck(reviewId);
+    } finally {
+      restore();
+    }
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.correctionRecheckStatus).toBe("conflict");
+    expect(review.status).toBe("open");
+    expect(review.reason.toLowerCase()).toContain("conflict");
+  });
+
+  it("correctionRecheck is unavailable (no live call) when Gemini is not configured; reports key NAMES only", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    setGeminiConfigured(store, false);
+    const reviewId = store.getState().reopenNeedsReview("RECHECK4", "marked wrong")!;
+    const { spy, restore } = stub({});
+    try {
+      await store.getState().correctionRecheck(reviewId);
+    } finally {
+      restore();
+    }
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.correctionRecheckStatus).toBe("unavailable");
+    expect(review.correctionRecheckMissingKeys).toEqual(["GEMINI_API_KEY"]);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("cost guard: only one Pro recheck per code unless an explicit retry", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    setGeminiConfigured(store, true);
+    const reviewId = store.getState().reopenNeedsReview("RECHECK5", "marked wrong")!;
+    const { spy, restore } = stub({ providerNames: ["gemini:pro"], results: [aiResult({ productName: "P" })], decision: { status: "suggested", confidence: 0.5 } });
+    try {
+      await store.getState().correctionRecheck(reviewId);
+      await store.getState().correctionRecheck(reviewId); // guarded -> no second fetch
+      expect(spy).toHaveBeenCalledTimes(1);
+      await store.getState().correctionRecheck(reviewId, { retry: true }); // explicit retry -> fetch again
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe("scanStore - W2 discovered-alias approval", () => {
   const clean = (s: string) => normalizeCode(s).clean;
 
