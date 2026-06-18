@@ -69,12 +69,14 @@ function lookupChain(primary: string): AiProvider[] {
   return chain;
 }
 
-function decodeProviders(): AiProvider[] {
+function decodeProviders(pro = false): AiProvider[] {
   if (e2eMode()) return [mockProvider];
   const chain: AiProvider[] = [];
   // Fast first: fast models with web search/grounding. The page-fetch step does the heavy lifting.
-  if (process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: GEMINI_FAST_MODEL }));
-  if (process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: OPENAI_FAST_MODEL }));
+  // proRecheck (correction-only) escalates to the strongest configured verification models instead -
+  // it does NOT change the normal scan provider order or the premium fallback path.
+  if (process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: pro ? GEMINI_DECODE_MODEL : GEMINI_FAST_MODEL }));
+  if (process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: pro ? OPENAI_DECODE_MODEL : OPENAI_FAST_MODEL }));
   if (chain.length === 0) chain.push(mockProvider);
   return chain;
 }
@@ -143,6 +145,7 @@ export async function POST(request: Request) {
     allowImageSuggestions?: boolean;
     confidenceThreshold?: number;
     budgetMs?: number;
+    proRecheck?: boolean; // correction-only: use the strongest configured Gemini verification model
   };
   try {
     body = await request.json();
@@ -181,7 +184,7 @@ export async function POST(request: Request) {
     const computeDecode = async () => {
       // FAST PATH - CONCURRENT, HARD ~13s BUDGET. Providers + page-fetch race under one budget signal.
       // On timeout the orchestrator aborts everything and returns Needs Review (never a partial).
-      const baseProviders = decodeProviders(); // fast models only (gemini-flash + gpt-5-mini)
+      const baseProviders = decodeProviders(body.proRecheck === true); // fast models; pro models for a correction recheck
       const providers: DecodeProvider[] = baseProviders.map((p) => ({
         name: p.name,
         lookup: (signal) => p.lookup(req, signal),
