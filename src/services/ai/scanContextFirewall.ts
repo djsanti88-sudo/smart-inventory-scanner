@@ -6,7 +6,7 @@
 // decode must NOT auto-count - it routes to Needs Review with a safe, product-facing reason.
 
 import type { AiLookupResult, CodeType } from "@/types";
-import { isTireContext } from "@/services/ai/tireSpecs";
+import { isTireContext, type IdentityText } from "@/services/ai/tireSpecs";
 import { decodeBarcodeStructure, type BrandPrefixHint } from "@/services/ai/barcodeAnatomy";
 
 export type ScanContext = "any" | "tire";
@@ -17,12 +17,39 @@ export type ConflictKind = "category_context_conflict" | "brand_prefix_conflict"
 const NON_TIRE_RE =
   /\b(rivet|screw|bolt|nut|washer|fastener|anchor|drill|bit|wrench|socket|hammer|tool|cable|wire|bulb|battery|charger|hose|spark\s?plug|supplement|vitamin|capsule|tablet|food|snack|candy|drink|beverage|cola|soda|juice|shampoo|soap|lotion|cigarette|lighter)\b/i;
 
-export function classifyProductDomain(r: AiLookupResult | null | undefined): "tire" | "non_tire" | "unknown" {
+export function classifyProductDomain(r: IdentityText | null | undefined): "tire" | "non_tire" | "unknown" {
   if (!r) return "unknown";
   if (isTireContext(r)) return "tire";
   const t = [r.productName, r.category, r.specsShort, r.specsFull].filter(Boolean).join(" ");
   if (NON_TIRE_RE.test(t)) return "non_tire";
   return "unknown";
+}
+
+/**
+ * Phase 8C - the firewall must ALSO guard the deterministic count path: an approved alias or a verified
+ * product that already carries a poisoned barcode would otherwise auto-count with NO AI call and NO
+ * firewall (the original firewall only ran inside the AI decode path). This check takes a stored
+ * product/catalog identity (Product.name OR a catalog hit's name maps to productName). Only the
+ * category/context guard applies here - there is no provider result to brand-check. Returns the conflict
+ * kind to BLOCK the auto-count, or null.
+ */
+export function detectIdentityContextConflict(
+  scanContext: ScanContext,
+  identity:
+    | { productName?: string; name?: string; brand?: string; category?: string; specsShort?: string; specsFull?: string }
+    | null
+    | undefined,
+): ConflictKind | null {
+  if (!identity) return null;
+  const text: IdentityText = {
+    productName: identity.productName ?? identity.name ?? "",
+    brand: identity.brand ?? "",
+    category: identity.category ?? "",
+    specsShort: identity.specsShort ?? "",
+    specsFull: identity.specsFull ?? "",
+  };
+  if (scanContext === "tire" && classifyProductDomain(text) === "non_tire") return "category_context_conflict";
+  return null;
 }
 
 /**

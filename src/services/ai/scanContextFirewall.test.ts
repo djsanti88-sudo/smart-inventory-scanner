@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyProductDomain, detectScanContextConflict } from "@/services/ai/scanContextFirewall";
+import { classifyProductDomain, detectScanContextConflict, detectIdentityContextConflict } from "@/services/ai/scanContextFirewall";
 import type { AiLookupResult } from "@/types";
 
 const r = (over: Partial<AiLookupResult>): AiLookupResult => ({
@@ -41,5 +41,35 @@ describe("detectScanContextConflict (Phase 8 firewall)", () => {
   it("non-tire product in ANY (non-tire) context -> no category conflict", () => {
     const result = r({ productName: "Manstel Rivet Kit" });
     expect(detectScanContextConflict({ scanContext: "any", code: "745125495781", codeType: "upc_a", result, brandPrefixHints: [] })).toBeNull();
+  });
+});
+
+describe("detectIdentityContextConflict (Phase 8C side-door firewall)", () => {
+  it("a non-tire product matched deterministically in TIRE context -> category_context_conflict", () => {
+    // Product.name (not productName) is the stored-product field; the helper must map it.
+    const product = { name: "Manstel 200 Pcs Aluminum Core Blind Rivet Semi-Round Head Screw Kit M3.2X11mm" };
+    expect(detectIdentityContextConflict("tire", product)).toBe("category_context_conflict");
+  });
+
+  it("also accepts the AI-style productName field", () => {
+    expect(detectIdentityContextConflict("tire", { productName: "Aluminum Rivet Screw Kit" })).toBe("category_context_conflict");
+  });
+
+  it("a real tire product in tire context -> no conflict", () => {
+    const product = { name: "Fortune Tormenta A/T 275/55R20 117T", brand: "Fortune", category: "Tires" };
+    expect(detectIdentityContextConflict("tire", product)).toBeNull();
+  });
+
+  it("non-tire product in ANY context -> no conflict (firewall is opt-in to tire)", () => {
+    expect(detectIdentityContextConflict("any", { name: "Manstel Rivet Kit" })).toBeNull();
+  });
+
+  it("ambiguous / unknown product in tire context -> no false conflict (prefer unknown over wrong block)", () => {
+    expect(detectIdentityContextConflict("tire", { name: "Generic Thing" })).toBeNull();
+  });
+
+  it("null / undefined identity -> null", () => {
+    expect(detectIdentityContextConflict("tire", null)).toBeNull();
+    expect(detectIdentityContextConflict("tire", undefined)).toBeNull();
   });
 });

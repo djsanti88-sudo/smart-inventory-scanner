@@ -46,7 +46,7 @@ import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/s
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
-import { detectScanContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
+import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
@@ -788,6 +788,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           buildIdempotencyKey(businessId, sessionId, scanEventId, op);
 
         const isKnown = resolution.resolverStatus === "known" && !!resolution.productId;
+        // Phase 8C SIDE-DOOR FIREWALL: a deterministic "known" match (approved alias or verified product)
+        // can still carry a POISONED identity - e.g. a verified product whose primaryBarcode is a tire UPC
+        // that a public source mislabels as a rivet kit. The original firewall only ran inside the AI
+        // decode path, so such a match would auto-count with NO AI and NO firewall. Re-check the matched
+        // product's domain against the scan context; on conflict it must NOT count -> route to Needs Review.
+        const matchedProduct = resolution.productId
+          ? products.find((p) => p.id === resolution.productId)
+          : undefined;
+        const knownConflict = isKnown
+          ? detectIdentityContextConflict(get().settings.scanContext ?? "any", matchedProduct)
+          : null;
+        const countable = isKnown && !knownConflict;
 
         const event: ScanEvent = {
           id: scanEventId,
@@ -798,11 +810,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           normalizedCandidates: cleaned.normalizedCandidates,
           matchedProductId: resolution.productId,
           matchType: resolution.matchType,
-          status: isKnown ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
+          status: countable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
           resolverStatus: resolution.resolverStatus,
           codeType: resolution.codeType,
           reason: resolution.reason,
-          quantityDelta: isKnown ? 1 : 0,
+          quantityDelta: countable ? 1 : 0,
           quantityAfterScan: 0,
           createdAt,
           source: "scan",
@@ -812,7 +824,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           syncError: null,
         };
 
-        if (isKnown && resolution.productId) {
+        if (countable && resolution.productId) {
           // Deterministic increment in local state FIRST (instant UI, no server round-trip).
           const { counts, count } = incrementInventoryCount(get().finalCounts, event, idFactory);
           event.quantityAfterScan = count.quantity;
@@ -856,6 +868,85 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               scanEventId,
             }),
           ]);
+          return event;
+        }
+
+        if (isKnown && knownConflict && resolution.productId) {
+          // SIDE-DOOR FIREWALL block: the matched product contradicts the tire scan context (a poisoned
+          // identity reached via the deterministic path). Do NOT count. Surface it for human relink,
+          // carrying the suspect product so the owner sees what it WOULD have been. No AI is run here -
+          // re-decoding would just return the same poisoned public source.
+          const conflictText = conflictReason(knownConflict);
+          event.decodeStatus = "needs_review";
+          event.reason = conflictText;
+          event.notes = conflictText;
+          set((s) => ({ scanFeed: [event, ...s.scanFeed] }));
+          const alreadyOpen = get().needsReviewQueue.find(
+            (r) => r.cleanCode === cleaned.cleanCode && r.status === "open",
+          );
+          if (!alreadyOpen) {
+            const review: UnknownCodeReview = {
+              id: idFactory(),
+              businessId,
+              sessionId,
+              rawCode: cleaned.rawCode,
+              cleanCode: cleaned.cleanCode,
+              normalizedCandidates: cleaned.normalizedCandidates,
+              suggestedProductName: matchedProduct?.name ?? "",
+              suggestedBrand: matchedProduct?.brand ?? "",
+              suggestedCategory: matchedProduct?.category ?? "",
+              suggestedSpecsShort: matchedProduct?.specsShort ?? "",
+              suggestedSpecsFull: matchedProduct?.specsFull ?? "",
+              suggestedPrimarySku: matchedProduct?.primarySku ?? "",
+              suggestedPrimaryBarcode: matchedProduct?.primaryBarcode ?? "",
+              suggestedGtin: matchedProduct?.gtin ?? "",
+              suggestedUpc: matchedProduct?.upc ?? "",
+              suggestedEan: matchedProduct?.ean ?? "",
+              suggestedImageUrl: "",
+              suggestedProductUrl: "",
+              suggestedAliases: [],
+              sourceUrls: [],
+              verifiedFacts: [],
+              guesses: [],
+              reason: conflictText,
+              providerName: "",
+              confidence: 0,
+              hasSuggestion: !!matchedProduct,
+              decodeStatus: "needs_review",
+              evidenceStrength: "none",
+              exactCodeEvidenceVerifiedByApp: false,
+              crossCheckDecision: "",
+              status: "open",
+              createdAt,
+              resolvedAt: null,
+              resolvedBy: null,
+              resolutionAction: null,
+              syncStatus: "pending",
+              idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"),
+            };
+            set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
+            enqueueAndSync([
+              makeQueueItem({
+                idFactory,
+                now,
+                businessId,
+                sessionId,
+                entityType: "UnknownCodeReview",
+                entityId: review.id,
+                operation: "SAVE_UNKNOWN_SCAN",
+                payload: review,
+                idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"),
+                scanEventId,
+              }),
+            ]);
+            emitAudit({
+              entityType: "UnknownCodeReview",
+              entityId: review.id,
+              action: "context_conflict_blocked",
+              metadata: { code: cleaned.cleanCode, productId: resolution.productId, kind: knownConflict },
+            });
+          }
+          get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
           return event;
         }
 
@@ -953,7 +1044,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // runs on a miss or a weak/conflicting catalog hit.
           const codes = [cleaned.cleanCode, ...cleaned.normalizedCandidates];
           const decision = decideLookup(get().catalog, get().shopOverrides, codes, businessId);
-          if (decision.shouldResolveWithoutAi && decision.hit) {
+          // Phase 8C: a verified-catalog / shop-override hit is also a NON-AI auto-count path - apply the
+          // same context firewall. A clearly non-tire hit in tire context must not shortcut-count; let it
+          // fall through to the AI decode path (where the firewall + human review handle it).
+          const catalogConflict = decision.hit
+            ? detectIdentityContextConflict(get().settings.scanContext ?? "any", decision.hit)
+            : null;
+          if (decision.shouldResolveWithoutAi && decision.hit && !catalogConflict) {
             const fromOverride = decision.source === "shop_override";
             get().recordFeedback(fromOverride ? "found_from_override" : "found_from_catalog", {
               code: cleaned.cleanCode,
@@ -1993,6 +2090,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             return u;
           });
           set((s) => ({ aliases: updatedAliases, pendingSyncQueue: [...s.pendingSyncQueue, ...queued] }));
+        }
+        // 1b. Un-verify the wrong product so the DETERMINISTIC resolver can no longer match it by its
+        // identifier fields (matchProductByIdentifiers only trusts verified === true). Without this, the
+        // next scan of the same barcode would re-match this wrong product and re-count it - bypassing the
+        // firewall entirely. The product row is kept (status unchanged) for audit/repair, just untrusted.
+        if (product && product.verified) {
+          const key = buildIdempotencyKey(state.businessId, state.sessionId, `${product.id}:markwrong:unverify`, "SAVE_PRODUCT");
+          const unverified: Product = { ...product, verified: false, updatedAt: now(), updatedBy: "human" };
+          set((s) => ({
+            products: s.products.map((p) => (p.id === productId ? unverified : p)),
+            pendingSyncQueue: [
+              ...s.pendingSyncQueue,
+              makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Product", entityId: productId, operation: "SAVE_PRODUCT", payload: unverified, idempotencyKey: key, scanEventId: null }),
+            ],
+          }));
+          emitAudit({ entityType: "Product", entityId: productId, action: "product_unverified", metadata: { reason: opts?.reason ?? "marked_wrong" } });
         }
         // 2. Reset related feed rows to needs_review (scan history preserved; no longer "known").
         set((s) => ({
