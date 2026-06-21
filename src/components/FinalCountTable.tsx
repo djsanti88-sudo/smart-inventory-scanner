@@ -69,6 +69,11 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
   const removeFromCount = useScanStore((s) => s.removeFromCount);
   const correctProduct = useScanStore((s) => s.correctProduct);
   const markWrong = useScanStore((s) => s.markWrong);
+  const aliases = useScanStore((s) => s.aliases);
+  const approveDiscoveredIdentifiers = useScanStore((s) => s.approveDiscoveredIdentifiers);
+  // Discovered (grounded, not-yet-approved) identifiers for this product: offered for one-click approval.
+  // They do NOT match or count until approved (the resolver ignores approved !== true).
+  const discovered = aliases.filter((a) => a.productId === product.id && !a.approved);
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: product.name, brand: product.brand, category: product.category, location: product.location ?? "" });
@@ -101,7 +106,25 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
       <td className="px-3 py-2">{product.brand}</td>
       <td className="px-3 py-2">{product.category}</td>
       <td className="px-3 py-2">{product.specsShort}</td>
-      <td className="px-3 py-2 font-mono text-xs">{product.primarySku || "-"}</td>
+      <td className="px-3 py-2 font-mono text-xs">
+        <div>{product.primarySku || "-"}</div>
+        {discovered.length > 0 && (
+          <div className="mt-1 flex flex-col items-start gap-1" data-testid={`discovered-${product.id}`}>
+            {discovered.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                data-testid={`approve-discovered-${product.id}-${a.cleanCode}`}
+                onClick={() => approveDiscoveredIdentifiers(product.id, [a.cleanCode])}
+                title="Discovered identifier - approve so scanning it counts this product"
+                className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100"
+              >
+                + Approve {a.cleanCode}
+              </button>
+            ))}
+          </div>
+        )}
+      </td>
       {isPlatform && <td className="px-3 py-2 font-mono text-xs">{product.primaryBarcode || "-"}</td>}
       {isPlatform && <td className="px-3 py-2 font-mono text-xs text-zinc-500">{count.aliasesSeen.join(", ")}</td>}
       <td className="px-3 py-2">

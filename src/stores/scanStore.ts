@@ -46,6 +46,7 @@ import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/s
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 import { extractTireFields } from "@/services/tire/extractTireFields";
+import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
@@ -277,6 +278,10 @@ export interface ScanState {
   clearAliasConflicts: () => void;
   /** Clear the category-firewall warning banner (user dismissed it or switched category). */
   clearCategoryWarning: () => void;
+  /** Approve DISCOVERED (grounded, unapproved) identifiers as aliases for a product so scanning any of
+   *  them resolves to it. Conflict-safe (a code approved for a DIFFERENT product is skipped + surfaced);
+   *  idempotent (re-approving an already-approved code is a no-op). Never invents a code. */
+  approveDiscoveredIdentifiers: (productId: string, cleanCodes: string[]) => void;
   /** Repair a bad alias: unlink it (stops resolving; soft delete, scan history kept). Audited. */
   unlinkAlias: (aliasId: string) => void;
   /** Repair a bad alias: move it to the correct product. Audited. */
@@ -423,7 +428,7 @@ function buildProductCodeAliases(params: {
  * and NEVER overwrites a code that is an approved alias of a DIFFERENT product - those are returned as
  * conflicts for the caller to surface. Pure builder; caller commits to state.
  */
-function buildApprovedAliasesForCodes(params: {
+function buildAliasesForCodes(params: {
   product: Product;
   codes: string[];
   existingAliases: Alias[];
@@ -431,8 +436,14 @@ function buildApprovedAliasesForCodes(params: {
   sessionId: string;
   idFactory: () => string;
   now: () => string;
+  approved?: boolean; // default true; pass false to persist a DISCOVERED (un-trusted) alias suggestion
+  source?: Alias["source"];
+  createdBy?: string;
 }): { aliases: Alias[]; queued: PendingSyncItem[]; conflicts: { code: string; otherProductId: string }[] } {
   const { product, codes, existingAliases, businessId, sessionId, idFactory, now } = params;
+  const approved = params.approved ?? true;
+  const aliasSource = params.source ?? "human_review";
+  const aliasCreatedBy = params.createdBy ?? "human";
   const ownCleanCodes = new Set(existingAliases.filter((a) => a.productId === product.id).map((a) => a.cleanCode));
   const aliases: Alias[] = [];
   const queued: PendingSyncItem[] = [];
@@ -459,12 +470,12 @@ function buildApprovedAliasesForCodes(params: {
       cleanCode,
       normalizedCode: n.noSeparators || cleanCode,
       aliasType: codeTypeToAliasType(detectCodeType(cleanCode)),
-      source: "human_review",
+      source: aliasSource,
       confidence: 1,
-      approved: true,
+      approved,
       createdAt: now(),
       updatedAt: now(),
-      createdBy: "human",
+      createdBy: aliasCreatedBy,
       lastSeenAt: now(),
       syncStatus: "pending",
       idempotencyKey: key,
@@ -1858,7 +1869,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (selectedAliasCodes.length > 0) {
           const targetProduct = get().products.find((p) => p.id === productId);
           if (targetProduct) {
-            const built = buildApprovedAliasesForCodes({
+            const built = buildAliasesForCodes({
               product: targetProduct,
               codes: selectedAliasCodes,
               existingAliases: get().aliases,
@@ -1881,6 +1892,43 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               set({ lastAliasConflicts: built.conflicts.map((c) => ({ reviewId, code: c.code, existingProductId: c.otherProductId })) });
               for (const c of built.conflicts) {
                 emitAudit({ entityType: "Alias", entityId: c.code, action: "alias_conflict_blocked", metadata: { code: c.code, attemptedProductId: productId, existingProductId: c.otherProductId } });
+              }
+            }
+          }
+        }
+
+        // Persist any decode-SUGGESTED identifiers the human did NOT approve as UNAPPROVED "discovered"
+        // aliases on the resolved product. They never match or count until a human approves them (the
+        // resolver ignores approved !== true); they are offered for one-click approval from the count
+        // table. Grounded only - we persist codes the decode actually returned, never an invented one.
+        const discoveryTarget = get().products.find((p) => p.id === productId);
+        if (discoveryTarget) {
+          const selectedSet = new Set(selectedAliasCodes.map((c) => normalizeCode(c).clean));
+          const grounded = collectGroundedIdentifiers({ extras: review.suggestedAliases ?? [] });
+          const discoverable = discoverableIdentifiers(grounded, get().aliases, productId, state.businessId).filter(
+            (g) => g.cleanCode !== newAlias.cleanCode && !selectedSet.has(g.cleanCode),
+          );
+          if (discoverable.length > 0) {
+            const built = buildAliasesForCodes({
+              product: discoveryTarget,
+              codes: discoverable.map((g) => g.rawCode),
+              existingAliases: get().aliases,
+              businessId: state.businessId,
+              sessionId: state.sessionId,
+              idFactory,
+              now,
+              approved: false, // DISCOVERED: never trusted until a human approves it
+              source: discoveryTarget.source,
+              createdBy: "discovered",
+            });
+            if (built.aliases.length > 0) {
+              const ids = new Set(built.aliases.map((a) => a.id));
+              set((s) => ({
+                aliases: [...s.aliases, ...built.aliases],
+                pendingSyncQueue: [...s.pendingSyncQueue, ...built.queued.filter((q) => ids.has(q.entityId))],
+              }));
+              for (const a of built.aliases) {
+                emitAudit({ entityType: "Alias", entityId: a.id, action: "alias_discovered", metadata: { code: a.cleanCode, productId, origin: "decode_discovered" } });
               }
             }
           }
@@ -1967,6 +2015,65 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       clearMismatchWarning: () => set({ lastMismatchWarning: null }),
 
       clearCategoryWarning: () => set({ lastCategoryWarning: null }),
+
+      approveDiscoveredIdentifiers: (productId, cleanCodes) => {
+        const state = get();
+        const product = state.products.find((p) => p.id === productId);
+        if (!product) return;
+        const { businessId, sessionId } = state;
+        const codes = [...new Set(cleanCodes.map((c) => normalizeCode(c).clean).filter(Boolean))];
+        if (codes.length === 0) return;
+        const aliases = state.aliases;
+        const flipIds = new Set<string>();
+        const toCreate: string[] = [];
+        const conflicts: { code: string; otherProductId: string }[] = [];
+        for (const code of codes) {
+          const approvedElsewhere = aliases.find(
+            (a) => a.businessId === businessId && a.cleanCode === code && a.approved && a.productId !== productId,
+          );
+          if (approvedElsewhere) {
+            conflicts.push({ code, otherProductId: approvedElsewhere.productId }); // never hijack another product
+            continue;
+          }
+          const mine = aliases.find((a) => a.businessId === businessId && a.cleanCode === code && a.productId === productId);
+          if (mine) {
+            if (!mine.approved) flipIds.add(mine.id); // flip the discovered alias -> approved
+            // already approved -> idempotent no-op
+          } else {
+            toCreate.push(code); // grounded code with no alias yet -> create approved
+          }
+        }
+        const built =
+          toCreate.length > 0
+            ? buildAliasesForCodes({ product, codes: toCreate, existingAliases: aliases, businessId, sessionId, idFactory, now })
+            : { aliases: [] as Alias[], queued: [] as PendingSyncItem[], conflicts: [] as { code: string; otherProductId: string }[] };
+        for (const c of built.conflicts) conflicts.push(c);
+
+        if (flipIds.size > 0 || built.aliases.length > 0) {
+          const flipped = aliases.filter((a) => flipIds.has(a.id));
+          const flipQueue = flipped.map((a) =>
+            makeQueueItem({
+              idFactory, now, businessId, sessionId,
+              entityType: "Alias", entityId: a.id, operation: "RESOLVE_ALIAS",
+              payload: { ...a, approved: true },
+              idempotencyKey: buildIdempotencyKey(businessId, sessionId, a.id, "RESOLVE_ALIAS"),
+              scanEventId: null,
+            }),
+          );
+          set((s) => ({
+            aliases: s.aliases
+              .map((a): Alias => (flipIds.has(a.id) ? { ...a, approved: true, updatedAt: now(), syncStatus: "pending" } : a))
+              .concat(built.aliases),
+            pendingSyncQueue: [...s.pendingSyncQueue, ...built.queued, ...flipQueue],
+          }));
+          for (const a of [...flipped, ...built.aliases]) {
+            emitAudit({ entityType: "Alias", entityId: a.id, action: "alias_approved", metadata: { code: a.cleanCode, productId, origin: "discovered_approved" } });
+          }
+        }
+        if (conflicts.length > 0) {
+          set({ lastAliasConflicts: conflicts.map((c) => ({ reviewId: "", code: c.code, existingProductId: c.otherProductId })) });
+        }
+      },
 
       clearAliasConflicts: () => set({ lastAliasConflicts: null }),
 
