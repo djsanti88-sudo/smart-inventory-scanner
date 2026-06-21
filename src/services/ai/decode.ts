@@ -3,13 +3,16 @@ import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
-// status. A "verified" decode requires ALL of:
+// status. A "verified" decode (auto-counted) requires ALL of:
 //   - public barcode code type (never X00/FNSKU/vendor_label/internal_code/messy)
 //   - strong app-verified evidence (snippet / grounding_chunk / fetched_source), set by the app
-//   - provider agreement OR a single provider (never a conflict)
+//   - BOTH providers (Gemini Flash + ChatGPT mini, run in parallel) AGREE on the identity
 //   - non-empty product identity
 //   - confidence >= threshold
-// Anything short of that is suggested / needs_review. Provider disagreement is a conflict.
+// A SINGLE provider on its own is NOT enough to auto-count (it becomes a Suggested, human-reviewed
+// result) - two independent providers must agree before we trust a code enough to count it. This is
+// what stopped a lone provider's wrong web-data (e.g. a mis-decoded UPC) from being auto-counted.
+// Anything short of full agreement is suggested / needs_review. Provider disagreement is a conflict.
 
 const PUBLIC_BARCODE_TYPES: CodeType[] = ["upc_a", "ean_13", "gtin_14"];
 
@@ -93,21 +96,22 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     };
   }
 
+  // Auto-count ONLY when BOTH providers agree. A single provider, even with strong app-verified
+  // evidence, is downgraded to "suggested" (human review) - two providers must independently land on
+  // the same identity before we trust it enough to count.
   const canVerify =
     isPublicBarcode &&
     strong &&
     identityNonEmpty &&
     passesThreshold &&
-    (cc.decision === "agree" || cc.decision === "single_provider");
+    cc.decision === "agree";
 
   if (canVerify) {
     return {
       status: "verified",
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
       reason:
-        cc.decision === "agree"
-          ? "Verified AI Decode: providers agree and the app independently confirmed the exact code in real evidence."
-          : "Verified AI Decode: single provider, but the app independently confirmed the exact code in strong evidence.",
+        "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence.",
       evidenceStrength: bestEvidence.strength,
       exactCodeEvidenceVerifiedByApp: true,
       crossCheck: baseCrossCheck,
@@ -124,7 +128,9 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
         ? "Evidence is weak (the exact code was not found in a snippet/grounding/fetched source)."
         : !passesThreshold
           ? "Confidence is below the threshold."
-          : "Needs human confirmation.";
+          : cc.decision !== "agree"
+            ? "Only one source could confirm this; a second source must agree before it is auto-counted."
+            : "Needs human confirmation.";
     return {
       status: "suggested",
       confidence: Math.max(maxConfidence * 0.6, cc.confidence * 0.6),

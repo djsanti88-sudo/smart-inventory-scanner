@@ -26,9 +26,10 @@ export interface DecodeRunParams {
   providerTimeoutMs?: number;
   pageTimeoutMs?: number;
   trustedHosts?: string[];
-  // DEPRECATED (v1.0.0 W1): no-op. Early-exit now ALWAYS requires an app-VERIFIED decision (exact code
-  // in strong evidence + agreement/single-provider on a public barcode); a usable product name alone
-  // never stops the wait. Retained only for caller compatibility until callers drop it.
+  // DEPRECATED / retained for caller + fallback compatibility (no-op). Early-exit is now ALWAYS gated on a
+  // fully app-VERIFIED decision (exact scanned code in strong evidence + agreement of TWO independent
+  // providers); a usable product name alone never stops the wait and a lone provider never early-exits on
+  // either path. Kept so existing callers compile; safe to remove once unused.
   requireVerifiedEarlyExit?: boolean;
 }
 
@@ -107,10 +108,13 @@ export async function runDecode(p: DecodeRunParams): Promise<DecodeRunResult> {
   const confident = new Promise<void>((res) => (resolveConfident = res));
   const recheck = () => {
     if (results.length === 0) return;
-    // W1 (v1.0.0): early-exit ONLY on an app-VERIFIED decision (exact scanned code confirmed in strong
-    // evidence + provider agreement/single-provider on a public barcode). A usable product NAME alone is
-    // NOT enough - unverified/suggested/conflict keep running until a verified hit or the time budget.
-    // This removes the old "trust-the-AI fast path" that stopped on the first usable product name.
+    // Early-exit ONLY on an app-VERIFIED decision: the exact scanned code confirmed in strong evidence
+    // with AGREEMENT of two independent sources (Gemini Flash + ChatGPT mini, plus the app's own
+    // page-fetch, all parallel). A usable product NAME alone is NOT enough, and a lone provider no longer
+    // stops the wait - unverified/suggested/conflict keep running so a second source can agree (or the page
+    // fetch supplies it) until a verified hit or the time budget. This removes the old "trust-the-AI fast
+    // path"; the all-settled / budget path still returns the best available (Suggested -> review), never a
+    // single-source auto-count.
     const d = decideDecode({ codeType: p.codeType, results, evidences, confidenceThreshold: p.confidenceThreshold });
     if (d.status === "verified") resolveConfident();
   };

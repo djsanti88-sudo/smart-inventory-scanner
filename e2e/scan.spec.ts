@@ -1,9 +1,17 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 // End-to-end proof of the Smart Inventory Scanner. One serial flow so local state (Zustand) is
 // preserved across pages. Screenshots are written to e2e/proof/.
 
 const PROOF = "e2e/proof";
+
+// AI is OFF for this deterministic proof. master defaults AI on + auto-enables it when a provider key is
+// configured, so we mock a NO-KEYS status: the auto-decode gate fails on hasKey -> zero AI calls.
+const NO_AI_STATUS = {
+  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
+  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
+  dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+};
 
 const SEQUENCE = [
   "6419440485331",
@@ -31,6 +39,10 @@ test("full inventory scan proof", async ({ page }) => {
   page.on("request", (r) => {
     // Only POST is an AI lookup; GET is the (cheap, no-secret) capability/status check.
     if (r.url().includes("/api/ai-lookup") && r.method() === "POST") aiCalls.push(r.url());
+  });
+  await page.route("**/api/ai-lookup", async (route: Route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: NO_AI_STATUS });
+    return route.fulfill({ json: {} }); // a POST must never fire on this deterministic, no-key flow
   });
 
   // 1. Login screen

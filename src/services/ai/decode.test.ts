@@ -146,11 +146,21 @@ describe("decideDecode - the gate that produces a Verified AI Decode", () => {
     expect(d.status).not.toBe("verified");
   });
 
-  it("single provider can verify only with strong evidence + thresholds on a public barcode", () => {
-    const ok = decideDecode({ codeType: "upc_a", results: [coke()], evidences: [strong()], confidenceThreshold: 0.8 });
-    expect(ok.status).toBe("verified");
+  it("a SINGLE provider NEVER auto-verifies - it is Suggested until a second provider agrees", () => {
+    // Even with strong app-verified evidence + high confidence on a public barcode, one provider on
+    // its own is not enough to auto-count. Two providers must independently agree (Gemini Flash +
+    // ChatGPT mini run in parallel). This is what stops a lone provider's wrong web-data from counting.
+    const oneStrong = decideDecode({ codeType: "upc_a", results: [coke()], evidences: [strong()], confidenceThreshold: 0.8 });
+    expect(oneStrong.status).toBe("suggested");
+    expect(oneStrong.reason).toMatch(/second source must agree/i);
     const weakOne = decideDecode({ codeType: "upc_a", results: [coke()], evidences: [weak()], confidenceThreshold: 0.8 });
     expect(weakOne.status).not.toBe("verified");
+  });
+
+  it("TWO providers that agree (same identity) + strong evidence DO verify (auto-count)", () => {
+    const d = decideDecode({ codeType: "upc_a", results: [coke(), coke()], evidences: [strong(), strong()], confidenceThreshold: 0.8 });
+    expect(d.status).toBe("verified");
+    expect(d.reason).toMatch(/both providers/i);
   });
 
   it("does not verify when below the confidence threshold", () => {
