@@ -145,18 +145,18 @@ describe("confidence-based auto-verify (speed-first)", () => {
     expect(store.getState().finalCounts.find((c) => c.productId === prod.id)?.quantity).toBe(2);
   });
 
-  it("trusts the AI: a weak/no-evidence product (usable name) auto-adds + counts (catalog pending)", async () => {
+  it("does NOT auto-count a weak/no-evidence product (evidence gate); Needs Review + pending catalog", async () => {
     const store = aiOnStore();
     const { restore } = stub(WEAK);
     try {
       store.getState().processScan(CODE);
-      await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("resolved"));
+      await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.hasSuggestion).toBe(true));
     } finally {
       restore();
     }
-    const prod = store.getState().products.find((p) => p.name === "Maybe Snack");
-    expect(prod).toBeDefined();
-    expect(store.getState().finalCounts.find((c) => c.productId === prod!.id)?.quantity).toBe(1);
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // never auto-counted
+    expect(store.getState().products.find((p) => p.name === "Maybe Snack")).toBeUndefined();
+    expect(store.getState().finalCounts).toHaveLength(0);
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === CODE)?.verificationStatus).toBe("pending");
   });
 

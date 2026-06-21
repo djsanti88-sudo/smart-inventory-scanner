@@ -109,6 +109,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   const products = useScanStore((s) => s.products);
   const resolveUnknown = useScanStore((s) => s.resolveUnknown);
   const liveDecode = useScanStore((s) => s.liveDecode);
+  const correctionRecheck = useScanStore((s) => s.correctionRecheck);
   const aiEnabled = useScanStore((s) => s.settings.aiLookupEnabled);
   const lastMismatchWarning = useScanStore((s) => s.lastMismatchWarning);
   const clearMismatchWarning = useScanStore((s) => s.clearMismatchWarning);
@@ -393,6 +394,18 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 disabled={!aiEnabled}
               >
                 Live decode
+              </button>
+            )}
+            {isPlatform && (
+              <button
+                type="button"
+                data-testid="stronger-redecode"
+                onClick={() => void correctionRecheck(review.id, { retry: true })}
+                title="Re-decode with the stronger Gemini Pro model (correction-only). Result is a suggestion you approve - never auto-saved."
+                className="rounded border border-purple-300 bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-40"
+                disabled={!aiEnabled}
+              >
+                Re-decode (stronger model)
               </button>
             )}
             <label className="flex items-center gap-1 text-xs text-zinc-500">

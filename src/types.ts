@@ -235,6 +235,8 @@ export interface UnknownCodeReview {
   correctionRecheckStatus?: "requested" | "verified_correction" | "insufficient_evidence" | "conflict" | "unavailable";
   correctionRecheckedAt?: string | null;
   correctionRecheckMissingKeys?: string[];
+  // Phase 7: set when this review was reopened by Mark wrong -> the re-decode escalates to the stronger model.
+  reopenedFromWrong?: boolean;
 }
 
 export type ResolutionAction =

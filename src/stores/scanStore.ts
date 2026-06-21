@@ -44,6 +44,7 @@ import { buildCleanupRecommendations } from "@/services/cleanup/recommendations"
 import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
+import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
@@ -1264,6 +1265,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 mode: "decode",
+                proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
                 rawCode: rawCodeSanitized,
                 cleanCode: cleanCodeSanitized,
                 codeType,
@@ -1387,7 +1389,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           };
 
           const autoAddOn = s.autoAddDecodedProducts ?? true; // master gate: false = manual review for all
-          if (autoAddOn && (plan.status === "auto_verify" || plan.status === "auto_count") && isUsableProductName(best?.productName ?? "")) {
+          // Phase 7 EVIDENCE GATE: auto-count ONLY on the app's independent exact-code verification +
+          // confidence >= 0.90 + (for tires) full specs. The model's self-reported confidence alone is
+          // never enough (that is what auto-counted wrong products). Anything short -> Needs Review.
+          const tireOk = !isTireContext(best) || hasRequiredTireSpecs(best);
+          const evidenceGatePassed =
+            decision?.status === "verified" &&
+            Boolean(decision?.exactCodeEvidenceVerifiedByApp) &&
+            (decision?.confidence ?? 0) >= 0.9 &&
+            isUsableProductName(best?.productName ?? "") &&
+            tireOk;
+          if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
             // Origin decides the catalog write: exact app-confirmed evidence -> VERIFIED global catalog
             // entry; a trusted-but-non-exact AI product -> still counted + aliased, PENDING catalog
             // entry ("ai"); learning off -> count only, no catalog write ("auto_count").
@@ -1439,7 +1451,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // Prefer the server's HONEST reason (rate-limited / timed-out / not-found-after-search /
             // fallback) over the generic gate text, so the row never lies about why it needs review.
             const honest = typeof data.reasonText === "string" ? data.reasonText : "";
-            const reviewReason = honest || plan.blockingReasons[0] || plan.reason || "Needs review";
+            // Phase 7: a usable tire decode blocked only for missing specs gets a precise reason.
+            const tireIncomplete = isUsableProductName(best?.productName ?? "") && isTireContext(best) && !hasRequiredTireSpecs(best);
+            const reviewReason = tireIncomplete
+              ? "Tire decode missing size / load index / speed rating - confirm full specs before counting (incomplete_specs)."
+              : honest || plan.blockingReasons[0] || plan.reason || "Needs review";
             set((st) => ({
               needsReviewQueue: st.needsReviewQueue.map((r) =>
                 r.id === reviewId
@@ -1896,6 +1912,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [], confidence: 0, providerName: "",
                     decodeStatus: "needs_review", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
                     correctionRecheckStatus: undefined, correctionRecheckedAt: null, correctionRecheckMissingKeys: undefined,
+                    reopenedFromWrong: true,
                   }
                 : r,
             ),
@@ -1910,7 +1927,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           suggestedPrimarySku: "", suggestedPrimaryBarcode: "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
           suggestedImageUrl: "", suggestedProductUrl: "", suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [],
           reason, providerName: "", confidence: 0, hasSuggestion: false, decodeStatus: "needs_review",
-          evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
+          evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "", reopenedFromWrong: true,
           status: "open", createdAt: now(), resolvedAt: null, resolvedBy: null, resolutionAction: null,
           syncStatus: "pending", idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, id, "SAVE_UNKNOWN_SCAN"),
         };

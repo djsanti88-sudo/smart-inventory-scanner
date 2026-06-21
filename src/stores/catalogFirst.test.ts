@@ -80,18 +80,18 @@ describe("catalog-first lookup (saves AI tokens; offline-first)", () => {
     expect(spy).toHaveBeenCalled(); // AI was used because catalog had no hit
   });
 
-  it("a non-exact AI product auto-adds + counts, writing a PENDING catalog entry (trust the AI)", async () => {
+  it("a non-exact AI product does NOT auto-count (evidence gate); Needs Review + PENDING catalog entry", async () => {
     const store = aiOnStore();
     const { restore } = stub(SUGGESTED);
     try {
       store.getState().processScan(CODE);
-      await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("resolved"));
+      await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.hasSuggestion).toBe(true));
     } finally {
       restore();
     }
-    const prod = store.getState().products.find((p) => p.name === "Maybe Snack");
-    expect(prod).toBeDefined();
-    expect(store.getState().finalCounts.find((c) => c.productId === prod!.id)?.quantity).toBe(1);
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // not auto-counted
+    expect(store.getState().products.find((p) => p.name === "Maybe Snack")).toBeUndefined();
+    expect(store.getState().finalCounts).toHaveLength(0);
     const entry = store.getState().catalog.find((e) => e.name === "Maybe Snack");
     expect(entry?.verificationStatus).toBe("pending"); // counted locally; global catalog stays pending
     expect(entry?.verifiedBy).toBeNull();

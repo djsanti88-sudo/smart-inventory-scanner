@@ -315,6 +315,65 @@ describe("scanStore - Phase 6 wrong-decode correction", () => {
   });
 });
 
+describe("scanStore - Phase 7 stronger re-decode escalation", () => {
+  function captureStub(resp: object) {
+    const original = globalThis.fetch;
+    const calls: Array<RequestInit | undefined> = [];
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      calls.push(init);
+      return { ok: true, json: async () => resp };
+    }) as unknown as typeof fetch;
+    return { calls, restore: () => (globalThis.fetch = original) };
+  }
+  const lastBody = (calls: Array<RequestInit | undefined>) => JSON.parse(String(calls[calls.length - 1]?.body ?? "{}"));
+  const DECODE_RESP = {
+    providerNames: ["gemini"],
+    results: [{ ...{ productName: "Some Product", brand: "B", category: "", specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "", gtin: "", upc: "", ean: "", aliases: [], imageUrl: "", productUrl: "", sourceUrls: [], confidence: 0.5, verifiedFacts: [], guesses: [], needsHumanReview: true } }],
+    decision: { status: "suggested", confidence: 0.5 },
+  };
+
+  it("liveDecode auto-escalates to proRecheck:true for a review reopened from Mark wrong", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
+    const reviewId = store.getState().reopenNeedsReview("PH7CODE1", "marked wrong - re-identify")!;
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)?.reopenedFromWrong).toBe(true);
+    const { calls, restore } = captureStub(DECODE_RESP);
+    try {
+      await store.getState().liveDecode(reviewId);
+    } finally {
+      restore();
+    }
+    expect(lastBody(calls).proRecheck).toBe(true);
+  });
+
+  it("normal liveDecode does NOT send proRecheck (fast models for ordinary unknowns)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().processScan("PH7CODE2"); // AI off by default -> passive review, not reopened-from-wrong
+    const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
+    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
+    const { calls, restore } = captureStub(DECODE_RESP);
+    try {
+      await store.getState().liveDecode(reviewId);
+    } finally {
+      restore();
+    }
+    expect(lastBody(calls).proRecheck).not.toBe(true);
+  });
+
+  it("explicit stronger re-decode (correctionRecheck retry) uses the Pro path (proRecheck:true)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, geminiConfigured: true } }));
+    const reviewId = store.getState().reopenNeedsReview("PH7CODE3", "marked wrong")!;
+    const { calls, restore } = captureStub({ providerNames: ["gemini:pro"], results: DECODE_RESP.results, decision: { status: "suggested", confidence: 0.6 } });
+    try {
+      await store.getState().correctionRecheck(reviewId, { retry: true });
+    } finally {
+      restore();
+    }
+    expect(lastBody(calls).proRecheck).toBe(true);
+  });
+});
+
 describe("scanStore - W2 discovered-alias approval", () => {
   const clean = (s: string) => normalizeCode(s).clean;
 
@@ -550,7 +609,8 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
   });
 
-  it("trusts the AI: a suggested (usable-name) decode auto-adds + counts", async () => {
+  it("does NOT auto-count a SUGGESTED/weak decode (evidence gate) - it stays in Needs Review", async () => {
+    // Phase 7: model self-confidence + weak url_only evidence is exactly what auto-counted wrong products.
     const db = new MockDb();
     const store = createTestScanStore({ db });
     const { reviewId } = await decode(
@@ -561,10 +621,54 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
         { productName: "Camel Crush Box", brand: "Camel", upc: "049000111222", sourceUrls: ["https://gs1.org/x"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
+    expect(store.getState().products.find((p) => p.name === "Camel Crush Box")).toBeUndefined();
+    expect(store.getState().finalCounts).toHaveLength(0);
+  });
+
+  it("does NOT auto-count a tire decode missing size/load/speed even if verified (incomplete specs)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const { reviewId } = await decode(
+      store,
+      "049000111222",
+      decodeResponse(
+        { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
+        { productName: "Falken Wildpeak AT", brand: "Falken", upc: "049000111222", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("open"); // thin tire identity is NOT counted
+    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(review.reason.toLowerCase()).toContain("size");
+  });
+
+  it("DOES auto-count a tire decode WITH full specs (size + load + speed)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const { reviewId } = await decode(
+      store,
+      "049000111222",
+      decodeResponse(
+        { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
+        { productName: "Falken Wildpeak A/T 275/55R20 111T", brand: "Falken", upc: "049000111222", specsShort: "275/55R20 111T", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
     expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("resolved");
-    const product = store.getState().products.find((p) => p.name === "Camel Crush Box");
-    expect(product).toBeDefined();
-    expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
+    expect(store.getState().products.find((p) => p.name.includes("Falken Wildpeak"))).toBeDefined();
+    expect(store.getState().finalCounts).toHaveLength(1);
+  });
+
+  it("does NOT auto-count when confidence is below 0.90 even if verified", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const { reviewId } = await decode(
+      store,
+      "049000111222",
+      decodeResponse(
+        { status: "verified", confidence: 0.86, reason: "Verified", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
+        { productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "049000111222", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
+    expect(store.getState().finalCounts).toHaveLength(0);
   });
 
   it("does NOT auto-add a CONFLICT (providers disagree) - that stays in Needs Review", async () => {
