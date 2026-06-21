@@ -630,10 +630,10 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const { reviewId } = await decode(
       store,
-      "049000111222",
+      "770000000007",
       decodeResponse(
         { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
-        { productName: "Falken Wildpeak AT", brand: "Falken", upc: "049000111222", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
+        { productName: "Falken Wildpeak AT", brand: "Falken", upc: "770000000007", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
@@ -646,10 +646,10 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const { reviewId } = await decode(
       store,
-      "049000111222",
+      "770000000007",
       decodeResponse(
         { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
-        { productName: "Falken Wildpeak A/T 275/55R20 111T", brand: "Falken", upc: "049000111222", specsShort: "275/55R20 111T", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
+        { productName: "Falken Wildpeak A/T 275/55R20 111T", brand: "Falken", upc: "770000000007", specsShort: "275/55R20 111T", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
     expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("resolved");
@@ -705,6 +705,57 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     }
     expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
     expect(store.getState().finalCounts).toHaveLength(0);
+  });
+
+  it("FIREWALL: 745125495781 rivet kit in tire context does NOT auto-count (category conflict)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "745125495781",
+      decodeResponse(
+        { status: "verified", confidence: 0.92, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { productName: "Manstel 200 Pcs Aluminum Core Blind Rivet Semi-Round Head Screw Kit M3.2X11mm", brand: "", upc: "745125495781", sourceUrls: ["https://go-upc.com/search?q=745125495781"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("open"); // poisoned exact-code source -> NOT auto-counted
+    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(review.reason.toLowerCase()).toContain("category conflict");
+  });
+
+  it("FIREWALL: a valid complete tire in tire context still auto-counts", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "745125495781",
+      decodeResponse(
+        { status: "verified", confidence: 0.97, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
+        { productName: "Fortune Tormenta A/T 275/55R20 117T", brand: "Fortune", specsShort: "275/55R20 117T", upc: "745125495781", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("resolved");
+    expect(store.getState().products.find((p) => p.name.includes("Fortune Tormenta"))).toBeDefined();
+    expect(store.getState().finalCounts).toHaveLength(1);
+  });
+
+  it("FIREWALL: after a category conflict, manual relink makes future scans count the correct product", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "745125495781",
+      decodeResponse(
+        { status: "verified", confidence: 0.92, reason: "Verified", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { productName: "Manstel Aluminum Rivet Kit", brand: "", upc: "745125495781", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    expect(store.getState().finalCounts).toHaveLength(0); // conflict blocked the auto-count
+    store.getState().resolveUnknown(reviewId, "link_existing", { productId: "prod-nokian", applyToCount: true });
+    const ev = store.getState().processScan("745125495781");
+    expect(ev?.resolverStatus).toBe("known");
+    expect(ev?.matchedProductId).toBe("prod-nokian"); // human backstop wins
   });
 
   it("re-scanning a human-approved alias does NOT call AI", () => {

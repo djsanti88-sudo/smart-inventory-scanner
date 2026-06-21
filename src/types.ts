@@ -310,6 +310,7 @@ export interface Settings {
   // catalog (no owner approval); weak/conflicting/unsafe go to Needs Review. Safety gates always apply.
   autoCatalogLearningEnabled: boolean; // default true
   autoVerifyConfidenceThreshold: number; // default 80 (UI 70-95); lowering it cannot bypass safety
+  scanContext?: "any" | "tire"; // Phase 8: "tire" enables the category/brand-prefix conflict firewall
   trustedSourceAutoVerifyEnabled: boolean; // default true (Tier 1/2 exact-barcode fast path)
   aiOnlyAutoVerifyAllowed: boolean; // default false (AI w/o exact evidence can never auto-verify)
 }

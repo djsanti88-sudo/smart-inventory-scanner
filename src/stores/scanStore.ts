@@ -45,6 +45,8 @@ import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { deriveBrandPrefixHints } from "@/services/ai/barcodeAnatomy";
+import { detectScanContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
@@ -168,6 +170,7 @@ const DEFAULT_SETTINGS: Settings = {
   decodeBudgetMs: 13000,
   autoCatalogLearningEnabled: true,
   autoVerifyConfidenceThreshold: 80,
+  scanContext: "any",
   trustedSourceAutoVerifyEnabled: true,
   aiOnlyAutoVerifyAllowed: false,
 };
@@ -1393,12 +1396,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // confidence >= 0.90 + (for tires) full specs. The model's self-reported confidence alone is
           // never enough (that is what auto-counted wrong products). Anything short -> Needs Review.
           const tireOk = !isTireContext(best) || hasRequiredTireSpecs(best);
+          // Phase 8 FIREWALL: exact-code evidence is necessary but NOT sufficient. If the decoded product
+          // contradicts the business scan context (tire) or a learned brand-prefix hint, block auto-count.
+          const contextConflict = detectScanContextConflict({
+            scanContext: s.scanContext ?? "any",
+            code: review.cleanCode,
+            codeType,
+            result: best,
+            brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
+          });
           const evidenceGatePassed =
             decision?.status === "verified" &&
             Boolean(decision?.exactCodeEvidenceVerifiedByApp) &&
             (decision?.confidence ?? 0) >= 0.9 &&
             isUsableProductName(best?.productName ?? "") &&
-            tireOk;
+            tireOk &&
+            !contextConflict;
           if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
             // Origin decides the catalog write: exact app-confirmed evidence -> VERIFIED global catalog
             // entry; a trusted-but-non-exact AI product -> still counted + aliased, PENDING catalog
@@ -1451,11 +1464,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // Prefer the server's HONEST reason (rate-limited / timed-out / not-found-after-search /
             // fallback) over the generic gate text, so the row never lies about why it needs review.
             const honest = typeof data.reasonText === "string" ? data.reasonText : "";
+            // Phase 8: a category/brand conflict gives the safe, product-facing reason (highest priority).
             // Phase 7: a usable tire decode blocked only for missing specs gets a precise reason.
             const tireIncomplete = isUsableProductName(best?.productName ?? "") && isTireContext(best) && !hasRequiredTireSpecs(best);
-            const reviewReason = tireIncomplete
-              ? "Tire decode missing size / load index / speed rating - confirm full specs before counting (incomplete_specs)."
-              : honest || plan.blockingReasons[0] || plan.reason || "Needs review";
+            const reviewReason = contextConflict
+              ? conflictReason(contextConflict)
+              : tireIncomplete
+                ? "Tire decode missing size / load index / speed rating - confirm full specs before counting (incomplete_specs)."
+                : honest || plan.blockingReasons[0] || plan.reason || "Needs review";
             set((st) => ({
               needsReviewQueue: st.needsReviewQueue.map((r) =>
                 r.id === reviewId
