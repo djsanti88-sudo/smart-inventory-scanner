@@ -47,6 +47,7 @@ import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 import { extractTireFields } from "@/services/tire/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
+import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
@@ -1385,9 +1386,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const learnedHint = candidatePrefix
           ? deriveBrandPrefixHints(get().products, get().aliases).find((h) => h.prefix === candidatePrefix)
           : undefined;
-        const brandPrefixHint = learnedHint
-          ? `candidate prefix ${learnedHint.prefix} has previously been human-approved for brand "${learnedHint.brand}" in this business`
+        // Non-authoritative brand-FAMILY suggestion from the validated prefix hint table (corporate
+        // siblings that share a GS1 company prefix). The learned (human-approved) hint is listed FIRST -
+        // it is the trusted/promoted layer; the family is only a suggestion and never overrides the firewall.
+        const familyMatch = lookupTirePrefix(review.cleanCode);
+        const familyHint = familyMatch
+          ? `GS1 prefix ${familyMatch.prefix} is associated (non-authoritative hint) with the tire brand family: ${familyMatch.brands.map((b) => b.brand).slice(0, 8).join(", ")}`
           : undefined;
+        const brandPrefixHint =
+          [
+            learnedHint
+              ? `candidate prefix ${learnedHint.prefix} has previously been human-approved for brand "${learnedHint.brand}" in this business`
+              : undefined,
+            familyHint,
+          ]
+            .filter(Boolean)
+            .join(". ") || undefined;
 
         try {
           const decodeOnce = async () => {

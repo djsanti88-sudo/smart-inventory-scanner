@@ -8,6 +8,7 @@
 import type { AiLookupResult, CodeType } from "@/types";
 import { isTireContext, type IdentityText } from "@/services/ai/tireSpecs";
 import { decodeBarcodeStructure, type BrandPrefixHint } from "@/services/ai/barcodeAnatomy";
+import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 
 export type ScanContext = "any" | "tire";
 export type ConflictKind = "category_context_conflict" | "brand_prefix_conflict";
@@ -79,7 +80,10 @@ export function detectScanContextConflict(params: {
       const decodedBrand = (result.brand ?? "").trim().toLowerCase();
       const learned = hint.brand.toLowerCase();
       const brandMismatch = !!decodedBrand && !decodedBrand.includes(learned) && !learned.includes(decodedBrand);
-      if (brandMismatch) return "brand_prefix_conflict"; // only a genuine brand contradiction, not "is non-tire"
+      // Brand-FAMILY guard: corporate siblings share a GS1 company prefix (e.g. Michelin / BFGoodrich /
+      // Uniroyal on 086699). A decode of any brand in the prefix family is NOT a real conflict. The hint
+      // table can only SUPPRESS a conflict here - it never creates one and never auto-trusts.
+      if (brandMismatch && !isBrandInPrefixFamily(code, result.brand ?? "")) return "brand_prefix_conflict";
     }
   }
   return null;
