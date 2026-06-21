@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 // Live-decode proof. The /api/ai-lookup route is fully intercepted with page.route, so NO live
 // Gemini/OpenAI call is ever made (the Playwright webServer also runs with IS_E2E=1 as a backstop).

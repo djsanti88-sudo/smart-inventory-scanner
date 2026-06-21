@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 // Phase 1 representative UI proof (NOT 100 browser runs - the 100-code benchmark is the headless runner
 // scripts/benchmark-decodes.ts). Fully mocked (IS_E2E + page.route): never spends credits. Proves the

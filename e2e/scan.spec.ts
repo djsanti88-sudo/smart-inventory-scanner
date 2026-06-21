@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 // End-to-end proof of the Smart Inventory Scanner. One serial flow so local state (Zustand) is
 // preserved across pages. Screenshots are written to e2e/proof/.
