@@ -45,7 +45,7 @@ import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
-import { deriveBrandPrefixHints } from "@/services/ai/barcodeAnatomy";
+import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { detectScanContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
@@ -1260,6 +1260,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const rawCodeSanitized = sanitizeForAiLookup(review.rawCode).clean;
         const cleanCodeSanitized = sanitizeForAiLookup(review.cleanCode).clean;
         const codeType = detectCodeType(review.cleanCode);
+        // Phase 8B: app-derived prompt hints (advisory only - the Phase 8 firewall stays the hard gate).
+        const scanContext = s.scanContext ?? "any";
+        const candidatePrefix = decodeBarcodeStructure(review.cleanCode, codeType).candidateCompanyPrefix;
+        const learnedHint = candidatePrefix
+          ? deriveBrandPrefixHints(get().products, get().aliases).find((h) => h.prefix === candidatePrefix)
+          : undefined;
+        const brandPrefixHint = learnedHint
+          ? `candidate prefix ${learnedHint.prefix} has previously been human-approved for brand "${learnedHint.brand}" in this business`
+          : undefined;
 
         try {
           const decodeOnce = async () => {
@@ -1275,6 +1284,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 confidenceThreshold: 0.85,
                 allowImageSuggestions: s.allowImageSuggestions,
                 budgetMs: s.decodeBudgetMs ?? 13000,
+                scanContext,
+                brandPrefixHint,
               }),
             });
             if (!res.ok) throw new Error(`decode failed ${res.status}`);

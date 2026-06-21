@@ -66,7 +66,7 @@ ${req.allowImageSuggestions ? "You may suggest an imageUrl as a guess." : "Do no
 </rules>
 
 <trusted_context>
-${TRUSTED_CONTEXT}${req.gs1RegionHint ? `\n${req.gs1RegionHint}` : ""}
+${TRUSTED_CONTEXT}${req.gs1RegionHint ? `\n${req.gs1RegionHint}` : ""}${req.scanContext === "tire" ? `\nThis scan is for TIRE inventory. Non-tire products (hardware, fasteners, rivets, screws, groceries, general merchandise) are likely a WRONG or poisoned barcode source and should be rejected with low confidence UNLESS strong tire-specific evidence proves otherwise (a tire size like 275/55R20, a load index and speed rating like 111T).` : ""}${req.brandPrefixHint ? `\nBusiness catalog hint (NON-AUTHORITATIVE - this is not identity truth; verify the exact product and full tire specs before trusting): ${req.brandPrefixHint}.` : ""}
 </trusted_context>
 
 <untrusted_input>

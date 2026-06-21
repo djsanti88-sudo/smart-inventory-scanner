@@ -62,6 +62,10 @@ truth; AI only suggests, and only a human approves. Quick map for a new session 
   ("category conflict" / "brand conflict"). It never deletes evidence. The scan context is a setting
   (`scanContext`, default `any` to preserve the multi-trade product; set `tire` to enable the firewall).
 - Internal barcode anatomy / conflict diagnostics are platformOwner-only; customers never see them.
+- Phase 8B: the scan context (tire) and the unambiguous learned brand-prefix hint are also injected into
+  the AI prompt's trusted context as ADVISORY, non-authoritative hints (the prompt is told the brand-prefix
+  hint is not identity truth, and to reject non-tire results in tire context). Hints only help the model
+  search; the firewall above remains the hard auto-count gate.
 
 ## 6. Needs Review human approval (W2)
 - A human resolves an unknown by linking to an existing product or creating a new one. Resolution sets
