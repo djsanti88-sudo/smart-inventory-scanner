@@ -83,9 +83,9 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // focus retained across async decode
   expect(postHits).toBeGreaterThan(0); // AI WAS called automatically
 
-  // Suggested (usable product) -> TRUST THE AI: auto-added + counted, not a blank review.
+  // Suggested (weak url_only evidence) -> EVIDENCE GATE: NOT auto-counted; routed to Needs Review.
   await scan(page, "111111111119");
-  await expect(page.getByTestId("final-count-body")).toContainText("Maybe Energy Bar");
+  await expect(page.getByTestId("final-count-body")).not.toContainText("Maybe Energy Bar");
 
   // Conflict: providers disagree -> NOT auto-added, stays in Needs Review.
   await scan(page, "222222222226");
@@ -93,8 +93,9 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   await expect(page.getByTestId("scanner-input")).toBeFocused();
   await page.screenshot({ path: `${PROOF}/auto-decode-01-feed.png`, fullPage: true });
 
-  // Only the conflict is left in Needs Review (the suggested product was trusted + counted).
+  // Both the weak-suggested and the conflict are left in Needs Review (evidence gate; neither auto-counted).
   await page.goto("/review");
+  await expect(page.getByTestId("review-row-111111111119")).toBeVisible();
   await expect(page.getByTestId("review-row-222222222226")).toBeVisible();
   await page.screenshot({ path: `${PROOF}/auto-decode-02-review.png`, fullPage: true });
 

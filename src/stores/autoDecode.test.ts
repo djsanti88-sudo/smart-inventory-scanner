@@ -88,18 +88,18 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     }
   });
 
-  it("trusts the AI: a suggested product (usable name) auto-adds + counts, not blank review", async () => {
+  it("does NOT auto-count a suggested product (evidence gate); it stays in Needs Review", async () => {
     const store = aggressiveStore();
     const { restore } = stub(SUGGESTED);
     try {
       store.getState().processScan("878106003504");
-      await vi.waitFor(() => expect(lastReview(store).status).toBe("resolved"));
+      await vi.waitFor(() => expect(lastReview(store).hasSuggestion).toBe(true));
     } finally {
       restore();
     }
-    const product = store.getState().products.find((p) => p.name === "Maybe Snack");
-    expect(product).toBeDefined();
-    expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
+    expect(lastReview(store).status).toBe("open"); // weak/suggested evidence is never auto-counted
+    expect(store.getState().products.find((p) => p.name === "Maybe Snack")).toBeUndefined();
+    expect(store.getState().finalCounts).toHaveLength(0);
   });
 
   it("provider conflict -> Conflict status", async () => {
