@@ -17,7 +17,7 @@ export type IdentityText = {
 
 // Small, hand-verified list of real tire brands (used only to recognise tire context, e.g. "Falken
 // Wildpeak AT" which never contains the word "tire"). Not a manufacturer-prefix table.
-const KNOWN_TIRE_BRANDS = [
+export const KNOWN_TIRE_BRANDS = [
   "falken", "nexen", "michelin", "bridgestone", "goodyear", "continental", "pirelli", "yokohama",
   "hankook", "kumho", "toyo", "cooper", "bfgoodrich", "firestone", "dunlop", "general tire", "nitto",
   "sailun", "nokian", "maxxis", "kenda", "hercules", "ironman", "mastercraft", "uniroyal", "sumitomo",

@@ -45,6 +45,7 @@ import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { extractTireFields } from "@/services/tire/extractTireFields";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
@@ -1415,6 +1416,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
+          // Phase 10: for a tire scan, parse the messy decode into structured columns (size -> specs,
+          // brand, part number, clean description). Display/storage only - it does NOT touch the firewall
+          // or the hasRequiredTireSpecs auto-count gate below (those read the ORIGINAL `best`).
+          const tireFields = best && s.scanContext === "tire" && isTireContext(best) ? extractTireFields(best) : null;
           const providerNamesArr = (data.providerNames as string[]) ?? [];
           const providerName = providerNamesArr.join("+") || "mock";
           const decodeProviderSummaries = results.map((r, i) => ({
@@ -1428,12 +1433,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               r.id === reviewId
                 ? {
                     ...r,
-                    suggestedProductName: best?.productName ?? "",
-                    suggestedBrand: best?.brand ?? "",
+                    suggestedProductName: tireFields?.description || (best?.productName ?? ""),
+                    suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
                     suggestedCategory: best?.category ?? "",
-                    suggestedSpecsShort: best?.specsShort ?? "",
+                    suggestedSpecsShort: tireFields?.size ?? best?.specsShort ?? "",
                     suggestedSpecsFull: best?.specsFull ?? "",
-                    suggestedPrimarySku: best?.primarySku ?? "",
+                    suggestedPrimarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
                     suggestedPrimaryBarcode: best?.primaryBarcode ?? "",
                     suggestedGtin: best?.gtin ?? "",
                     suggestedUpc: best?.upc ?? "",
@@ -1495,12 +1500,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
 
           const newProduct = {
-            name: cleanName,
-            brand: best?.brand ?? "",
+            name: tireFields?.description || cleanName,
+            brand: tireFields?.brand ?? best?.brand ?? "",
             category: best?.category ?? "",
-            specsShort: best?.specsShort ?? "",
+            specsShort: tireFields?.size ?? best?.specsShort ?? "",
             specsFull: best?.specsFull ?? "",
-            primarySku: best?.primarySku ?? "",
+            primarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
             primaryBarcode: best?.primaryBarcode || review.cleanCode,
             gtin: best?.gtin ?? "",
             upc: best?.upc ?? "",
