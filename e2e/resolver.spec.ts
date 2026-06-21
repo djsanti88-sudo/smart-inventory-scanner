@@ -1,10 +1,19 @@
-import { test, expect, type Page } from "./fixtures";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 // Proof for the product-identity hotfix. The three previously-poisoned codes must NEVER resolve to
 // the wrong products; they must go to Needs Review. A human approval then makes the code
 // deterministic on the next scan, with no AI call.
 
 const PROOF = "e2e/proof";
+
+// This flow proves the DETERMINISTIC resolver with NO AI. master defaults AI on and auto-enables it when
+// a provider key is configured, so we run it in a NO-KEYS environment: the auto-decode gate fails on
+// hasKey, so unknown scans go straight to Needs Review with zero AI calls.
+const NO_AI_STATUS = {
+  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
+  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
+  dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+};
 
 async function scan(page: Page, code: string) {
   const input = page.getByTestId("scanner-input");
@@ -22,6 +31,10 @@ test("resolver never maps codes to wrong products; human approval makes them det
     if (r.url().includes("/api/ai-lookup") && r.method() === "POST") aiCalls.push(r.url());
   });
   page.on("dialog", (d) => d.accept()); // auto-accept the Clear cache confirmation
+  await page.route("**/api/ai-lookup", async (route: Route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: NO_AI_STATUS });
+    return route.fulfill({ json: {} }); // a POST must never fire on this deterministic, no-key flow
+  });
 
   await page.goto("/login");
   await page.getByTestId("login-button").click();

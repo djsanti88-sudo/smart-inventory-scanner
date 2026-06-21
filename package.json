@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/patch-jwks-rsa.cjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -25,7 +26,8 @@
     "qa:bots:performance": "playwright test --config=playwright.bots.config.ts performance-smoke",
     "qa:bots:all": "playwright test --config=playwright.bots.config.ts",
     "qa:bots:live": "playwright test --config=playwright.bots.cloud.config.ts",
-    "qa:revision": "npx tsc --noEmit && npx eslint src e2e && npx next build && npx playwright test && npm run test:firebase && npm run qa:bots"
+    "qa:revision": "npx tsc --noEmit && npx eslint src e2e && npx next build && npx playwright test && npm run test:firebase && npm run qa:bots",
+    "qa:weekly-report": "npm run qa:bots:security && npm run qa:bots:data && npm run qa:bots:tire && npm run qa:bots:ux"
   },
   "dependencies": {
     "firebase": "^12.14.0",

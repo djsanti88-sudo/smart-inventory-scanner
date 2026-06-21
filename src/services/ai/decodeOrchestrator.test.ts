@@ -11,7 +11,22 @@ function suggestion(): AiLookupResult {
 }
 
 describe("runDecode - time budget + concurrency", () => {
-  it("returns a VERIFIED result quickly when a provider + evidence verify (no timeout)", async () => {
+  it("returns a VERIFIED result quickly when TWO providers agree + evidence verifies (no timeout)", async () => {
+    // Auto-count requires two independent sources to agree (Gemini Flash + ChatGPT mini in parallel).
+    const a: DecodeProvider = { name: "gemini", lookup: async () => coke() };
+    const b: DecodeProvider = { name: "openai", lookup: async () => coke() };
+    const r = await runDecode({
+      code: "049000028904",
+      codeType: "upc_a",
+      confidenceThreshold: 0.8,
+      providers: [a, b],
+      budgetMs: 13_000,
+    });
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("verified");
+  });
+
+  it("a SINGLE provider on its own does NOT auto-verify - it is Suggested (needs a second agreeing source)", async () => {
     const p: DecodeProvider = { name: "openai", lookup: async () => coke() };
     const r = await runDecode({
       code: "049000028904",
@@ -21,7 +36,7 @@ describe("runDecode - time budget + concurrency", () => {
       budgetMs: 13_000,
     });
     expect(r.timedOut).toBe(false);
-    expect(r.decision.status).toBe("verified");
+    expect(r.decision.status).toBe("suggested");
   });
 
   it("on TIMEOUT, aborts pending work and returns needs_review with NO partial result", async () => {
@@ -84,8 +99,9 @@ describe("runDecode - time budget + concurrency", () => {
     expect(r.providerStatuses.find((s) => s.provider === "openai")?.status).toBe("ok");
   });
 
-  it("uses the page-fetch enrich result + reports latency", async () => {
-    // Provider finds nothing; the page-fetch result is authoritative.
+  it("uses the page-fetch enrich result (single source -> Suggested) + reports latency", async () => {
+    // Provider finds nothing; the page-fetch result is the ONLY source. One source alone cannot
+    // auto-count under the two-source rule, so it lands as Suggested (human review) - but it is used.
     const p: DecodeProvider = { name: "openai", lookup: async () => emptyResult() };
     const r = await runDecode({
       code: "049000028904",
@@ -96,8 +112,25 @@ describe("runDecode - time budget + concurrency", () => {
       budgetMs: 13_000,
     });
     expect(r.timedOut).toBe(false);
-    expect(r.decision.status).toBe("verified"); // page-fetch fetched_source verifies it
+    expect(r.decision.status).toBe("suggested"); // single source: shown + reviewable, not auto-counted
+    expect(r.results.some((x) => x.productName === "Coca-Cola Classic")).toBe(true); // page-fetch result IS used
     expect(typeof r.latencyMs).toBe("number");
+  });
+
+  it("a provider + the page-fetch enrich that AGREE verify (two independent sources)", async () => {
+    // The page-fetch acts as a second independent source: provider + page-fetch landing on the same
+    // identity is exactly the agreement the two-source rule wants -> auto-counted.
+    const p: DecodeProvider = { name: "openai", lookup: async () => coke() };
+    const r = await runDecode({
+      code: "049000028904",
+      codeType: "upc_a",
+      confidenceThreshold: 0.8,
+      providers: [p],
+      enrich: async () => ({ result: coke(), evidence: { verified: true, strength: "fetched_source", matchedCode: "049000028904", matchedSources: ["go-upc"], reason: "" } }),
+      budgetMs: 13_000,
+    });
+    expect(r.timedOut).toBe(false);
+    expect(r.decision.status).toBe("verified");
   });
 });
 
@@ -134,15 +167,16 @@ describe("runDecode - W1 verified-only early exit", () => {
     expect(r.providerNames).toContain("page-fetch");
   });
 
-  it("still exits early as soon as the decode is app-VERIFIED (does not wait for a hung provider)", async () => {
-    const fastVerified: DecodeProvider = { name: "gemini", lookup: async () => coke() };
-    // The hung provider would only settle at providerTimeoutMs (10s) > vitest's 5s test timeout. If the
-    // run did NOT early-exit on the verified result, this test would hang and fail - passing fast proves it.
+  it("exits early as soon as TWO providers agree (app-VERIFIED) - does not wait for a hung third provider", async () => {
+    // Stricter pipeline: auto-verify needs two independent sources to agree. Once they do, the run
+    // early-exits and does NOT wait for a third hung provider (whose 10s timeout > vitest's 5s would hang).
+    const fastA: DecodeProvider = { name: "gemini", lookup: async () => coke() };
+    const fastB: DecodeProvider = { name: "openai", lookup: async () => coke() };
     const hung: DecodeProvider = {
-      name: "openai",
+      name: "premium",
       lookup: (signal) => new Promise<AiLookupResult>((_, rej) => signal.addEventListener("abort", () => rej(new Error("aborted")))),
     };
-    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [fastVerified, hung], budgetMs: 13_000, providerTimeoutMs: 10_000 });
+    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [fastA, fastB, hung], budgetMs: 13_000, providerTimeoutMs: 10_000 });
     expect(r.timedOut).toBe(false);
     expect(r.decision.status).toBe("verified");
   });
@@ -163,9 +197,9 @@ describe("runDecode - W1 verified-only early exit", () => {
     expect(r.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
   });
 
-  it("855724007602 (known live decode) still VERIFIES under the stricter pipeline when evidence is present", async () => {
-    const natureWise: DecodeProvider = {
-      name: "gemini",
+  it("855724007602 (known live decode) VERIFIES under the stricter pipeline when TWO sources agree with evidence", async () => {
+    const natureWise = (name: string): DecodeProvider => ({
+      name,
       lookup: async () => ({
         ...emptyResult(),
         productName: "NatureWise Omega 3 1000 Mg + Vitamin E",
@@ -174,8 +208,8 @@ describe("runDecode - W1 verified-only early exit", () => {
         sourceSnippets: ["NatureWise Omega 3 1000 Mg + Vitamin E UPC 855724007602 fish oil supplement"],
         confidence: 0.95,
       }),
-    };
-    const r = await runDecode({ code: "855724007602", codeType: "upc_a", confidenceThreshold: 0.85, providers: [natureWise], budgetMs: 13_000 });
+    });
+    const r = await runDecode({ code: "855724007602", codeType: "upc_a", confidenceThreshold: 0.85, providers: [natureWise("gemini"), natureWise("openai")], budgetMs: 13_000 });
     expect(r.timedOut).toBe(false);
     expect(r.decision.status).toBe("verified");
     expect(r.results[0]?.productName).toMatch(/NatureWise Omega 3/);

@@ -27,7 +27,7 @@ export default function ProductsPage() {
                 <th className="px-3 py-2">Brand</th>
                 <th className="px-3 py-2">Category</th>
                 <th className="px-3 py-2">Specs</th>
-                <th className="px-3 py-2">Part number</th>
+                <th className="px-3 py-2">SKU</th>
                 {isPlatform && <th className="px-3 py-2">Primary barcode</th>}
                 {isPlatform && <th className="px-3 py-2">GTIN/UPC/EAN</th>}
                 {isPlatform && <th className="px-3 py-2">Codes</th>}

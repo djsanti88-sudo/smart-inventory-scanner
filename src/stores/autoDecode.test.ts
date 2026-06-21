@@ -139,7 +139,9 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect(spy).not.toHaveBeenCalled();
     const r = lastReview(store);
     expect(r.decodeStatus).toBe("needs_review");
-    expect(r.reason).toMatch(/GEMINI_API_KEY|OPENAI_API_KEY|key/i);
+    // platformOwner diagnostic carries the key detail; the customer-facing reason must NOT.
+    expect(r.decodeNote).toMatch(/GEMINI_API_KEY|OPENAI_API_KEY|key/i);
+    expect(r.reason).not.toMatch(/api.?key|gemini|openai|provider/i);
   });
 
   it("does NOT auto-decode when AI lookup is OFF (passive, with reason)", () => {
@@ -153,7 +155,9 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
       restore();
     }
     expect(spy).not.toHaveBeenCalled();
-    expect(lastReview(store).reason).toMatch(/off|disabled/i);
+    // The "why" (AI off) is a platformOwner-only decodeNote; the customer-facing reason stays product-safe.
+    expect(lastReview(store).decodeNote).toMatch(/off|disabled/i);
+    expect(lastReview(store).reason).not.toMatch(/\bai\b|settings/i);
   });
 
   it("emergency stop blocks auto-decode with a clear reason", () => {
@@ -166,7 +170,24 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
       restore();
     }
     expect(spy).not.toHaveBeenCalled();
-    expect(lastReview(store).reason.toLowerCase()).toMatch(/emergency|stop/);
+    expect((lastReview(store).decodeNote ?? "").toLowerCase()).toMatch(/emergency|stop/);
+  });
+
+  it("refreshAiStatus is server-authoritative: stale persisted off/cap-25 -> forced on + cap 200, gemini-first", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    // Simulate a STALE persisted client session from before AI was enabled.
+    store.getState().updateSettings({ aiLookupEnabled: false, dailyLookupLimit: 25, primaryProvider: "mock", fallbackProvider: "mock" });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: ["FIRECRAWL_API_KEY"] });
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    const s = store.getState().settings;
+    expect(s.aiLookupEnabled).toBe(true);    // forced on by the server confirming a key
+    expect(s.dailyLookupLimit).toBe(200);    // adopts AI_LOOKUP_DAILY_LIMIT from the server
+    expect(s.primaryProvider).toBe("gemini");
+    expect(s.fallbackProvider).toBe("openai");
   });
 
   it("a KNOWN (approved) scan never calls AI", () => {
