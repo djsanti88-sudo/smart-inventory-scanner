@@ -149,7 +149,7 @@ export interface ScanStoreDeps {
   audit?: (event: AuditEventInput) => void;
 }
 
-const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   businessId: DEMO_BUSINESS_ID,
   aiLookupEnabled: false,
   primaryProvider: "mock",
@@ -170,7 +170,7 @@ const DEFAULT_SETTINGS: Settings = {
   decodeBudgetMs: 13000,
   autoCatalogLearningEnabled: true,
   autoVerifyConfidenceThreshold: 80,
-  scanContext: "any",
+  scanContext: "tire", // Phase 9: default to Tires so the category firewall protects from day one (no setup)
   trustedSourceAutoVerifyEnabled: true,
   aiOnlyAutoVerifyAllowed: false,
 };
@@ -209,6 +209,9 @@ export interface ScanState {
   // Transient (not persisted): SELECTED discovered identifiers that could NOT be approved because the
   // clean code already belongs to a DIFFERENT product. Surfaced to the UI; never silently overwritten.
   lastAliasConflicts: { reviewId: string; code: string; existingProductId: string }[] | null;
+  // Transient (not persisted): set when a scan was BLOCKED by the category firewall. Drives the
+  // non-blocking, dismissible warning banner on the scan page (the item still goes to Needs Review).
+  lastCategoryWarning: { code: string; productName: string; reason: string } | null;
 
   // AI lookup (fallback only, for unknown codes)
   aiLookupLogs: AiLookupLog[];
@@ -271,6 +274,8 @@ export interface ScanState {
   /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
   clearMismatchWarning: () => void;
   clearAliasConflicts: () => void;
+  /** Clear the category-firewall warning banner (user dismissed it or switched category). */
+  clearCategoryWarning: () => void;
   /** Repair a bad alias: unlink it (stops resolving; soft delete, scan history kept). Audited. */
   unlinkAlias: (aliasId: string) => void;
   /** Repair a bad alias: move it to the correct product. Audited. */
@@ -648,6 +653,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       lastSyncError: null,
       lastMismatchWarning: null,
       lastAliasConflicts: null,
+      lastCategoryWarning: null,
       aiLookupLogs: [],
       breaker: initBreaker(),
       aiStatus: { ...DEFAULT_AI_STATUS },
@@ -800,6 +806,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           ? detectIdentityContextConflict(get().settings.scanContext ?? "any", matchedProduct)
           : null;
         const countable = isKnown && !knownConflict;
+        if (knownConflict === "category_context_conflict") {
+          // Phase 9: surface the non-blocking category warning banner (the scan still routes to review).
+          set({ lastCategoryWarning: { code: cleaned.cleanCode, productName: matchedProduct?.name ?? "this product", reason: knownConflict } });
+        }
 
         const event: ScanEvent = {
           id: scanEventId,
@@ -1581,6 +1591,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 ? "Tire decode missing size / load index / speed rating - confirm full specs before counting (incomplete_specs)."
                 : honest || plan.blockingReasons[0] || plan.reason || "Needs review";
             set((st) => ({
+              // Phase 9: a category-context conflict drives the dismissible scan-page warning banner.
+              lastCategoryWarning:
+                contextConflict === "category_context_conflict"
+                  ? { code: review.cleanCode, productName: best?.productName ?? "this product", reason: contextConflict }
+                  : st.lastCategoryWarning,
               needsReviewQueue: st.needsReviewQueue.map((r) =>
                 r.id === reviewId
                   ? { ...r, autoVerifyScore: plan.score, blockingReasons: plan.blockingReasons, reason: reviewReason }
@@ -1762,7 +1777,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : e,
         );
 
-        set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null, lastAliasConflicts: null });
+        set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null, lastAliasConflicts: null, lastCategoryWarning: null });
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
@@ -1945,6 +1960,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       clearMismatchWarning: () => set({ lastMismatchWarning: null }),
+
+      clearCategoryWarning: () => set({ lastCategoryWarning: null }),
 
       clearAliasConflicts: () => set({ lastAliasConflicts: null }),
 
@@ -2296,6 +2313,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           lastSyncError: null,
           lastMismatchWarning: null,
           lastAliasConflicts: null,
+          lastCategoryWarning: null,
           breaker: initBreaker(),
           lastCleanupBackup: null,
           catalog: [],
@@ -2458,5 +2476,10 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
     loadBusinessData: overrides?.loadBusinessData,
     audit: overrides?.audit,
   };
-  return create<ScanState>()(buildScanInitializer(deps));
+  const store = create<ScanState>()(buildScanInitializer(deps));
+  // Test convenience: generic store tests use non-tire seed fixtures (e.g. Coca-Cola) as stand-ins for
+  // ANY product, so the test store defaults to "any" context. The PRODUCTION default is "tire"
+  // (DEFAULT_SETTINGS); firewall tests opt in via updateSettings({ scanContext: "tire" }).
+  store.getState().updateSettings({ scanContext: "any" });
+  return store;
 }
