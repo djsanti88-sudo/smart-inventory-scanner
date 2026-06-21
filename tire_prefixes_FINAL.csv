@@ -1,0 +1,207 @@
+brand,prefix,prefix_length,region,verification_status,ingest_tier,example_barcode,source_url,mapping_flag,notes
+Michelin,086699,6,US / North America,barcode_checked,hint_strong,086699220585,,OK,Parent company GS1 prefix NA
+Michelin,352870,6,Europe / Global,ai_asserted_no_barcode,hint_weak,1 EU Allocation,,OK,Parent company GS1 prefix EU
+BFGoodrich,086699,6,US / North America,barcode_checked,hint_strong,086699091000,,OK,"Owned by Michelin, shares NA prefix"
+Uniroyal (US),086699,6,US / North America,barcode_checked,hint_strong,086699142948,,OK,Owned by Michelin NA
+Kleber,352870,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Michelin EU
+Tigar,352870,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Michelin
+Riken,352870,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Michelin
+Kormoran,352870,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Michelin
+Goodyear,069766,6,US / North America,barcode_INVALID,review_before_use,069766215826,,NEEDS_MANUAL_REVIEW,Parent company GS1 prefix
+Dunlop,069766,6,US / North America,barcode_checked,hint_strong,697662104834,,OK,"NA rights owned by Goodyear, uses Goodyear prefix"
+Kelly,069766,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Goodyear
+Debica,069766,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Goodyear
+Sava,069766,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Goodyear
+Fulda,069766,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Goodyear
+Fierce,069766,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Goodyear
+Cooper,029142,6,US / North America,barcode_checked,hint_strong,029142753568,,OK,Parent company GS1 prefix
+Mastercraft,029142,6,US / North America,barcode_checked_crossconfirmed,hint_strong,029142694212,https://www.barcodespider.com/029142694212,OK,Owned by Cooper
+Starfire,029142,6,US / North America,barcode_checked_crossconfirmed,hint_strong,029142933168,https://www.amazon.com/Starfire-Solarus-Season-Radial-Tire-LT215/dp/B07Y7342PX,OK,Owned by Cooper
+Roadmaster,029142,6,US / North America,ai_asserted_no_barcode,review_before_use,,,POSSIBLE_PARENT_MISMATCH,Owned by Cooper (Commercial)
+Mickey Thompson,0787025,7,US / North America,barcode_checked,hint_strong,0787025497922,,OK,"Owned by Cooper, separate prefix"
+Dick Cepek,0787025,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,"Owned by Cooper, shares Mickey Thompson prefix"
+Avon Tyres,029142,6,UK / Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Cooper
+Bridgestone,092971,6,US / North America,barcode_checked,hint_strong,092971263164,,OK,Parent company GS1 prefix NA
+Bridgestone,4961914,7,Japan / Global,ai_asserted_no_barcode,hint_weak,,,OK,Parent company GS1 prefix Japan
+Firestone,092971,6,US / North America,barcode_checked,hint_strong,092971286392,,OK,Owned by Bridgestone NA
+Dayton,092971,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Bridgestone
+Fuzion,092971,6,US / North America,barcode_checked_crossconfirmed,hint_strong,092971317478,https://www.upcindex.com/92971317478,OK,Owned by Bridgestone
+Continental,4019238,7,Germany / Global,barcode_checked,hint_strong,4019238334760,,OK,Parent company GS1 prefix
+General Tire,051342,6,US / North America,barcode_checked,hint_strong,051342186877,,OK,"Owned by Continental NA, separate prefix"
+Uniroyal (EU),4019238,7,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Continental in Europe
+Semperit,4019238,7,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Continental
+Barum,4019238,7,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Continental
+Viking,4019238,7,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Continental
+Gislaved,4019238,7,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Continental
+Hoosier,N/A,,US / North America,part_number_only,exclude_partnumber,,,POSSIBLE_PART_NUMBER_ONLY,Owned by Continental. FLAG: Does not consistently use retail UPC/EAN (DOT or part-number only).
+Pirelli,054137,6,US / North America,barcode_checked,hint_strong,054137048381,,OK,Pirelli NA prefix
+Pirelli,8019227,7,Italy / Global,barcode_checked_crossconfirmed,hint_strong,8019227414325,https://www.upcindex.com/8019227414325,OK,Pirelli Global EAN prefix
+Metzeler,8019227,7,Global,barcode_checked_crossconfirmed,hint_strong,8019227402384,https://no.product-search.net/80192274,OK,Owned by Pirelli (Motorcycle)
+Toyo Tires,4981910,7,Japan / Global,barcode_checked,hint_strong,4981910527329,,OK,Parent company GS1 prefix
+Toyo Tires (NA),0826825,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Toyo NA UPC block
+Nitto,0826825,7,US / North America,barcode_checked,hint_strong,0826825535868,,OK,Owned by Toyo Tires NA
+Sumitomo,0826826,7,US / North America,barcode_checked,hint_strong,826826082606,,OK,Sumitomo NA prefix
+Sumitomo,0768155,7,US / North America,barcode_checked,hint_strong,768155397986,,OK,Sumitomo NA Commercial prefix
+Falken,0848983,7,US / North America,barcode_checked,hint_strong,0848983018830,,OK,Sumitomo Rubber NA / Falken specific prefix
+Ohtsu,0848983,7,US / North America,barcode_checked_crossconfirmed,hint_strong,848983001597,https://www.u-buy.com.ng/product/2MPGKEFI-ohtsu-fp8000-all-season-radial-tire-28525zr20-93w,OK,"Owned by Sumitomo, often uses Falken prefix"
+Yokohama,0721506,7,US / North America,barcode_checked,hint_strong,0721506160370,,OK,Yokohama NA prefix
+Yokohama,4968814,7,Japan / Global,ai_asserted_no_barcode,hint_weak,,,OK,Yokohama Japan EAN prefix
+Alliance,0721506,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Yokohama Off-Highway Tires
+Galaxy,0721506,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Yokohama Off-Highway Tires
+Hankook,0715459,7,US / North America,barcode_checked,hint_strong,0715459431564,,OK,Hankook NA prefix
+Hankook,8808569,7,South Korea / Global,ai_asserted_no_barcode,hint_weak,,,OK,Hankook Korea EAN prefix
+Laufenn,0715459,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Value brand owned by Hankook
+Kingstar,8808569,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Value brand owned by Hankook
+Kumho,8808956,7,South Korea / Global,barcode_checked,hint_strong,8808956298296,,OK,Parent company GS1 prefix
+Marshal,8808956,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Kumho
+Nexen,0191563,7,US / North America,barcode_checked,hint_strong,0191563015119,,OK,Nexen NA prefix
+Nexen,8807622,7,South Korea / Global,ai_asserted_no_barcode,hint_weak,,,OK,Nexen Korea EAN prefix
+Roadstone,8807622,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Nexen
+Nokian,0703382,7,US / North America,barcode_checked,hint_strong,703382351103,,OK,Nokian NA prefix
+Nokian,6413613,7,Finland / Global,ai_asserted_no_barcode,hint_weak,,,OK,Nokian Finland EAN prefix
+Kenda,098663,6,US / North America,barcode_checked,hint_strong,098663061223,,OK,Kenda NA prefix
+Kenda,047853,6,US / North America,barcode_checked,hint_strong,047853608595,,OK,Kenda NA alternate prefix
+Maxxis,4717784,7,Taiwan / Global,barcode_checked,hint_strong,4717784033501,,OK,Parent company (Cheng Shin) GS1 prefix
+CST,4717784,7,Taiwan / Global,ai_asserted_no_barcode,hint_weak,,,OK,Cheng Shin Tire
+Westlake,0758823,7,US / North America,barcode_checked,hint_strong,758823174209,,OK,Imported via Tireco NA block
+Westlake,6927116,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,ZC Rubber global EAN
+Goodride,6927116,7,China / Global,barcode_checked,hint_strong,6927116103675,,OK,ZC Rubber global EAN
+Chaoyang,6927116,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,ZC Rubber global EAN
+Arisun,6927116,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,ZC Rubber global EAN
+Milestar,0758823,7,US / North America,barcode_checked,hint_strong,758823145070,,OK,Owned/Distributed by Tireco
+Nankang (NA),0758823,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Distributed by Tireco NA
+Freestar,0758823,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Distributed by Tireco
+Nankang,4718022,7,Taiwan / Global,barcode_checked,hint_strong,4718022011909,,OK,Nankang global EAN
+GT Radial,0818749,7,US / North America,barcode_checked,hint_strong,818749012440,,OK,Giti NA prefix
+Giti,6932877,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Giti global EAN
+Primewell,0818749,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,"Owned by Giti, sold at Firestone"
+Dextero,0818749,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,"Owned by Giti, sold at Walmart"
+Sailun,8936096,7,Vietnam / Global,barcode_checked,hint_strong,8936096303768,,OK,Sailun Vietnam manufacturing EAN
+Sailun,6959655,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Sailun China EAN
+Rovelo,8936096,7,Global,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,Owned by Sailun
+Blackhawk,8936096,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Sailun
+Ironhead,8936096,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Sailun
+RoadX,8936096,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Sailun
+Linglong,6959956,7,China / Global,barcode_checked,hint_strong,6959956718368,,OK,Linglong global EAN
+Crosswind,0749715,7,US / North America,barcode_checked,hint_strong,749715451423,,OK,Linglong Americas prefix
+Leao,6959956,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Linglong
+Atlas,6959956,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Linglong
+Sentury,0841623,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Sentury Americas prefix
+Delinte,0841623,7,US / North America,barcode_checked,hint_strong,841623104993,,OK,Owned by Sentury
+Landsail,0841623,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Sentury
+Groundspeed,0841623,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Sentury
+Pantera,0841623,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Manufactured by Sentury
+American Roadstar,0841623,7,US / North America,barcode_checked,hint_strong,841623139476,,OK,Manufactured by Sentury
+Fortune,08401396,8,US / North America,barcode_checked,hint_strong,840139644610,,OK,Prinx Chengshan NA prefix
+Prinx,08401396,8,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Prinx Chengshan
+Chengshan,6959458,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Prinx Chengshan Global
+Austone,6959458,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Prinx Chengshan
+Hercules,0688028,7,US / North America,barcode_checked,hint_strong,0688028985204,,OK,Owned by ATD / Hercules
+Ironman,0688028,7,US / North America,barcode_checked,hint_strong,0688028911661,,OK,Owned by Hercules Tires
+Atturo,5060330,7,Global,barcode_checked,hint_strong,5060330612835,,OK,Atturo Tires EAN block
+Atturo,0840156,7,US / North America,barcode_checked,hint_strong,0840156420990,,OK,Atturo Tires UPC block
+Triangle,6959654,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Triangle Tire EAN
+Double Coin,6959955,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Double Coin EAN
+Lexani,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Lexani Tires (Often shares prefix patterns or uses specific blocks)
+Lionhart,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Lionhart Tires
+Arroyo,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Arroyo Tires
+Vogue,085532,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Vogue Tyres
+Accelera,8997011,7,Indonesia / Global,ai_asserted_no_barcode,hint_weak,,,OK,EP Tyres Indonesia
+Forceum,8997011,7,Indonesia / Global,ai_asserted_no_barcode,hint_weak,,,OK,EP Tyres Indonesia
+Zeta,6959956,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,SD International
+Radar,8888001,7,Singapore / Global,ai_asserted_no_barcode,hint_weak,,,OK,Omni United
+Patriot,8888001,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Omni United
+American Tourer,8888001,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Omni United
+Venom Power,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Venom Power Tires
+Fury,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Fury Off-Road Tires
+Haida,6959656,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Haida Rubber
+Joyroad,6959656,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Dongying City Rubber
+Mazzini,6959656,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Mazzini Tires
+Apollo,8902823,7,India / Global,ai_asserted_no_barcode,hint_weak,,,OK,Apollo Tyres
+Vredestein,8714692,7,Netherlands / Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Apollo
+MRF,8901002,7,India / Global,ai_asserted_no_barcode,hint_weak,,,OK,MRF Tyres
+CEAT,8901003,7,India / Global,ai_asserted_no_barcode,hint_weak,,,OK,CEAT Tyres
+JK Tyre,8901004,7,India / Global,ai_asserted_no_barcode,hint_weak,,,OK,JK Tyre
+Carlisle,025114,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Carlstar Group
+ITP,025114,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Carlstar
+BKT,8059971,7,India / Global,ai_asserted_no_barcode,hint_weak,,,OK,Balkrishna Industries
+Trelleborg,731235,6,Sweden / Global,ai_asserted_no_barcode,hint_weak,,,OK,Trelleborg Wheel Systems
+Mitas,8590341,7,Czech Rep / Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Trelleborg
+Titan,088656,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Titan International
+Interco (Super Swamper),N/A,,US / North America,part_number_only,exclude_partnumber,,,POSSIBLE_PART_NUMBER_ONLY,Specialty Off-Road. FLAG: Does not consistently use retail UPC/EAN (DOT or part-number only).
+Pit Bull,N/A,,US / North America,part_number_only,exclude_partnumber,,,POSSIBLE_PART_NUMBER_ONLY,Specialty Off-Road. FLAG: Does not consistently use retail UPC/EAN (DOT or part-number only).
+American Racer,N/A,,US / North America,part_number_only,exclude_partnumber,,,POSSIBLE_PART_NUMBER_ONLY,Racing Tires. FLAG: Does not consistently use retail UPC/EAN (DOT or part-number only).
+Corsa,8997011,7,Indonesia / Global,ai_asserted_no_barcode,review_before_use,,,POSSIBLE_PARENT_MISMATCH,PT Multistrada (now owned by Michelin)
+Achilles,8997011,7,Indonesia / Global,ai_asserted_no_barcode,review_before_use,,,POSSIBLE_PARENT_MISMATCH,PT Multistrada (now owned by Michelin)
+Rovelo,6959655,7,China / Global,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,Sailun China EAN
+MaxTrek,6959956,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Zhaoqing Junhong Co.
+Jinyu,6959655,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Jinyu Tires
+Boto,6959955,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Shandong Wanda Boto
+Duraturn,6959956,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Shaanxi Yanchang Petroleum Group Rubber
+Dynatrac,0818749,7,US / North America,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,"Commercial tires, often manufactured by Giti"
+Sampson,6959458,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Guizhou Tyre Co / Advance
+Advance,6959458,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Guizhou Tyre Co
+Tornel,7501111,7,Mexico / Global,ai_asserted_no_barcode,hint_weak,,,OK,JK Tyre Mexico
+Euzkadi,4019238,7,Mexico / Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Continental
+General,4019238,7,Global,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,Continental Global Prefix
+America,4019238,7,Europe,ai_asserted_no_barcode,review_before_use,,,NEEDS_MANUAL_REVIEW,Owned by Continental
+Sportiva,4019238,7,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Continental
+Sebring,352870,6,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Michelin / Europe
+Siamtyre,352870,6,Asia,ai_asserted_no_barcode,hint_weak,,,OK,Michelin Partnership
+Remington,069766,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Historically Goodyear / Kelly-Springfield
+Monarch,069766,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Historically Goodyear
+Lee,069766,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Historically Goodyear
+Republic,069766,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Historically Goodyear
+Arizonian,029142,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Discount Tire private label (Cooper manufactured)
+Phantom,029142,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Discount Tire private label (Cooper manufactured)
+Pathfinder,0715459,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Discount Tire private label (Hankook manufactured)
+Falken (EU),4010684,7,Europe,ai_asserted_no_barcode,hint_weak,,,OK,Sumitomo / Falken Europe EAN
+Vredestein (US),8714692,7,US / North America,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,Apollo Vredestein Global EAN
+Coker Tire,084214,6,US / North America,ai_asserted_no_barcode,hint_weak,,,POSSIBLE_PART_NUMBER_ONLY,Coker Classic / Antique tires
+Pro-Meter,0758823,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Tireco Brand
+Geostar,0758823,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Tireco Brand
+Geotrac,0758823,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Tireco Brand
+Transeagle,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Private label / ST Trailer tires
+Gladiator,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,API / Gladiator Tires
+Zenna,0840156,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,API / Zenna Tires
+Otani,8858973,7,Thailand / Global,ai_asserted_no_barcode,hint_weak,,,OK,Otani Tire
+Deestone,8858712,7,Thailand / Global,ai_asserted_no_barcode,hint_weak,,,OK,Deestone Tyres
+Vee Rubber,8851123,7,Thailand / Global,ai_asserted_no_barcode,hint_weak,,,OK,Vee Rubber
+Shinko,8808922,7,South Korea / Global,ai_asserted_no_barcode,hint_weak,,,OK,Shinko Tires (Motorcycle)
+Heidenau,4028015,7,Germany / Global,ai_asserted_no_barcode,hint_weak,,,OK,Reifenwerk Heidenau
+Mitas (Moto),8590341,7,Czech Rep / Global,ai_asserted_no_barcode,hint_weak,,,OK,Mitas Motorcycle
+IRC,4962625,7,Japan / Global,ai_asserted_no_barcode,hint_weak,,,OK,Inoue Rubber Co
+Cheng Shin,4717784,7,Taiwan / Global,ai_asserted_no_barcode,hint_weak,,,OK,CST
+Duro,4710134,7,Taiwan / Global,ai_asserted_no_barcode,hint_weak,,,OK,Hwa Fong Rubber
+Schwalbe,4026495,7,Germany / Global,ai_asserted_no_barcode,hint_weak,,,OK,Ralf Bohle GmbH (Bicycle/Wheelchair)
+Maxxis (Bicycle),4717784,7,Taiwan / Global,ai_asserted_no_barcode,hint_weak,,,OK,CST / Maxxis
+SunF,6959956,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Taizhou SunF (ATV)
+Wanda,6959955,7,China / Global,ai_asserted_no_barcode,hint_weak,,,OK,Tianjin Wanda
+Carlisle (Ag),025114,6,US / North America,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,Carlstar Group
+Galaxy (Ag),0721506,7,Global,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,Yokohama OHT
+Primex (Ag),0721506,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Yokohama OHT
+BKT (Ag),8059971,7,India / Global,ai_asserted_no_barcode,hint_weak,,,DUPLICATE_OR_CONFLICTING_ROW,Balkrishna Industries
+Delta,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Eldorado,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Multi-Mile,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Cordovan,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Sigma,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Vanderbilt,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Power King,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Towmax,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Mud Claw,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Trail Guide,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Mirada,040051,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,TBC Corporation private label
+Doral,0826826,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Manufactured by Sumitomo for TBC
+Solar,0826826,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Manufactured by Sumitomo for TBC
+Wild Spirit,0848983,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Often manufactured by Sumitomo
+Wild Country,0848983,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Often manufactured by Sumitomo
+Oliver,086699,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Michelin Retread Technologies
+Bandag,092971,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Bridgestone Commercial Retread
+Dean,029142,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Historically Cooper Tire
+Oliver (Cooper),029142,6,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,Cooper Retread
+Dynatrac (ATD),0688028,7,US / North America,ai_asserted_no_barcode,hint_weak,,,OK,ATD Commercial Label
+Sentry,0841623,7,US / North America,ai_asserted_no_barcode,review_before_use,,,POSSIBLE_PREFIX_MISMATCH,Sentury Tire
+M&H Racemaster,N/A,,US / North America,part_number_only,exclude_partnumber,,,POSSIBLE_PART_NUMBER_ONLY,Drag Racing Tires. FLAG: Does not consistently use retail UPC/EAN (DOT or part-number only).
+Mickey Thompson (Racing),N/A,,US / North America,part_number_only,exclude_partnumber,,,POSSIBLE_PART_NUMBER_ONLY,Pure drag slicks often part-number only. FLAG: Does not consistently use retail UPC/EAN (DOT or part-number only).
+Coker Classic,N/A,,US / North America,part_number_only,exclude_partnumber,,,POSSIBLE_PART_NUMBER_ONLY,Some vintage lines are part-number only. FLAG: Does not consistently use retail UPC/EAN (DOT or part-number only).

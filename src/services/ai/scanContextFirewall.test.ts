@@ -73,3 +73,29 @@ describe("detectIdentityContextConflict (Phase 8C side-door firewall)", () => {
     expect(detectIdentityContextConflict("tire", undefined)).toBeNull();
   });
 });
+
+describe("brand-FAMILY suppression via the tire prefix hint table (Phase 11)", () => {
+  // 086699 family (Michelin / BFGoodrich / Uniroyal...). candidateCompanyPrefix for the UPC is "0086699".
+  const michelinPrefix = [{ prefix: "0086699", brand: "michelin" }];
+
+  it("a corporate sibling on a shared prefix is NOT a brand conflict (no false-conflict)", () => {
+    const result = r({ productName: "BFGoodrich All-Terrain T/A KO2 275/55R20 115T", brand: "BFGoodrich", specsShort: "275/55R20 115T" });
+    expect(
+      detectScanContextConflict({ scanContext: "any", code: "086699220585", codeType: "upc_a", result, brandPrefixHints: michelinPrefix }),
+    ).toBeNull(); // suppressed: siblings, and a hint never marks anything verified - only allows/blocks
+  });
+
+  it("a brand OUTSIDE the family still conflicts vs a learned prefix", () => {
+    const result = r({ productName: "Bridgestone Dueler H/T", brand: "Bridgestone" });
+    expect(
+      detectScanContextConflict({ scanContext: "any", code: "086699220585", codeType: "upc_a", result, brandPrefixHints: michelinPrefix }),
+    ).toBe("brand_prefix_conflict");
+  });
+
+  it("the family table never weakens the category firewall (poisoned non-tire in tire context still blocks)", () => {
+    const result = r({ productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel" });
+    expect(
+      detectScanContextConflict({ scanContext: "tire", code: "086699220585", codeType: "upc_a", result, brandPrefixHints: [] }),
+    ).toBe("category_context_conflict");
+  });
+});
