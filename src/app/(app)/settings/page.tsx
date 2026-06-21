@@ -248,6 +248,17 @@ export default function SettingsPage() {
             data-testid="setting-auto-threshold"
           />
         </Row>
+        <Row label="Scan context (Tire blocks non-tire products from auto-counting)">
+          <select
+            value={settings.scanContext ?? "any"}
+            onChange={(e) => update({ scanContext: e.target.value as "any" | "tire" })}
+            className="rounded border border-zinc-300 px-2 py-1 text-sm"
+            data-testid="setting-scan-context"
+          >
+            <option value="any">Any (multi-trade)</option>
+            <option value="tire">Tire inventory</option>
+          </select>
+        </Row>
         <Toggle
           label="Trusted-source fast path (Tier 1/2 exact barcode auto-verifies)"
           checked={settings.trustedSourceAutoVerifyEnabled ?? true}

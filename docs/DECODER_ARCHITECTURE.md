@@ -41,6 +41,28 @@ truth; AI only suggests, and only a human approves. Quick map for a new session 
   alias approval, verified-source agreement, resolver truth, or auto-count rules. It is never placed in
   untrusted scraped text. See docs/GS1_COUNTRY_REFERENCE.md.
 
+## 5b. Business scan-context conflict firewall (Phase 8) - exact-code evidence is necessary, not sufficient
+- A public UPC source can be WRONG. Proven live: go-upc.com maps tire UPC `745125495781` to an
+  aluminum-rivet kit, and Gemini Pro repeated it because the source itself is poisoned. Model strength
+  cannot fix poisoned exact-code evidence.
+- So exact-code evidence is necessary but NOT sufficient. Before auto-counting, the decode must also
+  agree with the business scan context and learned brand hints (`scanContextFirewall.ts`):
+  - `decodeBarcodeStructure(code, codeType)` (`barcodeAnatomy.ts`) gives NON-AUTHORITATIVE structure:
+    GS1 numbering-authority region, mod-10 check-digit validity, a CANDIDATE company prefix (the real
+    GS1 company prefix is variable-length), and the item reference.
+  - `deriveBrandPrefixHints(products, aliases)` learns brand <- candidate-prefix ONLY from
+    APPROVED aliases of branded products in the active business catalog. A prefix mapped to more than
+    one brand is ambiguous and never used. Never learns from AI/Needs-Review/unapproved/scraped data.
+  - `detectScanContextConflict(...)` returns:
+    - `category_context_conflict` when the scan context is `tire` and the decoded product is clearly
+      non-tire (the poisoned-source guard).
+    - `brand_prefix_conflict` when an unambiguous learned brand for the code's candidate prefix is
+      contradicted by the decoded brand.
+- A conflict BLOCKS auto-count and routes to Needs Review with a safe, product-facing reason
+  ("category conflict" / "brand conflict"). It never deletes evidence. The scan context is a setting
+  (`scanContext`, default `any` to preserve the multi-trade product; set `tire` to enable the firewall).
+- Internal barcode anatomy / conflict diagnostics are platformOwner-only; customers never see them.
+
 ## 6. Needs Review human approval (W2)
 - A human resolves an unknown by linking to an existing product or creating a new one. Resolution sets
   the alias `approved: true` (source `human_review`); only then does the code count and become
