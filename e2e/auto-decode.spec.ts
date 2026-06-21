@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixtures";
 
 // Proves Aggressive Auto Decode Mode: with AI on and (mocked) keys configured, an unknown scan
 // AUTOMATICALLY runs the live decode pipeline - the feed shows Decoding then the final decode

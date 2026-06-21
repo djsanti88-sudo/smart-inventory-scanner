@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 // Proves the confidence-based auto-verify loop with MOCKED decode (no live AI):
 //   strong evidence-backed scan -> auto-verifies + counts (no review) -> second scan resolves with

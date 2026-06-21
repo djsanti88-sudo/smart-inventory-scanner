@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 // Proof for the product-identity hotfix. The three previously-poisoned codes must NEVER resolve to
 // the wrong products; they must go to Needs Review. A human approval then makes the code
