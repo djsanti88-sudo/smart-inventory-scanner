@@ -55,3 +55,33 @@ describe("buildLookupPrompt - GS1 region hint (W3)", () => {
     expect(section(prompt, "untrusted_input")).not.toContain("GS1 prefix region:");
   });
 });
+
+describe("buildLookupPrompt - Phase 8B scan-context + brand-prefix hints", () => {
+  it("injects the tire scan-context instruction into trusted_context when scanContext is tire", () => {
+    const trusted = section(buildLookupPrompt(req({ cleanCodeSanitized: "745125495781", scanContext: "tire" })), "trusted_context");
+    expect(trusted).toContain("TIRE inventory");
+    expect(trusted.toLowerCase()).toContain("non-tire");
+  });
+
+  it("injects a NON-AUTHORITATIVE learned brand-prefix hint when provided", () => {
+    const trusted = section(
+      buildLookupPrompt(req({ cleanCodeSanitized: "745125495781", brandPrefixHint: 'candidate prefix 0745125 has previously been human-approved for brand "fortune" in this business' })),
+      "trusted_context",
+    );
+    expect(trusted).toContain("0745125");
+    expect(trusted).toContain("NON-AUTHORITATIVE");
+    expect(trusted.toLowerCase()).toContain("not identity truth");
+  });
+
+  it("omits the hints when not provided (default context, no learned hint)", () => {
+    const prompt = buildLookupPrompt(req({ cleanCodeSanitized: "745125495781" }));
+    expect(prompt).not.toContain("TIRE inventory");
+    expect(prompt).not.toContain("Business catalog hint");
+  });
+
+  it("keeps the GS1 disclaimer alongside the new tire hint", () => {
+    const prompt = buildLookupPrompt(req({ cleanCodeSanitized: "855724007602", gs1RegionHint: formatGs1Hint("855724007602", "upc_a")!, scanContext: "tire" }));
+    expect(prompt).toContain("GS1 numbering authority region only");
+    expect(prompt).toContain("TIRE inventory");
+  });
+});

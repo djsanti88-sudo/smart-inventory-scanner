@@ -14,6 +14,9 @@ export interface AiLookupRequest {
   // W3 (v1.0.0): app-derived GS1 numbering-authority region hint (public barcodes only). Injected into
   // the TRUSTED prompt context as a NON-AUTHORITATIVE hint; never resolver/alias/evidence truth.
   gs1RegionHint?: string;
+  // Phase 8B: app-derived, NON-AUTHORITATIVE prompt hints (advisory only; the firewall is the hard gate).
+  scanContext?: "any" | "tire";
+  brandPrefixHint?: string;
 }
 
 export interface AiProvider {

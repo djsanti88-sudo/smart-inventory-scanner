@@ -146,6 +146,8 @@ export async function POST(request: Request) {
     confidenceThreshold?: number;
     budgetMs?: number;
     proRecheck?: boolean; // correction-only: use the strongest configured Gemini verification model
+    scanContext?: "any" | "tire"; // Phase 8B: app-derived, non-authoritative prompt hint
+    brandPrefixHint?: string; // Phase 8B: unambiguous learned brand-prefix hint (non-authoritative)
   };
   try {
     body = await request.json();
@@ -167,6 +169,8 @@ export async function POST(request: Request) {
     cleanCodeSanitized,
     allowImageSuggestions: body.allowImageSuggestions ?? false,
     gs1RegionHint,
+    scanContext: body.scanContext,
+    brandPrefixHint: body.brandPrefixHint,
   };
 
   if (body.mode === "decode") {
