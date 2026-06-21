@@ -4,7 +4,16 @@
 // speed rating) before a tire decode is allowed to auto-count. Heuristic detection + a small VERIFIED
 // brand list (never a fabricated bulk table). A tire missing its size is not a usable inventory product.
 
-import type { AiLookupResult } from "@/types";
+// Minimal identity shape the tire/domain heuristics read. Both AiLookupResult and a stored Product
+// (mapped name -> productName) satisfy it, so the SAME checks can guard the AI decode path and the
+// deterministic (already-known) count path. Phase 8C.
+export type IdentityText = {
+  productName?: string;
+  brand?: string;
+  category?: string;
+  specsShort?: string;
+  specsFull?: string;
+};
 
 // Small, hand-verified list of real tire brands (used only to recognise tire context, e.g. "Falken
 // Wildpeak AT" which never contains the word "tire"). Not a manufacturer-prefix table.
@@ -22,19 +31,19 @@ const COMMERCIAL_SIZE = /\b\d{2}(\.\d)?(X\d{2}(\.\d)?)?R\d{2}(\.\d)?\b/i;
 // Load index (2-3 digits, optional dual) + speed-rating letter as a standalone token: 111T, 111/110T, 116 S.
 const LOAD_SPEED = /\b\d{2,3}(\/\d{2,3})?\s?[A-Z]\b/;
 
-function haystack(r: AiLookupResult | null | undefined): string {
+function haystack(r: IdentityText | null | undefined): string {
   if (!r) return "";
   return [r.productName, r.brand, r.category, r.specsShort, r.specsFull].filter(Boolean).join(" ");
 }
 
 /** A tire size pattern (metric or commercial) appears anywhere in the result text. */
-export function hasTireSize(r: AiLookupResult | null | undefined): boolean {
+export function hasTireSize(r: IdentityText | null | undefined): boolean {
   const t = haystack(r);
   return METRIC_SIZE.test(t) || COMMERCIAL_SIZE.test(t);
 }
 
 /** Tire context if the decode looks tire-related at all: keyword, a size pattern, or a known tire brand. */
-export function isTireContext(r: AiLookupResult | null | undefined): boolean {
+export function isTireContext(r: IdentityText | null | undefined): boolean {
   const t = haystack(r).toLowerCase();
   if (/\btires?\b|\btyres?\b/.test(t)) return true;
   if (hasTireSize(r)) return true;
@@ -46,7 +55,7 @@ export function isTireContext(r: AiLookupResult | null | undefined): boolean {
  * The size token is removed before scanning for load/speed so the size's own "R" is not mistaken for a
  * speed rating.
  */
-export function hasRequiredTireSpecs(r: AiLookupResult | null | undefined): boolean {
+export function hasRequiredTireSpecs(r: IdentityText | null | undefined): boolean {
   const t = haystack(r);
   if (!hasTireSize(r)) return false;
   const isCommercial = COMMERCIAL_SIZE.test(t) && !METRIC_SIZE.test(t);
