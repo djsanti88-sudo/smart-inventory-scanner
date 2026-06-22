@@ -3,7 +3,7 @@
 // codes / decode traces). This module is the SINGLE place that decides what reaches disk, so it is pure and
 // unit-testable in isolation (no store, no Firebase). The store's `partialize` delegates here.
 
-import { sanitizeProduct } from "@/services/security/serializers";
+import { sanitizeProduct, sanitizeReview, sanitizeScanEvent } from "@/services/security/serializers";
 import { effectiveClientAccessLevel, type AccessLevel } from "@/services/security/roleAccess";
 
 // Minimal shape of the persistable fields we read off the store state. Typed loosely on purpose so this
@@ -70,5 +70,12 @@ export function buildPersistedScanState(
     ...base,
     products: s.products.map((p) => sanitizeProduct(p, "business")),
     finalCounts: s.finalCounts.map((c) => ({ ...c, aliasesSeen: [] })),
+    // P1 (2026-06-22): a customer MUST keep their own pending Needs-Review items + scan feed across a
+    // reload (otherwise their unfinished work is lost and can never be approved/counted). Persist a
+    // SANITIZED copy: only act-on-it fields + the user's own cleanCode; every provider/decode internal and
+    // every OTHER reusable code is stripped (sanitizeReview/sanitizeScanEvent), so no reusable alias/catalog
+    // data reaches disk.
+    needsReviewQueue: (s.needsReviewQueue as Array<Record<string, unknown>>).map((r) => sanitizeReview(r, "business")),
+    scanFeed: (s.scanFeed as Array<Record<string, unknown>>).map((e) => sanitizeScanEvent(e, "business")),
   };
 }

@@ -1857,8 +1857,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           productId,
           rawCodeExample: review.rawCode,
           cleanCode: review.cleanCode,
+          // normalizedCandidates is stripped from a customer's persisted (rehydrated) review for privacy;
+          // fall back to the cleanCode, which is what this alias is keyed on anyway.
           normalizedCode:
-            review.normalizedCandidates[review.normalizedCandidates.length - 1] ?? review.cleanCode,
+            review.normalizedCandidates?.[review.normalizedCandidates.length - 1] ?? review.cleanCode,
           aliasType: codeTypeToAliasType(detectCodeType(review.cleanCode)),
           source: "human_review",
           confidence: 1,
@@ -2063,7 +2065,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             brand: resolvedProduct.brand,
             category: resolvedProduct.category,
             imageUrl: resolvedProduct.imageUrl,
-            sourceUrls: review.sourceUrls,
+            sourceUrls: review.sourceUrls ?? [],
             confidence: review.confidence || 1,
           };
           if (origin === "human") set({ catalog: upsertVerified(get().catalog, candidate, now(), "owner") });
@@ -2096,9 +2098,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
         }
 
-        // Optionally apply this code to the current session count immediately.
+        // Optionally apply this code to the current session count immediately. Fall back to cleanCode:
+        // a customer review rehydrated from disk has its rawCode stripped (privacy), but cleanCode is kept
+        // and is what the approved alias is keyed on, so the re-scan still matches + counts.
         if (payload.applyToCount) {
-          get().processScan(review.rawCode);
+          get().processScan(review.rawCode || review.cleanCode);
         } else {
           get().syncPending();
         }

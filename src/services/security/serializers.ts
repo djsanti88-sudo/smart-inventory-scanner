@@ -3,7 +3,7 @@
 // server resolve endpoint, the customer loader, export builders, and (secondarily) UI. PURE.
 
 import type { AccessLevel } from "@/services/security/roleAccess";
-import { stripSensitive, CUSTOMER_SAFE_PRODUCT_FIELDS } from "@/services/security/sensitiveFields";
+import { stripSensitive, CUSTOMER_SAFE_PRODUCT_FIELDS, CUSTOMER_SAFE_REVIEW_FIELDS, CUSTOMER_SAFE_SCANEVENT_FIELDS } from "@/services/security/sensitiveFields";
 
 export interface CustomerProduct {
   id: string;
@@ -63,6 +63,24 @@ export function sanitizeScanResult(
     quantityAfterScan: typeof r.quantityAfterScan === "number" ? (r.quantityAfterScan as number) : 0,
     reason: typeof r.reason === "string" ? (r.reason as string) : "",
   };
+}
+
+/** A Needs-Review item → role-shaped. business: allowlist of act-on-it fields + the user's own cleanCode;
+ *  NO provider/evidence internals and NO other reusable codes. platform: untouched. */
+export function sanitizeReview<T extends Record<string, unknown>>(review: T, level: AccessLevel): T | Record<string, unknown> {
+  if (level === "platform") return review;
+  const out: Record<string, unknown> = {};
+  for (const f of CUSTOMER_SAFE_REVIEW_FIELDS) if (f in review) out[f] = review[f];
+  return out;
+}
+
+/** A scan-feed event → role-shaped. business: allowlist matching LiveScanFeed's customer columns (own
+ *  cleanCode kept); NO rawCode/normalized/matchType/decodeNote/syncError. platform: untouched. */
+export function sanitizeScanEvent<T extends Record<string, unknown>>(event: T, level: AccessLevel): T | Record<string, unknown> {
+  if (level === "platform") return event;
+  const out: Record<string, unknown> = {};
+  for (const f of CUSTOMER_SAFE_SCANEVENT_FIELDS) if (f in event) out[f] = event[f];
+  return out;
 }
 
 /** Generic record sanitizer for any customer-facing payload (defense in depth): strip every sensitive key. */
