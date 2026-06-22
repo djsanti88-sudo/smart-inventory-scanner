@@ -20,6 +20,7 @@ import { normalizeCode } from "@/services/codeNormalizer";
 import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismatchGuard";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
+import { resolveScanToProduct } from "@/services/aliasMatcher";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
 import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
@@ -1710,38 +1711,73 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         let createdProduct: Product | null = null; // persisted to Firestore (cloud backend) via SAVE_PRODUCT
 
         if (action === "create_new") {
-          productId = `prod-${idFactory()}`;
           const np = payload.newProduct ?? {};
-          const newProduct: Product = {
-            id: productId,
-            businessId: state.businessId,
-            name: np.name ?? review.cleanCode,
-            brand: np.brand ?? "",
-            category: np.category ?? "",
-            specsShort: np.specsShort ?? "",
-            specsFull: np.specsFull ?? "",
-            primarySku: np.primarySku ?? "",
-            primaryBarcode: np.primaryBarcode ?? review.cleanCode,
-            gtin: np.gtin ?? "",
-            upc: np.upc ?? "",
-            ean: np.ean ?? "",
-            vendorCodes: [],
-            aliases: [review.cleanCode],
-            imageUrl: np.imageUrl ?? "",
-            productUrl: np.productUrl ?? "",
-            location: np.location ?? "",
-            notes: "",
-            status: "active",
-            source: np.source ?? "human_review",
-            confidence: 1,
-            verified: true, // a human created/confirmed this product, so it is trusted identity
-            createdAt: now(),
-            updatedAt: now(),
-            createdBy: "human",
-            updatedBy: "human",
-          };
-          products = [...products, newProduct];
-          createdProduct = newProduct;
+
+          // DEDUP GUARD (data correctness): every auto-add path (AI auto-add, catalog auto-count) funnels
+          // through create_new, so without this one barcode could spawn dozens of identical product rows
+          // (the 235x "Manstel rivet kit" bug). Before minting a product, look for an existing one this
+          // identity already belongs to, using the SAME deterministic matcher the resolver uses (approved
+          // alias OR verified product identifier) so dedup never drifts from resolve.
+          const identityCodes = [...new Set(
+            [review.cleanCode, np.primaryBarcode, np.gtin, np.upc, np.ean, np.primarySku]
+              .map((c) => (c ?? "").trim())
+              .filter(Boolean),
+          )];
+          const matchedIds = new Set<string>();
+          for (const codeStr of identityCodes) {
+            const res = resolveScanToProduct(cleanScanCode(codeStr), state.products, state.aliases, state.businessId);
+            if (res.matchType === "conflict") (res.conflictProductIds ?? []).forEach((id) => matchedIds.add(id));
+            else if (res.productId) matchedIds.add(res.productId);
+          }
+
+          if (matchedIds.size > 1) {
+            // MORE THAN ONE existing product owns this identity -> never guess; keep it in Needs Review
+            // (same rule as the resolver conflict guard). The human picks the right one via link_existing.
+            set({ lastAliasConflicts: [...matchedIds].map((existingProductId) => ({ reviewId, code: review.cleanCode, existingProductId })) });
+            emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "alias_conflict_blocked", metadata: { code: review.cleanCode, reason: "dedup_multiple_match", productIds: [...matchedIds].join(",") } });
+            return;
+          }
+
+          if (matchedIds.size === 1) {
+            // EXACTLY ONE existing product owns this identity -> reuse it (count the existing row) and fall
+            // through to the alias-add + applyToCount path. Do NOT create a duplicate.
+            productId = [...matchedIds][0];
+            emitAudit({ entityType: "Product", entityId: productId, action: "product_dedup_reused", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
+          } else {
+            productId = `prod-${idFactory()}`;
+            const newProduct: Product = {
+              id: productId,
+              businessId: state.businessId,
+              name: np.name ?? review.cleanCode,
+              brand: np.brand ?? "",
+              category: np.category ?? "",
+              specsShort: np.specsShort ?? "",
+              specsFull: np.specsFull ?? "",
+              primarySku: np.primarySku ?? "",
+              // Identity = the scanned code, so the product's primaryBarcode and its first approved alias
+              // agree (prevents the alias-miss -> identifier-conflict -> re-decode -> duplicate cascade).
+              primaryBarcode: review.cleanCode,
+              gtin: np.gtin ?? "",
+              upc: np.upc ?? "",
+              ean: np.ean ?? "",
+              vendorCodes: [],
+              aliases: [review.cleanCode],
+              imageUrl: np.imageUrl ?? "",
+              productUrl: np.productUrl ?? "",
+              location: np.location ?? "",
+              notes: "",
+              status: "active",
+              source: np.source ?? "human_review",
+              confidence: 1,
+              verified: true, // a human created/confirmed this product, so it is trusted identity
+              createdAt: now(),
+              updatedAt: now(),
+              createdBy: "human",
+              updatedBy: "human",
+            };
+            products = [...products, newProduct];
+            createdProduct = newProduct;
+          }
         }
 
         if (!productId) return;
