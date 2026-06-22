@@ -2760,7 +2760,7 @@ const appDeps: ScanStoreDeps = {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 4,
+    version: 5,
     storage: createJSONStorage(() => localStorage),
     skipHydration: true,
     // v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
@@ -2770,6 +2770,8 @@ export const useScanStore = create<ScanState>()(
     // v4 (Sec-4): the customer-data wipe of any legacy sensitive localStorage keys (aliases/catalog/
     // raw codes) is enforced by the role-aware `partialize` below on the first post-hydration write
     // (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
+    // v5: auto-purge the poisoned duplicates (e.g. the ~235 "Manstel rivet kit" rows saved on the
+    // non-matching code 745125495781) by resetting products/aliases to clean verified seed on next load.
     migrate: (persisted: unknown) => {
       const p = (persisted ?? {}) as Record<string, unknown>;
       const fresh = getSeed();
