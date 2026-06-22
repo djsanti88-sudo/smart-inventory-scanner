@@ -16,6 +16,25 @@ describe("EvidenceVerifier - the app verifies the exact code, not the model's cl
     expect(r.strength).toBe("none");
   });
 
+  it("REJECTS a page that echoes the code only to declare it invalid (745125495781 'not a valid UPC')", () => {
+    // go-upc returns this for 745125495781 and points at a DIFFERENT code. The scanned code's presence in
+    // an invalidation page is a denial, not confirmation -> must NOT verify (none), so it can never auto-trust.
+    const ev: ProviderEvidence = {
+      ...empty,
+      fetchedSourceText: "Sorry, 745125495781 is not a valid UPC. Did you mean GTIN 7451254957818 (Manstel rivet kit)?",
+      sourceUrls: ["https://go-upc.com/7451254957818"],
+    };
+    const r = verifyEvidence("745125495781", "upc_a", ev);
+    expect(r.verified).toBe(false);
+    expect(r.strength).toBe("none");
+  });
+
+  it("does NOT match a DIFFERENT, longer numeric code (7451254957818 != scanned 745125495781)", () => {
+    const ev: ProviderEvidence = { ...empty, sourceSnippets: ["Product GTIN 7451254957818 Manstel rivet kit"] };
+    const r = verifyEvidence("745125495781", "upc_a", ev);
+    expect(r.verified).toBe(false); // exact numeric match only - a 12-digit prefix of a 13-digit code is not a hit
+  });
+
   it("verifies when a source snippet contains the exact code", () => {
     const ev: ProviderEvidence = { ...empty, sourceSnippets: ["Listed as UPC 049000028904 on the box."] };
     const r = verifyEvidence("049000028904", "upc_a", ev);

@@ -159,7 +159,7 @@ export async function fetchPages(
  */
 // A barcode DB's "Product Not Found" page ECHOES the searched code in its error text, so "the code is
 // on the page" is not enough to trust it. Detect those so they never win or get scraped as a product.
-const NOT_FOUND_RE = /\b(product not found|not able to find|no(?:t)? (?:results?|product|match)|couldn't find|we were not able)\b/i;
+const NOT_FOUND_RE = /\b(product not found|not able to find|no(?:t)? (?:results?|product|match)|couldn't find|we were not able|not a valid (?:upc|ean|gtin|barcode|code)|did you mean)\b/i;
 export function looksLikeNotFound(text: string): boolean {
   return NOT_FOUND_RE.test(text || "");
 }
