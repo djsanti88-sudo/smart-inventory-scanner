@@ -15,6 +15,7 @@ import { filterSafeUrls } from "@/services/ai/urlSafety";
 import { shouldRunFallback, decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
 import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
 import { withDecodeCache } from "@/services/ai/decodeCache";
+import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -195,6 +196,32 @@ export async function POST(request: Request) {
     // real product, a repeat scan in this server returns instantly with NO AI/Firecrawl spend. Only a
     // SUCCESS (a usable product) is cached - a failure stays retryable. Skipped under E2E (mock-only).
     const computeDecode = async () => {
+      // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST: an EXACT trusted-corpus barcode (or, for SKU-shaped
+      // codes, an exact part number) resolves with NO AI call and NO page fetch. A miss returns null and the
+      // existing AI/page-fetch path below runs unchanged. The corpus is GROUNDING - the downstream store
+      // auto-count gate (firewall + tire specs + brand-prefix + >=0.9) still applies, so a non-tire or a
+      // near-match can never auto-count this way. (Human-confirmed business catalog/flywheel still wins
+      // first, in the store, before this route is ever called for an unknown code.)
+      if (!e2eMode()) {
+        const skuShaped = codeType === "alpha_sku" || codeType === "vendor_label";
+        const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
+        if (corpus) {
+          return {
+            mode: "decode" as const,
+            providerNames: corpus.providerNames,
+            results: corpus.results,
+            evidences: corpus.evidences,
+            providerStatuses: [{ provider: "tire-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
+            decision: corpus.decision,
+            reasonCode: "ok",
+            reasonText: "",
+            timedOut: false,
+            debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false },
+            sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+          };
+        }
+      }
+
       // FAST PATH - CONCURRENT, HARD ~13s BUDGET. Providers + page-fetch race under one budget signal.
       // On timeout the orchestrator aborts everything and returns Needs Review (never a partial).
       const baseProviders = decodeProviders(body.proRecheck === true); // fast models; pro models for a correction recheck

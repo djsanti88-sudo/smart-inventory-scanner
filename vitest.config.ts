@@ -9,7 +9,13 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // Next maps `server-only` to a client-throw module; under vitest (no Next bundler) it would throw
+      // unconditionally, so alias it to a no-op stub to unit-test server-only modules. The real boundary
+      // is enforced by the app build + the static import-boundary test.
+      "server-only": fileURLToPath(new URL("./src/test/server-only-stub.ts", import.meta.url)),
+    },
   },
   test: {
     // Emulator-backed rules tests (src/services/db/firebase/*.rules.test.ts) do real Firestore I/O
@@ -24,7 +30,7 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts"],
+          include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts", "src/server/**/*.test.ts", "scripts/**/*.test.mjs"],
         },
       },
       {

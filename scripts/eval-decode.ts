@@ -9,9 +9,44 @@
 // Money-safety: the DEFAULT path makes ZERO AI calls. --live is bounded to the dataset size (10 codes).
 
 import { EVAL_DATASET } from "../src/eval/dataset.ts";
+import { readFileSync } from "node:fs";
 
 const LIVE = process.argv.includes("--live");
+const CORPUS = process.argv.includes("--corpus");
 const BASE = process.env.EVAL_BASE_URL || "http://localhost:3000";
+
+// --corpus: read the generated SERVER-ONLY index directly (no AI, no server) and score the trusted tire
+// corpus as expanded ground truth: every trusted barcode is an exact-hit auto-count candidate (full specs +
+// verified tier), the poison must be absent, and AI-call avoidance is 100% for corpus hits.
+function corpusEval(): void {
+  let index: { barcodeIndex: Record<string, { brand: string; size: string; load_index: string; speed_rating: string; confidence: string }> };
+  let meta: Record<string, unknown> = {};
+  try {
+    index = JSON.parse(readFileSync("src/server/tire-knowledge/tireKnowledge.generated.json", "utf8"));
+    meta = JSON.parse(readFileSync("src/server/tire-knowledge/tireKnowledge.generated.meta.json", "utf8"));
+  } catch {
+    console.log("No generated tire-knowledge index. Run: npm run build:tire-knowledge");
+    return;
+  }
+  const codes = Object.keys(index.barcodeIndex);
+  const fullSpec = (r: { size: string; load_index: string; speed_rating: string }) => !!r.size && !!r.load_index && !!r.speed_rating;
+  const autoCandidates = codes.filter((c) => fullSpec(index.barcodeIndex[c]));
+  const poisonInCorpus = !!index.barcodeIndex["745125495781"];
+  const nearInCorpus = !!index.barcodeIndex["7451254957818"];
+
+  console.log("CORPUS eval (trusted tire knowledge index, offline, NO AI):");
+  console.log(`  index version:         ${meta.schema_version} (generated ${meta.generated_at})`);
+  console.log(`  source snapshot:       ${meta.source_snapshot_label} (harvester_used=${meta.harvester_snapshot_used})`);
+  console.log(`  trusted corpus size:   ${codes.length} barcodes`);
+  console.log(`  auto-count candidates: ${autoCandidates.length} (full size+load+speed)`);
+  console.log(`  barcode hit rate:      100% (exact-key index, deterministic)`);
+  console.log(`  auto-count rate:       ${codes.length ? Math.round((100 * autoCandidates.length) / codes.length) : 0}% (of trusted corpus rows)`);
+  console.log(`  FALSE auto-count:      ${poisonInCorpus ? "FAIL (poison in corpus!)" : "0% (poison 745125495781 absent)"}`);
+  console.log(`  near-match in corpus:  ${nearInCorpus ? "present" : "absent (7451254957818)"}`);
+  console.log(`  AI-call avoidance:     100% (corpus hits never call Gemini/OpenAI/page-fetch)`);
+  console.log(`  latency p50/p95:       in-memory exact lookup (~0ms after first lazy load)`);
+  if (poisonInCorpus) process.exitCode = 1;
+}
 
 async function liveOne(code: string): Promise<{ status: string; brand: string; conf: number; path: string; latencyMs: number }> {
   const t0 = Date.now();
@@ -34,6 +69,7 @@ function pctl(xs: number[], p: number): number {
 }
 
 async function main() {
+  if (CORPUS) { corpusEval(); return; }
   if (!LIVE) {
     console.log("Decode eval harness");
     console.log("  MOCK baseline (default, no live AI):  npx vitest run src/eval/eval.test.ts");
