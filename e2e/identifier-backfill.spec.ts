@@ -35,6 +35,14 @@ test("IdentifierBackfillBot: platform fills barcode-in-name, reversible (P2)", a
   await page.addInitScript(([k, v]) => window.localStorage.setItem(k, v), [KEY, JSON.stringify(legacyState)] as const);
 
   await page.goto("/settings");
+
+  // P3 cross-check: the platformOwner view is UNCHANGED - it still shows the technical settings a customer
+  // no longer sees (Business ID, Scanner tuning, Sync internals).
+  const settingsBody = await page.locator("body").innerText();
+  for (const term of ["Business ID", "Debounce", "Enable idempotent sync", "Submit mode"]) {
+    expect(settingsBody, `platform Settings still shows "${term}"`).toContain(term);
+  }
+
   const block = page.getByTestId("identifier-backfill");
   await expect(block).toBeVisible();
   await block.scrollIntoViewIfNeeded();

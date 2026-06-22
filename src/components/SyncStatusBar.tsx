@@ -72,8 +72,9 @@ export function SyncStatusBar() {
       )}
 
       {lastSyncError && (
-        <span className="w-full text-xs text-red-600" data-testid="sync-error">
-          Last sync error: {lastSyncError}
+        <span className="w-full text-sm text-red-600" data-testid="sync-error">
+          {/* P3: the raw technical error is platformOwner only; a customer gets a plain, non-scary message. */}
+          {isPlatform ? `Last sync error: ${lastSyncError}` : "Some items haven't saved yet. Tap Try saving again."}
         </span>
       )}
     </div>
