@@ -14,7 +14,7 @@ export function DecodeStatusBadge({ status }: { status: FeedDecodeStatus }) {
   };
   const [cls, label] = map[status];
   return (
-    <span className={`rounded px-2 py-0.5 text-xs font-medium ${cls}`} data-testid="decode-row-status">
+    <span className={`rounded px-2 py-1 text-sm font-medium ${cls}`} data-testid="decode-row-status">
       {label}
     </span>
   );
@@ -42,7 +42,7 @@ export function MatchBadge({ type }: { type: MatchType }) {
         ? "bg-amber-100 text-amber-800"
         : "bg-blue-100 text-blue-700";
   return (
-    <span className={`rounded px-2 py-0.5 text-xs font-medium ${color}`}>{MATCH_LABEL[type]}</span>
+    <span className={`rounded px-2 py-1 text-sm font-medium ${color}`}>{MATCH_LABEL[type]}</span>
   );
 }
 
@@ -58,7 +58,7 @@ export function SyncBadge({ status }: { status: SyncStatus }) {
     error: "Sync error",
   };
   return (
-    <span className={`rounded px-2 py-0.5 text-xs font-medium ${map[status]}`} data-testid="sync-badge">
+    <span className={`rounded px-2 py-1 text-sm font-medium ${map[status]}`} data-testid="sync-badge">
       {label[status]}
     </span>
   );
@@ -81,5 +81,5 @@ export function StatusBadge({ status }: { status: ScanStatus }) {
     ignored: "Ignored",
     conflict: "Conflict",
   };
-  return <span className={`rounded px-2 py-0.5 text-xs font-medium ${map[status]}`}>{label[status]}</span>;
+  return <span className={`rounded px-2 py-1 text-sm font-medium ${map[status]}`}>{label[status]}</span>;
 }

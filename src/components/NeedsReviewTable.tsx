@@ -133,11 +133,19 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
 
   const resolved = review.status !== "open";
 
+  // P4: elderly-readable controls. One PRIMARY action per row (blue filled, >=44px, text-base); everything
+  // else is a same-size outline so nothing scary competes with the primary. Approve is primary when there is
+  // a suggestion to approve; otherwise Link (to an existing product) is the primary.
+  const primaryIsApprove = !!(review.hasSuggestion && review.suggestedProductName);
+  const btnBase = "inline-flex min-h-[44px] items-center rounded-lg px-4 text-base font-medium";
+  const btnPrimary = `${btnBase} bg-blue-600 text-white hover:bg-blue-700`;
+  const btnSecondary = `${btnBase} border border-zinc-300 text-zinc-700 hover:bg-zinc-50`;
+
   return (
     <tr className="border-t border-zinc-100 align-top" data-testid={`review-row-${review.cleanCode}`}>
       {isPlatform && <td className="px-3 py-2 font-mono text-xs">{review.rawCode}</td>}
       {isPlatform && <td className="px-3 py-2 font-mono text-xs">{review.cleanCode}</td>}
-      <td className="max-w-48 px-3 py-2 text-xs text-zinc-600" data-testid="review-reason">
+      <td className="max-w-48 px-3 py-2 text-sm text-zinc-700" data-testid="review-reason">
         {review.reason || "Unknown code."}
         {typeof review.autoVerifyScore === "number" && (
           <span className="mt-1 block text-zinc-500" data-testid="review-score">
@@ -152,7 +160,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           </ul>
         )}
       </td>
-      <td className="max-w-56 px-3 py-2 text-xs">
+      <td className="max-w-56 px-3 py-2 text-sm">
         {review.hasSuggestion || (review.sourceUrls?.length ?? 0) > 0 ? (
           <div className="flex flex-col gap-1">
             <DecodeBadge review={review} isPlatform={isPlatform} />
@@ -179,7 +187,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               <span className="text-zinc-500">Facts: {review.verifiedFacts!.join("; ")}</span>
             )}
             {(review.guesses?.length ?? 0) > 0 && (
-              <span className="text-zinc-400">Guesses: {review.guesses!.join("; ")}</span>
+              <span className="text-zinc-600">Guesses: {review.guesses!.join("; ")}</span>
             )}
             {isPlatform && (review.sourceUrls?.length ?? 0) > 0 && (
               <span className="flex flex-wrap gap-1">
@@ -192,10 +200,10 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             )}
           </div>
         ) : (
-          <span className="text-zinc-400">No suggestion</span>
+          <span className="text-zinc-600">No suggestion</span>
         )}
       </td>
-      <td className="px-3 py-2 text-xs tabular-nums">
+      <td className="px-3 py-2 text-sm tabular-nums">
         {review.confidence > 0 ? `${Math.round(review.confidence * 100)}%` : "-"}
       </td>
       {isPlatform && <td className="px-3 py-2 text-xs">{review.providerName || "-"}</td>}
@@ -255,30 +263,30 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           </div>
         )}
         {resolved ? (
-          <span className="text-xs text-zinc-400">{review.resolutionAction ?? review.status}</span>
+          <span className="text-sm text-zinc-600">{review.resolutionAction ?? review.status}</span>
         ) : mode === "create" ? (
-          <div className="flex w-64 flex-col gap-1" data-testid="create-form">
+          <div className="flex w-64 flex-col gap-1.5" data-testid="create-form">
             <input
               aria-label="product name"
               value={np.name}
               onChange={(e) => setNp({ ...np, name: e.target.value })}
               placeholder="Product name"
-              className="rounded border border-zinc-300 px-2 py-1 text-xs"
+              className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
             />
-            <div className="flex gap-1">
+            <div className="flex gap-1.5">
               <input
                 aria-label="brand"
                 value={np.brand}
                 onChange={(e) => setNp({ ...np, brand: e.target.value })}
                 placeholder="Brand"
-                className="w-1/2 rounded border border-zinc-300 px-2 py-1 text-xs"
+                className="min-h-[44px] w-1/2 rounded-lg border border-zinc-300 px-3 text-base"
               />
               <input
                 aria-label="category"
                 value={np.category}
                 onChange={(e) => setNp({ ...np, category: e.target.value })}
                 placeholder="Category"
-                className="w-1/2 rounded border border-zinc-300 px-2 py-1 text-xs"
+                className="min-h-[44px] w-1/2 rounded-lg border border-zinc-300 px-3 text-base"
               />
             </div>
             <div className="flex gap-1">
@@ -292,14 +300,14 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                     selectedAliasCodes: selectedCodes,
                   })
                 }
-                className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                className={btnPrimary}
               >
                 Save product
               </button>
               <button
                 type="button"
                 onClick={() => setMode("idle")}
-                className="rounded border border-zinc-300 px-2 py-1 text-xs"
+                className={btnSecondary}
               >
                 Cancel
               </button>
@@ -331,7 +339,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                   })
                 }
                 title="Approve this AI suggestion and save it as a verified product + alias"
-                className="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                className={btnPrimary}
               >
                 Approve suggestion
               </button>
@@ -340,7 +348,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               aria-label="link to product"
               value={linkId}
               onChange={(e) => setLinkId(e.target.value)}
-              className="max-w-40 rounded border border-zinc-300 px-1 py-1 text-xs"
+              className="min-h-[44px] max-w-48 rounded-lg border border-zinc-300 px-2 text-base"
             >
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -352,7 +360,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               type="button"
               data-testid="link-existing"
               onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes })}
-              className="rounded bg-green-600 px-2 py-1 text-xs font-medium text-white hover:bg-green-700"
+              className={primaryIsApprove ? btnSecondary : btnPrimary}
             >
               Link
             </button>
@@ -368,7 +376,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 });
                 setMode("create");
               }}
-              className="rounded border border-zinc-300 px-2 py-1 text-xs"
+              className={btnSecondary}
             >
               Create new
             </button>
@@ -376,7 +384,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               type="button"
               data-testid="ignore-review"
               onClick={() => resolveUnknown(review.id, "ignore", {})}
-              className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-500"
+              className={btnSecondary}
             >
               Ignore
             </button>
@@ -390,7 +398,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                     ? "Run a live AI decode (cross-checked + app-verified evidence). Result is a suggestion you approve."
                     : "AI lookup is off (enable it in Settings)"
                 }
-                className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-500 disabled:opacity-40"
+                className={`${btnSecondary} disabled:opacity-40`}
                 disabled={!aiEnabled}
               >
                 Live decode
@@ -402,14 +410,14 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 data-testid="stronger-redecode"
                 onClick={() => void correctionRecheck(review.id, { retry: true })}
                 title="Re-decode with the stronger Gemini Pro model (correction-only). Result is a suggestion you approve - never auto-saved."
-                className="rounded border border-purple-300 bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-40"
+                className={`${btnBase} border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-40`}
                 disabled={!aiEnabled}
               >
                 Re-decode (stronger model)
               </button>
             )}
-            <label className="flex items-center gap-1 text-xs text-zinc-500">
-              <input type="checkbox" checked={applyToCount} onChange={(e) => setApplyToCount(e.target.checked)} />
+            <label className="flex items-center gap-1.5 text-base text-zinc-700">
+              <input type="checkbox" className="h-4 w-4" checked={applyToCount} onChange={(e) => setApplyToCount(e.target.checked)} />
               count it
             </label>
           </div>

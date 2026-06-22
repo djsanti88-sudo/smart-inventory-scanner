@@ -11,7 +11,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
   const [broken, setBroken] = useState(false);
 
   if (!imageUrl) {
-    return <span className="text-xs text-zinc-400">No image yet</span>;
+    return <span className="text-sm text-zinc-700">No image yet</span>;
   }
 
   return (
@@ -23,7 +23,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-xs font-medium text-blue-600 underline underline-offset-2 hover:text-blue-800"
+        className="text-sm font-medium text-blue-600 underline underline-offset-2 hover:text-blue-800"
         data-testid="image-link"
       >
         Image
@@ -35,7 +35,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
           data-testid="image-hover-card"
         >
           {broken ? (
-            <span className="flex h-24 w-full items-center justify-center rounded bg-zinc-100 text-xs text-zinc-500">
+            <span className="flex h-24 w-full items-center justify-center rounded bg-zinc-100 text-sm text-zinc-700">
               Image unavailable
             </span>
           ) : (
