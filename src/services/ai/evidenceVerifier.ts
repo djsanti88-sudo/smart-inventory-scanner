@@ -36,6 +36,16 @@ function numericVariants(code: string): string[] {
   return [...set].filter((c) => c.length >= 8);
 }
 
+// A page that ECHOES the scanned code only to declare it INVALID (and usually suggests a DIFFERENT code)
+// is not confirmation that the product exists for THIS code - it is the opposite. go-upc does exactly this
+// for 745125495781 ("not a valid UPC ... did you mean 7451254957818 = Manstel rivet kit"). When a text
+// channel carries such an invalidation, the code's presence there must NOT count as strong evidence.
+const INVALIDATION_RE =
+  /\bnot a valid\b|\binvalid (?:upc|ean|gtin|barcode|code|product)\b|\bdid you mean\b|\bisn'?t a valid\b|\bno such (?:upc|product|barcode)\b/i;
+function looksInvalidating(text: string): boolean {
+  return INVALIDATION_RE.test(text || "");
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).hostname.toLowerCase();
@@ -71,7 +81,10 @@ export function verifyEvidence(
   ];
 
   for (const tier of tiers) {
-    const matched = tier.texts.filter((t) => matches(t));
+    // For prose channels (fetched source / snippet / grounding) a match inside an INVALIDATION page
+    // ("not a valid UPC", "did you mean <other code>") is rejected - the code being there is a denial,
+    // not a confirmation. url_only is just URLs (no prose), so the filter is a no-op there.
+    const matched = tier.texts.filter((t) => matches(t) && (tier.strength === "url_only" || !looksInvalidating(t)));
     if (matched.length === 0) continue;
 
     if (tier.strength === "url_only") {

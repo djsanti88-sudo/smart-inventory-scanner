@@ -148,4 +148,25 @@ describe("decideDecode - tire corroboration via fetched_source page text", () =>
     const r = decideDecode({ codeType: "upc_a", results: [COOPER], evidences: [ev], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });
     expect(r.status).not.toBe("verified");
   });
+
+  it("NON-MATCHING code (745125495781 -> go-upc returns a DIFFERENT EAN 7451254957818) is never verified", () => {
+    // The real bug: go-upc says 745125495781 is "not a valid UPC" and returns a DIFFERENT GTIN
+    // (7451254957818 = Manstel rivet kit). The scanned code does NOT appear on the page - only the longer,
+    // different code does. The verifier must require the EXACT scanned code (numeric, exact), so this
+    // yields none/url_only, exactCodeEvidenceVerifiedByApp=false, and the decode is never "verified".
+    const goUpcPage = "Sorry, 745125495781 is not a valid UPC. Did you mean: Manstel 200 Pcs Aluminum Rivet Screw Kit, GTIN 7451254957818?";
+    const ev = verifyEvidence("745125495781", "upc_a", {
+      fetchedSourceText: goUpcPage, sourceUrls: ["https://go-upc.com/7451254957818"], sourceSnippets: [], groundingChunks: [],
+    });
+    expect(ev.verified, "the different EAN 7451254957818 must NOT satisfy the scanned 745125495781").toBe(false);
+    expect(ev.strength).toBe("none");
+
+    const r = decideDecode({
+      codeType: "upc_a",
+      results: [tire({ productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel", specsShort: "" })],
+      evidences: [ev], confidenceThreshold: 0.85, code: "745125495781", scanContext: "tire",
+    });
+    expect(r.status).not.toBe("verified"); // routes to Needs Review (evidence + firewall both hold)
+    expect(r.exactCodeEvidenceVerifiedByApp).toBe(false);
+  });
 });
