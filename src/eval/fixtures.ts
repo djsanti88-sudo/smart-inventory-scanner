@@ -19,8 +19,12 @@ export interface DecodeFixture {
   fetchedSourceText: string;
 }
 
+// Phase 9: accurate tire fixtures now carry corroboratedByModel=true, modeling the new pipeline where the
+// page-fetch + an independent model read of the same page agree on the tire identity (path 2). The poison
+// overrides this to false (it is non-tire and its page declares the code invalid, so the real enrich never
+// sets it). This lets the harness measure the path-2 unlock; the LIVE run (--live) measures real agreement.
 function tire(over: Partial<AiLookupResult>, code: string): AiLookupResult {
-  return { ...emptyResult(), confidence: 0.92, sourceUrls: [`https://www.upcitemdb.com/upc/${code}`], ...over };
+  return { ...emptyResult(), confidence: 0.92, corroboratedByModel: true, sourceUrls: [`https://www.upcitemdb.com/upc/${code}`], ...over };
 }
 
 export const FIXTURES: Record<string, DecodeFixture> = {
@@ -67,7 +71,7 @@ export const FIXTURES: Record<string, DecodeFixture> = {
   // The page text contains the DIFFERENT code + an invalidation phrase -> verifyEvidence(745125495781)
   // returns none, decideDecode never verifies, and the firewall blocks the non-tire product.
   "745125495781": {
-    result: tire({ productName: "Manstel 200 Pcs Aluminum Core Blind Rivet Screw Kit", brand: "Manstel", specsShort: "", category: "Hardware", confidence: 0.9, sourceUrls: ["https://go-upc.com/7451254957818"] }, "745125495781"),
+    result: tire({ productName: "Manstel 200 Pcs Aluminum Core Blind Rivet Screw Kit", brand: "Manstel", specsShort: "", category: "Hardware", confidence: 0.9, corroboratedByModel: false, sourceUrls: ["https://go-upc.com/7451254957818"] }, "745125495781"),
     fetchedSourceText: "Sorry, 745125495781 is not a valid UPC. Did you mean GTIN 7451254957818 (Manstel 200 Pcs Aluminum Core Blind Rivet Screw Kit)?",
   },
 };

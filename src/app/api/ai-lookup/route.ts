@@ -202,9 +202,12 @@ export async function POST(request: Request) {
         name: p.name,
         lookup: (signal) => p.lookup(req, signal),
       }));
+      // Phase 9: enable PATH-2 corroboration (page-fetch + one independent model read agree) for tire
+      // scans, so an accurate tire whose grounded providers lost the race can still auto-count safely.
+      const corroborate = body.scanContext === "tire";
       const enrich = e2eMode()
         ? undefined
-        : (signal: AbortSignal) => enrichWithPageFetch({ code, codeType, extract: reader, signal });
+        : (signal: AbortSignal) => enrichWithPageFetch({ code, codeType, extract: reader, signal, corroborate });
 
       const run = await runDecode({ code, codeType, confidenceThreshold: threshold, providers, enrich, budgetMs, trustedHosts: TRUSTED_HOSTS });
 
@@ -241,7 +244,7 @@ export async function POST(request: Request) {
             run: async (signal) => {
               const deep = await runDecode({
                 code, codeType, confidenceThreshold: threshold, providers,
-                enrich: (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, extraUrls: citedFromFast }),
+                enrich: (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, extraUrls: citedFromFast, corroborate }),
                 budgetMs: FALLBACK_AI_TIMEOUT_MS + 5_000,
                 providerTimeoutMs: FALLBACK_AI_TIMEOUT_MS,
                 pageTimeoutMs: FALLBACK_PAGE_TIMEOUT_MS,
@@ -253,7 +256,7 @@ export async function POST(request: Request) {
               if (i >= 0) return { result: deep.results[i], evidence: deep.evidences[i], providerName: deep.providerNames[i] ?? "ai-deep" };
               const freshCited = filterSafeUrls(deep.results.flatMap((r) => r.sourceUrls ?? []), 4).filter((u) => !citedFromFast.includes(u));
               if (freshCited.length && !signal.aborted) {
-                const fb = await enrichWithPageFetch({ code, codeType, extraUrls: freshCited, extract: reader, signal });
+                const fb = await enrichWithPageFetch({ code, codeType, extraUrls: freshCited, extract: reader, signal, corroborate });
                 if (fb.result && isUsableProductName(fb.result.productName) && fb.evidence.verified) {
                   return { result: fb.result, evidence: fb.evidence, providerName: "ai-cited-deep" };
                 }

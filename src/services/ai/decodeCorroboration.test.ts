@@ -16,6 +16,49 @@ const weakEv = (): EvidenceResult => ({ verified: false, strength: "none", match
 // Cooper owns the STRONG prefix 029142 (029142712886 -> family Cooper/Mastercraft/Starfire).
 const COOPER = tire({ productName: "Cooper Discoverer A/T3 LT245/75R16 120R", brand: "Cooper", specsShort: "LT245/75R16 120R" });
 
+// PATH 2 (Phase 9): page-fetch + one independent model agreement. A tire whose code is NOT in a strong
+// prefix family can still auto-count when the page-fetch result was corroborated by an independent model
+// read of the same page (result.corroboratedByModel) AND all hard gates pass. Never page-fetch alone,
+// never model-only, never a non-tire, never spec-less, never weak evidence.
+describe("decideDecode - PATH 2 page-fetch + model agreement", () => {
+  // A NON-strong-family tire (Continental 051342 is not Continental's own strong family in the table).
+  const CONTINENTAL = (over: Partial<AiLookupResult> = {}) =>
+    tire({ productName: "Continental TerrainContact A/T 265/70R17 115T", brand: "Continental", specsShort: "265/70R17 115T", ...over });
+
+  it("AUTO-VERIFIES via page_fetch_model_agreement when corroboratedByModel + full specs + strong evidence", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [CONTINENTAL({ corroboratedByModel: true })], evidences: [strongEv("051342144969")], confidenceThreshold: 0.85, code: "051342144969", scanContext: "tire" });
+    expect(r.status).toBe("verified");
+    expect(r.corroborationPath).toBe("page_fetch_model_agreement");
+    expect(r.exactCodeEvidenceVerifiedByApp).toBe(true);
+    expect(r.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it("page-fetch ALONE (no model corroboration) stays SUGGESTED - never auto-counts", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [CONTINENTAL({ corroboratedByModel: false })], evidences: [strongEv("051342144969")], confidenceThreshold: 0.85, code: "051342144969", scanContext: "tire" });
+    expect(r.status).toBe("suggested");
+  });
+
+  it("PATH 2 requires FULL specs: a spec-less tire with model corroboration does NOT verify", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [tire({ productName: "Continental TerrainContact A/T", brand: "Continental", specsShort: "", corroboratedByModel: true })], evidences: [strongEv("051342144969")], confidenceThreshold: 0.85, code: "051342144969", scanContext: "tire" });
+    expect(r.status).not.toBe("verified");
+  });
+
+  it("PATH 2 requires the TIRE domain: a non-tire with model corroboration does NOT verify (poison shape)", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [tire({ productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel", specsShort: "", corroboratedByModel: true })], evidences: [strongEv("745125495781")], confidenceThreshold: 0.85, code: "745125495781", scanContext: "tire" });
+    expect(r.status).not.toBe("verified");
+  });
+
+  it("PATH 2 requires STRONG app-verified evidence: model corroboration on weak evidence does NOT verify", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [CONTINENTAL({ corroboratedByModel: true })], evidences: [weakEv()], confidenceThreshold: 0.85, code: "051342144969", scanContext: "tire" });
+    expect(r.status).not.toBe("verified");
+  });
+
+  it("PATH 2 is tire-context only: corroboratedByModel in scanContext 'any' does NOT verify", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [CONTINENTAL({ corroboratedByModel: true })], evidences: [strongEv("051342144969")], confidenceThreshold: 0.85, code: "051342144969", scanContext: "any" });
+    expect(r.status).not.toBe("verified");
+  });
+});
+
 describe("decideDecode - deterministic tire corroboration", () => {
   it("AUTO-VERIFIES a corroborated single-provider tire (strong family + specs + app-verified code)", () => {
     const r = decideDecode({ codeType: "upc_a", results: [COOPER], evidences: [strongEv("029142712886")], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });

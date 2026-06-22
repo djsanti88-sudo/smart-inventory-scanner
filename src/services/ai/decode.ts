@@ -127,16 +127,38 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     !!code &&
     isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
 
-  if (canVerify || tireCorroborated) {
+  // PATH 2 (Phase 9) - PAGE-FETCH + ONE MODEL AGREEMENT. The page-fetch is the app's own retrieval of the
+  // REAL product page (exact code confirmed in the page text -> strong fetched_source evidence). When an
+  // INDEPENDENT model read of that SAME page agreed on the normalized tire identity (set as
+  // a.corroboratedByModel by enrichWithPageFetch via crossCheck), that is a genuine two-source agreement -
+  // page-fetch (deterministic) + model - and unlocks auto-count WITHOUT needing the strong prefix family.
+  // It is NOT confidence-only and NOT page-fetch alone: it requires the model agreement flag AND strong
+  // app-verified exact-code evidence AND tire domain AND full specs. The firewall + brand_prefix conflict +
+  // the >=0.9 store gate still apply downstream, so a non-tire (poison) can never reach a count this way.
+  const pageFetchModelAgreement =
+    scanContext === "tire" &&
+    isPublicBarcode &&
+    strong &&
+    identityNonEmpty &&
+    !!a &&
+    a.corroboratedByModel === true &&
+    isTireContext(a) &&
+    hasRequiredTireSpecs(a);
+
+  if (canVerify || tireCorroborated || pageFetchModelAgreement) {
+    const corroborationPath = canVerify ? "two_ai_agreement" : tireCorroborated ? "deterministic_prefix" : "page_fetch_model_agreement";
     return {
       status: "verified",
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
       reason: canVerify
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
-        : "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + full specs + app-verified exact code (independent of the AI text).",
+        : tireCorroborated
+          ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + full specs + app-verified exact code (independent of the AI text)."
+          : "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with full specs + app-verified exact code.",
       evidenceStrength: bestEvidence.strength,
       exactCodeEvidenceVerifiedByApp: true,
       crossCheck: baseCrossCheck,
+      corroborationPath,
     };
   }
 
