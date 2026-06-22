@@ -277,6 +277,9 @@ export async function enrichWithPageFetch(params: {
         sourceUrls: uniq([...(extracted?.sourceUrls ?? []), ...fetchedUrls]),
         primaryBarcode: extracted?.primaryBarcode || params.code,
         confidence: extracted?.confidence ?? (evidence.verified ? 0.92 : 0.6),
+        // Carry the exact code-bearing page text so this result's fetched_source provenance survives any
+        // later re-verification (evidenceOf). It is the same text already verified above into `evidence`.
+        fetchedSourceText: codePage ? codePage.text : fetchedText,
       })
     : null;
 

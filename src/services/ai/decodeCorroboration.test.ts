@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { decideDecode } from "@/services/ai/decode";
 import { emptyResult } from "@/services/ai/provider";
+import { verifyEvidence } from "@/services/ai/evidenceVerifier";
 import type { AiLookupResult, EvidenceResult } from "@/types";
 
 // Deterministic tire corroboration: a single-provider tire decode AUTO-COUNTS (status "verified") only
@@ -82,5 +83,69 @@ describe("decideDecode - deterministic tire corroboration", () => {
       evidences: [strongEv("012345678905")], confidenceThreshold: 0.85, code: "012345678905", scanContext: "any",
     });
     expect(r.status).toBe("suggested");
+  });
+});
+
+// END-TO-END evidence path: the exact-code-evidence fix means the strong evidence that unlocks
+// corroboration comes from a REAL fetched page (verifyEvidence over fetchedSourceText), not a synthetic
+// flag. These tests drive verifyEvidence with actual page text so they prove the live mechanism: a tire
+// auto-counts ONLY when the scanned code is confirmed in the page the app fetched.
+describe("decideDecode - tire corroboration via fetched_source page text", () => {
+  // A realistic product-DB page body for the Cooper tire (contains the exact scanned UPC).
+  const cooperPage =
+    "Cooper Discoverer A/T3 LT245/75R16 120R. UPC 029142712886. Light truck all-terrain tire. In stock.";
+
+  it("auto-VERIFIES a strong-prefix-family tire when the fetched page CONFIRMS the exact code", () => {
+    const ev = verifyEvidence("029142712886", "upc_a", {
+      fetchedSourceText: cooperPage, sourceUrls: ["https://www.upcitemdb.com/upc/029142712886"], sourceSnippets: [], groundingChunks: [],
+    });
+    expect(ev.verified).toBe(true);
+    expect(ev.strength).toBe("fetched_source"); // verified from the real page text, not url_only
+
+    const r = decideDecode({ codeType: "upc_a", results: [COOPER], evidences: [ev], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });
+    expect(r.status).toBe("verified");
+    expect(r.exactCodeEvidenceVerifiedByApp).toBe(true);
+    expect(r.evidenceStrength).toBe("fetched_source");
+  });
+
+  it("does NOT verify when the fetched page does NOT contain the scanned code (no real confirmation)", () => {
+    // Page is about a different code -> fetched_source cannot confirm 029142712886 -> evidence none.
+    const ev = verifyEvidence("029142712886", "upc_a", {
+      fetchedSourceText: "Bridgestone Dueler H/T. UPC 012000001291. In stock.", sourceUrls: ["https://www.upcitemdb.com/upc/029142712886"], sourceSnippets: [], groundingChunks: [],
+    });
+    expect(ev.verified).toBe(false);
+
+    const r = decideDecode({ codeType: "upc_a", results: [COOPER], evidences: [ev], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });
+    expect(r.status).not.toBe("verified"); // stays Suggested/review: never auto-count without real confirmation
+  });
+
+  it("poison 745125495781 (Manstel rivet kit) in tire context stays NEEDS REVIEW even with a confirming page", () => {
+    // The poison's own page genuinely contains its code (fetched_source verifies), yet it must NOT
+    // auto-count: Manstel is not in any STRONG tire prefix family and the product is non-tire.
+    const poisonPage = "Manstel 200 Pcs Aluminum Rivet Screw Kit. UPC 745125495781. Hardware.";
+    const ev = verifyEvidence("745125495781", "upc_a", {
+      fetchedSourceText: poisonPage, sourceUrls: ["https://go-upc.com/745125495781"], sourceSnippets: [], groundingChunks: [],
+    });
+    expect(ev.verified).toBe(true); // the code IS on the page...
+
+    const r = decideDecode({
+      codeType: "upc_a",
+      results: [tire({ productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel", specsShort: "" })],
+      evidences: [ev], confidenceThreshold: 0.85, code: "745125495781", scanContext: "tire",
+    });
+    expect(r.status).not.toBe("verified"); // ...but corroboration still refuses it (layer 1)
+  });
+
+  it("url_only on an UNTRUSTED product-DB host stays verified:false (not enough to corroborate)", () => {
+    // The exact code appears ONLY in the URL of a crowd barcode DB (which echoes any code) -> url_only,
+    // untrusted -> NOT verified. A tire backed only by such evidence must NOT auto-count.
+    const ev = verifyEvidence("029142712886", "upc_a", {
+      fetchedSourceText: "", sourceUrls: ["https://www.upcitemdb.com/upc/029142712886"], sourceSnippets: [], groundingChunks: [],
+    }, { trustedHosts: ["gs1.org", "gtin.info"] });
+    expect(ev.verified).toBe(false);
+    expect(ev.strength).toBe("url_only");
+
+    const r = decideDecode({ codeType: "upc_a", results: [COOPER], evidences: [ev], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });
+    expect(r.status).not.toBe("verified");
   });
 });
