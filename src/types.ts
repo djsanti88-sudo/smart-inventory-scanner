@@ -459,7 +459,12 @@ export interface AiStatus {
 }
 
 /** Which approved corroboration path produced a "verified" decode (for honest reporting). */
-export type CorroborationPath = "two_ai_agreement" | "page_fetch_model_agreement" | "deterministic_prefix";
+export type CorroborationPath =
+  | "two_ai_agreement"
+  | "page_fetch_model_agreement"
+  | "deterministic_prefix"
+  | "corpus_exact_barcode"
+  | "corpus_exact_part_number";
 
 export interface DecodeDecision {
   status: DecodeStatus;

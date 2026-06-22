@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-06-22T06:03:41.807Z",
+  "source_snapshot_path": "src/server/tire-knowledge/seed/tire_corpus_seed.csv",
+  "source_snapshot_label": "bootstrap_seed",
+  "harvester_snapshot_used": false,
+  "source_file_hash": "62758fa53a9a4a8091dabe12f66fdad44321511ace5f10bdfb432340ffba6ec4",
+  "source_row_count": 2,
+  "trusted_rows_ingested": 2,
+  "barcode_index_count": 2,
+  "part_number_index_count": 2,
+  "identity_index_count": 2,
+  "size_alias_count": 0,
+  "brand_alias_count": 0,
+  "model_alias_count": 0,
+  "skipped_row_count": 0,
+  "skip_reasons": {},
+  "generator_version": "1.0.0",
+  "next_version": "16.2.9",
+  "git_branch": "decoder-hardening-v1-local",
+  "git_commit_if_available": "e307124"
+}
