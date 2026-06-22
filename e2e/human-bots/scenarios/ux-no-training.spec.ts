@@ -29,7 +29,8 @@ test("ConfusedHumanBot: no-training usability scorecard", async ({ page }) => {
   add("See whether a scan worked", await visible(page, '[data-testid="scan-feed-body"]'), 2, "P2", false, "live feed row appears with product + Known");
   add("See the current count", await visible(page, '[data-testid="final-count-body"]'), 2, "P2", false, "Final Count Database table");
   add("Start / finish an inventory session", await visible(page, '[data-testid="start-session"]') && await visible(page, '[data-testid="finish-session"]'), 2, "P2", false, "buttons present on scan page");
-  add("Export the final count", await visible(page, '[data-testid="export-final-counts"]'), 2, "P2", false, "export buttons present");
+  await page.getByTestId("export-menu-trigger").click(); // open the unified Export dropdown
+  add("Export the final count", await visible(page, '[data-testid="export-final-counts"]'), 2, "P2", false, "export in unified Export menu");
   await page.goto("/review");
   add("Understand Needs Review", await visible(page, '[data-testid="review-body"]'), 3, "P2", true, "page exists; copy could be plainer for a new user");
   // mobile width

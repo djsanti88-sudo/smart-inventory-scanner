@@ -7,7 +7,7 @@ import { ScannerInput } from "@/components/ScannerInput";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
-import { ExportButtons } from "@/components/ExportButtons";
+import { ExportMenu } from "@/components/ExportMenu";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 export default function ScanPage() {
@@ -173,7 +173,7 @@ export default function ScanPage() {
           <SyncStatusBar />
         </div>
         <div className="mt-3">
-          <ExportButtons />
+          <ExportMenu />
         </div>
         </details>
       </div>

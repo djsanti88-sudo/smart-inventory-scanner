@@ -27,6 +27,7 @@ test("ManagerBot: shop-manager workflow coverage", async ({ page }) => {
   await check("Latest scans / scan log (live feed)", '[data-testid="scan-feed-body"]', "");
   await check("Current inventory count (final count table)", '[data-testid="final-count-body"]', "");
   await check("Start/finish inventory session", '[data-testid="finish-session"]', "");
+  await page.getByTestId("export-menu-trigger").click(); // exports live in the unified Export dropdown
   await check("Export final count", '[data-testid="export-final-counts"]', "");
   await check("Export raw scan log", '[data-testid="export-raw-log"]', "");
   await page.goto("/review");

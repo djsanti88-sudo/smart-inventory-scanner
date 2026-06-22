@@ -314,7 +314,7 @@ export interface ScanState {
   /** Import products + approved aliases from CSV text (MVP). Writes via the durable queue + audits. */
   importProductsCsv: (text: string) => CsvImportSummary;
   /** Audit a CSV export (called by the export UI). Fire-and-forget; never blocks. */
-  auditCsvExport: (kind: string, rowCount: number) => void;
+  auditCsvExport: (kind: string, rowCount: number, format?: string) => void;
   pendingCount: () => number;
   getProduct: (id: string | null) => Product | undefined;
   clearSession: () => void;
@@ -2453,8 +2453,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         };
       },
 
-      auditCsvExport: (kind, rowCount) => {
-        emitAudit({ entityType: "Export", entityId: kind, action: "csv_export", metadata: { kind, rowCount } });
+      auditCsvExport: (kind, rowCount, format) => {
+        // Backward-compatible: action + entityId unchanged; format defaults to "csv" so existing 2-arg
+        // callers and the csvImport audit test keep working, while new multi-format exports record which.
+        emitAudit({ entityType: "Export", entityId: kind, action: "csv_export", metadata: { kind, rowCount, format: format ?? "csv" } });
       },
 
       pendingCount: () => get().pendingSyncQueue.length,
