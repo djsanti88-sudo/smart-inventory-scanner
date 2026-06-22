@@ -1,0 +1,23 @@
+{
+  "done": true,
+  "commit": "efc5655de398a0cbf4039a5441cee8534ac3ab85",
+  "step1_findings": "Both Gemini and OpenAI ARE invoked server-side (route.ts decodeProviders() pushes both providers when both keys are present). In practice only ONE returns a usable product (the fast OpenAI model gpt-5-mini does not reliably web-search), so crossCheckEngine returns decision 'single_provider' (confidence 0.4). decideDecode requires cc.decision==='agree' to return 'verified', so a lone provider can never auto-count and falls to the 'suggested' branch, whose confidence = max(maxConfidence*0.6, cc.confidence*0.6). With the model's ~0.92 self-reported confidence that is 0.92*0.6 = ~0.552 - the flat value seen across all 9 tires. Net: 9/9 correct decode, but single_provider => Suggested => Needs Review, nothing auto-counts. The reliable, testable fix is deterministic corroboration (independent of the AI text); making OpenAI's live fast model reliably contribute a 2nd usable result is a live-AI tuning matter (no live calls in CI), so it is NOT relied upon here.",
+  "new_autocount_conditions": "decideDecode now returns status 'verified' (=> store auto-counts subject to its existing gate: exactCodeEvidenceVerifiedByApp + confidence>=0.9 + tireOk + no firewall conflict) when EITHER (A) two providers independently AGREE (unchanged), OR (B) TIRE CORROBORATION: settings.scanContext==='tire' AND isTireContext(decoded) AND hasRequiredTireSpecs(decoded) AND the decoded brand is in the barcode's STRONG-tier prefix family (isBrandInPrefixFamily(code, brand, {strongOnly:true}); hint_weak/review/part-number rows never corroborate) AND the app independently verified the exact scanned code in real evidence (EvidenceVerifier, never the model's claim). Confidence alone is never one of the conditions.",
+  "changed_files": [
+    "src/services/ai/decode.ts",
+    "src/services/tire/tirePrefixLookup.ts",
+    "src/app/api/ai-lookup/route.ts",
+    "src/services/ai/decodeCorroboration.test.ts",
+    "src/stores/autoCountTire.store.test.ts",
+    "e2e/auto-count-tire.spec.ts"
+  ],
+  "results": {
+    "tsc": "pass",
+    "eslint": "pass (0 errors, 4 pre-existing warnings) over src + e2e",
+    "vitest": "575 passed / 30 skipped / 0 failed (sequential, --no-file-parallelism)",
+    "qa_bots": "8 passed",
+    "playwright": "16 passed"
+  },
+  "poison_still_blocks": true,
+  "notes": "Poison 745125495781 (go-upc 'Manstel rivet kit') in tire context is blocked at TWO layers: (1) decideDecode corroboration fails (brand 'Manstel' not in any strong prefix family for 745125 AND non-tire product) so it stays Suggested; (2) the store firewall (detectScanContextConflict: non-tire product in tire context => category_context_conflict) blocks the auto-count even if a decision claimed 'verified'. Both are asserted by tests (decodeCorroboration poison test + autoCountTire 'HARD INVARIANT' store test). Firewall, resolver trust model, side-door/markWrong, and the store's confidence>=0.9 auto-count floor are unchanged. Of the 9 live barcodes, corroboration auto-counts those whose decoded brand matches the barcode's STRONG prefix family (e.g. Cooper 029142, Michelin 086699, Hankook 0715459); the rest correctly route to review when the brand is held-out/weak/mismatched for that prefix (e.g. Goodyear 069766 row is review_before_use; Nexen 8807622 is hint_weak only; Continental on 051342 is General Tire's family) - safe by design (prefer review over a wrong auto-count). Live two-provider agreement still auto-counts independently when OpenAI contributes; improving its live yield is a separate tuning task."
+}
