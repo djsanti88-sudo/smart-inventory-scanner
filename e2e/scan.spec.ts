@@ -82,7 +82,9 @@ test("full inventory scan proof", async ({ page }) => {
   await expect(page.getByTestId("image-hover-card").first()).toBeVisible();
   await page.screenshot({ path: `${PROOF}/06-image-hover.png`, fullPage: true });
 
-  // 5. CSV export works from local state (even before any sync concerns).
+  // 5. CSV export works from local state (even before any sync concerns). Exports now live in the
+  // unified "Export" dropdown; open it first. The CSV chip keeps the legacy export-final-counts testid.
+  await page.getByTestId("export-menu-trigger").click();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page.getByTestId("export-final-counts").click(),

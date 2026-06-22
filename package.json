@@ -30,8 +30,11 @@
     "qa:weekly-report": "npm run qa:bots:security && npm run qa:bots:data && npm run qa:bots:tire && npm run qa:bots:ux"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "firebase": "^12.14.0",
     "firebase-admin": "^14.0.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",

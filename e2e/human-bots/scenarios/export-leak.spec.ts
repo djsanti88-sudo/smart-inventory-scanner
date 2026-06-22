@@ -41,6 +41,9 @@ test("ExportBot: capture export headers and flag code-bearing exports", async ({
   const i = page.getByTestId("scanner-input");
   await i.click(); await i.fill("049000028904"); await i.press("Enter"); await page.waitForTimeout(150);
 
+  // Exports now live in the unified "Export" dropdown - open it so the per-dataset CSV chips are present.
+  await page.getByTestId("export-menu-trigger").click();
+
   const rows: Array<{ export: string; header: string; codeFields: string[] }> = [];
   for (const e of EXPORTS) {
     const header = await headerOf(page, e.testid);

@@ -100,6 +100,7 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   // 10. Finish the session (persists completed state + audit), then export a CSV.
   await page.getByTestId("finish-session").click();
   await waitDrained(page);
+  await page.getByTestId("export-menu-trigger").click(); // exports now live in the unified Export dropdown
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page.getByTestId("export-final-counts").click(),

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
-import { ExportButtons } from "@/components/ExportButtons";
+import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 
 export default function SettingsPage() {
@@ -225,7 +225,7 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="Export">
-        <ExportButtons />
+        <ExportMenu />
       </Section>
 
       {isPlatform && (<>
