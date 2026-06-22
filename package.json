@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-jwks-rsa.cjs",
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:emulator": "node scripts/dev.mjs --emulator",
+    "dev:prod": "node scripts/dev.mjs --prod",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
