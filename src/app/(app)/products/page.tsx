@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { customerDisplayName } from "@/services/displayName";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import type { Product } from "@/types";
@@ -66,7 +67,7 @@ function ProductRow({ product: p, allProducts, isPlatform }: { product: Product;
   return (
     <>
       <tr className="border-t border-zinc-100" data-testid={`product-row-${p.id}`}>
-        <td className="px-3 py-2 font-medium text-zinc-800">{p.name}</td>
+        <td className="px-3 py-2 font-medium text-zinc-800">{isPlatform ? p.name : customerDisplayName(p.name)}</td>
         <td className="px-3 py-2">{p.brand}</td>
         <td className="px-3 py-2">{p.category}</td>
         <td className="px-3 py-2">{p.specsShort}</td>
