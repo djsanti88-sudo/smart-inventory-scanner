@@ -92,6 +92,30 @@ describe("enrichWithPageFetch (the read step)", () => {
     expect(r.result?.sourceUrls.some((u) => u.includes("go-upc"))).toBe(true);
   });
 
+  it("infers the tire brand from the title when the page has no separate brand field", async () => {
+    // Barcode-DB title carries the brand in the name only. Before the fix this left brand="" and blocked
+    // the brand-prefix-family corroboration check. The exact code is still verified (fetched_source).
+    const html = `<html><head><title>Cooper Discoverer A/T3 LT245/75R16 120R</title></head>
+      <body>UPC 029142712886 light truck all-terrain tire in stock</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) =>
+      url.includes("go-upc") ? page(html) : notFound(),
+    ) as unknown as FetchImpl;
+    const r = await enrichWithPageFetch({ code: "029142712886", codeType: "upc_a", fetchImpl });
+    expect(r.evidence.strength).toBe("fetched_source");
+    expect(r.evidence.verified).toBe(true);
+    expect(r.result?.brand).toBe("Cooper"); // inferred from the title, enabling corroboration
+  });
+
+  it("does NOT infer a brand for a non-tire product (poison stays brand-less -> no corroboration)", async () => {
+    const html = `<html><head><title>Manstel 200 Pcs Aluminum Core Blind Rivet Screw Kit</title></head>
+      <body>UPC 745125495781 hardware</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) =>
+      url.includes("go-upc") ? page(html) : notFound(),
+    ) as unknown as FetchImpl;
+    const r = await enrichWithPageFetch({ code: "745125495781", codeType: "upc_a", fetchImpl });
+    expect(r.result?.brand ?? "").toBe(""); // no known tire brand in the name -> stays empty
+  });
+
   it("matches a UPC-12 even when the page shows the GTIN-13 form", async () => {
     const html = `<html><head><title>PHATOIL Lavender Essential Oil 100ml</title></head>
       <body>GTIN-13: 0697722815261 ... barcode 6977228152610 lavender</body></html>`;

@@ -2,6 +2,7 @@ import type { AiLookupResult, CodeType, EvidenceResult } from "@/types";
 import { normalizeResult } from "@/services/ai/provider";
 import { verifyEvidence } from "@/services/ai/evidenceVerifier";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
+import { inferTireBrandFromName } from "@/services/ai/tireSpecs";
 
 // Page-fetch-and-read: the app itself opens public barcode/retail pages, reads the text, confirms
 // the exact code is on the page (strong "fetched_source" evidence), and extracts the product. This
@@ -269,11 +270,14 @@ export async function enrichWithPageFetch(params: {
   }
 
   const cleanName = isUsableProductName(candidateName) ? cleanProductName(candidateName) : "";
+  // Barcode-DB titles carry the brand in the name but not a separate field; infer it deterministically so
+  // the brand-prefix-family corroboration check can run. Never invents a brand (KNOWN_TIRE_BRANDS only).
+  const resolvedBrand = candidateBrand || inferTireBrandFromName(cleanName);
   const result = cleanName
     ? normalizeResult({
         ...(extracted ?? {}),
         productName: cleanName,
-        brand: candidateBrand,
+        brand: resolvedBrand,
         sourceUrls: uniq([...(extracted?.sourceUrls ?? []), ...fetchedUrls]),
         primaryBarcode: extracted?.primaryBarcode || params.code,
         confidence: extracted?.confidence ?? (evidence.verified ? 0.92 : 0.6),

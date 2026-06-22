@@ -42,6 +42,28 @@ export function hasTireSize(r: IdentityText | null | undefined): boolean {
   return METRIC_SIZE.test(t) || COMMERCIAL_SIZE.test(t);
 }
 
+/**
+ * Infer a tire brand from a product NAME when the structured brand field is empty. Barcode-DB page titles
+ * (e.g. "Cooper Discoverer A/T3 ... 245/75R16") carry the brand in the name but not in a separate field,
+ * which left brand="" and blocked the brand-prefix-family corroboration check. This is a deterministic,
+ * read-only extraction (the brand literally appears in the title) - it never invents a brand and only
+ * matches the small hand-verified KNOWN_TIRE_BRANDS list, so it cannot weaken any trust gate. Returns the
+ * matched brand as it appears in the name, or "".
+ */
+export function inferTireBrandFromName(name: string): string {
+  const src = name ?? "";
+  const lower = src.toLowerCase();
+  // Longest brand names first so "general tire" / "gt radial" win over a shorter accidental substring.
+  for (const b of [...KNOWN_TIRE_BRANDS].sort((x, y) => y.length - x.length)) {
+    const i = lower.indexOf(b);
+    if (i < 0) continue;
+    const before = i === 0 || /[^a-z0-9]/.test(lower[i - 1]);
+    const after = i + b.length >= lower.length || /[^a-z0-9]/.test(lower[i + b.length]);
+    if (before && after) return src.slice(i, i + b.length);
+  }
+  return "";
+}
+
 /** Tire context if the decode looks tire-related at all: keyword, a size pattern, or a known tire brand. */
 export function isTireContext(r: IdentityText | null | undefined): boolean {
   const t = haystack(r).toLowerCase();
