@@ -36,10 +36,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
       <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-zinc-900">Smart Inventory Scanner</h1>
-        <p className="mt-1 text-sm text-zinc-500">{mode === "signin" ? "Sign in to your account." : "Create an account."}</p>
+        <h1 className="text-2xl font-semibold text-zinc-900">Smart Inventory Scanner</h1>
+        <p className="mt-1 text-base text-zinc-600">{mode === "signin" ? "Sign in to your account." : "Create an account."}</p>
 
-        <label className="mt-5 block text-sm font-medium text-zinc-700" htmlFor="email">Email</label>
+        <label className="mt-5 block text-base font-medium text-zinc-800" htmlFor="email">Email</label>
         <input
           id="email"
           type="email"
@@ -47,10 +47,10 @@ export default function LoginPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           data-testid="login-email"
-          className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-3 text-base"
         />
 
-        <label className="mt-3 block text-sm font-medium text-zinc-700" htmlFor="password">Password</label>
+        <label className="mt-3 block text-base font-medium text-zinc-800" htmlFor="password">Password</label>
         <input
           id="password"
           type="password"
@@ -58,17 +58,17 @@ export default function LoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           data-testid="login-password"
-          className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-3 text-base"
         />
 
-        {error && <p className="mt-3 text-sm text-red-600" data-testid="login-error">{error}</p>}
-        {notice && <p className="mt-3 text-sm text-green-700" data-testid="login-notice">{notice}</p>}
+        {error && <p className="mt-3 text-base text-red-600" data-testid="login-error">{error}</p>}
+        {notice && <p className="mt-3 text-base text-green-700" data-testid="login-notice">{notice}</p>}
 
         <button
           type="submit"
           disabled={busy}
           data-testid="login-button"
-          className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+          className="mt-5 inline-flex min-h-[48px] w-full items-center justify-center rounded-lg bg-blue-600 px-4 text-base font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {busy ? "Please wait..." : mode === "signin" ? "Sign in" : "Create account"}
         </button>
@@ -76,7 +76,7 @@ export default function LoginPage() {
         <button
           type="button"
           onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setNotice(""); }}
-          className="mt-3 w-full text-center text-xs text-blue-600 hover:underline"
+          className="mt-3 w-full text-center text-sm text-blue-700 hover:underline"
         >
           {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
         </button>

@@ -65,17 +65,17 @@ export function NeedsReviewTable() {
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-      <div className="border-b border-zinc-200 px-4 py-2">
-        <h2 className="text-sm font-semibold text-zinc-800">Needs Review</h2>
-        <p className="text-xs text-zinc-500">
-          Unknown, vendor-label, or conflicting codes. AI results here are SUGGESTIONS only and are
-          never trusted until you approve them. Approving saves a permanent alias so future scans
-          count automatically.
+      <div className="border-b border-zinc-200 px-4 py-3">
+        <h2 className="text-lg font-semibold text-zinc-900">{isPlatform ? "Needs Review" : "Check these"}</h2>
+        <p className="text-sm text-zinc-700">
+          {isPlatform
+            ? "Unknown, vendor-label, or conflicting codes. AI results here are SUGGESTIONS only and are never trusted until you approve them. Approving saves a permanent alias so future scans count automatically."
+            : "These codes need a quick look. Pick the right product once, and from then on scanning that code counts it for you."}
         </p>
       </div>
       <div className="overflow-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
+        <table className="w-full border-collapse text-left text-base">
+          <thead className="bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
               {isPlatform && <th className="px-3 py-2">Raw code</th>}
               {isPlatform && <th className="px-3 py-2">Clean code</th>}
@@ -91,7 +91,7 @@ export function NeedsReviewTable() {
           <tbody data-testid="review-body">
             {reviews.length === 0 ? (
               <tr>
-                <td colSpan={isPlatform ? 9 : 6} className="px-3 py-6 text-center text-zinc-400">
+                <td colSpan={isPlatform ? 9 : 6} className="px-3 py-6 text-center text-base text-zinc-600">
                   Nothing to review. Unknown codes will appear here.
                 </td>
               </tr>

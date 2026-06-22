@@ -23,33 +23,33 @@ export function FinalCountTable() {
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2">
-        <h2 className="text-sm font-semibold text-zinc-800">Final Count Database</h2>
-        <span className="text-xs text-zinc-500">{rows.length} products</span>
+      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+        <h2 className="text-lg font-semibold text-zinc-900">Your counts</h2>
+        <span className="text-sm text-zinc-600">{rows.length} products</span>
       </div>
       <div className="overflow-auto">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
+        <table className="w-full border-collapse text-left text-base">
+          <thead className="bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
               <th className="px-3 py-2">Qty</th>
               <th className="px-3 py-2">Product</th>
               <th className="px-3 py-2">Brand</th>
               <th className="px-3 py-2">Category</th>
               <th className="px-3 py-2">Specs</th>
-              <th className="px-3 py-2">SKU</th>
+              <th className="px-3 py-2">{isPlatform ? "SKU" : "Part number"}</th>
               {isPlatform && <th className="px-3 py-2">Primary barcode</th>}
               {isPlatform && <th className="px-3 py-2">Aliases</th>}
               <th className="px-3 py-2">Image</th>
               <th className="px-3 py-2">Location</th>
               <th className="px-3 py-2">Last scanned</th>
-              <th className="px-3 py-2">Sync</th>
+              <th className="px-3 py-2">Saved</th>
               <th className="px-3 py-2">Actions</th>
             </tr>
           </thead>
           <tbody data-testid="final-count-body">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={isPlatform ? 13 : 11} className="px-3 py-6 text-center text-zinc-400">
+                <td colSpan={isPlatform ? 13 : 11} className="px-3 py-6 text-center text-base text-zinc-600">
                   No counts yet.
                 </td>
               </tr>
