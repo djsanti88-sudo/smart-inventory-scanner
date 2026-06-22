@@ -377,6 +377,11 @@ export interface AiLookupResult {
   // are NOT trusted as truth.
   sourceSnippets?: string[]; // text snippets from sources / web-search results
   groundingChunks?: string[]; // Gemini grounding chunk text
+  // Full text of a page the APP actually fetched and read for this result (page-fetch / firecrawl scrape).
+  // This is the STRONGEST evidence channel: the EvidenceVerifier confirms the exact code in this real
+  // page text. Kept on the result so its fetched_source provenance survives any re-verification via
+  // evidenceOf() (it is never capped/sanitized into a snippet - it stays the raw fetched source).
+  fetchedSourceText?: string;
   exactCodeEvidence?: boolean; // model SELF-CLAIM that the exact code appears in a source (untrusted)
 }
 

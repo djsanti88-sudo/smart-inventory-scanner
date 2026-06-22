@@ -75,6 +75,10 @@ function evidenceOf(r: AiLookupResult): ProviderEvidence {
     sourceUrls: r.sourceUrls ?? [],
     sourceSnippets: r.sourceSnippets ?? [],
     groundingChunks: r.groundingChunks ?? [],
+    // Thread the fetched page text so the strongest tier ("fetched_source") can confirm the exact code
+    // from the REAL page this result was read from. Without this, a result that carried its own fetched
+    // page (page-fetch / scrape) was re-verified with empty text and could never reach fetched_source.
+    fetchedSourceText: r.fetchedSourceText,
     exactCodeEvidence: r.exactCodeEvidence,
   };
 }
