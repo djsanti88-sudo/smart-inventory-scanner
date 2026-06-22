@@ -24,7 +24,7 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["src/services/**/*.test.ts"],
+          include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts"],
         },
       },
       {
