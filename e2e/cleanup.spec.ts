@@ -53,7 +53,7 @@ test("recommendation-first cleanup: review -> backup -> remove selected -> Undo 
     if (localStorage.getItem("e2e-cleanup-seeded")) return;
     localStorage.setItem(
       "sis-scan-v1",
-      JSON.stringify({ state: { products: [good, junk], aliases: [], finalCounts: [cGood, cJunk] }, version: 4 }),
+      JSON.stringify({ state: { products: [good, junk], aliases: [], finalCounts: [cGood, cJunk] }, version: 5 }),
     );
     localStorage.setItem("e2e-cleanup-seeded", "1");
   }, [GOOD_P, JUNK_P, mkCount("c-good-e2e", "p-good-e2e", 3), mkCount("c-junk-e2e", "p-junk-e2e", 1)]);
