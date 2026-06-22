@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+import { customerDisplayName } from "@/services/displayName";
 import { SyncBadge } from "@/components/badges";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
@@ -108,7 +109,7 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
       <td className="px-3 py-2 text-lg font-semibold tabular-nums" data-testid={`qty-${product.id}`}>
         {count.quantity}
       </td>
-      <td className="px-3 py-2 font-medium text-zinc-800">{product.name}</td>
+      <td className="px-3 py-2 font-medium text-zinc-800">{isPlatform ? product.name : customerDisplayName(product.name)}</td>
       <td className="px-3 py-2">{product.brand}</td>
       <td className="px-3 py-2">{product.category}</td>
       <td className="px-3 py-2">{product.specsShort}</td>
