@@ -1754,6 +1754,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             else if (res.productId) matchedIds.add(res.productId);
           }
 
+          // ORPHANED-COUNT DEDUP: also reuse a product that is STILL COUNTED (has a surviving finalCounts
+          // row) whose own identifier fields exactly match the scanned code - even if it is no longer
+          // verified or approved-aliased. A persist/session reset can drop a counted product's approved
+          // alias AND its `verified` flag (the customer-safe persist strips both) while its count survives,
+          // which makes resolveScanToProduct miss it and used to mint a duplicate. This is a DETERMINISTIC
+          // exact identifier match (never fuzzy name), and it is scoped to products that are ACTIVELY
+          // COUNTED, so a markWrong'd product (whose count was removed) is never silently reused.
+          const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
+          for (const p of state.products) {
+            if (!countedProductIds.has(p.id) || p.status === "archived") continue;
+            const pCodes = [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).filter(Boolean);
+            if (pCodes.some((c) => identityCodes.includes(c))) matchedIds.add(p.id);
+          }
+
           if (matchedIds.size > 1) {
             // MORE THAN ONE existing product owns this identity -> never guess; keep it in Needs Review
             // (same rule as the resolver conflict guard). The human picks the right one via link_existing.
