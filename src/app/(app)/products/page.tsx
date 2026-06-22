@@ -15,19 +15,19 @@ export default function ProductsPage() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2">
-          <h2 className="text-sm font-semibold text-zinc-800">Product Database</h2>
-          <span className="text-xs text-zinc-500">{products.length} products</span>
+        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+          <h2 className="text-lg font-semibold text-zinc-900">Product Database</h2>
+          <span className="text-sm text-zinc-600">{products.length} products</span>
         </div>
         <div className="overflow-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
+          <table className="w-full border-collapse text-left text-base">
+            <thead className="bg-zinc-50 text-sm font-semibold text-zinc-700">
               <tr>
                 <th className="px-3 py-2">Name</th>
                 <th className="px-3 py-2">Brand</th>
                 <th className="px-3 py-2">Category</th>
                 <th className="px-3 py-2">Specs</th>
-                <th className="px-3 py-2">SKU</th>
+                <th className="px-3 py-2">{isPlatform ? "SKU" : "Part number"}</th>
                 {isPlatform && <th className="px-3 py-2">Primary barcode</th>}
                 {isPlatform && <th className="px-3 py-2">GTIN/UPC/EAN</th>}
                 {isPlatform && <th className="px-3 py-2">Codes</th>}

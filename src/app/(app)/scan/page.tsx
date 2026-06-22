@@ -90,8 +90,14 @@ export default function ScanPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="text-zinc-600">
+        {/* Everything below the scan box is secondary. Group it so the scan box stays the hero; the user
+            can collapse it to declutter. Default OPEN so every control stays reachable (tests + power use). */}
+        <details open className="group mt-1 border-t border-zinc-200 pt-3">
+          <summary className="cursor-pointer list-none text-base font-medium text-zinc-700 hover:text-zinc-900">
+            <span className="select-none">More options (session, sync, export)</span>
+          </summary>
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-base">
+          <span className="text-zinc-700">
             Session: <strong className="text-zinc-900">{session?.name ?? "None"}</strong>
           </span>
           <input
@@ -117,7 +123,7 @@ export default function ScanPage() {
             type="button"
             data-testid="start-session"
             onClick={() => startSession(name || "Session", location)}
-            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 text-base font-medium text-white hover:bg-blue-700"
           >
             Start new session
           </button>
@@ -126,14 +132,16 @@ export default function ScanPage() {
             data-testid="finish-session"
             onClick={() => finishSession()}
             disabled={session?.status === "completed"}
-            className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
           >
             Finish session
           </button>
           <button
             type="button"
-            onClick={() => clearSession()}
-            className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            onClick={() => {
+              if (window.confirm("Clear the current session? Your saved counts are kept - this only starts a fresh, empty session.")) clearSession();
+            }}
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50"
           >
             Clear session
           </button>
@@ -161,8 +169,13 @@ export default function ScanPage() {
           )}
         </div>
 
-        <SyncStatusBar />
-        <ExportButtons />
+        <div className="mt-3">
+          <SyncStatusBar />
+        </div>
+        <div className="mt-3">
+          <ExportButtons />
+        </div>
+        </details>
       </div>
 
       <LiveScanFeed />
