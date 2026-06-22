@@ -4,16 +4,20 @@ import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
+import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import type { Product } from "@/types";
 
 export default function ProductsPage() {
-  const products = useScanStore((s) => s.products);
-  // Raw codes (barcode/GTIN/UPC/EAN), the alias "Codes" panel, and the source (which can reveal the
-  // lookup origin) are platformOwner-only. Customers see product-facing columns + the part number (SKU).
+  const allProducts = useScanStore((s) => s.products);
+  // Archived (deleted) products are hidden from the list but kept in state for Undo + audit.
+  const products = allProducts.filter((p) => p.status !== "archived");
+  // Raw codes (barcode/GTIN/UPC/EAN), the alias "Codes" panel, the source, and Delete are platformOwner-
+  // only. Customers see product-facing columns + the part number (SKU).
   const isPlatform = useIsPlatformOwner();
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
+      {isPlatform && <UndoDeleteBanner />}
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
           <h2 className="text-lg font-semibold text-zinc-900">Product Database</h2>
@@ -34,6 +38,7 @@ export default function ProductsPage() {
                 <th className="px-3 py-2">Image</th>
                 <th className="px-3 py-2">Location</th>
                 {isPlatform && <th className="px-3 py-2">Source</th>}
+                {isPlatform && <th className="px-3 py-2">Actions</th>}
               </tr>
             </thead>
             <tbody data-testid="products-body">
@@ -78,10 +83,22 @@ function ProductRow({ product: p, allProducts, isPlatform }: { product: Product;
         <td className="px-3 py-2"><ImageHoverPreview imageUrl={p.imageUrl} alt={p.name} /></td>
         <td className="px-3 py-2">{p.location || "-"}</td>
         {isPlatform && <td className="px-3 py-2 text-xs text-zinc-500">{p.source}</td>}
+        {isPlatform && (
+          <td className="px-3 py-2">
+            <button
+              type="button"
+              data-testid={`delete-product-${p.id}`}
+              onClick={() => confirmAndDeleteProduct(p.id, p.name)}
+              className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+            >
+              Delete
+            </button>
+          </td>
+        )}
       </tr>
       {isPlatform && open && (
         <tr className="bg-zinc-50" data-testid={`codes-panel-${p.id}`}>
-          <td colSpan={11} className="px-3 py-2">
+          <td colSpan={12} className="px-3 py-2">
             <p className="mb-1 text-xs font-semibold text-zinc-600">Codes for {p.name} (unlink a wrong code, or move it to the correct product)</p>
             <div className="flex flex-col gap-1">
               {aliases.length === 0 && <span className="text-xs text-zinc-400">No codes.</span>}
