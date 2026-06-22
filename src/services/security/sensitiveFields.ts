@@ -44,3 +44,27 @@ export function stripSensitive<T>(value: T): T {
 export const CUSTOMER_SAFE_PRODUCT_FIELDS = [
   "id", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
 ] as const;
+
+// A customer's OWN pending Needs-Review item — only the fields they need to SEE + ACT on it, plus their
+// own scanned code (cleanCode, already shown to all roles in LiveScanFeed). EXCLUDES every provider/decode
+// internal (providerName, sourceUrls, verifiedFacts, decodeProviderSummaries, evidence/crossCheck/confidence)
+// AND every OTHER reusable code (rawCode/normalizedCandidates/suggestedAliases/gtin/upc/ean/primaryBarcode/
+// primarySku/productUrl/specsFull) so no reusable alias/catalog data reaches a customer's disk.
+export const CUSTOMER_SAFE_REVIEW_FIELDS = [
+  "id", "businessId", "sessionId", "cleanCode",
+  "suggestedProductName", "suggestedBrand", "suggestedCategory", "suggestedSpecsShort", "suggestedImageUrl",
+  "reason", "blockingReasons", "hasSuggestion", "decodeStatus", "status",
+  "createdAt", "resolvedAt", "resolvedBy", "resolutionAction", "syncStatus", "idempotencyKey",
+] as const;
+
+// A customer's OWN scan-feed event survives reload as an activity log (Product, Qty after, Status, Reason,
+// Saved). It deliberately EXCLUDES cleanCode: a MATCHED feed row maps a known code -> product, and a growing
+// list of those is a slice of the reusable code->product database, which must never persist to a customer
+// browser (Sec-4 leak guard). The product name + qty are what the customer needs after a reload; the raw
+// code is on the physical item and is shown live during the session. Also excludes rawCode,
+// normalizedCandidates, matchType, codeType, decodeNote, notes, syncError (platform-only decode traces).
+export const CUSTOMER_SAFE_SCANEVENT_FIELDS = [
+  "id", "businessId", "sessionId", "matchedProductId",
+  "status", "resolverStatus", "reason", "quantityDelta", "quantityAfterScan",
+  "decodeStatus", "syncStatus", "createdAt", "source", "idempotencyKey",
+] as const;

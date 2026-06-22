@@ -153,7 +153,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
         )}
       </td>
       <td className="max-w-56 px-3 py-2 text-xs">
-        {review.hasSuggestion || review.sourceUrls.length > 0 ? (
+        {review.hasSuggestion || (review.sourceUrls?.length ?? 0) > 0 ? (
           <div className="flex flex-col gap-1">
             <DecodeBadge review={review} isPlatform={isPlatform} />
             {isPlatform && review.evidenceStrength && review.evidenceStrength !== "none" && (
@@ -175,13 +175,13 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                   .join(" | ")}
               </span>
             )}
-            {review.verifiedFacts.length > 0 && (
-              <span className="text-zinc-500">Facts: {review.verifiedFacts.join("; ")}</span>
+            {(review.verifiedFacts?.length ?? 0) > 0 && (
+              <span className="text-zinc-500">Facts: {review.verifiedFacts!.join("; ")}</span>
             )}
-            {review.guesses.length > 0 && (
-              <span className="text-zinc-400">Guesses: {review.guesses.join("; ")}</span>
+            {(review.guesses?.length ?? 0) > 0 && (
+              <span className="text-zinc-400">Guesses: {review.guesses!.join("; ")}</span>
             )}
-            {isPlatform && review.sourceUrls.length > 0 && (
+            {isPlatform && (review.sourceUrls?.length ?? 0) > 0 && (
               <span className="flex flex-wrap gap-1">
                 {review.sourceUrls.map((u, i) => (
                   <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
