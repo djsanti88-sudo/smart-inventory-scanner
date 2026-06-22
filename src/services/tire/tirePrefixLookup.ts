@@ -48,12 +48,19 @@ export function brandNorm(brand: string): string {
  * avoid a FALSE brand conflict between corporate siblings (e.g. Michelin / BFGoodrich on 086699). Never
  * creates a conflict on its own; only suppresses one.
  */
-export function isBrandInPrefixFamily(code: string, brand: string, table: Record<string, PrefixHint[]> = TIRE_PREFIX_HINTS): boolean {
+export function isBrandInPrefixFamily(
+  code: string,
+  brand: string,
+  opts: { strongOnly?: boolean; table?: Record<string, PrefixHint[]> } = {},
+): boolean {
   const nb = brandNorm(brand);
   if (!nb) return false;
-  const m = lookupTirePrefix(code, table);
+  const m = lookupTirePrefix(code, opts.table ?? TIRE_PREFIX_HINTS);
   if (!m) return false;
-  return m.brands.some((h) => {
+  // strongOnly: corroboration (auto-count) trusts ONLY hint_strong rows. hint_weak / review / part-number
+  // rows never corroborate a decode - they may suggest, but cannot make a scan auto-count.
+  const family = opts.strongOnly ? m.brands.filter((h) => h.weight === "strong") : m.brands;
+  return family.some((h) => {
     const hn = brandNorm(h.brand);
     return !!hn && (hn === nb || hn.includes(nb) || nb.includes(hn));
   });
