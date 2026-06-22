@@ -44,7 +44,16 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 
 export const dynamic = "force-dynamic";
 
-const TRUSTED_HOSTS = ["gs1.org", "gtin.info"]; // url-only evidence is trusted only from these
+// url-only evidence (the exact code appears ONLY in a source URL, never confirmed in page text) is
+// trusted ONLY from these authoritative GS1 registries. Deliberately NOT expanded to crowd barcode DBs
+// (upcitemdb / go-upc / barcodespider / barcodelookup): those build the URL FROM the scanned code
+// (/upc/<code>, /search?q=<code>) and serve a page for ANY code - even unregistered/not-found ones - so
+// "the code is in the URL" there carries ZERO evidentiary value and would make every scan look "verified",
+// defeating the evidence gate. Trust for those hosts must come from fetched_source instead: the app opens
+// the candidate page, confirms the exact code in the REAL page text, and rejects "product not found" pages
+// (see enrichWithPageFetch + looksLikeNotFound). gs1.org/gtin.info only return a page when a GTIN is
+// actually registered, so url_only from them is sound.
+const TRUSTED_HOSTS = ["gs1.org", "gtin.info"];
 
 function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
