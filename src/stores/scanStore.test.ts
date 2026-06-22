@@ -420,6 +420,80 @@ describe("scanStore - W2 discovered-alias approval", () => {
     expect(countFor(store, prod.id)).toBe(1);
   });
 
+  // P2: a counted product whose barcode lives ONLY inside its NAME must be reused on a re-scan of that
+  // barcode (no duplicate row). Wrong identity = failure; unknown = acceptable, so we match a full exact
+  // code token only, and >1 candidate routes to a conflict (never a guess).
+  const legacyCounted = (
+    store: ReturnType<typeof createTestScanStore>,
+    id: string,
+    name: string,
+  ) =>
+    store.setState((s) => ({
+      products: [
+        ...s.products,
+        {
+          id, businessId: s.businessId, name, brand: "", category: "", specsShort: "", specsFull: "",
+          primarySku: "", primaryBarcode: "", gtin: "", upc: "", ean: "", vendorCodes: [], aliases: [],
+          imageUrl: "", productUrl: "", location: "", notes: "", status: "active" as const,
+          source: "human_review", confidence: 1, verified: false, createdAt: "t", updatedAt: "t",
+          createdBy: "h", updatedBy: "h",
+        },
+      ],
+      finalCounts: [
+        ...s.finalCounts,
+        {
+          id: `fc-${id}`, businessId: s.businessId, sessionId: s.sessionId, productId: id, quantity: 5,
+          lastScannedAt: "t", aliasesSeen: [], scanEventIds: [], createdAt: "t", updatedAt: "t",
+          syncStatus: "synced" as const, syncError: null, appliedIdempotencyKeys: [],
+        },
+      ],
+    }));
+
+  it("re-scanning a barcode that lives only in a counted product's NAME reuses it (no duplicate) [P2]", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    legacyCounted(store, "prod-legacy-cooper", "UPC 029142712886 - Discoverer A/T3 E (10 Ply) BW");
+    const before = store.getState().products.length;
+
+    const id = openReview(store, "029142712886"); // unknown (no alias) -> Needs Review
+    store.getState().resolveUnknown(id, "create_new", { newProduct: { name: "Cooper Discoverer A/T3" }, applyToCount: true });
+
+    expect(store.getState().products.length, "must NOT mint a duplicate product").toBe(before);
+    expect(countFor(store, "prod-legacy-cooper"), "existing row gets the count").toBeGreaterThanOrEqual(6);
+  });
+
+  it("two counted products both name-containing the scanned code -> conflict, never guess [P2]", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    legacyCounted(store, "prod-a", "UPC 029142712886 - Cooper A/T3");
+    legacyCounted(store, "prod-b", "Barcode 029142712886 - Cooper (relabeled)");
+    const before = store.getState().products.length;
+
+    const id = openReview(store, "029142712886");
+    store.getState().resolveUnknown(id, "create_new", { newProduct: { name: "Cooper" }, applyToCount: true });
+
+    expect(store.getState().products.length, "no product minted on a conflict").toBe(before);
+    expect((store.getState().lastAliasConflicts ?? []).length, "conflict recorded for human to resolve").toBeGreaterThan(1);
+    expect(store.getState().needsReviewQueue.find((r) => r.id === id)?.status).toBe("open");
+  });
+
+  it("identifier backfill (P2): dry-run preview, apply fills primaryBarcode/upc from name prefix, Undo restores", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    legacyCounted(store, "prod-legacy", "UPC 029142712886 - Discoverer A/T3");
+    legacyCounted(store, "prod-plain", "Just A Name No Code"); // not eligible
+
+    const preview = store.getState().previewIdentifierBackfill();
+    expect(preview).toEqual([{ productId: "prod-legacy", name: "UPC 029142712886 - Discoverer A/T3", code: "029142712886" }]);
+    expect(store.getState().products.find((p) => p.id === "prod-legacy")!.primaryBarcode).toBe(""); // dry-run mutated nothing
+
+    const { changed } = store.getState().applyIdentifierBackfill(["prod-legacy", "prod-plain"]);
+    expect(changed).toBe(1);
+    const filled = store.getState().products.find((p) => p.id === "prod-legacy")!;
+    expect(filled.primaryBarcode).toBe("029142712886");
+    expect(filled.upc).toBe("029142712886"); // 12-digit -> upc too
+
+    expect(store.getState().undoIdentifierBackfill()).toBe(true);
+    expect(store.getState().products.find((p) => p.id === "prod-legacy")!.primaryBarcode).toBe(""); // restored
+  });
+
   it("approves SELECTED discovered identifiers onto an EXISTING product without creating a duplicate product", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const before = store.getState().products.length;

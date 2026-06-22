@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { buildCleanupRecommendations, type CleanupConfidence } from "@/services/cleanup/recommendations";
 
 function downloadJson(filename: string, data: unknown) {
@@ -40,9 +41,31 @@ export function CleanupRecommendations() {
     [finalCounts, products, aliases, catalog],
   );
 
+  const isPlatform = useIsPlatformOwner();
+  const previewIdentifierBackfill = useScanStore((s) => s.previewIdentifierBackfill);
+  const applyIdentifierBackfill = useScanStore((s) => s.applyIdentifierBackfill);
+  const undoIdentifierBackfill = useScanStore((s) => s.undoIdentifierBackfill);
+  const lastIdentifierBackfill = useScanStore((s) => s.lastIdentifierBackfill);
+
   const [open, setOpen] = useState(false);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [msg, setMsg] = useState("");
+  const [backfillMsg, setBackfillMsg] = useState("");
+
+  // Recompute each render (cheap single pass over products) so it reflects state after a backfill/undo.
+  // `products` is read here only to re-run when the product list changes.
+  void products;
+  const backfillCandidates = isPlatform ? previewIdentifierBackfill() : [];
+
+  function runBackfill() {
+    const ids = backfillCandidates.map((c) => c.productId);
+    if (ids.length === 0) { setBackfillMsg("No products need a barcode backfill."); return; }
+    const res = applyIdentifierBackfill(ids);
+    setBackfillMsg(`Filled the barcode field on ${res.changed} product(s) from the name. You can Undo.`);
+  }
+  function undoBackfill() {
+    if (undoIdentifierBackfill()) setBackfillMsg("Backfill undone. Barcode fields restored.");
+  }
 
   function review() {
     const init: Record<string, boolean> = {};
@@ -106,6 +129,27 @@ export function CleanupRecommendations() {
           </button>
         )}
       </div>
+
+      {isPlatform && (backfillCandidates.length > 0 || lastIdentifierBackfill) && (
+        <div className="flex flex-wrap items-center gap-2 rounded border border-zinc-200 p-2" data-testid="identifier-backfill">
+          <span className="text-xs text-zinc-600">
+            {backfillCandidates.length} product(s) carry a barcode only in the name. Backfill the barcode field so re-scans dedup cleanly.
+          </span>
+          {backfillCandidates.length > 0 && (
+            <button type="button" data-testid="backfill-apply" onClick={runBackfill}
+              className="rounded border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100">
+              Backfill barcodes ({backfillCandidates.length})
+            </button>
+          )}
+          {lastIdentifierBackfill && (
+            <button type="button" data-testid="undo-backfill" onClick={undoBackfill}
+              className="rounded border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50">
+              Undo backfill ({lastIdentifierBackfill.length})
+            </button>
+          )}
+          {backfillMsg && <span className="text-xs text-zinc-600" data-testid="backfill-msg">{backfillMsg}</span>}
+        </div>
+      )}
 
       {open && recommendations.length === 0 && (
         <p className="text-xs text-green-700" data-testid="cleanup-empty">

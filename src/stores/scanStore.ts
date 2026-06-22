@@ -21,6 +21,7 @@ import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismat
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
 import { resolveScanToProduct } from "@/services/aliasMatcher";
+import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
 import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/services/mockDb";
@@ -246,6 +247,8 @@ export interface ScanState {
   lastCleanupBackup: CleanupBackup | null;
   // most recent product-delete snapshot (enables Undo); persisted so Undo survives a reload
   lastProductDeleteBackup: ProductDeleteBackup | null;
+  // most recent identifier-backfill snapshot (enables in-session Undo of the P2 name-prefix backfill)
+  lastIdentifierBackfill: Array<{ productId: string; primaryBarcode: string; upc: string }> | null;
 
   // hydration guard
   _hasHydrated: boolean;
@@ -349,6 +352,14 @@ export interface ScanState {
   purgePoisonedProducts: () => { removed: number; backup: ProductDeleteBackup | null };
   /** Restore the product(s) removed by the most recent delete/purge (exact restore). */
   undoDeleteProduct: () => boolean;
+  /** P2 maintenance (platform, NOT auto-run): dry-run preview of products whose identifier fields are empty
+   *  but whose NAME starts with "UPC <code> - " - the code that would backfill primaryBarcode/upc. */
+  previewIdentifierBackfill: () => Array<{ productId: string; name: string; code: string }>;
+  /** Fill empty primaryBarcode (+ upc for 12-digit) from the name prefix for the given products. Snapshots
+   *  the prior values for Undo. Reversible, audited, never auto-run. Returns how many products changed. */
+  applyIdentifierBackfill: (productIds: string[]) => { changed: number };
+  /** Restore the identifier fields changed by the most recent backfill. */
+  undoIdentifierBackfill: () => boolean;
 }
 
 function makeQueueItem(params: {
@@ -703,6 +714,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       feedbackEvents: [],
       lastCleanupBackup: null,
       lastProductDeleteBackup: null,
+      lastIdentifierBackfill: null,
       _hasHydrated: deps.persistName ? false : true,
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
@@ -1766,6 +1778,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             if (!countedProductIds.has(p.id) || p.status === "archived") continue;
             const pCodes = [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).filter(Boolean);
             if (pCodes.some((c) => identityCodes.includes(c))) matchedIds.add(p.id);
+            // BARCODE-IN-NAME DEDUP (P2): a legacy product can carry its barcode ONLY inside the name
+            // (e.g. "UPC 029142712886 - Discoverer A/T3"), so the identifier-field check above misses it
+            // and re-scanning that barcode mints a duplicate. Reuse it when the scanned code appears as an
+            // EXACT whole token in its name (never fuzzy name matching). >1 match -> conflict block below.
+            else if (blobContainsCodeToken(p.name, identityCodes)) matchedIds.add(p.id);
           }
 
           if (matchedIds.size > 1) {
@@ -2666,6 +2683,49 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }));
         for (const p of backup.products) emitAudit({ entityType: "Product", entityId: p.id, action: "product_delete_undone", metadata: { name: p.name } });
         get().recordFeedback("restored_cleanup", { code: "", meta: { restored: restoredProductIds.size } });
+        return true;
+      },
+
+      // P2 maintenance: backfill identifier fields from a "UPC <code> - " name prefix so legacy products
+      // carry their barcode in a real field (not just the name). Reversible + audited; never auto-run.
+      previewIdentifierBackfill: () => {
+        const out: Array<{ productId: string; name: string; code: string }> = [];
+        for (const p of get().products) {
+          if (p.status === "archived" || p.primaryBarcode) continue; // only fill empty identifier rows
+          const code = codeFromNamePrefix(p.name);
+          if (code) out.push({ productId: p.id, name: p.name, code });
+        }
+        return out;
+      },
+
+      applyIdentifierBackfill: (productIds) => {
+        const targets = new Set(productIds);
+        const snapshot: Array<{ productId: string; primaryBarcode: string; upc: string }> = [];
+        let changed = 0;
+        const products = get().products.map((p) => {
+          if (!targets.has(p.id) || p.status === "archived" || p.primaryBarcode) return p;
+          const code = codeFromNamePrefix(p.name);
+          if (!code) return p;
+          const norm = normCodeToken(code);
+          snapshot.push({ productId: p.id, primaryBarcode: p.primaryBarcode ?? "", upc: p.upc ?? "" });
+          changed++;
+          emitAudit({ entityType: "Product", entityId: p.id, action: "identifier_backfilled", metadata: { code: norm } });
+          // Fill primaryBarcode; fill upc only when the code is a 12-digit UPC-A (don't mislabel other lengths).
+          return { ...p, primaryBarcode: code, upc: !p.upc && /^\d{12}$/.test(norm) ? code : p.upc, updatedAt: now(), updatedBy: "human" };
+        });
+        if (changed > 0) set({ products, lastIdentifierBackfill: snapshot });
+        return { changed };
+      },
+
+      undoIdentifierBackfill: () => {
+        const snap = get().lastIdentifierBackfill;
+        if (!snap || snap.length === 0) return false;
+        const byId = new Map(snap.map((s) => [s.productId, s]));
+        const products = get().products.map((p) => {
+          const prev = byId.get(p.id);
+          return prev ? { ...p, primaryBarcode: prev.primaryBarcode, upc: prev.upc, updatedAt: now(), updatedBy: "human" } : p;
+        });
+        set({ products, lastIdentifierBackfill: null });
         return true;
       },
     };
