@@ -77,6 +77,17 @@ export interface CleanupBackup {
   removedAt: string;
 }
 
+/** Full snapshot taken before deleting product(s), so a delete is fully reversible (Undo) + downloadable. */
+export interface ProductDeleteBackup {
+  products: Product[]; // the product rows as they were BEFORE delete (active/verified)
+  aliases: Alias[]; // their aliases as they were BEFORE delete (approval intact)
+  counts: InventoryCount[]; // their removed InventoryCount rows
+  catalog: CatalogEntry[]; // removed global-catalog entries keyed to their codes
+  shopOverrides: ShopOverride[]; // removed private shop-override entries keyed to their codes
+  feed: ScanEvent[]; // scan-feed rows (full prior value) that referenced the deleted product(s)
+  deletedAt: string;
+}
+
 const DEFAULT_AI_STATUS: AiStatus = {
   liveEnabled: true,
   autoDecodeOnScan: true,
@@ -233,6 +244,8 @@ export interface ScanState {
 
   // most recent junk-cleanup snapshot (enables Undo); persisted so Undo survives a reload
   lastCleanupBackup: CleanupBackup | null;
+  // most recent product-delete snapshot (enables Undo); persisted so Undo survives a reload
+  lastProductDeleteBackup: ProductDeleteBackup | null;
 
   // hydration guard
   _hasHydrated: boolean;
@@ -326,6 +339,16 @@ export interface ScanState {
   cleanupJunkCounts: () => { removed: number; backup: CleanupBackup | null };
   /** Restore the rows removed by the most recent cleanup (additively, no data loss). */
   undoCleanup: () => boolean;
+  /** Delete a saved product: archive it (status archived + verified false so the resolver stops matching),
+   *  deactivate ALL its aliases, remove its count rows, detach its scan-feed rows, and drop catalog/
+   *  shop-override entries keyed to its codes. Reversible (snapshots for Undo) + audited. The freed code
+   *  re-decodes/Needs-Review on the next scan. Returns the backup, or null if the product is unknown. */
+  deleteProduct: (productId: string) => ProductDeleteBackup | null;
+  /** One-time safe purge of poisoned duplicates (e.g. the 235 "Manstel" rows on 745125495781 and any
+   *  non-protected product whose identity is the poison code). Reversible via the same Undo. Returns count. */
+  purgePoisonedProducts: () => { removed: number; backup: ProductDeleteBackup | null };
+  /** Restore the product(s) removed by the most recent delete/purge (exact restore). */
+  undoDeleteProduct: () => boolean;
 }
 
 function makeQueueItem(params: {
@@ -679,6 +702,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       shopOverrides: [],
       feedbackEvents: [],
       lastCleanupBackup: null,
+      lastProductDeleteBackup: null,
       _hasHydrated: deps.persistName ? false : true,
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
@@ -2499,6 +2523,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           lastCategoryWarning: null,
           breaker: initBreaker(),
           lastCleanupBackup: null,
+          lastProductDeleteBackup: null,
           catalog: [],
           shopOverrides: [],
           feedbackEvents: [],
@@ -2573,8 +2598,133 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         get().recordFeedback("restored_cleanup", { code: "", meta: { restored: backup.removedCounts.length } });
         return true;
       },
+
+      deleteProduct: (productId) => {
+        const r = deleteProductsInternal(get, set, emitAudit, now, [productId], "product_deleted");
+        return r.backup;
+      },
+
+      purgePoisonedProducts: () => {
+        // Targeted, safe purge of the known poison: NON-protected (non seed/manual) products whose identity
+        // is the poison code 745125495781, or whose name is a rivet/Manstel kit sitting on that code. Seed/
+        // manual products are never touched. Reversible via undoDeleteProduct. (The persist version bump
+        // additionally resets every browser's local cache to clean seed on next load.)
+        const state = get();
+        const ids = state.products
+          .filter((p) => {
+            if (p.source === "seed" || p.source === "manual") return false;
+            const codes = productIdentityCodes(p, state.aliases);
+            const onPoison = codes.some((c) => POISON_CODES.has(c));
+            const rivet = /\bmanstel\b|\brivet\b/i.test(`${p.name} ${p.brand}`);
+            return onPoison || (rivet && codes.some((c) => POISON_CODES.has(c)));
+          })
+          .map((p) => p.id);
+        if (ids.length === 0) return { removed: 0, backup: null };
+        const r = deleteProductsInternal(get, set, emitAudit, now, ids, "product_purged");
+        return { removed: ids.length, backup: r.backup };
+      },
+
+      undoDeleteProduct: () => {
+        const backup = get().lastProductDeleteBackup;
+        if (!backup) return false;
+        // EXACT restore: put the product/alias/count rows back as they were, restore the catalog/shop
+        // entries, and re-attach the scan-feed rows. Replace-by-id so a row that still exists (archived) is
+        // restored to its pre-delete value; rows fully removed (counts) are re-added.
+        const upsertById = <T extends { id: string }>(current: T[], restored: T[]): T[] => {
+          const map = new Map(current.map((x) => [x.id, x]));
+          for (const x of restored) map.set(x.id, x);
+          return [...map.values()];
+        };
+        const restoredProductIds = new Set(backup.products.map((p) => p.id));
+        const feedById = new Map(backup.feed.map((e) => [e.id, e]));
+        set((s) => ({
+          products: upsertById(s.products, backup.products),
+          aliases: upsertById(s.aliases, backup.aliases),
+          finalCounts: upsertById(s.finalCounts, backup.counts),
+          catalog: [...s.catalog, ...backup.catalog.filter((c) => !s.catalog.some((x) => x.normalizedBarcode === c.normalizedBarcode && x.name === c.name))],
+          shopOverrides: [...s.shopOverrides, ...backup.shopOverrides.filter((o) => !s.shopOverrides.some((x) => x.businessId === o.businessId && x.normalizedBarcode === o.normalizedBarcode))],
+          scanFeed: s.scanFeed.map((e) => feedById.get(e.id) ?? e),
+          lastProductDeleteBackup: null,
+        }));
+        for (const p of backup.products) emitAudit({ entityType: "Product", entityId: p.id, action: "product_delete_undone", metadata: { name: p.name } });
+        get().recordFeedback("restored_cleanup", { code: "", meta: { restored: restoredProductIds.size } });
+        return true;
+      },
     };
   };
+}
+
+/** All identity codes a product owns: its identifier fields + every alias clean/normalized code. */
+function productIdentityCodes(p: Product, aliases: Alias[]): string[] {
+  const own = [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].filter(Boolean) as string[];
+  const aliasCodes = aliases.filter((a) => a.productId === p.id).flatMap((a) => [a.cleanCode, a.normalizedCode].filter(Boolean) as string[]);
+  return [...new Set([...own, ...aliasCodes])];
+}
+
+// Known non-matching / poison codes that must never re-trust. 745125495781 is "not a valid UPC" at go-upc
+// (which returns a DIFFERENT EAN 7451254957818 = Manstel rivet kit); the codes do not match.
+const POISON_CODES = new Set(["745125495781"]);
+
+/**
+ * Shared delete engine for deleteProduct + purgePoisonedProducts. Archives each product (status archived +
+ * verified false), deactivates ALL its aliases, removes its count rows, detaches its scan-feed rows, and
+ * drops catalog/shop-override entries keyed to its codes. Snapshots everything BEFORE mutating for an exact
+ * Undo. Idempotent (unknown/already-archived ids are skipped) and audited.
+ */
+function deleteProductsInternal(
+  get: () => ScanState,
+  set: (partial: Partial<ScanState> | ((s: ScanState) => Partial<ScanState>)) => void,
+  emitAudit: (e: { entityType: string; entityId: string; action: string; metadata?: Record<string, unknown> }) => void,
+  now: () => string,
+  productIds: string[],
+  auditAction: string,
+): { backup: ProductDeleteBackup | null } {
+  const state = get();
+  const targetIds = new Set(productIds.filter((id) => state.products.some((p) => p.id === id)));
+  if (targetIds.size === 0) return { backup: null };
+
+  const targetProducts = state.products.filter((p) => targetIds.has(p.id));
+  const codes = new Set(targetProducts.flatMap((p) => productIdentityCodes(p, state.aliases)));
+  const targetAliases = state.aliases.filter((a) => targetIds.has(a.productId));
+  const targetCounts = state.finalCounts.filter((c) => targetIds.has(c.productId));
+  const targetCatalog = state.catalog.filter((c) => codes.has(c.normalizedBarcode) || codes.has(c.barcode));
+  const targetOverrides = state.shopOverrides.filter((o) => codes.has(o.normalizedBarcode));
+  const touchedFeed = state.scanFeed.filter((e) => e.matchedProductId !== null && targetIds.has(e.matchedProductId));
+
+  // Snapshot the PRE-delete values for an exact Undo (+ for the downloadable JSON backup in the UI).
+  const backup: ProductDeleteBackup = {
+    products: targetProducts.map((p) => ({ ...p })),
+    aliases: targetAliases.map((a) => ({ ...a })),
+    counts: targetCounts.map((c) => ({ ...c })),
+    catalog: targetCatalog.map((c) => ({ ...c })),
+    shopOverrides: targetOverrides.map((o) => ({ ...o })),
+    feed: touchedFeed.map((e) => ({ ...e })),
+    deletedAt: now(),
+  };
+
+  set((s) => ({
+    // Archive + un-verify so the deterministic resolver/matcher (verified === true only) stops matching it.
+    products: s.products.map((p) => (targetIds.has(p.id) ? { ...p, status: "archived" as const, verified: false, updatedBy: "human" } : p)),
+    // Deactivate ALL aliases so an approved alias can no longer resolve the freed code.
+    aliases: s.aliases.map((a) => (targetIds.has(a.productId) ? { ...a, approved: false } : a)),
+    // Remove the session count rows.
+    finalCounts: s.finalCounts.filter((c) => !targetIds.has(c.productId)),
+    // Drop catalog / shop-override entries keyed to the freed codes so a future scan re-decodes them.
+    catalog: s.catalog.filter((c) => !(codes.has(c.normalizedBarcode) || codes.has(c.barcode))),
+    shopOverrides: s.shopOverrides.filter((o) => !codes.has(o.normalizedBarcode)),
+    // Detach scan-feed rows (history kept, but no longer "known" / pointing at the deleted product).
+    scanFeed: s.scanFeed.map((e) =>
+      e.matchedProductId !== null && targetIds.has(e.matchedProductId)
+        ? { ...e, matchedProductId: null, status: "needs_review" as const, resolverStatus: "needs_review" as const }
+        : e,
+    ),
+    lastProductDeleteBackup: backup,
+  }));
+
+  for (const p of targetProducts) {
+    emitAudit({ entityType: "Product", entityId: p.id, action: auditAction, metadata: { name: p.name, codes: [...codes].join(" | "), aliasesDeactivated: targetAliases.filter((a) => a.productId === p.id).length } });
+  }
+  return { backup };
 }
 
 // --- App store (persisted) ---------------------------------------------------------------------

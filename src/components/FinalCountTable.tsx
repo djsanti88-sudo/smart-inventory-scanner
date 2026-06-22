@@ -5,6 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { SyncBadge } from "@/components/badges";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
+import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import type { InventoryCount, Product } from "@/types";
 
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). Raw codes (barcode +
@@ -27,6 +28,11 @@ export function FinalCountTable() {
         <h2 className="text-lg font-semibold text-zinc-900">Your counts</h2>
         <span className="text-sm text-zinc-600">{rows.length} products</span>
       </div>
+      {isPlatform && (
+        <div className="px-4 pt-3">
+          <UndoDeleteBanner />
+        </div>
+      )}
       <div className="overflow-auto">
         <table className="w-full border-collapse text-left text-base">
           <thead className="bg-zinc-50 text-sm font-semibold text-zinc-700">
@@ -190,6 +196,11 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
             {isPlatform && (
               <button type="button" data-testid={`mark-wrong-${product.id}`} onClick={onMarkWrong} className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
                 Mark wrong
+              </button>
+            )}
+            {isPlatform && (
+              <button type="button" data-testid={`delete-product-${product.id}`} onClick={() => confirmAndDeleteProduct(product.id, product.name)} className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
+                Delete
               </button>
             )}
           </div>
