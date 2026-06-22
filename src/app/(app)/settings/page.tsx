@@ -43,11 +43,15 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
+      {/* P3: the raw Business ID is an internal identifier - platformOwner only. Customers see only
+          Export, Clean up, and Danger zone. */}
+      {isPlatform && (
       <Section title="Business">
         <Row label="Business ID">
           <span className="font-mono text-xs text-zinc-600">{businessId}</span>
         </Row>
       </Section>
+      )}
 
       {isPlatform && (<>
       <Section title="AI lookup">
@@ -187,6 +191,9 @@ export default function SettingsPage() {
 
       </>)}
 
+      {/* P3: Scanner tuning + Sync internals are technical settings - platformOwner only. A 65+ customer
+          should never see "Submit mode", "Debounce (ms)", "pending sync queue", or "idempotent sync". */}
+      {isPlatform && (<>
       <Section title="Scanner">
         <Row label="Submit mode">
           <select
@@ -223,6 +230,7 @@ export default function SettingsPage() {
           onChange={(v) => update({ enableIdempotentSync: v })}
         />
       </Section>
+      </>)}
 
       <Section title="Export">
         <ExportMenu />
