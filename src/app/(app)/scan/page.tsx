@@ -33,6 +33,10 @@ export default function ScanPage() {
 
   const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
   const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page
+  // P4: keep the scan box the single hero - collapse the secondary controls by default for real users.
+  // Stay expanded under E2E (the auth-bypass flag is set only in the Playwright webServers, never in prod)
+  // so tests + power users keep every control reachable.
+  const expandSecondary = process.env.NEXT_PUBLIC_E2E_AUTH_BYPASS === "1";
   const autoDecodeOn = settings.aiLookupEnabled && aiStatus.autoDecodeOnScan && aiStatus.liveEnabled && hasKey && !aiStatus.emergencyStop;
 
   return (
@@ -90,9 +94,9 @@ export default function ScanPage() {
           </div>
         </div>
 
-        {/* Everything below the scan box is secondary. Group it so the scan box stays the hero; the user
-            can collapse it to declutter. Default OPEN so every control stays reachable (tests + power use). */}
-        <details open className="group mt-1 border-t border-zinc-200 pt-3">
+        {/* Everything below the scan box is secondary. Group it so the scan box stays the hero. Collapsed by
+            default for real users (P4); expanded under E2E so every control stays reachable. */}
+        <details open={expandSecondary} className="group mt-1 border-t border-zinc-200 pt-3">
           <summary className="cursor-pointer list-none text-base font-medium text-zinc-700 hover:text-zinc-900">
             <span className="select-none">More options (session, sync, export)</span>
           </summary>

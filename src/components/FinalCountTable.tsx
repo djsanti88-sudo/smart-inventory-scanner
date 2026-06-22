@@ -177,29 +177,29 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
               className="rounded border border-zinc-300 px-2 py-1 text-xs"
             />
             <div className="flex gap-1">
-              <button type="button" data-testid={`correct-save-${product.id}`} onClick={onSave} className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
+              <button type="button" data-testid={`correct-save-${product.id}`} onClick={onSave} className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 text-base font-medium text-white hover:bg-blue-700">
                 Save
               </button>
-              <button type="button" onClick={() => setEditing(false)} className="rounded border border-zinc-300 px-2 py-1 text-xs">
+              <button type="button" onClick={() => setEditing(false)} className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50">
                 Cancel
               </button>
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap gap-1">
-            <button type="button" data-testid={`correct-${product.id}`} onClick={() => setEditing(true)} className="rounded border border-zinc-300 px-2 py-1 text-xs">
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" data-testid={`correct-${product.id}`} onClick={() => setEditing(true)} className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50">
               Correct
             </button>
-            <button type="button" data-testid={`remove-count-${product.id}`} onClick={onRemove} className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-600">
+            <button type="button" data-testid={`remove-count-${product.id}`} onClick={onRemove} className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50">
               Remove from count
             </button>
             {isPlatform && (
-              <button type="button" data-testid={`mark-wrong-${product.id}`} onClick={onMarkWrong} className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
+              <button type="button" data-testid={`mark-wrong-${product.id}`} onClick={onMarkWrong} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">
                 Mark wrong
               </button>
             )}
             {isPlatform && (
-              <button type="button" data-testid={`delete-product-${product.id}`} onClick={() => confirmAndDeleteProduct(product.id, product.name)} className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">
+              <button type="button" data-testid={`delete-product-${product.id}`} onClick={() => confirmAndDeleteProduct(product.id, product.name)} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">
                 Delete
               </button>
             )}
