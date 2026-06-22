@@ -203,7 +203,10 @@ export async function POST(request: Request) {
       let evidences = run.evidences;
       let providerNames = run.providerNames;
       let providerStatuses = run.providerStatuses;
-      let decision = run.decision;
+      // Re-decide with the business scan context + scanned code so a deterministically-corroborated tire
+      // (strong brand-prefix family + full specs + app-verified exact code) can auto-count even from a
+      // single provider. Same inputs as the orchestrator otherwise; pure + cheap.
+      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext });
       let fallbackFound = false;
       let coverageMissed = false;
       let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
@@ -283,7 +286,7 @@ export async function POST(request: Request) {
             providerNames = [outcome.hit.providerName, ...providerNames];
             fallbackFound = true;
             // Decide on the WINNER alone so leftover fast-path noise can't manufacture a false conflict.
-            decision = decideDecode({ codeType, results: [outcome.hit.result], evidences: [outcome.hit.evidence], confidenceThreshold: threshold });
+            decision = decideDecode({ codeType, results: [outcome.hit.result], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext });
           }
         }
       }

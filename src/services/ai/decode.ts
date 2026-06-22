@@ -1,6 +1,8 @@
 import type { AiLookupResult, CodeType, DecodeDecision, EvidenceResult } from "@/types";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
+import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
 // status. A "verified" decode (auto-counted) requires ALL of:
@@ -21,6 +23,8 @@ export interface DecodeParams {
   results: AiLookupResult[];
   evidences: EvidenceResult[];
   confidenceThreshold: number;
+  code?: string; // the exact scanned code, for deterministic brand-prefix-family corroboration
+  scanContext?: "any" | "tire"; // business scan context; "tire" enables deterministic tire corroboration
 }
 
 // --- Product-name quality gate (junk firewall) ------------------------------------------------
@@ -69,7 +73,7 @@ function identityOf(r: AiLookupResult): string {
 }
 
 export function decideDecode(params: DecodeParams): DecodeDecision {
-  const { codeType, confidenceThreshold } = params;
+  const { codeType, confidenceThreshold, code, scanContext } = params;
   const present = params.results.filter((r) => r && identityOf(r).length > 0);
   const a = present[0] ?? null;
   const b = present[1] ?? null;
@@ -106,12 +110,30 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     passesThreshold &&
     cc.decision === "agree";
 
-  if (canVerify) {
+  // DETERMINISTIC TIRE CORROBORATION: the barcode's STRONG brand-prefix family + tire context + full tire
+  // specs + the app's own exact-code verification act as an INDEPENDENT agreeing source - equivalent to
+  // two-provider agreement, but grounded in signals that do NOT come from the AI text (prefix table, spec
+  // structure, business context). This lets an accurate single-provider tire decode auto-count without a
+  // second AI provider. A brand/prefix MISMATCH, non-tire product, missing specs, or weak/unverified
+  // evidence can never satisfy it - and confidence alone never does (it is not one of the conditions).
+  const tireCorroborated =
+    scanContext === "tire" &&
+    isPublicBarcode &&
+    strong &&
+    identityNonEmpty &&
+    !!a &&
+    isTireContext(a) &&
+    hasRequiredTireSpecs(a) &&
+    !!code &&
+    isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
+
+  if (canVerify || tireCorroborated) {
     return {
       status: "verified",
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
-      reason:
-        "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence.",
+      reason: canVerify
+        ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
+        : "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + full specs + app-verified exact code (independent of the AI text).",
       evidenceStrength: bestEvidence.strength,
       exactCodeEvidenceVerifiedByApp: true,
       crossCheck: baseCrossCheck,
