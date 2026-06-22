@@ -197,6 +197,46 @@ describe("runDecode - W1 verified-only early exit", () => {
     expect(r.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
   });
 
+  it("threads a result's fetchedSourceText so fetched_source CONFIRMS the exact code (evidenceOf fix)", async () => {
+    // A provider/page result that carries the real page text it was read from must verify at the
+    // strongest tier. Before the fix, evidenceOf dropped fetchedSourceText so fetched_source got empty
+    // text and could never confirm the code (the live-effectiveness bug).
+    const withPage: DecodeProvider = {
+      name: "page-fetch",
+      lookup: async () => ({
+        ...emptyResult(),
+        productName: "Coca-Cola Classic",
+        brand: "Coca-Cola",
+        upc: "049000028904",
+        fetchedSourceText: "Product page: Coca-Cola Classic 12oz. UPC 049000028904. In stock.",
+        confidence: 0.92,
+      }),
+    };
+    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [withPage], budgetMs: 13_000 });
+    const ev = r.evidences.find((e) => e.verified && e.strength === "fetched_source");
+    expect(ev, "fetched_source evidence must verify from the result's own page text").toBeDefined();
+    expect(ev?.matchedCode).toBe("049000028904");
+    expect(r.providerStatuses.find((s) => s.provider === "page-fetch")?.exactCodeFound).toBe(true);
+  });
+
+  it("does NOT verify fetched_source when the page text lacks the exact code (negative control)", async () => {
+    const wrongPage: DecodeProvider = {
+      name: "page-fetch",
+      lookup: async () => ({
+        ...emptyResult(),
+        productName: "Coca-Cola Classic",
+        brand: "Coca-Cola",
+        upc: "049000028904",
+        // Page text is about a DIFFERENT code -> the scanned code is NOT present -> must not verify.
+        fetchedSourceText: "Product page: Pepsi 12oz. UPC 012000001291. In stock.",
+        confidence: 0.92,
+      }),
+    };
+    const r = await runDecode({ code: "049000028904", codeType: "upc_a", confidenceThreshold: 0.8, providers: [wrongPage], budgetMs: 13_000 });
+    expect(r.evidences.some((e) => e.verified)).toBe(false); // no channel confirmed the scanned code
+    expect(r.decision.status).not.toBe("verified");
+  });
+
   it("855724007602 (known live decode) VERIFIES under the stricter pipeline when TWO sources agree with evidence", async () => {
     const natureWise = (name: string): DecodeProvider => ({
       name,
