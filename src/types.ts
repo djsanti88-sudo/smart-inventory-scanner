@@ -383,6 +383,11 @@ export interface AiLookupResult {
   // evidenceOf() (it is never capped/sanitized into a snippet - it stays the raw fetched source).
   fetchedSourceText?: string;
   exactCodeEvidence?: boolean; // model SELF-CLAIM that the exact code appears in a source (untrusted)
+  // Phase 9: set TRUE only by the page-fetch step when an INDEPENDENT model read of the SAME fetched page
+  // agreed (via crossCheck) with the deterministic title extraction on the normalized tire identity. It is
+  // the "page-fetch + one model agreement" corroboration signal; it never bypasses the firewall, the
+  // exact-code evidence gate, the tire-spec gate, or the >=0.9 store gate.
+  corroboratedByModel?: boolean;
 }
 
 // --- Evidence verification (the app independently verifies the exact code in real evidence) ---
@@ -453,6 +458,9 @@ export interface AiStatus {
   lastFailureReason: string;
 }
 
+/** Which approved corroboration path produced a "verified" decode (for honest reporting). */
+export type CorroborationPath = "two_ai_agreement" | "page_fetch_model_agreement" | "deterministic_prefix";
+
 export interface DecodeDecision {
   status: DecodeStatus;
   confidence: number;
@@ -460,4 +468,5 @@ export interface DecodeDecision {
   evidenceStrength: EvidenceStrength;
   exactCodeEvidenceVerifiedByApp: boolean; // set ONLY from EvidenceVerifier output, never the model
   crossCheck: CrossCheckResult;
+  corroborationPath?: CorroborationPath; // set only when status === "verified"
 }

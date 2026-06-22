@@ -24,8 +24,10 @@ export const KNOWN_TIRE_BRANDS = [
   "gt radial", "atturo", "milestar", "lexani",
 ];
 
-// Metric / P-metric / LT sizes: 275/55R20, LT265/70R17, P225/60R17, 225/60ZR17.
-const METRIC_SIZE = /\b(LT|P|ST)?\d{3}\/\d{2}\s?Z?R\s?\d{2}\b/i;
+// Metric / P-metric / LT sizes: 275/55R20, LT265/70R17, P225/60R17, 225/60ZR17. Also accept the dash
+// notation some barcode DBs use (245/65-17) - it is the SAME size, just a different separator; the spec
+// COMPLETENESS check still independently requires a load index + speed rating, so this never relaxes specs.
+const METRIC_SIZE = /\b(LT|P|ST)?\d{3}\/\d{2}\s?(Z?R|-)\s?\d{2}\b/i;
 // Commercial / flotation: 11R22.5, 295/75R22.5, 35X12.5R20.
 const COMMERCIAL_SIZE = /\b\d{2}(\.\d)?(X\d{2}(\.\d)?)?R\d{2}(\.\d)?\b/i;
 // Load index (2-3 digits, optional dual) + speed-rating letter as a standalone token: 111T, 111/110T, 116 S.
@@ -40,6 +42,16 @@ function haystack(r: IdentityText | null | undefined): string {
 export function hasTireSize(r: IdentityText | null | undefined): boolean {
   const t = haystack(r);
   return METRIC_SIZE.test(t) || COMMERCIAL_SIZE.test(t);
+}
+
+/** The normalized tire SIZE token (e.g. "245/75R16"), spaces removed + uppercased, or "" if none. Used to
+ *  require two independent extractions to agree on the EXACT size before treating them as corroborating. */
+export function tireSizeToken(r: IdentityText | null | undefined): string {
+  const t = haystack(r);
+  const m = t.match(METRIC_SIZE) || t.match(COMMERCIAL_SIZE);
+  if (!m) return "";
+  // Canonicalize the separator (dash -> R) so "245/65-17" and "245/65R17" compare equal.
+  return m[0].replace(/\s+/g, "").replace(/(\d{2})-(\d{2})$/, "$1R$2").toUpperCase();
 }
 
 /**

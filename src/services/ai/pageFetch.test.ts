@@ -116,6 +116,36 @@ describe("enrichWithPageFetch (the read step)", () => {
     expect(r.result?.brand ?? "").toBe(""); // no known tire brand in the name -> stays empty
   });
 
+  it("PATH-2: sets corroboratedByModel when an independent model read agrees on brand + exact size", async () => {
+    const html = `<html><head><title>Cooper Discoverer A/T3 245/75R16 120R</title></head>
+      <body>UPC 029142712886 light truck all-terrain tire</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) => (url.includes("go-upc") ? page(html) : notFound())) as unknown as FetchImpl;
+    // The heuristic title is usable, so `extract` is the INDEPENDENT model read used only for corroboration.
+    const extract = vi.fn(async () => ({ productName: "Cooper Discoverer A/T3", brand: "Cooper", specsShort: "245/75R16 120R" }));
+    const r = await enrichWithPageFetch({ code: "029142712886", codeType: "upc_a", fetchImpl, extract, corroborate: true });
+    expect(r.result?.corroboratedByModel).toBe(true);
+    expect(extract).toHaveBeenCalled();
+  });
+
+  it("PATH-2: does NOT corroborate when the model read disagrees on the tire size", async () => {
+    const html = `<html><head><title>Cooper Discoverer A/T3 245/75R16 120R</title></head>
+      <body>UPC 029142712886 tire</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) => (url.includes("go-upc") ? page(html) : notFound())) as unknown as FetchImpl;
+    const extract = vi.fn(async () => ({ productName: "Cooper Discoverer A/T3", brand: "Cooper", specsShort: "265/70R17 115T" })); // DIFFERENT size
+    const r = await enrichWithPageFetch({ code: "029142712886", codeType: "upc_a", fetchImpl, extract, corroborate: true });
+    expect(r.result?.corroboratedByModel).toBe(false);
+  });
+
+  it("PATH-2: without the corroborate flag, runs NO extra model read and does not corroborate", async () => {
+    const html = `<html><head><title>Cooper Discoverer A/T3 245/75R16 120R</title></head>
+      <body>UPC 029142712886 tire</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) => (url.includes("go-upc") ? page(html) : notFound())) as unknown as FetchImpl;
+    const extract = vi.fn(async () => ({ productName: "should not be called", brand: "x" }));
+    const r = await enrichWithPageFetch({ code: "029142712886", codeType: "upc_a", fetchImpl, extract });
+    expect(r.result?.corroboratedByModel).toBeFalsy();
+    expect(extract).not.toHaveBeenCalled();
+  });
+
   it("matches a UPC-12 even when the page shows the GTIN-13 form", async () => {
     const html = `<html><head><title>PHATOIL Lavender Essential Oil 100ml</title></head>
       <body>GTIN-13: 0697722815261 ... barcode 6977228152610 lavender</body></html>`;

@@ -1,0 +1,84 @@
+{
+  "phase": "Phase 9 - raise safe live tire auto-count without weakening poison protection",
+  "branch": "decoder-hardening-v1-local",
+  "done": true,
+  "new_autocount_conditions": "Auto-count fires when ALL hard gates pass (exact app-verified scanned-code evidence, no category_context_conflict, no brand_prefix_conflict, tire-domain in tire context, FULL tire specs, confidence >= 0.90 normalized, customer-privacy intact) AND ANY ONE approved corroboration PATH holds: (1) two_ai_agreement (two independent providers agree); (2) NEW page_fetch_model_agreement - the app's page-fetch result was corroborated by an INDEPENDENT model read of the SAME verified page agreeing on brand + EXACT tire size (set as result.corroboratedByModel in enrichWithPageFetch via crossCheck; never page-fetch alone, never model-confidence alone); (3) deterministic_prefix (strong learned brand-prefix family + full specs + app-verified code). decideDecode tags the winning path on the decision (decision.corroborationPath).",
+  "mock_baseline_before": {
+    "identity_accuracy_pct": 100,
+    "auto_count_rate_pct": 33,
+    "false_auto_count_rate_pct": 0,
+    "specs_extracted_pct": 89,
+    "note": "single-provider page-fetch; only strong-prefix-family tires (Michelin 086699, Cooper 029142712886, Hankook 0715459) corroborated."
+  },
+  "mock_baseline_after": {
+    "identity_accuracy_pct": 100,
+    "auto_count_rate_pct": 89,
+    "false_auto_count_rate_pct": 0,
+    "specs_extracted_pct": 89,
+    "note": "8/9 full-spec tires now auto-count via page_fetch_model_agreement (path 2); only the truncated-spec Cooper 029142815167 correctly withholds (specs gate). Poison still 0%.",
+    "table": "see docs/decode/eval-baseline.md (npx vitest run src/eval/eval.test.ts)"
+  },
+  "live_per_code": [
+    { "code": "086699205636", "expected": "Michelin", "decoded": "Michelin", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10090, "reason_if_not": "source page lacks load index + speed rating (size shown as 245/65-17, no full specs); spec gate correctly withholds" },
+    { "code": "051342144969", "expected": "Continental", "decoded": "Continental", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10038, "reason_if_not": "source page lacks full specs (load+speed)" },
+    { "code": "029142712886", "expected": "Cooper", "decoded": "Cooper", "decision": "verified", "conf": 0.92, "path": "deterministic_prefix", "autoCount": true, "latencyMs": 10040 },
+    { "code": "029142815167", "expected": "Cooper", "decoded": "Cooper", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10039, "reason_if_not": "source page lacks full specs (load+speed)" },
+    { "code": "8807622002083", "expected": "Nexen", "decoded": "Nexen", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10043, "reason_if_not": "source page lacks full specs (load+speed)" },
+    { "code": "8807622002649", "expected": "Nexen", "decoded": "Nexen", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10036, "reason_if_not": "source page lacks full specs (load+speed)" },
+    { "code": "715459332915", "expected": "Hankook", "decoded": "Hankook", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10030, "reason_if_not": "source page lacks full specs (load+speed)" },
+    { "code": "697662123125", "expected": "Goodyear", "decoded": "Goodyear", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10035, "reason_if_not": "source page lacks full specs (load+speed)" },
+    { "code": "697662036067", "expected": "Goodyear", "decoded": "Goodyear", "decision": "suggested", "conf": 0.55, "path": "-", "autoCount": false, "latencyMs": 10031, "reason_if_not": "source page lacks full specs (load+speed)" },
+    { "code": "745125495781", "expected": "(poison)", "decoded": "(none)", "decision": "needs_review", "conf": 0.0, "path": "-", "autoCount": false, "latencyMs": 35041, "reason_if_not": "POISON - decode timed out on deep fallback -> Needs Review; never counted (correct)" }
+  ],
+  "live_summary": {
+    "identity_accuracy_pct": 100,
+    "auto_count_rate_pct": 11,
+    "auto_counted_codes": ["029142712886"],
+    "false_auto_count": 0,
+    "note": "Identity is 100% correct live, but 8/9 tire SOURCE pages (barcode DBs) lack a parseable load index + speed rating, so the tire-spec completeness gate (a hard safety rule) correctly withholds auto-count. Path 2 is proven in mock (89%) + unit tests; it unlocks the second-source requirement, NOT missing source specs. The spec gate was deliberately NOT weakened."
+  },
+  "latency": {
+    "before_p50_ms": 10040, "before_p95_ms": 13000,
+    "after_p50_ms": 10039, "after_p95_ms": 10090,
+    "poison_deep_fallback_ms": 35041,
+    "note": "Tire decode latency is bounded by the unchanged 13s budget / 10s per-provider timeout; the path-2 page-read corroboration runs WITHIN that budget (concurrent, page timeout 8s) and enables early-exit on a verified tire, so tire p95 is NOT worse (~10s). The 35s figure is the POISON's deep-fallback path (Firecrawl + deep AI), which is pre-existing and unchanged by Phase 9. The budget was NOT increased."
+  },
+  "false_poison_result": "0% (mock + live). 745125495781 -> needs_review live, never counted.",
+  "poison_code_result": "745125495781 NOT auto-counted at any layer (evidence none/timeout, non-tire firewall, no corroboration path). Near-match 7451254957818 never verifies 745125495781 (exact-code evidence test).",
+  "invariant_confirmations": {
+    "exact_scanned_code_required": true,
+    "near_match_blocked": true,
+    "page_fetch_alone_never_counts": true,
+    "model_confidence_alone_never_counts": true,
+    "full_specs_required_for_tires": true,
+    "firewall_and_brand_prefix_conflict_enforced": true,
+    "poison_zero_auto_count": true,
+    "security_leak_bot_findings": [],
+    "no_budget_increase": true,
+    "no_pro_default": true,
+    "no_provider_order_or_key_changes": true
+  },
+  "blockers_by_code": {
+    "086699205636": "barcode-DB page lacks load index + speed rating",
+    "051342144969": "barcode-DB page lacks load index + speed rating",
+    "029142815167": "barcode-DB page lacks load index + speed rating (title truncated the speed)",
+    "8807622002083": "barcode-DB page lacks load index + speed rating",
+    "8807622002649": "barcode-DB page lacks load index + speed rating",
+    "715459332915": "barcode-DB page lacks load index + speed rating",
+    "697662123125": "barcode-DB page lacks load index + speed rating",
+    "697662036067": "barcode-DB page lacks load index + speed rating"
+  },
+  "iterations": "2 safe iterations: (1) path-2 page_fetch_model_agreement; (2) dash-size recognition + spec-merge from the corroborating model read. Stopped before a 3rd that would either weaken the spec gate (forbidden) or require RAG/manufacturer-spec retrieval (Improvement Plan P2, a larger separate effort).",
+  "screenshots": [
+    "e2e/proof/phase9-final-count-cooper-counted.png (Cooper auto-counted qty 1 via deterministic_prefix)",
+    "e2e/proof/phase9-needs-review-poison.png (745125495781 in Needs Review)"
+  ],
+  "verification": {
+    "tsc": "clean", "eslint": "clean (4 pre-existing warnings)", "vitest": "618 passed / 30 skipped / 0 failed",
+    "next_build": "ok", "playwright": "19 passed",
+    "qa_bots": "security 2, data 1, tire 1, ux 1 (all passed; leak findings [])"
+  },
+  "what_still_cannot_autocount_and_why": "8 of the 9 real tires - their barcode-DB source pages do not expose a parseable load index + speed rating, and the tire-spec completeness gate (a hard safety rule) correctly routes them to Needs Review rather than auto-count an under-specified tire. The durable fix is grounded retrieval of full specs (RAG over the prefix table + catalog flywheel + manufacturer spec sheets - Improvement Plan P2), not a corroboration change. Cooper 029142712886 auto-counts (full specs + strong family).",
+  "nothing_pushed_merged_deployed": true,
+  "no_secrets_committed_or_printed": true
+}

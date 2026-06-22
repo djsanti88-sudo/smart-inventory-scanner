@@ -2,7 +2,8 @@ import type { AiLookupResult, CodeType, EvidenceResult } from "@/types";
 import { normalizeResult } from "@/services/ai/provider";
 import { verifyEvidence } from "@/services/ai/evidenceVerifier";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
-import { inferTireBrandFromName } from "@/services/ai/tireSpecs";
+import { inferTireBrandFromName, isTireContext, hasRequiredTireSpecs, tireSizeToken } from "@/services/ai/tireSpecs";
+import { crossCheck } from "@/services/ai/crossCheckEngine";
 
 // Page-fetch-and-read: the app itself opens public barcode/retail pages, reads the text, confirms
 // the exact code is on the page (strong "fetched_source" evidence), and extracts the product. This
@@ -223,6 +224,10 @@ export async function enrichWithPageFetch(params: {
   fetchImpl?: FetchImpl;
   signal?: AbortSignal;
   extract?: (pageText: string, code: string, signal?: AbortSignal) => Promise<Partial<AiLookupResult>> | Partial<AiLookupResult>;
+  // Phase 9: when true AND `extract` is provided AND the heuristic produced a tire identity, run ONE
+  // independent model read of the same page and, if it agrees on the normalized tire identity (brand +
+  // exact size), set result.corroboratedByModel = true. Set by the route only for tire scanContext.
+  corroborate?: boolean;
 }): Promise<PageEnrichResult> {
   const urls = uniq([...(params.extraUrls ?? []), ...barcodeDbUrls(params.code)]).slice(0, params.maxPages ?? 6);
   // ONLY trust a page that actually contains the exact scanned code (or a GTIN-13/14 variant).
@@ -286,6 +291,35 @@ export async function enrichWithPageFetch(params: {
         fetchedSourceText: codePage ? codePage.text : fetchedText,
       })
     : null;
+
+  // PATH-2 corroboration (Phase 9): when the DETERMINISTIC heuristic produced a usable tire identity
+  // (so `extracted` is null - the model has NOT already authored the result), run ONE independent model
+  // read of the SAME page text and treat it as corroboration ONLY if it AGREES (crossCheck) on the brand
+  // AND extracts the EXACT same tire size. This is "page-fetch + one model agreement" (decode path 2). It
+  // adds at most one fast non-grounded read, and only for a tire that already has full specs + verified
+  // code - the cases we want to auto-count - so it never slows non-tire scans. Never trusts the model
+  // alone; the deterministic page result stays the identity and all downstream gates still apply.
+  if (result && params.corroborate && params.extract && !extracted && evidence.verified && isTireContext(result)) {
+    try {
+      const modelRead = normalizeResult(await params.extract(fetchedText, params.code, params.signal));
+      const cc = crossCheck(result, modelRead);
+      const sizeA = tireSizeToken(result);
+      const sizeB = tireSizeToken(modelRead);
+      const sizesAgree = cc.decision === "agree" && !!sizeA && sizeA === sizeB;
+      // When the deterministic title agreed on brand + size but lacked the load index / speed rating, take
+      // those from the INDEPENDENT model read of the SAME verified page (it reads the full page text, not
+      // just the title). This recovers full specs from the verified source without trusting the model alone:
+      // the brand + exact size still had to match, the exact code is still app-verified, and the firewall
+      // still applies downstream. Never merges when the sizes disagree.
+      if (sizesAgree && hasRequiredTireSpecs(modelRead) && !hasRequiredTireSpecs(result)) {
+        result.specsShort = modelRead.specsShort?.trim() || result.specsShort;
+        if (!hasRequiredTireSpecs(result)) result.specsFull = `${result.specsFull ?? ""} ${modelRead.specsShort ?? ""}`.trim();
+      }
+      result.corroboratedByModel = sizesAgree && hasRequiredTireSpecs(result);
+    } catch {
+      result.corroboratedByModel = false;
+    }
+  }
 
   return { result, evidence, fetchedUrls, pageCount: pages.length, fetchedText };
 }
