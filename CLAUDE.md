@@ -72,8 +72,12 @@ retail, restaurant supplies, medical supplies, and any physical inventory.
 - `decideDecode` (`decode.ts`) returns "verified" ONLY for a public barcode (never X00/FNSKU/vendor/
   internal) with strong app-verified evidence, provider agreement (or single provider), non-empty
   identity, and confidence >= threshold. Otherwise suggested / needs_review; disagreement = conflict.
-- A "Verified AI Decode" is still a SUGGESTION the human approves; it auto-counts ONLY if the owner
-  enables `autoAcceptVerifiedDecodes` (default OFF) AND it is a public barcode.
+- A "Verified AI Decode" that clears the Phase-7 evidence gate AUTO-COUNTS by default: the master gate
+  `autoAddDecodedProducts` defaults true (scanStore.ts), and the gate requires status verified +
+  app-verified exact code (`exactCodeEvidenceVerifiedByApp`) + confidence >= 0.9 + (for tires) full specs
+  + no firewall/brand-prefix conflict, on a public barcode. Set `autoAddDecodedProducts` false to route
+  every decode to manual review instead. NOTE: `autoAcceptVerifiedDecodes` is declared (types.ts) and
+  defaulted false but is currently UNUSED/dead - it does NOT gate auto-count; do not rely on it.
 - TEST SAFETY: automated tests NEVER call live Gemini/OpenAI. Unit tests mock the engines/`fetch`;
   E2E mocks `/api/ai-lookup` with `page.route`; the Playwright webServer runs with `IS_E2E=1` which
   forces the route to mock-only. Live providers run only in manual/dev use with a key present.
