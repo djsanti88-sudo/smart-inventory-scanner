@@ -38,6 +38,9 @@ test("IdentifierBackfillBot: platform fills barcode-in-name, reversible (P2)", a
 
   // P3 cross-check: the platformOwner view is UNCHANGED - it still shows the technical settings a customer
   // no longer sees (Business ID, Scanner tuning, Sync internals).
+  // Wait for the persisted store to hydrate (Settings renders "Loading local session..." until then) so the
+  // body-text read below never races hydration. Timing guard only - it changes/weakens no assertion.
+  await expect(page.getByTestId("identifier-backfill")).toBeVisible();
   const settingsBody = await page.locator("body").innerText();
   for (const term of ["Business ID", "Debounce", "Enable idempotent sync", "Submit mode"]) {
     expect(settingsBody, `platform Settings still shows "${term}"`).toContain(term);

@@ -139,7 +139,7 @@ export async function GET() {
     pageFetchAndRead: true,
     premiumFallback: process.env.ENABLE_PREMIUM_MODEL_FALLBACK !== "false",
     mode: process.env.AI_LOOKUP_MODE || "aggressive",
-    dailyLimit: Number(process.env.AI_LOOKUP_DAILY_LIMIT || 100),
+    dailyLimit: Number(process.env.AI_LOOKUP_DAILY_LIMIT || 200),
     missingKeys,
     e2e: e2eMode(),
   });
