@@ -49,3 +49,13 @@ next-env.d.ts
 *-debug.log
 .firebase/
 firebase-export-*/
+
+# service-account keys / secrets — NEVER commit
+sa-key.json
+sa-key*.json
+service-account*.json
+service_account*.json
+serviceAccount*.json
+*firebase-adminsdk*.json
+*.serviceaccount.json
+gcloud-*.json
