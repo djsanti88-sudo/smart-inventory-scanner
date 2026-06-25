@@ -1,7 +1,7 @@
 import type { AiLookupResult, CodeType, DecodeDecision, EvidenceResult } from "@/types";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
@@ -123,7 +123,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     identityNonEmpty &&
     !!a &&
     isTireContext(a) &&
-    hasRequiredTireSpecs(a) &&
+    hasCountableTireIdentity(a) &&
     !!code &&
     isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
 
@@ -133,7 +133,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
   // a.corroboratedByModel by enrichWithPageFetch via crossCheck), that is a genuine two-source agreement -
   // page-fetch (deterministic) + model - and unlocks auto-count WITHOUT needing the strong prefix family.
   // It is NOT confidence-only and NOT page-fetch alone: it requires the model agreement flag AND strong
-  // app-verified exact-code evidence AND tire domain AND full specs. The firewall + brand_prefix conflict +
+  // app-verified exact-code evidence AND tire domain AND a countable identity (size + model). The firewall + brand_prefix conflict +
   // the >=0.9 store gate still apply downstream, so a non-tire (poison) can never reach a count this way.
   const pageFetchModelAgreement =
     scanContext === "tire" &&
@@ -143,7 +143,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     !!a &&
     a.corroboratedByModel === true &&
     isTireContext(a) &&
-    hasRequiredTireSpecs(a);
+    hasCountableTireIdentity(a);
 
   if (canVerify || tireCorroborated || pageFetchModelAgreement) {
     const corroborationPath = canVerify ? "two_ai_agreement" : tireCorroborated ? "deterministic_prefix" : "page_fetch_model_agreement";
@@ -153,8 +153,8 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
       reason: canVerify
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
         : tireCorroborated
-          ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + full specs + app-verified exact code (independent of the AI text)."
-          : "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with full specs + app-verified exact code.",
+          ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
+          : "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code.",
       evidenceStrength: bestEvidence.strength,
       exactCodeEvidenceVerifiedByApp: true,
       crossCheck: baseCrossCheck,

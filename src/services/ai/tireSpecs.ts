@@ -97,3 +97,28 @@ export function hasRequiredTireSpecs(r: IdentityText | null | undefined): boolea
   const rest = t.replace(METRIC_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
   return LOAD_SPEED.test(rest); // consumer/LT metric: require load index + speed rating too
 }
+
+// Common non-model noise words to strip when isolating the model name.
+const TIRE_NOISE = /\b(tires?|tyres?|radial|all[- ]?season|all[- ]?terrain|mud[- ]?terrain|highway|touring|performance|passenger|new|set of \d+|lt|p|st|xl|bsw|owl|rwl)\b/gi;
+
+/** The model/line name remaining in the product name after removing brand, size, load/speed and noise. */
+export function tireModelToken(r: IdentityText | null | undefined): string {
+  const name = (r?.productName ?? "");
+  let rest = name.replace(METRIC_SIZE, " ").replace(COMMERCIAL_SIZE, " ").replace(LOAD_SPEED, " ");
+  const brand = (r?.brand && r.brand.trim()) || inferTireBrandFromName(name);
+  if (brand) rest = rest.replace(new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), " ");
+  rest = rest.replace(TIRE_NOISE, " ").replace(/[^A-Za-z0-9+ ]/g, " ").replace(/\s+/g, " ").trim();
+  const words = rest.split(" ").filter((w) => w.replace(/[^A-Za-z0-9]/g, "").length >= 3);
+  return words.join(" ");
+}
+
+/** A usable model/line name is present (e.g. "Defender", "Discoverer AT3"). */
+export function hasTireModel(r: IdentityText | null | undefined): boolean {
+  return tireModelToken(r).length >= 3;
+}
+
+/** Countable tire identity for inventory: a size AND a model name. Brand comes from the GS1 prefix, not
+ *  this check, and load index + speed rating are optional enrichment (not required to count). */
+export function hasCountableTireIdentity(r: IdentityText | null | undefined): boolean {
+  return hasTireSize(r) && hasTireModel(r);
+}
