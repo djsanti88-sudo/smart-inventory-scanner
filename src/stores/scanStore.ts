@@ -6,6 +6,7 @@ import type {
   Alias,
   AiLookupLog,
   AiLookupResult,
+  DecodeDecision,
   InventoryCount,
   InventorySession,
   PendingSyncItem,
@@ -268,6 +269,13 @@ export interface ScanState {
   updateSettings: (partial: Partial<Settings>) => void;
   lookupUnknown: (reviewId: string) => Promise<void>;
   liveDecode: (reviewId: string) => Promise<void>;
+  /** Tasks 5+6: client-orchestrated background verify. After a tire scan's fast decode lands as
+   *  suggested/needs_review, fire ONE `mode:"decode-deep"` request WITH `scanContext:"tire"` (the
+   *  page-fetch verify gate cannot fire without it). On a `verified` decideDecode result, route it
+   *  through the EXISTING verified-decode handling (count + alias) using the scan's existing review,
+   *  so a late/duplicate response can never double-count (the open-status guard makes it idempotent).
+   *  A non-verified deep result never counts; it may only refresh the review suggestion. */
+  backgroundVerifyDeep: (reviewId: string) => Promise<void>;
   setAiStatus: (partial: Partial<AiStatus>) => void;
   refreshAiStatus: () => Promise<void>;
   setEmergencyStop: (on: boolean) => void;
@@ -1699,6 +1707,27 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     )
                   : st.scanFeed,
             }));
+
+            // Tasks 5+6: CLIENT-ORCHESTRATED BACKGROUND VERIFY. The fast hot path (mode:"decode") did
+            // NOT auto-count this scan (the else branch ran -> not verified-and-clean). For a TIRE scan
+            // that is still open, fire ONE background `mode:"decode-deep"` request WITH scanContext
+            // "tire" - that is what makes the route page-fetch + app-verify the exact UPC and lets
+            // decideDecode return "verified" (proven live: Hankook 715459332915). On success it routes
+            // through the SAME verified-decode handling below to count + learn the alias.
+            //
+            // Never fire when the fast pass was a firewall context CONFLICT (a poisoned/off-domain
+            // identity in tire context): re-fetching would just re-confirm the poison and the firewall
+            // would block the count anyway, so we keep it in human review instead of spending a fetch.
+            // The tire trigger reads BOTH the scan context (tire) and the decoded identity, so a clearly
+            // non-tire decode in tire context does not escalate.
+            const tireScan =
+              (s.scanContext ?? "any") === "tire" && (isTireContext(best) || lookupTirePrefix(review.cleanCode) !== null);
+            const fastWasVerified = decision?.status === "verified";
+            if (tireScan && !fastWasVerified && !contextConflict) {
+              // Fire-and-forget: it must NEVER block the scan UI or throw into this flow. The action
+              // self-guards on the review still being open (idempotent against a late/duplicate response).
+              void get().backgroundVerifyDeep(reviewId);
+            }
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
@@ -1721,6 +1750,212 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
           }));
         }
+      },
+
+      backgroundVerifyDeep: async (reviewId) => {
+        const state = get();
+        const review = state.needsReviewQueue.find((r) => r.id === reviewId);
+        // IDEMPOTENCY GUARD: only an OPEN review is ever acted on. The fast-path resolveUnknown (or an
+        // earlier deep response) flips the review to "resolved" the instant it counts, so a late or
+        // duplicate deep response that re-enters here finds status !== "open" and returns - it can never
+        // double-count or duplicate the alias. This reuses the SAME open-status gate liveDecode relies on.
+        if (!review || review.status !== "open") return;
+
+        const s = state.settings;
+        const nowIso = now();
+        const today = nowIso.slice(0, 10);
+        const nowMs = new Date(nowIso).getTime();
+        const dailyCount = s.lastResetDate === today ? s.dailyLookupCount : 0;
+
+        // Reuse the EXACT auto-decode gate (online + AI on + configured + not stopped + under cap +
+        // breaker closed). No new gating is invented; a blocked state simply leaves the review open.
+        const gate = evaluateAiGate({
+          enabled: s.aiLookupEnabled,
+          online: state.online,
+          dailyCount,
+          dailyLimit: s.dailyLookupLimit,
+          breaker: state.breaker,
+          now: nowMs,
+        });
+        if (!gate.allowed) return;
+
+        const rawCodeSanitized = sanitizeForAiLookup(review.rawCode).clean;
+        const cleanCodeSanitized = sanitizeForAiLookup(review.cleanCode).clean;
+        const codeType = detectCodeType(review.cleanCode);
+
+        let data: {
+          decision?: DecodeDecision;
+          results?: AiLookupResult[];
+        };
+        try {
+          const res = await fetch("/api/ai-lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: "decode-deep",
+              // MANDATORY: without scanContext "tire" the route's page-fetch verify gate cannot fire,
+              // so the exact UPC is never app-verified and decideDecode can never return "verified"
+              // (proven live). This is the whole point of the background pass.
+              scanContext: "tire",
+              rawCode: rawCodeSanitized,
+              cleanCode: cleanCodeSanitized,
+              codeType,
+              confidenceThreshold: 0.85,
+              allowImageSuggestions: s.allowImageSuggestions,
+            }),
+          });
+          if (!res.ok) return; // never throw into the scan flow; leave the review open for the human
+          data = await res.json();
+        } catch {
+          // Network/provider failure on the BACKGROUND pass must be silent: the row is already shown as
+          // suggested/needs_review and the human can still resolve it. Never surface a scary error here.
+          return;
+        }
+
+        const decision = data.decision;
+        const results: AiLookupResult[] = data.results ?? [];
+        const best = results[0] ?? null;
+
+        // Re-read the review: it may have been resolved (fast path / a concurrent deep response) while we
+        // awaited the fetch. Only an OPEN review is upgraded - the idempotency backstop.
+        const fresh = get().needsReviewQueue.find((r) => r.id === reviewId);
+        if (!fresh || fresh.status !== "open") return;
+
+        // NON-VERIFIED deep result: NEVER counts. If it carries a fuller product than the fast pass, refresh
+        // the review's suggestion so the human sees better data; otherwise leave it untouched. No gate weakened.
+        if (decision?.status !== "verified") {
+          if (best && isUsableProductName(best.productName ?? "")) {
+            const tireFields = best && s.scanContext === "tire" && isTireContext(best) ? extractTireFields(best) : null;
+            set((st) => ({
+              needsReviewQueue: st.needsReviewQueue.map((r) =>
+                r.id === reviewId && r.status === "open"
+                  ? {
+                      ...r,
+                      suggestedProductName: tireFields?.description || best.productName || r.suggestedProductName,
+                      suggestedBrand: tireFields?.brand ?? best.brand ?? r.suggestedBrand,
+                      suggestedCategory: best.category ?? r.suggestedCategory,
+                      suggestedSpecsShort: tireFields?.size ?? best.specsShort ?? r.suggestedSpecsShort,
+                      suggestedSpecsFull: best.specsFull ?? r.suggestedSpecsFull,
+                      suggestedPrimarySku: tireFields?.partNumber ?? best.primarySku ?? r.suggestedPrimarySku,
+                      suggestedImageUrl: s.allowImageSuggestions ? (best.imageUrl ?? r.suggestedImageUrl) : r.suggestedImageUrl,
+                      suggestedProductUrl: best.productUrl ?? r.suggestedProductUrl,
+                      sourceUrls: best.sourceUrls ?? r.sourceUrls,
+                      hasSuggestion: true,
+                    }
+                  : r,
+              ),
+            }));
+          }
+          return;
+        }
+
+        // VERIFIED deep result: route through the SAME auto-count gate + verified-decode handling as
+        // liveDecode (Task 6 alignment). This must reuse resolveUnknown so the count + alias-learn +
+        // idempotency keys are identical to the fast path - we never re-implement counting here.
+        const cleanName = cleanProductName(best?.productName ?? "");
+        const tireFields = best && s.scanContext === "tire" && isTireContext(best) ? extractTireFields(best) : null;
+        const avSettings = {
+          autoCatalogLearningEnabled: s.autoCatalogLearningEnabled ?? true,
+          autoVerifyConfidenceThreshold: s.autoVerifyConfidenceThreshold ?? 80,
+          trustedSourceAutoVerifyEnabled: s.trustedSourceAutoVerifyEnabled ?? true,
+          aiOnlyAutoVerifyAllowed: s.aiOnlyAutoVerifyAllowed ?? false,
+        };
+        const plan = planAutoVerify({
+          code: review.cleanCode,
+          codeType,
+          decision: {
+            status: decision.status,
+            evidenceStrength: decision.evidenceStrength ?? "none",
+            exactCodeEvidenceVerifiedByApp: Boolean(decision.exactCodeEvidenceVerifiedByApp),
+            crossCheck: decision.crossCheck ?? {
+              decision: "weak", confidence: 0, reason: "", brandSimilarity: 0, nameSimilarity: 0, contradictions: [],
+            },
+          },
+          best,
+          catalog: get().catalog,
+          settings: avSettings,
+        });
+
+        const newProduct = {
+          name: tireFields?.description || cleanName,
+          brand: tireFields?.brand ?? best?.brand ?? "",
+          category: best?.category ?? "",
+          specsShort: tireFields?.size ?? best?.specsShort ?? "",
+          specsFull: best?.specsFull ?? "",
+          primarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
+          primaryBarcode: best?.primaryBarcode || review.cleanCode,
+          gtin: best?.gtin ?? "",
+          upc: best?.upc ?? "",
+          ean: best?.ean ?? "",
+          imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
+          productUrl: best?.productUrl ?? "",
+        };
+
+        const autoAddOn = s.autoAddDecodedProducts ?? true; // master gate (unchanged): false -> manual review
+        // SAME Phase 7 evidence gate + Phase 8 firewall as liveDecode. A non-verified result never reaches
+        // here, and a firewall/brand-prefix conflict (poison in tire context) still blocks the count.
+        const tireOk = !isTireContext(best) || hasRequiredTireSpecs(best);
+        const contextConflict = detectScanContextConflict({
+          scanContext: s.scanContext ?? "any",
+          code: review.cleanCode,
+          codeType,
+          result: best,
+          brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
+        });
+        const evidenceGatePassed =
+          decision.status === "verified" &&
+          Boolean(decision.exactCodeEvidenceVerifiedByApp) &&
+          (decision.confidence ?? 0) >= 0.9 &&
+          isUsableProductName(best?.productName ?? "") &&
+          tireOk &&
+          !contextConflict;
+
+        if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
+          const origin = plan.status === "auto_count" ? "auto_count" : plan.verifiedBy ? "auto_verify" : "ai";
+          get().recordFeedback(plan.verifiedBy === "trusted_source" ? "trusted_source_match" : "found_from_ai", { code: review.cleanCode });
+          if (origin === "auto_verify") {
+            get().recordFeedback("auto_verified_catalog_entry", { code: review.cleanCode, meta: { score: plan.score, tier: plan.sourceTier } });
+          }
+          // Flip the scan-feed badge to verified BEFORE resolveUnknown re-scans (it would otherwise stay
+          // on the suggested/needs_review badge the fast pass left).
+          set((st) => ({
+            scanFeed: st.scanFeed.map((e) =>
+              e.cleanCode === review.cleanCode && e.status !== "known" && e.status !== "resolved"
+                ? { ...e, decodeStatus: "verified" as ScanEvent["decodeStatus"], reason: decision.reason ?? e.reason }
+                : e,
+            ),
+          }));
+          get().resolveUnknown(reviewId, "create_new", {
+            applyToCount: true,
+            origin,
+            autoVerify:
+              origin === "auto_verify"
+                ? {
+                    score: plan.score,
+                    verifiedBy: plan.verifiedBy ?? "evidence_score",
+                    sourceTier: plan.sourceTier,
+                    reason: plan.reason,
+                    evidenceSummary: plan.evidenceSummary,
+                    sourceUrls: best?.sourceUrls ?? [],
+                  }
+                : undefined,
+            newProduct,
+          });
+        } else if (contextConflict) {
+          // FALSE-AUTO-COUNT BACKSTOP: a "verified" deep decode that contradicts the tire context (poison)
+          // must NOT count. Keep it open with the safe conflict reason; the human relinks. Never weaken.
+          set((st) => ({
+            lastCategoryWarning:
+              contextConflict === "category_context_conflict"
+                ? { code: review.cleanCode, productName: best?.productName ?? "this product", reason: contextConflict }
+                : st.lastCategoryWarning,
+            needsReviewQueue: st.needsReviewQueue.map((r) =>
+              r.id === reviewId && r.status === "open" ? { ...r, reason: conflictReason(contextConflict) } : r,
+            ),
+          }));
+        }
+        // else: verified-but-gate-blocked-for-another-reason (e.g. autoAdd off, incomplete specs). The fast
+        // pass already left an accurate review row; we leave it for the human (never count a blocked result).
       },
 
       resolveUnknown: (reviewId, action, payload) => {
