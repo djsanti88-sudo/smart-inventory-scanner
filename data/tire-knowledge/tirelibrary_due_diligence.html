@@ -1,0 +1,112 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tirelibrary — Due Diligence Report</title>
+<style>
+:root{--g:#1a7f37;--y:#b7791f;--r:#c0392b;--ink:#1b1f27;--mut:#5b6470;--line:#e3e7ee;--bg:#f6f8fb;--card:#fff}
+*{box-sizing:border-box}
+body{font:15px/1.55 system-ui,Segoe UI,Arial;margin:0;background:var(--bg);color:var(--ink)}
+.wrap{max-width:900px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:26px;margin:0 0 2px}h2{font-size:19px;margin:30px 0 10px;border-bottom:2px solid var(--line);padding-bottom:6px}
+.sub{color:var(--mut);margin:0 0 18px}
+.verdict{background:linear-gradient(135deg,#0f1620,#1b2735);color:#eef;border-radius:14px;padding:20px 22px;margin:16px 0 8px}
+.verdict h3{margin:0 0 8px;font-size:17px}
+.verdict p{margin:6px 0;color:#cdd7e6}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin:18px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card .lbl{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.card .val{font-size:15px;font-weight:600;margin-top:4px}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700;color:#fff}
+.bg-g{background:var(--g)}.bg-y{background:var(--y)}.bg-r{background:var(--r)}
+table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:#eef2f7;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+tr:last-child td{border-bottom:none}
+.flag{background:#fff7ed;border:1px solid #f0c98a;border-left:5px solid var(--y);border-radius:10px;padding:14px 16px;margin:12px 0}
+.flag.red{background:#fdf0ee;border-color:#e3a89f;border-left-color:var(--r)}
+.flag h4{margin:0 0 6px}
+.ok{color:var(--g);font-weight:700}.warn{color:var(--y);font-weight:700}.no{color:var(--r);font-weight:700}
+ul{margin:8px 0 8px 2px;padding-left:20px}li{margin:4px 0}
+.q{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 16px}
+.foot{color:var(--mut);font-size:12px;margin-top:30px;border-top:1px solid var(--line);padding-top:12px}
+code{background:#eef2f7;padding:1px 6px;border-radius:5px;font-size:13px}
+</style></head><body><div class="wrap">
+
+<h1>Tirelibrary — Due Diligence Report</h1>
+<p class="sub">Vendor check for the Smart Inventory Scanner tire-barcode database &middot; prepared 2026-06-24 &middot; sources: tireweb.com, tirelibrary.com, industry press</p>
+
+<div class="verdict">
+<h3>Bottom line</h3>
+<p><b>The data is real, valuable, and the company is legit.</b> 240,000 tires with UPC/EAN barcodes — ~9&times; your current 26,771 — from a 20-year, industry-trusted vendor, validated daily. The <b>$250/mo API tier delivers a CSV flat-file of the whole catalog</b>, so a <b>one-month pull of everything is feasible</b>, and <b>you can cancel anytime</b>.</p>
+<p><b>The one catch that decides it:</b> their public terms say the data is for <b>personal, non-commercial use</b> and <b>"may not be re-sold or re-distributed."</b> Your scanner is a commercial product, and you'd want to <i>keep</i> the data after canceling. The paid API almost certainly has a <b>separate commercial license</b> — but it isn't public. <span class="warn">You must confirm the commercial-use + data-retention terms with them before paying.</span> Everything else checks out.</p>
+</div>
+
+<div class="cards">
+<div class="card"><div class="lbl">Reliable vendor</div><div class="val"><span class="badge bg-g">YES</span> 20+ yrs, trusted</div></div>
+<div class="card"><div class="lbl">Data valuable</div><div class="val"><span class="badge bg-g">YES</span> 240k + barcodes</div></div>
+<div class="card"><div class="lbl">Cancel anytime</div><div class="val"><span class="badge bg-g">YES</span> no lock-in</div></div>
+<div class="card"><div class="lbl">All in 1 month?</div><div class="val"><span class="badge bg-g">YES</span> CSV flat-file</div></div>
+<div class="card"><div class="lbl">License for us</div><div class="val"><span class="badge bg-y">CONFIRM</span> commercial?</div></div>
+</div>
+
+<h2>1. Is it reliable?  <span class="ok">Yes</span></h2>
+<ul>
+<li>Run by <b>E-Solution Professionals</b> (esprofessionals.com) — an established tire-industry software company, <b>20+ years</b>, owners are tire-industry veterans.</li>
+<li>Powers Tireweb, Tirelibrary, Ezytire, Wheelweb — used by tire <b>distributors, dealers, and shops</b>; covered by Tire Review Magazine &amp; Traction News.</li>
+<li>Database is <b>maintained daily by an expert team</b> and <b>validated against manufacturer sources every day</b>. Built by "scouring web pages, catalogs, and in some cases the physical tire."</li>
+<li>Offered to third parties via API — i.e., built to be integrated, not a fly-by-night scraper site.</li>
+</ul>
+
+<h2>2. Is the data valuable for our scanner?  <span class="ok">Yes — exactly what we need</span></h2>
+<table>
+<tr><th>Attribute</th><th>Tirelibrary</th><th>Our corpus today</th></tr>
+<tr><td>Tire SKUs</td><td><b>240,000+</b></td><td>26,771</td></tr>
+<tr><td>Brands</td><td>440</td><td>203</td></tr>
+<tr><td>Models</td><td>13,000+</td><td>—</td></tr>
+<tr><td>Barcode fields</td><td><b>UPC, EAN</b> + MPC, ASIN, GM codes</td><td>UPC/EAN (validated)</td></tr>
+<tr><td>Freshness</td><td>Validated daily</td><td>point-in-time</td></tr>
+</table>
+<p><b>Why it matters:</b> the scanner resolves a scanned <b>barcode → tire</b>. Tirelibrary is indexed by <b>UPC/EAN</b> (the codes on the physical tire) across the whole market — that's a near-complete seed for instant lookups, ~9&times; what we have, and it would fill every brand/size gap including the niche brands stuck at 45.</p>
+
+<h2>3. Can you pay one month, grab everything, and cancel?  <span class="ok">Technically yes</span></h2>
+<ul>
+<li>The <b>$250/mo API tier</b> includes a <b>"CSV flat-file for bulk integration"</b> — the entire catalog as a downloadable file (plus a read-only REST API). That's a <b>full bulk export</b>, not slow paging.</li>
+<li>So you could pull all <b>240k in a day</b>, well within one billing month.</li>
+<li><b>Cancel anytime</b> — no setup fee, no minimum term (all plans). 7-day free trial on every plan.</li>
+</ul>
+
+<h2>4. Pricing</h2>
+<table>
+<tr><th>Plan</th><th>Price</th><th>Bulk data?</th><th>Notes</th></tr>
+<tr><td>Standard</td><td>$10/mo</td><td class="no">No</td><td>Web-app lookup only (search/compare/rebates). Good as a manual top-seller verifier — not a harvester.</td></tr>
+<tr><td>Enterprise</td><td>$8/user (min 10 = $80/mo)</td><td class="warn">Extra cost</td><td>Multi-user; "bulk export (additional cost)".</td></tr>
+<tr><td><b>API</b></td><td><b>$250/mo</b></td><td class="ok">Yes — CSV flat-file + REST API</td><td><b>The tier that gets the full 240k.</b> Cancel anytime, 7-day trial.</td></tr>
+</table>
+
+<div class="flag red">
+<h4>⚠️ The deciding factor — the data license</h4>
+<p>Their public <b>Terms of Use</b> state the material is for <b>"personal use only and may not be re-sold or re-distributed,"</b> and grant permission for <b>"personal, non-commercial use."</b> Two problems for us:</p>
+<ul>
+<li><b>Commercial use:</b> the Smart Inventory Scanner is a commercial product (future SaaS). Embedding their data could violate the personal/non-commercial clause.</li>
+<li><b>Keeping it after cancel:</b> licensed data is normally usable only <i>while subscribed</i>. "Pay one month, keep forever" would be using the data past the license term.</li>
+</ul>
+<p><b>BUT:</b> the $250 API tier is explicitly sold for <b>developer integration</b> — i.e., a commercial product — so it almost certainly carries a <b>separate commercial data-license agreement</b> that overrides the generic website terms. That agreement <b>isn't public.</b> This is the single thing to nail down before paying.</p>
+</div>
+
+<h2>5. Before you pay — ask them these (legal@esprofessionals.com / sales)</h2>
+<div class="q"><ul>
+<li>Does the <b>$250 API plan allow commercial use</b> of the data in my own inventory/scanner application?</li>
+<li>After I <b>cancel</b>, may I <b>keep and keep using</b> the data I downloaded, or must I stop/delete it?</li>
+<li>Is the <b>full 240k catalog</b> included in the CSV flat-file feed (no per-record or volume cap)?</li>
+<li>Any <b>redistribution</b> limits if the scanner is later sold to other shops (multi-tenant SaaS)?</li>
+<li>Is the API/feed license <b>month-to-month</b> with true cancel-anytime, or any minimum commitment?</li>
+</ul></div>
+
+<h2>6. Recommendation</h2>
+<ul>
+<li><b>If</b> they confirm commercial use + the right to keep the data → <b>$250 one-time is a strong buy</b>: 240k validated tire barcodes for ~$250 beats months of free trickle, and it's 100% clean (paying their real bulk price, using the sanctioned API).</li>
+<li><b>If</b> they say personal-use-only / must-delete-on-cancel → <b>don't</b>; it can't legitimately power your product, and the free daily engine remains your clean path.</li>
+<li><b>Smart move:</b> start the <b>7-day free trial of the API tier</b>, confirm the license in writing first, and only then pull + pay. The trial lets you verify the data quality and the CSV format at zero cost.</li>
+</ul>
+
+<p class="foot">Compiled from tireweb.com (/tirelibrary, /terms-of-use, /resources, /about), tirelibrary.com, esprofessionals.com, Tire Review Magazine, Traction News. Pricing/terms can change — verify on their site at purchase. This is research, not legal advice; confirm license terms directly with the vendor.</p>
+</div></body></html>
