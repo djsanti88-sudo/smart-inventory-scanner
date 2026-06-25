@@ -68,6 +68,11 @@ export function normalizeResult(raw: Partial<AiLookupResult> | null | undefined)
     sourceSnippets: capSnippets(Array.isArray(raw.sourceSnippets) ? raw.sourceSnippets : []),
     groundingChunks: capSnippets(Array.isArray(raw.groundingChunks) ? raw.groundingChunks : []),
     exactCodeEvidence: Boolean(raw.exactCodeEvidence),
+    // sizeAgreement is an APP-owned corroboration flag, set ONLY by the route's two-source size race
+    // (sizeRace.ts). A provider JSON must never inject it, so discard any raw value here - the route sets
+    // the real app-computed value AFTER normalizeResult, and decideDecode's internet_two_source_size path
+    // trusts only that. This makes the "app-computed only" invariant structural, not positional.
+    sizeAgreement: undefined,
     confidence,
     // The 0.85 rule: anything below is forced to human review regardless of provider claim.
     needsHumanReview: confidence < 0.85 ? true : Boolean(raw.needsHumanReview),
