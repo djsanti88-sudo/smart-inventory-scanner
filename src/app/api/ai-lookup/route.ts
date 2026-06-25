@@ -1,4 +1,4 @@
-import type { AiLookupResult } from "@/types";
+import type { AiLookupResult, EvidenceResult } from "@/types";
 import { type AiProvider, emptyResult } from "@/services/ai/provider";
 import { mockProvider } from "@/services/ai/mockProvider";
 import { createGeminiProvider } from "@/services/ai/geminiProvider";
@@ -241,9 +241,13 @@ export async function POST(request: Request) {
       const anchorBrand = prefixMatch ? (prefixMatch.brands.find((b) => b.weight === "strong")?.brand ?? null) : null;
       const isTireScan = !!prefixMatch;
       if (isTireScan && !deepRequested && !e2eMode()) {
-        const { result, evidence } = await groundedSpecFind({ code, codeType, anchorBrand });
+        // INSTANT: brand from the prefix, NO synchronous grounded call. The size fills from the background
+        // size race (mode "decode-deep" / backgroundVerifyDeep). Returns immediately.
+        const result: AiLookupResult = { ...emptyResult(), brand: anchorBrand ?? "", productName: anchorBrand ?? "", needsHumanReview: true, confidence: 0.6 };
+        const evidence: EvidenceResult = { verified: false, strength: "none", matchedCode: code, matchedSources: [], reason: "size pending background fill" };
         // decideDecode is the ONLY gate that decides truth/auto-count: it verifies on the app-built
-        // evidence from groundedSpecFind (never the model's self-claim), so false-auto-count stays 0.
+        // evidence (never the model's self-claim), so false-auto-count stays 0. A brand-only result
+        // has no size/model so hasCountableTireIdentity is false and decideDecode returns "suggested".
         const decision = decideDecode({
           codeType,
           results: [result].filter((r): r is NonNullable<typeof r> => Boolean(r)),
@@ -253,14 +257,14 @@ export async function POST(request: Request) {
           scanContext: "tire",
         });
         const results = result ? [result] : [];
-        const providerNames = ["grounded-spec"];
+        const providerNames = ["prefix-brand"];
         const providerStatuses = [{
-          provider: "grounded-spec",
-          status: (result ? "ok" : "no_match") as "ok" | "no_match",
+          provider: "prefix-brand",
+          status: "ok" as const,
           latencyMs: 0,
-          sourceUrlsReturned: result?.sourceUrls?.length ?? 0,
-          exactCodeFound: evidence.verified,
-          identityFound: !!result,
+          sourceUrlsReturned: 0,
+          exactCodeFound: false,
+          identityFound: true,
         }];
         const hasProductHot = results.some((r) => isUsableProductName(r.productName));
         const reasonCode = decodeReasonCode({ hasProduct: hasProductHot, fallbackFound: false, timedOut: false, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: false, coverageMissed: false });
@@ -282,7 +286,8 @@ export async function POST(request: Request) {
             sourceCounts: results.map((r) => (r.sourceUrls ?? []).length),
             anchorBrand,
             tireHotPath: true,
-            aiCalled: true,
+            sizePending: true,
+            aiCalled: false,
             pageFetched: false,
             firecrawlCreditsEstimated: 0,
             cached: false,
