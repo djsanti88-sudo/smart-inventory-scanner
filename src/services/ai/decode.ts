@@ -1,7 +1,7 @@
 import type { AiLookupResult, CodeType, DecodeDecision, EvidenceResult } from "@/types";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
@@ -123,7 +123,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     identityNonEmpty &&
     !!a &&
     isTireContext(a) &&
-    hasRequiredTireSpecs(a) &&
+    hasCountableTireIdentity(a) &&
     !!code &&
     isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
 
@@ -143,7 +143,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     !!a &&
     a.corroboratedByModel === true &&
     isTireContext(a) &&
-    hasRequiredTireSpecs(a);
+    hasCountableTireIdentity(a);
 
   if (canVerify || tireCorroborated || pageFetchModelAgreement) {
     const corroborationPath = canVerify ? "two_ai_agreement" : tireCorroborated ? "deterministic_prefix" : "page_fetch_model_agreement";
