@@ -53,9 +53,12 @@ export function parseSpecResponse(json: unknown, anchorBrand: string | null): Pa
 
   const sourceUrl = j.sourceUrl ? String(j.sourceUrl) : "";
 
-  // corroboratedByModel: the model claims exactCodeGrounded - this is only a hint used to set
-  // corroboratedByModel for display/debug purposes. It NEVER sets evidence.verified or strength.
-  const exactGrounded = j.exactCodeGrounded === true;
+  // corroboratedByModel means "an INDEPENDENT second model read agreed" everywhere else (set only by
+  // enrichWithPageFetch via crossCheck), and decideDecode's pageFetchModelAgreement branch can verify on
+  // it. The grounded finder does NOT provide an independent second read - it has only the model's own
+  // self-reported exactCodeGrounded claim - so it must NOT set this flag. A single self-claim can never
+  // stand in for two-source agreement; the hot path still verifies via the prefix-family tireCorroborated
+  // branch when the app-verified evidence is strong.
 
   const result: AiLookupResult = {
     productName,
@@ -79,7 +82,7 @@ export function parseSpecResponse(json: unknown, anchorBrand: string | null): Pa
     sourceSnippets: [],
     groundingChunks: [],
     exactCodeEvidence: false,
-    corroboratedByModel: exactGrounded,
+    corroboratedByModel: false,
   };
 
   return { result };

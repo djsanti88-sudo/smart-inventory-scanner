@@ -133,7 +133,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
   // a.corroboratedByModel by enrichWithPageFetch via crossCheck), that is a genuine two-source agreement -
   // page-fetch (deterministic) + model - and unlocks auto-count WITHOUT needing the strong prefix family.
   // It is NOT confidence-only and NOT page-fetch alone: it requires the model agreement flag AND strong
-  // app-verified exact-code evidence AND tire domain AND full specs. The firewall + brand_prefix conflict +
+  // app-verified exact-code evidence AND tire domain AND a countable identity (size + model). The firewall + brand_prefix conflict +
   // the >=0.9 store gate still apply downstream, so a non-tire (poison) can never reach a count this way.
   const pageFetchModelAgreement =
     scanContext === "tire" &&
@@ -153,8 +153,8 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
       reason: canVerify
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
         : tireCorroborated
-          ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + full specs + app-verified exact code (independent of the AI text)."
-          : "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with full specs + app-verified exact code.",
+          ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
+          : "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code.",
       evidenceStrength: bestEvidence.strength,
       exactCodeEvidenceVerifiedByApp: true,
       crossCheck: baseCrossCheck,

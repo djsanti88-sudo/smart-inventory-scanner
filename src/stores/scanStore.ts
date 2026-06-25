@@ -47,7 +47,7 @@ import { buildCleanupRecommendations } from "@/services/cleanup/recommendations"
 import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
-import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
+import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { extractTireFields } from "@/services/tire/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
@@ -135,6 +135,18 @@ function evaluateAutoDecode(p: {
   if (!canRequest(p.breaker, p.now).allowed)
     return { allowed: false, reason: "AI circuit breaker is open after repeated failures. Routed to Needs Review." };
   return { allowed: true, reason: "Decoding with AI..." };
+}
+
+/**
+ * Tire portion of the auto-count gate, shared by liveDecode + backgroundVerifyDeep so the spec requirement
+ * cannot drift between the two paths again. A non-tire decode is unaffected; a tire must carry the COUNTABLE
+ * identity (brand-prefix + size + model), matching the route's verify gate (decode.ts hasCountableTireIdentity).
+ * Load index + speed rating are optional enrichment, not required to count. This relaxes ONLY the spec
+ * requirement; every other clause of the gate (verified status, app-verified exact code, confidence >= 0.9,
+ * firewall / brand-prefix conflict, planAutoVerify) is enforced separately and unchanged.
+ */
+function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
+  return !isTireContext(best) || hasCountableTireIdentity(best);
 }
 
 // The local optimistic session store. Known scans update this store immediately - the UI never
@@ -1507,7 +1519,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const best = results[0] ?? null;
           // Phase 10: for a tire scan, parse the messy decode into structured columns (size -> specs,
           // brand, part number, clean description). Display/storage only - it does NOT touch the firewall
-          // or the hasRequiredTireSpecs auto-count gate below (those read the ORIGINAL `best`).
+          // or the tireAutoCountOk (size + model) auto-count gate below (those read the ORIGINAL `best`).
           const tireFields = best && s.scanContext === "tire" && isTireContext(best) ? extractTireFields(best) : null;
           const providerNamesArr = (data.providerNames as string[]) ?? [];
           const providerName = providerNamesArr.join("+") || "mock";
@@ -1605,9 +1617,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           const autoAddOn = s.autoAddDecodedProducts ?? true; // master gate: false = manual review for all
           // Phase 7 EVIDENCE GATE: auto-count ONLY on the app's independent exact-code verification +
-          // confidence >= 0.90 + (for tires) full specs. The model's self-reported confidence alone is
-          // never enough (that is what auto-counted wrong products). Anything short -> Needs Review.
-          const tireOk = !isTireContext(best) || hasRequiredTireSpecs(best);
+          // confidence >= 0.90 + (for tires) a countable identity (size + model, matching the route's
+          // verify gate). The model's self-reported confidence alone is never enough (that is what
+          // auto-counted wrong products). Anything short -> Needs Review.
+          const tireOk = tireAutoCountOk(best);
           // Phase 8 FIREWALL: exact-code evidence is necessary but NOT sufficient. If the decoded product
           // contradicts the business scan context (tire) or a learned brand-prefix hint, block auto-count.
           const contextConflict = detectScanContextConflict({
@@ -1812,6 +1825,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           return;
         }
 
+        // COST METERING: a successful deep fetch is a REAL provider call, so it must count against the
+        // daily cap exactly like liveDecode does (same field, same +1, same set/persist pattern). Only a
+        // real provider call reaches here - a non-OK response or a thrown fetch returned above, uncounted.
+        set((st) => ({
+          settings: { ...st.settings, dailyLookupCount: dailyCount + 1, lastResetDate: today },
+        }));
+
         const decision = data.decision;
         const results: AiLookupResult[] = data.results ?? [];
         const best = results[0] ?? null;
@@ -1894,7 +1914,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const autoAddOn = s.autoAddDecodedProducts ?? true; // master gate (unchanged): false -> manual review
         // SAME Phase 7 evidence gate + Phase 8 firewall as liveDecode. A non-verified result never reaches
         // here, and a firewall/brand-prefix conflict (poison in tire context) still blocks the count.
-        const tireOk = !isTireContext(best) || hasRequiredTireSpecs(best);
+        const tireOk = tireAutoCountOk(best);
         const contextConflict = detectScanContextConflict({
           scanContext: s.scanContext ?? "any",
           code: review.cleanCode,
