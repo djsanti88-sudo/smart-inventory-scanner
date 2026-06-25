@@ -1,0 +1,22 @@
+{
+  "date": "2026-06-24",
+  "mode": "weekly",
+  "target": "local",
+  "run_type": "inaugural-synthesis-lead-review",
+  "scores": {
+    "first_impression": 72,
+    "scanner_flow": 84,
+    "data_integrity_trust": 85,
+    "trust_signals": 86,
+    "decision_load": 58,
+    "ease_of_use": 74,
+    "visual_polish": 70,
+    "accessibility": 68,
+    "copy_clarity": 78,
+    "resilience": 80,
+    "role_privacy_safety": 70,
+    "performance": null,
+    "overall": 74
+  },
+  "publish_gap": { "uncommitted_files": 109, "unpushed_commits": 28, "branch": "decoder-hardening-v1-local", "live": "not_configured" }
+}
