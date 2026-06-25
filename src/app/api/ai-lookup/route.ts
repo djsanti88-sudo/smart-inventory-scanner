@@ -16,6 +16,8 @@ import { shouldRunFallback, decodeReasonCode, REASON_TEXT } from "@/services/ai/
 import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
 import { withDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
+import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -150,7 +152,8 @@ export async function POST(request: Request) {
     rawCode?: string;
     cleanCode?: string;
     codeType?: string;
-    mode?: "lookup" | "decode";
+    mode?: "lookup" | "decode" | "decode-deep";
+    deep?: boolean; // Task 5: client opt-in to the synchronous deep/Firecrawl decode (off the tire hot path)
     provider?: string;
     allowImageSuggestions?: boolean;
     confidenceThreshold?: number;
@@ -183,7 +186,11 @@ export async function POST(request: Request) {
     brandPrefixHint: body.brandPrefixHint,
   };
 
-  if (body.mode === "decode") {
+  if (body.mode === "decode" || body.mode === "decode-deep") {
+    // Task 4/5: the tire hot path issues NO synchronous deep/Firecrawl call. The deep path stays
+    // reachable for the client: it sends mode "decode-deep" (or "decode" with deep:true) to opt INTO
+    // the existing multi-stage deep/Firecrawl orchestration and SKIP the tire hot path below.
+    const deepRequested = body.mode === "decode-deep" || body.deep === true;
     const threshold = body.confidenceThreshold ?? 0.85;
     // The budget may be owner-configured and arrives from the client - clamp it server-side so a
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
@@ -220,6 +227,66 @@ export async function POST(request: Request) {
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
+      }
+
+      // PREFIX-ANCHORED FAST TIRE HOT PATH (Task 4). A known tire GS1 prefix hit IS the tire signal:
+      // the route may not receive an explicit "tire" scanContext, so a lookupTirePrefix match scopes
+      // this path. The anchor brand comes from the STRONG prefix family only (a hint, never authority).
+      // One grounded 3s call + one decideDecode(scanContext "tire"), then return - with NO synchronous
+      // deep/Firecrawl call. The deep path stays reachable via deepRequested (mode "decode-deep").
+      // Skipped under E2E (mock-only orchestration below) and when the client opted into the deep path.
+      const prefixMatch = lookupTirePrefix(code);
+      const anchorBrand = prefixMatch ? (prefixMatch.brands.find((b) => b.weight === "strong")?.brand ?? null) : null;
+      const isTireScan = !!prefixMatch;
+      if (isTireScan && !deepRequested && !e2eMode()) {
+        const { result, evidence } = await groundedSpecFind({ code, codeType, anchorBrand });
+        // decideDecode is the ONLY gate that decides truth/auto-count: it verifies on the app-built
+        // evidence from groundedSpecFind (never the model's self-claim), so false-auto-count stays 0.
+        const decision = decideDecode({
+          codeType,
+          results: [result].filter((r): r is NonNullable<typeof r> => Boolean(r)),
+          evidences: [evidence],
+          confidenceThreshold: threshold,
+          code,
+          scanContext: "tire",
+        });
+        const results = result ? [result] : [];
+        const providerNames = ["grounded-spec"];
+        const providerStatuses = [{
+          provider: "grounded-spec",
+          status: (result ? "ok" : "no_match") as "ok" | "no_match",
+          latencyMs: 0,
+          sourceUrlsReturned: result?.sourceUrls?.length ?? 0,
+          exactCodeFound: evidence.verified,
+          identityFound: !!result,
+        }];
+        const hasProductHot = results.some((r) => isUsableProductName(r.productName));
+        const reasonCode = decodeReasonCode({ hasProduct: hasProductHot, fallbackFound: false, timedOut: false, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: false, coverageMissed: false });
+        const reasonText = REASON_TEXT[reasonCode] ?? "";
+        const finalDecision = decision.status !== "verified" && reasonText ? { ...decision, reason: reasonText } : decision;
+        return {
+          mode: "decode" as const,
+          providerNames,
+          results,
+          evidences: [evidence],
+          providerStatuses,
+          decision: finalDecision,
+          reasonCode,
+          reasonText,
+          timedOut: false,
+          debug: {
+            providersAttempted: providerNames,
+            evidenceStrengths: [evidence].map((e) => e.strength),
+            sourceCounts: results.map((r) => (r.sourceUrls ?? []).length),
+            anchorBrand,
+            tireHotPath: true,
+            aiCalled: true,
+            pageFetched: false,
+            firecrawlCreditsEstimated: 0,
+            cached: false,
+          },
+          sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+        };
       }
 
       // FAST PATH - CONCURRENT, HARD ~13s BUDGET. Providers + page-fetch race under one budget signal.
