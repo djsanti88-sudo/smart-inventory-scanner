@@ -1,14 +1,14 @@
 {
   "date": "2026-06-25",
   "base": "http://localhost:3200",
-  "sampled": 20,
-  "verifiedPct": 30,
-  "needsReviewPct": 70,
-  "brandCorrectPct": 90,
+  "sampled": 100,
+  "verifiedPct": 58,
+  "needsReviewPct": 42,
+  "brandCorrectPct": 89,
   "latencyMs": {
-    "p50": 10025,
-    "p95": 35035,
-    "max": 35035
+    "p50": 10039,
+    "p95": 36146,
+    "max": 40062
   },
   "cost": {
     "firecrawlCredits": 0,
@@ -22,140 +22,700 @@
       "brand": "falken",
       "decision": "verified",
       "brandHit": true,
-      "wall": 10026
+      "wall": 10083
     },
     {
-      "code": "6419440533261",
+      "code": "715459416011",
+      "brand": "hankook",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10044
+    },
+    {
+      "code": "715459432233",
+      "brand": "hankook",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10043
+    },
+    {
+      "code": "4981910851370",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10051
+    },
+    {
+      "code": "6419440489506",
       "brand": "nokian",
       "decision": "suggested",
       "brandHit": true,
-      "wall": 10012
+      "wall": 10043
     },
     {
-      "code": "848983026200",
+      "code": "6419440573014",
+      "brand": "nokian",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10037
+    },
+    {
+      "code": "848983002488",
       "brand": "falken",
       "decision": "verified",
       "brandHit": true,
-      "wall": 10015
+      "wall": 10040
     },
     {
-      "code": "029142359555",
-      "brand": "hercules",
+      "code": "4981910793403",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10037
+    },
+    {
+      "code": "4981910799979",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10035
+    },
+    {
+      "code": "848983025500",
+      "brand": "falken",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10029
+    },
+    {
+      "code": "4981910526988",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10032
+    },
+    {
+      "code": "4981910569961",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10030
+    },
+    {
+      "code": "729419106485",
+      "brand": "amp",
       "decision": "suggested",
       "brandHit": true,
-      "wall": 10028
+      "wall": 10050
     },
     {
-      "code": "051342165544",
-      "brand": "continental",
+      "code": "054137051046",
+      "brand": "pirelli",
       "decision": "suggested",
       "brandHit": true,
-      "wall": 10023
+      "wall": 10038
     },
     {
-      "code": "4713309152702",
+      "code": "715459448289",
+      "brand": "laufenn",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10041
+    },
+    {
+      "code": "029142802280",
+      "brand": "cooper",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10050
+    },
+    {
+      "code": "9550000002814",
+      "brand": "versatyre",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10036
+    },
+    {
+      "code": "4710405480975",
       "brand": "kenda",
       "decision": "suggested",
       "brandHit": true,
-      "wall": 10025
+      "wall": 10034
     },
     {
-      "code": "086699378101",
-      "brand": "uniroyal",
-      "decision": "verified",
-      "brandHit": true,
-      "wall": 10018
-    },
-    {
-      "code": "051342183517",
+      "code": "051342223473",
       "brand": "continental",
       "decision": "suggested",
       "brandHit": true,
-      "wall": 10017
+      "wall": 10031
     },
     {
-      "code": "4981910542865",
-      "brand": "nitto",
+      "code": "688028937609",
+      "brand": "ironman",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10033
+    },
+    {
+      "code": "086699271860",
+      "brand": "uniroyal",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10035
+    },
+    {
+      "code": "715459465828",
+      "brand": "hankook",
       "decision": "suggested",
       "brandHit": true,
-      "wall": 10027
+      "wall": 10039
     },
     {
-      "code": "715459586226",
+      "code": "086699173546",
+      "brand": "bfgoodrich",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10034
+    },
+    {
+      "code": "029142809883",
+      "brand": "cooper",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10030
+    },
+    {
+      "code": "4981910889427",
+      "brand": "nitto",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10034
+    },
+    {
+      "code": "715459478934",
+      "brand": "hankook",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10041
+    },
+    {
+      "code": "086699662309",
+      "brand": "uniroyal",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10035
+    },
+    {
+      "code": "029142870418",
+      "brand": "mastercraft",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10034
+    },
+    {
+      "code": "029142997122",
+      "brand": "mastercraft",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10030
+    },
+    {
+      "code": "086699562715",
+      "brand": "michelin",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10044
+    },
+    {
+      "code": "029142956204",
+      "brand": "hercules",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10035
+    },
+    {
+      "code": "086699665393",
+      "brand": "bfgoodrich",
+      "decision": "suggested",
+      "brandHit": false,
+      "wall": 10034
+    },
+    {
+      "code": "8808956150532",
+      "brand": "kumho",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10031
+    },
+    {
+      "code": "054137070597",
+      "brand": "pirelli",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10040
+    },
+    {
+      "code": "029142934936",
+      "brand": "cooper",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10037
+    },
+    {
+      "code": "051342204588",
+      "brand": "continental",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10039
+    },
+    {
+      "code": "4981910543947",
+      "brand": "nitto",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10035
+    },
+    {
+      "code": "092971308544",
+      "brand": "firestone",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10036
+    },
+    {
+      "code": "086699031280",
+      "brand": "michelin",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10041
+    },
+    {
+      "code": "715459577576",
       "brand": "hankook",
       "decision": "suggested",
       "brandHit": true,
       "wall": 10032
     },
     {
-      "code": "086699762504",
+      "code": "086699296214",
       "brand": "michelin",
       "decision": "verified",
       "brandHit": true,
-      "wall": 10017
+      "wall": 10032
     },
     {
-      "code": "054137075929",
+      "code": "086699219503",
+      "brand": "michelin",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10034
+    },
+    {
+      "code": "086699026187",
+      "brand": "michelin",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 36086
+    },
+    {
+      "code": "051342149407",
+      "brand": "continental",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10028
+    },
+    {
+      "code": "086699999542",
+      "brand": "michelin",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10030
+    },
+    {
+      "code": "8808956372316",
+      "brand": "kumho",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 19902
+    },
+    {
+      "code": "029142985709",
+      "brand": "cooper",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10039
+    },
+    {
+      "code": "051342201563",
+      "brand": "continental",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10035
+    },
+    {
+      "code": "054137064190",
+      "brand": "pirelli",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10031
+    },
+    {
+      "code": "086699414410",
+      "brand": "michelin",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10042
+    },
+    {
+      "code": "051342151295",
+      "brand": "continental",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10038
+    },
+    {
+      "code": "054137086055",
       "brand": "pirelli",
       "decision": "suggested",
+      "brandHit": false,
+      "wall": 10039
+    },
+    {
+      "code": "086699173898",
+      "brand": "michelin",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10045
+    },
+    {
+      "code": "721506335235",
+      "brand": "yokohama",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10048
+    },
+    {
+      "code": "721506933127",
+      "brand": "yokohama",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10041
+    },
+    {
+      "code": "721506561146",
+      "brand": "yokohama",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10033
+    },
+    {
+      "code": "092971277604",
+      "brand": "bridgestone",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10042
+    },
+    {
+      "code": "092971361440",
+      "brand": "bridgestone",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10032
+    },
+    {
+      "code": "842210040243",
+      "brand": "sumitomo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10040
+    },
+    {
+      "code": "842164109546",
+      "brand": "lionhart",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10036
+    },
+    {
+      "code": "8859291415602",
+      "brand": "atlas",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10035
+    },
+    {
+      "code": "450309097186",
+      "brand": "gripmax",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10040
+    },
+    {
+      "code": "8859384962549",
+      "brand": "otani",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10036
+    },
+    {
+      "code": "8859105416191",
+      "brand": "thunderer",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10039
+    },
+    {
+      "code": "602693282451",
+      "brand": "zeetex",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10042
+    },
+    {
+      "code": "818749010392",
+      "brand": "dextero",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10040
+    },
+    {
+      "code": "467714420386",
+      "brand": "kinforest",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10033
+    },
+    {
+      "code": "462773748099",
+      "brand": "sunny",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10032
+    },
+    {
+      "code": "737245479048",
+      "brand": "kanati",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10042
+    },
+    {
+      "code": "841623107284",
+      "brand": "pantera",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10043
+    },
+    {
+      "code": "8848116010122",
+      "brand": "blackhawk",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 35059
+    },
+    {
+      "code": "8848116004718",
+      "brand": "blackhawk",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 37104
+    },
+    {
+      "code": "848983002693",
+      "brand": "falken",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10042
+    },
+    {
+      "code": "848983002914",
+      "brand": "falken",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10048
+    },
+    {
+      "code": "6419440444574",
+      "brand": "nokian",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 23412
+    },
+    {
+      "code": "6419440401911",
+      "brand": "nokian",
+      "decision": "verified",
       "brandHit": true,
       "wall": 10029
     },
     {
-      "code": "051342219582",
-      "brand": "continental",
-      "decision": "suggested",
+      "code": "6419440323008",
+      "brand": "nokian",
+      "decision": "verified",
       "brandHit": true,
-      "wall": 10027
+      "wall": 10043
     },
     {
-      "code": "450446554382",
-      "brand": "radar",
-      "decision": "suggested",
-      "brandHit": true,
-      "wall": 10025
-    },
-    {
-      "code": "641126564351",
-      "brand": "tornel",
-      "decision": "suggested",
-      "brandHit": true,
-      "wall": 10021
-    },
-    {
-      "code": "461493677696",
-      "brand": "advanta",
-      "decision": "suggested",
-      "brandHit": true,
-      "wall": 10018
-    },
-    {
-      "code": "848983005113",
-      "brand": "falken",
-      "decision": "needs_review",
-      "brandHit": false,
-      "wall": 35035
-    },
-    {
-      "code": "6419440568454",
+      "code": "6419440586403",
       "brand": "nokian",
       "decision": "suggested",
-      "brandHit": false,
-      "wall": 26944
+      "brandHit": true,
+      "wall": 36146
     },
     {
-      "code": "4981910709992",
+      "code": "8859305520544",
+      "brand": "arisun",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 40061
+    },
+    {
+      "code": "4981910559160",
       "brand": "toyo",
       "decision": "verified",
       "brandHit": true,
-      "wall": 9916
+      "wall": 10048
     },
     {
-      "code": "887613440108",
+      "code": "4981910871422",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10030
+    },
+    {
+      "code": "4981910719496",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10047
+    },
+    {
+      "code": "4981910876250",
+      "brand": "toyo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10051
+    },
+    {
+      "code": "697662136651",
+      "brand": "dunlop",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10061
+    },
+    {
+      "code": "697662148043",
+      "brand": "dunlop",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10029
+    },
+    {
+      "code": "697662119210",
+      "brand": "dunlop",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10039
+    },
+    {
+      "code": "887613234806",
       "brand": "nexen",
       "decision": "verified",
       "brandHit": true,
-      "wall": 10015
+      "wall": 10037
+    },
+    {
+      "code": "8807622195884",
+      "brand": "nexen",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 40044
+    },
+    {
+      "code": "8997020615692",
+      "brand": "accelera",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10038
+    },
+    {
+      "code": "8994234020724",
+      "brand": "accelera",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 40062
+    },
+    {
+      "code": "8994731004746",
+      "brand": "achilles",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10047
+    },
+    {
+      "code": "8886459508319",
+      "brand": "american tourer",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 35051
+    },
+    {
+      "code": "040232421051",
+      "brand": "americus",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 10034
+    },
+    {
+      "code": "6290300266501",
+      "brand": "armstrong",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 35048
+    },
+    {
+      "code": "8681110670769",
+      "brand": "arroyo",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 22414
+    },
+    {
+      "code": "8904365505861",
+      "brand": "ascenso",
+      "decision": "suggested",
+      "brandHit": true,
+      "wall": 22677
+    },
+    {
+      "code": "8859291415749",
+      "brand": "atlas",
+      "decision": "needs_review",
+      "brandHit": false,
+      "wall": 35047
+    },
+    {
+      "code": "4713959001986",
+      "brand": "atturo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10038
+    },
+    {
+      "code": "840156420563",
+      "brand": "atturo",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10033
+    },
+    {
+      "code": "086699891006",
+      "brand": "bfgoodrich",
+      "decision": "verified",
+      "brandHit": true,
+      "wall": 10042
     }
   ]
 }
