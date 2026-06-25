@@ -1,6 +1,6 @@
 // GENERATED FILE - do not edit by hand. Source: tire_prefixes_FINAL.csv (validated, tiered).
 // Regenerate: node scripts/genTirePrefixHints.mjs
-// Ingested as prefixes: hint_strong=45, hint_weak=148 (71 distinct prefixes).
+// Ingested as prefixes: hint_strong=46, hint_weak=147 (71 distinct prefixes).
 // NOT ingested (held out): exclude_partnumber=7, review_before_use=6.
 //
 // A prefix may map to a brand FAMILY (corporate siblings sharing a GS1 company prefix). A hint may
@@ -68,7 +68,7 @@ export const TIRE_PREFIX_HINTS: Record<string, PrefixHint[]> = {
   "8059971": [{ brand: "BKT", weight: "weak" }, { brand: "BKT (Ag)", weight: "weak" }],
   "8590341": [{ brand: "Mitas", weight: "weak" }, { brand: "Mitas (Moto)", weight: "weak" }],
   "8714692": [{ brand: "Vredestein", weight: "weak" }, { brand: "Vredestein (US)", weight: "weak" }],
-  "8807622": [{ brand: "Nexen", weight: "weak" }, { brand: "Roadstone", weight: "weak" }],
+  "8807622": [{ brand: "Nexen", weight: "strong" }, { brand: "Roadstone", weight: "weak" }],
   "8808569": [{ brand: "Hankook", weight: "weak" }, { brand: "Kingstar", weight: "weak" }],
   "8808922": [{ brand: "Shinko", weight: "weak" }],
   "8808956": [{ brand: "Kumho", weight: "strong" }, { brand: "Marshal", weight: "weak" }],

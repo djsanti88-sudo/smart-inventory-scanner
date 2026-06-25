@@ -104,13 +104,13 @@ describe("decideDecode - deterministic tire corroboration", () => {
     expect(r.status).not.toBe("verified");
   });
 
-  it("uses ONLY the strong tier: a weak-tier-only prefix (Nexen Korea EAN 8807622) does NOT corroborate", () => {
+  it("uses ONLY the strong tier: a weak-tier-only prefix (Nokian Finland EAN 6413613) does NOT corroborate", () => {
     const r = decideDecode({
       codeType: "ean_13",
-      results: [tire({ productName: "Nexen Roadian GTX 235/65R18 106V", brand: "Nexen", specsShort: "235/65R18 106V" })],
-      evidences: [strongEv("8807622002083")], confidenceThreshold: 0.85, code: "8807622002083", scanContext: "tire",
+      results: [tire({ productName: "Nokian Hakkapeliitta R5 235/65R18 106R", brand: "Nokian", specsShort: "235/65R18 106R" })],
+      evidences: [strongEv("6413613001234")], confidenceThreshold: 0.85, code: "6413613001234", scanContext: "tire",
     });
-    expect(r.status).not.toBe("verified"); // 8807622 is hint_weak only -> never corroborates
+    expect(r.status).not.toBe("verified"); // 6413613 is hint_weak only -> never corroborates
   });
 
   it("two independent providers that AGREE still auto-verify without any prefix corroboration", () => {

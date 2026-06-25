@@ -55,7 +55,7 @@ Kingstar,8808569,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Value brand owne
 Kumho,8808956,7,South Korea / Global,barcode_checked,hint_strong,8808956298296,,OK,Parent company GS1 prefix
 Marshal,8808956,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Kumho
 Nexen,0191563,7,US / North America,barcode_checked,hint_strong,0191563015119,,OK,Nexen NA prefix
-Nexen,8807622,7,South Korea / Global,ai_asserted_no_barcode,hint_weak,,,OK,Nexen Korea EAN prefix
+Nexen,8807622,7,South Korea / Global,barcode_checked,hint_strong,8807622002083,,OK,Nexen Korea EAN prefix (promoted: live decode confirmed Nexen Roadian HTX on 8807622002083 via fetched_source)
 Roadstone,8807622,7,Global,ai_asserted_no_barcode,hint_weak,,,OK,Owned by Nexen
 Nokian,0703382,7,US / North America,barcode_checked,hint_strong,703382351103,,OK,Nokian NA prefix
 Nokian,6413613,7,Finland / Global,ai_asserted_no_barcode,hint_weak,,,OK,Nokian Finland EAN prefix
