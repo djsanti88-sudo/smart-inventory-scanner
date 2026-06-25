@@ -83,9 +83,15 @@ scan -> prefix lookup -> brand (instant) -> row shown (suggested, size pending)
   fills in behind it, and that a two-source-agreed tire auto-counts while a single-source size stays in
   review. Required before handoff (scanner/auto-count change).
 
-## Out of scope (future)
-- The local 30k-tire DB is treated as NON-EXISTENT: not read at runtime, not a confirmer, not a
-  validation answer-key. The exact-size trust comes entirely from two independent Internet lookups.
+## Deferred (not in this build) - DB plugs in later
+- The local 30k-tire DB is treated as NON-EXISTENT for THIS build and its validation: not read at
+  runtime, not a confirmer, not an answer-key. Purpose: PROVE the prefix + Internet path stands on its
+  own (the owner's "make it work without the DB" goal).
+- DEFERRED, not abandoned: once the owner uploads the DB, it plugs in as an AUTHORITATIVE size source -
+  a DB barcode->size match can auto-confirm on its OWN (it is the owner's verified data), while Internet
+  sources still need two-source agreement. To keep that a clean extension, the agreement logic operates
+  over a LIST of independent size sources (each returns {size, sourceId}); adding a `db` source later
+  changes configuration, not the gate. No DB code is written now (YAGNI) - only the seam is kept clean.
 - Tuning which two retrieval roads are fastest/most independent beyond an initial pair (follow-up).
 - Non-tire categories (the `internet_two_source_size` route is gated on tire context for now).
 
