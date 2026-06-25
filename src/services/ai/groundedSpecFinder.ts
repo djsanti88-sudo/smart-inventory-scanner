@@ -104,8 +104,8 @@ export interface GroundedSpecFindResult {
   latencyMs: number;
 }
 
-const GROUNDED_SPEC_GEMINI_MODEL =
-  process.env.GEMINI_MODEL || "gemini-2.0-flash-001";
+export const GROUNDED_SPEC_GEMINI_MODEL =
+  process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 /**
  * Make ONE grounded Gemini Flash + Google Search call to look up specs for a product code.
