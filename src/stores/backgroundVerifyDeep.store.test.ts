@@ -60,6 +60,48 @@ function tireAiStore() {
   return store;
 }
 
+// SIZE + MODEL ONLY (no load index, no speed rating). Cooper prefix 029142...; identity "Cooper Discoverer
+// AT3 245/75R16". This is a COUNTABLE tire identity (brand + size + model) but does NOT have full specs, so
+// the old store gate (hasRequiredTireSpecs) routed a genuinely verified tire to review = the dead-end.
+const COOPER_CODE = "029142753568";
+
+const COOPER_FAST_SUGGESTED = {
+  providerNames: ["gemini"],
+  results: [{
+    productName: "Cooper Discoverer AT3 245/75R16", brand: "Cooper", category: "Tire",
+    specsShort: "245/75R16", specsFull: "", primarySku: "", primaryBarcode: COOPER_CODE, gtin: "",
+    upc: COOPER_CODE, ean: "", aliases: [], imageUrl: "", productUrl: "https://coopertire.com/discoverer-at3",
+    sourceUrls: ["https://www.upcitemdb.com/upc/029142753568"], confidence: 0.6, verifiedFacts: [], guesses: [],
+  }],
+  decision: { status: "suggested", confidence: 0.6, reason: "Grounded, not app-verified.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
+};
+
+const COOPER_DEEP_VERIFIED = {
+  providerNames: ["gemini"],
+  results: [{
+    productName: "Cooper Discoverer AT3 245/75R16", brand: "Cooper", category: "Tire",
+    specsShort: "245/75R16", specsFull: "", primarySku: "", primaryBarcode: COOPER_CODE, gtin: "",
+    upc: COOPER_CODE, ean: "", aliases: [], imageUrl: "", productUrl: "https://coopertire.com/discoverer-at3",
+    sourceUrls: ["https://coopertire.com/discoverer-at3"], confidence: 0.92, verifiedFacts: [], guesses: [],
+  }],
+  decision: { status: "verified", confidence: 0.92, reason: "Verified: exact UPC confirmed on the product page (fetched_source).", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+};
+
+function cooperModeStub() {
+  const original = globalThis.fetch;
+  const calls = { decode: 0, decodeDeep: 0 };
+  globalThis.fetch = vi.fn(async (_url: unknown, init?: { body?: string }) => {
+    const body = init?.body ? JSON.parse(init.body) : {};
+    if (body.mode === "decode-deep") {
+      calls.decodeDeep++;
+      return { ok: true, json: async () => COOPER_DEEP_VERIFIED };
+    }
+    calls.decode++;
+    return { ok: true, json: async () => COOPER_FAST_SUGGESTED };
+  }) as unknown as typeof fetch;
+  return { calls, restore: () => (globalThis.fetch = original) };
+}
+
 describe("client-orchestrated background verify (suggested tire -> verified -> counted)", () => {
   it("a suggested tire fires decode-deep WITH scanContext:'tire' and upgrades to counted + alias learned", async () => {
     const store = tireAiStore();
@@ -153,5 +195,32 @@ describe("client-orchestrated background verify (suggested tire -> verified -> c
     expect(store.getState().finalCounts).toHaveLength(0);
     expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open");
     expect(store.getState().aliases.some((a) => a.cleanCode === HANKOOK_CODE && a.approved)).toBe(false);
+  });
+
+  // FIX 1 (the dead-end): a verified size+model tire with NO load/speed must COUNT, matching the route's
+  // verify gate (hasCountableTireIdentity). Before the fix the store required FULL specs, so this exact
+  // identity (which the route already returns "verified") was wrongly routed to review = the feature dead-end.
+  it("a verified tire with size + model but NO load/speed (countable identity) ends up COUNTED, not in review", async () => {
+    const store = tireAiStore();
+    const { calls, restore } = cooperModeStub();
+    try {
+      store.getState().processScan(COOPER_CODE);
+      await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("resolved"));
+    } finally {
+      restore();
+    }
+
+    // The deep pass ran exactly once.
+    expect(calls.decode).toBeGreaterThanOrEqual(1);
+    expect(calls.decodeDeep).toBe(1);
+
+    // COUNTED: the Cooper tire exists, is in finalCounts qty 1, and is OUT of the open needs-review queue.
+    const prod = store.getState().products.find((p) => p.brand === "Cooper");
+    expect(prod, "Cooper tire product must be created + counted").toBeDefined();
+    expect(store.getState().finalCounts.find((c) => c.productId === prod!.id)?.quantity).toBe(1);
+    expect(store.getState().needsReviewQueue.some((r) => r.status === "open")).toBe(false);
+
+    // Alias learned: the scanned code is now a deterministic APPROVED alias.
+    expect(store.getState().aliases.some((a) => a.cleanCode === COOPER_CODE && a.approved)).toBe(true);
   });
 });
