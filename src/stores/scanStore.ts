@@ -149,6 +149,17 @@ function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
   return !isTireContext(best) || hasCountableTireIdentity(best);
 }
 
+/**
+ * What counts as "corroborated" for auto-count, shared by liveDecode + backgroundVerifyDeep so the rule
+ * cannot drift. The app-verified exact code OR the internet_two_source_size path (brand from the strong GS1
+ * prefix + two independent Internet sources agreeing on the size, set app-side by the route race). The
+ * local DB is never involved. Every OTHER gate clause (verified status, confidence >= 0.9, tireOk,
+ * no context conflict, autoAddOn) is enforced separately and unchanged.
+ */
+export function decodeCorroborated(decision: { exactCodeEvidenceVerifiedByApp?: boolean; corroborationPath?: string } | null | undefined): boolean {
+  return Boolean(decision?.exactCodeEvidenceVerifiedByApp) || decision?.corroborationPath === "internet_two_source_size";
+}
+
 // The local optimistic session store. Known scans update this store immediately - the UI never
 // waits on a server round-trip. Sync to the (mock) backend happens AFTER the user sees feedback,
 // using idempotency keys so a retry can never double-count.
@@ -1632,7 +1643,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
           const evidenceGatePassed =
             decision?.status === "verified" &&
-            Boolean(decision?.exactCodeEvidenceVerifiedByApp) &&
+            decodeCorroborated(decision) &&
             (decision?.confidence ?? 0) >= 0.9 &&
             isUsableProductName(best?.productName ?? "") &&
             tireOk &&
@@ -1924,7 +1935,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         });
         const evidenceGatePassed =
           decision.status === "verified" &&
-          Boolean(decision.exactCodeEvidenceVerifiedByApp) &&
+          decodeCorroborated(decision) &&
           (decision.confidence ?? 0) >= 0.9 &&
           isUsableProductName(best?.productName ?? "") &&
           tireOk &&
