@@ -155,6 +155,17 @@ describe("decideDecode - PATH 3 internet two-source size agreement (no exact-cod
     const r = decideDecode({ codeType: "upc_a", results: [tire({ productName: "Kumho Crugen 265/70R17 115T", brand: "Kumho", specsShort: "265/70R17 115T", sizeAgreement: true })], evidences: [weakEv()], confidenceThreshold: 0.85, code: "012345678905", scanContext: "tire" });
     expect(r.status).not.toBe("verified");
   });
+
+  it("does NOT set exactCodeEvidenceVerifiedByApp on the internet two-source path (no app-confirmed exact code)", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [sizeAgreed()], evidences: [weakEv()], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });
+    expect(r.status).toBe("verified");
+    expect(r.exactCodeEvidenceVerifiedByApp).toBe(false);
+  });
+
+  it("does NOT verify the internet two-source path outside tire context (scanContext 'any')", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [sizeAgreed()], evidences: [weakEv()], confidenceThreshold: 0.85, code: "029142712886", scanContext: "any" });
+    expect(r.status).not.toBe("verified");
+  });
 });
 
 // END-TO-END evidence path: the exact-code-evidence fix means the strong evidence that unlocks
