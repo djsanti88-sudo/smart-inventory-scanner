@@ -2,6 +2,7 @@
 import "server-only";
 import type { AiLookupResult, CodeType, EvidenceResult, ProviderEvidence } from "@/types";
 import { verifyEvidence } from "@/services/ai/evidenceVerifier";
+import { tireSizeToken } from "@/services/ai/tireSpecs";
 
 // Fast brand-anchored grounded spec finder. Makes ONE Gemini Flash + Google Search grounding call
 // with a hard 3s budget to look up tire (or other product) specs for a known brand prefix.
@@ -32,7 +33,12 @@ export function parseSpecResponse(json: unknown, anchorBrand: string | null): Pa
 
   const brand = (anchorBrand && String(anchorBrand).trim()) || String(j.brand ?? "") || "";
   const model = j.model ? String(j.model) : "";
-  const size = j.size ? String(j.size) : "";
+  const rawSize = j.size ? String(j.size) : "";
+  // The size often lives in the title/description, not a clean size field. Mine it from the model name
+  // and product text when the structured field is missing (owner insight).
+  const size = rawSize || tireSizeToken({
+    productName: [j.brand, j.model, j.productName, j.description].filter(Boolean).map(String).join(" "),
+  } as Parameters<typeof tireSizeToken>[0]);
 
   // If there is no usable identity, return null result.
   if (!model && !size) {

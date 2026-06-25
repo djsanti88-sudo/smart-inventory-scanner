@@ -12,3 +12,16 @@ describe("groundedSpecFinder identity parse (pure)", () => {
     expect(parseSpecResponse({ brand: "Cooper" }, "Cooper").result).toBeNull();
   });
 });
+
+it("mines the size from the model/description when the size field is empty", () => {
+  const json = { brand: "Toyo", model: "Open Country A/T III 265/70R17", size: "" };
+  const { result } = parseSpecResponse(json, "Toyo");
+  expect(result).not.toBeNull();
+  expect(result!.specsShort).toContain("265/70R17");
+});
+
+it("still prefers an explicit size field when present", () => {
+  const json = { brand: "Toyo", model: "Open Country", size: "265/70R17" };
+  const { result } = parseSpecResponse(json, "Toyo");
+  expect(result!.specsShort).toContain("265/70R17");
+});
