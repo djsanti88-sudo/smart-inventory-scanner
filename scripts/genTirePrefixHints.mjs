@@ -6,6 +6,7 @@
 import fs from "node:fs";
 
 const CSV = "tire_prefixes_FINAL.csv";
+const ADDITIONS = "tire_prefixes_ADDITIONS.csv"; // mined prefixes (same columns); merged if present
 const OUT = "src/services/tire/tirePrefixHints.ts";
 
 function parseCSV(text) {
@@ -33,7 +34,14 @@ function parseCSV(text) {
 const rows = parseCSV(fs.readFileSync(CSV, "utf8"));
 const header = rows[0].map((h) => h.trim());
 const idx = Object.fromEntries(header.map((h, j) => [h, j]));
-const data = rows.slice(1).filter((r) => r.length > 1 && (r[idx.brand] ?? "").trim());
+let data = rows.slice(1).filter((r) => r.length > 1 && (r[idx.brand] ?? "").trim());
+// Merge the mined ADDITIONS file (same columns). The strong-beats-weak dedupe below handles overlaps.
+if (fs.existsSync(ADDITIONS)) {
+  const arows = parseCSV(fs.readFileSync(ADDITIONS, "utf8"));
+  const adata = arows.slice(1).filter((r) => r.length > 1 && (r[idx.brand] ?? "").trim());
+  data = data.concat(adata);
+  console.log(`merged ${adata.length} rows from ${ADDITIONS}`);
+}
 
 const counts = { hint_strong: 0, hint_weak: 0, exclude_partnumber: 0, review_before_use: 0 };
 const map = {}; // prefix -> { brand -> { weight, source } }
