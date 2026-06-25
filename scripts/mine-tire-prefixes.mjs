@@ -37,8 +37,14 @@ const brandNorm = (b) => String(b || "").toLowerCase().replace(/\([^)]*\)/g, "")
 // longer form of an existing FINAL prefix (which would shadow FINAL's curated family via longest-wins).
 // FINAL stays authoritative; we extend coverage to genuinely-new GS1 blocks only.
 const finalRows = parseCSV(fs.readFileSync("tire_prefixes_FINAL.csv", "utf8"));
-const fpi = finalRows[0].map((h) => h.trim()).indexOf("prefix");
+const fhdr = finalRows[0].map((h) => h.trim());
+const fpi = fhdr.indexOf("prefix"), fbi2 = fhdr.indexOf("brand"), fti2 = fhdr.indexOf("ingest_tier");
 const finalPrefixes = finalRows.slice(1).map((r) => (r[fpi] || "").trim()).filter((p) => /^\d+$/.test(p));
+// Brands FINAL HELD BACK (needs-review or not-a-retail-barcode). If the corpus forms a NEW prefix for one
+// of these, surface it as a CONFLICT (owner's prior call vs >= 5 rows of corpus proof), never a silent add.
+const heldOutBrands = new Set(
+  finalRows.slice(1).filter((r) => ["review_before_use", "exclude_partnumber"].includes((r[fti2] || "").trim())).map((r) => brandNorm(r[fbi2])),
+);
 function finalCovers(code) {
   const g = normalizeToGtin13(code);
   if (!g) return false;
@@ -68,14 +74,16 @@ for (const r of rows.slice(1)) {
 // prefix (e.g. 42 "Toyo" rows on Bridgestone's 0092971) - which would otherwise risk a wrong-brand
 // corroboration. A brand's real prefix holds the bulk of its barcodes; contamination is a tiny fraction.
 const MIN_SHARE = 0.1;
+const MIN_CONFIRM = 5; // owner rule: >= 5 corpus rows from the legitimate tire library == 100% strong proof.
 const byPrefix = new Map();
-const minor = [];
+const minor = []; const conflicts = [];
 let skippedCoveredByFinal = 0;
 for (const [brand, codes] of byBrand) {
   const total = codes.size;
-  for (const p of deriveBrandPrefixes([...codes])) {
+  for (const p of deriveBrandPrefixes([...codes], { minConfirm: MIN_CONFIRM })) {
     if (p.count < MIN_SHARE * total) { minor.push({ brand, prefix: p.prefix, count: p.count, total }); continue; }
     if (finalCovers(p.examples[0])) { skippedCoveredByFinal++; continue; } // FINAL already covers these codes
+    if (heldOutBrands.has(brandNorm(brand))) { conflicts.push({ brand, prefix: p.prefix, count: p.count }); continue; } // held back
     if (!byPrefix.has(p.prefix)) byPrefix.set(p.prefix, new Map());
     byPrefix.get(p.prefix).set(brand, { count: p.count, example: p.examples[0] });
   }
@@ -112,5 +120,6 @@ for (const m of minor.sort((a, b) => b.count - a.count).slice(0, 40)) md += `- $
 if (minor.length > 40) md += `- ... and ${minor.length - 40} more\n`;
 fs.writeFileSync(REPORT, md);
 
-console.log(`brands=${byBrand.size} distinctPrefixes=${distinctPrefixes} rows=${emitted.length} skippedTooWide=${skipped.length} droppedMinor=${minor.length}`);
+console.log(`brands=${byBrand.size} distinctPrefixes=${distinctPrefixes} rows=${emitted.length} CONFLICTS=${conflicts.length} skippedCoveredByFinal=${skippedCoveredByFinal} skippedTooWide=${skipped.length} droppedMinor=${minor.length}`);
+if (conflicts.length) for (const c of conflicts.sort((a, b) => b.count - a.count)) console.log(`  CONFLICT: ${c.brand} forms NEW prefix ${c.prefix} - corpus=${c.count} rows (FINAL held this brand back)`);
 console.log(`wrote ${ADDITIONS} + ${REPORT}`);

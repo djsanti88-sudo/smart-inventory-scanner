@@ -1,0 +1,20 @@
+brand,prefix,prefix_length,region,verification_status,ingest_tier,example_barcode,source_url,mapping_flag,notes
+Hercules,029142,6,sibling,barcode_checked_crossconfirmed,hint_strong,029142978312,,OK,corpus sibling on FINAL prefix: 307 barcodes
+Ironman,029142,6,sibling,barcode_checked_crossconfirmed,hint_strong,029142967675,,OK,corpus sibling on FINAL prefix: 72 barcodes
+Timberland,029142,6,sibling,barcode_checked_crossconfirmed,hint_strong,291428466114,,OK,corpus sibling on FINAL prefix: 9 barcodes
+Continental,051342,6,sibling,barcode_checked_crossconfirmed,hint_strong,051342150847,,OK,corpus sibling on FINAL prefix: 1669 barcodes
+General,051342,6,sibling,barcode_checked_crossconfirmed,hint_strong,051342119066,,OK,corpus sibling on FINAL prefix: 755 barcodes
+Tis Offroad Tires,0688028,7,sibling,barcode_checked_crossconfirmed,hint_strong,688028987338,,OK,corpus sibling on FINAL prefix: 10 barcodes
+Aeolus,0768155,7,sibling,barcode_checked_crossconfirmed,hint_strong,768155370149,,OK,corpus sibling on FINAL prefix: 5 barcodes
+Roadone,0768155,7,sibling,barcode_checked_crossconfirmed,hint_strong,768155398402,,OK,corpus sibling on FINAL prefix: 10 barcodes
+Mickey Thompson Tires,0787025,7,sibling,barcode_checked_crossconfirmed,hint_strong,787025486193,,OK,corpus sibling on FINAL prefix: 241 barcodes
+Giti,0818749,7,sibling,barcode_checked_crossconfirmed,hint_strong,818749011436,,OK,corpus sibling on FINAL prefix: 5 barcodes
+Tbb,0840156,7,sibling,barcode_checked_crossconfirmed,hint_strong,840156400404,,OK,corpus sibling on FINAL prefix: 45 barcodes
+Kinforest,0841623,7,sibling,barcode_checked_crossconfirmed,hint_strong,841623125509,,OK,corpus sibling on FINAL prefix: 10 barcodes
+Dunlop,0848983,7,sibling,barcode_checked_crossconfirmed,hint_strong,848983035189,,OK,corpus sibling on FINAL prefix: 250 barcodes
+Ohtsu Tires,0848983,7,sibling,barcode_checked_crossconfirmed,hint_strong,848983005465,,OK,corpus sibling on FINAL prefix: 47 barcodes
+Presa,4717784,7,sibling,barcode_checked_crossconfirmed,hint_strong,4717784333878,,OK,corpus sibling on FINAL prefix: 21 barcodes
+Nitto,4981910,7,sibling,barcode_checked_crossconfirmed,hint_strong,4981910544517,,OK,corpus sibling on FINAL prefix: 869 barcodes
+Toyo,4981910,7,sibling,barcode_checked_crossconfirmed,hint_strong,4981910526605,,OK,corpus sibling on FINAL prefix: 2873 barcodes
+Vogue,6959655,7,sibling,barcode_checked_crossconfirmed,hint_strong,6959655470161,,OK,corpus sibling on FINAL prefix: 30 barcodes
+Blackhawk,6959655,7,sibling,barcode_checked_crossconfirmed,hint_strong,6959655467970,,OK,corpus sibling on FINAL prefix: 267 barcodes

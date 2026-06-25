@@ -1,0 +1,12 @@
+brand,prefix,prefix_length,region,verification_status,ingest_tier,example_barcode,source_url,mapping_flag,notes
+Goodyear,069766,6,promoted,barcode_checked_crossconfirmed,hint_strong,697662155133,,OK,owner-approved promotion (was review_before_use): 641 corpus rows + Gemini confirmed
+Achilles,89947310,8,promoted,barcode_checked_crossconfirmed,hint_strong,8994731001387,,OK,owner-approved promotion (was review_before_use(new prefix)): 437 corpus rows + Gemini confirmed
+Laufenn,0715459,7,promoted,barcode_checked_crossconfirmed,hint_strong,715459368815,,OK,owner-approved promotion (was hint_weak): 198 corpus rows + Gemini confirmed
+Kelly,069766,6,promoted,barcode_checked_crossconfirmed,hint_strong,697662114369,,OK,owner-approved promotion (was hint_weak): 93 corpus rows + Gemini confirmed
+Dick Cepek,0787025,7,promoted,barcode_checked_crossconfirmed,hint_strong,787025483871,,OK,owner-approved promotion (was hint_weak): 41 corpus rows + Gemini confirmed
+Pantera,0841623,7,promoted,barcode_checked_crossconfirmed,hint_strong,841623107086,,OK,owner-approved promotion (was hint_weak): 31 corpus rows + Gemini confirmed
+Dextero,0818749,7,promoted,barcode_checked_crossconfirmed,hint_strong,818749013317,,OK,owner-approved promotion (was hint_weak): 30 corpus rows + Gemini confirmed
+Freestar,0758823,7,promoted,barcode_checked_crossconfirmed,hint_strong,758823125218,,OK,owner-approved promotion (was hint_weak): 21 corpus rows + Gemini confirmed
+Landsail,0841623,7,promoted,barcode_checked_crossconfirmed,hint_strong,841623109622,,OK,owner-approved promotion (was hint_weak): 20 corpus rows + Gemini confirmed
+Groundspeed,0841623,7,promoted,barcode_checked_crossconfirmed,hint_strong,841623115975,,OK,owner-approved promotion (was hint_weak): 20 corpus rows + Gemini confirmed
+Nankang,0758823,7,promoted,barcode_checked_crossconfirmed,hint_strong,758823121982,,OK,owner-approved promotion (was hint_weak): 18 corpus rows + Gemini confirmed

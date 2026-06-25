@@ -13,9 +13,10 @@ describe("tire prefix data: tiers loaded, excluded rows held out", () => {
     expect(allBrands).not.toContain("Hoosier"); // exclude_partnumber
     expect(allBrands).not.toContain("Interco (Super Swamper)"); // exclude_partnumber
     expect(allBrands).not.toContain("Roadmaster"); // review_before_use
-    // 069766 is ingested via Dunlop (hint_strong) but Goodyear's row is review_before_use -> held out
-    expect(TIRE_PREFIX_HINTS["069766"].some((h) => h.brand === "Dunlop")).toBe(true);
-    expect(TIRE_PREFIX_HINTS["069766"].some((h) => h.brand === "Goodyear")).toBe(false);
+    // 029142 is ingested via Cooper (hint_strong) but Roadmaster's row is review_before_use -> held out.
+    // (Goodyear on 069766 was review_before_use too, but is now an owner-approved promotion - see PROMOTED.csv.)
+    expect(TIRE_PREFIX_HINTS["029142"].some((h) => h.brand === "Cooper")).toBe(true);
+    expect(TIRE_PREFIX_HINTS["029142"].some((h) => h.brand === "Roadmaster")).toBe(false);
   });
 });
 
