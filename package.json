@@ -32,7 +32,11 @@
     "qa:bots:all": "playwright test --config=playwright.bots.config.ts",
     "qa:bots:live": "playwright test --config=playwright.bots.cloud.config.ts",
     "qa:revision": "npx tsc --noEmit && npx eslint src e2e && npx next build && npx playwright test && npm run test:firebase && npm run qa:bots",
-    "qa:weekly-report": "npm run qa:bots:security && npm run qa:bots:data && npm run qa:bots:tire && npm run qa:bots:ux"
+    "qa:weekly-report": "npm run qa:bots:security && npm run qa:bots:data && npm run qa:bots:tire && npm run qa:bots:ux",
+    "intel:now": "node scripts/weekly-intel.mjs",
+    "intel:tire-scan": "node scripts/weekly-tire-scan.ts",
+    "intel:report": "node scripts/build-report-html.mjs",
+    "intel:validate": "node scripts/validate-agents.mjs"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
@@ -61,6 +65,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "jsdom": "^29.1.1",
+    "nodemailer": "^9.0.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.8"
