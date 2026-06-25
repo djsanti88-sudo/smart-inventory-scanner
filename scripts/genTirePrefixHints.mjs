@@ -6,7 +6,8 @@
 import fs from "node:fs";
 
 const CSV = "tire_prefixes_FINAL.csv";
-const ADDITIONS = "tire_prefixes_ADDITIONS.csv"; // mined prefixes (same columns); merged if present
+// Extra curated/mined files (same columns) merged on top of FINAL; strong-beats-weak dedupe handles overlaps.
+const EXTRA = ["tire_prefixes_ADDITIONS.csv", "tire_prefixes_SIBLINGS.csv", "tire_prefixes_PROMOTED.csv"];
 const OUT = "src/services/tire/tirePrefixHints.ts";
 
 function parseCSV(text) {
@@ -35,12 +36,12 @@ const rows = parseCSV(fs.readFileSync(CSV, "utf8"));
 const header = rows[0].map((h) => h.trim());
 const idx = Object.fromEntries(header.map((h, j) => [h, j]));
 let data = rows.slice(1).filter((r) => r.length > 1 && (r[idx.brand] ?? "").trim());
-// Merge the mined ADDITIONS file (same columns). The strong-beats-weak dedupe below handles overlaps.
-if (fs.existsSync(ADDITIONS)) {
-  const arows = parseCSV(fs.readFileSync(ADDITIONS, "utf8"));
-  const adata = arows.slice(1).filter((r) => r.length > 1 && (r[idx.brand] ?? "").trim());
-  data = data.concat(adata);
-  console.log(`merged ${adata.length} rows from ${ADDITIONS}`);
+for (const f of EXTRA) {
+  if (!fs.existsSync(f)) continue;
+  const xrows = parseCSV(fs.readFileSync(f, "utf8"));
+  const xdata = xrows.slice(1).filter((r) => r.length > 1 && (r[idx.brand] ?? "").trim());
+  data = data.concat(xdata);
+  console.log(`merged ${xdata.length} rows from ${f}`);
 }
 
 const counts = { hint_strong: 0, hint_weak: 0, exclude_partnumber: 0, review_before_use: 0 };
