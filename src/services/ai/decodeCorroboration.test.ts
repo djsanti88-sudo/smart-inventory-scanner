@@ -131,6 +131,32 @@ describe("decideDecode - deterministic tire corroboration", () => {
   });
 });
 
+describe("decideDecode - PATH 3 internet two-source size agreement (no exact-code echo, no DB)", () => {
+  const sizeAgreed = (over = {}) =>
+    tire({ productName: "Cooper Discoverer A/T3 LT245/75R16 120R", brand: "Cooper", specsShort: "LT245/75R16 120R", sizeAgreement: true, ...over });
+
+  it("AUTO-VERIFIES a strong-prefix tire when two independent sources agree on the size - WITHOUT exact-code evidence", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [sizeAgreed()], evidences: [weakEv()], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });
+    expect(r.status).toBe("verified");
+    expect(r.corroborationPath).toBe("internet_two_source_size");
+  });
+
+  it("stays SUGGESTED when only ONE source has the size (no agreement)", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [sizeAgreed({ sizeAgreement: false })], evidences: [weakEv()], confidenceThreshold: 0.85, code: "029142712886", scanContext: "tire" });
+    expect(r.status).not.toBe("verified");
+  });
+
+  it("does NOT verify the poison (non-tire) even with sizeAgreement true", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [tire({ productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel", specsShort: "", sizeAgreement: true })], evidences: [weakEv()], confidenceThreshold: 0.85, code: "745125495781", scanContext: "tire" });
+    expect(r.status).not.toBe("verified");
+  });
+
+  it("does NOT verify a brand NOT in the strong prefix family even with sizeAgreement", () => {
+    const r = decideDecode({ codeType: "upc_a", results: [tire({ productName: "Kumho Crugen 265/70R17 115T", brand: "Kumho", specsShort: "265/70R17 115T", sizeAgreement: true })], evidences: [weakEv()], confidenceThreshold: 0.85, code: "012345678905", scanContext: "tire" });
+    expect(r.status).not.toBe("verified");
+  });
+});
+
 // END-TO-END evidence path: the exact-code-evidence fix means the strong evidence that unlocks
 // corroboration comes from a REAL fetched page (verifyEvidence over fetchedSourceText), not a synthetic
 // flag. These tests drive verifyEvidence with actual page text so they prove the live mechanism: a tire

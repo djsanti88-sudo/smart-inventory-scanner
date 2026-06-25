@@ -388,6 +388,9 @@ export interface AiLookupResult {
   // the "page-fetch + one model agreement" corroboration signal; it never bypasses the firewall, the
   // exact-code evidence gate, the tire-spec gate, or the >=0.9 store gate.
   corroboratedByModel?: boolean;
+  // Two INDEPENDENT Internet retrievals (grounded search + page fetch) agreed on the tire SIZE. Set by
+  // the background size race in the route; consumed by decideDecode's internet_two_source_size branch.
+  sizeAgreement?: boolean;
 }
 
 // --- Evidence verification (the app independently verifies the exact code in real evidence) ---
@@ -464,7 +467,8 @@ export type CorroborationPath =
   | "page_fetch_model_agreement"
   | "deterministic_prefix"
   | "corpus_exact_barcode"
-  | "corpus_exact_part_number";
+  | "corpus_exact_part_number"
+  | "internet_two_source_size";
 
 export interface DecodeDecision {
   status: DecodeStatus;

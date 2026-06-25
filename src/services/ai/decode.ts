@@ -145,8 +145,31 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     isTireContext(a) &&
     hasCountableTireIdentity(a);
 
-  if (canVerify || tireCorroborated || pageFetchModelAgreement) {
-    const corroborationPath = canVerify ? "two_ai_agreement" : tireCorroborated ? "deterministic_prefix" : "page_fetch_model_agreement";
+  // PATH 3 - INTERNET TWO-SOURCE SIZE AGREEMENT. The barcode's STRONG brand-prefix family gives the brand
+  // deterministically (public GS1 fact, not the AI text). When two INDEPENDENT Internet retrievals (grounded
+  // search + a direct page fetch) agreed on the SIZE (a.sizeAgreement, set by the route race), that
+  // agreement is the second source - so we do NOT require the exact code echoed on a page. The local DB is
+  // never consulted. Poison / non-tire / weak-prefix / single-source can never satisfy it.
+  const internetTwoSourceSize =
+    scanContext === "tire" &&
+    isPublicBarcode &&
+    identityNonEmpty &&
+    passesThreshold &&
+    !!a &&
+    a.sizeAgreement === true &&
+    isTireContext(a) &&
+    hasCountableTireIdentity(a) &&
+    !!code &&
+    isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
+
+  if (canVerify || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize) {
+    const corroborationPath = canVerify
+      ? "two_ai_agreement"
+      : tireCorroborated
+        ? "deterministic_prefix"
+        : pageFetchModelAgreement
+          ? "page_fetch_model_agreement"
+          : "internet_two_source_size";
     return {
       status: "verified",
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
@@ -154,9 +177,11 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
         : tireCorroborated
           ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
-          : "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code.",
+          : pageFetchModelAgreement
+            ? "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code."
+            : "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size.",
       evidenceStrength: bestEvidence.strength,
-      exactCodeEvidenceVerifiedByApp: true,
+      exactCodeEvidenceVerifiedByApp: canVerify || tireCorroborated || pageFetchModelAgreement,
       crossCheck: baseCrossCheck,
       corroborationPath,
     };
