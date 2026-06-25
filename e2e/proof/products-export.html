@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Products</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;padding:24px;color:#18181b;background:#fafafa}
+  h1{font-size:22px;margin:0 0 4px} .meta{color:#52525b;font-size:14px;margin-bottom:16px}
+  input{font-size:16px;padding:10px 12px;width:100%;max-width:420px;border:1px solid #d4d4d8;border-radius:8px;margin-bottom:12px}
+  table{border-collapse:collapse;width:100%;background:#fff;font-size:14px}
+  th,td{border:1px solid #e4e4e7;padding:8px 10px;text-align:left}
+  th{background:#f4f4f5;cursor:pointer;position:sticky;top:0}
+  tr:nth-child(even) td{background:#fafafa} .count{color:#52525b;font-size:13px;margin-top:8px}
+</style></head><body>
+<h1>Products</h1>
+<div class="meta">Smart Inventory Scanner &middot; 6/22/2026, 10:57:18 PM</div>
+<input id="q" type="search" placeholder="Search..." aria-label="Search">
+<table><thead><tr id="hdr"></tr></thead><tbody id="body"></tbody></table>
+<div class="count" id="count"></div>
+<script>
+(function(){
+  var DATA={"headers":["id","name","brand","category","specs","primary_sku","primary_barcode","gtin","upc","ean","aliases","image_url","location","source"],"rows":[["prod-nokian","Nokian Outpost APT","Nokian","Tire","245/55R19 103H","T432119","6419440485331","6419440485331","","","6419440485331 | T432119 | T432119%RU1%","https://images.example.com/nokian-outpost-apt.jpg","Bay A","seed"],["prod-falken","Falken Sincera ST80 A/S","Falken","Tire","215/70R15 98T","28816861","848983012906","848983012906","","","848983012906 | 28816861 | 2881-6861","https://images.example.com/falken-sincera-st80.jpg","Bay B","seed"],["prod-coke","Coca-Cola 12 pack 12 oz cans","Coca-Cola","Beverage","12 x 12 oz","","049000028904","","049000028904","","049000028904 | 7262","https://images.example.com/coca-cola-12pack.jpg","Cooler 1","seed"],["prod-supplement","Vital Whey Protein Vanilla 2lb","VitalNutrition","Supplement","2 lb, vanilla","VWP-VAN-2LB","850012345678","","850012345678","","850012345678 | VWP-VAN-2LB","https://images.example.com/vital-whey-vanilla.jpg","Shelf C3","seed"],["prod-tool","DeWalt 20V Impact Driver","DeWalt","Tool","20V MAX, bare tool","DCF887B","885911484047","00885911484047","885911484047","","885911484047 | DCF887B","https://images.example.com/dewalt-dcf887b.jpg","Cage 2","seed"]]};
+  var sortCol=-1, sortAsc=true, q="";
+  var hdr=document.getElementById("hdr"), body=document.getElementById("body"), count=document.getElementById("count");
+  DATA.headers.forEach(function(h,i){var th=document.createElement("th");th.textContent=h;th.onclick=function(){if(sortCol===i)sortAsc=!sortAsc;else{sortCol=i;sortAsc=true;}render();};hdr.appendChild(th);});
+  function render(){
+    var rows=DATA.rows.filter(function(r){return q===""||r.some(function(c){return String(c).toLowerCase().indexOf(q)>-1;});});
+    if(sortCol>-1){rows=rows.slice().sort(function(a,b){var x=a[sortCol]||"",y=b[sortCol]||"";var n=parseFloat(x),m=parseFloat(y);var c=(!isNaN(n)&&!isNaN(m))?n-m:String(x).localeCompare(String(y));return sortAsc?c:-c;});}
+    body.textContent="";
+    rows.forEach(function(r){var tr=document.createElement("tr");r.forEach(function(c){var td=document.createElement("td");td.textContent=c;tr.appendChild(td);});body.appendChild(tr);});
+    count.textContent=rows.length+" of "+DATA.rows.length+" row(s)";
+  }
+  document.getElementById("q").addEventListener("input",function(e){q=e.target.value.toLowerCase();render();});
+  render();
+})();
+</script></body></html>
