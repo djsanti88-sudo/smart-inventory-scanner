@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSpecResponse } from "./groundedSpecFinder";
+import { parseSpecResponse, GROUNDED_SPEC_GEMINI_MODEL } from "./groundedSpecFinder";
 
 describe("groundedSpecFinder identity parse (pure)", () => {
   it("anchors the brand and builds productName from brand+model+size", () => {
@@ -24,4 +24,9 @@ it("still prefers an explicit size field when present", () => {
   const json = { brand: "Toyo", model: "Open Country", size: "265/70R17" };
   const { result } = parseSpecResponse(json, "Toyo");
   expect(result!.specsShort).toContain("265/70R17");
+});
+
+it("defaults to a live Gemini model, not the retired gemini-2.0-flash-001", () => {
+  expect(GROUNDED_SPEC_GEMINI_MODEL).not.toBe("gemini-2.0-flash-001");
+  expect(GROUNDED_SPEC_GEMINI_MODEL).toMatch(/^gemini-2\.5-flash/);
 });
