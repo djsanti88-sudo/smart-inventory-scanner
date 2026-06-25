@@ -146,10 +146,14 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     hasCountableTireIdentity(a);
 
   // PATH 3 - INTERNET TWO-SOURCE SIZE AGREEMENT. The barcode's STRONG brand-prefix family gives the brand
-  // deterministically (public GS1 fact, not the AI text). When two INDEPENDENT Internet retrievals (grounded
-  // search + a direct page fetch) agreed on the SIZE (a.sizeAgreement, set by the route race), that
-  // agreement is the second source - so we do NOT require the exact code echoed on a page. The local DB is
-  // never consulted. Poison / non-tire / weak-prefix / single-source can never satisfy it.
+  // deterministically (public GS1 fact, not AI text). a.sizeAgreement is set ONLY by the app's own route-side
+  // two-source race (compares a grounded-search size vs an independent page-fetch size) - it is NEVER an AI
+  // self-claim, so it cannot be injected by a provider. That app-computed agreement is the second independent
+  // source, so - BY DESIGN, and unlike the three paths above - this path intentionally does NOT require the
+  // `strong` app-verified exact-code evidence; two independent Internet sources agreeing on the size IS the
+  // corroboration (owner-approved Internet-only path). The local DB is never consulted. Poison / non-tire /
+  // weak-prefix / single-source (sizeAgreement !== true) can never satisfy it; weak exact-code evidence CAN,
+  // which is the intended relaxation.
   const internetTwoSourceSize =
     scanContext === "tire" &&
     isPublicBarcode &&
