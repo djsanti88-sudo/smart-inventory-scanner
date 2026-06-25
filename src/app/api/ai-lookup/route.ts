@@ -18,6 +18,8 @@ import { withDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
+import { runSizeRace } from "@/services/ai/sizeRace";
+import { tireSizeToken } from "@/services/ai/tireSpecs";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -303,12 +305,34 @@ export async function POST(request: Request) {
         ? undefined
         : (signal: AbortSignal) => enrichWithPageFetch({ code, codeType, extract: reader, signal, corroborate });
 
-      const run = await runDecode({ code, codeType, confidenceThreshold: threshold, providers, enrich, budgetMs, trustedHosts: TRUSTED_HOSTS });
+      // SIZE RACE (PATH 3 setup): run groundedSpecFind (Arm A) concurrently with runDecode (which
+      // internally runs enrichWithPageFetch as Arm B). Neither arm is the other - these are genuinely
+      // different Internet roads (grounded Gemini search vs barcode-DB page fetch). sizeAgreement is
+      // set ONLY from this app-computed race result - NEVER from any provider's self-claim.
+      const [run, groundedForRace] = await Promise.all([
+        runDecode({ code, codeType, confidenceThreshold: threshold, providers, enrich, budgetMs, trustedHosts: TRUSTED_HOSTS }),
+        e2eMode() ? Promise.resolve(null) : groundedSpecFind({ code, codeType, anchorBrand }).catch(() => null),
+      ]);
 
       let results = run.results;
       let evidences = run.evidences;
       let providerNames = run.providerNames;
       let providerStatuses = run.providerStatuses;
+
+      // Arm A: grounded search size (from groundedSpecFind run concurrently above).
+      const armASize = tireSizeToken(groundedForRace?.result ?? null) || "";
+      // Arm B: page-fetch size - the page-fetch path (enrichWithPageFetch) sets fetchedSourceText on
+      // the result it produces; look for that first, then fall back to the first available result.
+      const pageFetchResult = results.find((r) => r.fetchedSourceText) ?? results[0] ?? null;
+      const armBSize = tireSizeToken(pageFetchResult) || "";
+      const sizeRace = await runSizeRace({
+        armAGetSize: async () => armASize,
+        armBGetSize: async () => armBSize,
+      });
+      // Set sizeAgreement on the first result (the one decideDecode reads as `a`). This is the app's
+      // computation - it is NEVER copied from a provider field. Provider self-claims are untrusted.
+      if (results.length > 0) results[0] = { ...results[0], sizeAgreement: sizeRace.sizeAgreement };
+
       // Re-decide with the business scan context + scanned code so a deterministically-corroborated tire
       // (strong brand-prefix family + full specs + app-verified exact code) can auto-count even from a
       // single provider. Same inputs as the orchestrator otherwise; pure + cheap.
@@ -387,12 +411,16 @@ export async function POST(request: Request) {
         if (finders.length > 0) {
           const outcome = await raceFinders(finders, { hardCapMs: FALLBACK_HARD_CAP_MS });
           if (outcome.hit) {
-            results = [outcome.hit.result, ...results];
+            // Apply the same app-computed sizeAgreement from the race to the fallback winner before
+            // decideDecode so PATH 3 (internetTwoSourceSize) is available here too. sizeAgreement is
+            // ONLY set from the race result - never from any provider field.
+            const winnerWithSize = { ...outcome.hit.result, sizeAgreement: sizeRace.sizeAgreement };
+            results = [winnerWithSize, ...results];
             evidences = [outcome.hit.evidence, ...evidences];
             providerNames = [outcome.hit.providerName, ...providerNames];
             fallbackFound = true;
             // Decide on the WINNER alone so leftover fast-path noise can't manufacture a false conflict.
-            decision = decideDecode({ codeType, results: [outcome.hit.result], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext });
+            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext });
           }
         }
       }
