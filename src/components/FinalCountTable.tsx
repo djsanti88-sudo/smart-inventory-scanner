@@ -84,6 +84,9 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: product.name, brand: product.brand, category: product.category, location: product.location ?? "" });
+  // For now (owner request) keep the row to TWO simple actions: Modify + Delete. The extra/destructive
+  // actions (Mark wrong, hard product delete) are hidden behind this flag (code kept). Set true to restore.
+  const SHOW_ADVANCED_ACTIONS = false;
 
   const onRemove = () => {
     if (window.confirm("Remove this product from the current count? The product and its codes are kept - you can re-scan to count again.")) {
@@ -189,19 +192,19 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
         ) : (
           <div className="flex flex-wrap gap-1.5">
             <button type="button" data-testid={`correct-${product.id}`} onClick={() => setEditing(true)} className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50">
-              Correct
+              Modify
             </button>
-            <button type="button" data-testid={`remove-count-${product.id}`} onClick={onRemove} className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50">
-              Remove from count
+            <button type="button" data-testid={`remove-count-${product.id}`} onClick={onRemove} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">
+              Delete
             </button>
-            {isPlatform && (
+            {SHOW_ADVANCED_ACTIONS && isPlatform && (
               <button type="button" data-testid={`mark-wrong-${product.id}`} onClick={onMarkWrong} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">
                 Mark wrong
               </button>
             )}
-            {isPlatform && (
+            {SHOW_ADVANCED_ACTIONS && isPlatform && (
               <button type="button" data-testid={`delete-product-${product.id}`} onClick={() => confirmAndDeleteProduct(product.id, product.name)} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">
-                Delete
+                Delete product
               </button>
             )}
           </div>

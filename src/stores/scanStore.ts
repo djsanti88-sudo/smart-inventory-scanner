@@ -3188,7 +3188,10 @@ const appDeps: ScanStoreDeps = {
   // Global catalog cloud lookup (Option 1 wiring). Tries each candidate code against the Firestore
   // global catalog; returns the first verified entry, or the first entry of any status, or null.
   // Errors are swallowed here and also in cloudCatalogResolve so a Firestore failure never breaks scanning.
-  lookupGlobalCatalog: useFirebaseBackend
+  // READ-ONLY cloud "brain": the global catalog lookup is enabled by full Firebase backend OR by the
+  // dedicated NEXT_PUBLIC_CLOUD_CATALOG flag. The latter lets the LOCAL (mock) backend read the cloud
+  // 52k catalog for resolution WITHOUT writing any scans to the cloud (scans stay in the local store).
+  lookupGlobalCatalog: (useFirebaseBackend || process.env.NEXT_PUBLIC_CLOUD_CATALOG === "1")
     ? async (codes: string[]): Promise<CatalogEntry | null> => {
         const repo = catalogRepository(getDb());
         const nowIso = new Date().toISOString();

@@ -146,14 +146,29 @@ describe("decideDecode - the gate that produces a Verified AI Decode", () => {
     expect(d.status).not.toBe("verified");
   });
 
-  it("a SINGLE provider NEVER auto-verifies - it is Suggested until a second provider agrees", () => {
-    // Even with strong app-verified evidence + high confidence on a public barcode, one provider on
-    // its own is not enough to auto-count. Two providers must independently agree (Gemini Flash +
-    // ChatGPT mini run in parallel). This is what stops a lone provider's wrong web-data from counting.
-    const oneStrong = decideDecode({ codeType: "upc_a", results: [coke()], evidences: [strong()], confidenceThreshold: 0.8 });
-    expect(oneStrong.status).toBe("suggested");
-    expect(oneStrong.reason).toMatch(/second source must agree/i);
-    const weakOne = decideDecode({ codeType: "upc_a", results: [coke()], evidences: [weak()], confidenceThreshold: 0.8 });
+  it("a single provider auto-verifies ONLY when its source is trusted/legit (owner single-source policy)", () => {
+    // Owner policy: ONE provider is enough to auto-count when the app confirmed the exact code in strong
+    // evidence AND the provider's best source is a trusted/legit site. An untrusted/unknown source stays
+    // Suggested; weak evidence never verifies even from a trusted source.
+    const untrusted = decideDecode({ codeType: "upc_a", results: [coke()], evidences: [strong()], confidenceThreshold: 0.8 });
+    expect(untrusted.status).toBe("suggested");
+    expect(untrusted.reason).toMatch(/trusted\/legit site|trusted source/i);
+
+    const trusted = decideDecode({
+      codeType: "upc_a",
+      results: [result({ ...coke(), sourceUrls: ["https://www.amazon.com/dp/B000"] })],
+      evidences: [strong()],
+      confidenceThreshold: 0.8,
+    });
+    expect(trusted.status).toBe("verified");
+    expect(trusted.corroborationPath).toBe("single_trusted_source");
+
+    const weakOne = decideDecode({
+      codeType: "upc_a",
+      results: [result({ ...coke(), sourceUrls: ["https://www.amazon.com/dp/B000"] })],
+      evidences: [weak()],
+      confidenceThreshold: 0.8,
+    });
     expect(weakOne.status).not.toBe("verified");
   });
 

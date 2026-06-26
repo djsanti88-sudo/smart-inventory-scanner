@@ -3,6 +3,7 @@ import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
+import { bestTier, isTrustedTier } from "@/services/catalog/sourceTrust";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
 // status. A "verified" decode (auto-counted) requires ALL of:
@@ -110,6 +111,22 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     passesThreshold &&
     cc.decision === "agree";
 
+  // SINGLE TRUSTED SOURCE (owner policy): one provider (e.g. Gemini Flash) is enough to auto-count when
+  // the app independently verified the EXACT code in strong evidence AND that provider's best source is a
+  // TRUSTED/legit site (Tier-1 registry or Tier-2 commercial retailer per sourceTrust). This is the
+  // catalog-miss fallback for ANY item (tire or not): a legit source confirming the exact code is enough.
+  // Still rejects: vendor/label code types, weak/unverified evidence, below-threshold, and untrusted or
+  // unknown-host single-provider claims (those stay "suggested" -> human review). The downstream firewall
+  // + >=0.9 store gate still apply.
+  const singleProviderTrusted =
+    isPublicBarcode &&
+    strong &&
+    identityNonEmpty &&
+    passesThreshold &&
+    !!a &&
+    (cc.decision === "single_provider" || cc.decision === "agree") &&
+    isTrustedTier(bestTier(a.sourceUrls ?? []));
+
   // DETERMINISTIC TIRE CORROBORATION: the barcode's STRONG brand-prefix family + tire context + full tire
   // specs + the app's own exact-code verification act as an INDEPENDENT agreeing source - equivalent to
   // two-provider agreement, but grounded in signals that do NOT come from the AI text (prefix table, spec
@@ -166,26 +183,30 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     !!code &&
     isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
 
-  if (canVerify || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize) {
+  if (canVerify || singleProviderTrusted || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize) {
     const corroborationPath = canVerify
       ? "two_ai_agreement"
-      : tireCorroborated
-        ? "deterministic_prefix"
-        : pageFetchModelAgreement
-          ? "page_fetch_model_agreement"
-          : "internet_two_source_size";
+      : singleProviderTrusted
+        ? "single_trusted_source"
+        : tireCorroborated
+          ? "deterministic_prefix"
+          : pageFetchModelAgreement
+            ? "page_fetch_model_agreement"
+            : "internet_two_source_size";
     return {
       status: "verified",
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
       reason: canVerify
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
-        : tireCorroborated
-          ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
-          : pageFetchModelAgreement
-            ? "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code."
-            : "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size.",
+        : singleProviderTrusted
+          ? "Verified AI Decode: the app confirmed the exact code on a trusted/legit source (single trusted source is enough)."
+          : tireCorroborated
+            ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
+            : pageFetchModelAgreement
+              ? "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code."
+              : "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size.",
       evidenceStrength: bestEvidence.strength,
-      exactCodeEvidenceVerifiedByApp: canVerify || tireCorroborated || pageFetchModelAgreement,
+      exactCodeEvidenceVerifiedByApp: canVerify || singleProviderTrusted || tireCorroborated || pageFetchModelAgreement,
       crossCheck: baseCrossCheck,
       corroborationPath,
     };
@@ -202,7 +223,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
         : !passesThreshold
           ? "Confidence is below the threshold."
           : cc.decision !== "agree"
-            ? "Only one source could confirm this; a second source must agree before it is auto-counted."
+            ? "Only one source confirmed this and it isn't a trusted/legit site - a trusted source (or a second source) must confirm before it auto-counts."
             : "Needs human confirmation.";
     return {
       status: "suggested",

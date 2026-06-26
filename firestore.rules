@@ -129,9 +129,11 @@ service cloud.firestore {
       }
     }
 
-    // ----- shared global catalog: read by any signed-in user; writes are SERVER-ONLY (Admin SDK). -----
+    // ----- shared global catalog ("the brain"): PUBLIC read (sanitized, non-private reference data only:
+    // barcode/brand/model/size — no businessId/prices/customer data). Writes are SERVER-ONLY (Admin SDK).
+    // Public read lets the local/no-login app resolve scans from the cloud catalog without writing anything. -----
     match /catalogEntries/{id} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if false;
     }
 
