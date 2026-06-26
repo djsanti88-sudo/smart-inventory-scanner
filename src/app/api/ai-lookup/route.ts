@@ -17,6 +17,7 @@ import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
 import { withDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
+import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 import { runSizeRace } from "@/services/ai/sizeRace";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
@@ -86,11 +87,24 @@ function lookupChain(primary: string): AiProvider[] {
 function decodeProviders(pro = false): AiProvider[] {
   if (e2eMode()) return [mockProvider];
   const chain: AiProvider[] = [];
-  // Fast first: fast models with web search/grounding. The page-fetch step does the heavy lifting.
-  // proRecheck (correction-only) escalates to the strongest configured verification models instead -
-  // it does NOT change the normal scan provider order or the premium fallback path.
+  // OWNER BASELINE (v1): Gemini Flash runs the FAST first pass ALONE - the loved 1-2s decode. ChatGPT
+  // (OpenAI) is NOT run in parallel; it is the ESCALATION (escalationProviders) called ONLY when Gemini's
+  // fast pass finds nothing. The pro path (proRecheck correction) still uses both strongest models.
   if (process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: pro ? GEMINI_DECODE_MODEL : GEMINI_FAST_MODEL }));
-  if (process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: pro ? OPENAI_DECODE_MODEL : OPENAI_FAST_MODEL }));
+  if (pro && process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: OPENAI_DECODE_MODEL }));
+  if (chain.length === 0) chain.push(mockProvider);
+  return chain;
+}
+
+// ESCALATION pass: runs ONLY when the Gemini fast pass found no usable product (the ~1-2/20 Gemini
+// whiffs). ChatGPT mini first (owner-chosen GPT-5 mini fallback), then a Gemini retry in the longer
+// window. A single verified hit here auto-counts under the same any-source rule. Sequential, not parallel:
+// a normal Gemini hit never spends an OpenAI call.
+function escalationProviders(): AiProvider[] {
+  if (e2eMode()) return [mockProvider];
+  const chain: AiProvider[] = [];
+  if (process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: OPENAI_FAST_MODEL }));
+  if (process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: GEMINI_FAST_MODEL }));
   if (chain.length === 0) chain.push(mockProvider);
   return chain;
 }
@@ -193,7 +207,7 @@ export async function POST(request: Request) {
     // reachable for the client: it sends mode "decode-deep" (or "decode" with deep:true) to opt INTO
     // the existing multi-stage deep/Firecrawl orchestration and SKIP the tire hot path below.
     const deepRequested = body.mode === "decode-deep" || body.deep === true;
-    const threshold = body.confidenceThreshold ?? 0.85;
+    const threshold = body.confidenceThreshold ?? 0.8;
     // The budget may be owner-configured and arrives from the client - clamp it server-side so a
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
     const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
@@ -298,8 +312,15 @@ export async function POST(request: Request) {
 
       // FAST PATH - CONCURRENT, HARD ~13s BUDGET. Providers + page-fetch race under one budget signal.
       // On timeout the orchestrator aborts everything and returns Needs Review (never a partial).
-      const baseProviders = decodeProviders(body.proRecheck === true); // fast models; pro models for a correction recheck
+      const baseProviders = decodeProviders(body.proRecheck === true); // fast = Gemini only; pro = both strongest
       const providers: DecodeProvider[] = baseProviders.map((p) => ({
+        name: p.name,
+        lookup: (signal) => p.lookup(req, signal),
+      }));
+      // Escalation providers (ChatGPT mini first) - used ONLY by the on-miss Stage-2 finder below, so a
+      // normal Gemini hit never calls OpenAI. proRecheck keeps its strongest-model set.
+      const escBase = body.proRecheck === true ? baseProviders : escalationProviders();
+      const escProviders: DecodeProvider[] = escBase.map((p) => ({
         name: p.name,
         lookup: (signal) => p.lookup(req, signal),
       }));
@@ -341,7 +362,7 @@ export async function POST(request: Request) {
       // Re-decide with the business scan context + scanned code so a deterministically-corroborated tire
       // (strong brand-prefix family + full specs + app-verified exact code) can auto-count even from a
       // single provider. Same inputs as the orchestrator otherwise; pure + cheap.
-      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext });
+      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: prefixBrandConflict(code, results[0]?.brand) });
       let fallbackFound = false;
       let coverageMissed = false;
       let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
@@ -366,7 +387,7 @@ export async function POST(request: Request) {
             name: "ai-deep",
             run: async (signal) => {
               const deep = await runDecode({
-                code, codeType, confidenceThreshold: threshold, providers,
+                code, codeType, confidenceThreshold: threshold, providers: escProviders,
                 enrich: (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, extraUrls: citedFromFast, corroborate }),
                 budgetMs: FALLBACK_AI_TIMEOUT_MS + 5_000,
                 providerTimeoutMs: FALLBACK_AI_TIMEOUT_MS,
@@ -425,7 +446,7 @@ export async function POST(request: Request) {
             providerNames = [outcome.hit.providerName, ...providerNames];
             fallbackFound = true;
             // Decide on the WINNER alone so leftover fast-path noise can't manufacture a false conflict.
-            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext });
+            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: prefixBrandConflict(code, winnerWithSize.brand) });
           }
         }
       }

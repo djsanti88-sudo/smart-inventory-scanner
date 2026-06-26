@@ -26,7 +26,7 @@ describe("runDecode - time budget + concurrency", () => {
     expect(r.decision.status).toBe("verified");
   });
 
-  it("a SINGLE provider on its own does NOT auto-verify - it is Suggested (needs a second agreeing source)", async () => {
+  it("a SINGLE provider with strong app-verified evidence AUTO-VERIFIES (any-source baseline)", async () => {
     const p: DecodeProvider = { name: "openai", lookup: async () => coke() };
     const r = await runDecode({
       code: "049000028904",
@@ -36,7 +36,7 @@ describe("runDecode - time budget + concurrency", () => {
       budgetMs: 13_000,
     });
     expect(r.timedOut).toBe(false);
-    expect(r.decision.status).toBe("suggested");
+    expect(r.decision.status).toBe("verified");
   });
 
   it("on TIMEOUT, aborts pending work and returns needs_review with NO partial result", async () => {
@@ -99,9 +99,9 @@ describe("runDecode - time budget + concurrency", () => {
     expect(r.providerStatuses.find((s) => s.provider === "openai")?.status).toBe("ok");
   });
 
-  it("uses the page-fetch enrich result (single source -> Suggested) + reports latency", async () => {
-    // Provider finds nothing; the page-fetch result is the ONLY source. One source alone cannot
-    // auto-count under the two-source rule, so it lands as Suggested (human review) - but it is used.
+  it("uses the page-fetch enrich result and AUTO-VERIFIES from that single source + reports latency", async () => {
+    // Provider finds nothing; the page-fetch result is the ONLY source. Under any-source, one source that
+    // confirms the exact code in strong (fetched_source) evidence auto-counts.
     const p: DecodeProvider = { name: "openai", lookup: async () => emptyResult() };
     const r = await runDecode({
       code: "049000028904",
@@ -112,7 +112,7 @@ describe("runDecode - time budget + concurrency", () => {
       budgetMs: 13_000,
     });
     expect(r.timedOut).toBe(false);
-    expect(r.decision.status).toBe("suggested"); // single source: shown + reviewable, not auto-counted
+    expect(r.decision.status).toBe("verified"); // single trusted source confirms the exact code -> auto-count
     expect(r.results.some((x) => x.productName === "Coca-Cola Classic")).toBe(true); // page-fetch result IS used
     expect(typeof r.latencyMs).toBe("number");
   });

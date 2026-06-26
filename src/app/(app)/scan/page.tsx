@@ -26,6 +26,20 @@ export default function ScanPage() {
   const [name, setName] = useState("");
   const [location, setLocation] = useState("Main");
 
+  // BULK SCAN: paste/type several codes separated by spaces or newlines and each becomes its OWN row
+  // (one processScan per code). A single hardware-scanned barcode contains no whitespace, so normal
+  // one-at-a-time scanning is unchanged. Returns the LAST result so the success panel reflects it.
+  const handleScan = (raw: string) => {
+    const codes = raw
+      .split(/\s+/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (codes.length <= 1) return processScan(raw);
+    let last = null as ReturnType<typeof processScan>;
+    for (const code of codes) last = processScan(code);
+    return last;
+  };
+
   // Learn which provider keys are configured (server-side) so unknown scans can auto-decode.
   useEffect(() => {
     void refreshAiStatus();
@@ -84,7 +98,7 @@ export default function ScanPage() {
         )}
         <div className="flex flex-wrap items-end gap-3">
           <div className="grow">
-            <ScannerInput onScan={(raw) => processScan(raw)} submitMode={settings.scannerSubmitMode} debounceMs={settings.scannerDebounceMs} />
+            <ScannerInput onScan={handleScan} submitMode={settings.scannerSubmitMode} debounceMs={settings.scannerDebounceMs} />
           </div>
           {SHOW_CATEGORY && (
             <div className="flex flex-col gap-1">

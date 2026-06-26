@@ -464,7 +464,7 @@ export interface AiStatus {
 /** Which approved corroboration path produced a "verified" decode (for honest reporting). */
 export type CorroborationPath =
   | "two_ai_agreement"
-  | "single_trusted_source"
+  | "single_source"
   | "page_fetch_model_agreement"
   | "deterministic_prefix"
   | "corpus_exact_barcode"

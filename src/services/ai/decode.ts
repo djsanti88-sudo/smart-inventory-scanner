@@ -3,7 +3,6 @@ import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
-import { bestTier, isTrustedTier } from "@/services/catalog/sourceTrust";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
 // status. A "verified" decode (auto-counted) requires ALL of:
@@ -26,6 +25,10 @@ export interface DecodeParams {
   confidenceThreshold: number;
   code?: string; // the exact scanned code, for deterministic brand-prefix-family corroboration
   scanContext?: "any" | "tire"; // business scan context; "tire" enables deterministic tire corroboration
+  // GENERAL catalog-derived brand sanity (owner baseline v1): true when the code's prefix is a known
+  // single-brand family in the global catalog AND the decoded brand clearly differs (wrong brand for
+  // this barcode). Computed by the caller via prefixBrandConflict(); blocks every auto-count path.
+  brandPrefixConflict?: boolean;
 }
 
 // --- Product-name quality gate (junk firewall) ------------------------------------------------
@@ -109,23 +112,23 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     strong &&
     identityNonEmpty &&
     passesThreshold &&
+    !params.brandPrefixConflict &&
     cc.decision === "agree";
 
-  // SINGLE TRUSTED SOURCE (owner policy): one provider (e.g. Gemini Flash) is enough to auto-count when
-  // the app independently verified the EXACT code in strong evidence AND that provider's best source is a
-  // TRUSTED/legit site (Tier-1 registry or Tier-2 commercial retailer per sourceTrust). This is the
-  // catalog-miss fallback for ANY item (tire or not): a legit source confirming the exact code is enough.
-  // Still rejects: vendor/label code types, weak/unverified evidence, below-threshold, and untrusted or
-  // unknown-host single-provider claims (those stay "suggested" -> human review). The downstream firewall
-  // + >=0.9 store gate still apply.
-  const singleProviderTrusted =
+  // SINGLE SOURCE (owner policy, supersedes the old two-provider / trusted-only rules): one provider
+  // (e.g. Gemini Flash) is enough to auto-count when the app independently verified the EXACT code in
+  // strong evidence (the code appears in a real snippet / grounding chunk / fetched page) - ANY source,
+  // not just a trusted-tier site. Catalog-miss fallback for ANY item. Still rejects vendor/label code
+  // types, weak/unverified evidence, and below-threshold (those stay "suggested" -> human review). The
+  // downstream identity firewall + >=0.9 store gate still apply.
+  const singleSourceVerified =
     isPublicBarcode &&
     strong &&
     identityNonEmpty &&
     passesThreshold &&
+    !params.brandPrefixConflict &&
     !!a &&
-    (cc.decision === "single_provider" || cc.decision === "agree") &&
-    isTrustedTier(bestTier(a.sourceUrls ?? []));
+    (cc.decision === "single_provider" || cc.decision === "agree");
 
   // DETERMINISTIC TIRE CORROBORATION: the barcode's STRONG brand-prefix family + tire context + full tire
   // specs + the app's own exact-code verification act as an INDEPENDENT agreeing source - equivalent to
@@ -183,11 +186,13 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     !!code &&
     isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
 
-  if (canVerify || singleProviderTrusted || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize) {
+  // BRAND SANITY (owner baseline v1): a catalog-derived brand-prefix conflict blocks EVERY auto-count
+  // path, not just the single-source one (wrong brand for this barcode is never auto-counted).
+  if (!params.brandPrefixConflict && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize)) {
     const corroborationPath = canVerify
       ? "two_ai_agreement"
-      : singleProviderTrusted
-        ? "single_trusted_source"
+      : singleSourceVerified
+        ? "single_source"
         : tireCorroborated
           ? "deterministic_prefix"
           : pageFetchModelAgreement
@@ -198,15 +203,15 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
       reason: canVerify
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
-        : singleProviderTrusted
-          ? "Verified AI Decode: the app confirmed the exact code on a trusted/legit source (single trusted source is enough)."
+        : singleSourceVerified
+          ? "Verified AI Decode: the app confirmed the exact code in a real source (one source is enough)."
           : tireCorroborated
             ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
             : pageFetchModelAgreement
               ? "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code."
               : "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size.",
       evidenceStrength: bestEvidence.strength,
-      exactCodeEvidenceVerifiedByApp: canVerify || singleProviderTrusted || tireCorroborated || pageFetchModelAgreement,
+      exactCodeEvidenceVerifiedByApp: canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement,
       crossCheck: baseCrossCheck,
       corroborationPath,
     };
@@ -222,9 +227,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
         ? "Evidence is weak (the exact code was not found in a snippet/grounding/fetched source)."
         : !passesThreshold
           ? "Confidence is below the threshold."
-          : cc.decision !== "agree"
-            ? "Only one source confirmed this and it isn't a trusted/legit site - a trusted source (or a second source) must confirm before it auto-counts."
-            : "Needs human confirmation.";
+          : "Needs human confirmation.";
     return {
       status: "suggested",
       confidence: Math.max(maxConfidence * 0.6, cc.confidence * 0.6),
