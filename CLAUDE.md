@@ -61,6 +61,15 @@ retail, restaurant supplies, medical supplies, and any physical inventory.
   Manual live test only: see MANUAL_LIVE_TEST.md.
 
 ## Evidence Verification + Cross-Check Rules (live AI decode)
+- MASTER BASELINE v1 (owner-locked; SUPERSEDES the older two-provider / trusted-source decode rules):
+  decode is GEMINI-FIRST then CHATGPT, SEQUENTIAL. Gemini Flash runs the fast pass ALONE; OpenAI GPT-5
+  mini (`OPENAI_FAST_MODEL`) is the ESCALATION, called ONLY when Gemini's fast pass finds NO usable
+  product (never in parallel - a normal Gemini hit spends no OpenAI call). A SINGLE source (Gemini or the
+  escalation) that confirms the EXACT code in strong app-verified evidence AUTO-COUNTS at confidence
+  >= 0.8 - no second provider, no trusted-host requirement. Two guardrails still hold: (1) catalog-derived
+  brand sanity - `prefixBrandConflict` (`src/services/catalog/brandPrefixGeneral.ts`, map generated from
+  the global catalog) blocks a wrong brand for the barcode across ALL product types; (2) the store
+  auto-count gate (tire specs + scan-context). Only a code BOTH Gemini and ChatGPT fail -> Needs Review.
 - The model may CLAIM exactCodeEvidence, but the APP verifies it independently. `exactCodeEvidence`
   from a provider is NEVER used to decide truth - only `EvidenceVerifier` output is.
 - `EvidenceVerifier` (`src/services/ai/evidenceVerifier.ts`) checks whether the exact (normalized)
@@ -69,12 +78,14 @@ retail, restaurant supplies, medical supplies, and any physical inventory.
   match. url_only is NOT verified unless the host is in an explicit trusted allowlist.
 - `CrossCheckEngine` (`crossCheckEngine.ts`) compares two providers structurally (brand similarity,
   name token overlap, barcode/GTIN/UPC/EAN, contradictions) -> agree | conflict | single_provider | weak.
-- `decideDecode` (`decode.ts`) returns "verified" ONLY for a public barcode (never X00/FNSKU/vendor/
-  internal) with strong app-verified evidence, provider agreement (or single provider), non-empty
-  identity, and confidence >= threshold. Otherwise suggested / needs_review; disagreement = conflict.
+- `decideDecode` (`decode.ts`) returns "verified" for a public barcode (never X00/FNSKU/vendor/internal)
+  with strong app-verified evidence from a SINGLE provider (or two that agree), non-empty identity,
+  confidence >= threshold (baseline 0.8), and NO catalog-derived brand-prefix conflict
+  (`params.brandPrefixConflict`, which blocks EVERY verify path). Otherwise suggested / needs_review;
+  provider disagreement = conflict.
 - A "Verified AI Decode" that clears the Phase-7 evidence gate AUTO-COUNTS by default: the master gate
   `autoAddDecodedProducts` defaults true (scanStore.ts), and the gate requires status verified +
-  app-verified exact code (`exactCodeEvidenceVerifiedByApp`) + confidence >= 0.9 + (for tires) full specs
+  app-verified exact code (`exactCodeEvidenceVerifiedByApp`) + confidence >= 0.8 + (for tires) full specs
   + no firewall/brand-prefix conflict, on a public barcode. Set `autoAddDecodedProducts` false to route
   every decode to manual review instead. NOTE: `autoAcceptVerifiedDecodes` is declared (types.ts) and
   defaulted false but is currently UNUSED/dead - it does NOT gate auto-count; do not rely on it.

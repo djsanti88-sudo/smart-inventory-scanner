@@ -731,13 +731,13 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(1);
   });
 
-  it("does NOT auto-count when confidence is below 0.90 even if verified", async () => {
+  it("does NOT auto-count when confidence is below the 0.80 gate even if verified", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     const { reviewId } = await decode(
       store,
       "049000111222",
       decodeResponse(
-        { status: "verified", confidence: 0.86, reason: "Verified", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
+        { status: "verified", confidence: 0.75, reason: "Verified", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
         { productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "049000111222", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );

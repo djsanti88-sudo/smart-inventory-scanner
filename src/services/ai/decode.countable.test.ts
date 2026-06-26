@@ -2,28 +2,35 @@
 import { describe, it, expect } from "vitest";
 import { decideDecode } from "./decode";
 
-// A real Cooper prefix (029142...) with a size+model name but no load/speed. Strong fetched_source evidence.
+// MASTER BASELINE v1: decideDecode auto-verifies any public barcode with strong app-verified evidence
+// (single_source). Tire-spec completeness (size + model + load/speed) and non-tire/scan-context rejection
+// are NOT decode-level gates anymore - the store auto-count gate (tireAutoCountOk + contextConflict)
+// enforces those downstream. These tests pin the decode-level contract under the new policy.
 const cooper = {
   codeType: "upc_a" as const,
-  confidenceThreshold: 0.85,
+  confidenceThreshold: 0.8,
   code: "029142753568",
   scanContext: "tire" as const,
   results: [{ productName: "Cooper Discoverer AT3 245/75R16", brand: "Cooper", confidence: 0.92, corroboratedByModel: true } as any],
   evidences: [{ verified: true, strength: "fetched_source" } as any],
 };
 
-describe("countable tire verify (brand+size+model)", () => {
-  it("verifies a prefix-family tire with size+model and strong evidence (no load/speed needed)", () => {
+describe("decode-level verify (any-source baseline)", () => {
+  it("verifies a tire with size+model and strong evidence", () => {
     expect(decideDecode(cooper).status).toBe("verified");
   });
-  it("does NOT verify when the model is missing (size only)", () => {
+  it("still verifies at the DECODE level when the model is thin (size only) - tire-spec completeness is a STORE-gate concern now", () => {
     const d = decideDecode({ ...cooper, results: [{ productName: "Cooper 245/75R16", brand: "Cooper", confidence: 0.92, corroboratedByModel: true } as any] });
-    expect(d.status).not.toBe("verified");
+    expect(d.status).toBe("verified");
   });
-  it("does NOT verify a non-tire poison even with strong evidence", () => {
-    const d = decideDecode({ codeType: "upc_a", confidenceThreshold: 0.85, code: "745125495781", scanContext: "tire",
+  it("verifies a non-tire product with strong evidence (scan-anything) - the tire-only rejection moved to the store gate", () => {
+    const d = decideDecode({ codeType: "upc_a", confidenceThreshold: 0.8, code: "745125495781", scanContext: "any",
       results: [{ productName: "Manstel Rivet Kit", brand: "Manstel", confidence: 0.95 } as any],
       evidences: [{ verified: true, strength: "fetched_source" } as any] });
+    expect(d.status).toBe("verified");
+  });
+  it("does NOT verify when a catalog-derived brand-prefix conflict is flagged (wrong brand for this barcode)", () => {
+    const d = decideDecode({ ...cooper, brandPrefixConflict: true });
     expect(d.status).not.toBe("verified");
   });
 });

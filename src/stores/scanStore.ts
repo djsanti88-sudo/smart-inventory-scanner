@@ -1590,7 +1590,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 rawCode: rawCodeSanitized,
                 cleanCode: cleanCodeSanitized,
                 codeType,
-                confidenceThreshold: 0.85,
+                confidenceThreshold: 0.8,
                 allowImageSuggestions: s.allowImageSuggestions,
                 budgetMs: s.decodeBudgetMs ?? 13000,
                 scanContext,
@@ -1733,7 +1733,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const evidenceGatePassed =
             decision?.status === "verified" &&
             decodeCorroborated(decision) &&
-            (decision?.confidence ?? 0) >= 0.9 &&
+            (decision?.confidence ?? 0) >= 0.8 &&
             isUsableProductName(best?.productName ?? "") &&
             tireOk &&
             !contextConflict;
@@ -2025,7 +2025,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const evidenceGatePassed =
           decision.status === "verified" &&
           decodeCorroborated(decision) &&
-          (decision.confidence ?? 0) >= 0.9 &&
+          (decision.confidence ?? 0) >= 0.8 &&
           isUsableProductName(best?.productName ?? "") &&
           tireOk &&
           !contextConflict;
