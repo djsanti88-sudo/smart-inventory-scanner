@@ -43,13 +43,17 @@ describe("FinalCountTable role gating (Phase 6)", () => {
     expect(screen.queryByTestId("remove-count-p1")).not.toBeNull();
   });
 
-  it("shows Primary barcode + Aliases + Mark wrong to the platformOwner", () => {
+  it("shows Primary barcode + Aliases to the platformOwner (Mark wrong hidden for now)", () => {
     process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1"; // platformOwner
     seed();
     render(<FinalCountTable />);
     expect(screen.queryByText("Primary barcode")).not.toBeNull();
     expect(screen.queryByText("Aliases")).not.toBeNull();
     expect(screen.queryAllByText(/111222333444/).length).toBeGreaterThan(0);
-    expect(screen.queryByTestId("mark-wrong-p1")).not.toBeNull();
+    // Owner request: row is simplified to Modify + Delete; Mark wrong + hard product-delete are hidden
+    // behind SHOW_ADVANCED_ACTIONS (code kept). The two core controls remain.
+    expect(screen.queryByTestId("mark-wrong-p1")).toBeNull();
+    expect(screen.queryByTestId("correct-p1")).not.toBeNull(); // Modify
+    expect(screen.queryByTestId("remove-count-p1")).not.toBeNull(); // Delete
   });
 });

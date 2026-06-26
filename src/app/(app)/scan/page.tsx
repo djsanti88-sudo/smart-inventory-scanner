@@ -39,11 +39,20 @@ export default function ScanPage() {
   const expandSecondary = process.env.NEXT_PUBLIC_E2E_AUTH_BYPASS === "1";
   const autoDecodeOn = settings.aiLookupEnabled && aiStatus.autoDecodeOnScan && aiStatus.liveEnabled && hasKey && !aiStatus.emergencyStop;
 
+  // CATEGORY FEATURE HIDDEN (owner request): scanning is category-agnostic for now. The dropdown +
+  // the "wrong category" warning are hidden (code kept), and scanContext is forced to "any" so a scan
+  // is NEVER routed to review for not matching a category. Set SHOW_CATEGORY = true (and remove the
+  // force-effect) to restore the Tires / Not-specialized selector.
+  const SHOW_CATEGORY = false;
+  useEffect(() => {
+    if (settings.scanContext !== "any") updateSettings({ scanContext: "any" });
+  }, [settings.scanContext, updateSettings]);
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
       <BusinessContextGate>
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
-        {categoryWarning && (
+        {SHOW_CATEGORY && categoryWarning && (
           <div
             data-testid="category-warning"
             className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
@@ -77,21 +86,23 @@ export default function ScanPage() {
           <div className="grow">
             <ScannerInput onScan={(raw) => processScan(raw)} submitMode={settings.scannerSubmitMode} debounceMs={settings.scannerDebounceMs} />
           </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="scan-category" className="text-xs font-medium text-zinc-600">
-              Scan category
-            </label>
-            <select
-              id="scan-category"
-              data-testid="scan-category"
-              value={settings.scanContext ?? "any"}
-              onChange={(e) => updateSettings({ scanContext: e.target.value as "any" | "tire" })}
-              className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
-            >
-              <option value="tire">Tires</option>
-              <option value="any">Not specialized</option>
-            </select>
-          </div>
+          {SHOW_CATEGORY && (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="scan-category" className="text-xs font-medium text-zinc-600">
+                Scan category
+              </label>
+              <select
+                id="scan-category"
+                data-testid="scan-category"
+                value={settings.scanContext ?? "any"}
+                onChange={(e) => updateSettings({ scanContext: e.target.value as "any" | "tire" })}
+                className="rounded border border-zinc-300 px-2 py-1.5 text-sm"
+              >
+                <option value="tire">Tires</option>
+                <option value="any">Not specialized</option>
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Everything below the scan box is secondary. Group it so the scan box stays the hero. Collapsed by
