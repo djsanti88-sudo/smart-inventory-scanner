@@ -29,7 +29,7 @@ import { MockDb, getMockDb, type IncrementPayload, type SyncResult } from "@/ser
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
-import { auditRepository } from "@/services/db/firebase/repositories";
+import { auditRepository, catalogRepository } from "@/services/db/firebase/repositories";
 import { getDb } from "@/lib/firebaseClient";
 import {
   evaluateAiGate,
@@ -44,7 +44,7 @@ import {
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
-import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes";
+import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
@@ -53,7 +53,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
-import { isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
+import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
@@ -187,6 +187,10 @@ export interface ScanStoreDeps {
   // Fire-and-forget audit sink (cloud -> auditRepository.append). Optional: when absent (mock/default)
   // audit is a no-op. It must never throw into the scanner path; the store also guards every call.
   audit?: (event: AuditEventInput) => void;
+  // Cloud global catalog lookup (Option 1 wiring). Given a list of candidate codes, returns the first
+  // verified CatalogEntry from the global Firestore catalog, or null on a miss. Optional: when absent
+  // (tests / mock path) the cloud step is skipped and the scan falls through to AI / Needs Review.
+  lookupGlobalCatalog?: (codes: string[]) => Promise<CatalogEntry | null>;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -299,6 +303,11 @@ export interface ScanState {
    *  so a late/duplicate response can never double-count (the open-status guard makes it idempotent).
    *  A non-verified deep result never counts; it may only refresh the review suggestion. */
   backgroundVerifyDeep: (reviewId: string) => Promise<void>;
+  /** Option 1 wiring: async cloud global catalog lookup on an in-memory-catalog miss.
+   *  Awaits deps.lookupGlobalCatalog, applies the Phase-8C firewall, merges a verified hit into
+   *  the in-memory catalog, records "found_from_catalog" feedback, and resolves via resolveUnknown.
+   *  Falls through to AI on a miss, pending entry, firewall conflict, or dep absence. Fire-and-forget. */
+  cloudCatalogResolve: (reviewId: string, codes: string[]) => Promise<void>;
   setAiStatus: (partial: Partial<AiStatus>) => void;
   refreshAiStatus: () => Promise<void>;
   setEmergencyStop: (on: boolean) => void;
@@ -1181,7 +1190,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           // Fall back to live AI decode (subject to the existing gate). A human still approves anything
           // not auto-accepted. AI is never called for a known/approved scan or a verified catalog hit.
-          if (autoGate.allowed) void get().liveDecode(review.id);
+          // Option 1 wiring: if the cloud dep is present and we're online, try the global catalog first;
+          // cloudCatalogResolve falls through to AI internally on a miss / firewall conflict.
+          if (deps.lookupGlobalCatalog && get().online) {
+            void get().cloudCatalogResolve(review.id, codes);
+          } else if (autoGate.allowed) {
+            void get().liveDecode(review.id);
+          }
         }
         return event;
       },
@@ -1412,6 +1427,80 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
           }));
         }
+      },
+
+      cloudCatalogResolve: async (reviewId, codes) => {
+        if (!deps.lookupGlobalCatalog) return;
+        let entry: CatalogEntry | null = null;
+        try {
+          entry = await deps.lookupGlobalCatalog(codes);
+        } catch {
+          // Cloud lookup failure must never break the scanner. Fall through to AI.
+        }
+        // Re-read review after the async round-trip: the user may have already resolved it.
+        const review = get().needsReviewQueue.find((r) => r.id === reviewId);
+        if (!review || review.status !== "open") return;
+
+        const scanContext = get().settings.scanContext ?? "any";
+        if (entry && entry.verificationStatus === "verified") {
+          // Build a CatalogHit for the Phase-8C identity-context firewall check.
+          const hit: CatalogHit = {
+            source: "verified_catalog",
+            name: entry.name,
+            brand: entry.brand ?? "",
+            category: entry.category ?? "",
+            size: entry.size ?? "",
+            imageUrl: entry.imageUrl ?? "",
+            productUrl: entry.sourceUrls?.[0] ?? "",
+            confidence: entry.confidence ?? 0.9,
+            verified: true,
+          };
+          const hasConflict = detectIdentityContextConflict(scanContext, hit);
+          if (!hasConflict) {
+            // Cache into in-memory catalog so repeat scans are instant (no second cloud round-trip).
+            set((s) => ({ catalog: [...s.catalog, entry!] }));
+            get().recordFeedback("found_from_catalog", { code: review.cleanCode });
+            set((s) => ({
+              scanFeed: s.scanFeed.map((e) =>
+                e.cleanCode === review.cleanCode &&
+                (e.decodeStatus === "decoding" || e.decodeStatus === "needs_review")
+                  ? { ...e, decodeStatus: "verified" as const, reason: "Matched from global catalog - no AI used." }
+                  : e,
+              ),
+            }));
+            get().resolveUnknown(reviewId, "create_new", {
+              applyToCount: true,
+              origin: "catalog",
+              newProduct: {
+                name: entry.name,
+                brand: entry.brand,
+                category: entry.category,
+                imageUrl: entry.imageUrl,
+                productUrl: entry.sourceUrls?.[0],
+                primaryBarcode: review.cleanCode,
+                source: "catalog",
+              },
+            });
+            return;
+          }
+          // Firewall conflict: fall through to AI below (same as a miss).
+        }
+        // Cloud miss, pending/unverified, or firewall conflict -> fall back to AI if the gate allows.
+        const state = get();
+        const s = state.settings;
+        const nowMs = Date.now();
+        const today = now().slice(0, 10);
+        const dailyCount = s.lastResetDate === today ? s.dailyLookupCount : 0;
+        const autoGate = evaluateAutoDecode({
+          aiEnabled: s.aiLookupEnabled,
+          status: state.aiStatus,
+          online: state.online,
+          dailyCount,
+          dailyLimit: s.dailyLookupLimit,
+          breaker: state.breaker,
+          now: nowMs,
+        });
+        if (autoGate.allowed) void get().liveDecode(reviewId);
       },
 
       liveDecode: async (reviewId) => {
@@ -3096,6 +3185,35 @@ const appDeps: ScanStoreDeps = {
         }
       }
     : undefined,
+  // Global catalog cloud lookup (Option 1 wiring). Tries each candidate code against the Firestore
+  // global catalog; returns the first verified entry, or the first entry of any status, or null.
+  // Errors are swallowed here and also in cloudCatalogResolve so a Firestore failure never breaks scanning.
+  lookupGlobalCatalog: useFirebaseBackend
+    ? async (codes: string[]): Promise<CatalogEntry | null> => {
+        const repo = catalogRepository(getDb());
+        const nowIso = new Date().toISOString();
+        // toStoreEntry: map the minimal db/types.ts CatalogEntry shape -> the full catalogTypes CatalogEntry
+        // shape that the store/resolver expects, via sanitizeCatalogEntry (fills in all required defaults).
+        const toStoreEntry = (raw: { id: string; normalizedBarcode: string; name?: string; brand?: string; category?: string; verificationStatus?: string }) =>
+          sanitizeCatalogEntry(
+            { barcode: raw.normalizedBarcode, normalizedBarcode: raw.normalizedBarcode, name: raw.name ?? "", brand: raw.brand, category: raw.category },
+            { now: nowIso, verificationStatus: raw.verificationStatus === "verified" ? "verified" : raw.verificationStatus === "conflict" ? "conflict" : "pending", verifiedBy: null, by: "trusted_source" },
+          );
+        let firstAny: CatalogEntry | null = null;
+        for (const code of codes) {
+          try {
+            const raw = await repo.getByBarcode(code);
+            if (!raw) continue;
+            const entry = toStoreEntry(raw);
+            if (entry.verificationStatus === "verified") return entry;
+            if (!firstAny) firstAny = entry;
+          } catch {
+            // swallow per-code errors; try the next candidate
+          }
+        }
+        return firstAny;
+      }
+    : undefined,
   idFactory: () => crypto.randomUUID(),
   now: () => new Date().toISOString(),
   persistName: "sis-scan-v1",
@@ -3154,6 +3272,7 @@ export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {
     cloudBackend: overrides?.cloudBackend ?? false,
     loadBusinessData: overrides?.loadBusinessData,
     audit: overrides?.audit,
+    lookupGlobalCatalog: overrides?.lookupGlobalCatalog,
   };
   const store = create<ScanState>()(buildScanInitializer(deps));
   // Test convenience: generic store tests use non-tire seed fixtures (e.g. Coca-Cola) as stand-ins for
