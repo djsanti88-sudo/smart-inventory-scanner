@@ -137,6 +137,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ----- SEPARATE retail catalog (Open Food Facts + enrichment): same PUBLIC-read, server-only-write
+    // model as catalogEntries. Distinct collection so retail data is never mixed with tires. -----
+    match /retailCatalogEntries/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // default deny
     match /{document=**} {
       allow read, write: if false;
