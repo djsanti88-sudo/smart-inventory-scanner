@@ -3194,6 +3194,7 @@ const appDeps: ScanStoreDeps = {
   lookupGlobalCatalog: (useFirebaseBackend || process.env.NEXT_PUBLIC_CLOUD_CATALOG === "1")
     ? async (codes: string[]): Promise<CatalogEntry | null> => {
         const repo = catalogRepository(getDb());
+        const retailRepo = catalogRepository(getDb(), "retailCatalogEntries"); // SEPARATE retail catalog (Open Food Facts)
         const nowIso = new Date().toISOString();
         // toStoreEntry: map the minimal db/types.ts CatalogEntry shape -> the full catalogTypes CatalogEntry
         // shape that the store/resolver expects, via sanitizeCatalogEntry (fills in all required defaults).
@@ -3206,10 +3207,19 @@ const appDeps: ScanStoreDeps = {
         for (const code of codes) {
           try {
             const raw = await repo.getByBarcode(code);
-            if (!raw) continue;
-            const entry = toStoreEntry(raw);
-            if (entry.verificationStatus === "verified") return entry;
-            if (!firstAny) firstAny = entry;
+            if (raw) {
+              const entry = toStoreEntry(raw);
+              if (entry.verificationStatus === "verified") return entry;
+              if (!firstAny) firstAny = entry;
+            }
+          } catch {
+            // swallow per-code errors; try the next candidate
+          }
+          try {
+            // RETAIL catalog (Open Food Facts) - a hit IS the product identity, so resolve it as Known
+            // (mirrors the tire catalog behavior). Separate collection; never mixed with tires.
+            const rraw = await retailRepo.getByBarcode(code);
+            if (rraw) return toStoreEntry({ ...rraw, verificationStatus: "verified" });
           } catch {
             // swallow per-code errors; try the next candidate
           }

@@ -59,3 +59,9 @@ serviceAccount*.json
 *firebase-adminsdk*.json
 *.serviceaccount.json
 gcloud-*.json
+
+# Large retail harvest data (downloaded/regenerable - never commit)
+data/retail-knowledge/*.jsonl
+data/retail-knowledge/retail_corpus.csv
+data/retail-knowledge/outputs/
+*.csv.gz
