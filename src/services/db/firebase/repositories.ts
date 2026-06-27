@@ -137,10 +137,12 @@ export function userProfilesRepository(db: Firestore) {
 }
 
 /** Global shared catalog: client reads only (writes are server-only via Admin SDK). */
-export function catalogRepository(db: Firestore) {
+// `collectionName` lets the same repo read the tire catalog (default `catalogEntries`) OR the SEPARATE
+// retail catalog (`retailCatalogEntries`) - kept in distinct collections, never mixed.
+export function catalogRepository(db: Firestore, collectionName: string = COLLECTIONS.catalogEntries) {
   return {
     async getByBarcode(normalizedBarcode: string): Promise<CatalogEntry | null> {
-      const snap = await getDocs(query(collection(db, COLLECTIONS.catalogEntries), where("normalizedBarcode", "==", normalizedBarcode)));
+      const snap = await getDocs(query(collection(db, collectionName), where("normalizedBarcode", "==", normalizedBarcode)));
       const d = snap.docs[0];
       return d ? ({ id: d.id, ...d.data() } as CatalogEntry) : null;
     },
