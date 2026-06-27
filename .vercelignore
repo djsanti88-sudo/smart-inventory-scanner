@@ -1,0 +1,8 @@
+# Harvest data + outputs are NOT part of the Next.js app — the deployed app reads the cloud catalog
+# (Firestore) at runtime, never these local files. Excluding them keeps deploys under the 100MB limit.
+data/
+e2e/proof/
+e2e/test-results/
+playwright-report/
+*.csv.gz
+*.jsonl
