@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseSpecResponse, GROUNDED_SPEC_GEMINI_MODEL } from "./groundedSpecFinder";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { parseSpecResponse, groundedSpecFind, GROUNDED_SPEC_GEMINI_MODEL } from "./groundedSpecFinder";
 
 describe("groundedSpecFinder identity parse (pure)", () => {
   it("anchors the brand and builds productName from brand+model+size", () => {
@@ -29,4 +29,33 @@ it("still prefers an explicit size field when present", () => {
 it("defaults to a live Gemini model, not the retired gemini-2.0-flash-001", () => {
   expect(GROUNDED_SPEC_GEMINI_MODEL).not.toBe("gemini-2.0-flash-001");
   expect(GROUNDED_SPEC_GEMINI_MODEL).toMatch(/^gemini-2\.5-flash/);
+});
+
+describe("groundedSpecFind live request config", () => {
+  beforeEach(() => {
+    process.env.GEMINI_API_KEY = "test-key";
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.GEMINI_API_KEY;
+  });
+
+  it("disables thinking so the 3s grounded call can actually finish", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: { body: string }) => {
+        body = JSON.parse(init.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ candidates: [{ content: { parts: [{ text: "{}" }] }, groundingMetadata: {} }] }),
+          text: async () => "",
+        } as unknown as Response;
+      }),
+    );
+    await groundedSpecFind({ code: "012345678905", anchorBrand: "Cooper" });
+    const gc = (body.generationConfig ?? {}) as Record<string, unknown>;
+    expect(gc.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
 });

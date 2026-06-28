@@ -1592,7 +1592,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 codeType,
                 confidenceThreshold: 0.8,
                 allowImageSuggestions: s.allowImageSuggestions,
-                budgetMs: s.decodeBudgetMs ?? 13000,
+                budgetMs: s.decodeBudgetMs ?? 8000,
                 scanContext,
                 brandPrefixHint,
               }),
@@ -1600,20 +1600,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             if (!res.ok) throw new Error(`decode failed ${res.status}`);
             return res.json();
           };
-          // RELIABILITY: a cold lookup reads external barcode DBs that can transiently rate-limit, so
-          // the same code can decode one moment and return nothing the next. If the first pass yields
-          // no usable product, retry ONCE (the throttle almost always clears). The success path is
-          // unchanged and fast - only a genuine miss pays for the extra attempt.
-          let data = await decodeOnce();
-          const firstName = String((((data.results ?? [])[0] ?? {}).productName ?? ""));
-          if (!isUsableProductName(firstName) && codeType !== "vendor_label") {
-            try {
-              const retry = await decodeOnce();
-              if (isUsableProductName(String((((retry.results ?? [])[0] ?? {}).productName ?? "")))) data = retry;
-            } catch {
-              // keep the first result if the retry itself failed
-            }
-          }
+          // Owner cost rule: NO client retry. The old "retry once on a miss" doubled both the wait (up
+          // to ~70s, which dropped the browser connection -> "Failed to fetch") and the token spend. One
+          // call only; a miss is shown fast with its honest reason and is briefly miss-cached server-side
+          // so an immediate re-scan does not re-pay.
+          const data = await decodeOnce();
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
