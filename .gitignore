@@ -72,3 +72,6 @@ playwright-results.json
 cloud-playwright-results.json
 reports/**/playwright-results.json
 reports/**/cloud-playwright-results.json
+
+# Runtime daily spend-cap counter for /api/ai-lookup (local-first state, regenerated)
+.ai-lookup-usage.json

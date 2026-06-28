@@ -18,18 +18,29 @@ import { withDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
+import { lookupPrefix } from "@/services/catalog/prefixIndex";
+import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
+import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 import { runSizeRace } from "@/services/ai/sizeRace";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { killSwitchOn, checkRateLimit, checkAndIncrementDaily } from "@/services/security/aiSpendGuard";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
-const FALLBACK_AI_TIMEOUT_MS = Number(process.env.FALLBACK_AI_TIMEOUT_MS || 25_000); // grounded AI re-run
-const FALLBACK_HARD_CAP_MS = Number(process.env.FALLBACK_HARD_CAP_MS || 30_000); // whole-fallback ceiling
-const FALLBACK_PAGE_TIMEOUT_MS = Number(process.env.FALLBACK_PAGE_TIMEOUT_MS || 15_000);
+// Background deep fallback (mode "decode-deep" ONLY) caps. Owner cost rule: keep the whole deep search
+// <= ~15s (was 30s) so it can't run away on tokens. The synchronous live scan NEVER runs this fallback.
+const FALLBACK_AI_TIMEOUT_MS = Number(process.env.FALLBACK_AI_TIMEOUT_MS || 12_000); // grounded AI re-run
+const FALLBACK_HARD_CAP_MS = Number(process.env.FALLBACK_HARD_CAP_MS || 15_000); // whole-fallback ceiling
+const FALLBACK_PAGE_TIMEOUT_MS = Number(process.env.FALLBACK_PAGE_TIMEOUT_MS || 10_000);
 const FIRECRAWL_MAX_SCRAPE = Number(process.env.FIRECRAWL_MAX_SCRAPE || 6);
+// Firecrawl open-web fallback is OFF by default: it currently errors instantly (wasting a reserved
+// credit + a finder slot); we lean on free Gemini grounding instead. Set ENABLE_FIRECRAWL=1 to re-enable.
+const FIRECRAWL_ENABLED = process.env.ENABLE_FIRECRAWL === "1";
 
-const DECODE_BUDGET_MS = Number(process.env.DECODE_BUDGET_MS || 13_000);
+// Owner cost rule: the SYNCHRONOUS live decode (what the user waits on every scan) defaults to an 8s
+// budget and is clamped to a hard 8s ceiling (clampDecodeBudgetMs / DECODE_BUDGET_MAX_MS).
+const DECODE_BUDGET_MS = Number(process.env.DECODE_BUDGET_MS || 8_000);
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env.
@@ -47,6 +58,23 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 // TEST SAFETY: when IS_E2E=1 (set by the Playwright webServer) real providers are NEVER called -
 // only the local mock - so automated runs cannot burn live tokens. Live providers run only in
 // normal/manual use with a key present (the "manual / LIVE_AI_TEST" path).
+
+// Combined prefix conflict fed to decideDecode: the existing catalog-derived brand sanity OR the new
+// evidence-weighted firewall (barcode prefix-owner vs the candidate's manufacturer/category). The
+// firewall is OVERRIDE-AWARE - strong app-verified exact-code evidence makes fw.conflict false - so this
+// never blocks a legitimately exact-verified decode, only conflicting non-exact verify paths (e.g. the
+// internet-two-source-size tire path) and Gemini-style "plausible product, wrong code" hallucinations.
+function combinedPrefixConflict(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): boolean {
+  const strongExact = isStrongEvidence(strongestEvidence(evidences));
+  const fw = evaluatePrefixFirewall({
+    code,
+    prefix: lookupPrefix(code),
+    candidate: { brand: result?.brand, manufacturer: result?.brand, category: result?.category },
+    candidateKnownUpcs: [], // reverse-UPC guard is unit-tested + ready; inert server-side until a name->UPC index exists
+    exactCodeVerifiedByApp: strongExact,
+  });
+  return prefixBrandConflict(code, result?.brand) || fw.conflict;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -164,6 +192,28 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // Server-side abuse + spend guard (auth DEFERRED by owner). Bounds bill-drain without login:
+  // kill switch (503) and per-IP rate limit (429) here; the hard daily cap is checked at the decode
+  // path below. Each control makes ZERO provider calls when it blocks. Local-first state; a deployed
+  // multi-instance setup needs a shared store (see services/security/aiSpendGuard.ts). Inert under E2E
+  // mock mode (no real provider spend to bound), so deterministic test runs are unaffected.
+  if (!e2eMode()) {
+    if (killSwitchOn()) {
+      return Response.json({ error: "AI lookup is temporarily disabled.", reasonCode: "kill_switch" }, { status: 503 });
+    }
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "local";
+    const rl = checkRateLimit(clientIp);
+    if (!rl.allowed) {
+      return Response.json(
+        { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+      );
+    }
+  }
+
   let body: {
     rawCode?: string;
     cleanCode?: string;
@@ -211,6 +261,19 @@ export async function POST(request: Request) {
     // The budget may be owner-configured and arrives from the client - clamp it server-side so a
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
     const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
+
+    // Hard server-side daily spend cap (auth DEFERRED). Once the day's cap is hit, return blocked with
+    // ZERO provider calls. Skipped under E2E mock mode (no real spend). This route is the unknown-code
+    // path (known scans never reach it), so the cap bounds genuine AI-eligible lookups per day.
+    if (!e2eMode()) {
+      const cap = checkAndIncrementDaily();
+      if (!cap.allowed) {
+        return Response.json(
+          { error: `Daily AI lookup cap reached (${cap.used}/${cap.limit}). No AI call made.`, reasonCode: "daily_cap" },
+          { status: 429 }
+        );
+      }
+    }
 
     const reader = pageReader();
     const firecrawlKey = process.env.FIRECRAWL_API_KEY;
@@ -362,14 +425,16 @@ export async function POST(request: Request) {
       // Re-decide with the business scan context + scanned code so a deterministically-corroborated tire
       // (strong brand-prefix family + full specs + app-verified exact code) can auto-count even from a
       // single provider. Same inputs as the orchestrator otherwise; pure + cheap.
-      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: prefixBrandConflict(code, results[0]?.brand) });
+      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: combinedPrefixConflict(code, results[0], evidences) });
       let fallbackFound = false;
       let coverageMissed = false;
       let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
       let firecrawlCandidates = 0;
 
       const hasProduct = () => results.some((r) => isUsableProductName(r.productName));
-      const eligibleForFallback = shouldRunFallback({ hasProduct: hasProduct(), timedOut: run.timedOut, decisionStatus: decision.status, e2e: e2eMode() });
+      // Owner cost rule: the SYNCHRONOUS live decode NEVER runs the deep Stage-2 fallback (that was the
+      // 30s hang + the token bleed). It runs ONLY for an explicit background "decode-deep" request.
+      const eligibleForFallback = deepRequested && shouldRunFallback({ hasProduct: hasProduct(), timedOut: run.timedOut, decisionStatus: decision.status, e2e: e2eMode() });
 
       // STAGE 2 - DEEP, PARALLEL fallback. Runs ONLY when the fast path found no usable product (so a
       // normal successful scan adds ZERO extra calls). Gemini grounded + OpenAI mini (deep 25s budget)
@@ -410,8 +475,9 @@ export async function POST(request: Request) {
           });
         }
 
-        // Finder B: Firecrawl open-web discovery (6 safe candidates, scraped in PARALLEL).
-        if (firecrawlKey) {
+        // Finder B: Firecrawl open-web discovery (6 safe candidates, scraped in PARALLEL). OFF by default
+        // (set ENABLE_FIRECRAWL=1) - it currently errors instantly and wastes a reserved credit.
+        if (FIRECRAWL_ENABLED && firecrawlKey) {
           const key = firecrawlKey;
           finders.push({
             name: "firecrawl",
@@ -446,7 +512,7 @@ export async function POST(request: Request) {
             providerNames = [outcome.hit.providerName, ...providerNames];
             fallbackFound = true;
             // Decide on the WINNER alone so leftover fast-path noise can't manufacture a false conflict.
-            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: prefixBrandConflict(code, winnerWithSize.brand) });
+            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: combinedPrefixConflict(code, winnerWithSize, [outcome.hit.evidence]) });
           }
         }
       }
