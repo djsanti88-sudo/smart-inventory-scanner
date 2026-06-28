@@ -65,3 +65,13 @@ data/retail-knowledge/*.jsonl
 data/retail-knowledge/retail_corpus.csv
 data/retail-knowledge/outputs/
 *.csv.gz
+
+# Generated QA / Playwright result JSON can capture env values including API keys. Never track.
+# (A real Anthropic + SerpAPI key leaked through these once. Keep them untracked going forward.)
+playwright-results.json
+cloud-playwright-results.json
+reports/**/playwright-results.json
+reports/**/cloud-playwright-results.json
+
+# Runtime daily spend-cap counter for /api/ai-lookup (local-first state, regenerated)
+.ai-lookup-usage.json
