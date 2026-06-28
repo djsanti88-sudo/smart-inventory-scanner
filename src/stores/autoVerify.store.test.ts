@@ -85,20 +85,23 @@ describe("confidence-based auto-verify (speed-first)", () => {
     expect(store.getState().scanFeed.some((e) => e.cleanCode === CODE && e.decodeStatus === "verified")).toBe(true);
   });
 
-  it("retries a cold decode once when the first pass returns no product (rate-limit), then succeeds", async () => {
+  it("does NOT retry a cold miss (owner cost rule): exactly one call, miss stays in review", async () => {
+    // The old behavior retried once on a miss, which doubled the wait (-> "Failed to fetch") and the
+    // token spend. New contract: ONE call; a miss is left in Needs Review (fast), not re-run.
     const store = aiOnStore();
-    let n = 0;
     const original = globalThis.fetch;
-    const spy = vi.fn(async () => ({ ok: true, json: async () => (++n === 1 ? NOPRODUCT : STRONG) })) as unknown as typeof fetch;
+    const spy = vi.fn(async () => ({ ok: true, json: async () => NOPRODUCT })) as unknown as typeof fetch;
     globalThis.fetch = spy;
     try {
       store.getState().processScan(CODE);
-      await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("resolved"));
+      await vi.waitFor(() => expect(calls(spy)).toBe(1));
+      await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.decodeStatus).not.toBe("decoding"));
     } finally {
       globalThis.fetch = original;
     }
-    expect(store.getState().products.find((p) => p.name === "BIC Classic Pocket Lighter")).toBeDefined(); // retry recovered it
-    expect(calls(spy)).toBe(2); // exactly one retry
+    expect(calls(spy)).toBe(1); // NO retry (previously 2)
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // miss stays in review
+    expect(store.getState().products.find((p) => p.name === "BIC Classic Pocket Lighter")).toBeUndefined();
   });
 
   it("does NOT retry when the first pass already has a product (stays fast)", async () => {
@@ -154,6 +157,9 @@ describe("confidence-based auto-verify (speed-first)", () => {
     } finally {
       restore();
     }
+    // RECALL (Fix 4): the weak candidate is SHOWN (name surfaced) but never counted - high-confidence
+    // first, then any source as a suggestion the human can approve.
+    expect(store.getState().needsReviewQueue.at(-1)!.suggestedProductName).toBe("Maybe Snack");
     expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // never auto-counted
     expect(store.getState().products.find((p) => p.name === "Maybe Snack")).toBeUndefined();
     expect(store.getState().finalCounts).toHaveLength(0);
