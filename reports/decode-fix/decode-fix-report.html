@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Decode Fix - Proof Report (8s cap + recall + cost)</title>
+<style>
+  :root { --g:#16a34a; --r:#dc2626; --a:#d97706; --ink:#18181b; --mut:#52525b; --line:#e4e4e7; --bg:#fafafa; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); margin:0; background:var(--bg); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 32px 0 10px; border-bottom: 2px solid var(--line); padding-bottom: 6px; }
+  .sub { color: var(--mut); margin: 0 0 18px; }
+  .banner { background:#fffbeb; border:1px solid #fde68a; color:#92400e; padding:12px 16px; border-radius:10px; font-weight:600; margin: 14px 0 24px; }
+  table { width:100%; border-collapse: collapse; background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; margin: 8px 0 4px; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align: top; }
+  th { background:#f4f4f5; font-size:13px; color:#3f3f46; }
+  tr:last-child td { border-bottom:0; }
+  code { background:#f4f4f5; padding:1px 5px; border-radius:4px; font-size:13px; }
+  .ok { color:var(--g); font-weight:700; } .bad { color:var(--r); font-weight:700; } .warn { color:var(--a); font-weight:700; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+  .pill.g { background:#dcfce7; color:#166534; } .pill.r { background:#fee2e2; color:#991b1b; } .pill.a { background:#fef3c7; color:#92400e; }
+  .small { font-size:13px; color:var(--mut); }
+  ul { margin: 6px 0; padding-left: 22px; } li { margin: 3px 0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Decode Fix - Proof Report</h1>
+  <p class="sub">Branch <code>fix/decode-fast-recall-8s</code> &middot; 2026-06-28 &middot; local verification (dev server, new code)</p>
+
+  <div class="banner">NOT committed. NOT deployed. The live site still runs the old code. This report is for your review before any commit/deploy (your release gate).</div>
+
+  <h2>1. What was wrong (measured, before)</h2>
+  <table>
+    <tr><th>Symptom</th><th>Measured cause</th></tr>
+    <tr><td>"Needs review, no suggestion / Failed to fetch"</td><td>The decode POST took <b>36-42s</b> for a hard code; the browser connection dropped during the long wait &rarr; <code>TypeError: Failed to fetch</code> &rarr; empty review.</td></tr>
+    <tr><td>Slow + costly AI</td><td>Gemini grounded <b>timed out &gt;10s</b> (thinking ON); OpenAI lookup ran <b>42s and returned nothing</b>; deep fallback ran another ~30s; client <b>retried</b> (2x); Firecrawl <b>errored</b> instantly.</td></tr>
+    <tr><td>Money bleed</td><td>~6 provider/Firecrawl calls per hard scan, <b>repeated every scan</b> (failures were not cached), doubled by the retry.</td></tr>
+  </table>
+
+  <h2>2. The five fixes</h2>
+  <table>
+    <tr><th>#</th><th>Fix</th><th>File(s)</th><th>Status</th></tr>
+    <tr><td>1</td><td>Gemini <b>thinking OFF</b> (<code>thinkingBudget:0</code>, flash only) + <code>maxOutputTokens</code> cap</td><td>geminiProvider.ts, groundedSpecFinder.ts</td><td><span class="pill g">done</span></td></tr>
+    <tr><td>2</td><td><b>8s hard cap</b> on the synchronous decode; deep fallback moved to background &amp; capped <b>30s&rarr;15s</b>; <b>client retry removed</b></td><td>decodeBudget.ts, route.ts, scanStore.ts</td><td><span class="pill g">done</span></td></tr>
+    <tr><td>3</td><td><b>Cache misses</b> with a short TTL (10 min) so the same unresolved code stops re-running</td><td>decodeCache.ts</td><td><span class="pill g">done</span></td></tr>
+    <tr><td>4</td><td><b>Surface the weak/any-source candidate</b> as a Suggestion (high-confidence first, then any) - counting stays verified-only</td><td>(decideDecode + store mapping; test-locked)</td><td><span class="pill g">done</span></td></tr>
+    <tr><td>5</td><td><b>Firecrawl kill-switch</b> (off by default; it errored instantly) - lean on free Gemini grounding</td><td>route.ts</td><td><span class="pill g">done</span></td></tr>
+  </table>
+
+  <h2>3. Before / after (real measurements, live)</h2>
+  <table>
+    <tr><th>Case</th><th>Before</th><th>After (local, new code)</th></tr>
+    <tr><td>Gemini grounded latency</td><td class="bad">timeout &gt;10s</td><td class="ok">2.39s</td></tr>
+    <tr><td>Hard bucket <code>051596320812</code></td><td class="bad">36-42s &rarr; "Failed to fetch"</td><td class="ok">8.0s, honest "ran out of time", no crash</td></tr>
+    <tr><td>Findable code <code>012345678905</code></td><td>varied</td><td class="ok">1.68s, verified + suggested ("Sunbun Full Service")</td></tr>
+    <tr><td>Calls per hard scan</td><td class="bad">~6, x2 retry, repeated every scan</td><td class="ok">1 call, miss-cached 10 min</td></tr>
+  </table>
+  <p class="small">Note: the Home Depot bucket is genuinely not on the indexed web (Gemini returns "Unknown Product", confidence 0.1), so it correctly stays in Needs Review - but now in 8s with a clear reason instead of a 36s hang. Findable products that need Gemini grounding now benefit from the 2.4s response.</p>
+
+  <h2>4. Proof gates</h2>
+  <table>
+    <tr><th>Gate</th><th>Result</th></tr>
+    <tr><td><code>npm run test</code> (Vitest)</td><td class="ok">720 passed, 30 skipped, 0 failed</td></tr>
+    <tr><td><code>npx tsc --noEmit</code></td><td class="ok">clean (exit 0)</td></tr>
+    <tr><td><code>npx next build</code></td><td class="ok">success (all routes built, /api/ai-lookup intact)</td></tr>
+    <tr><td><code>eslint</code> (my changed files)</td><td class="ok">clean</td></tr>
+    <tr><td><code>eslint</code> (repo-wide)</td><td class="warn">9 pre-existing <code>no-explicit-any</code> errors in test files I did NOT touch (e.g. scanStore.autocount.test.ts) - not introduced by this change</td></tr>
+  </table>
+
+  <h2>5. Tests added / updated (TDD - watched each fail first)</h2>
+  <ul>
+    <li><b>geminiProvider.test.ts</b> (new): flash request sets <code>thinkingBudget:0</code> + <code>maxOutputTokens</code>; pro model does NOT get <code>thinkingBudget:0</code>.</li>
+    <li><b>groundedSpecFinder.test.ts</b>: grounded call disables thinking so the 3s budget can finish.</li>
+    <li><b>decodeCache.test.ts</b>: a miss is cached for a short TTL (money-bleed fix); re-runs after TTL; <code>forceRefresh</code> bypasses; success cached indefinitely.</li>
+    <li><b>decodeBudget.test.ts</b>: live decode capped at 8s and defaults to 8s; a stale 13s setting is clamped down.</li>
+    <li><b>autoVerify.store.test.ts</b>: the old "retry once on a miss" test was rewritten to the new contract (one call, miss stays in review); weak candidate is SHOWN (name surfaced) but never counted.</li>
+  </ul>
+
+  <h2>6. Files changed</h2>
+  <ul class="mono">
+    <li>src/services/ai/geminiProvider.ts (+ .test.ts new)</li>
+    <li>src/services/ai/groundedSpecFinder.ts (+ .test.ts)</li>
+    <li>src/services/ai/decodeCache.ts (+ .test.ts)</li>
+    <li>src/services/ai/decodeBudget.ts (+ .test.ts)</li>
+    <li>src/app/api/ai-lookup/route.ts</li>
+    <li>src/stores/scanStore.ts</li>
+    <li>src/stores/autoVerify.store.test.ts</li>
+  </ul>
+
+  <h2>7. Honest limitations / follow-ups</h2>
+  <ul>
+    <li><b>Genuinely-unfindable codes</b> (like the bucket) still end in Needs Review - no architecture invents a product that isn't on the web. But now fast + explained, not a hang.</li>
+    <li><b>Minor:</b> when both providers settle early with nothing usable, the decode still waits out the full 8s budget. A "return as soon as all providers settle" early-exit could cut some misses to ~2.5s. Not done (kept scope tight); easy follow-up.</li>
+    <li><b>Firecrawl</b> remains off until its key/credit issue is fixed (set <code>ENABLE_FIRECRAWL=1</code> to re-enable).</li>
+    <li><b>eslint</b> has 9 pre-existing errors in untouched test files - out of scope here; worth a separate cleanup.</li>
+  </ul>
+
+  <h2>8. Anti-hallucination firewall (Phase 2 - evidence-weighted, many-to-many)</h2>
+  <p class="small">Built after the Gemini failure case (it decoded the bucket UPC as a Hampton Bay ceiling fan). Catches "plausible product, wrong code" without false-rejecting legitimate private-label / multi-prefix / multi-UPC products.</p>
+  <table>
+    <tr><th>Piece</th><th>What it does</th><th>Tests</th></tr>
+    <tr><td><code>prefixIndex.ts</code></td><td>Many-to-many GS1 prefix &rarr; candidate brands/manufacturers w/ confidence + ambiguity. Curated seed (051596 United Solutions, 792145 King of Fans); derived map loads from generated JSON.</td><td>4</td></tr>
+    <tr><td><code>prefixFirewall.ts</code></td><td>Evidence-weighted veto. Conflict needs manufacturer + CATEGORY mismatch (category match = private-label escape hatch). Override-aware: official exact-code evidence wins.</td><td>6</td></tr>
+    <tr><td><code>candidateUpcSet.ts</code></td><td>Reverse known-UPC guard: builds a candidate's known UPC SET from our own data (no live lookup). Only conflicts on a category-incompatible exclusion (multi-UPC safe).</td><td>4</td></tr>
+    <tr><td>route wiring</td><td>OR'd into <code>decideDecode</code>'s brandPrefixConflict on both decode paths; override-aware, so it never blocks a legitimately exact-verified decode.</td><td>734 regression-clean</td></tr>
+    <tr><td><code>build-prefix-index.mjs</code></td><td>Offline derivation (corpus/4M &rarr; prefix-confidence map). Proof run: 76,208 corpus rows &rarr; 1,235 prefixes &rarr; 310 kept (e.g. 092971&rarr;bridgestone 0.818; 086699 ambiguous 0.455 = weak veto).</td><td>n/a (offline)</td></tr>
+  </table>
+  <p><b>Proven behavior for <code>051596320812</code> (unit-locked):</b></p>
+  <table>
+    <tr><th>Candidate</th><th>Firewall verdict</th></tr>
+    <tr><td>Hampton Bay ceiling fan (Gemini's wrong answer)</td><td class="ok">BLOCKED &rarr; Needs Review (prefix + reverse-UPC conflict)</td></tr>
+    <tr><td>"The Home Depot" Homer Bucket (private label, category matches)</td><td class="ok">NOT flagged (retail-brand difference is legit)</td></tr>
+    <tr><td>Same bucket under a different maker's UPC (multi-prefix)</td><td class="ok">NOT false-rejected (category compatible)</td></tr>
+    <tr><td>Any candidate with official exact-code evidence</td><td class="ok">Override &rarr; allowed</td></tr>
+  </table>
+  <p class="small"><b>Honest status:</b> the prefix guard is active via the curated seed; the derived map is empty at runtime until you run the derivation (the "upgrade"). The reverse-UPC guard is built + unit-tested but inert server-side until a name&rarr;UPC index exists (the OFF 4M catalog is food-only, so it won't cover hardware/fans regardless - broad coverage needs a licensed GS1-style source).</p>
+
+  <h2>9. Prefix intelligence DB (Phase 1 - food/grocery, OFF-derived)</h2>
+  <p class="small">Built from the 4.37M-row Open Food Facts database + a Gemini Flash-Lite alias-cleanup pass (normalize/cluster ONLY - no truth, no ownership guessing, thinking off, no web). Curated seed stays authoritative for non-food.</p>
+  <table>
+    <tr><th>Metric</th><th>Value</th></tr>
+    <tr><td>Gemini spend (one-time enrichment)</td><td><b>$2.0499</b> (Flash-Lite, 0 errors, under the $3 stop)</td></tr>
+    <tr><td>Ambiguous prefixes enriched</td><td>14,944</td></tr>
+    <tr><td>Recovered to strong / moderate</td><td><b>3,365 strong + 4,481 moderate = 7,846</b> (52.5%)</td></tr>
+    <tr><td>Runtime index entries</td><td><b>23,999</b> (5,980 strong + 10,173 moderate + 7,846 recovered)</td></tr>
+    <tr><td>Index file size</td><td>compacted <b>18.2 MB → 2.26 MB</b> (suite load 29s → 5.5s)</td></tr>
+    <tr><td>Source / trust</td><td>derived_catalog (statistical evidence, NOT official GS1). Strong+≥0.8+≥20 = override-able veto; moderate = review hint; ambiguous = weak warning; thin = experimental.</td></tr>
+  </table>
+  <p><b>Cleanup examples (alias clustering only):</b> <code>0029700</code> 11 brands top 88% → <code>idahoan foods</code> top 97%; <code>0017400</code> 24 brands top 24% → <code>carolina / riviana / inharvest</code> top 66%.</p>
+  <p><b>Proof <code>051596320812</code> still NOT the fan:</b> the OFF map is food-only and contains neither <code>0051596</code> (United Solutions) nor <code>0792145</code> (King of Fans), so the curated seed is unshadowed. With the 2.26MB derived map loaded, the firewall test still BLOCKS the Hampton Bay fan candidate for the bucket code, and <code>lookupPrefix("051596320812")</code> still returns United Solutions (16/16 catalog tests pass).</p>
+  <p class="small"><b>Coverage limit:</b> Open Food Facts = food/grocery only. No hardware/housewares/fans/tires/electronics. This DB strengthens FOOD scans; broad multi-category coverage still needs a curated seed + (later) a licensed GS1-style source.</p>
+
+  <h2>10. Release gate (your rule)</h2>
+  <p>IMPLEMENT &rarr; run LOCAL (done) &rarr; <b>HTML report (this) &rarr; you review</b> &rarr; THEN commit / deploy. Nothing has been committed or deployed.</p>
+</div>
+</body>
+</html>

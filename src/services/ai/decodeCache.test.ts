@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   withDecodeCache,
   getDecodeCache,
@@ -9,6 +9,7 @@ import {
 } from "@/services/ai/decodeCache";
 
 beforeEach(() => clearDecodeCache());
+afterEach(() => vi.useRealTimers());
 
 describe("decodeCache (never re-pay AI/Firecrawl for the same barcode)", () => {
   it("runs compute once, then serves the cache on the second call (no repeat spend)", async () => {
@@ -28,7 +29,7 @@ describe("decodeCache (never re-pay AI/Firecrawl for the same barcode)", () => {
     expect(calls).toBe(1); // the expensive path ran exactly once
   });
 
-  it("does NOT cache failures - a failed decode stays retryable", async () => {
+  it("caches a MISS briefly so the same unresolved code stops re-running (money-bleed fix)", async () => {
     let calls = 0;
     const compute = async () => {
       calls++;
@@ -36,12 +37,61 @@ describe("decodeCache (never re-pay AI/Firecrawl for the same barcode)", () => {
     };
     const isSuccess = (v: { ok: boolean }) => v.ok;
 
-    const a = await withDecodeCache("000", isSuccess, compute);
-    const b = await withDecodeCache("000", isSuccess, compute);
+    const a = await withDecodeCache("000", isSuccess, compute, { missTtlMs: 600_000 });
+    const b = await withDecodeCache("000", isSuccess, compute, { missTtlMs: 600_000 });
 
     expect(a.cached).toBe(false);
-    expect(b.cached).toBe(false); // not served from cache because it never succeeded
+    expect(b.cached).toBe(true); // served from the short-lived miss cache (no repeat AI/Firecrawl spend)
+    expect(calls).toBe(1);
+  });
+
+  it("re-runs a miss after its TTL expires (so a later retry still works)", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const compute = async () => {
+      calls++;
+      return { ok: false };
+    };
+    const isSuccess = (v: { ok: boolean }) => v.ok;
+
+    await withDecodeCache("000", isSuccess, compute, { missTtlMs: 1_000 });
+    vi.advanceTimersByTime(1_500); // past the miss TTL
+    const b = await withDecodeCache("000", isSuccess, compute, { missTtlMs: 1_000 });
+
+    expect(b.cached).toBe(false);
     expect(calls).toBe(2);
+  });
+
+  it("forceRefresh bypasses the cache (manual Retry)", async () => {
+    let calls = 0;
+    const compute = async () => {
+      calls++;
+      return { ok: true, n: calls };
+    };
+    const isSuccess = (v: { ok: boolean }) => v.ok;
+
+    await withDecodeCache("z", isSuccess, compute);
+    const b = await withDecodeCache("z", isSuccess, compute, { forceRefresh: true });
+
+    expect(b.cached).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  it("a successful decode is cached indefinitely (no TTL)", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const compute = async () => {
+      calls++;
+      return { ok: true };
+    };
+    const isSuccess = (v: { ok: boolean }) => v.ok;
+
+    await withDecodeCache("ok1", isSuccess, compute, { missTtlMs: 1_000 });
+    vi.advanceTimersByTime(60 * 60 * 1000); // an hour later
+    const b = await withDecodeCache("ok1", isSuccess, compute, { missTtlMs: 1_000 });
+
+    expect(b.cached).toBe(true); // success never expires
+    expect(calls).toBe(1);
   });
 
   it("keys are independent per code and clear/size work", async () => {

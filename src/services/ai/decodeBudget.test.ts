@@ -29,4 +29,10 @@ describe("clampDecodeBudgetMs (server-side safety clamp)", () => {
   it("clamps an out-of-range fallback too", () => {
     expect(clampDecodeBudgetMs(undefined, 999_999)).toBe(DECODE_BUDGET_MAX_MS);
   });
+
+  it("caps live AI decode at 8s and defaults to 8s (owner cost rule)", () => {
+    expect(DECODE_BUDGET_MAX_MS).toBe(8_000);
+    expect(DECODE_BUDGET_DEFAULT_MS).toBe(8_000);
+    expect(clampDecodeBudgetMs(13_000)).toBe(8_000); // a stale 13s client setting is clamped down
+  });
 });

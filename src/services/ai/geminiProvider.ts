@@ -18,11 +18,21 @@ export function createGeminiProvider(opts?: { model?: string; label?: string; di
 
       const prompt = buildLookupPrompt(req);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      // Gemini 2.5 Flash THINKS by default - that makes a grounded lookup take 10-30s and bill thinking
+      // tokens. A barcode lookup needs retrieval, not reasoning, so disable thinking for FLASH models
+      // (2.5 Pro REJECTS thinkingBudget:0, so only flash gets it). Cap output so a grounded answer can't
+      // run away. Both env-overridable.
+      const isFlash = /flash/i.test(model);
+      const generationConfig: Record<string, unknown> = {
+        temperature: 0.2,
+        maxOutputTokens: Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 2048),
+      };
+      if (isFlash) generationConfig.thinkingConfig = { thinkingBudget: 0 };
       const body: Record<string, unknown> = {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         // Grounding with Google Search. Do NOT also force responseMimeType=json here (it conflicts
         // with tool use); we extract JSON from the text instead.
-        generationConfig: { temperature: 0.2 },
+        generationConfig,
       };
       if (grounding) body.tools = [{ google_search: {} }];
 
