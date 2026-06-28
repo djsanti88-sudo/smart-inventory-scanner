@@ -1,0 +1,77 @@
+{
+  "_README": "Ground truth for the weekly 10-code live decode accuracy bot. SEEDED placeholders - OWNER MUST CONFIRM. Until every entry has confirmed:true, the report labels the accuracy score PROVISIONAL and not trustworthy. Edit `expected` to the real product, set confirmed:true. Codes are scanned exactly as written (separators preserved).",
+  "version": 1,
+  "confirmedByOwner": false,
+  "codes": [
+    {
+      "code": "2881-6861",
+      "type": "vendor_part_number",
+      "expected": { "brand": "Falken", "productHint": "Falken tire (part 2881-6861)", "category": "tire", "mustNotBe": ["Camel"] },
+      "confirmed": false,
+      "note": "From the repo tire-resolution bot: must resolve to Falken, never Camel. Owner: confirm exact tire model."
+    },
+    {
+      "code": "878106003504",
+      "type": "upc_a",
+      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "Used in MANUAL_LIVE_TEST.md as a live decode sample. Owner: fill the true product."
+    },
+    {
+      "code": "745125495781",
+      "type": "upc_a",
+      "expected": { "brand": "", "productHint": "POISON / near-match trap - must route to Needs Review, never auto-count", "category": "non_tire", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "Known poison code in the repo. Expected outcome = Needs Review (NOT a confident decode). Owner: confirm."
+    },
+    {
+      "code": "070330645936",
+      "type": "upc_a",
+      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "From live-decode-smoke.ts sample set. Owner: fill the true product."
+    },
+    {
+      "code": "6977228152610",
+      "type": "ean_13",
+      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "From live-decode-smoke.ts sample set. Owner: fill the true product."
+    },
+    {
+      "code": "710154236681",
+      "type": "upc_a",
+      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "From live-decode-smoke.ts sample set. Owner: fill the true product."
+    },
+    {
+      "code": "",
+      "type": "tire_dot",
+      "expected": { "brand": "", "productHint": "A real tire from your inventory (hard one)", "category": "tire", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "Owner: add a genuinely hard tire code you know the answer to."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "expected": { "brand": "", "productHint": "A non-tire retail item (supplement / tool / part)", "category": "non_tire", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "Owner: add a non-tire code so accuracy covers the multi-trade case."
+    },
+    {
+      "code": "",
+      "type": "vendor_label",
+      "expected": { "brand": "", "productHint": "An X00/FNSKU-style vendor label - expected outcome = Needs Review, not a confident UPC decode", "category": "", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "Owner: add a vendor-label code to test that it does NOT get treated as a public barcode."
+    },
+    {
+      "code": "",
+      "type": "unknown_new",
+      "expected": { "brand": "", "productHint": "A brand-new code with no online presence - expected outcome = Needs Review", "category": "", "mustNotBe": [] },
+      "confirmed": false,
+      "note": "Owner: add an obscure code to test honest 'unknown' behavior (unknown is acceptable, wrong is failure)."
+    }
+  ]
+}
