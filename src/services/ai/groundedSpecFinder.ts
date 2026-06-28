@@ -162,7 +162,13 @@ export async function groundedSpecFind(args: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1 },
+        // Thinking OFF (flash thinks by default -> the 3s grounded call could never finish) + an output
+        // cap. 2.5 Pro rejects thinkingBudget:0, so guard on a flash model. Both env-overridable.
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 1024),
+          ...(/flash/i.test(GROUNDED_SPEC_GEMINI_MODEL) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        },
         tools: [{ google_search: {} }],
       }),
       signal: effectiveSignal,

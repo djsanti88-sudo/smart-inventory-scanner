@@ -2,9 +2,11 @@
 // CLIENT-supplied (untrusted), so the server clamps it into a safe range before use - a client must
 // never be able to request a 10-minute decode. Pure module (no React / next), unit-testable.
 
+// Owner cost rule (2026-06-28): live AI decode must never run longer than 8s. The MAX is the hard
+// ceiling the client cannot exceed; the DEFAULT is what an unset/invalid budget falls back to.
 export const DECODE_BUDGET_MIN_MS = 5_000;
-export const DECODE_BUDGET_MAX_MS = 20_000;
-export const DECODE_BUDGET_DEFAULT_MS = 13_000;
+export const DECODE_BUDGET_MAX_MS = 8_000;
+export const DECODE_BUDGET_DEFAULT_MS = 8_000;
 
 function clampToRange(n: number): number {
   return Math.min(DECODE_BUDGET_MAX_MS, Math.max(DECODE_BUDGET_MIN_MS, Math.round(n)));
