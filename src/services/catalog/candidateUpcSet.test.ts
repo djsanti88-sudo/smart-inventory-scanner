@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { candidateKnownUpcSet, type UpcRecord } from "@/services/catalog/candidateUpcSet";
+import { candidateKnownUpcSet, shopReverseUpcConflict, type UpcRecord } from "@/services/catalog/candidateUpcSet";
 
 // Reverse known-UPC guard input: given an AI-proposed product, build its known UPC SET from OUR OWN
 // catalog/corpus (no live lookup). UPC SETS (not a single UPC) because one product family legitimately
@@ -31,5 +31,24 @@ describe("candidateKnownUpcSet (reverse guard, UPC sets from our own data)", () 
 
   it("returns an empty set for an empty candidate", () => {
     expect(candidateKnownUpcSet({}, RECORDS)).toEqual([]);
+  });
+});
+
+describe("shopReverseUpcConflict (shop-catalog reverse-UPC guard, brought from WIP backup)", () => {
+  it("flags when the candidate is already in our catalog under a DIFFERENT code", () => {
+    const r = shopReverseUpcConflict({ brand: "The Home Depot", name: "Homer Bucket" }, "051596320812", RECORDS);
+    expect(r.conflict).toBe(true);
+    expect(r.knownUpcs).toContain("084305355546");
+  });
+
+  it("no conflict when the scanned code IS one of the candidate's known codes", () => {
+    const r = shopReverseUpcConflict({ brand: "The Home Depot", name: "Homer Bucket" }, "084305355546", RECORDS);
+    expect(r.conflict).toBe(false);
+  });
+
+  it("no conflict when the candidate is not in our catalog (guard stays inert)", () => {
+    const r = shopReverseUpcConflict({ brand: "Acme", name: "Mystery Widget" }, "051596320812", RECORDS);
+    expect(r.conflict).toBe(false);
+    expect(r.knownUpcs).toEqual([]);
   });
 });
