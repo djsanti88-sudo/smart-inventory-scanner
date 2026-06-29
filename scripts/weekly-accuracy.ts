@@ -119,7 +119,10 @@ async function main() {
   catch (e) { console.error("Cannot read fixture", FIXTURE, String(e)); process.exit(1); }
   const all = fixture.codes || [];
   const runnable = all.filter((c) => c.code && String(c.code).trim());
-  const provisional = !fixture.confirmedByOwner || all.some((c) => !c.confirmed);
+  // Tire codes come from the trusted corpus (confirmed). Only the GENERAL group needs owner confirmation,
+  // so the score is provisional until the general codes are confirmed; the tire score is corpus-verified.
+  const generalOk = all.filter((c) => c.group === "general" && c.code).every((c) => c.confirmed);
+  const provisional = !generalOk;
 
   let status = null;
   for (const cand of PORT_CANDIDATES) {
@@ -132,16 +135,21 @@ async function main() {
   console.log("server:", BASE);
 
   const canLive = LIVE && !status.e2e && (status.geminiConfigured || status.openaiConfigured);
+  const blank = () => ({ total: 0, correct: 0, wrong: 0, needsReview: 0, unscored: 0 });
   const result = {
     date: DATE, mode: DEEP ? "deep" : "lean", provisional, ranLive: false,
-    total: 0, correct: 0, wrong: 0, needsReview: 0, unscored: 0, perCode: [],
+    total: 0, correct: 0, wrong: 0, needsReview: 0, unscored: 0,
+    byGroup: { general: blank(), tire: blank() },
+    perCode: [],
   };
 
   if (!canLive) {
     const why = !LIVE ? "dry mode (LIVE_AI_TEST not 1)" : status.e2e ? "server is IS_E2E mock-only" : "no provider keys configured server-side";
     console.log("\nNOT running live providers ->", why, "-> $0 spent.");
-    result.perCode = runnable.map((c) => ({ code: c.code, expected: (c.expected && (c.expected.brand || c.expected.productHint)) || "(unconfirmed)", got: "(not run)", verdict: "dry", note: why }));
+    result.perCode = runnable.map((c) => ({ code: c.code, group: c.group || "general", expected: (c.expected && (c.expected.brand || c.expected.productHint)) || "(unconfirmed)", got: "(not run)", verdict: "dry", note: why }));
+    for (const c of runnable) { const g = c.group === "tire" ? "tire" : "general"; result.byGroup[g].total++; }
     result.total = runnable.length;
+    console.log("would run:", result.byGroup.general.total, "general +", result.byGroup.tire.total, "tire =", runnable.length, "codes (tire = corpus, ~$0 live; general = AI decode)");
     fs.mkdirSync(OUT, { recursive: true });
     fs.writeFileSync(path.join(OUT, "accuracy.json"), JSON.stringify(result, null, 2));
     const cf = mergeCost(null, "live accuracy not run: " + why);
@@ -160,11 +168,13 @@ async function main() {
     const sc = scoreCode(entry, data);
     const c = estCost(data);
     spent += c.usd; calls += c.calls; ran++;
-    if (sc.verdict === "correct") result.correct++;
-    else if (sc.verdict === "wrong") result.wrong++;
-    else if (sc.verdict === "needs-review") result.needsReview++;
-    else result.unscored++;
-    result.perCode.push({ code: entry.code, expected: entry.expected.brand || entry.expected.productHint || "", got: sc.got, verdict: sc.verdict, confidence: (data.decision || {}).status, note: sc.reason });
+    const g = entry.group === "tire" ? "tire" : "general";
+    result.byGroup[g].total++;
+    if (sc.verdict === "correct") { result.correct++; result.byGroup[g].correct++; }
+    else if (sc.verdict === "wrong") { result.wrong++; result.byGroup[g].wrong++; }
+    else if (sc.verdict === "needs-review") { result.needsReview++; result.byGroup[g].needsReview++; }
+    else { result.unscored++; result.byGroup[g].unscored++; }
+    result.perCode.push({ code: entry.code, group: g, expected: entry.expected.brand || entry.expected.productHint || "", got: sc.got, verdict: sc.verdict, confidence: (data.decision || {}).status, note: sc.reason });
     console.log("  " + entry.code + " -> " + sc.verdict + " (" + sc.got.slice(0, 60) + ")  est $" + spent.toFixed(3));
   }
   result.ranLive = true;
@@ -174,6 +184,7 @@ async function main() {
   fs.writeFileSync(path.join(OUT, "accuracy.json"), JSON.stringify(result, null, 2));
   const cf = mergeCost({ provider: "decode (Gemini/OpenAI)", detail: ran + " codes, " + calls + " provider calls (estimated)", calls, usd: Math.round(spent * 100) / 100 });
   console.log("\nScored:", result.correct, "correct,", result.wrong, "wrong,", result.needsReview, "needs-review,", result.unscored, "unscored of", ran);
+  console.log("  general:", result.byGroup.general.correct + "/" + result.byGroup.general.total, "correct | tire:", result.byGroup.tire.correct + "/" + result.byGroup.tire.total, "correct");
   console.log("Estimated third-party spend: $" + spent.toFixed(2), "(cap $" + CAP.toFixed(2) + ")");
   console.log("wrote", path.join(OUT, "accuracy.json"), "and merged", cf);
   if (provisional) console.log("WARNING: ground-truth not owner-confirmed -> score is PROVISIONAL and not trustworthy.");
