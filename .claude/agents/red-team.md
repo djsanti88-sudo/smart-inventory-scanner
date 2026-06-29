@@ -34,10 +34,13 @@ back to grep. Parse output into findings. Useful invocations:
 
 ## Layer 2 - active, localhost only (only if dev server up)
 1. Discover the port (3000/3100/3300) via `GET /api/ai-lookup`; confirm `"e2e"` before any decode POST.
-2. **Scrape / rate-limit proof:** `autocannon -d 8 -c 50 http://localhost:<port>/api/ai-lookup` (GET,
-   no spend) and any catalog/list GET route. If thousands of requests complete with zero 429s, that is
-   PROOF of no inbound rate limiting - the scrape/DB-drain exposure the owner cares about. Report the
-   exact numbers (requests sent, non-2xx, throughput).
+2. **Scrape / rate-limit proof (numeric, non-fakeable):** `autocannon -d 8 -c 50 http://localhost:<port>/api/ai-lookup`
+   (GET, no spend) and any catalog/list GET route. Record the EXACT numbers and put them in `evidence`
+   as numeric tokens, e.g. `requests=12000 non2xx=0 rps=1500 count_429=0`. THRESHOLD: if `requests > 3000`
+   and `count_429 = 0`, nothing throttles a scraper -> set `scrape_resistance` to a BLOCKER. If 429s
+   appear, it IS rate-limited -> score it up accordingly. Never report a scrape verdict without the
+   numbers. (Note the app added a per-IP rate limit + daily cap in `aiSpendGuard.ts`; verify whether it
+   actually fires under autocannon load, since in-process limits may not hold across instances.)
 3. **Authz / IDOR (observational):** with `curl`, GET data routes with no auth and with a different
    `businessId` than the seeded one; if another tenant's rows come back, that is a cross-tenant leak
    (the Falken/Camel class). Read-only.
