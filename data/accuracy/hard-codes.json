@@ -1,77 +1,1573 @@
 {
-  "_README": "Ground truth for the weekly 10-code live decode accuracy bot. SEEDED placeholders - OWNER MUST CONFIRM. Until every entry has confirmed:true, the report labels the accuracy score PROVISIONAL and not trustworthy. Edit `expected` to the real product, set confirmed:true. Codes are scanned exactly as written (separators preserved).",
-  "version": 1,
+  "_README": "Ground truth for the weekly accuracy bot. TARGET: 20 general + 100 tire = 120 codes. Tire codes are sourced from the trusted tire corpus (real barcode + brand/model), so they are confirmed and mostly resolve deterministically (no AI spend). The 20 general codes test the AI decode path and need owner confirmation (set confirmed:true after filling expected). The score is PROVISIONAL until confirmedByOwner is true.",
+  "version": 2,
+  "targets": {
+    "general": 20,
+    "tire": 100
+  },
   "confirmedByOwner": false,
   "codes": [
     {
-      "code": "2881-6861",
-      "type": "vendor_part_number",
-      "expected": { "brand": "Falken", "productHint": "Falken tire (part 2881-6861)", "category": "tire", "mustNotBe": ["Camel"] },
-      "confirmed": false,
-      "note": "From the repo tire-resolution bot: must resolve to Falken, never Camel. Owner: confirm exact tire model."
-    },
-    {
       "code": "878106003504",
       "type": "upc_a",
-      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "",
+        "category": "",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "Used in MANUAL_LIVE_TEST.md as a live decode sample. Owner: fill the true product."
+      "note": "MANUAL_LIVE_TEST sample. Owner: fill true product."
     },
     {
       "code": "745125495781",
       "type": "upc_a",
-      "expected": { "brand": "", "productHint": "POISON / near-match trap - must route to Needs Review, never auto-count", "category": "non_tire", "mustNotBe": [] },
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "POISON near-match trap - expect Needs Review, not auto-count",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "Known poison code in the repo. Expected outcome = Needs Review (NOT a confident decode). Owner: confirm."
+      "note": "Known poison code. Expected outcome = Needs Review."
     },
     {
       "code": "070330645936",
       "type": "upc_a",
-      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "",
+        "category": "",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "From live-decode-smoke.ts sample set. Owner: fill the true product."
+      "note": "live-decode-smoke sample. Owner: fill."
     },
     {
       "code": "6977228152610",
       "type": "ean_13",
-      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "",
+        "category": "",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "From live-decode-smoke.ts sample set. Owner: fill the true product."
+      "note": "live-decode-smoke sample. Owner: fill."
     },
     {
       "code": "710154236681",
       "type": "upc_a",
-      "expected": { "brand": "", "productHint": "", "category": "", "mustNotBe": [] },
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "",
+        "category": "",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "From live-decode-smoke.ts sample set. Owner: fill the true product."
-    },
-    {
-      "code": "",
-      "type": "tire_dot",
-      "expected": { "brand": "", "productHint": "A real tire from your inventory (hard one)", "category": "tire", "mustNotBe": [] },
-      "confirmed": false,
-      "note": "Owner: add a genuinely hard tire code you know the answer to."
+      "note": "live-decode-smoke sample. Owner: fill."
     },
     {
       "code": "",
       "type": "upc_a",
-      "expected": { "brand": "", "productHint": "A non-tire retail item (supplement / tool / part)", "category": "non_tire", "mustNotBe": [] },
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "Owner: add a non-tire code so accuracy covers the multi-trade case."
+      "note": "Owner: add a general product barcode + expected answer."
     },
     {
       "code": "",
-      "type": "vendor_label",
-      "expected": { "brand": "", "productHint": "An X00/FNSKU-style vendor label - expected outcome = Needs Review, not a confident UPC decode", "category": "", "mustNotBe": [] },
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "Owner: add a vendor-label code to test that it does NOT get treated as a public barcode."
+      "note": "Owner: add a general product barcode + expected answer."
     },
     {
       "code": "",
-      "type": "unknown_new",
-      "expected": { "brand": "", "productHint": "A brand-new code with no online presence - expected outcome = Needs Review", "category": "", "mustNotBe": [] },
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
       "confirmed": false,
-      "note": "Owner: add an obscure code to test honest 'unknown' behavior (unknown is acceptable, wrong is failure)."
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "",
+      "type": "upc_a",
+      "group": "general",
+      "expected": {
+        "brand": "",
+        "productHint": "A real general product (supplement/tool/part) you know the answer to",
+        "category": "non_tire",
+        "mustNotBe": []
+      },
+      "confirmed": false,
+      "note": "Owner: add a general product barcode + expected answer."
+    },
+    {
+      "code": "2881-6861",
+      "type": "vendor_part_number",
+      "group": "tire",
+      "expected": {
+        "brand": "Falken",
+        "productHint": "Falken tire (part 2881-6861)",
+        "category": "tire",
+        "mustNotBe": [
+          "Camel"
+        ]
+      },
+      "confirmed": true,
+      "note": "Famous regression: must resolve to Falken, NEVER Camel."
+    },
+    {
+      "code": "848983006257",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "falken",
+        "productHint": "wildpeak a t3w 265/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "715459448692",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "hankook",
+        "productHint": "dynapro mt2 rt05 LT265/75R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "6419440597775",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "nokian",
+        "productHint": "hakkapeliitta r5 275/40R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "848983002310",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "falken",
+        "productHint": "ziex ze950 a s 265/60R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "4981910519256",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "toyo",
+        "productHint": "proxes r888r 245/40R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "4981910526797",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "toyo",
+        "productHint": "open country a t3 P235/75R15",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "729419094492",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "amp",
+        "productHint": "cm2 terrain attack m t 37x13.50R22",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "715459387991",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "laufenn",
+        "productHint": "s fit as 235/60R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "6959655436839",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "vogue",
+        "productHint": "custom built radial viii white with gold 245/45R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "092971273552",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "bridgestone",
+        "productHint": "blizzak lm001 rft 245/50R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "086699451156",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "uniroyal",
+        "productHint": "tiger paw gtz a s 2 255/35R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "054137055907",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "pirelli",
+        "productHint": "pzero 275/40R22",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "4981910887812",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "nitto",
+        "productHint": "ntsn2 winter 195/65R15",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "086699653208",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "uniroyal",
+        "productHint": "tiger paw touring a s 265/50R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "029142996736",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "mastercraft",
+        "productHint": "avenger 225/50R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "092971294076",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "firestone",
+        "productHint": "winterforce 2 225/60R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "4981910501848",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "nitto",
+        "productHint": "ridge grappler LT285/55R22",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "029142874461",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "cooper",
+        "productHint": "zeon rs3 g1 235/40R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "4981910537724",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "nitto",
+        "productHint": "recon grappler a t LT33/12.50R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "086699241207",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "michelin",
+        "productHint": "pilot alpin pa4 225/45R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "086699034816",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "michelin",
+        "productHint": "pilot sport 4 s 245/45R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "092971346508",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "firestone",
+        "productHint": "firehawk as v2 235/55R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "086699185808",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "michelin",
+        "productHint": "pilot super sport 225/45R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "054137046226",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "pirelli",
+        "productHint": "w210 sottozero series ii 235/55R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "051342019151",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "continental",
+        "productHint": "spare tire 175/80R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "086699179166",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "michelin",
+        "productHint": "primacy a s 275/55R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "054137085997",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "pirelli",
+        "productHint": "scorpion weatheractive 265/50R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "051342075959",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "continental",
+        "productHint": "extremecontact sport 2 265/40R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "697662157151",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "goodyear",
+        "productHint": "assurance weather ready 2 235/55R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_1src_strong"
+    },
+    {
+      "code": "450434348320",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "blackhawk",
+        "productHint": "ice prey bw10 215/55R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_db"
+    },
+    {
+      "code": "8681110666625",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "arroyo",
+        "productHint": "grand sport 2 225/55R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_db"
+    },
+    {
+      "code": "468840299433",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "neoterra",
+        "productHint": "neotrac h t 235/55R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_db"
+    },
+    {
+      "code": "841877101748",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "windforce",
+        "productHint": "catchpower 255/50R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_db"
+    },
+    {
+      "code": "6959613707421",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "keter",
+        "productHint": "kt696  255/50R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_db"
+    },
+    {
+      "code": "737245800965",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "kanati",
+        "productHint": "mud hog LT275/60R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_db"
+    },
+    {
+      "code": "8848116009751",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "blackhawk",
+        "productHint": "agility uhp as 215/45R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "848983024817",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "falken",
+        "productHint": "azenis fk460 a s 295/45R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "6419440444369",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "nokian",
+        "productHint": "hakkapeliitta 10 suv 275/45R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "6419440322841",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "nokian",
+        "productHint": "nordman 7 175/70R13",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "840139633386",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "fortune",
+        "productHint": "viento fsr702 255/35R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "4981910526582",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "toyo",
+        "productHint": "m671 m671a nanoenergy 295/75R22.5",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "4981910879503",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "toyo",
+        "productHint": "proxes st ii 225/55R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "697662116233",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "dunlop",
+        "productHint": "sp sport maxx 235/50R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "887613260003",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "nexen",
+        "productHint": "nfera ru5 235/65R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "887613280209",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "nexen",
+        "productHint": "winguard winspike 245/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8994731001165",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "achilles",
+        "productHint": "desert hawk h t 275/70R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "040232662478",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "americus",
+        "productHint": "rugged m t 315/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "841623122447",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "arroyo",
+        "productHint": "eco pro h t 255/70R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8859291416944",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "atlas",
+        "productHint": "force hp 205/50R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "5060330612590",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "atturo",
+        "productHint": "trail blade h t 215/85R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "086699641687",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "bfgoodrich",
+        "productHint": "g-force t a kdws 235/50R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8903094027477",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "bkt",
+        "productHint": "agrimax rt 955 r-1 230/95R36",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "6949402132992",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "blacklion",
+        "productHint": "bc86 voracio h t 245/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "092971388973",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "bridgestone",
+        "productHint": "blizzak icepeak 255/45R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "092971242619",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "bridgestone",
+        "productHint": "dueler h l alenza plus 265/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "092971314644",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "bridgestone",
+        "productHint": "potenza re-71rs 285/30R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "092971340551",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "bridgestone",
+        "productHint": "potenza sport 325/30R21",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "769382906903",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "buckshot",
+        "productHint": "buckshot rt 265/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8904288109696",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "ceat",
+        "productHint": "rock-xls 355/65R15",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "051342108862",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "continental",
+        "productHint": "contiprocontact 195/65R15",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "051342101092",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "continental",
+        "productHint": "contiwintercontact ts810 s 175/65R15",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "4019238760637",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "continental",
+        "productHint": "premiumcontact 6 225/50R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "029142751465",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "cooper",
+        "productHint": "cs3 touring 185/65R14",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "029142714798",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "cooper",
+        "productHint": "zeon rs3-s 225/45R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "841623117979",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "delinte",
+        "productHint": "aw5 185/55R14",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "746573237053",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "delta",
+        "productHint": "delta trailcutter at4s 275/65R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "746573269245",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "doral",
+        "productHint": "journey ht 245/75R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "4713959223487",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "federal",
+        "productHint": "595 205/60R14",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "092971258610",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "firestone",
+        "productHint": "destination a t special edition camo 235/75R15",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "051342197385",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "general",
+        "productHint": "g-max as-07 245/35R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "844402074142",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "gladiator",
+        "productHint": "x comp h t asii 235/70R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "697662161813",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "goodyear",
+        "productHint": "eagle f1 all season 275/35R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "697662117872",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "goodyear",
+        "productHint": "eagle sport all-season 245/40R19",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "697662128816",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "goodyear",
+        "productHint": "wrangler trailrunner at 235/70R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "758823182976",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "milestar",
+        "productHint": "patagonia a t w 265/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "5420068699711",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "minerva",
+        "productHint": "ecospeed2 suv 265/40R22",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8590341075475",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "mitas",
+        "productHint": "ac 70 h g n r-1w 335/80R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "746573197784",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "multi-mile",
+        "productHint": "matrix tour rs 205/65R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "6959613729461",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "neoterra",
+        "productHint": "neosport 225/60R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "841623107055",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "pantera",
+        "productHint": "supertrac a t 235/75R15",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8680830021141",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "petlas",
+        "productHint": "explero pt431 h t 275/45R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8680830005448",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "petlas",
+        "productHint": "un 3 12/80R15.3",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "054137089902",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "pirelli",
+        "productHint": "pzero pz4 245/40R21",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "054137091042",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "pirelli",
+        "productHint": "scorpion 295/40R21",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "743785363907",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "predator",
+        "productHint": "new mutant rt trail 305/55R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "844658025660",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "pro comp",
+        "productHint": "xtreme mt2 295/65R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8886459540340",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "radar",
+        "productHint": "dimax r8 295/30R22",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "841623156930",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "rbp",
+        "productHint": "repulsor r t 305/40R22",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8848116001076",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "roadx",
+        "productHint": "rxquest at qx12 245/70R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "029142912446",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "starfire",
+        "productHint": "rs-w 50 255/45R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "746573761329",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "sumitomo",
+        "productHint": "touring ls t h v 215/55R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8859105406635",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "thunderer",
+        "productHint": "ranger 007 r601 265/60R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8059971016550",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "trelleborg",
+        "productHint": "tm150 380/105R50",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "086699131980",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "uniroyal",
+        "productHint": "tiger paw ice  snow 3 205/65R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8994234060768",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "vizzoni",
+        "productHint": "vz101 225/60R16",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8714692347504",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "vredestein",
+        "productHint": "quatrac pro 235/45R20",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "8714692152283",
+      "type": "ean",
+      "group": "tire",
+      "expected": {
+        "brand": "vredestein",
+        "productHint": "ultrac sessanta 315/35R17",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "810214450061",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "wanli",
+        "productHint": "sport macro 225/45R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
+    },
+    {
+      "code": "721506107177",
+      "type": "upc",
+      "group": "tire",
+      "expected": {
+        "brand": "yokohama",
+        "productHint": "advan sport v107 275/40R18",
+        "category": "tire",
+        "mustNotBe": []
+      },
+      "confirmed": true,
+      "note": "corpus verified_vendor"
     }
   ]
 }

@@ -13,7 +13,7 @@ Arguments: `$ARGUMENTS`
 Parse: `--mode=` (default `lean`; `--deep` is shorthand for `--mode=deep`), `--refresh` (re-run
 `npm run qa:bots` to regenerate screenshots first; default OFF = judge the latest existing proof),
 `--apply` (default OFF -> report-only; you MUST NOT edit app code or touch git when absent),
-`--live-accuracy` (default OFF -> the 10-code decode bot runs DRY at $0; ON -> it spends real
+`--live-accuracy` (default OFF -> the accuracy bot (20 general + 100 tire) runs DRY at $0; ON -> it spends real
 third-party cash within the cap), `--date=` (default today).
 
 Honor every project gate: **never deploy, never push, never merge, never run live AI without the
