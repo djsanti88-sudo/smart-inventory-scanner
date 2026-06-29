@@ -2091,6 +2091,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         let products = state.products;
         let productId = payload.productId ?? "";
         let createdProduct: Product | null = null; // persisted to Firestore (cloud backend) via SAVE_PRODUCT
+        // Phase-2 POISON GUARD: set true in the mint branch below when create_new is ACCEPTING the
+        // review's evidence-less AI suggestion (the 078742051451 -> "Velvet Torch dress" class). A weak
+        // guess is minted UNVERIFIED, its alias is left UNAPPROVED, no verified catalog entry is written,
+        // and it is NOT counted - so a future scan never resolves deterministically to a wrong product.
+        let weakGuessProduct = false;
 
         if (action === "create_new") {
           const np = payload.newProduct ?? {};
@@ -2146,6 +2151,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             emitAudit({ entityType: "Product", entityId: productId, action: "product_dedup_reused", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
           } else {
             productId = `prod-${idFactory()}`;
+            // POISON GUARD: is this create_new accepting the review's AI suggestion (the new product's
+            // name equals the suggested name)? If so, and the suggestion has NO real evidence the app
+            // could back - no brand, no gtin/upc/ean, no source URL - it must not become trusted identity.
+            // A human typing their OWN product name (not the AI's guess) is unaffected.
+            const suggestedName = (review.suggestedProductName ?? "").trim();
+            const acceptingSuggestion =
+              !!review.hasSuggestion && suggestedName.length > 0 && (np.name ?? "").trim() === suggestedName;
+            const suggestionHasRealEvidence =
+              (review.suggestedBrand ?? "").trim().length > 0 ||
+              [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
+              (review.sourceUrls?.length ?? 0) > 0;
+            weakGuessProduct = acceptingSuggestion && !suggestionHasRealEvidence;
             const newProduct: Product = {
               id: productId,
               businessId: state.businessId,
@@ -2170,7 +2187,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               status: "active",
               source: np.source ?? "human_review",
               confidence: 1,
-              verified: true, // a human created/confirmed this product, so it is trusted identity
+              verified: !weakGuessProduct, // trusted ONLY if not accepting an evidence-less AI suggestion (Phase-2 poison guard)
               createdAt: now(),
               updatedAt: now(),
               createdBy: "human",
@@ -2227,7 +2244,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           aliasType: codeTypeToAliasType(detectCodeType(review.cleanCode)),
           source: "human_review",
           confidence: 1,
-          approved: true, // human-approved -> this alias resolves deterministically to Known
+          approved: !weakGuessProduct, // NOT approved when minting from an evidence-less AI suggestion (Phase-2 poison guard)
           createdAt: now(),
           updatedAt: now(),
           createdBy: "human",
@@ -2431,7 +2448,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             sourceUrls: review.sourceUrls ?? [],
             confidence: review.confidence || 1,
           };
-          if (origin === "human") set({ catalog: upsertVerified(get().catalog, candidate, now(), "owner") });
+          if (origin === "human" && !weakGuessProduct) set({ catalog: upsertVerified(get().catalog, candidate, now(), "owner") });
           else if (origin === "ai") set({ catalog: applyAiCandidate(get().catalog, candidate, now()) });
           else if (origin === "auto_verify") {
             const av = payload.autoVerify;
@@ -2464,7 +2481,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Optionally apply this code to the current session count immediately. Fall back to cleanCode:
         // a customer review rehydrated from disk has its rawCode stripped (privacy), but cleanCode is kept
         // and is what the approved alias is keyed on, so the re-scan still matches + counts.
-        if (payload.applyToCount) {
+        if (payload.applyToCount && !weakGuessProduct) {
           get().processScan(review.rawCode || review.cleanCode);
         } else {
           get().syncPending();
