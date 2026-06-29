@@ -233,6 +233,8 @@ export interface UnknownCodeReview {
   // anti-hallucination firewall's conflict reason (if any). Hints/evidence only, never identity truth.
   prefixHint?: string;
   prefixConflictReason?: string;
+  // platformOwner-only: the proposed product already exists in the shop's catalog under a different code.
+  reverseUpcConflictNote?: string;
   // Confidence-based auto-verify outcome (when a decode was scored but did NOT auto-save).
   autoVerifyScore?: number;
   blockingReasons?: string[];

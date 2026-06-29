@@ -47,6 +47,7 @@ import { buildCleanupRecommendations } from "@/services/cleanup/recommendations"
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
+import { shopReverseUpcConflict, type UpcRecord } from "@/services/catalog/candidateUpcSet";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { extractTireFields } from "@/services/tire/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
@@ -1644,6 +1645,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             sources: (r.sourceUrls ?? []).length,
           }));
 
+          // Reverse-UPC heads-up (client-safe, our OWN catalog/products, full codes - no prefix map):
+          // if the suggested product already exists under a DIFFERENT code than the one scanned, flag a
+          // platformOwner-only note. WARNING ONLY - it never counts, aliases, or changes identity truth.
+          const shopRecords: UpcRecord[] = [
+            ...get().catalog.map((c) => ({ name: c.name, brand: c.brand, barcode: c.barcode, normalizedBarcode: c.normalizedBarcode })),
+            ...get().products.map((p) => ({ name: p.name, brand: p.brand, model: p.specsShort, primarySku: p.primarySku, primaryBarcode: p.primaryBarcode, upc: p.upc, ean: p.ean, gtin: p.gtin, aliases: p.aliases })),
+          ];
+          const shopRev = best
+            ? shopReverseUpcConflict({ brand: best.brand, name: best.productName, model: best.primarySku }, review.cleanCode, shopRecords)
+            : { conflict: false, knownUpcs: [] as string[] };
+          const reverseUpcConflictNote = shopRev.conflict ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0, 3).join(", ")}` : "";
+
           set((st) => ({
             needsReviewQueue: st.needsReviewQueue.map((r) =>
               r.id === reviewId
@@ -1676,6 +1689,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     decodeProviderSummaries,
                     prefixHint: (data.debug?.prefixHint as string) || "",
                     prefixConflictReason: (data.debug?.firewallReason as string) || "",
+                    reverseUpcConflictNote,
                   }
                 : r,
             ),

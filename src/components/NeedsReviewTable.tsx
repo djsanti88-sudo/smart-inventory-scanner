@@ -193,6 +193,11 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 Prefix firewall: {review.prefixConflictReason}
               </span>
             )}
+            {isPlatform && review.reverseUpcConflictNote && (
+              <span className="w-fit rounded bg-amber-50 px-1.5 py-0.5 text-amber-800" data-testid="reverse-upc-conflict">
+                {review.reverseUpcConflictNote}
+              </span>
+            )}
             {(review.verifiedFacts?.length ?? 0) > 0 && (
               <span className="text-zinc-500">Facts: {review.verifiedFacts!.join("; ")}</span>
             )}
