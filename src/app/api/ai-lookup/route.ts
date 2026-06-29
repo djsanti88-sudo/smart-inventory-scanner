@@ -25,7 +25,7 @@ import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerif
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 import { runSizeRace } from "@/services/ai/sizeRace";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { killSwitchOn, checkRateLimit, checkAndIncrementDaily } from "@/services/security/aiSpendGuard";
+import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv } from "@/services/security/aiSpendGuard";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -94,7 +94,19 @@ export const dynamic = "force-dynamic";
 // the candidate page, confirms the exact code in the REAL page text, and rejects "product not found" pages
 // (see enrichWithPageFetch + looksLikeNotFound). gs1.org/gtin.info only return a page when a GTIN is
 // actually registered, so url_only from them is sound.
-const TRUSTED_HOSTS = ["gs1.org", "gtin.info"];
+// OPTION 3 (owner): trusted hosts where a url_only match (the exact code appears in the URL) counts as
+// app-verified. GS1 registries + the major barcode databases + the big online retailers - per owner "Gemini
+// found the code on Amazon = that's all it takes for Sam's/Walmart/an online retailer". A url_only match
+// from ANY OTHER host stays weak (-> Suggested, not Verified). The brand-prefix firewall + 0.8 + the
+// non-public setting still gate every auto-count, so a wrong host can never alone force a count.
+const TRUSTED_HOSTS = [
+  "gs1.org", "gtin.info",
+  // barcode databases
+  "go-upc.com", "upcitemdb.com", "barcodelookup.com", "barcodespider.com", "eandata.com", "ean-search.org", "buycott.com",
+  // major online retailers
+  "amazon.com", "walmart.com", "samsclub.com", "target.com", "costco.com", "bestbuy.com", "homedepot.com",
+  "lowes.com", "kroger.com", "ebay.com", "chewy.com", "wayfair.com",
+];
 
 function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
@@ -164,7 +176,24 @@ function pageReader(): ((pageText: string, code: string) => Promise<Partial<AiLo
 
 // GET reports which keys/flags are configured. NO secrets are returned (booleans + names only),
 // so the client can decide whether to auto-decode and show exactly which keys are missing.
-export async function GET() {
+export async function GET(request: Request) {
+  // Lightweight per-IP rate limit so the public status endpoint cannot be scraped or flooded unthrottled.
+  // It returns only booleans + model names (no secrets), but an unbounded GET is still a cheap DoS / config-
+  // scrape vector. Generous default for legit client polling; SEPARATE bucket from POST (GET: prefix) so the
+  // two never interfere. Skipped under E2E mock mode, matching the POST guards.
+  if (!e2eMode()) {
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "local";
+    const rl = checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120) });
+    if (!rl.allowed) {
+      return Response.json(
+        { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+      );
+    }
+  }
   const geminiConfigured = !!process.env.GEMINI_API_KEY;
   const openaiConfigured = !!process.env.OPENAI_API_KEY;
   // firecrawlConfigured gates the Stage-2 open-web fallback. Absent is NOT a blocker (decode still
@@ -234,6 +263,7 @@ export async function POST(request: Request) {
     proRecheck?: boolean; // correction-only: use the strongest configured Gemini verification model
     scanContext?: "any" | "tire"; // Phase 8B: app-derived, non-authoritative prompt hint
     brandPrefixHint?: string; // Phase 8B: unambiguous learned brand-prefix hint (non-authoritative)
+    autoCountNonPublicWithEvidence?: boolean; // Option 3 (owner): allow a non-public code (SKU/vendor/FNSKU) to auto-verify from a single trusted source. Default true.
   };
   try {
     body = await request.json();
@@ -259,28 +289,31 @@ export async function POST(request: Request) {
     brandPrefixHint: body.brandPrefixHint,
   };
 
+  // Hard server-side daily spend cap (auth DEFERRED) - applies to EVERY provider-calling POST mode
+  // (decode, decode-deep, AND the legacy lookup path) so no mode can bypass it. Once the day's cap is hit,
+  // return blocked with ZERO provider calls. Skipped under E2E mock mode (no real spend). Known scans never
+  // reach this route, so the cap bounds genuine AI-eligible lookups per day.
+  if (!e2eMode()) {
+    const cap = checkAndIncrementDaily();
+    if (!cap.allowed) {
+      return Response.json(
+        { error: `Daily AI lookup cap reached (${cap.used}/${cap.limit}). No AI call made.`, reasonCode: "daily_cap" },
+        { status: 429 }
+      );
+    }
+  }
+
   if (body.mode === "decode" || body.mode === "decode-deep") {
     // Task 4/5: the tire hot path issues NO synchronous deep/Firecrawl call. The deep path stays
     // reachable for the client: it sends mode "decode-deep" (or "decode" with deep:true) to opt INTO
     // the existing multi-stage deep/Firecrawl orchestration and SKIP the tire hot path below.
     const deepRequested = body.mode === "decode-deep" || body.deep === true;
     const threshold = body.confidenceThreshold ?? 0.8;
+    // Option 3 (owner): non-public codes auto-verify from a single trusted source unless explicitly disabled.
+    const allowNonPublicAutoCount = body.autoCountNonPublicWithEvidence !== false;
     // The budget may be owner-configured and arrives from the client - clamp it server-side so a
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
     const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
-
-    // Hard server-side daily spend cap (auth DEFERRED). Once the day's cap is hit, return blocked with
-    // ZERO provider calls. Skipped under E2E mock mode (no real spend). This route is the unknown-code
-    // path (known scans never reach it), so the cap bounds genuine AI-eligible lookups per day.
-    if (!e2eMode()) {
-      const cap = checkAndIncrementDaily();
-      if (!cap.allowed) {
-        return Response.json(
-          { error: `Daily AI lookup cap reached (${cap.used}/${cap.limit}). No AI call made.`, reasonCode: "daily_cap" },
-          { status: 429 }
-        );
-      }
-    }
 
     const reader = pageReader();
     const firecrawlKey = process.env.FIRECRAWL_API_KEY;
@@ -435,7 +468,7 @@ export async function POST(request: Request) {
       const fw0 = evalCombinedFirewall(code, results[0], evidences);
       let prefixHint = fw0.hint;
       let firewallReason = fw0.reason;
-      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict });
+      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict, allowNonPublicAutoCount });
       let fallbackFound = false;
       let coverageMissed = false;
       let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
@@ -525,7 +558,7 @@ export async function POST(request: Request) {
             const fwW = evalCombinedFirewall(code, winnerWithSize, [outcome.hit.evidence]);
             prefixHint = fwW.hint;
             firewallReason = fwW.reason;
-            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict });
+            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict, allowNonPublicAutoCount });
           }
         }
       }

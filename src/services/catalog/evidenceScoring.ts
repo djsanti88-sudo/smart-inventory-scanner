@@ -36,6 +36,12 @@ export interface AutoVerifySettings {
   autoVerifyConfidenceThreshold: number;
   trustedSourceAutoVerifyEnabled: boolean;
   aiOnlyAutoVerifyAllowed: boolean;
+  // OPTION 3 (owner): when true, a NON-public vendor/internal/SKU/FNSKU code may auto-count IF the app
+  // independently confirmed the exact code in real evidence (appVerifiedStrongEvidence). Lifts ONLY the
+  // "vendor/internal code without an approved alias" block - every other block (no usable product, conflict,
+  // private data) still applies, and an evidence-less guess never has appVerifiedStrongEvidence. Optional so
+  // existing callers default to the old strict behavior; the live store passes the user setting (default on).
+  allowNonPublicAutoCount?: boolean;
 }
 
 export type AutoVerifyStatus = "auto_verify" | "auto_count" | "needs_review";
@@ -119,7 +125,13 @@ export function decideAutoVerification(flags: ScoreFlags, settings: AutoVerifySe
   }
   if (flags.conflictsVerifiedCatalog) blockingReasons.push("Conflicts with a verified catalog entry");
   if (flags.conflictingNames) blockingReasons.push("Providers disagree on the product identity");
-  if (flags.vendorCodeNoAlias) blockingReasons.push("Vendor/internal code without an approved alias");
+  // OPTION 3: a vendor/internal code normally blocks to Needs Review - UNLESS the owner enabled non-public
+  // auto-count AND the app independently confirmed the exact code in real evidence (then it is allowed to count,
+  // just like a public barcode would). An evidence-less guess never sets appVerifiedStrongEvidence, so this can
+  // never let a no-source guess through.
+  if (flags.vendorCodeNoAlias && !(settings.allowNonPublicAutoCount === true && flags.appVerifiedStrongEvidence)) {
+    blockingReasons.push("Vendor/internal code without an approved alias");
+  }
   if (flags.privateDataDetected) blockingReasons.push("Private/shop data detected");
 
   if (blockingReasons.length > 0) {

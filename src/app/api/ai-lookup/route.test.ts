@@ -7,7 +7,7 @@ import fs from "node:fs";
 // The route imports server-only modules (groundedSpecFinder). Stub the marker so it can load in vitest.
 vi.mock("server-only", () => ({}));
 
-import { POST } from "@/app/api/ai-lookup/route";
+import { POST, GET } from "@/app/api/ai-lookup/route";
 import { __resetForTest } from "@/services/security/aiSpendGuard";
 
 // Route-level wallet-protection smoke tests for /api/ai-lookup (6937cf3). They run with NO API keys and a
@@ -26,7 +26,7 @@ const AI_PROVIDER_HOSTS = ["generativelanguage.googleapis.com", "api.openai.com"
 
 describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "AI_LOOKUP_GET_RATE_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE"];
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
 
@@ -68,6 +68,30 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(res.status).toBe(429);
     expect((await res.json()).reasonCode).toBe("daily_cap");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("legacy 'lookup' mode is ALSO bound by the daily cap (no bypass)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap
+    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "lookup" }));
+    expect(res.status).toBe(429);
+    expect((await res.json()).reasonCode).toBe("daily_cap");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("a request with NO mode (legacy lookup default) is ALSO bound by the daily cap", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+    const res = await POST(makeRequest({ cleanCode: "111000222333" }));
+    expect(res.status).toBe(429);
+    expect((await res.json()).reasonCode).toBe("daily_cap");
+  });
+
+  it("GET status endpoint is rate-limited (no unthrottled scrape/flood)", async () => {
+    process.env.AI_LOOKUP_GET_RATE_LIMIT = "3";
+    const mkGet = () => new Request("http://localhost/api/ai-lookup", { headers: { "x-forwarded-for": "7.7.7.7" } });
+    for (let i = 0; i < 3; i++) expect((await GET(mkGet())).status).toBe(200);
+    const blocked = await GET(mkGet()); // 4th within the window -> blocked
+    expect(blocked.status).toBe(429);
+    expect((await blocked.json()).reasonCode).toBe("rate_limited");
   });
 
   it("a valid request UNDER the limit is NOT blocked (proceeds to decode) and calls NO live AI provider", async () => {
