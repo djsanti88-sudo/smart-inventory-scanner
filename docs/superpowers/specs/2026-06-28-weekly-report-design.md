@@ -134,7 +134,12 @@ isolation, mobile usability, scanner flow, decode accuracy, needs-review quality
 offline readiness, import/export readiness, business value, pricing confidence, competitive position,
 supportability.
 
-## 10. Live 10-code accuracy bot
+## 10. Live accuracy bot (20 general product codes + 100 tire codes = 120)
+Standing config (owner, 2026-06-28): `data/accuracy/hard-codes.json` holds `targets {general:20, tire:100}`.
+Tire codes are auto-sourced from the trusted tire corpus (real barcode + brand/model), so they are
+confirmed and mostly resolve deterministically (corpus hit, ~$0 live). The 20 general codes test the AI
+decode path and need owner confirmation. The bot reports general and tire accuracy SEPARATELY.
+
 
 `scripts/weekly-accuracy.ts` + `data/accuracy/hard-codes.json` (10 codes + expected brand/product/
 type). Lean: asks before paid spend, dry mode $0, scores correct/wrong/needs-review. Deep: cross-
