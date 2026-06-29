@@ -75,3 +75,19 @@ reports/**/cloud-playwright-results.json
 
 # Runtime daily spend-cap counter for /api/ai-lookup (local-first state, regenerated)
 .ai-lookup-usage.json
+.env*.local
+
+# Python bytecode + compile caches (tire-knowledge pipeline scripts) - regenerated
+*.pyc
+__pycache__/
+
+# Run logs + pipeline locks - regenerated, never source
+*.log
+data/**/*.lock
+
+# Nested auto-generated Playwright HTML report (root /playwright-report already ignored above)
+reports/**/playwright-report/
+
+# Agent/session scratch (Playwright MCP snapshots + superpowers tooling state)
+.playwright-mcp/
+.superpowers/
