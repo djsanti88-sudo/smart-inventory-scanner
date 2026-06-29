@@ -183,6 +183,16 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                   .join(" | ")}
               </span>
             )}
+            {isPlatform && review.prefixHint && (
+              <span className="text-zinc-500" data-testid="prefix-hint">
+                Barcode prefix: {review.prefixHint}
+              </span>
+            )}
+            {isPlatform && review.prefixConflictReason && (
+              <span className="w-fit rounded bg-amber-50 px-1.5 py-0.5 text-amber-800" data-testid="prefix-conflict">
+                Prefix firewall: {review.prefixConflictReason}
+              </span>
+            )}
             {(review.verifiedFacts?.length ?? 0) > 0 && (
               <span className="text-zinc-500">Facts: {review.verifiedFacts!.join("; ")}</span>
             )}

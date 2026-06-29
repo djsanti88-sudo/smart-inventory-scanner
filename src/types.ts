@@ -223,6 +223,10 @@ export interface UnknownCodeReview {
   crossCheckDecision: string;
   // Per-provider summaries (e.g. Gemini result, OpenAI result) shown in the review.
   decodeProviderSummaries?: { provider: string; productName: string; sources: number }[];
+  // Prefix intelligence (platformOwner-only display): the brand the barcode prefix maps to, and the
+  // anti-hallucination firewall's conflict reason (if any). Hints/evidence only, never identity truth.
+  prefixHint?: string;
+  prefixConflictReason?: string;
   // Confidence-based auto-verify outcome (when a decode was scored but did NOT auto-save).
   autoVerifyScore?: number;
   blockingReasons?: string[];
