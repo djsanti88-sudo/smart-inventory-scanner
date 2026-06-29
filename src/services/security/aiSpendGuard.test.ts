@@ -47,6 +47,22 @@ describe("aiSpendGuard", () => {
       expect(checkRateLimit("a", { limit: 1, windowMs: 1000, now: 0 }).allowed).toBe(false);
       expect(checkRateLimit("b", { limit: 1, windowMs: 1000, now: 0 }).allowed).toBe(true);
     });
+
+    it("treats an empty AI_LOOKUP_RATE_LIMIT env as the default (30), not 0", () => {
+      const prev = process.env.AI_LOOKUP_RATE_LIMIT;
+      process.env.AI_LOOKUP_RATE_LIMIT = ""; // present-but-blank, the env-pull failure mode
+      try {
+        const ip = "9.9.9.9";
+        const now = 2_000_000;
+        // With the bug (blank -> Number("") = 0) the 2nd call is blocked; with the default 30 all pass.
+        for (let i = 0; i < 5; i++) {
+          expect(checkRateLimit(ip, { windowMs: 60_000, now }).allowed).toBe(true);
+        }
+      } finally {
+        if (prev === undefined) delete process.env.AI_LOOKUP_RATE_LIMIT;
+        else process.env.AI_LOOKUP_RATE_LIMIT = prev;
+      }
+    });
   });
 
   describe("checkAndIncrementDaily", () => {
@@ -73,6 +89,20 @@ describe("aiSpendGuard", () => {
       expect(checkAndIncrementDaily({ limit: 1, file, dateKey: "2026-06-28" }).allowed).toBe(false);
       // new day -> fresh budget
       expect(checkAndIncrementDaily({ limit: 1, file, dateKey: "2026-06-29" }).allowed).toBe(true);
+    });
+
+    it("treats an empty AI_LOOKUP_DAILY_LIMIT env as the default 200, not 0 (regression: blank env -> 0 cap blocked ALL decode)", () => {
+      const prev = process.env.AI_LOOKUP_DAILY_LIMIT;
+      process.env.AI_LOOKUP_DAILY_LIMIT = ""; // the production failure: var present but blank
+      try {
+        // No explicit opts.limit -> reads env -> blank must fall back to 200 -> ALLOWED, not blocked at 0/0.
+        const r = checkAndIncrementDaily({ file: tmpFile, dateKey: "2026-06-28" });
+        expect(r.allowed).toBe(true);
+        expect(r.limit).toBe(200);
+      } finally {
+        if (prev === undefined) delete process.env.AI_LOOKUP_DAILY_LIMIT;
+        else process.env.AI_LOOKUP_DAILY_LIMIT = prev;
+      }
     });
 
     it("dailyUsage peeks without incrementing", () => {

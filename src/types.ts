@@ -106,6 +106,12 @@ export interface Product {
   // True only for trusted identity: seed/manual or human-created. AI never sets this true.
   // The resolver may return "known" from a product identifier ONLY when verified is true.
   verified: boolean;
+  // PHASE 2 (Suggested provisional count): true ONLY for a product born from a weak AI suggestion that is
+  // counted but unconfirmed (verified:false, NO approved alias). A re-scan increments it deterministically
+  // (processScan provMatch) without re-deciding, and it stays in Needs Review until a human confirms it
+  // (which flips provisional->false, verified->true, + creates the approved alias). Distinguishes it from an
+  // ORPHANED verified product (verified lost on persist reset) which must still re-alias via resolveUnknown.
+  provisional?: boolean;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -319,6 +325,7 @@ export interface Settings {
   scanContext?: "any" | "tire"; // Phase 8: "tire" enables the category/brand-prefix conflict firewall
   trustedSourceAutoVerifyEnabled: boolean; // default true (Tier 1/2 exact-barcode fast path)
   aiOnlyAutoVerifyAllowed: boolean; // default false (AI w/o exact evidence can never auto-verify)
+  autoCountNonPublicWithEvidence: boolean; // Option 3 (owner): default true. A non-public code (SKU/vendor/FNSKU) auto-counts when the app confirmed the exact code in a real/trusted source. Evidence-less guesses still never count.
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -390,7 +397,7 @@ export interface AiLookupResult {
   // Phase 9: set TRUE only by the page-fetch step when an INDEPENDENT model read of the SAME fetched page
   // agreed (via crossCheck) with the deterministic title extraction on the normalized tire identity. It is
   // the "page-fetch + one model agreement" corroboration signal; it never bypasses the firewall, the
-  // exact-code evidence gate, the tire-spec gate, or the >=0.9 store gate.
+  // exact-code evidence gate, the tire-spec gate, or the >=0.8 store gate.
   corroboratedByModel?: boolean;
   // Two INDEPENDENT Internet retrievals (grounded search + page fetch) agreed on the tire SIZE. Set by
   // the background size race in the route; consumed by decideDecode's internet_two_source_size branch.
@@ -473,7 +480,8 @@ export type CorroborationPath =
   | "deterministic_prefix"
   | "corpus_exact_barcode"
   | "corpus_exact_part_number"
-  | "internet_two_source_size";
+  | "internet_two_source_size"
+  | "non_public_trusted_source";
 
 export interface DecodeDecision {
   status: DecodeStatus;

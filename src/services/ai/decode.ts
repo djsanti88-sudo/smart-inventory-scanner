@@ -5,16 +5,19 @@ import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
-// status. A "verified" decode (auto-counted) requires ALL of:
+// status. MASTER BASELINE v1 (owner-locked, supersedes the older two-provider rule): a "verified"
+// decode (auto-counted) requires ALL of:
 //   - public barcode code type (never X00/FNSKU/vendor_label/internal_code/messy)
 //   - strong app-verified evidence (snippet / grounding_chunk / fetched_source), set by the app
-//   - BOTH providers (Gemini Flash + ChatGPT mini, run in parallel) AGREE on the identity
 //   - non-empty product identity
-//   - confidence >= threshold
-// A SINGLE provider on its own is NOT enough to auto-count (it becomes a Suggested, human-reviewed
-// result) - two independent providers must agree before we trust a code enough to count it. This is
-// what stopped a lone provider's wrong web-data (e.g. a mis-decoded UPC) from being auto-counted.
-// Anything short of full agreement is suggested / needs_review. Provider disagreement is a conflict.
+//   - confidence >= threshold (baseline 0.8)
+//   - NO catalog-derived brand-prefix conflict
+// A SINGLE source is ENOUGH: one provider (e.g. Gemini Flash) whose result the app independently
+// verified to contain the EXACT code in strong evidence auto-counts ("one source is enough") - no
+// second provider and no trusted-host requirement (singleSourceVerified). Two providers that AGREE
+// also verify (canVerify). What is NEVER trusted is a provider's own self-claim of evidence - only
+// the app's EvidenceVerifier output decides. Anything short -> suggested / needs_review. Provider
+// disagreement is a conflict.
 
 const PUBLIC_BARCODE_TYPES: CodeType[] = ["upc_a", "ean_13", "gtin_14"];
 
@@ -29,6 +32,12 @@ export interface DecodeParams {
   // single-brand family in the global catalog AND the decoded brand clearly differs (wrong brand for
   // this barcode). Computed by the caller via prefixBrandConflict(); blocks every auto-count path.
   brandPrefixConflict?: boolean;
+  // OPTION 3 (owner): when true, a NON-public code (vendor_label/internal/sku/part-number/FNSKU/alphanumeric)
+  // may auto-verify from a single app-verified source (incl. a trusted retailer/barcode-DB url_only) - "found
+  // it on Amazon = enough". Default off in this pure fn; the route passes the user setting (default on). The
+  // brand-prefix firewall, 0.8 threshold, non-empty identity, and app-verified evidence all still apply, so
+  // an evidence-LESS guess never reaches it (Velvet Torch stays dead).
+  allowNonPublicAutoCount?: boolean;
 }
 
 // --- Product-name quality gate (junk firewall) ------------------------------------------------
@@ -104,9 +113,9 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     };
   }
 
-  // Auto-count ONLY when BOTH providers agree. A single provider, even with strong app-verified
-  // evidence, is downgraded to "suggested" (human review) - two providers must independently land on
-  // the same identity before we trust it enough to count.
+  // canVerify: the two-provider AGREEMENT path - both providers independently land on the same identity.
+  // This is ONE of several verify paths (NOT the only one); the single-source path below
+  // (singleSourceVerified) auto-counts a lone app-verified provider without a second one.
   const canVerify =
     isPublicBarcode &&
     strong &&
@@ -120,10 +129,28 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
   // strong evidence (the code appears in a real snippet / grounding chunk / fetched page) - ANY source,
   // not just a trusted-tier site. Catalog-miss fallback for ANY item. Still rejects vendor/label code
   // types, weak/unverified evidence, and below-threshold (those stay "suggested" -> human review). The
-  // downstream identity firewall + >=0.9 store gate still apply.
+  // downstream identity firewall + >=0.8 store gate still apply.
   const singleSourceVerified =
     isPublicBarcode &&
     strong &&
+    identityNonEmpty &&
+    passesThreshold &&
+    !params.brandPrefixConflict &&
+    !!a &&
+    (cc.decision === "single_provider" || cc.decision === "agree");
+
+  // OPTION 3 (owner) - NON-PUBLIC single trusted source. A SKU/part-number/vendor/internal/FNSKU/alphanumeric
+  // code auto-verifies when the app independently confirmed the EXACT code in a real source - INCLUDING a
+  // single TRUSTED retailer / barcode-DB url_only (verifyEvidence returns verified:true for trusted hosts),
+  // so a product found on Amazon/Walmart/Go-UPC etc. is enough ("found it on Amazon = enough"). Uses
+  // bestEvidence.verified (NOT isStrongEvidence) so a trusted-host url_only counts. Same hard floors as the
+  // public path: >= threshold, non-empty identity, NO brand-prefix conflict, single/agreeing provider. An
+  // evidence-LESS guess (verified===false) never reaches it, so Velvet Torch stays dead. Off unless the owner
+  // setting is on (route passes it; default on).
+  const nonPublicTrustedVerified =
+    params.allowNonPublicAutoCount === true &&
+    !isPublicBarcode &&
+    bestEvidence.verified &&
     identityNonEmpty &&
     passesThreshold &&
     !params.brandPrefixConflict &&
@@ -188,7 +215,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
 
   // BRAND SANITY (owner baseline v1): a catalog-derived brand-prefix conflict blocks EVERY auto-count
   // path, not just the single-source one (wrong brand for this barcode is never auto-counted).
-  if (!params.brandPrefixConflict && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize)) {
+  if (!params.brandPrefixConflict && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize || nonPublicTrustedVerified)) {
     const corroborationPath = canVerify
       ? "two_ai_agreement"
       : singleSourceVerified
@@ -197,7 +224,9 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
           ? "deterministic_prefix"
           : pageFetchModelAgreement
             ? "page_fetch_model_agreement"
-            : "internet_two_source_size";
+            : internetTwoSourceSize
+              ? "internet_two_source_size"
+              : "non_public_trusted_source";
     return {
       status: "verified",
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
@@ -209,9 +238,11 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
             ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
             : pageFetchModelAgreement
               ? "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code."
-              : "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size.",
+              : internetTwoSourceSize
+                ? "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size."
+                : "Verified AI Decode: the app confirmed the exact code in a trusted source (one trusted source is enough for this code type).",
       evidenceStrength: bestEvidence.strength,
-      exactCodeEvidenceVerifiedByApp: canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement,
+      exactCodeEvidenceVerifiedByApp: canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || nonPublicTrustedVerified,
       crossCheck: baseCrossCheck,
       corroborationPath,
     };

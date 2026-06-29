@@ -73,6 +73,27 @@ describe("Phase-2 review-flow poison guard (078742051451 -> dress)", () => {
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === WATER_CODE)?.verificationStatus).not.toBe("verified");
   });
 
+  it("ROBUSTNESS: accepting the weak suggestion via a CASE + hedge-phrase name variant is STILL caught (no verified product / approved alias / count)", async () => {
+    const store = await seedDressSuggestion();
+    const review = store.getState().needsReviewQueue.at(-1)!;
+    // Same evidence-less suggestion, but the saved name differs from the suggestion only by CASE and a
+    // hedge phrase that cleanProductName strips. The old exact-string match would miss this and wrongly
+    // mint a verified product; the normalized guard must still catch it.
+    store.getState().resolveUnknown(review.id, "create_new", {
+      applyToCount: true,
+      newProduct: {
+        name: DRESS.toUpperCase() + " (likely wholesale)",
+        brand: "", category: "", gtin: "", upc: "", ean: "",
+        primaryBarcode: review.cleanCode, productUrl: "",
+      },
+    });
+    const dressProduct = store.getState().products.find((p) => /velvet torch|dress/i.test(p.name));
+    if (dressProduct) expect(dressProduct.verified, "case/hedge variant must not be verified").toBe(false);
+    const dressAlias = store.getState().aliases.find((a) => a.cleanCode === WATER_CODE);
+    if (dressAlias) expect(dressAlias.approved, "case/hedge variant alias must not be approved").toBe(false);
+    expect(store.getState().finalCounts, "case/hedge variant must not be counted").toHaveLength(0);
+  });
+
   it("after approving the weak dress, a re-scan of 078742051451 does NOT resolve to / count the dress", async () => {
     const store = await seedDressSuggestion();
     const review = store.getState().needsReviewQueue.at(-1)!;

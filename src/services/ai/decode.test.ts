@@ -146,6 +146,36 @@ describe("decideDecode - the gate that produces a Verified AI Decode", () => {
     expect(d.status).not.toBe("verified");
   });
 
+  it("OPTION 3 ON: a NON-public code (vendor/FNSKU) auto-verifies from a single TRUSTED source (owner: 'found on Amazon = enough')", () => {
+    // Real product decoded from an FNSKU, exact code confirmed by the app in a trusted-host source (url_only
+    // is enough here because the host is trusted - that is what verifyEvidence returns verified:true for).
+    const np = result({ productName: "NatureBell Magnesium Glycinate 500mg", brand: "NatureBell" });
+    const ev: EvidenceResult = { verified: true, strength: "url_only", matchedCode: "X004DY7YUT", matchedSources: ["https://www.amazon.com/dp/X004DY7YUT"], reason: "exact code in trusted-host url" };
+    const d = decideDecode({ codeType: "vendor_label", results: [np], evidences: [ev], confidenceThreshold: 0.8, allowNonPublicAutoCount: true });
+    expect(d.status).toBe("verified");
+    expect(d.exactCodeEvidenceVerifiedByApp).toBe(true);
+  });
+
+  it("OPTION 3 OFF (default param): the same non-public code does NOT auto-verify", () => {
+    const np = result({ productName: "NatureBell Magnesium Glycinate 500mg", brand: "NatureBell" });
+    const ev: EvidenceResult = { verified: true, strength: "url_only", matchedCode: "X004DY7YUT", matchedSources: ["https://www.amazon.com/dp/X004DY7YUT"], reason: "exact code in trusted-host url" };
+    const d = decideDecode({ codeType: "vendor_label", results: [np], evidences: [ev], confidenceThreshold: 0.8 });
+    expect(d.status).not.toBe("verified");
+  });
+
+  it("OPTION 3 still blocks a non-public code with NO source (Velvet Torch stays dead even with the setting on)", () => {
+    const np = result({ productName: "Velvet Torch Dress", brand: "" });
+    const d = decideDecode({ codeType: "vendor_label", results: [np], evidences: [weak()], confidenceThreshold: 0.8, allowNonPublicAutoCount: true });
+    expect(d.status).not.toBe("verified");
+  });
+
+  it("OPTION 3 still respects the brand-prefix firewall for a non-public code", () => {
+    const np = result({ productName: "NatureBell Magnesium", brand: "NatureBell" });
+    const ev: EvidenceResult = { verified: true, strength: "snippet", matchedCode: "X004DY7YUT", matchedSources: ["s"], reason: "" };
+    const d = decideDecode({ codeType: "vendor_label", results: [np], evidences: [ev], confidenceThreshold: 0.8, allowNonPublicAutoCount: true, brandPrefixConflict: true });
+    expect(d.status).not.toBe("verified");
+  });
+
   it("a single provider auto-verifies from ANY source when the app confirmed the exact code (owner single-source policy)", () => {
     // Owner policy (supersedes the old two-provider / trusted-only rules): ONE provider is enough to
     // auto-count when the app independently confirmed the EXACT code in strong evidence (a real

@@ -142,7 +142,7 @@ function evaluateAutoDecode(p: {
  * cannot drift between the two paths again. A non-tire decode is unaffected; a tire must carry the COUNTABLE
  * identity (brand-prefix + size + model), matching the route's verify gate (decode.ts hasCountableTireIdentity).
  * Load index + speed rating are optional enrichment, not required to count. This relaxes ONLY the spec
- * requirement; every other clause of the gate (verified status, app-verified exact code, confidence >= 0.9,
+ * requirement; every other clause of the gate (verified status, app-verified exact code, confidence >= 0.8,
  * firewall / brand-prefix conflict, planAutoVerify) is enforced separately and unchanged.
  */
 function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
@@ -153,7 +153,7 @@ function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
  * What counts as "corroborated" for auto-count, shared by liveDecode + backgroundVerifyDeep so the rule
  * cannot drift. The app-verified exact code OR the internet_two_source_size path (brand from the strong GS1
  * prefix + two independent Internet sources agreeing on the size, set app-side by the route race). The
- * local DB is never involved. Every OTHER gate clause (verified status, confidence >= 0.9, tireOk,
+ * local DB is never involved. Every OTHER gate clause (verified status, confidence >= 0.8, tireOk,
  * no context conflict, autoAddOn) is enforced separately and unchanged.
  */
 export function decodeCorroborated(decision: { exactCodeEvidenceVerifiedByApp?: boolean; corroborationPath?: string } | null | undefined): boolean {
@@ -221,6 +221,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scanContext: "tire", // Phase 9: default to Tires so the category firewall protects from day one (no setup)
   trustedSourceAutoVerifyEnabled: true,
   aiOnlyAutoVerifyAllowed: false,
+  autoCountNonPublicWithEvidence: true,
 };
 
 export interface ScanState {
@@ -900,6 +901,27 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           ? detectIdentityContextConflict(get().settings.scanContext ?? "any", matchedProduct)
           : null;
         const countable = isKnown && !knownConflict;
+        // PHASE 2 re-scan dedup: the deterministic resolver only returns "known" for an APPROVED alias /
+        // VERIFIED product. A weak AI suggestion is counted as a PROVISIONAL product (verified:false, NO
+        // approved alias), which the resolver intentionally misses - so a re-scan would re-decode / duplicate.
+        // Bridge it deterministically: if a STILL-COUNTED, UNVERIFIED product carries this exact code as an
+        // identifier, count THAT product (exact identifier match only, never fuzzy, no AI). A human approval
+        // later flips it verified + approved, after which the resolver matches it as a normal Known.
+        let provMatchId: string | null = null;
+        if (!countable && !knownConflict) {
+          const countedIds = new Set(get().finalCounts.map((c) => c.productId));
+          const ids = [cleaned.cleanCode, ...(cleaned.normalizedCandidates ?? [])];
+          provMatchId =
+            products.find(
+              (p) =>
+                countedIds.has(p.id) &&
+                p.status !== "archived" &&
+                p.provisional === true &&
+                [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).some((c) => !!c && ids.includes(c)),
+            )?.id ?? null;
+        }
+        const effectiveProductId = resolution.productId ?? provMatchId;
+        const effectiveCountable = countable || !!provMatchId;
         if (knownConflict === "category_context_conflict") {
           // Phase 9: surface the non-blocking category warning banner (the scan still routes to review).
           set({ lastCategoryWarning: { code: cleaned.cleanCode, productName: matchedProduct?.name ?? "this product", reason: knownConflict } });
@@ -912,13 +934,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           rawCode: cleaned.rawCode,
           cleanCode: cleaned.cleanCode,
           normalizedCandidates: cleaned.normalizedCandidates,
-          matchedProductId: resolution.productId,
+          matchedProductId: effectiveProductId,
           matchType: resolution.matchType,
-          status: countable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
+          status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
           resolverStatus: resolution.resolverStatus,
           codeType: resolution.codeType,
-          reason: resolution.reason,
-          quantityDelta: countable ? 1 : 0,
+          reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
+          decodeStatus: provMatchId ? "suggested" : undefined,
+          quantityDelta: effectiveCountable ? 1 : 0,
           quantityAfterScan: 0,
           createdAt,
           source: "scan",
@@ -928,7 +951,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           syncError: null,
         };
 
-        if (countable && resolution.productId) {
+        if (effectiveCountable && effectiveProductId) {
           // Deterministic increment in local state FIRST (instant UI, no server round-trip).
           const { counts, count } = incrementInventoryCount(get().finalCounts, event, idFactory);
           event.quantityAfterScan = count.quantity;
@@ -941,7 +964,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const incPayload: IncrementPayload = {
             businessId,
             sessionId,
-            productId: resolution.productId,
+            productId: effectiveProductId,
             scanEventId,
             quantityDelta: 1,
             idempotencyKey: keyFor("INCREMENT_COUNT"),
@@ -1595,6 +1618,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 budgetMs: s.decodeBudgetMs ?? 8000,
                 scanContext,
                 brandPrefixHint,
+                autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
               }),
             });
             if (!res.ok) throw new Error(`decode failed ${res.status}`);
@@ -1676,6 +1700,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             autoVerifyConfidenceThreshold: s.autoVerifyConfidenceThreshold ?? 80,
             trustedSourceAutoVerifyEnabled: s.trustedSourceAutoVerifyEnabled ?? true,
             aiOnlyAutoVerifyAllowed: s.aiOnlyAutoVerifyAllowed ?? false,
+            allowNonPublicAutoCount: s.autoCountNonPublicWithEvidence ?? true,
           };
           const plan = planAutoVerify({
             code: review.cleanCode,
@@ -1710,7 +1735,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           const autoAddOn = s.autoAddDecodedProducts ?? true; // master gate: false = manual review for all
           // Phase 7 EVIDENCE GATE: auto-count ONLY on the app's independent exact-code verification +
-          // confidence >= 0.90 + (for tires) a countable identity (size + model, matching the route's
+          // confidence >= 0.8 + (for tires) a countable identity (size + model, matching the route's
           // verify gate). The model's self-reported confidence alone is never enough (that is what
           // auto-counted wrong products). Anything short -> Needs Review.
           const tireOk = tireAutoCountOk(best);
@@ -1734,8 +1759,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // Origin decides the catalog write: exact app-confirmed evidence -> VERIFIED global catalog
             // entry; a trusted-but-non-exact AI product -> still counted + aliased, PENDING catalog
             // entry ("ai"); learning off -> count only, no catalog write ("auto_count").
+            // OPTION 3: a NON-public code (vendor/SKU/FNSKU) NEVER writes the global cross-shop catalog
+            // ("auto_verify") - those codes are seller-specific. It still counts + makes a SHOP-local approved
+            // alias via origin "ai". Only a public UPC/EAN/GTIN keeps the verified global-catalog write.
+            const isPublicCode = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
             const origin =
-              plan.status === "auto_count" ? "auto_count" : plan.verifiedBy ? "auto_verify" : "ai";
+              plan.status === "auto_count" ? "auto_count" : (plan.verifiedBy && isPublicCode) ? "auto_verify" : "ai";
             get().recordFeedback(plan.verifiedBy === "trusted_source" ? "trusted_source_match" : "found_from_ai", { code: review.cleanCode });
             if (origin === "auto_verify") {
               get().recordFeedback("auto_verified_catalog_entry", { code: review.cleanCode, meta: { score: plan.score, tier: plan.sourceTier } });
@@ -1757,6 +1786,54 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               newProduct,
             });
           } else {
+            // PHASE 2 (Suggested provisional count): a weak-source NON-public code (vendor/SKU/FNSKU/internal)
+            // that found a USABLE product but could not be trust-verified is COUNTED as an UNVERIFIED,
+            // shop-local, REVIEWABLE provisional count. It shows + counts on the scan page (tag "Suggested")
+            // but creates NO approved alias and NO verified product, and the review STAYS OPEN for human
+            // confirmation - so a wrong weak guess can never become permanent truth (Velvet Torch stays dead).
+            // Public UPC/EAN/GTIN behavior is untouched; a firewall (brand-prefix/context) conflict still blocks.
+            const isPublicCode2 = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
+            if ((s.autoCountNonPublicWithEvidence ?? true) && !isPublicCode2 && isUsableProductName(best?.productName ?? "") && !contextConflict) {
+              const code = review.cleanCode;
+              const cur = get();
+              // DEDUP: reuse a still-counted product whose identifier matches this code (orphaned-count rule),
+              // so re-scans increment the SAME provisional row instead of duplicating. Never fuzzy.
+              const countedIds = new Set(cur.finalCounts.map((c) => c.productId));
+              let provId = cur.products.find(
+                (p) =>
+                  countedIds.has(p.id) &&
+                  p.status !== "archived" &&
+                  [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
+              )?.id;
+              if (!provId) {
+                provId = `prod-${idFactory()}`;
+                const provProduct: Product = {
+                  id: provId, businessId: cur.businessId, name: cleanName || code, brand: best?.brand ?? "",
+                  category: best?.category ?? "", specsShort: best?.specsShort ?? "", specsFull: best?.specsFull ?? "",
+                  primarySku: best?.primarySku ?? "", primaryBarcode: code, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
+                  ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
+                  productUrl: best?.productUrl ?? "", location: "", notes: "", status: "active", source: "ai_gemini",
+                  confidence: decision?.confidence ?? 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+                };
+                set((st) => ({ products: [...st.products, provProduct] }));
+                emitAudit({ entityType: "Product", entityId: provId, action: "product_created", metadata: { code, origin: "ai_suggested_provisional" } });
+              }
+              // Count it on the EXISTING scan event for this code (idempotent by event id), and surface the
+              // provisional product + qty on that feed row while keeping the "Suggested" badge.
+              const ev = get().scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
+              if (ev) {
+                const countEvent: ScanEvent = { ...ev, matchedProductId: provId, status: "known", quantityDelta: 1 };
+                const { counts, count } = incrementInventoryCount(get().finalCounts, countEvent, idFactory);
+                set((st) => ({
+                  finalCounts: counts,
+                  scanFeed: st.scanFeed.map((e) =>
+                    e.id === ev.id
+                      ? { ...e, matchedProductId: provId!, status: "known", quantityAfterScan: count.quantity, decodeStatus: "suggested" }
+                      : e,
+                  ),
+                }));
+              }
+            }
             // Needs Review: keep it in the queue, show the score + why; write a PENDING catalog
             // candidate when the name is usable so the catalog still accumulates knowledge.
             get().recordFeedback("catalog_candidate_blocked", { code: review.cleanCode, meta: { score: plan.score } });
@@ -1972,6 +2049,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           autoVerifyConfidenceThreshold: s.autoVerifyConfidenceThreshold ?? 80,
           trustedSourceAutoVerifyEnabled: s.trustedSourceAutoVerifyEnabled ?? true,
           aiOnlyAutoVerifyAllowed: s.aiOnlyAutoVerifyAllowed ?? false,
+          allowNonPublicAutoCount: s.autoCountNonPublicWithEvidence ?? true,
         };
         const plan = planAutoVerify({
           code: review.cleanCode,
@@ -2024,7 +2102,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           !contextConflict;
 
         if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
-          const origin = plan.status === "auto_count" ? "auto_count" : plan.verifiedBy ? "auto_verify" : "ai";
+          // OPTION 3: non-public codes never write the global catalog ("auto_verify") - shop-local "ai" only.
+          const isPublicCode = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
+          const origin = plan.status === "auto_count" ? "auto_count" : (plan.verifiedBy && isPublicCode) ? "auto_verify" : "ai";
           get().recordFeedback(plan.verifiedBy === "trusted_source" ? "trusted_source_match" : "found_from_ai", { code: review.cleanCode });
           if (origin === "auto_verify") {
             get().recordFeedback("auto_verified_catalog_entry", { code: review.cleanCode, meta: { score: plan.score, tier: plan.sourceTier } });
@@ -2074,7 +2154,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       resolveUnknown: (reviewId, action, payload) => {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
-        if (!review) return;
+        // Idempotency / re-entry guard: only act on an OPEN review. A double-click, or a race where a
+        // background decode resolves the same review while a human approves it, must NOT re-run
+        // applyToCount -> a second count of the same physical item. Matches the open-status guard already
+        // used by liveDecode / backgroundVerifyDeep / cloudCatalogResolve / correctionRecheck.
+        if (!review || review.status !== "open") return;
 
         if (action === "ignore") {
           set({
@@ -2098,6 +2182,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // guess is minted UNVERIFIED, its alias is left UNAPPROVED, no verified catalog entry is written,
         // and it is NOT counted - so a future scan never resolves deterministically to a wrong product.
         let weakGuessProduct = false;
+        // PHASE 2: set true when this resolution is CONFIRMING an existing PROVISIONAL count (the reused
+        // product was provisional). The provisional was already counted, so the approval must NOT re-count
+        // (no double-count) - it only upgrades the product to verified + adds the approved alias.
+        let approvingProvisional = false;
 
         if (action === "create_new") {
           const np = payload.newProduct ?? {};
@@ -2150,6 +2238,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // EXACTLY ONE existing product owns this identity -> reuse it (count the existing row) and fall
             // through to the alias-add + applyToCount path. Do NOT create a duplicate.
             productId = [...matchedIds][0];
+            // PHASE 2: if the reused row is a PROVISIONAL count, this resolution CONFIRMS it -> upgrade it
+            // in place to a verified, non-provisional product (the approved alias is added below, so future
+            // scans resolve it as a normal Known) and do NOT re-count it (it was already counted).
+            if (products.find((p) => p.id === productId)?.provisional === true) {
+              approvingProvisional = true;
+              products = products.map((p) =>
+                p.id === productId ? { ...p, verified: true, provisional: false, updatedAt: now() } : p,
+              );
+            }
             emitAudit({ entityType: "Product", entityId: productId, action: "product_dedup_reused", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
           } else {
             productId = `prod-${idFactory()}`;
@@ -2157,9 +2254,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // name equals the suggested name)? If so, and the suggestion has NO real evidence the app
             // could back - no brand, no gtin/upc/ean, no source URL - it must not become trusted identity.
             // A human typing their OWN product name (not the AI's guess) is unaffected.
-            const suggestedName = (review.suggestedProductName ?? "").trim();
+            // Compare NORMALIZED names (cleanProductName + lowercase) so a case difference or an AI hedge
+            // phrase (e.g. "(likely wholesale)") that cleanProductName strips cannot slip the guard.
+            const normName = (s: string) => cleanProductName(s ?? "").trim().toLowerCase();
+            const suggestedName = normName(review.suggestedProductName ?? "");
             const acceptingSuggestion =
-              !!review.hasSuggestion && suggestedName.length > 0 && (np.name ?? "").trim() === suggestedName;
+              !!review.hasSuggestion && suggestedName.length > 0 && normName(np.name ?? "") === suggestedName;
             const suggestionHasRealEvidence =
               (review.suggestedBrand ?? "").trim().length > 0 ||
               [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
@@ -2483,7 +2583,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Optionally apply this code to the current session count immediately. Fall back to cleanCode:
         // a customer review rehydrated from disk has its rawCode stripped (privacy), but cleanCode is kept
         // and is what the approved alias is keyed on, so the re-scan still matches + counts.
-        if (payload.applyToCount && !weakGuessProduct) {
+        if (payload.applyToCount && !weakGuessProduct && !approvingProvisional) {
           get().processScan(review.rawCode || review.cleanCode);
         } else {
           get().syncPending();
