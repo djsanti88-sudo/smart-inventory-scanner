@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { lookupPrefix, type PrefixEntry } from "@/services/catalog/prefixIndex";
+import { describe, it, expect, beforeEach } from "vitest";
+import { lookupPrefix, recordLearnedPrefix, clearLearnedPrefixes, type PrefixEntry } from "@/services/catalog/prefixIndex";
 
 // The prefix index is MANY-TO-MANY and statistical, NOT official GS1 truth: one prefix can carry
 // several candidate brand/manufacturer/OEM names with confidence weights, and the same owner can hold
@@ -48,5 +48,34 @@ describe("prefixIndex (curated seed, many-to-many)", () => {
   it("ignores non-digits and short codes", () => {
     expect(lookupPrefix("05-1596-320812")?.dominant?.name.toLowerCase()).toContain("united solutions");
     expect(lookupPrefix("123")).toBeNull();
+  });
+});
+
+describe("self-learning flywheel (recordLearnedPrefix)", () => {
+  beforeEach(() => clearLearnedPrefixes());
+
+  it("learns a NEW prefix from a verified decode (fills a gap seed/derived don't cover)", () => {
+    const code = "9999990000000"; // prefix 9999990 - not in seed or the OFF-derived map
+    expect(lookupPrefix(code)).toBeNull(); // unknown before learning
+    recordLearnedPrefix(code, "Test Brand", "test category");
+    const e = lookupPrefix(code);
+    expect(e?.source).toBe("learned_flywheel");
+    expect(e?.dominant?.name).toBe("test brand");
+  });
+
+  it("accumulates repeated verified decodes (confidence reflects dominance)", () => {
+    const code = "9999991000000";
+    recordLearnedPrefix(code, "Acme", "snacks");
+    recordLearnedPrefix(code, "Acme", "snacks");
+    recordLearnedPrefix(code, "Other", "snacks");
+    const e = lookupPrefix(code);
+    expect(e?.dominant?.name).toBe("acme");
+    expect(e?.confidence).toBeCloseTo(0.667, 1); // 2 of 3
+    expect(e?.productCount).toBe(3);
+  });
+
+  it("NEVER overrides the curated seed (learned is lowest precedence)", () => {
+    recordLearnedPrefix("051596320812", "Imposter Brand", "snacks"); // same prefix as United Solutions seed
+    expect(lookupPrefix("051596320812")?.dominant?.name.toLowerCase()).toContain("united solutions");
   });
 });

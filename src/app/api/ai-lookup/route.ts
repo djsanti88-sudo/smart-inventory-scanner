@@ -18,8 +18,9 @@ import { withDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
-import { lookupPrefix } from "@/services/catalog/prefixIndex";
+import { lookupPrefix, recordLearnedPrefix, candidateKnownPrefixes } from "@/services/catalog/prefixIndex";
 import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
+import { isLearnablePrefix } from "@/services/catalog/prefixLearning";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 import { runSizeRace } from "@/services/ai/sizeRace";
@@ -64,16 +65,22 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 // firewall is OVERRIDE-AWARE - strong app-verified exact-code evidence makes fw.conflict false - so this
 // never blocks a legitimately exact-verified decode, only conflicting non-exact verify paths (e.g. the
 // internet-two-source-size tire path) and Gemini-style "plausible product, wrong code" hallucinations.
-function combinedPrefixConflict(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): boolean {
+function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): { conflict: boolean; hint: string; reason: string } {
   const strongExact = isStrongEvidence(strongestEvidence(evidences));
+  const prefix = lookupPrefix(code);
   const fw = evaluatePrefixFirewall({
     code,
-    prefix: lookupPrefix(code),
+    prefix,
     candidate: { brand: result?.brand, manufacturer: result?.brand, category: result?.category },
-    candidateKnownUpcs: [], // reverse-UPC guard is unit-tested + ready; inert server-side until a name->UPC index exists
+    candidateKnownUpcs: [], // shop-catalog UPC sets live client-side; reverse footprint below is the server signal
+    candidateKnownPrefixes: candidateKnownPrefixes(result?.brand), // reverse guard: brand's known prefix footprint
     exactCodeVerifiedByApp: strongExact,
   });
-  return prefixBrandConflict(code, result?.brand) || fw.conflict;
+  const conflict = prefixBrandConflict(code, result?.brand) || fw.conflict;
+  // platformOwner-only display: what the barcode prefix maps to, and why a conflict (if any) fired.
+  const hint = prefix?.dominant ? `${prefix.dominant.name} (${prefix.dominant.kind}, from barcode prefix - ${prefix.source})` : "";
+  const reason = fw.conflict ? fw.reason : "";
+  return { conflict, hint, reason };
 }
 
 export const dynamic = "force-dynamic";
@@ -425,7 +432,10 @@ export async function POST(request: Request) {
       // Re-decide with the business scan context + scanned code so a deterministically-corroborated tire
       // (strong brand-prefix family + full specs + app-verified exact code) can auto-count even from a
       // single provider. Same inputs as the orchestrator otherwise; pure + cheap.
-      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: combinedPrefixConflict(code, results[0], evidences) });
+      const fw0 = evalCombinedFirewall(code, results[0], evidences);
+      let prefixHint = fw0.hint;
+      let firewallReason = fw0.reason;
+      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict });
       let fallbackFound = false;
       let coverageMissed = false;
       let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
@@ -512,7 +522,10 @@ export async function POST(request: Request) {
             providerNames = [outcome.hit.providerName, ...providerNames];
             fallbackFound = true;
             // Decide on the WINNER alone so leftover fast-path noise can't manufacture a false conflict.
-            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: combinedPrefixConflict(code, winnerWithSize, [outcome.hit.evidence]) });
+            const fwW = evalCombinedFirewall(code, winnerWithSize, [outcome.hit.evidence]);
+            prefixHint = fwW.hint;
+            firewallReason = fwW.reason;
+            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict });
           }
         }
       }
@@ -521,6 +534,13 @@ export async function POST(request: Request) {
       const reasonText = REASON_TEXT[reasonCode] ?? "";
       // Never surface the generic "no provider returned a usable product": prefer the honest reason.
       if (decision.status !== "verified" && reasonText) decision = { ...decision, reason: reasonText };
+
+      // SELF-LEARNING FLYWHEEL: a genuinely verified decode (app-verified exact code, conf >= 0.90, public
+      // barcode, real brand) teaches the prefix map so future scans + the firewall get smarter, for $0.
+      // In-memory + server-side; gated by isLearnablePrefix; LEARNED is the lowest-precedence prefix tier.
+      if (isLearnablePrefix({ status: decision.status, confidence: decision.confidence, exactCodeEvidenceVerifiedByApp: decision.exactCodeEvidenceVerifiedByApp, codeType, brand: results[0]?.brand })) {
+        recordLearnedPrefix(code, results[0]!.brand, results[0]?.category);
+      }
 
       return {
         mode: "decode" as const,
@@ -548,6 +568,8 @@ export async function POST(request: Request) {
           firecrawlCreditsEstimated,
           firecrawlCandidates,
           cached: false,
+          prefixHint, // platformOwner-only: brand the barcode prefix maps to (recall/transparency)
+          firewallReason, // platformOwner-only: why a prefix/UPC conflict routed this to review (if any)
         },
         sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
       };

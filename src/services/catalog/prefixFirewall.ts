@@ -1,5 +1,5 @@
 import { normalizeBrand } from "@/services/catalog/brandPrefixGeneral";
-import type { PrefixEntry } from "@/services/catalog/prefixIndex";
+import { gtin13, type PrefixEntry } from "@/services/catalog/prefixIndex";
 
 // EVIDENCE-WEIGHTED anti-hallucination firewall. A prefix-owner mismatch is a STRONG CONFLICT SIGNAL,
 // NOT final proof: it blocks auto-verify and forces Needs Review, but it is overridden by official
@@ -18,6 +18,7 @@ export interface FirewallInput {
   prefix: PrefixEntry | null; // from lookupPrefix(code)
   candidate: FirewallCandidate; // the AI-proposed identity
   candidateKnownUpcs?: string[]; // the candidate's known UPC SET from our own catalog/corpus (reverse guard)
+  candidateKnownPrefixes?: string[]; // prefixes our data associates with the candidate brand (reverse footprint)
   exactCodeVerifiedByApp?: boolean; // official exact-code evidence -> overrides the firewall
 }
 
@@ -90,7 +91,12 @@ export function evaluatePrefixFirewall(input: FirewallInput): FirewallVerdict {
   const scan = normCode(code);
   const set = (input.candidateKnownUpcs ?? []).map(normCode).filter(Boolean);
   const reverseExcludes = set.length > 0 && !set.includes(scan);
-  const reverseConflict = reverseExcludes && catCompatible !== true;
+  // Reverse PREFIX footprint: the candidate brand is known under THESE prefixes (from our own data); if
+  // the scanned code's prefix is not among them, the candidate likely does not own this code.
+  const scanPrefix = gtin13(code).slice(0, 7);
+  const known = input.candidateKnownPrefixes ?? [];
+  const footprintExcludes = known.length > 0 && !known.includes(scanPrefix);
+  const reverseConflict = (reverseExcludes || footprintExcludes) && catCompatible !== true;
 
   const rawConflict = prefixConflict || reverseConflict;
   const overriddenByEvidence = rawConflict && strongExact;
