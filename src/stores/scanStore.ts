@@ -1650,6 +1650,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
                     crossCheckDecision: decision?.crossCheck?.decision ?? "",
                     decodeProviderSummaries,
+                    prefixHint: (data.debug?.prefixHint as string) || "",
+                    prefixConflictReason: (data.debug?.firewallReason as string) || "",
                   }
                 : r,
             ),

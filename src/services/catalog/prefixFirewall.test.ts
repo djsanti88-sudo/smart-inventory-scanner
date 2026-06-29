@@ -71,6 +71,29 @@ describe("prefixFirewall (evidence-weighted, false-reject-safe)", () => {
     expect(v.conflict).toBe(false);
   });
 
+  it("reverse footprint: candidate brand known under OTHER prefixes, scan not among them -> conflict", () => {
+    const v = evaluatePrefixFirewall({
+      code: "0999000111111", // prefix 0999000 - unknown scanned prefix
+      prefix: null,
+      candidate: { brand: "Acme", category: "snacks" },
+      candidateKnownPrefixes: ["0123456", "0123457"], // Acme is known elsewhere, never under 0999000
+      exactCodeVerifiedByApp: false,
+    });
+    expect(v.conflict).toBe(true);
+    expect(v.kind).toBe("reverse_upc_conflict");
+  });
+
+  it("reverse footprint: NO conflict when the scan's prefix IS in the candidate's footprint", () => {
+    const v = evaluatePrefixFirewall({
+      code: "0123456000000", // prefix 0123456 - in the footprint
+      prefix: null,
+      candidate: { brand: "Acme", category: "snacks" },
+      candidateKnownPrefixes: ["0123456", "0123457"],
+      exactCodeVerifiedByApp: false,
+    });
+    expect(v.conflict).toBe(false);
+  });
+
   it("an unknown prefix with no UPC-set info never conflicts (non-cataloged products unaffected)", () => {
     const v = evaluatePrefixFirewall({
       code: "999888777666",
