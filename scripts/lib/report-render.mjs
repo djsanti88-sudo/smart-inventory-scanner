@@ -12,8 +12,10 @@ import { costToHtml } from './cost-ledger.mjs';
 const TEAMS = [
   { key: 'technical_qa', name: 'Technical and QA' },
   { key: 'security', name: 'Security and Data Protection' },
+  { key: 'ops', name: 'Operations and Reliability' },
   { key: 'decode', name: 'Barcode, Inventory and Decode' },
   { key: 'business', name: 'Business and Product' },
+  { key: 'legal', name: 'Legal, Compliance and Tax' },
   { key: 'verification', name: 'Verification and Synthesis' },
 ];
 
@@ -86,7 +88,7 @@ function findingCard(f) {
     </div>
     ${f.explanation ? `<div style="font-size:14px;color:#1f2937;margin-top:8px;line-height:1.55">${esc(f.explanation)}</div>` : ''}
     ${meta}
-    ${f.fix ? `<div style="font-size:13px;color:#065f46;background:#ecfdf5;border-radius:6px;padding:8px 10px;margin-top:8px"><strong>Fix (#${f.ref}):</strong> ${esc(f.fix)} ${f.autoFixable ? '<em>(auto-fixable)</em>' : ''}</div>` : ''}
+    ${(f.fix || f.recommendation) ? `<div style="font-size:13px;color:#065f46;background:#ecfdf5;border-radius:6px;padding:8px 10px;margin-top:8px"><strong>Fix (#${f.ref}):</strong> ${esc(f.fix || f.recommendation)} ${(f.autoFixable ?? f.auto_fixable) ? '<em>(auto-fixable)</em>' : ''}</div>` : ''}
     ${refuted}
     ${thumb(f.screenshot)}
   </div>`;
@@ -165,6 +167,46 @@ function competitorTable(c) {
   return `<section style="margin-top:24px"><h2 style="font-size:18px;margin:0 0 8px">Competitor comparison (${c.rows.length})</h2><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${src}</section>`;
 }
 
+function budgetTable(b) {
+  if (!b || !b.rows || !b.rows.length) return '';
+  const cols = b.columns || ['Item', 'Effort', 'Est. cost', 'ROI', 'Scalability', 'Key specs / risk', 'Recommendation'];
+  const head = cols.map((h) => `<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e5e7eb;font-size:12px">${esc(h)}</th>`).join('');
+  const body = b.rows.map((r) => {
+    const cells = Array.isArray(r) ? r : cols.map((_, i) => r[Object.keys(r)[i]]);
+    return `<tr>${cells.map((c) => `<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;vertical-align:top">${esc(c)}</td>`).join('')}</tr>`;
+  }).join('');
+  const note = b.note ? `<div style="font-size:12px;color:#6b7280;margin-top:6px">${esc(b.note)}</div>` : '';
+  return `<section style="margin-top:24px"><h2 style="font-size:18px;margin:0 0 8px">Build economics (cost, ROI, scalability)</h2><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${note}</section>`;
+}
+
+function roadmapSection(r) {
+  if (!r || !r.phases || !r.phases.length) return '';
+  const cards = r.phases.map((p) => {
+    const items = (p.items || []).map((i) => `<li style="margin:2px 0">${esc(i)}</li>`).join('');
+    return `<div style="flex:1;min-width:200px;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px">
+      <div style="font-weight:700;font-size:14px">${esc(p.name)}</div>
+      ${p.goal ? `<div style="font-size:12px;color:#6b7280;margin-bottom:6px">${esc(p.goal)}</div>` : ''}
+      <ul style="margin:0;padding-left:16px;font-size:13px">${items}</ul></div>`;
+  }).join('');
+  const crit = r.criticalPath && r.criticalPath.length
+    ? `<div style="margin-top:10px;font-size:13px"><strong>Critical path:</strong> ${r.criticalPath.map(esc).join(' -> ')}</div>` : '';
+  const blocked = r.blocked && r.blocked.length
+    ? `<div style="margin-top:6px;font-size:13px;color:#9a3412"><strong>Blocked / waiting:</strong> ${r.blocked.map(esc).join('; ')}</div>` : '';
+  return `<section style="margin-top:24px"><h2 style="font-size:18px;margin:0 0 8px">Roadmap (sequenced plan)</h2><div style="display:flex;gap:12px;flex-wrap:wrap">${cards}</div>${crit}${blocked}</section>`;
+}
+
+function monetizationTable(m) {
+  if (!m || !m.rows || !m.rows.length) return '';
+  const cols = m.columns || ['Play', 'What it is', 'Who pays', 'Price model', 'ROI speed', 'Effort'];
+  const head = cols.map((h) => `<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #e5e7eb;font-size:12px">${esc(h)}</th>`).join('');
+  const body = m.rows.map((r) => {
+    const cells = Array.isArray(r) ? r : cols.map((_, i) => r[Object.keys(r)[i]]);
+    return `<tr>${cells.map((c) => `<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;vertical-align:top">${esc(c)}</td>`).join('')}</tr>`;
+  }).join('');
+  const note = m.note ? `<div style="font-size:12px;color:#6b7280;margin-top:6px">${esc(m.note)}</div>` : '';
+  return `<section style="margin-top:24px"><h2 style="font-size:18px;margin:0 0 8px">Growth and monetization (paid plays, target customers)</h2><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${note}</section>`;
+}
+
 function accuracySection(a) {
   if (!a) return '';
   const banner = a.provisional
@@ -190,9 +232,9 @@ function changedSection(ch) {
 }
 
 function proposedFixes(findings) {
-  const af = findings.filter((f) => f.autoFixable);
+  const af = findings.filter((f) => f.autoFixable ?? f.auto_fixable);
   if (!af.length) return '';
-  const li = af.map((f) => `<li><strong>#${f.ref}</strong> ${esc(f.fix || f.title)}</li>`).join('');
+  const li = af.map((f) => `<li><strong>#${f.ref}</strong> ${esc(f.fix || f.recommendation || f.title)}</li>`).join('');
   return `<section style="margin-top:22px"><h2 style="font-size:18px;margin:0 0 6px">Proposed auto-fixable items</h2><div style="font-size:12px;color:#6b7280;margin-bottom:6px">Applied only when you run with --apply. Reference by number.</div><ul style="margin:0;padding-left:20px;font-size:14px">${li}</ul></section>`;
 }
 
@@ -231,6 +273,9 @@ export function renderReport(data = {}) {
   ${TEAMS.map((t) => teamSection(t, findings)).join('')}
   ${accuracySection(data.accuracy)}
   ${competitorTable(data.competitors)}
+  ${budgetTable(data.budget)}
+  ${monetizationTable(data.monetization)}
+  ${roadmapSection(data.roadmap)}
   ${proposedFixes(findings)}
   ${changedSection(data.changed)}
   ${costToHtml(data.cost || { mode: m.mode })}

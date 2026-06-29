@@ -6,12 +6,14 @@ export const meta = {
     { title: 'Verify', detail: 'adversarial refutation of high/medium findings (deep)' },
     { title: 'Loop', detail: 'loop-until-dry extra discovery rounds (deep)' },
     { title: 'Critic', detail: 'completeness critic, one more targeted round (deep)' },
+    { title: 'Strategy', detail: 'synthesizers (missing features, budget, roadmap, monetization) fed the final findings' },
     { title: 'Synthesis', detail: 'qa-triage ranks + scores' },
   ],
 }
 
 // ---- args from the command ----
-const A = args || {}
+let A = args || {}
+if (typeof A === 'string') { try { A = JSON.parse(A) } catch (e) { A = {} } } // args may arrive JSON-encoded
 const DEEP = A.mode === 'deep' || A.deep === true
 const reportDir = A.reportDir || 'reports/product-intel'
 const shots = Array.isArray(A.screenshots) ? A.screenshots : []
@@ -57,6 +59,9 @@ const TEAM_OF = {
   'feature-synthesizer': 'business', 'competitor-intel': 'business', 'value-roi': 'business',
   'pricing-strategy': 'business', 'retention-churn': 'business', 'conversion-activation': 'business',
   'growth-loops': 'business', 'marketing-angle': 'business', 'product-strategy': 'business',
+  'budget-analyst': 'business', 'project-manager': 'business',
+  'growth-entrepreneur': 'business', 'legal-compliance': 'legal',
+  'release-hygiene': 'ops', 'backup-recovery': 'ops', 'observability': 'ops', 'analytics-instrumentation': 'ops',
 }
 const teamForLens = (t) => TEAM_OF[t] || 'technical_qa'
 
@@ -68,15 +73,20 @@ const HEAVY = new Set(['security', 'red-team', 'tenant-isolation', 'data-integri
 const modelFor = () => 'sonnet'
 const effortFor = (t) => (DEEP ? (HEAVY.has(t) ? 'high' : 'medium') : 'medium')
 
+// DISCOVERY lenses (fan-out): each finds issues independently. Synthesizers are NOT here - they run
+// in the Strategy phase below, fed the collected findings, so they never fabricate their inputs.
 const CORE = ['first-impression', 'scanner-flow', 'data-integrity', 'security', 'tenant-isolation',
-  'red-team', 'decision-fatigue', 'ux-vision', 'feature-synthesizer', 'competitor-intel']
+  'red-team', 'release-hygiene', 'decision-fatigue', 'ux-vision', 'competitor-intel']
 const DEEP_EXTRA = ['design-system', 'trust-signals', 'psychology', 'microinteraction', 'simplicity-enforcer',
   'chaos-resilience', 'accessibility', 'visual-polish', 'copy-clarity', 'live-walkthrough', 'performance-device',
   'code-review', 'value-roi', 'conversion-activation', 'growth-loops', 'retention-churn', 'marketing-angle',
-  'pricing-strategy', 'product-strategy']
+  'pricing-strategy', 'product-strategy', 'legal-compliance', 'backup-recovery', 'observability', 'analytics-instrumentation']
+// SYNTHESIZERS: run AFTER the fan-out (Strategy phase) so they receive the real collected findings.
+const SYNTH = DEEP ? ['feature-synthesizer', 'budget-analyst', 'project-manager', 'growth-entrepreneur'] : ['feature-synthesizer']
 
 // ================= Fan-out =================
 phase('Fan-out')
+log(`config: mode=${A.mode} deep=${A.deep} DEEP=${DEEP} screenshots=${shots.length} reportDir=${reportDir}`)
 const lenses = DEEP ? CORE.concat(DEEP_EXTRA) : CORE
 const lensResults = await parallel(lenses.map((t) => () =>
   agent(
@@ -88,6 +98,9 @@ const lensResults = await parallel(lenses.map((t) => () =>
 
 let findings = []
 let competitors = null
+let econBudget = null // build-economics table (NOT the harness `budget` primitive - do not shadow it)
+let roadmap = null
+let monetization = null
 let scoreSignals = {}
 for (const r of lensResults.filter(Boolean)) {
   Object.assign(scoreSignals, parseScoreLines(r.text))
@@ -96,7 +109,7 @@ for (const r of lensResults.filter(Boolean)) {
   if (Array.isArray(parsed)) arr = parsed
   else if (parsed && typeof parsed === 'object') {
     if (Array.isArray(parsed.findings)) arr = parsed.findings
-    if (parsed.competitors) competitors = parsed.competitors // captured even if findings is absent
+    if (parsed.competitors) competitors = parsed.competitors // competitor-intel runs in fan-out
   }
   for (const f of arr) { if (f && typeof f === 'object') { f.team = f.team || teamForLens(r.t); findings.push(f) } }
 }
@@ -176,6 +189,33 @@ if (DEEP && findings.length) {
 }
 transparency.accepted = findings.length
 
+// ================= Strategy (synthesizers fed the FINAL findings, never fabricated input) =================
+phase('Strategy')
+const findingsBrief = JSON.stringify(findings.map((f) => ({ team: f.team, title: f.title, severity: f.severity, fix: f.fix })).slice(0, 120))
+const compBrief = competitors ? JSON.stringify(competitors).slice(0, 2000) : 'none'
+const stratResults = await parallel(SYNTH.map((t) => () =>
+  agent(
+    `You are the "${t}" synthesizer for the ${DEEP ? 'deep' : 'lean'} weekly report. Work ONLY from the REAL verified findings below - do NOT invent inputs. For cost sizing, read ${reportDir}/cost.json (actual measured spend).\n` +
+    `VERIFIED FINDINGS: ${findingsBrief}\nCOMPETITORS: ${compBrief}\n${ctx}\nReturn your required fenced json format and score line(s).`,
+    { agentType: t, label: t, phase: 'Strategy', model: 'sonnet', effort: DEEP ? 'high' : 'medium' }
+  ).then((text) => ({ t, text })).catch(() => null)
+))
+for (const r of stratResults.filter(Boolean)) {
+  Object.assign(scoreSignals, parseScoreLines(r.text))
+  const parsed = extract(r.text)
+  let arr = []
+  if (Array.isArray(parsed)) arr = parsed
+  else if (parsed && typeof parsed === 'object') {
+    if (Array.isArray(parsed.findings)) arr = parsed.findings
+    if (parsed.budget) econBudget = parsed.budget
+    if (parsed.roadmap) roadmap = parsed.roadmap
+    if (parsed.monetization) monetization = parsed.monetization
+  }
+  for (const f of arr) { if (f && typeof f === 'object') { f.team = f.team || teamForLens(r.t); findings.push(f) } }
+}
+transparency.accepted = findings.length
+log(`Strategy: ${SYNTH.length} synthesizers fed ${findingsBrief.length}b of findings; total now ${findings.length}`)
+
 // ================= Synthesis =================
 phase('Synthesis')
 const triage = await agent(
@@ -199,4 +239,4 @@ if (!scores.length && Object.keys(scoreSignals).length) {
 const present = scores.map((s) => Number(s.score)).filter((n) => !isNaN(n))
 const overall = present.length ? Math.round(present.reduce((a, b) => a + b, 0) / present.length) : null
 
-return { findings, scores, competitors, priorities, overall, transparency }
+return { findings, scores, competitors, budget: econBudget, roadmap, monetization, priorities, overall, transparency }
