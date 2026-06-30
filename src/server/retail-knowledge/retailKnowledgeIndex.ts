@@ -26,15 +26,25 @@ export interface RetailLookupResult {
   barcode: string; // the variant that matched
 }
 
-// SQLite prepared statement (created lazily, cached for process lifetime)
+// SQLite prepared statement (created lazily, cached for process lifetime).
+// The retail table may not exist if the source JSON was an LFS pointer during build.
 let _stmtLookup: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
+let _tableChecked = false;
 
 function getStmtLookup() {
   if (_stmtLookup) return _stmtLookup;
+  if (_tableChecked) return null; // already checked, table missing
   const db = getKnowledgeDb();
-  if (!db) return null;
-  _stmtLookup = db.prepare("SELECT barcode, product_name, brand, category FROM retail WHERE barcode = ?");
-  return _stmtLookup;
+  if (!db) { _tableChecked = true; return null; }
+  try {
+    _stmtLookup = db.prepare("SELECT barcode, product_name, brand, category FROM retail WHERE barcode = ?");
+    return _stmtLookup;
+  } catch {
+    // Table doesn't exist (retail JSON was LFS pointer during build)
+    console.warn("[retail-knowledge] retail table not found in SQLite DB. Retail lookups disabled.");
+    _tableChecked = true;
+    return null;
+  }
 }
 
 /** Look up a barcode in the retail product index. Returns null on miss. Tries zero-padded variants. */
