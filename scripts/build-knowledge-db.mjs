@@ -172,7 +172,13 @@ if (tireData) {
 // ---------------------------------------------------------------------------
 // 3. Retail index
 // ---------------------------------------------------------------------------
-const retailData = safeReadJson(RETAIL_JSON, "Retail JSON (247MB, may need Git LFS)");
+// The full retail DB (4M rows, ~320MB) exceeds Vercel's ~250MB compressed function limit.
+// Skip on Vercel builds; retail will use an external DB (Turso) in a future update.
+// Locally, set BUILD_RETAIL=1 to include it for testing.
+const skipRetail = process.env.VERCEL === "1" && process.env.BUILD_RETAIL !== "1";
+const retailData = skipRetail
+  ? (console.log("[knowledge-db] Skipping retail index on Vercel (function size limit). Use Turso for retail in production."), null)
+  : safeReadJson(RETAIL_JSON, "Retail JSON (247MB, may need Git LFS)");
 if (retailData) {
   const t2 = performance.now();
   const retailIndex = retailData.index || {};
