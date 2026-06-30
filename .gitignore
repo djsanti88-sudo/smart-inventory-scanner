@@ -97,3 +97,4 @@ src/server/knowledge.generated.db-shm
 .playwright-mcp/
 .superpowers/
 knowledge.generated.db.gz
+scripts/barcode-harvester/output/*.csv
