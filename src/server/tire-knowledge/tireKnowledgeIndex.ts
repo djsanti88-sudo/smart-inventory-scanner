@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getKnowledgeDb } from "@/server/knowledgeDb";
 
-// SERVER-ONLY tire knowledge index reader. Tries SQLite first (microsecond lookups, ~5MB memory).
-// Falls back to the original JSON if the DB doesn't exist (development without a build step).
-//
-// The `server-only` import makes this module a BUILD ERROR if imported from a client component.
+// SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
+// The `server-only` import makes this a BUILD ERROR if imported from a client component.
 // EXACT lookups only. No fuzzy/near-match — near-match auto-count is forbidden.
+//
+// The JSON source files stay in git for regeneration but are NOT loaded at runtime.
+// Run `npm run build:knowledge-db` to generate the SQLite DB from the JSON indexes.
 
 export interface TireKnowledgeRow {
   canonical_product_uid: string;
@@ -22,37 +23,14 @@ export interface TireKnowledgeRow {
   field_completeness_score: string; missing_fields: string;
   source_count: number;
 }
-interface GeneratedIndex {
-  schema_version: string; generated_at: string;
-  barcodeIndex: Record<string, TireKnowledgeRow>;
-  partNumberIndex: Record<string, string>;
-  identityIndex: Record<string, string>;
-}
+
 export interface TireKnowledgeMeta extends Record<string, unknown> { schema_version?: string; generated_at?: string; trusted_rows_ingested?: number; barcode_index_count?: number; harvester_snapshot_used?: boolean; }
 
-const INDEX_PATH = join(process.cwd(), "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
 const META_PATH = join(process.cwd(), "src", "server", "tire-knowledge", "tireKnowledge.generated.meta.json");
 
-// JSON fallback cache (used when SQLite DB doesn't exist)
-let _indexPromise: Promise<GeneratedIndex | null> | null = null;
 let _metaPromise: Promise<TireKnowledgeMeta | null> | null = null;
 
-/** Lazy, cached, fail-closed load of the JSON index (only used as fallback). */
-function getJsonIndex(): Promise<GeneratedIndex | null> {
-  if (!_indexPromise) {
-    _indexPromise = readFile(INDEX_PATH, "utf8")
-      .then((raw) => {
-        const d = JSON.parse(raw) as GeneratedIndex;
-        if (!d || typeof d !== "object" || !d.barcodeIndex) return null;
-        return d;
-      })
-      .catch(() => null);
-  }
-  return _indexPromise;
-}
-
-/** Safe scanner-key normalization: trim, drop control chars, strip space/dash separators. NO numeric
- *  conversion (leading zeros are preserved); meaningful alphanumerics are kept. */
+/** Safe scanner-key normalization: trim, drop control chars, strip space/dash separators. */
 function normBarcodeKey(code: string): string {
   return (code ?? "").toString().replace(/[ -]/g, "").trim().replace(/[ -]/g, "");
 }
@@ -60,9 +38,7 @@ function normPartKey(pn: string): string {
   return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
 }
 
-// ---------------------------------------------------------------------------
 // SQLite prepared statements (created lazily, cached for process lifetime)
-// ---------------------------------------------------------------------------
 let _stmtBarcode: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 let _stmtPartNumber: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 
@@ -86,49 +62,28 @@ function getStmtPartNumber() {
 export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeRow | null> {
   const key = normBarcodeKey(code);
   if (!key) return null;
-
-  // SQLite fast path
   const stmt = getStmtBarcode();
-  if (stmt) {
-    const row = stmt.get(key) as TireKnowledgeRow | undefined;
-    return row ?? null;
-  }
-
-  // JSON fallback
-  const idx = await getJsonIndex();
-  return idx?.barcodeIndex?.[key] ?? null;
+  if (!stmt) return null;
+  return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
 }
 
 /** EXACT trusted manufacturer-part-number lookup. Returns the corpus row or null. */
 export async function lookupByExactPartNumber(partNumber: string): Promise<TireKnowledgeRow | null> {
   const key = normPartKey(partNumber);
   if (!key) return null;
-
-  // SQLite fast path
   const stmt = getStmtPartNumber();
-  if (stmt) {
-    const row = stmt.get(key) as TireKnowledgeRow | undefined;
-    return row ?? null;
-  }
-
-  // JSON fallback
-  const idx = await getJsonIndex();
-  const uid = idx?.partNumberIndex?.[key];
-  if (!uid) return null;
-  const row = Object.values(idx!.barcodeIndex).find((r) => r.canonical_product_uid === uid);
-  return row ?? null;
+  if (!stmt) return null;
+  return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
 }
 
-/** Read the generated metadata (counts/version) - for platformOwner diagnostics only. Fail-closed. */
+/** Read the generated metadata (counts/version) — for platformOwner diagnostics only. Fail-closed. */
 export async function getTireKnowledgeMeta(): Promise<TireKnowledgeMeta | null> {
-  // Metadata comes from the small JSON file (not SQLite) since it's tiny and rarely queried
   if (!_metaPromise) _metaPromise = readFile(META_PATH, "utf8").then((r) => JSON.parse(r) as TireKnowledgeMeta).catch(() => null);
   return _metaPromise;
 }
 
-/** Test-only: reset caches (so a regenerated index is re-read). Not used in production paths. */
+/** Test-only: reset caches so a regenerated index is re-read. */
 export function __resetTireKnowledgeCacheForTests(): void {
-  _indexPromise = null;
   _metaPromise = null;
   _stmtBarcode = null;
   _stmtPartNumber = null;
