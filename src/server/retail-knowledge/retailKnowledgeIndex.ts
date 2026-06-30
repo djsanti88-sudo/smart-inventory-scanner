@@ -1,31 +1,35 @@
-// Retail product knowledge index: 4M+ products from Open Food Facts, loaded ONCE at server start.
-// Barcode -> [productName, brand, category]. Lazy-loaded, cached in-memory.
-// SERVER-SIDE ONLY (never imported by client code).
+// Retail product knowledge index: 4M+ products from Open Food Facts.
+// Barcode -> [productName, brand, category]. SERVER-SIDE ONLY.
+//
+// Primary: SQLite (microsecond lookups, ~5MB memory, no cold-start parse).
+// Fallback: JSON (original 247MB file, loaded into memory — only used when the DB doesn't exist).
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { getKnowledgeDb } from "@/server/knowledgeDb";
 
 // Compact format: barcode -> [name, brand?, category?]
 type RetailEntry = [string, string?, string?];
 type RetailIndex = Record<string, RetailEntry>;
 
-let cached: RetailIndex | null = null;
+// JSON fallback cache
+let jsonCached: RetailIndex | null = null;
 
-function loadIndex(): RetailIndex {
-  if (cached) return cached;
+function loadJsonIndex(): RetailIndex {
+  if (jsonCached) return jsonCached;
   try {
     const raw = readFileSync(
       join(process.cwd(), "src", "server", "retail-knowledge", "retailKnowledge.generated.json"),
       "utf8",
     );
     const parsed = JSON.parse(raw);
-    cached = parsed.index ?? {};
-    console.log(`[retail-knowledge] Loaded ${Object.keys(cached!).length} products`);
+    jsonCached = parsed.index ?? {};
+    console.log(`[retail-knowledge] JSON fallback: loaded ${Object.keys(jsonCached!).length} products`);
   } catch (e) {
-    console.warn("[retail-knowledge] Index not found or unreadable, retail lookup disabled:", (e as Error).message);
-    cached = {};
+    console.warn("[retail-knowledge] JSON index not found, retail lookup disabled:", (e as Error).message);
+    jsonCached = {};
   }
-  return cached!;
+  return jsonCached!;
 }
 
 /** Generate zero-padded barcode variants (UPC-12, EAN-13, GTIN-14) for lookup normalization. */
@@ -47,10 +51,42 @@ export interface RetailLookupResult {
   barcode: string; // the variant that matched
 }
 
+// ---------------------------------------------------------------------------
+// SQLite prepared statement (created lazily, cached for process lifetime)
+// ---------------------------------------------------------------------------
+let _stmtLookup: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
+
+function getStmtLookup() {
+  if (_stmtLookup) return _stmtLookup;
+  const db = getKnowledgeDb();
+  if (!db) return null;
+  _stmtLookup = db.prepare("SELECT barcode, product_name, brand, category FROM retail WHERE barcode = ?");
+  return _stmtLookup;
+}
+
 /** Look up a barcode in the retail product index. Returns null on miss. Tries zero-padded variants. */
 export function lookupRetailBarcode(code: string): RetailLookupResult | null {
-  const idx = loadIndex();
   const variants = barcodeVariants(code.trim());
+
+  // SQLite fast path: try each variant (~50 microseconds per indexed lookup)
+  const stmt = getStmtLookup();
+  if (stmt) {
+    for (const v of variants) {
+      const row = stmt.get(v) as { barcode: string; product_name: string; brand: string; category: string } | undefined;
+      if (row) {
+        return {
+          productName: row.product_name,
+          brand: row.brand,
+          category: row.category,
+          barcode: row.barcode,
+        };
+      }
+    }
+    return null;
+  }
+
+  // JSON fallback
+  const idx = loadJsonIndex();
   for (const v of variants) {
     const entry = idx[v];
     if (entry) {
@@ -65,7 +101,8 @@ export function lookupRetailBarcode(code: string): RetailLookupResult | null {
   return null;
 }
 
-/** For tests: reset the cached index so the next lookup re-reads from disk. */
+/** For tests: reset caches so the next lookup re-initializes. */
 export function __resetRetailKnowledgeCacheForTests(): void {
-  cached = null;
+  jsonCached = null;
+  _stmtLookup = null;
 }
