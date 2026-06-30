@@ -96,3 +96,4 @@ src/server/knowledge.generated.db-shm
 # Agent/session scratch (Playwright MCP snapshots + superpowers tooling state)
 .playwright-mcp/
 .superpowers/
+knowledge.generated.db.gz
