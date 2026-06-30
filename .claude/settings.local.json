@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk -F',' 'NR>1 && $10!=\"\" {count++} END {print \"Rows with barcodes:\", count}' \"C:/Users/djsan/inventory/data/tire-knowledge/tire_corpus_flat.csv\")",
+      "Bash(node:*)",
+      "Bash(grep:*)",
+      "Bash(npx vitest:*)",
+      "Bash(python3 -c \"import sys,json;d=json.loads\\(sys.stdin.readline\\(\\)\\);print\\(json.dumps\\({k:d[k] for k in list\\(d.keys\\(\\)\\)[:8]},indent=2\\)\\)\")",
+      "Bash(npx tsx:*)",
+      "Bash(git lfs:*)",
+      "Bash(echo \"staged exit: $?\")"
+    ]
+  }
+}

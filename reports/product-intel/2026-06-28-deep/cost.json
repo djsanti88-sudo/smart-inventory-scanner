@@ -1,0 +1,14 @@
+{
+  "mode": "lean",
+  "capUsd": 0.5,
+  "thirdParty": [],
+  "claude": {
+    "agents": 0,
+    "estTokens": 0,
+    "note": "Covered by Claude subscription. Zero out-of-pocket cash."
+  },
+  "skipped": [
+    "live accuracy not run: dry mode (LIVE_AI_TEST not 1)",
+    "live accuracy not run: dry mode (LIVE_AI_TEST not 1)"
+  ]
+}

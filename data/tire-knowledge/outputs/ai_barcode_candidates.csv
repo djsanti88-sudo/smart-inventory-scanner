@@ -1,0 +1,125 @@
+id,brand,model,size,claimed_barcode,gtin_valid,prefix_match,confidence,sources
+369546,FALKEN,Aklimate,185/55R16,00848983028211,True,True,prefix,
+369570,FALKEN,Aklimate,205/55R17,848983028297,True,True,prefix,
+369608,FALKEN,Aklimate,235/40R19,848983028600,True,True,prefix,
+369614,FALKEN,Aklimate,235/50R19,848983028662,True,True,prefix,
+369564,FALKEN,Aklimate,245/45R17,848983028808,True,True,prefix,
+369613,FALKEN,Aklimate,245/45R19,848983028822,True,True,prefix,
+369598,FALKEN,Aklimate,255/55R18,848983028945,True,True,prefix,
+369629,FALKEN,Aklimate,255/55R20,848983028969,True,True,prefix,
+130061,FALKEN,Azenis FK-453,215/50R17,4250427406565,True,False,none,
+130108,FALKEN,Azenis FK-453,245/45R19,4250427406565,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGk5BoFqtP7zzhacWdOaHHaQ8n8pkLPuyjjrjIljakdAfhz9l4uRp3pXCxButp9KuSR9S1C7hNEIKk8FJ8FY1xCkHC6w60YuqouLbkDHYgEdhrYs1IqKbdUDUqjTvCb3UvLTvaG4_FylrX_nVdxh12OGaJwShVGASs=
+130111,FALKEN,Azenis FK-453,255/40R19,4250427406190,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE9nArtJ60sJ3ZaEr3EeWLIBXm5vyiK_JnT7-MNoaIIMry54ORgbDPd82tKELRneaEV9BKhljlEKguAKCkf7c3mB83Mo62PMB1VpiWBgU8fO7bJnMYAypJHSr927bZNmkGbCMKiX7htL_cYhKs-BeF4DP9pmWrUmpyjVNb3dMQ=
+130085,FALKEN,Azenis FK-453,275/40R17,4250427406565,True,False,none,
+126222,FALKEN,Azenis FK453CC,275/45R19,4250427405858,True,False,none,
+385976,FALKEN,Azenis FK520,275/50R20,848983031495,True,True,prefix,
+80780,FALKEN,Azenis RT-615,215/40R17,848983008299,True,True,prefix,
+80774,FALKEN,Azenis RT-615,215/45R16,848983008305,True,True,prefix,
+81329,FALKEN,Azenis RT-615,225/45R17,848983008336,True,True,prefix,
+81334,FALKEN,Azenis RT-615,235/40R18,848983008367,True,True,prefix,
+80782,FALKEN,Azenis RT-615,255/40R17,848983008398,True,True,prefix,
+88691,FALKEN,Azenis RT-615,295/40R18,848983008442,True,True,prefix,
+324203,FALKEN,Azenis RT660,225/45R15,848983017932,True,True,prefix,
+324215,FALKEN,Azenis RT660,255/40R17,848983017994,True,True,prefix,
+324228,FALKEN,Azenis RT660,275/35R18,848983017857,True,True,prefix,
+324216,FALKEN,Azenis RT660,275/40R17,848983018021,True,True,prefix,
+324239,FALKEN,Azenis RT660,305/30R19,848983018151,True,True,prefix,
+419465,FALKEN,Azenis RT660+,255/40R18,848983029379,True,True,prefix,
+419471,FALKEN,Azenis RT660+,315/30R18,306851366155,False,False,none,
+88651,FALKEN,Eurowinter HS439,185/65R14,4250427403465,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE5TxPWNIkb_7IDgF7nuS6GKVonLu_XQtTXunhdk76p7uKYW64SSftVRf9mEv_SBtakGxO2LNPWBysJxfnJqFc96kXDCw8gWP9H_oxhXuqw-rihZJfkAlCx1ho9-JnWCnNQRAcnQso_qvWq|https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG9Ty1VKyx0QH-o9U1eEFqWIaRuS4l7GtZyj1hMngmLqZHqkyiCRueHhpp_M7lUOQ3BDdx6OwVOB5de1ao7RrN9NW6U6e1J_-nOUNxHwAo8FzT2Aw82ifobvP7Spst0Ce6gOrLwVtzhwBkg6KwM-dJ7RDYAFBiqf0LrIqYiO5qO
+88654,FALKEN,Eurowinter HS439,195/60R15,3188649179862,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGmMcSzt4_A0vFUe2Qvsz4hQWwuqclSX4nhJdKNRny1_YEK7AccsC88YWVyoyQfpTn60pvYP9VgZq-1Rq_zC8GPTN3-Xdv5ZLF46WgMu9KO9PTDJEgSv7LoqNTQzi51RScO2Zbw3nH2RB_2kuMlwIOv83DzK4kJwJeNoSzUB5WyHvX5N3LNnezyKQ6YhSE0W-A0nlFA0EpTCL6H
+88659,FALKEN,Eurowinter HS439,225/55R16,8429451150102,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEkEcZN2S1rV8qukM7-rQ8tM3i0m_n1kSC3r7FYRKAtNfcA5L9-JElt4A9oJKRrydhHuXzyhL4Hz53_xgCtAswF2iGONcTmxcNCjnRP7en2iitWCC6Ia0Prw9T0QVkHAWPwmcEVTCn3FXFPLxuEc3YwVj7I0KmR1At-e14ceSsidQ67Qjwgjz84Nc4y_GThqVwNi3H5gLRfalCdcPIsEvuhmoSuKdmUzgPIzDHrvMFvm3uusIiGzfi53XFFf2v1
+97961,FALKEN,Eurowinter HS439,235/60R17,4250427404431,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHPzZEuyXVvDd5pGcZQZzqsmVao_UyOpLNJ_PQym-0973DLOZ2fsUolfnBBIo8yguCsdszGfjpA1art2P2Q08eFeCnRhV7Ea74rU-YoXO8kriuC8bBeWopQkht85D80r9yHg7ea3Scbe2FuDVE2qfKBIjgCemI=
+88668,FALKEN,Eurowinter HS439,235/65R17,4250427404462,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEXEjPGKGtdWu0gW5j_Zmfm4GX0Exgzizv25oE3qluV93dIVkCBSFYY7sgW5h-jHrMEooQkOPrjw-4-wv_GqT4MHFLRQ0hJfxQK6YrgmjcPJyxAt2EoY-W4LjGzwiOTZmzEctIZEQQLsw_P3YbLduYnouy9RnoKR4Oawd-cJBBeRTgbem3FUM7hXrtZqP7VmeAB5qrpdMzBH6GhKA8lAcKIpS5WPwE-9mZwA4fEt_sbqCn3AM_9qFl2mCdKQZ4Ufg4Jf-dsqeBc5d3JInjj
+269163,FALKEN,FK-090,145/90R16,848983013088,True,True,prefix,
+93264,FALKEN,FK-452,205/50R16,4250427401850,True,False,none,
+80764,FALKEN,FK-452,225/35R17,4250427402000,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFFyguk1hnQ4B3-6XMxmUDtffRmkPe3cwNk5d9qN_nxI86U0cTrJ9IO5ShZbfu9LBwBbbytqiJ0OzI4-BEI7El0xtpCHwTEkUpjHAcExMjwAaTbSVPdV_oeoKTO-DnTVpLHvCp0MxcABUTKQoJ5R0czXckI6OML|https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHthDqaSPBAiYrPUv2sUwxINyG1RpSp56bCqXZmt42n37xgkNgAm5pqWNbqD7I8hN7zsn9VXYdDgQNxdV1EazXNY_MSAqlqac3w9cGbGhWe648ljvCO8JBdicHvGSC2nA2q6iU15h-2O5bEQ5bESJmX4zCQ89-Lhq9tv4Fqx7sgDIKPYsrWhrgz
+81277,FALKEN,FK-452,255/30R21,4250427402147,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHLc4Mdhxqq1PMehqhMbYtU2uxmOKaHeOlImvmRNHge-O8JlmCzxJ2z1MvOn0ZAo46n9ymTbqBuXlEeJtwI0jgy8uPOJzvmjykGOuVh5w1oQeDJRJvklLWrHgNT7H-cs8ut0Tgz_jthAsS96mqrtdMpgXc=
+88694,FALKEN,FK-452,285/25R22,4250427401737,True,False,none,
+80948,FALKEN,FK-452,305/25R20,4250427402123,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEY3odHmHbYVt4vMm9sY0EtdMMtONY7MJGTUHwoDbj23Ki1oW8FHAHvdIB917lZ-zyNg0ir9iBQCIfFesOs73wZJzmdyU2nvQnw3u8xRaxAndFyrkdkfYBUJmcP_pLdmO6KUoesacTjdUoGkCCF2E_Eent5--HkwShHIKcB7JH3YlCaFuwiiUN4
+90879,FALKEN,High Country A/T,225/75R16,325753736083,True,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHLiTuETCkvQNX0eln98XbDEmW3mi-Kf_PmROG4akUKvgKTqMFiAXdAz1Ty0yprQtsvwt4xj-mZljUK1Zft6H0AUeRmzWod3yAMDnSR78pdC9ZaddlCvOu10GQxCcFhdb0=
+339258,FALKEN,Winterpeak F-Ice 1,215/65R17,848983023780,True,True,prefix,
+382259,FALKEN,Winterpeak F-Ice 1,255/40R20,00848983027580,True,True,prefix,
+383321,FALKEN,Winterpeak F-Ice 1,255/45R19,848983027573,True,True,prefix,
+339265,FALKEN,Winterpeak F-Ice 1,255/55R20,848983023902,True,True,prefix,
+339263,FALKEN,Winterpeak F-Ice 1,275/65R18,848983023858,True,True,prefix,
+81152,FALKEN,Ziex S/TZ01,295/30R22,4250427401744,True,False,none,
+81151,FALKEN,Ziex S/TZ01,295/40R20,266809018133,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG0J5bDLf5My-xtkCjKPck9zRTesPuYnOBU_X1TMkIBnyIqYcCbcgkKNrmwXeTPdErPpFEPn3hQVQTRLVDB4J8tSRkAqdtRMAj4FmmcNWURyS0XQPaVFIavAMDYFWGOww==
+136583,NOKIAN,Hakkapeliitta 5,255/35R20,387834568028,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG51lwxqpUC63O1nCi-L5wEgQ7nhTmdE5brTLWSkPzRTqo46fJ5TN8xL1rZKSSVszpwVDWRQp2Pbkaz8a2WeqIf_elXWPSkm_DYUQgkKkQ55CU5DG6X2zc7A4GFTfZVuQ==
+136596,NOKIAN,Hakkapeliitta 5 Suv,235/65R18,6419440490007,True,True,prefix,
+90698,NOKIAN,Hakkapeliitta 5 Suv,265/50R20,6419440490267,True,True,prefix,
+90678,NOKIAN,Hakkapeliitta 5 Suv,265/65R17,06419440489865,True,True,prefix,
+90699,NOKIAN,Hakkapeliitta 5 Suv,275/40R20,6419440490168,True,True,prefix,
+134998,NOKIAN,Hakkapeliitta 7,185/65R14,6419440316758,True,True,prefix,
+135018,NOKIAN,Hakkapeliitta 7,195/50R16,6419440281742,True,True,prefix,
+136480,NOKIAN,Hakkapeliitta 7,195/50R16,6419440281742,True,True,prefix,
+136470,NOKIAN,Hakkapeliitta 7,195/55R16,6419440277639,True,True,prefix,
+135005,NOKIAN,Hakkapeliitta 7,195/60R16,6419440277615,True,True,prefix,
+136458,NOKIAN,Hakkapeliitta 7,215/65R16,6419440318851,True,True,prefix,
+136498,NOKIAN,Hakkapeliitta 7,225/40R18,6419440277479,True,True,prefix,
+136485,NOKIAN,Hakkapeliitta 7,235/50R18,6419440277851,True,True,prefix,
+135017,NOKIAN,Hakkapeliitta 7,235/55R17,6419440316925,True,True,prefix,
+136500,NOKIAN,Hakkapeliitta 7,245/40R18,6419440277554,True,True,prefix,
+136501,NOKIAN,Hakkapeliitta 7,245/40R19,6419440279879,True,True,prefix,
+136486,NOKIAN,Hakkapeliitta 7,245/50R18,6419440277837,True,True,prefix,
+134957,NOKIAN,Hakkapeliitta 7 Suv,225/60R18,197174982876,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGjL5H50ndw2XKQFJ-ZjRx1EIkF8nhg4vzsex4ES6_Z5W3SeaZ44i4FczzMYmYG3XugLDHaqnp46c06TrHc06H_lBrZF0POdAU72VvEDiYqNfOd6H4ti-rv7jiD6B7xUe4=
+136521,NOKIAN,Hakkapeliitta 7 Suv,225/60R18,197174982876,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH2EVFkocZM-Co_cd1rjq_357Gux7hNNov0MQAw7JavlOuAM-xzMhXj3a4-f1RQMLh2euYqzpPKnWtYrcewpwi-xBa9K6sTM7VVE5FvGlhckuFabhwV1Z5sRm4AefXdmg==
+136512,NOKIAN,Hakkapeliitta 7 Suv,225/65R17,306329978394,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFIXQyp6VVqPfimsvMD_Ps3Dtav0VzWx0E3GHsa8Pu0J6Ngn5i1ImZRncwX5YHHy25TlIV-YACkHluQTvKs0CJf_LW1ojjSCCocXR3SeVSIk3lX-yTBr_N28-SLRXVky4M=
+166104,NOKIAN,Hakkapeliitta 7 Suv,235/50R19,6419440319612,True,True,prefix,
+134969,NOKIAN,Hakkapeliitta 7 Suv,255/55R18,397469930015,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFrNNsPiN1QZ-IWa8Hfp6PPKxtNbeWaMZzFFWh9rCdQGyZbbihG360AHfxVvzWXEKhE0KxLITUjsovd7aWCBrRr5abQZFyeHJ8ysLm7YiOPIaCDs2K7Kbtss6PCLbiVSic=
+136532,NOKIAN,Hakkapeliitta 7 Suv,255/55R18,397469930015,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE4Q4YpPcZ7ykzJuRJ2co1TX7R86YCaSw1dq2M9_YHteEgao7hmsXAtVYV-2gsqikeWTHMEWZry1pujRixhUWmH-VZrM5HWY7dZ0UYz1aRe2QLCJSeWStMUqXgl-Oxo3A==
+194360,NOKIAN,Hakkapeliitta 7 Suv,255/60R17,6419440323183,True,True,prefix,
+136515,NOKIAN,Hakkapeliitta 7 Suv,255/65R17,6419440278957,True,True,prefix,
+109137,NOKIAN,Hakkapeliitta 7 Suv,265/45R21,357622432413,True,False,none,
+134978,NOKIAN,Hakkapeliitta 7 Suv,275/50R20,6419440279817,True,True,prefix,
+136539,NOKIAN,Hakkapeliitta 7 Suv,275/50R20,6419440279817,True,True,prefix,
+194044,NOKIAN,Hakkapeliitta 8,215/45R16,6419440320700,True,True,prefix,
+185106,NOKIAN,Hakkapeliitta 8,215/60R16,6419440320809,True,True,prefix,
+166116,NOKIAN,Hakkapeliitta 8,245/35R20,6419440320199,True,True,prefix,
+194034,NOKIAN,Hakkapeliitta 8 Suv,225/60R17,176741495750,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHfuLz2oavFReMEz3EY4LkUAJTBZsT2TEp5KiAtqQ0SdLC8HYe9Gr7-5YO7Vs-YkemSYvlZ1-ZL1Nf8mInJIP97dIhPHHz8daNqbldMADz8UP7N9twO_6njus07_cwF6WU=
+179506,NOKIAN,Hakkapeliitta 8 Suv,235/55R17,6419440319452,True,True,prefix,
+194035,NOKIAN,Hakkapeliitta 8 Suv,235/60R18,187168862479,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFtnSojE3WfwVY_si16zk7ES5hHlpLcGXzv72Mf8iaTmNrSn3_xR9mpdtnVr5Ru1iaE4ugx-WpaiQrgacxe7ClaBuCn6-6zo1k2Sd5zI6KuJEOHBxaEMPHn9rwtKoYDHg==
+179518,NOKIAN,Hakkapeliitta 8 Suv,245/55R19,6419440319520,True,True,prefix,
+251006,NOKIAN,Hakkapeliitta 9,185/65R15,6419440321967,True,True,prefix,
+251014,NOKIAN,Hakkapeliitta 9,195/55R16,6419440322032,True,True,prefix,
+251031,NOKIAN,Hakkapeliitta 9,225/45R17,383059104382,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGIIYcxO42kYHXc6exyXbRAuCdOSG7Bl4DO8TfoUofu0gg6yNLTYZQJ9MVqfpQi--MpmA7bQDPf2O2NoWxV8H9vnjhb44GxxKc42q_EJDK5ixA2P1AYh66t72BX3wb7XJo=
+251056,NOKIAN,Hakkapeliitta 9,275/35R20,6419440322353,True,True,prefix,
+267395,NOKIAN,Hakkapeliitta 9 Suv,225/55R19,6419440323909,True,True,prefix,
+267394,NOKIAN,Hakkapeliitta 9 Suv,245/50R20,6419440323893,True,True,prefix,
+251064,NOKIAN,Hakkapeliitta 9 Suv,245/65R17,6419440323626,True,True,prefix,
+267386,NOKIAN,Hakkapeliitta 9 Suv,265/50R19,186682275746,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFNr5TQIbovwnnscCf9_eLHBIZ8xZAEcpv-9InmBiK4rRvAIXtLNSZJQydzE2DVQPZEKHZ21gu6QieTyx6RQ9aYL8M6IZMd3B_1z4Hg4A0-tF-JXu037IuODuyAE8MA-dA=
+251077,NOKIAN,Hakkapeliitta 9 Suv,265/60R18,6419440322513,True,True,prefix,
+267379,NOKIAN,Hakkapeliitta 9 Suv,275/50R22,64194403237186,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQF5ef97Feu1pKqSJMKcCgFAhv9HoSOGTwqUKTBLwWFmV9ddRiZJA8RFBRkAIvJM09RU9CR4lzfeNFBkUQToEixKuqsktXkYp9B9zm36Y68rAFR4wuj-FWyKAWVOk5sPWMXCUQWFZ7A7fVDX-bvDlrIuf6koZIb8rQBCVmybnPU5rOKxpTU=|https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQExfnRPwSguROZaxg-03ehvLbqrKj-uoXTcXHmhHbTw2mU5tB4bEi2XgDFuTlPNCMP2DZ-UJBDJ4YnBGDU8N5v4Shs12ZSG9TLIOC19Q15zMo79jsCCi0yGTdtu0j_T4lTrtT0OLEN69Qw4r-SAteJn50xbELBGypPlsn_L0XTym-12d3A=
+251071,NOKIAN,Hakkapeliitta 9 Suv,275/65R18,6419440322445,True,True,prefix,
+267382,NOKIAN,Hakkapeliitta 9 Suv,285/45R22,236034862636,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGcar8lqH8KSPAxQlE-C7nohHV2XoE1hIy1E3_qFnip8SGhzFnbf7NwRr-k7-SSluX3QG2xcQ9JxCkNAoJ5hHUAnqH2LPV2DB1wJgVvBwhBBxeS9iM9q5hqwNvnozhoJXY=
+267374,NOKIAN,Hakkapeliitta 9 Suv,305/40R20,6419440322742,True,True,prefix,
+305942,NOKIAN,Hakkapeliitta 9 Suv,315/35R20,6419440322803,True,True,prefix,
+294893,NOKIAN,Hakkapeliitta 9 Suv,315/35R21,186681011863,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQE7UcyhMrY5Wm6u5v4ykNQPYQKQ_dUrnrkLWxsnmsobLJ9DNK_BfQX5D1LU4-OC4e5ZAVKXtC9eJ9RO8uwdjxZB7zP_iJxjctYJbmPzy5JFzfi-XvGoEKeX1LcbOAWi2pw=
+136679,NOKIAN,Hakkapeliitta C Cargo,195/75R16,6419440496900,True,True,prefix,
+109059,NOKIAN,Hakkapeliitta C Cargo,215/75R16,6419440422398,True,True,prefix,
+136681,NOKIAN,Hakkapeliitta C Cargo,215/75R16,6419440422398,True,True,prefix,
+136684,NOKIAN,Hakkapeliitta C Cargo,225/65R16,6419440497518,True,True,prefix,
+109060,NOKIAN,Hakkapeliitta C Cargo,225/75R16,6419440496818,True,True,prefix,
+136682,NOKIAN,Hakkapeliitta C Cargo,225/75R16,6419440496818,True,True,prefix,
+136674,NOKIAN,Hakkapeliitta C Van,205/65R15,6419440291000,True,True,prefix,
+136671,NOKIAN,Hakkapeliitta C Van,205/70R15,397432635521,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGNFeKDBoofztJUlqIl3Gb8_Phfc075xMONJ8wu9HwH6dl66AtnXP7ZhItQutqtKSpMXhPYCPSDE7_hz55-muzU_4djo6538mGUn0Oo_UcJOk5KiyqjZy1U8ZY1czc_cig=
+166143,NOKIAN,Hakkapeliitta C3,205/65R15,6419440320380,True,True,prefix,
+157084,NOKIAN,Hakkapeliitta CR Cargo,195/75R16,305396193173,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHsNFSyRDE-iqsPzYdvi9knJrmrxzKyITpmbpCaZHghMKF7KL8DXFuIHGIxCp_sKBCUFfj1UULadrhVxpUOIV1ODul3_-5IYtMg5BJt99IOLcLtUWepQafF2D4wtZAGY6Y=
+157091,NOKIAN,Hakkapeliitta CR Cargo,225/65R16,6419440497518,True,True,prefix,
+157082,NOKIAN,Hakkapeliitta CR Van,215/60R17,6419440497488,True,True,prefix,
+166188,NOKIAN,Hakkapeliitta CR3,215/60R17,198272686811,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHXfpsmbpjjx2v0xESGsEBcGe1IeSz3_xsKulRVEZi-5_K63rSnRjgaIgh2IPGmAUDgA5CTLvjVRX94Avi-NlGUG0a5hIvtkI7PpFFRpuJkVCPFDJdsj9zqsQgh65E6k2o=
+90658,NOKIAN,Hakkapeliitta LT,225/75R16,6419440375496,True,True,prefix,
+136664,NOKIAN,Hakkapeliitta LT,235/85R16,6419440323923,True,True,prefix,
+136668,NOKIAN,Hakkapeliitta LT,265/70R17,6419440375557,True,True,prefix,
+146594,NOKIAN,Hakkapeliitta LT2,225/75R16,6419440282138,True,True,prefix,
+139584,NOKIAN,Hakkapeliitta LT2,265/70R17,6419440282213,True,True,prefix,
+146597,NOKIAN,Hakkapeliitta LT2,265/75R16,6419440282152,True,True,prefix,
+109139,NOKIAN,Hakkapeliitta R,175/65R15,6419440489124,True,True,prefix,
+91112,NOKIAN,Hakkapeliitta R,185/60R15,06419440489100,True,True,prefix,
+91125,NOKIAN,Hakkapeliitta R,215/55R16,305390941690,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHs58rgF90Hdi_QP0i138-8oSQZdeDzobrJMBJMcvmsM6NKgwPIU2TJV8SOTRHKHWKzWUUUKTEvSHFmYRUxyF4zmHzvI3H4Yn97pWBtF4cvZ5KXP6WkHtabRst7sk2zNA==
+91133,NOKIAN,Hakkapeliitta R,225/50R17,6419440489315,True,True,prefix,
+91129,NOKIAN,Hakkapeliitta R,235/55R17,6419440489360,True,True,prefix,
+109164,NOKIAN,Hakkapeliitta R Suv,235/55R19,6419440490106,True,True,prefix,
+109159,NOKIAN,Hakkapeliitta R Suv,245/60R18,6419440489964,True,True,prefix,
+90641,NOKIAN,Hakkapeliitta R Suv,265/70R16,296220962068,False,False,none,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQG3CeHVVKBasUC9DVq5nw9_c_HQg0C7sK1_eHF0WLHFq7oz86xr8QlsRXuMMn_YzGF-Vk2Zx-iMiQ1zkvYmgZPFax3WDywV1Q8NPJ2_NvZtudXV8kH7cYCSX14bUc9MOIE=
+109170,NOKIAN,Hakkapeliitta R Suv,285/50R20,6419440302973,True,True,prefix,

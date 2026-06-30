@@ -1,0 +1,11 @@
+{
+  "generated_at": "2026-06-30T00:36:06.527Z",
+  "source": "data/retail-knowledge/retail_off.jsonl",
+  "source_row_count": 4373079,
+  "unique_barcodes": 4047273,
+  "duplicates_merged": 0,
+  "skipped_no_code": 0,
+  "skipped_no_name": 325806,
+  "conflicts": 0,
+  "index_file": "retailKnowledge.generated.json"
+}

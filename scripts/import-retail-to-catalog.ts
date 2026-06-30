@@ -28,11 +28,13 @@ function normalizedKey(barcode: string): string {
 
 function first(s: string): string { return (s || "").split(",")[0].trim(); }
 
-function recToEntry(r: Record<string, string>): Record<string, unknown> | null {
+function recToEntry(r: Record<string, string>, namesNoBrand = false): Record<string, unknown> | null {
   const barcode = (r.code || "").trim();
   const name = (r.product_name || "").trim();
   const brand = first(r.brands || "");
-  if (!barcode || !name || !brand) return null; // high-value filter: need name + brand
+  if (!barcode || !name) return null;               // always need a barcode + a usable product name
+  // namesNoBrand pass: keep ONLY the records that have NO brand (the new ~1.38M); default: need a brand.
+  if (namesNoBrand ? !!brand : !brand) return null;
   const nb = normalizedKey(barcode);
   if (!nb) return null;
   return {
@@ -56,7 +58,7 @@ function recToEntry(r: Record<string, string>): Record<string, unknown> | null {
 async function main() {
   const apply = hasFlag("--apply");
   const dryRun = hasFlag("--dry-run") || !apply;
-  const all = hasFlag("--all");
+  const namesNoBrand = hasFlag("--names-without-brand"); // 2nd pass: add the name-only (brand-less) records
   const limit = argVal("--limit") ? parseInt(argVal("--limit")!, 10) : 0;
   const path = resolve(argVal("--jsonl") || "data/retail-knowledge/retail_off.jsonl");
 
@@ -79,7 +81,7 @@ async function main() {
     bulk.onWriteError((err: any) => err.failedAttempts < 5); // retry up to 5x
   }
 
-  console.log(`${dryRun ? "DRY-RUN" : "APPLY"} -> ${COLLECTION} | filter=${all ? "ALL" : "name+brand"} | src=${path}`);
+  console.log(`${dryRun ? "DRY-RUN" : "APPLY"} -> ${COLLECTION} | filter=${namesNoBrand ? "name-only(no brand)" : "name+brand"} | src=${path}`);
   const rl = createInterface({ input: createReadStream(path, { encoding: "utf8" }), crlfDelay: Infinity });
   let scanned = 0, kept = 0, written = 0;
   for await (const line of rl) {
@@ -87,7 +89,7 @@ async function main() {
     scanned++;
     let r: Record<string, string>;
     try { r = JSON.parse(line); } catch { continue; }
-    const e = all ? (() => { const x = recToEntry({ ...r, brands: r.brands || "x", product_name: r.product_name || "x" }); return x; })() : recToEntry(r);
+    const e = recToEntry(r, namesNoBrand);
     if (!e) continue;
     kept++;
     if (apply) {

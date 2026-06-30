@@ -5,16 +5,19 @@ import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
-// status. A "verified" decode (auto-counted) requires ALL of:
+// status. MASTER BASELINE v1 (owner-locked, supersedes the older two-provider rule): a "verified"
+// decode (auto-counted) requires ALL of:
 //   - public barcode code type (never X00/FNSKU/vendor_label/internal_code/messy)
 //   - strong app-verified evidence (snippet / grounding_chunk / fetched_source), set by the app
-//   - BOTH providers (Gemini Flash + ChatGPT mini, run in parallel) AGREE on the identity
 //   - non-empty product identity
-//   - confidence >= threshold
-// A SINGLE provider on its own is NOT enough to auto-count (it becomes a Suggested, human-reviewed
-// result) - two independent providers must agree before we trust a code enough to count it. This is
-// what stopped a lone provider's wrong web-data (e.g. a mis-decoded UPC) from being auto-counted.
-// Anything short of full agreement is suggested / needs_review. Provider disagreement is a conflict.
+//   - confidence >= threshold (baseline 0.8)
+//   - NO catalog-derived brand-prefix conflict
+// A SINGLE source is ENOUGH: one provider (e.g. Gemini Flash) whose result the app independently
+// verified to contain the EXACT code in strong evidence auto-counts ("one source is enough") - no
+// second provider and no trusted-host requirement (singleSourceVerified). Two providers that AGREE
+// also verify (canVerify). What is NEVER trusted is a provider's own self-claim of evidence - only
+// the app's EvidenceVerifier output decides. Anything short -> suggested / needs_review. Provider
+// disagreement is a conflict.
 
 const PUBLIC_BARCODE_TYPES: CodeType[] = ["upc_a", "ean_13", "gtin_14"];
 
@@ -29,6 +32,21 @@ export interface DecodeParams {
   // single-brand family in the global catalog AND the decoded brand clearly differs (wrong brand for
   // this barcode). Computed by the caller via prefixBrandConflict(); blocks every auto-count path.
   brandPrefixConflict?: boolean;
+  // OPTION 3 (owner): when true, a NON-public code (vendor_label/internal/sku/part-number/FNSKU/alphanumeric)
+  // may auto-verify from a single app-verified source (incl. a trusted retailer/barcode-DB url_only) - "found
+  // it on Amazon = enough". Default off in this pure fn; the route passes the user setting (default on). The
+  // brand-prefix firewall, 0.8 threshold, non-empty identity, and app-verified evidence all still apply, so
+  // an evidence-LESS guess never reaches it (Velvet Torch stays dead).
+  allowNonPublicAutoCount?: boolean;
+  // TRUTH-MODEL (owner): true when the primary decoded result is backed by an AUTHORITATIVE source
+  // (GS1 / official registry / a major retailer / manufacturer), as opposed to ONLY a generic barcode
+  // aggregator (upcitemdb / go-upc / barcodespider ...). A LONE aggregator source - which templates a
+  // page for ANY code and can carry recycled/wrong data (078742051451 water -> "Velvet Torch dress") -
+  // must NEVER alone auto-verify into permanent truth + an approved alias. Computed by the caller from
+  // the result's source hosts. When false and there is no two-provider agreement, the public single-
+  // source verify path is withheld -> the code stays "suggested" (recall-first still counts it as a
+  // provisional, reviewable row; it just never becomes a permanent Verified product/alias).
+  authoritativeEvidence?: boolean;
 }
 
 // --- Product-name quality gate (junk firewall) ------------------------------------------------
@@ -50,15 +68,32 @@ const TITLE_CODE_SUFFIX = /\s*[|–—-]\s*(?:upc|ean|gtin|isbn|barcode)\b[\s\S]
 const TITLE_SITE_SUFFIX =
   /\s*[|–—-]\s*(?:barcode lookup|upcitemdb|go-?upc|buycott|barcodespider|barcode ?finder|barcodes? ?database|ean-?search|eandata|barcodes?\.(?:com|net|org)|gtin ?lookup)\b[\s\S]*$/i;
 
-/** Strip AI hedges + barcode-site title cruft; keep real descriptors like "(Texas)" and hyphens. */
+// Aggregator-site name cruft: "UPC 078742051451 - Product Name" → "Product Name"
+const BARCODE_PREFIX = /^(?:UPC|EAN|GTIN|BARCODE)\s+[\d\s]+\s*[-\u2013\u2014]\s*/i;
+const PRICE_CASE_PREFIX = /^Price\/Case\)\s*/i;
+// HTML entities from scraped pages
+const HTML_ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'" };
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&(amp|lt|gt|quot|apos);/gi, (m) => HTML_ENTITIES[m.toLowerCase()] ?? m);
+}
+
+/** Strip AI hedges, barcode-site title cruft, aggregator prefixes, HTML entities, trademark junk. */
 export function cleanProductName(name: string): string {
-  return (name ?? "")
-    .replace(HEDGE_PAREN, "")
-    .replace(HEDGE_TAIL, "")
-    .replace(TITLE_CODE_SUFFIX, "")
-    .replace(TITLE_SITE_SUFFIX, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return decodeHtmlEntities(
+    (name ?? "")
+      .replace(BARCODE_PREFIX, "")
+      .replace(PRICE_CASE_PREFIX, "")
+      .replace(/\((?:r|R|®)\)/g, "")
+      .replace(HEDGE_PAREN, "")
+      .replace(HEDGE_TAIL, "")
+      .replace(TITLE_CODE_SUFFIX, "")
+      .replace(TITLE_SITE_SUFFIX, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /** True only for a clean, real product name (not a website title, hedge, placeholder, or junk). */

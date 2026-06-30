@@ -46,6 +46,17 @@ function looksInvalidating(text: string): boolean {
   return INVALIDATION_RE.test(text || "");
 }
 
+// A barcode-aggregator page that maps the ONE scanned code to MULTIPLE distinct products (a recycled /
+// reused / conflated UPC) is unreliable for IDENTITY: upcitemdb lists 078742051451 as a "Velvet Torch
+// Womens Lace Strapless Dress" AND two unrelated Calvin Klein shoes under "Product Name Variations".
+// Such a page must NOT count as verifying evidence - it can still name a Suggested candidate downstream,
+// but it can never auto-verify permanent truth + an approved alias. (Clean single-product pages, which do
+// not carry this multi-product marker, are unaffected and still verify.)
+const RECYCLED_RE = /\bproduct name variations\b|\bhas (?:the )?following product name\b|\b(?:also|other) product name variation/i;
+export function looksRecycledUpc(text: string): boolean {
+  return RECYCLED_RE.test(text || "");
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).hostname.toLowerCase();
@@ -84,7 +95,7 @@ export function verifyEvidence(
     // For prose channels (fetched source / snippet / grounding) a match inside an INVALIDATION page
     // ("not a valid UPC", "did you mean <other code>") is rejected - the code being there is a denial,
     // not a confirmation. url_only is just URLs (no prose), so the filter is a no-op there.
-    const matched = tier.texts.filter((t) => matches(t) && (tier.strength === "url_only" || !looksInvalidating(t)));
+    const matched = tier.texts.filter((t) => matches(t) && (tier.strength === "url_only" || (!looksInvalidating(t) && !looksRecycledUpc(t))));
     if (matched.length === 0) continue;
 
     if (tier.strength === "url_only") {

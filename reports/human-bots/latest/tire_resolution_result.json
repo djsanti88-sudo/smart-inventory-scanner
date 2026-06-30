@@ -6,7 +6,7 @@
     "label": "dashed (the original failing scan)",
     "product": "Falken",
     "status": "known",
-    "rowText": "1:53:04 AM 2881-6861 Falken Sincera ST80 A/S 28816861 2 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+    "rowText": "11:11:56 PM 2881-6861 Falken Sincera ST80 A/S 28816861 2 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
     "resolvedToCamel": false
   },
   "noDash": {
@@ -14,7 +14,7 @@
     "label": "no separator (found Falken online)",
     "product": "Falken",
     "status": "known",
-    "rowText": "1:53:05 AM 28816861 Falken Sincera ST80 A/S 28816861 3 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+    "rowText": "11:11:57 PM 28816861 Falken Sincera ST80 A/S 28816861 3 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
     "resolvedToCamel": false
   },
   "results": [
@@ -23,7 +23,7 @@
       "label": "retail barcode",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:04 AM 848983012906 Falken Sincera ST80 A/S 28816861 1 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:56 PM 848983012906 Falken Sincera ST80 A/S 28816861 1 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     },
     {
@@ -31,7 +31,7 @@
       "label": "dashed (the original failing scan)",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:04 AM 2881-6861 Falken Sincera ST80 A/S 28816861 2 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:56 PM 2881-6861 Falken Sincera ST80 A/S 28816861 2 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     },
     {
@@ -39,7 +39,7 @@
       "label": "no separator (found Falken online)",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:05 AM 28816861 Falken Sincera ST80 A/S 28816861 3 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:57 PM 28816861 Falken Sincera ST80 A/S 28816861 3 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     },
     {
@@ -47,7 +47,7 @@
       "label": "space separated",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:05 AM 2881 6861 Falken Sincera ST80 A/S 28816861 4 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:57 PM 2881 6861 Falken Sincera ST80 A/S 28816861 4 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     },
     {
@@ -55,7 +55,7 @@
       "label": "slash separated",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:06 AM 2881/6861 Falken Sincera ST80 A/S 28816861 5 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:57 PM 2881/6861 Falken Sincera ST80 A/S 28816861 5 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     },
     {
@@ -63,7 +63,7 @@
       "label": "backslash separated",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:06 AM 2881\\6861 Falken Sincera ST80 A/S 28816861 6 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:57 PM 2881\\6861 Falken Sincera ST80 A/S 28816861 6 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     },
     {
@@ -71,7 +71,7 @@
       "label": "underscore separated",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:06 AM 2881_6861 Falken Sincera ST80 A/S 28816861 7 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:58 PM 2881_6861 Falken Sincera ST80 A/S 28816861 7 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     },
     {
@@ -79,7 +79,7 @@
       "label": "dot separated",
       "product": "Falken",
       "status": "known",
-      "rowText": "1:53:07 AM 2881.6861 Falken Sincera ST80 A/S 28816861 8 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
+      "rowText": "11:11:58 PM 2881.6861 Falken Sincera ST80 A/S 28816861 8 Known Matched Falken Sincera ST80 A/S via an approved alias. Synced",
       "resolvedToCamel": false
     }
   ]

@@ -5,19 +5,19 @@ import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 
 // Server-only tire knowledge: EXACT trusted-barcode hits resolve a verified tire WITHOUT AI; misses + the
 // poison + near-matches return null (fall through to the existing AI path). Runs against the REAL committed
-// generated index (Cooper 029142712886 + Falken 848983006165 from the bootstrap seed).
+// generated index (Cooper 029142869870 + Falken 848983006165 from the bootstrap seed).
 
 beforeEach(() => __resetTireKnowledgeCacheForTests());
 
 describe("tireKnowledgeIndex - exact lookup", () => {
   it("resolves an exact trusted barcode (leading-zero UPC preserved as string)", async () => {
-    const row = await lookupByExactBarcode("029142712886");
-    expect(row?.brand).toBe("Cooper");
-    expect(row?.barcode).toBe("029142712886"); // leading zero intact
+    const row = await lookupByExactBarcode("029142869870");
+    expect(row?.brand).toBe("cooper");
+    expect(row?.barcode).toBe("029142869870"); // leading zero intact
   });
 
   it("normalizes scanner separators but never numeric-converts", async () => {
-    expect((await lookupByExactBarcode("0 29142-712886"))?.brand).toBe("Cooper");
+    expect((await lookupByExactBarcode("0 29142-869870"))?.brand).toBe("cooper");
   });
 
   it("MISS for an unknown barcode -> null (falls through to AI)", async () => {
@@ -34,7 +34,7 @@ describe("tireKnowledgeIndex - exact lookup", () => {
   });
 
   it("exact part-number lookup resolves the row", async () => {
-    expect((await lookupByExactPartNumber("90000183"))?.brand).toBe("Cooper");
+    expect((await lookupByExactPartNumber("90000027117"))?.brand).toBe("cooper");
     expect(await lookupByExactPartNumber("NOT-A-PART")).toBeNull();
   });
 
@@ -46,7 +46,7 @@ describe("tireKnowledgeIndex - exact lookup", () => {
 
 describe("TireKnowledgeProvider - decode result + safety", () => {
   it("exact barcode -> VERIFIED, app-verified, conf>=0.9, path=corpus_exact_barcode, full tire specs", async () => {
-    const r = await resolveExactBarcode("029142712886");
+    const r = await resolveExactBarcode("029142869870");
     expect(r).not.toBeNull();
     expect(r!.decision.status).toBe("verified");
     expect(r!.decision.exactCodeEvidenceVerifiedByApp).toBe(true);
@@ -58,7 +58,7 @@ describe("TireKnowledgeProvider - decode result + safety", () => {
   });
 
   it("PRIVACY: the corpus result carries NO source URLs (no global-corpus leak to the decode response)", async () => {
-    const r = await resolveExactBarcode("029142712886");
+    const r = await resolveExactBarcode("029142869870");
     expect(r!.results[0].sourceUrls).toEqual([]);
   });
 
@@ -83,13 +83,13 @@ describe("TireKnowledgeProvider - decode result + safety", () => {
   });
 
   it("part number -> SUGGESTED (Needs Review), never silently auto-counts", async () => {
-    const r = await resolveExactPartNumber("90000183");
+    const r = await resolveExactPartNumber("90000027117");
     expect(r!.decision.status).toBe("suggested");
     expect(r!.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
   });
 
   it("lazy load: works after a cache reset (re-reads the generated index)", async () => {
     __resetTireKnowledgeCacheForTests();
-    expect((await resolveExactBarcode("029142712886"))!.decision.status).toBe("verified");
+    expect((await resolveExactBarcode("029142869870"))!.decision.status).toBe("verified");
   });
 });

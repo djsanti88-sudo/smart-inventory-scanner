@@ -3,7 +3,7 @@
   "exports": [
     {
       "export": "final counts",
-      "header": "(no download)",
+      "header": "quantity,product_name,brand,category,specs,part_number,location,counted_at,session_id",
       "codeFields": []
     },
     {
@@ -23,7 +23,7 @@
     },
     {
       "export": "unknowns",
-      "header": "suggested_product_name,suggested_brand,suggested_category,status",
+      "header": "(no download)",
       "codeFields": []
     }
   ]

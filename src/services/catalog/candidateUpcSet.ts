@@ -95,3 +95,25 @@ export function candidateKnownUpcSet(candidate: CandidateProduct, records: UpcRe
   }
   return [...out];
 }
+
+function normUpc(s: string): string {
+  return (s || "").replace(/\D/g, "").replace(/^0+/, "");
+}
+
+/**
+ * Shop-catalog reverse-UPC guard (CLIENT-SAFE - no prefix map): does the AI-proposed product already
+ * exist in OUR OWN catalog/products under a DIFFERENT barcode than the one scanned? If so, flag it for a
+ * platformOwner heads-up (likely a mis-scan, a duplicate, or a wrong code). Inert when the candidate is
+ * not in our data. Uses UPC SETS (GTIN-equivalent), never a single code.
+ */
+export function shopReverseUpcConflict(
+  candidate: CandidateProduct,
+  scannedCode: string,
+  records: UpcRecord[],
+): { conflict: boolean; knownUpcs: string[] } {
+  const knownUpcs = candidateKnownUpcSet(candidate, records);
+  if (knownUpcs.length === 0) return { conflict: false, knownUpcs: [] };
+  const scan = normUpc(scannedCode);
+  const conflict = !knownUpcs.map(normUpc).includes(scan);
+  return { conflict, knownUpcs };
+}

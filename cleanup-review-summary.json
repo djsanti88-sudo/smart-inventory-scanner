@@ -1,0 +1,63 @@
+{
+  "generated": "2026-06-29",
+  "repo": "C:\\Users\\djsan\\inventory",
+  "branch": "feat/weekly-report-system",
+  "head": "b9dea2a",
+  "candidate": {
+    "path": "C:\\tmp\\inventory-release-repair",
+    "branch": "repair/baseline-v1-plus-reviewed-good-work",
+    "commit": "24d1797",
+    "clean": true,
+    "note": "Finished Option 3 work. Unaffected by anything in this report."
+  },
+  "vscode_change_count": { "default": 137, "untracked_all": 300 },
+  "group_1_wiring_files": {
+    "verdict": "keep_owner_review",
+    "feature": "reverse-UPC heads-up (platformOwner note when a suggested product already exists under a different code)",
+    "lines_added": 20,
+    "engine_committed_in_candidate": "candidateUpcSet.ts (commit abba1f4, dormant/unwired)",
+    "wired_in_main": true,
+    "in_24d1797": false,
+    "origin_commit": "3e02c8f (2026-06-28 19:13, santiago echeverri) + uncommitted edits on top",
+    "files": [
+      { "path": "src/types.ts", "change": "+2", "risk": "very_low", "role": "adds optional reverseUpcConflictNote field" },
+      { "path": "src/stores/scanStore.ts", "change": "+13", "risk": "low_medium", "role": "builds the heads-up note from your catalog+products" },
+      { "path": "src/components/NeedsReviewTable.tsx", "change": "+5", "risk": "very_low", "role": "renders amber owner-only badge" }
+    ],
+    "recommendation": "port to candidate as its own tested commit (preferred) | commit on feat/weekly-report-system | abandon"
+  },
+  "group_2_data": {
+    "verdict": "mostly_keep",
+    "untracked_files": 81,
+    "untracked_mb": 62.8,
+    "tracked_under_data": 114,
+    "tracked_modified": 5,
+    "ext": { "pyc": 40, "csv": 21, "json": 9, "log": 6, "py": 3, "txt": 1, "lock": 1 },
+    "generated_junk_mb": 1.6,
+    "keep": "tire corpus CSVs/JSONs, coverage_ledger.json, scripts, seed, config",
+    "gitignore": "*.pyc, __pycache__/, data/**/*.log, *.lock",
+    "archive_or_review": [
+      "outputs/backup_corpus_before_vendor_clean_*.csv (28.7 MB)",
+      "outputs/tirelibrary_missing_barcodes.csv (22.5 MB)"
+    ],
+    "owner_review": "5 tracked-modified tire scripts + tire_corpus_flat.csv -> commit or revert on tire branch"
+  },
+  "group_3_deleted_pngs": {
+    "verdict": "nothing_lost_ignore",
+    "count": 11,
+    "location": "reports/human-bots/playwright-report/data/",
+    "tracked_before": true,
+    "regenerated": true,
+    "restorable_with_git_checkout": true,
+    "current_report_present": "index.html (561 KB) + 12 fresh PNGs",
+    "recommendation": "do not restore; gitignore reports/**/playwright-report/"
+  },
+  "actions_taken": [
+    "created cleanup-review-report.html",
+    "created cleanup-review-summary.json",
+    "created proof-archive/24d1797-option3/ (5 screenshots copied + README.md)",
+    "created proof-archive/cleanup-analysis.html"
+  ],
+  "no_cleanup_performed": true,
+  "no_source_files_changed": true
+}

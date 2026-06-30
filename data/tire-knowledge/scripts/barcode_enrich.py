@@ -582,6 +582,10 @@ if __name__ == "__main__":
         if args.brands else None
     )
 
+    # 24/7 safety: only one enricher at a time (matches the harvest single-instance guard).
+    from singleton_lock import acquire_or_exit
+    acquire_or_exit("enrich", os.path.join(ROOT, "outputs"))
+
     run(
         root=ROOT,
         max_calls=args.max_calls,

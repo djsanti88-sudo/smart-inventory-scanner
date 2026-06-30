@@ -1,0 +1,458 @@
+[
+  {
+    "fingerprint": "first-impression:scan-page-desktop:comprehension-passes",
+    "title": "Desktop scan page communicates purpose clearly in under 10 seconds",
+    "severity": "low",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "first-impression:mobile-scan:session-block-buries-feedback",
+    "title": "Phone view: session controls bury the scan feedback below the fold",
+    "severity": "blocker",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "first-impression:scan-page:jargon-leak-ai-lookup",
+    "title": "Internal terms leak into user-facing copy: AI lookup, approved alias, provider names",
+    "severity": "high",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "first-impression:scan-page:primary-action-requires-click",
+    "title": "Scan input requires a manual click to focus; not auto-focused on page load",
+    "severity": "high",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "first-impression:mobile-scan:table-columns-truncated",
+    "title": "Phone view scan feed table truncates columns; Status and Saved columns disappear off-screen",
+    "severity": "medium",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "scanner:default-focus:misleading-placeholder-copy",
+    "title": "Scan input placeholder says 'Click here' but the field is already auto-focused",
+    "severity": "low",
+    "team": "decode",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "data:counts:correct-button-missing",
+    "title": "Counts table lacks a 'Correct' button - human correction flow may be absent or renamed",
+    "severity": "medium",
+    "team": "decode",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "data:unknown:reason-text-truncated-in-report",
+    "title": "Needs Review reason text is truncated in the data_integrity_report.md table",
+    "severity": "low",
+    "team": "decode",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "security:client-side-role-gate:data-not-stripped-at-store-api-boundary",
+    "title": "Role gating is UI-only: full NeedsReview/scan data (raw codes, provider names, decode traces) is in the Zustand store for all roles; only JSX conditionals hide it",
+    "severity": "high",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "security:auth-bypass:NEXT_PUBLIC_OPEN_ACCESS-skips-login-gate",
+    "title": "NEXT_PUBLIC_OPEN_ACCESS=1 bypasses the entire AuthGuard with no server-side enforcement",
+    "severity": "high",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "security:tenant-isolation:businessId-supplied-by-client-not-validated-against-auth-token",
+    "title": "resolve-scan route accepts businessId from the request body; a malicious client could pass another business's ID if Firebase member check is absent or misconfigured",
+    "severity": "high",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "security:pii-masking:bare-price-numbers-not-masked-without-keyword-label",
+    "title": "Sanitizer only masks cost/price when a labeled keyword is present; an unlabeled bare dollar amount (e.g. a price in a product notes field) passes through to AI",
+    "severity": "medium",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "security:role-visibility:confidence-score-visible-to-all-roles-in-needs-review",
+    "title": "AI confidence percentage is visible to all roles in the Needs Review table, not gated behind isPlatform",
+    "severity": "low",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "security:secret-hygiene:no-env-example-file-present",
+    "title": "No .env.example file found in the repository root",
+    "severity": "low",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "verifiedFacts and guesses rendered in NeedsReviewTable without isPlatform guard",
+    "severity": "medium",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "confidence and autoVerifyScore shown to all roles in NeedsReviewTable",
+    "severity": "low",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Role gating is client-side only - auth-bypass user sees full platformOwner view",
+    "severity": "high",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "catalogEntries collection is globally readable by any signed-in user",
+    "severity": "medium",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "exportFinalCounts and exportProducts contain raw barcode/GTIN/UPC/EAN and alias fields - no call-site role check outside ExportMenu",
+    "severity": "medium",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "platformOwner can inspect and repair global data safely (legitimate path confirmed intact)",
+    "severity": "low",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Anthropic API key and SerpAPI key committed to git history in Playwright results file",
+    "severity": "blocker",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "POST /api/ai-lookup has no authentication, no server-side rate limit, and no server-side daily spend cap",
+    "severity": "blocker",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "GET /api/ai-lookup exposes full AI stack fingerprint to unauthenticated callers",
+    "severity": "medium",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Client-side-only daily AI spend cap is trivially bypassed by direct HTTP calls",
+    "severity": "high",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Playwright config spreads full OS process environment into test report, capturing any shell secret",
+    "severity": "high",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "undici high-severity CVEs (TLS bypass, HTTP header injection, DoS, response queue poisoning)",
+    "severity": "high",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "keySafety test does not cover FIRECRAWL_API_KEY, SERPAPI_KEY, or ANTHROPIC_API_KEY client-side reads",
+    "severity": "medium",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "SSRF hostname guard is DNS-resolution-blind (hostname-only, no post-resolution IP check)",
+    "severity": "medium",
+    "team": "security",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "decision-load:scan:session-controls-always-visible",
+    "title": "Session controls (name field, location dropdown, 3 buttons) are always expanded above the feed",
+    "severity": "high",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "decision-load:scan:export-and-import-visible-during-scan-loop",
+    "title": "Export dropdown and Import button sit inside the active scan panel, adding choices during the repetitive scan loop",
+    "severity": "medium",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "decision-load:scan:sync-retry-button-always-rendered",
+    "title": "'Try saving again' button is always rendered in the sync row even when online and all items are synced",
+    "severity": "low",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "decision-load:scan:delete-button-equal-weight-to-modify",
+    "title": "Delete button in 'Your counts' rows is the same visual weight as Modify with no confirmation step visible",
+    "severity": "high",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "decision-load:scan:seven-column-feed-table",
+    "title": "Scan feed table has 7 columns (Time, Barcode, Product, Part number, Qty after, Status, Reason, Saved) -- the Reason column requires reading mid-scan",
+    "severity": "medium",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "decision-load:scan:mobile-session-block-dominates-viewport",
+    "title": "On mobile the session + sync + export block consumes most of the viewport before the scan feed, pushing the live feedback area below the fold",
+    "severity": "high",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "decision-load:products:no-search-or-filter",
+    "title": "Products page is a flat unsorted table with no search, filter, or sort controls; at scale locating a product requires scanning the full list",
+    "severity": "medium",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "ux:platform-owner:scan-page:internal-ai-branding-leak",
+    "title": "Settings page exposes internal AI provider names (Gemini, OpenAI) to shop operators",
+    "severity": "high",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "ux:platform-owner:products-page:no-search-or-filter",
+    "title": "Products page has no search, filter, or sort on a multi-category catalog",
+    "severity": "medium",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "fingerprint": "ux:platform-owner:scan-page:saved-counter-demo-killer",
+    "title": "'Saved: 0' while rows show 'Synced' looks like a bug to a prospect evaluating reliability",
+    "severity": "high",
+    "team": "technical_qa",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Role-gated server-side resolution and data protection (customer browsers never download the alias/catalog DB)",
+    "severity": "high",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Per-user scan attribution (who scanned what, when, in each session)",
+    "severity": "high",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Session history list with comparison (view and export any past inventory count)",
+    "severity": "high",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Product search and filter on the Products page",
+    "severity": "high",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Low-stock alerts and reorder point memory per product",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Audit history viewer (surface the already-written audit log in the UI)",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "In-row quantity correction button on the counts table",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Part-number-only CSV import with enrichment (onboard an existing product list that has no barcodes yet)",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Mobile scan input auto-focus on page load (eliminate the required tap before scanning on phones)",
+    "severity": "low",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Tekmetric Tire Suite is the single biggest threat: embedded + incremental cost",
+    "severity": "high",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Export gap: only final-counts CSV is wired; products, aliases, raw log, and unknowns exports are missing",
+    "severity": "high",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Role gating not yet live: all users see all exports and all data",
+    "severity": "high",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Needs Review copy is unclear to a first-time shop user -- a UX gap vs. every polished competitor",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "No preloaded catalog: Smart Inventory requires manual seeding or scan-and-resolve before any item is 'Known'",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "No purchase-order or reorder workflow: Smart Inventory is count-only vs. full inventory lifecycle competitors",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  },
+  {
+    "title": "Locale-specific catalog growth (localStorage) will degrade performance and expose catalog to the client",
+    "severity": "medium",
+    "team": "business",
+    "first_seen": "2026-06-28",
+    "last_seen": "2026-06-28",
+    "status": "open"
+  }
+]

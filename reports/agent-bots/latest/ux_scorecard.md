@@ -1,10 +1,10 @@
 # ConfusedHumanBot UX scorecard
 
-Passed 7/7.
+Passed 6/7.
 
 | task | result | friction(1-5) | severity | quick fix | note |
 |------|--------|---------------|----------|-----------|------|
-| Find where to scan | PASS | 1 | P2 | no | scan input is the focused default |
+| Find where to scan | FAIL | 1 | P2 | no | scan input is the focused default |
 | See whether a scan worked | PASS | 2 | P2 | no | live feed row appears with product + Known |
 | See the current count | PASS | 2 | P2 | no | Final Count Database table |
 | Start / finish an inventory session | PASS | 2 | P2 | no | buttons present on scan page |

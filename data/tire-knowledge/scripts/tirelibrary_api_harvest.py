@@ -643,6 +643,10 @@ def main():
                         help="Process only this single brand (case-insensitive match).")
     args = parser.parse_args()
 
+    # 24/7 safety: never allow two harvesters at once (a past duplicate poisoned the ledger).
+    from singleton_lock import acquire_or_exit
+    acquire_or_exit("harvest", os.path.join(_ROOT, "outputs"))
+
     harvest(args)
 
 

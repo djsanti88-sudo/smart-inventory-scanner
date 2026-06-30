@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cleanup Analysis — 3 things to decide</title>
+<style>
+  :root{
+    --green:#15803d; --green-bg:#f0fdf4; --green-bd:#bbf7d0;
+    --amber:#b45309; --amber-bg:#fffbeb; --amber-bd:#fde68a;
+    --red:#b91c1c;   --red-bg:#fef2f2;   --red-bd:#fecaca;
+    --ink:#18181b; --muted:#52525b; --line:#e4e4e7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#fafafa;color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:920px;margin:0 auto;padding:32px 20px 80px;}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin:0 0 24px;font-size:15px}
+  .banner{background:var(--green-bg);border:1px solid var(--green-bd);border-radius:12px;padding:14px 18px;margin:0 0 28px;font-size:15px}
+  .banner b{color:var(--green)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 22px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .card h2{font-size:21px;margin:0 0 4px;display:flex;align-items:center;gap:10px;letter-spacing:-.01em}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:#18181b;color:#fff;font-size:16px;font-weight:700;flex:none}
+  .tag{font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em}
+  .tag.keep{color:var(--green);background:var(--green-bg);border:1px solid var(--green-bd)}
+  .tag.review{color:var(--amber);background:var(--amber-bg);border:1px solid var(--amber-bd)}
+  .tag.junk{color:var(--red);background:var(--red-bg);border:1px solid var(--red-bd)}
+  .what{color:var(--muted);font-size:14px;margin:2px 0 16px}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  td code,code.inline{background:#f4f4f5;border-radius:5px;padding:1px 6px;font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .row{display:flex;gap:14px;margin:14px 0}
+  .row .k{flex:none;width:130px;color:var(--muted);font-size:13px;font-weight:600;padding-top:2px}
+  .row .v{flex:1;font-size:14.5px}
+  .verdict{border-radius:10px;padding:12px 16px;margin-top:14px;font-size:14.5px}
+  .verdict.keep{background:var(--green-bg);border:1px solid var(--green-bd)}
+  .verdict.review{background:var(--amber-bg);border:1px solid var(--amber-bd)}
+  .verdict.junk{background:var(--red-bg);border:1px solid var(--red-bd)}
+  .verdict b{display:block;margin-bottom:2px}
+  pre{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px 16px;overflow:auto;font:12.5px ui-monospace,Menlo,Consolas,monospace;line-height:1.5}
+  pre .add{color:#86efac}
+  pre .c{color:#64748b}
+  .pill{display:inline-block;font-size:12px;color:var(--muted);background:#f4f4f5;border-radius:6px;padding:2px 8px;margin:2px 4px 2px 0}
+  .foot{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+  .foot h2{margin-top:0}
+  .ask{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-top:14px;font-size:14.5px}
+  .ok{color:var(--green);font-weight:700}
+  .no{color:var(--red);font-weight:700}
+  small.dim{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Cleanup Analysis</h1>
+  <p class="sub">The 3 loose things in your VS Code folder <code class="inline">C:\Users\djsan\inventory</code> — what they are, where they came from, and whether you need them. Generated 2026-06-29.</p>
+
+  <div class="banner">
+    <b>First, the important part:</b> your finished work — commit <code class="inline">24d1797</code> in the candidate folder <code class="inline">C:\tmp\inventory-release-repair</code> — is <b>safe and 100% clean.</b> None of the three items below touch it. <b>Nothing has been deleted.</b>
+  </div>
+
+  <!-- ITEM 1 -->
+  <div class="card">
+    <h2><span class="num">1</span> The 3 “wiring” files <span class="tag review">Keep &amp; review</span></h2>
+    <p class="what">A half-connected <b>safety feature</b>: a “reverse-UPC heads-up.”</p>
+
+    <p>When the AI suggests a product for an unknown scanned code, this feature checks <b>your own catalog</b> first. If that same product already exists under a <b>different barcode</b>, it shows you (the owner) a small amber note: <em>“Already in your catalog under: 0123…”</em>. It helps catch mis-scans and accidental duplicate products.</p>
+
+    <table>
+      <tr><th>File</th><th>Size of change</th><th>What it does</th></tr>
+      <tr><td><code>types.ts</code></td><td>+2 lines</td><td>Adds the optional “note” field.</td></tr>
+      <tr><td><code>scanStore.ts</code></td><td>+13 lines</td><td>The logic that builds the note (compares the suggestion to your catalog).</td></tr>
+      <tr><td><code>NeedsReviewTable.tsx</code></td><td>+5 lines</td><td>Shows the amber note (owner-only) on the Needs Review screen.</td></tr>
+    </table>
+
+    <p style="margin:14px 0 6px;font-size:13px;color:var(--muted)">The actual change (purely additive — nothing removed):</p>
+    <pre><span class="c">// scanStore.ts — builds the heads-up note</span>
+<span class="add">+ const shopRecords = [ ...your catalog, ...your products ];</span>
+<span class="add">+ const shopRev = shopReverseUpcConflict(suggestion, scannedCode, shopRecords);</span>
+<span class="add">+ const reverseUpcConflictNote = shopRev.conflict</span>
+<span class="add">+   ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0,3).join(", ")}` : "";</span></pre>
+
+    <div class="row"><div class="k">Where / when</div><div class="v">Created <b>yesterday, 2026-06-28 ~7:42pm</b>, in the VS Code folder on branch <code>feat/weekly-report-system</code>. Never committed — loose working changes.</div></div>
+    <div class="row"><div class="k">Key fact</div><div class="v">The <b>engine</b> for this (<code>candidateUpcSet.ts</code>) is <b>already safely committed</b> in your candidate (commit <code>abba1f4</code>) — but it sits <b>dormant</b> (never called). These 3 files are the <b>“on switch.”</b></div></div>
+    <div class="row"><div class="k">Do we need it?</div><div class="v">Nice-to-have safety, <b>not core</b>. <span class="ok">Low risk</span> — purely additive, owner-only badge. Nothing breaks without it.</div></div>
+
+    <div class="verdict review">
+      <b>Recommendation: KEEP, port into the candidate later as its own small tested commit.</b>
+      It’s a <b>separate feature</b> from Option 3 — don’t fold it into <code>24d1797</code>. Not urgent. (If you’d rather, we can instead commit it on <code>feat/weekly-report-system</code> where it already lives, or abandon it — the ~20 lines are trivially rebuildable.)
+    </div>
+  </div>
+
+  <!-- ITEM 2 -->
+  <div class="card">
+    <h2><span class="num">2</span> The <code>data/**</code> files (81) <span class="tag keep">Mostly keep</span></h2>
+    <p class="what">This is your <b>parked tire-database pipeline</b> — harvested tire data + the scripts that build it.</p>
+
+    <p>It’s a mix of <b>real data you want to keep</b> and <b>auto-generated junk</b>:</p>
+
+    <table>
+      <tr><th>What</th><th>Examples</th><th>Verdict</th></tr>
+      <tr>
+        <td><b>Tire corpus &amp; scripts</b><br><small class="dim">authored / harvested</small></td>
+        <td><code>tire_corpus_flat.csv</code>, <code>tire_products.csv</code>, <code>coverage_ledger.json</code> (9.5 MB), <code>harvested_brands.json</code>, <code>tyres_demo.csv</code>, <code>outputs/ai_barcode_candidates.csv</code>, + 5 pipeline scripts (<code>barcode_enrich.py</code>, <code>ledger.py</code>…)</td>
+        <td><span class="ok">KEEP</span><br><small class="dim">your parked tire-DB asset</small></td>
+      </tr>
+      <tr>
+        <td><b>Generated junk</b></td>
+        <td><span class="pill">40 × .pyc</span><span class="pill">__pycache__/</span><span class="pill">6 × .log</span> Python bytecode + logs</td>
+        <td><span class="no">IGNORE</span><br><small class="dim">remade automatically</small></td>
+      </tr>
+      <tr>
+        <td><b>One-time backup</b></td>
+        <td><code>outputs/backup_corpus_before_vendor_clean_…csv</code> — <b>28.7 MB</b></td>
+        <td><span style="color:var(--amber);font-weight:700">KEEP for now</span><br><small class="dim">archive later</small></td>
+      </tr>
+    </table>
+
+    <div class="row"><div class="k">Where / when</div><div class="v">Produced by your tire-DB pipeline runs (the project you told me to <b>park and never truncate</b>).</div></div>
+    <div class="row"><div class="k">Do we need it?</div><div class="v">The <b>corpus + scripts: YES</b> (parked pipeline). The <b>.pyc / .log: no</b> — they regenerate on every run.</div></div>
+
+    <div class="verdict keep">
+      <b>Recommendation: KEEP the tire corpus + scripts. GITIGNORE the <code>.pyc</code> / <code>__pycache__</code> / <code>.log</code> junk.</b>
+      Honors your “don’t truncate the tire-DB” instruction while stopping the bytecode noise from cluttering the change list. The 28 MB backup: leave it for now, archive when convenient.
+    </div>
+  </div>
+
+  <!-- ITEM 3 -->
+  <div class="card">
+    <h2><span class="num">3</span> The 11 deleted report images <span class="tag junk">Nothing lost</span></h2>
+    <p class="what">Screenshots <b>inside an auto-generated test report</b> — replaced, not lost.</p>
+
+    <p>The folder <code>reports/human-bots/playwright-report/</code> is a <b>generated Playwright HTML report</b>: one <code>index.html</code> plus a <code>data/</code> folder of screenshots with random hash names. Every time the tests run, the report is <b>rebuilt with new hash names</b>.</p>
+
+    <table>
+      <tr><th>Check</th><th>Result</th></tr>
+      <tr><td>Is the report still there?</td><td><span class="ok">Yes</span> — a fresh <code>index.html</code> (561 KB) + <b>12 new screenshots</b> are present right now.</td></tr>
+      <tr><td>What are the 11 “deleted” ones?</td><td><b>Old screenshots</b> from a previous test run. A newer run regenerated the report with new names, so git sees the old names as “deleted.”</td></tr>
+      <tr><td>Were they lost?</td><td><span class="no">No</span> — <b>replaced.</b> The current report is complete and intact.</td></tr>
+      <tr><td>Origin</td><td>Committed once in <code>e5c2e16</code> (“qa:bots proof artifacts”), then regenerated by later test runs.</td></tr>
+    </table>
+
+    <div class="row"><div class="k">Do we need it?</div><div class="v"><span class="no">No</span> — these specific files regenerate on every test run. <small class="dim">(Side note: your root <code>/playwright-report</code> is already ignored by git; this nested copy was simply missed.)</small></div></div>
+
+    <div class="verdict junk">
+      <b>Recommendation: IGNORE the deletions — do NOT restore (nothing was lost).</b>
+      Add <code>reports/**/playwright-report/</code> to <code>.gitignore</code> so this auto-generated report stops appearing as “changes” forever.
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="foot">
+    <h2>Bottom line</h2>
+    <table>
+      <tr><th>Item</th><th>Need it?</th><th>What I recommend</th></tr>
+      <tr><td><b>1.</b> 3 wiring files</td><td><span style="color:var(--amber);font-weight:700">Optional</span></td><td>Keep → port into candidate later as its own tested commit</td></tr>
+      <tr><td><b>2.</b> <code>data/**</code></td><td><span class="ok">Yes (most)</span></td><td>Keep tire corpus + scripts; gitignore the .pyc / .log junk</td></tr>
+      <tr><td><b>3.</b> 11 deleted PNGs</td><td><span class="no">No</span></td><td>Nothing lost; ignore + gitignore the report folder</td></tr>
+    </table>
+
+    <div class="ask">
+      <b>What I need from you</b> — for Item 1 only, pick one: <b>(a)</b> port the wiring into the candidate as a new tested commit, <b>(b)</b> commit it where it lives on <code>feat/weekly-report-system</code>, or <b>(c)</b> abandon it. Items 2 &amp; 3 just need a <b>“CLEANUP APPROVED”</b> to add the gitignore lines.
+      <br><br>I have <b>deleted / committed / cleaned nothing.</b> I’ll wait for your word.
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

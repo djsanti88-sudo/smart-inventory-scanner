@@ -25,7 +25,7 @@ export function checkRateLimit(
   ip: string,
   opts: { limit?: number; windowMs?: number; now?: number } = {}
 ): { allowed: boolean; retryAfterMs: number; remaining: number } {
-  const limit = opts.limit ?? Number(process.env.AI_LOOKUP_RATE_LIMIT ?? 30);
+  const limit = opts.limit ?? Number(process.env.AI_LOOKUP_RATE_LIMIT ?? 120);
   const windowMs = opts.windowMs ?? Number(process.env.AI_LOOKUP_RATE_WINDOW_MS ?? 60_000);
   const now = opts.now ?? Date.now();
   const key = ip || "unknown";

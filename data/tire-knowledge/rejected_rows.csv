@@ -1,0 +1,8 @@
+raw_brand,raw_model,raw_size,raw_barcode,raw_mpn,source_url,reject_reason,harvested_at,run_id
+VersaTyre,TRX6000,305/35R24,950000002470,TRX60002401,https://www.tiresandwheels.com/product/tire/EC489789/VersaTyre/TRX60002401/TRX6000_950000002470_305+35R24,barcode missing or fails GTIN check,2026-06-23T03:59:53Z,run_20260623_035903
+Ironman,RB SUV,255/70R16,068802886646,86646,https://www.tiresandwheels.com/product/tire/EC493876/Ironman/86646/RB-SUV_68802886646_255+70R16,barcode missing or fails GTIN check,2026-06-23T04:02:27Z,run_20260623_040029
+Ironman,iMove,215/45R17,068802872434,72434,https://www.tiresandwheels.com/product/tire/EC165034/Ironman/72434/iMove_68802872434_215+45R17,barcode missing or fails GTIN check,2026-06-23T04:08:20Z,run_20260623_040651
+Ironman,iMove,255/35R19,068802872446,72446,https://www.tiresandwheels.com/product/tire/EC165046/Ironman/72446/iMove_68802872446_255+35R19,barcode missing or fails GTIN check,2026-06-23T04:08:20Z,run_20260623_040651
+Mickey Thompson Tires,ET Street Radial,P315/35R17,087025489507,90000024649,https://www.tiresandwheels.com/product/tire/EC302138/Mickey-Thompson-Tires/90000024649/ET-Street-Radial_87025489507_P315+35R17,barcode missing or fails GTIN check,2026-06-23T04:12:16Z,run_20260623_041053
+Nitto,NT420V Luxury Truck And Suv Tire,285/40R24,4981910565416,212410,https://www.tiresandwheels.com/product/tire/EC546448/Nitto/212410/NT420V-Luxury-Truck-And-Suv-Tire_4981910565416_285+40R24,barcode missing or fails GTIN check,2026-06-23T04:20:52Z,run_20260623_041917
+Hercules,Raptis R T6,235/50R17,688028985678,98567,https://www.tiresandwheels.com/product/tire/EC463267/Hercules/98567/Raptis-R-T6_688028985678_235+50R17,barcode missing or fails GTIN check,2026-06-23T04:24:45Z,run_20260623_042327

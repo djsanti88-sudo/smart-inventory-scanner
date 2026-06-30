@@ -1,0 +1,15 @@
+{
+  "run_id": "run_20260623_052627",
+  "result": {
+    "models_scraped": 14,
+    "trusted_added": 177,
+    "backlog": 0,
+    "rejected": 0,
+    "dup_skipped": 2,
+    "credits_spent": 14,
+    "rows_per_credit": 12.6,
+    "remaining_credits": 794
+  },
+  "audit_ok": true,
+  "timestamp": "2026-06-23T05:27:22Z"
+}

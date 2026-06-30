@@ -1,6 +1,6 @@
 import type { AiLookupResult, CodeType, EvidenceResult } from "@/types";
 import { normalizeResult } from "@/services/ai/provider";
-import { verifyEvidence } from "@/services/ai/evidenceVerifier";
+import { verifyEvidence, looksRecycledUpc } from "@/services/ai/evidenceVerifier";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { inferTireBrandFromName, isTireContext, hasRequiredTireSpecs, tireSizeToken } from "@/services/ai/tireSpecs";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
@@ -251,8 +251,12 @@ export async function enrichWithPageFetch(params: {
 
   // If no fetched page contains the code, return NO product (-> Needs Review). Never fall back to a
   // site's generic/search title (the "710154236681 website-title" bug).
-  if (pages.length === 0 || !codePage) {
-    return { result: null, evidence, fetchedUrls, pageCount: pages.length, fetchedText };
+  // RECYCLED-UPC: a code-bearing page that maps the ONE code to MULTIPLE unrelated products (upcitemdb listed
+  // 078742051451 as a "Velvet Torch dress" + 2 Calvin Klein shoes) is DISCARDED entirely - never adopt its
+  // (often wrong) title. The decode then falls through to the AI result or the barcode-anatomy fallback, so a
+  // scan never SHOWS the junk product, not even as a Suggested row.
+  if (pages.length === 0 || !codePage || looksRecycledUpc(codePage.text)) {
+    return { result: null, evidence: { ...evidence, verified: false, strength: "none" }, fetchedUrls, pageCount: pages.length, fetchedText };
   }
 
   // FAST PATH: read the code-bearing page's OWN structured data (ld+json / og:title) first - no model

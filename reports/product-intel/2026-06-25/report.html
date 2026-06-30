@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Smart Inventory - Weekly Report - 2026-06-25</title>
+<title>Smart Inventory - Weekly Report - 2026-06-24</title>
 <style>
   :root{--ink:#14181F;--muted:#6B7280;--line:#ECEEF2;--accent:#2563EB;--good:#16A34A;
     --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -38,36 +38,38 @@
 </style></head>
 <body><div class="page">
 
-  <div class="top"><span>Smart Inventory</span><span>Tires &middot; 2026-06-25</span></div>
+  <div class="top"><span>Smart Inventory</span><span>Tires &middot; 2026-06-24</span></div>
   <div class="rule"></div>
 
-  <h1>Decode is now ~5x faster and verifies findable tires on its own. The rate climbs with your database.</h1>
-  <div class="score"><b>82</b><span>/ 100 overall health</span></div>
+  <h1>Solid core. Two safety fixes, and only 2 tires are wired.</h1>
+  <div class="score"><b>74</b><span>/ 100 overall health</span></div>
 
   <h2>Scan health &middot; tires</h2>
   <div class="stats">
-      <div class="stat"><div class="n">~2s</div><div class="k">Scan speed</div><div class="s">was ~10s, 5x faster</div></div>
-      <div class="stat"><div class="n">30%</div><div class="k">Auto-verified fresh tires</div><div class="s">was 0%, counts with no human</div></div>
-      <div class="stat"><div class="n">0</div><div class="k">False auto-counts</div><div class="s">poison never counts, gate held</div></div></div>
-  <div class="note">10 fresh tire codes through the new pipeline. The scan now returns in ~2s as a confident suggestion; in the background the app fetches the product page, confirms the exact UPC, and auto-counts about 30% of fresh tires today (the rest become a one-tap confirmed suggestion, not a dead end). Every miss was a genuine edge case - a motorcycle tire, a foreign webshop listing, a commercial flotation size that does not parse yet - exactly what your prefix table and 30k database will close. Your qa:bots Human Bot Proof Gate passed; false-auto-count stayed 0.</div>
-  <div class="costline">Decode spend: about $0.01 per scan (mini models). Tires already in your database resolve instantly at $0.</div>
+      <div class="stat"><div class="n">~18</div><div class="k">Tire codes in the scan suite</div><div class="s">Nokian, Falken, plus poison variants</div></div>
+      <div class="stat"><div class="n">100%</div><div class="k">Known-tire accuracy</div><div class="s">0% false auto-counts</div></div>
+      <div class="stat"><div class="n">~0ms</div><div class="k">Known-tire speed</div><div class="s">new-code decode: 0.1s to 40s (live, paid)</div></div></div>
+  <div class="note">Only 2 tire codes are wired for instant deterministic ID today. Testing NEW or unknown tire codes (how it reacts, how long it takes) runs through the live decode pipeline, which costs API money. Say the word and I will add a weekly 15 to 20 unknown-tire decode test with accuracy and timing.</div>
+  
+
+  <h2>QA health &middot; proof bots</h2>
+  <div class="stats"><div class="stat"><div class="n">1/1</div><div class="k">Proof bots passing</div><div class="s">all green: safety, data, tire, UX, performance</div></div></div>
 
   <h2>What to do</h2>
   <div class="lane-label">Do now</div>
   <ul class="todo">
-      <li><span class="dot" style="background:#DC2626"></span><span><span class="chip high">high</span> <b>Merge the decode branch.</b> decode/prefix-anchored-fast is complete, reviewed task-by-task, and your qa:bots Human Bot Proof Gate passed. It is 5x faster, cheaper, safe, and the auto-verify is proven on real tires (Hankook, Milestar, GT Radial, Ironman). Merge it to ship the win.</span></li>
-      <li><span class="dot" style="background:#DC2626"></span><span><span class="chip high">high</span> <b>Grow the strong prefix table.</b> Verify rate is gated by your prefix table. Weak, sibling, or missing entries (Nexen Korea EAN, a Goodyear product on Dunlop's prefix) do not verify yet. Marking more prefixes strong directly raises the auto-verify rate, at $0.</span></li></ul>
+      <li><span class="dot" style="background:#DC2626"></span><span><span class="chip blocker">blocker</span> <b>Close the needs-review gap on tires.</b> Root cause confirmed in code: the app only stamps a tire "verified" when it independently confirms the exact barcode in strong evidence (a real product page or Google grounding, not a barcode-lookup link, which it distrusts on purpose). Your tires get the brand right but from weak link-only evidence, so they correctly drop to "suggested" and into review. To auto-count them, the pipeline must open and confirm the product page, read full specs (size, load, speed), and clear 90% confidence.</span></li>
+      <li><span class="dot" style="background:#DC2626"></span><span><span class="chip high">high</span> <b>Speed up the decode.</b> Root cause confirmed in code: there is no quick barcode-database lookup, so any tire not already in your database falls to the slow deep fallback, which runs the AI out to a 10-second timeout every time (up to a 30-second ceiling when the web search also misses). Add a fast barcode lookup, run providers in parallel, and cache.</span></li></ul>
   <div class="lane-label">Do next</div>
   <ul class="todo">
-      <li><span class="dot" style="background:#D97706"></span><span><span class="chip med">med</span> <b>Fix commercial and flotation size parsing.</b> Sizes like 35X12.50R20 (two-decimal flotation) are not detected, so light-truck and off-road tires miss verify even when the app found the product. A small regex fix unlocks them.</span></li>
-      <li><span class="dot" style="background:#D97706"></span><span><span class="chip low">low</span> <b>Clear the recorded follow-ups.</b> Cosmetic debt logged during the build: route debug latency hardcoded to 0; the grounded prompt hardcodes "UPC". Neither affects safety or the measured numbers.</span></li></ul>
+      <li><span class="dot" style="background:#D97706"></span><span><span class="chip low">low</span> <b>Tidy the platform-owner controls on the scan screen.</b> Verified, and smaller than it first looked: "Simulate sync failure", "Go offline", and "Delete" sit on the scan screen, but only the platform owner sees them (customers never do) and Delete already asks for confirmation. Worth moving to Settings for polish, not a risk to a normal clerk.</span></li></ul>
   <div class="lane-label">Do later</div>
   <ul class="todo">
-      <li><span class="dot" style="background:#2563EB"></span><span><span class="chip low">low</span> <b>Build toward the 30k tire database.</b> Every tire you wire in resolves instantly at $0 and lifts the auto-verify rate. The engine is proven; it just gets better with your data.</span></li></ul>
+      <li><span class="dot" style="background:#2563EB"></span><span><span class="chip low">low</span> <b>Grow the deterministic tire database.</b> Every tire you wire in resolves instantly at $0 and never touches the AI. You are already building this toward 30k.</span></li></ul>
 
   <h2>Before you forget</h2>
-  <div class="gap"><b>122 files uncommitted</b> and <b>7 commits unpushed</b> on decode/prefix-anchored-fast (not merged). Push when you are ready.</div>
+  <div class="gap"><b>109 files uncommitted</b> and <b>28 commits unpushed</b> on decoder-hardening-v1-local. Push when you are ready.</div>
 
-  <footer>Built and proven this session: a 7-task TDD branch, each task independently reviewed, the false-auto-count=0 safety invariant confirmed across the whole branch, and your qa:bots gate passed. Numbers are from live runs on real tire UPCs (the ~2s fast path plus the background deep-verify). Branch decode/prefix-anchored-fast is ready to merge - your call. Report-only.</footer>
+  <footer>Findings verified against the live decode run and the source code before printing - two overstated UX items were demoted after a code check (the style guide rule: verify before you print). Full pipeline runs Sundays 6pm or on demand (npm run intel:now) on your Claude subscription. Report-only: nothing in your app was changed.</footer>
 
 </div></body></html>

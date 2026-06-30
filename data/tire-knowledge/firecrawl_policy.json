@@ -1,0 +1,8 @@
+{
+  "TOTAL_CAP": 1000,
+  "PER_RUN_CAP": 300,
+  "ROWS_PER_CREDIT_FLOOR": 8,
+  "STEALTH_ALLOWED": false,
+  "KILL_SWITCH_FILE": ".firecrawl_STOP",
+  "total_credits_spent": 271
+}

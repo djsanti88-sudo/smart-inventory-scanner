@@ -1,0 +1,5 @@
+domain,url_attempted,block_type,notes,harvested_at,run_id
+tiresandwheels.com,https://www.tiresandwheels.com/catalog/tires/Dunlop/SC5369/SP-Sport-Maxx/,scrape_error,"Error: connect ETIMEDOUT 35.245.250.27:443
+",2026-06-23T03:20:45Z,run_20260623_031943
+tiresandwheels.com,https://www.tiresandwheels.com/catalog/tires/Hercules/SC5558/Avalanche-X-Treme-SUV/,scrape_error,non-zero exit,2026-06-23T03:28:59Z,run_20260623_032749
+tiresandwheels.com,https://www.tiresandwheels.com/catalog/tires/General/SC9723/Grabber-A/TX-FR/,scrape_error,non-zero exit,2026-06-23T04:20:53Z,run_20260623_041917

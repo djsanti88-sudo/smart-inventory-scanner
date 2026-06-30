@@ -1,0 +1,55 @@
+{
+  "date": "2026-06-28",
+  "mode": "lean",
+  "provisional": true,
+  "ranLive": false,
+  "total": 6,
+  "correct": 0,
+  "wrong": 0,
+  "needsReview": 0,
+  "unscored": 0,
+  "perCode": [
+    {
+      "code": "2881-6861",
+      "expected": "Falken",
+      "got": "(not run)",
+      "verdict": "dry",
+      "note": "dry mode (LIVE_AI_TEST not 1)"
+    },
+    {
+      "code": "878106003504",
+      "expected": "(unconfirmed)",
+      "got": "(not run)",
+      "verdict": "dry",
+      "note": "dry mode (LIVE_AI_TEST not 1)"
+    },
+    {
+      "code": "745125495781",
+      "expected": "POISON / near-match trap - must route to Needs Review, never auto-count",
+      "got": "(not run)",
+      "verdict": "dry",
+      "note": "dry mode (LIVE_AI_TEST not 1)"
+    },
+    {
+      "code": "070330645936",
+      "expected": "(unconfirmed)",
+      "got": "(not run)",
+      "verdict": "dry",
+      "note": "dry mode (LIVE_AI_TEST not 1)"
+    },
+    {
+      "code": "6977228152610",
+      "expected": "(unconfirmed)",
+      "got": "(not run)",
+      "verdict": "dry",
+      "note": "dry mode (LIVE_AI_TEST not 1)"
+    },
+    {
+      "code": "710154236681",
+      "expected": "(unconfirmed)",
+      "got": "(not run)",
+      "verdict": "dry",
+      "note": "dry mode (LIVE_AI_TEST not 1)"
+    }
+  ]
+}

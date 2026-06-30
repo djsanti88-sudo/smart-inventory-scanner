@@ -1,0 +1,1380 @@
+{
+  "meta": {
+    "product": "Smart Inventory",
+    "date": "2026-06-28 (post endpoint fix)",
+    "mode": "lean",
+    "branch": "feat/weekly-report-system",
+    "commit": "6937cf3",
+    "overallScore": 52
+  },
+  "summary": "Lean re-run after the AI endpoint hardening. The fix worked: AI cost safety jumped from 12 to 40 and the bill-drain blocker dropped to a high (auth only, which is deferred). Overall and security both improved. Two blockers remain by design or scope: the leaked keys stay in history (rotation deferred) and the mobile scan input still needs a manual click. A deeper exposure also surfaced: the global barcode catalog is readable without authentication, which is the real scraping risk to close next.",
+  "previous": {
+    "overall": 43,
+    "scores": {
+      "Overall readiness": 38,
+      "Demo readiness": 55,
+      "Security posture": 18,
+      "Customer data protection": 30,
+      "Multi-tenant isolation": 28,
+      "Mobile usability": 32,
+      "Scanner flow": 62,
+      "Decode accuracy": 70,
+      "Needs Review quality": 58,
+      "AI cost safety": 12,
+      "Offline readiness": 68,
+      "Import / export": 35,
+      "Business value": 60,
+      "Pricing confidence": 45,
+      "Competitive position": 41,
+      "Supportability": 42
+    }
+  },
+  "priorities": [
+    {
+      "title": "Rotate the two live API keys still sitting in git history, then scrub the history. Anyone who has cloned the repo can read them right now.",
+      "severity": "blocker"
+    },
+    {
+      "title": "Lock down the global barcode catalog. Today any anonymous person on the internet can download your entire product database (your core asset) with no login. Require sign-in to read it.",
+      "severity": "blocker"
+    },
+    {
+      "title": "Auto-focus the scan box so a scanner fires on the first beep without a click. Right now the very first scan silently does nothing until someone taps the screen.",
+      "severity": "blocker"
+    },
+    {
+      "title": "Build the customer-vs-staff role wall before any paid shop touches it. Today every logged-in employee's browser holds your full raw barcode and alias database, and several admin-only exports are reachable from the console.",
+      "severity": "high"
+    },
+    {
+      "title": "Declutter the scan screen for phones: hide session, sync, and export controls behind one toggle so the scan box and latest result are the only things on screen during counting.",
+      "severity": "high"
+    }
+  ],
+  "findings": [
+    {
+      "fingerprint": "first-impression:scan-page:primary-action-not-auto-focused",
+      "title": "Scan input requires a manual click before the first scan",
+      "category": "first-impression",
+      "severity": "blocker",
+      "evidence": [
+        "00-scan-page.png",
+        "mobile-scan.png"
+      ],
+      "recommendation": "Auto-focus the scan input on page load so a user with a physical scanner can fire immediately without touching the screen.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "first-impression:scan-page:control-panel-density-above-fold",
+      "title": "Session controls, sync status, and import/export bury the scan feedback",
+      "category": "first-impression",
+      "severity": "high",
+      "evidence": [
+        "01-customer-scan-part-number.png",
+        "00-scan-page.png"
+      ],
+      "recommendation": "Collapse or move session management and export controls to a secondary panel or Settings tab. The scan box and the live feed should be the only things above the fold.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "first-impression:scan-page:ready-state-color-warning",
+      "title": "\"Ready to scan\" appears in orange, which reads as a warning not a confirmation",
+      "category": "first-impression",
+      "severity": "medium",
+      "evidence": [
+        "mobile-scan.png"
+      ],
+      "recommendation": "Change the ready-state text color to green or neutral gray so it clearly signals go-ahead status, not an alert.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "first-impression:scan-page:jargon-needs-review-tab",
+      "title": "\"Needs Review\" tab label is internal jargon a shop owner would not recognize",
+      "category": "first-impression",
+      "severity": "medium",
+      "evidence": [
+        "00-scan-page.png",
+        "01-customer-scan-part-number.png"
+      ],
+      "recommendation": "Rename the tab to \"Unknown Codes\" or \"Unrecognized Items\" so a first-time user immediately understands what it holds.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "first-impression:scan-page:phone-session-controls-push-feed-offscreen",
+      "title": "On phone width, session and sync rows push the scan feed off screen",
+      "category": "first-impression",
+      "severity": "high",
+      "evidence": [
+        "mobile-scan.png",
+        "03-customer-mobile-part-number.png"
+      ],
+      "recommendation": "At mobile width, hide the session name input, location dropdown, and sync row behind a single collapsed \"Session\" toggle. The scan box and the most recent scan result must both be visible without scrolling.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "first-impression:scan-page:more-options-label-unclear",
+      "title": "\"More options (session, sync, export)\" is not a recognizable control",
+      "category": "first-impression",
+      "severity": "low",
+      "evidence": [
+        "01-customer-scan-part-number.png"
+      ],
+      "recommendation": "Replace the parenthetical label with a standard collapsed section or a visible button labeled \"Session and Export\" so users know it is interactive.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "scanner:default-focus:misleading-placeholder-copy",
+      "title": "Placeholder text says 'Click here' even when input is already auto-focused",
+      "category": "scanner-flow",
+      "severity": "medium",
+      "evidence": [
+        "e2e/proof/human-bots/tire-resolution/00-scan-page.png",
+        "e2e/proof/agent-bots/ux/mobile-scan.png"
+      ],
+      "recommendation": "Change placeholder to 'Scan or type a code and press Enter' so the focused-by-default state does not instruct the user to click. The UX bot scored this task as FAIL; the misleading copy is the likely cause.",
+      "auto_fixable": false,
+      "team": "decode"
+    },
+    {
+      "fingerprint": "scanner:dangerous-action:clear-session-on-scan-page",
+      "title": "'Clear session' button is visible on the scan page in the same panel as the scanner",
+      "category": "scanner-flow",
+      "severity": "low",
+      "evidence": [
+        "e2e/proof/agent-bots/security/01-scan.png",
+        "e2e/proof/demo-readiness/01-customer-scan-part-number.png"
+      ],
+      "recommendation": "The button is guarded by window.confirm and is type='button' (not submit), so a scanner Enter cannot fire it while focus is on the scan input. Risk is low but the button is reachable by a stray tab+Enter. Consider moving it behind the 'More options' disclosure or requiring a two-step confirmation without window.confirm (which can be bypassed by keyboard when the dialog is already open).",
+      "auto_fixable": false,
+      "team": "decode"
+    },
+    {
+      "fingerprint": "scanner:dangerous-action:delete-button-in-counts-table",
+      "title": "'Delete' button appears in the counts table on the scan page",
+      "category": "scanner-flow",
+      "severity": "low",
+      "evidence": [
+        "e2e/proof/agent-bots/data-integrity/01-counted.png"
+      ],
+      "recommendation": "Delete is a per-row action and requires a deliberate click on a specific row's button, so it is not in the Enter/tab flow from the scan input. No change required for the scanner flow itself, but confirm that deleting a counted row has an undo or confirmation step to prevent accidental deletion during rapid counting.",
+      "auto_fixable": false,
+      "team": "decode"
+    },
+    {
+      "fingerprint": "data:scan-feed:barcode-column-blank-for-known-scans",
+      "title": "Barcode column shows '-' instead of the scanned code for Known scan rows in the feed",
+      "category": "data-integrity",
+      "severity": "medium",
+      "evidence": [
+        "e2e/proof/agent-bots/data-integrity/02-unknown.png"
+      ],
+      "recommendation": "The raw barcode value should be stored on every ScanEvent and rendered in the feed row regardless of resolution status. A blank barcode column hides the audit trail for counted scans, making it impossible to verify which physical label drove a count without cross-referencing timestamps.",
+      "auto_fixable": false,
+      "team": "decode"
+    },
+    {
+      "fingerprint": "data:human-bot:correct-button-missing-in-counts",
+      "title": "CustomerReadableControlsBot: 'Correct' button absent from final-count-body - breaks human-approval flow for Needs Review items in the counts panel",
+      "category": "data-integrity",
+      "severity": "high",
+      "evidence": [
+        "reports/human-bots/latest/playwright-results.json - scenarios/customer-readable-controls.spec.ts FAILED"
+      ],
+      "recommendation": "The 'Correct' button (or equivalent approval control) was not found in the counts table rows. If this control is absent, a user cannot mark a quantity correct and the human-approval gate that separates suggestions from confirmed counts may be unreachable. Inspect the final-count-body component to confirm the button is rendered and has the expected accessible name.",
+      "auto_fixable": false,
+      "team": "decode"
+    },
+    {
+      "fingerprint": "data:identity:falken-camel-leak-clean",
+      "title": "Falken/Camel identity leak class: CLEAR - all 8 separator variants resolve to Falken Sincera ST80 A/S, never to Camel Crush",
+      "category": "data-integrity",
+      "severity": "low",
+      "evidence": [
+        "reports/human-bots/latest/tire_resolution_result.json - resolvedToCamelAnywhere: false",
+        "e2e/proof/human-bots/tire-resolution/02-variant-6-2881_6861.png",
+        "e2e/proof/human-bots/tire-resolution/01-barcode.png"
+      ],
+      "recommendation": "No action needed. Confirm this regression test remains in CI on every alias or catalog change.",
+      "auto_fixable": false,
+      "team": "decode"
+    },
+    {
+      "fingerprint": "data:counting:duplicate-scan-no-double-row",
+      "title": "Duplicate scan increments qty correctly - no double product row observed",
+      "category": "data-integrity",
+      "severity": "low",
+      "evidence": [
+        "e2e/proof/agent-bots/data-integrity/01-counted.png - qty=2 feed rows, 1 product row in counts",
+        "reports/agent-bots/latest/data_integrity_report.md - PASS qty=2 coke rows after reload=1"
+      ],
+      "recommendation": "No action needed. Continue verifying idempotency key behavior in unit tests.",
+      "auto_fixable": false,
+      "team": "decode"
+    },
+    {
+      "fingerprint": "security:unauthenticated-api:ai-lookup-no-auth",
+      "title": "/api/ai-lookup POST accepts requests from any unauthenticated caller",
+      "category": "security",
+      "severity": "high",
+      "evidence": [
+        "src/app/api/ai-lookup/route.ts:195 -- comment: 'auth DEFERRED by owner'",
+        "src/services/security/aiSpendGuard.ts:1-11 -- spend guard is in-process memory only, not shared across instances"
+      ],
+      "recommendation": "Add Firebase ID token verification to the /api/ai-lookup POST handler before deploying to a shared environment. Until then, the per-IP rate limit and daily cap are the only barriers, and both are per-process in serverless deployments.",
+      "auto_fixable": false,
+      "team": "security"
+    },
+    {
+      "fingerprint": "security:key-leak:provider-files-missing-server-only",
+      "title": "geminiProvider.ts and openaiProvider.ts read API keys but lack import 'server-only' enforcement",
+      "category": "security",
+      "severity": "medium",
+      "evidence": [
+        "src/services/ai/geminiProvider.ts:10 -- process.env.GEMINI_API_KEY read, no server-only import",
+        "src/services/ai/openaiProvider.ts:9 -- process.env.OPENAI_API_KEY read, no server-only import",
+        "src/services/ai/groundedSpecFinder.ts:2 -- HAS import 'server-only' (correct pattern)",
+        "src/services/keySafety.test.ts:9 -- CLIENT_DIRS list does not include src/services/ai/"
+      ],
+      "recommendation": "Add `import 'server-only';` to the top of geminiProvider.ts and openaiProvider.ts so Next.js build fails immediately if either file is accidentally imported into a client bundle. Also expand the keySafety.test.ts CLIENT_DIRS scan to include src/services/ai/ as an additional detection layer.",
+      "auto_fixable": false,
+      "team": "security"
+    },
+    {
+      "fingerprint": "security:data-leak:idempotency-key-in-customer-allowlist",
+      "title": "idempotencyKey is in SENSITIVE_FIELDS denylist and CUSTOMER_SAFE_REVIEW_FIELDS allowlist simultaneously",
+      "category": "security",
+      "severity": "medium",
+      "evidence": [
+        "src/services/security/sensitiveFields.ts:20 -- 'idempotencyKey', 'idempotency_key' listed in SENSITIVE_FIELDS ('customer roles must NEVER receive')",
+        "src/services/security/sensitiveFields.ts:57 -- 'idempotencyKey' listed in CUSTOMER_SAFE_REVIEW_FIELDS",
+        "src/services/security/serializers.ts:70-75 -- sanitizeReview builds from the allowlist directly without calling stripSensitive, so idempotencyKey reaches customer responses"
+      ],
+      "recommendation": "Remove 'idempotencyKey' from CUSTOMER_SAFE_REVIEW_FIELDS. Idempotency keys are internal sync tokens; exposing them to customers allows replay-style probing. If the client needs to track its own sync status, use a client-generated opaque reference instead.",
+      "auto_fixable": false,
+      "team": "security"
+    },
+    {
+      "fingerprint": "security:role-gate:ui-auth-bypass-active",
+      "title": "UI role gating is not implemented -- export bot confirmed 'auth-bypass; role gating not yet implemented'",
+      "category": "security",
+      "severity": "high",
+      "evidence": [
+        "reports/agent-bots/latest/export_headers_by_role.json:3 -- role field states 'current (auth-bypass; role gating not yet implemented)'",
+        "src/services/auth/authBypass.ts -- NEXT_PUBLIC_E2E_AUTH_BYPASS bypasses auth in non-production environments",
+        "playwright.config.ts:34 -- NEXT_PUBLIC_E2E_AUTH_BYPASS=1 set in E2E webServer env"
+      ],
+      "recommendation": "The auth bypass is scoped to non-production via NODE_ENV guard, which is correct. However, role-based UI gating (customer vs manager vs platformOwner) is confirmed absent. Before any multi-tenant deployment, server-side serializers must be called for every response and the UI must derive its access level from a verified server identity, not a NEXT_PUBLIC env flag.",
+      "auto_fixable": false,
+      "team": "security"
+    },
+    {
+      "fingerprint": "security:spend-cap:serverless-cap-not-shared",
+      "title": "AI daily spend cap is in-process memory -- ineffective on multi-instance serverless deployments",
+      "category": "security",
+      "severity": "medium",
+      "evidence": [
+        "src/services/security/aiSpendGuard.ts:8-11 -- explicit caveat: 'on Vercel the in-memory state is per-instance and the file write may be a no-op'",
+        "src/app/api/ai-lookup/route.ts:265-272 -- hard daily cap check uses checkAndIncrementDaily which calls aiSpendGuard"
+      ],
+      "recommendation": "Before deploying to Vercel or any multi-instance environment, replace the in-process counter with a shared atomic store (Upstash Redis or Vercel KV). The current design is explicitly acknowledged as a local-first placeholder.",
+      "auto_fixable": false,
+      "team": "security"
+    },
+    {
+      "team": "security",
+      "title": "Global barcode catalog (catalogEntries + retailCatalogEntries) is publicly readable without authentication",
+      "severity": "blocker",
+      "confidence": "high",
+      "area": "global_catalog",
+      "affects": "any unauthenticated internet user",
+      "evidence": [
+        "firestore.rules:135-138",
+        "firestore.rules:141-145",
+        "src/services/db/firebase/tenantIsolation.rules.test.ts:112-113"
+      ],
+      "file": "firestore.rules",
+      "businessImpact": "The entire global barcode-to-product catalog (the core platform asset and competitive moat) can be bulk-read by any unauthenticated person. A competitor or scraper can enumerate the full catalog with a simple collection scan.",
+      "securityImpact": "The global catalog contains normalized barcodes, brand, model, size, and GTIN data. allow read: if true removes all access control. The emulator test at line 113 explicitly asserts and accepts this as a passing behavior, meaning the test suite validates the open read as correct - the exposure is confirmed intentional but the business risk is blocker-level.",
+      "explanation": "firestore.rules lines 135-138 and 141-145 set allow read: if true for both catalogEntries and retailCatalogEntries. No authentication or membership is required. Anyone can call Firestore directly and page through the entire global barcode database with no rate limit enforced by Firestore rules.",
+      "fix": "Change to allow read: if isSignedIn() as a minimum. For tighter control, require isMember of any business (proving a paid customer relationship). Add server-side pagination enforcement if bulk reads need rate limiting. The comment says writes are server-only which is correct; reads need the same protection.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "security",
+      "title": "Client-side role gate for raw barcode fields in Products page and in-memory store during session",
+      "severity": "high",
+      "confidence": "high",
+      "area": "raw_codes",
+      "affects": "businessOwner / admin / counter / viewer",
+      "evidence": [
+        "src/app/(app)/products/page.tsx:36-37",
+        "src/app/(app)/products/page.tsx:75-76",
+        "src/services/security/useAccessLevel.ts:12-13",
+        "docs/HOTFIX_FOLLOWUPS.md:14"
+      ],
+      "file": "src/app/(app)/products/page.tsx",
+      "businessImpact": "A customer-side user can open browser devtools, inspect the Zustand store or React component state, and read primaryBarcode, gtin, upc, ean for every product loaded in their session. The Products page JSX hides these columns visually but the underlying store data is fully present in memory.",
+      "securityImpact": "The Products page hides barcode/GTIN/UPC/EAN columns behind isPlatform JSX conditionals (client-side only). The store holds the full Product objects including those fields for any authenticated user who loaded the page. Role gating is explicitly deferred per HOTFIX_FOLLOWUPS.md line 14. During a live session the customer browser has the alias array in memory before scanPersist strips it for disk.",
+      "explanation": "isPlatform is derived from NEXT_PUBLIC_PLATFORM_OWNER_* env vars checked in the browser. The data is present in client memory regardless; only the rendered HTML columns are gated. A businessOwner can read window.__NEXT_F or zustand devtools to extract all barcode identifiers.",
+      "fix": "Server-side serializers already exist (sanitizeProduct in serializers.ts). Wire them into the data-loading path so the Products page data fetch returns only CUSTOMER_SAFE_PRODUCT_FIELDS for non-platform users. Do not rely on JSX conditional column hiding as the security boundary.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "security",
+      "title": "/api/ai-lookup GET leaks AI provider model names and configuration flags to any caller with no authentication",
+      "severity": "high",
+      "confidence": "high",
+      "area": "internal_fields",
+      "affects": "any caller (no auth required)",
+      "evidence": [
+        "src/app/api/ai-lookup/route.ts:160-191"
+      ],
+      "file": "src/app/api/ai-lookup/route.ts",
+      "businessImpact": "Exposes geminiModel, openaiModel, geminiProModel, openaiProModel field values (exact model strings e.g. gemini-2.5-pro, gpt-5) and all feature flags (premiumFallback, pageFetchAndRead, etc.) to any unauthenticated HTTP caller. Competitors learn the exact AI stack without any access barrier.",
+      "securityImpact": "The GET handler has no auth check and returns the exact model IDs and all decode configuration flags. The CLAUDE.md specification says AI provider names and logs are platformOwner-only. The GET is called by the client to decide whether to auto-decode, but the model name fields are not needed for that decision (booleans geminiConfigured/openaiConfigured suffice).",
+      "explanation": "GET /api/ai-lookup returns geminiModel, openaiModel, geminiProModel, openaiProModel as plain strings with no authentication gate. The client only needs geminiConfigured/openaiConfigured booleans and the feature flags; the model names are internal platform detail that should be platformOwner-only.",
+      "fix": "Add auth verification to the GET handler OR strip the model name fields (geminiModel, openaiModel, geminiProModel, openaiProModel) from the public response and return them only when the caller's token resolves to a platformOwner identity. The booleans are sufficient for client auto-decode decisions.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "security",
+      "title": "NEXT_PUBLIC_E2E_PLATFORM_OWNER=1 env var unconditionally grants full platform access to all users client-side if accidentally set in production",
+      "severity": "high",
+      "confidence": "high",
+      "area": "raw_codes",
+      "affects": "all customer-side roles",
+      "evidence": [
+        "src/services/security/roleAccess.ts:61-63"
+      ],
+      "file": "src/services/security/roleAccess.ts",
+      "businessImpact": "If this env var is set on a Vercel/production deployment, every user in every session becomes platformOwner client-side and receives the full barcode/alias/raw-code/decode-trace UI and full localStorage persist. The platform's private data is exposed to all customers.",
+      "securityImpact": "effectiveClientAccessLevel returns platform unconditionally when NEXT_PUBLIC_E2E_PLATFORM_OWNER === '1' with no further check. The comment says real cloud never sets it, but there is no code guard (e.g. NODE_ENV check or CI-only assertion) to enforce that invariant. A misconfigured deploy silently escalates all users.",
+      "explanation": "roleAccess.ts line 62: if (process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER === '1') return 'platform'. No NODE_ENV guard, no CI-only check. The business logic relies on operational discipline, not code enforcement.",
+      "fix": "Add: if (process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'test') { /* ignore the flag */ }. Alternatively, rename to NEXT_PUBLIC_E2E_PLATFORM_OWNER_DEV_ONLY and add a build-time check that fails if it is set when NODE_ENV is production.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "security",
+      "title": "exportRawScanLog and exportUnknowns (platformOwner-only exports) are gated by client-side isPlatform only - no server enforcement",
+      "severity": "high",
+      "confidence": "high",
+      "area": "alias_export",
+      "affects": "businessOwner / admin / counter / viewer",
+      "evidence": [
+        "src/components/ExportMenu.tsx:53-77",
+        "src/services/csvExport.ts:129-181",
+        "src/services/csvExport.ts:219-243"
+      ],
+      "file": "src/components/ExportMenu.tsx",
+      "businessImpact": "A customer-side user who bypasses the client-side isPlatform conditional (devtools, direct JS call, or NEXT_PUBLIC_E2E_PLATFORM_OWNER=1 misconfiguration) can call exportRawScanLog or exportAliases directly from the browser console using the store state that is already in memory, exporting raw_code, clean_code, normalized_candidates, matchType, idempotency_key for every scan event, and alias cleanCode, normalizedCode, rawCodeExample for every alias.",
+      "securityImpact": "exportRawScanLog includes rawCode, cleanCode, normalizedCandidates. exportAliases includes rawCodeExample, cleanCode, normalizedCode, confidence, providerName. exportProducts includes primaryBarcode, gtin, upc, ean. All of these functions are imported in ExportMenu and callable from the browser. There is no server-side gate that prevents a customer from calling them if the store data is present.",
+      "explanation": "ExportMenu.tsx groups are computed client-side based on isPlatform. The underlying csvExport functions are plain JS accessible from the console. The store holds all data in memory for any authenticated user. The only real protection is that customer persist (scanPersist.ts) strips aliases/catalog from disk - but during the session they are in memory.",
+      "fix": "Move alias and raw-scan-log export generation to a server endpoint that enforces platformOwner via token verification (same pattern as /api/resolve-scan). Do not pass alias or raw scan data to the client for customer roles in the first place - use the server-side serialized loader path.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "security",
+      "title": "Cross-tenant Firestore isolation is enforced correctly - no finding",
+      "severity": "low",
+      "confidence": "high",
+      "area": "cross_tenant",
+      "affects": "businessOwner / admin",
+      "evidence": [
+        "firestore.rules:58-130",
+        "src/services/db/firebase/tenantIsolation.rules.test.ts:72-99",
+        "src/app/api/resolve-scan/route.ts:76-80"
+      ],
+      "file": "firestore.rules",
+      "businessImpact": "None - cross-tenant isolation is working correctly.",
+      "securityImpact": "Firestore rules scope all business subcollections by businessId path wildcard and verify membership via businessMembers doc. The emulator test suite proves User B cannot read, write, update, or delete Business A data. The /api/resolve-scan server route also enforces member check before reading any business data. The historical Falken/Camel cross-product confusion was a product-alias resolution bug, not a cross-tenant data leak, and is confirmed fixed per tire_resolution_result.json.",
+      "explanation": "Both the Firestore rules layer and the server API layer independently enforce tenant scoping. The emulator tests at lines 72-99 confirm all cross-tenant read, write, update, and delete attempts fail. This is a passing control.",
+      "fix": "No fix needed. Continue maintaining the emulator test suite as Firestore rules change.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "security",
+      "title": "platformOwner inspection and repair path is functional via /api/resolve-scan",
+      "severity": "low",
+      "confidence": "high",
+      "area": "platform_repair",
+      "affects": "platformOwner",
+      "evidence": [
+        "src/app/api/resolve-scan/route.ts:68-101"
+      ],
+      "file": "src/app/api/resolve-scan/route.ts",
+      "businessImpact": "None - the platform repair path works.",
+      "securityImpact": "accessLevelServer correctly reads PLATFORM_OWNER_EMAILS / PLATFORM_OWNER_UIDS from server-only env (not NEXT_PUBLIC_*). platformOwner callers skip the member check and receive the full internal resolver result including all raw fields. The path is not broken.",
+      "explanation": "The /api/resolve-scan endpoint verifies the Firebase ID token, maps it to platform or business level using server-side env, and returns either the full internal result or the sanitized customer shape. platformOwner gets the full shape. The Admin SDK credential gap (503 fallback when no service account is configured) is documented and handled gracefully.",
+      "fix": "No fix needed beyond the documented ops step of dropping a service-account JSON for cloud activation.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "security",
+      "title": "Committed API keys still in git history (ANTHROPIC_API_KEY + SERPAPI_KEY across 4 commits)",
+      "severity": "blocker",
+      "confidence": "high",
+      "area": "secrets",
+      "affects": "key owner; any party who has cloned or can clone this repo",
+      "evidence": [
+        "git log --all -S ANTHROPIC_API_KEY --oneline: matches f65c082, a11d265, e5c2e16, 8dcc318",
+        "git show f65c082:reports/human-bots/latest/playwright-results.json -> /config/webServer/env/ANTHROPIC_API_KEY = [REDACTED per guardrail 4]",
+        "git show f65c082:reports/human-bots/latest/playwright-results.json -> /config/webServer/env/SERPAPI_KEY = [REDACTED per guardrail 4]",
+        "Root cause: playwright.bots.config.ts webServer env spread '...process.env' captured all shell vars into Playwright JSON reporter output",
+        "Commit 4cea140 removed the tracked files and .gitignored them but did NOT scrub git history"
+      ],
+      "file": "C:/Users/djsan/inventory/playwright.bots.config.ts",
+      "businessImpact": "Live Anthropic and SerpAPI keys are retrievable from git history by anyone with read access to the repo. Keys must be rotated. Until history is scrubbed, rotating does not fully close the window for anyone who cloned before rotation.",
+      "securityImpact": "Credential exposure in version control history. Four commits contain the key; the most recent is e5c2e16 (still on the tire-barcode-db branch history). Repo is currently private but the exposure is permanent in the object store until BFG/filter-repo scrub.",
+      "explanation": "playwright.bots.config.ts spread the entire process.env into the Next.js webServer env block. Playwright JSON reporter serialized that full env map into reports/human-bots/latest/playwright-results.json. That file was git-tracked and committed four times. Files are now untracked and gitignored (4cea140) but the four object SHAs remain accessible via git show.",
+      "fix": "1. Rotate ANTHROPIC_API_KEY and SERPAPI_KEY now. 2. Run BFG Repo Cleaner or git filter-repo to remove the four commits from history. 3. Force-push the scrubbed history (coordinate with any forks/clones). 4. Replace '...process.env' in playwright.bots.config.ts with an explicit allowlist of only the app-specific vars the webServer needs. 5. Add gitleaks as a pre-commit hook to block future leaks.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "GET /api/ai-lookup has no rate limit and exposes full AI stack fingerprint to any unauthenticated caller",
+      "severity": "high",
+      "confidence": "high",
+      "area": "scrape",
+      "affects": "any internet-facing user once deployed; reconnaissance attack surface",
+      "evidence": [
+        "autocannon -d 8 -c 50 http://localhost:3000/api/ai-lookup: 623 requests in 8.09s, 0 non-2xx, 0 errors, avg latency 672ms",
+        "35 sequential GET requests: all 35 returned 200 -- no 429 observed",
+        "GET response body includes: geminiModel, openaiModel, geminiProModel, openaiProModel, mode, dailyLimit, missingKeys, liveEnabled flags",
+        "src/app/api/ai-lookup/route.ts:160-192: GET handler has no killSwitch, checkRateLimit, or auth check",
+        "src/app/api/ai-lookup/route.ts:200-215: rate limit guard is inside 'if (!e2eMode())' block on POST only"
+      ],
+      "file": "C:/Users/djsan/inventory/src/app/api/ai-lookup/route.ts",
+      "businessImpact": "Reveals which AI providers, model versions, daily limit, and operational mode are configured. An attacker gains a precise recon map before attacking the POST endpoint. Combined with the serverless daily-cap weakness, this lets an attacker know exactly what limit to stay under per instance.",
+      "securityImpact": "Unauthenticated information disclosure. 623 GET responses delivered in 8 seconds with zero throttling. The GET handler is intentionally public for client self-configuration but becomes an attacker recon endpoint when deployed.",
+      "explanation": "The POST handler correctly applies the kill switch, per-IP rate limit, and daily cap (confirmed: 6 of 35 POST requests got 429 after the 30/min window). The GET handler applies none of these controls. On Vercel or any CDN, GET caching could mitigate throughput but no cache-control headers are set. The GET response gives an attacker the complete provider configuration including which model to target for maximum cost.",
+      "fix": "Apply the same rate limit check to the GET handler (the kill switch check already skips expensive work, but rate limiting the GET is also correct). Strip model names and dailyLimit from the GET response -- return only the boolean flags the client needs (geminiConfigured, openaiConfigured, e2e, liveEnabled, missingKeys). Move model names to a server-only config.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "Server-side daily spend cap is per-process in-memory with file fallback -- ineffective on Vercel multi-instance deploys",
+      "severity": "high",
+      "confidence": "high",
+      "area": "scrape",
+      "affects": "owner Gemini, OpenAI, Firecrawl API budgets on any serverless/multi-instance deployment",
+      "evidence": [
+        "src/services/security/aiSpendGuard.ts:8-11: 'on Vercel the in-memory state is per-instance and the file write may be a no-op (read-only FS)'",
+        "src/services/security/aiSpendGuard.ts:43-84: memDaily is a module-level variable -- not shared across Vercel Lambda instances",
+        "src/services/security/aiSpendGuard.ts:78-81: fs.writeFileSync to .ai-lookup-usage.json fails silently on read-only Vercel FS",
+        "POST handler at route.ts:269 calls checkAndIncrementDaily() -- correct server placement, wrong storage backend for serverless"
+      ],
+      "file": "C:/Users/djsan/inventory/src/services/security/aiSpendGuard.ts",
+      "businessImpact": "On a Vercel deployment with N Lambda instances, each instance has its own daily counter. N simultaneous attackers each get 200 calls before their instance hits the cap. Real daily spend ceiling = 200 x N (unbounded). File persistence is a no-op on Vercel read-only FS so counter resets on every cold start.",
+      "securityImpact": "Spend cap is architecturally correct for local single-process dev but provides false safety assurance for production deployment. The acknowledged serverless caveat in the source comment is a production blocker.",
+      "explanation": "The daily cap implementation is well-structured and correctly placed server-side (real improvement over the prior client-only cap). The storage layer (module-level memDaily + local file) is explicitly noted as insufficient for multi-instance. Before any cloud deployment, this needs a shared atomic counter (Upstash Redis, Vercel KV, or Firestore increment).",
+      "fix": "Replace the in-memory + file store in aiSpendGuard.ts with an atomic shared counter. Upstash Redis is the lowest-friction option (one UPSTASH_REDIS_REST_URL env var, no SDK beyond the REST client already noted in the file comment). Vercel KV is the platform-native equivalent. Add a unit test that proves two concurrent calls with count=limit-1 do not both return allowed:true (race condition in the current implementation).",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "NEXT_PUBLIC_OPEN_ACCESS=1 bypasses AuthGuard entirely with no server-side enforcement",
+      "severity": "high",
+      "confidence": "high",
+      "area": "authz",
+      "affects": "any deployment where NEXT_PUBLIC_OPEN_ACCESS=1 is set with real inventory data",
+      "evidence": [
+        "src/components/AuthGuard.tsx:11-15: 'const OPEN_ACCESS = process.env.NEXT_PUBLIC_OPEN_ACCESS === 1'",
+        "src/components/AuthGuard.tsx:23: useState(() => (isAuthBypassEnabled() || OPEN_ACCESS ? 'authed' : 'loading'))",
+        "AuthGuard.tsx:26: if (isAuthBypassEnabled() || OPEN_ACCESS) return -- skips all Firebase auth checks",
+        "No server-side check in any API route guards against OPEN_ACCESS being set in production"
+      ],
+      "file": "C:/Users/djsan/inventory/src/components/AuthGuard.tsx",
+      "businessImpact": "If NEXT_PUBLIC_OPEN_ACCESS=1 is accidentally set in a production deploy (or demo deploy against a real Firestore project), any visitor can access the full inventory app without authentication.",
+      "securityImpact": "Complete client-side auth bypass. The flag is a public NEXT_PUBLIC_ var which is compiled into the client bundle, so its value is visible in the page source. No server route currently blocks requests when OPEN_ACCESS is set.",
+      "explanation": "The E2E auth bypass (isAuthBypassEnabled) is correctly guarded behind NODE_ENV checks. OPEN_ACCESS has no such guard. It is documented as 'intended for an open demo build; pair with mock backend' but there is no code enforcement of that pairing. A single misconfigured deploy against a real Firestore project exposes all inventory data.",
+      "fix": "Add a build-time check: if NEXT_PUBLIC_OPEN_ACCESS=1 and NODE_ENV=production, throw at build time. Alternatively, replace the flag with a server-side demo-mode config that enforces mock-only backend when active (so it is impossible to combine OPEN_ACCESS with real Firestore reads). Document in RISK_REGISTER.md.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "Role gating is client-side only -- Zustand store holds full platformOwner data for all roles in-session",
+      "severity": "high",
+      "confidence": "high",
+      "area": "authz",
+      "affects": "businessOwner / admin / counter / viewer roles",
+      "evidence": [
+        "src/services/security/useAccessLevel.ts: isPlatformOwner derived from NEXT_PUBLIC_PLATFORM_OWNER_EMAILS client env",
+        "src/stores/scanPersist.ts: partialize strips sensitive fields on localStorage write but not from in-memory Zustand state",
+        "src/components/NeedsReviewTable.tsx:209: JSX conditionals hide columns but store holds full payload",
+        "src/components/LiveScanFeed.tsx:30-32: same pattern -- render guard, not store guard",
+        "reports/product-intel/2026-06-28/findings.json: finding 'Role gating is UI-only' confirmed"
+      ],
+      "file": "C:/Users/djsan/inventory/src/stores/scanPersist.ts",
+      "businessImpact": "A counter employee who opens browser devtools can read the full Zustand store including raw barcodes, alias codes, GTIN/UPC/EAN, provider names, decode traces, and the full needsReviewQueue -- regardless of their UI role. This is the full alias/catalog database the platform charges to keep private.",
+      "securityImpact": "Defense is UI-layer only. The in-memory data is accessible via React DevTools, browser console (window.__zustand or store.getState()), or any injected script. The localStorage serialization correctly strips sensitive fields on write, but the in-memory gap means the data is live in the browser during every session.",
+      "explanation": "This is the documented deferred foundation per HOTFIX_FOLLOWUPS.md. The correct fix (server-side resolution endpoint /api/resolve-scan) is built and correct, but is not yet wired as the default path for customer roles. Until customer sessions use /api/resolve-scan instead of loading the full catalog client-side, the in-memory leak persists.",
+      "fix": "Wire /api/resolve-scan as the resolution path for non-platformOwner sessions. Customer Zustand store should hold only CUSTOMER_SAFE_* shaped data. The resolve-scan endpoint is implemented and correct; the missing piece is routing customer clients through it at scan time instead of loading the full alias/catalog locally.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "undici high-severity CVEs present: TLS cert bypass + HTTP header injection",
+      "severity": "high",
+      "confidence": "high",
+      "area": "deps",
+      "affects": "server-side HTTPS fetching (AI provider calls, page-fetch enrichment, Firecrawl)",
+      "evidence": [
+        "npm audit: undici severity=high, 1 high CVE confirmed",
+        "GHSA-vmh5-mc38-953g: undici vulnerable to TLS certificate validation bypass via dropped requestTls in SOCKS5 ProxyAgent",
+        "GHSA-p88m-4jfj-68fv: undici vulnerable to HTTP header injection via Set-Cookie percent-decoding",
+        "undici is a transitive dependency of next (not direct); npm audit reports fix available"
+      ],
+      "file": "C:/Users/djsan/inventory/package.json",
+      "businessImpact": "TLS bypass on a server that fetches untrusted vendor URLs and AI provider endpoints allows MITM on outbound HTTPS connections. HTTP header injection can corrupt request state across connections.",
+      "securityImpact": "CVSS 7.4 TLS bypass is directly relevant to a server that fetches product pages from AI-cited URLs (enrichWithPageFetch). An attacker who can influence DNS for those domains could exploit the bypass to serve malicious page content to the evidence verifier.",
+      "explanation": "undici is used by Node's built-in fetch (via Next.js). The TLS bypass via dropped requestTls in SOCKS5 ProxyAgent is the highest risk in the context of fetching untrusted URLs. npm audit confirms a fix is available.",
+      "fix": "Run 'npm audit fix' to update undici. Verify page-fetch and AI provider integration tests still pass after update. If the fix requires a major version bump of next or firebase-admin, evaluate on a branch.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "Firestore catalogEntries collection globally readable by any authenticated user",
+      "severity": "medium",
+      "confidence": "high",
+      "area": "authz",
+      "affects": "businessOwner / admin / counter / viewer once real Firebase Auth is live",
+      "evidence": [
+        "src/services/db/firebase/tenantIsolation.rules.test.ts:112-115: assertSucceeds for User B reading catalogEntries",
+        "HOTFIX_FOLLOWUPS.md: 'full alias/catalog/index download = platformOwner-only'",
+        "catalogEntries contains normalizedBarcode values -- the global barcode-to-product catalog",
+        "Intentional Firestore rule grants read to all authenticated users for local resolution speed"
+      ],
+      "file": "C:/Users/djsan/inventory/src/services/db/firebase/tenantIsolation.rules.test.ts",
+      "businessImpact": "Once real customer accounts exist, any signed-in shop employee can getDocs(collection(db, 'catalogEntries')) to download the full global barcode catalog -- the proprietary asset the platform is built on.",
+      "securityImpact": "The Firestore rule intentionally allows authenticated reads for performance, but this conflicts with the stated design requirement. The conflict is known and deferred; it becomes a real exposure the moment any non-platformOwner user signs in.",
+      "explanation": "Client-side resolution (current mode) requires the catalog to be locally accessible, which requires Firestore read access. The architectural fix is server-side resolution (/api/resolve-scan) so customers never query catalogEntries directly. Until that is the default path, the Firestore rule is a required performance compromise that also enables full catalog download.",
+      "fix": "Once /api/resolve-scan is the default customer path, update the Firestore security rules to deny catalogEntries reads from customer-role clients. Add a rule test that asserts a customer-role user cannot getDocs from catalogEntries. Near-term: add a TODO comment in the Firestore rules file linking to the HOTFIX_FOLLOWUPS.md item so the coupling is visible.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "SSRF guard is DNS-resolution-blind -- a hostname resolving to a private IP passes the check",
+      "severity": "medium",
+      "confidence": "medium",
+      "area": "injection",
+      "affects": "server-side page-fetch and Firecrawl discovery paths",
+      "evidence": [
+        "src/services/ai/urlSafety.ts line 3 comment: 'NOTE: this is a hostname/IP-literal guard, not full DNS-rebinding protection'",
+        "isSafePublicUrl() returns true for any hostname with a TLD -- no DNS resolution performed",
+        "A domain resolving to 169.254.169.254 (cloud metadata) passes the hostname check",
+        "enrichWithPageFetch and discoverViaFirecrawl both call filterSafeUrls before fetching"
+      ],
+      "file": "C:/Users/djsan/inventory/src/services/ai/urlSafety.ts",
+      "businessImpact": "An AI response containing a URL for a domain that resolves to an internal cloud metadata endpoint (169.254.169.254 on AWS/GCP/Azure) could trigger a metadata service fetch, leaking cloud credentials or IAM tokens.",
+      "securityImpact": "DNS rebinding SSRF bypass. Confidence is medium because exploitation requires the attacker to control DNS resolution for a domain that the AI model would cite as a product page URL. Harder in practice but plausible for barcode lookup domains.",
+      "explanation": "The guard correctly blocks literal private IPs and known internal hostnames. The acknowledged limitation (noted in the source comment) is that it does not resolve hostnames. In cloud environments the IMDSv1 endpoint 169.254.169.254 is reachable from any Lambda/container, and a poisoned AI citation or barcode vendor URL pointing to a crafted domain could reach it.",
+      "fix": "After the hostname check, resolve the hostname using Node's dns.promises.lookup() and run isPrivateOrReservedIpv4() on each returned address. Add a short DNS timeout (500ms). Add a unit test with a mock DNS resolver that simulates a public hostname resolving to 169.254.169.254 and asserts isSafePublicUrl returns false.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "verifiedFacts and guesses rendered in NeedsReviewTable without isPlatform guard",
+      "severity": "medium",
+      "confidence": "high",
+      "area": "authz",
+      "affects": "businessOwner / admin / counter / viewer",
+      "evidence": [
+        "src/components/NeedsReviewTable.tsx:186-191: review.verifiedFacts and review.guesses rendered unconditionally",
+        "src/services/security/sensitiveFields.ts:13: verifiedFacts is in SENSITIVE_FIELDS denylist",
+        "All other sensitive decode internals on same page (evidenceStrength, crossCheckDecision, sourceUrls) are correctly wrapped in isPlatform guards"
+      ],
+      "file": "C:/Users/djsan/inventory/src/components/NeedsReviewTable.tsx",
+      "businessImpact": "Customer-side users see internal AI reasoning strings meant for platformOwner diagnostics only. In-session memory leak; not persisted to localStorage.",
+      "securityImpact": "Leaks internal AI decode reasoning to customer-facing roles. verifiedFacts is explicitly listed in SENSITIVE_FIELDS; guesses is an internal AI field not in CUSTOMER_SAFE_REVIEW_FIELDS.",
+      "explanation": "Two fields were missed when other decode-internal fields were wrapped in isPlatform guards. The localStorage serializer correctly strips them on persist so the leak is session-memory and render-only.",
+      "fix": "Add isPlatform guard around the verifiedFacts and guesses spans matching the pattern used for sourceUrls at line 192. Add guesses to SENSITIVE_FIELDS or add an explicit exclusion comment in CUSTOMER_SAFE_REVIEW_FIELDS.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "open"
+    },
+    {
+      "team": "security",
+      "title": "keySafety test missing FIRECRAWL_API_KEY, SERPAPI_KEY, and ANTHROPIC_API_KEY from forbidden list",
+      "severity": "low",
+      "confidence": "high",
+      "area": "keys",
+      "affects": "future developers; CI pipeline",
+      "evidence": [
+        "src/services/keySafety.test.ts: FORBIDDEN list covers GEMINI_API_KEY and OPENAI_API_KEY only",
+        "src/app/api/ai-lookup/route.ts:279: process.env.FIRECRAWL_API_KEY read server-side (correct) -- but no guard against future client reads",
+        "ANTHROPIC_API_KEY was already leaked via playwright.bots.config.ts process.env spread -- adding it to the forbidden list would catch this class of mistake"
+      ],
+      "file": "C:/Users/djsan/inventory/src/services/keySafety.test.ts",
+      "businessImpact": "A developer could add FIRECRAWL_API_KEY to a client component and the automated guard would not catch it before merge.",
+      "securityImpact": "Gap in automated key-safety enforcement. Low immediate risk (no current client-side read found for these keys) but the guard should be complete given the active use of all three keys.",
+      "explanation": "The keySafety.test.ts guard is a valuable control but was not updated when Firecrawl, SerpAPI, and ANTHROPIC_API_KEY (used by Claude Code shell) became part of the environment. Adding them to the FORBIDDEN list closes the coverage gap.",
+      "fix": "Add 'process.env.FIRECRAWL_API_KEY', 'process.env.SERPAPI_KEY', and 'process.env.ANTHROPIC_API_KEY' to the FORBIDDEN pattern list in src/services/keySafety.test.ts.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "open"
+    },
+    {
+      "fingerprint": "decision-load:scan:session-controls-always-visible",
+      "title": "Session controls (name field, location dropdown, 3 buttons) live above the fold during every scan",
+      "category": "decision-load",
+      "severity": "high",
+      "evidence": [
+        "mobile-scan.png",
+        "00-scan-page.png",
+        "02-unknown.png"
+      ],
+      "recommendation": "defer / hide-until-needed: collapse the session block behind a single 'Session: Default Session (change)' tap target by default. Expand only on deliberate tap. The operator's eye should go scan-box -> feed row -> repeat, with zero session decisions mid-count.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "decision-load:scan:sync-and-export-inline",
+      "title": "Sync status row and Export/Import controls always rendered inside the scan card",
+      "category": "decision-load",
+      "severity": "high",
+      "evidence": [
+        "00-scan-page.png",
+        "01-barcode.png",
+        "02-variant-0-2881_6861.png"
+      ],
+      "recommendation": "defer / hide-until-needed: move Export and Import to Settings or a dedicated end-of-session step. Collapse sync status to a small corner badge (green dot only when healthy; expand on tap when there is a problem). This removes 2 controls from the scan loop entirely.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "decision-load:scan:modify-delete-per-row-during-active-scan",
+      "title": "Modify and Delete action buttons appear on every row in the live counts table while scanning is active",
+      "category": "decision-load",
+      "severity": "high",
+      "evidence": [
+        "01-barcode.png",
+        "02-variant-0-2881_6861.png",
+        "02-unknown.png"
+      ],
+      "recommendation": "defer: hide per-row actions during an active scan session; surface them only when the session is finished or the user explicitly enters an edit mode. Reduces dangerous accidental taps and eliminates visual competition with the scan feedback zone.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "decision-load:scan:click-to-focus-requirement",
+      "title": "Scan input requires an explicit click to gain focus - operator must make a targeting decision on each page load or return",
+      "category": "decision-load",
+      "severity": "medium",
+      "evidence": [
+        "00-scan-page.png",
+        "mobile-scan.png"
+      ],
+      "recommendation": "default: auto-focus the scan input on mount and after every navigation to the Scan page. Remove the 'Click here, then scan' instruction by making it unnecessary. Per-scan friction multiplies across hundreds of scans.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "decision-load:scan:feed-table-column-density",
+      "title": "Live scan feed shows 7 columns (Time, Barcode, Product, Part number, Qty after, Status, Reason, Saved) - operator must track all to confirm a scan",
+      "category": "decision-load",
+      "severity": "medium",
+      "evidence": [
+        "02-unknown.png",
+        "01-barcode.png"
+      ],
+      "recommendation": "group / default: collapse to 3 visible columns by default (Product, Status, Qty after). Allow expand-row for full detail. The 'Reason' and 'Saved' columns matter only for errors or audits - they add noise on every successful scan.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "decision-load:scan:counts-table-column-density",
+      "title": "Your counts table shows 10 columns (Qty, Product, Brand, Category, Specs, Part number, Image, Location, Last scanned, Saved, Actions) during active scanning",
+      "category": "decision-load",
+      "severity": "medium",
+      "evidence": [
+        "02-unknown.png",
+        "01-barcode.png",
+        "02-variant-0-2881_6861.png"
+      ],
+      "recommendation": "group / hide-until-needed: default view should show only Qty, Product, Location. Expose the rest in an expandable detail row or a post-session summary view. Reducing visual density below the scan box keeps the operator oriented without effort.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "decision-load:settings:danger-zone-proximity",
+      "title": "Clear local cache (Danger zone) is one scroll away from Export and Cleanup with no modal guard visible in the screenshot",
+      "category": "decision-load",
+      "severity": "medium",
+      "evidence": [
+        "_settings.png"
+      ],
+      "recommendation": "group / defer: place Danger zone behind a separate collapsed section requiring two deliberate actions (expand + confirm dialog). Reduces accidental data loss risk during Settings browsing.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "decision-load:scan:mobile-three-session-buttons",
+      "title": "On mobile width, three session buttons (Start new session, Finish session, Clear session) stack at the same visual weight with no primary vs secondary distinction",
+      "category": "decision-load",
+      "severity": "low",
+      "evidence": [
+        "mobile-scan.png"
+      ],
+      "recommendation": "group: make Start new session the primary CTA; demote Finish and Clear to text links or a single overflow menu. Three equal-weight buttons force a read-and-decide on every glance.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "ux:platform-owner:settings:internal-ai-terms-visible",
+      "title": "Settings and scan feed expose internal AI provider terms to end customers",
+      "category": "ux",
+      "persona": "platform-owner",
+      "severity": "high",
+      "evidence": [
+        "e2e/proof/agent-bots/ux/mobile-scan.png"
+      ],
+      "recommendation": "Replace provider names and 'AI lookup' with business-friendly labels ('Smart lookup', 'Cloud identification', 'Auto-identify unknown items'). Audit Settings and scan reason text for any engineering-internal terminology before showing to a prospect.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "ux:platform-owner:scan-page:export-discoverability",
+      "title": "Multi-format export is a strong selling point buried in a small unlabeled dropdown",
+      "category": "ux",
+      "persona": "platform-owner",
+      "severity": "medium",
+      "evidence": [
+        "e2e/proof/agent-bots/export/exports.png"
+      ],
+      "recommendation": "Give the Export button more prominence (larger, labeled 'Export report') and show format icons inline. This feature impresses prospects and should be discoverable on first glance.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "fingerprint": "ux:platform-owner:mobile:brand-name-wrapping",
+      "title": "Brand name wraps across two lines in mobile nav making the product look unpolished",
+      "category": "ux",
+      "persona": "platform-owner",
+      "severity": "low",
+      "evidence": [
+        "e2e/proof/agent-bots/ux/mobile-scan.png"
+      ],
+      "recommendation": "Use an abbreviated logo mark or single word 'Inventory' on mobile. The full four-word name should be reserved for desktop where it fits.",
+      "auto_fixable": false,
+      "team": "technical_qa"
+    },
+    {
+      "team": "business",
+      "title": "Server-side role model and protected customer resolution endpoint",
+      "severity": "high",
+      "confidence": "high",
+      "area": "feature",
+      "affects": "shop owner / counter / manager / multi-location",
+      "evidence": [
+        "export_headers_by_role.json: role field reads 'current (auth-bypass; role gating not yet implemented)'",
+        "performance_smoke.md: 'the local store includes the alias/catalog DB (a correctness + security concern flagged by SecurityLeakBot)'",
+        "HOTFIX_FOLLOWUPS.md: full deferred foundation documented - platformOwner vs businessOwner vs counter roles, server-side resolution, sensitive field stripping, alias scope separation",
+        "manager_insights.md: 'Critical-before-pilot: the customer/role data-protection foundation (so managers/employees don't see the raw code DB)'",
+        "security screenshot: full barcode DB and alias mapping visible to any logged-in user today"
+      ],
+      "businessImpact": "Unlocks selling to any multi-employee shop: without role gating every counter scan session downloads the platform's full proprietary alias/catalog database to the browser, making the app unsellable to a paying business; shipping this closes the blocker and enables the first paid pilot",
+      "explanation": "Today there is no role enforcement. Every authenticated session receives the full internal alias/barcode/catalog index in localStorage. A counter employee can trivially export or inspect the platform's catalog. Paying shops require that counter/viewer roles resolve via a protected server endpoint that returns only product-facing fields (name, brand, part number, specs, qty) with no raw codes, alias IDs, source evidence, or provider traces. This is the prerequisite for every other feature below: role-aware exports, per-user attribution, audit viewer, and eventually multi-location.",
+      "fix": "Implement the three-tier role model (platformOwner / businessOwner+admin / counter+viewer). Add a protected /api/resolve route that accepts a raw scanned code server-side, resolves against the internal DB, and returns only product-facing fields. Customer clients never download the alias/catalog index. Add role-aware serializers for products, review items, and exports. Enforce via Firestore rules + server-side checks. Ship de-branding of AI/provider labels in the same pass.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Per-user scan attribution and finished-session history list",
+      "severity": "high",
+      "confidence": "high",
+      "area": "feature",
+      "affects": "shop owner / manager",
+      "evidence": [
+        "manager_insights.md: '[important soon] Who scanned what (per-user attribution in the feed)' and '[important soon] Finished-sessions history list'",
+        "data-integrity screenshot: feed shows only timestamp + barcode + product, no user column",
+        "scan page screenshot: session controls present but no history of past sessions visible anywhere"
+      ],
+      "businessImpact": "A paying shop manager cannot audit who counted what, cannot reopen a previous session to verify a number, and cannot hold a counter accountable for a scan error; these two gaps together are the most common reason a shop rejects an inventory tool at the trial stage",
+      "explanation": "The scan feed and final count show no user identity. When a shop has two or more counters on the floor at the same time, the owner has no way to know who scanned a given item or when a session was completed. Session history is also absent: once a session is finished, there is no list of past sessions with their totals. Both gaps are classified 'important soon' by ManagerBot and are confirmed absent in the screenshots.",
+      "fix": "Attach the authenticated user ID and display name to every ScanEvent at write time. Add a 'Scanned by' column to the feed table (hidden for single-user shops via settings). Build a Sessions History page that lists finished sessions with their date, name, counter name, item count, and a link to that session's exported count. Requires the role model above to be safe to display.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Product search and filter on the Products page",
+      "severity": "high",
+      "confidence": "high",
+      "area": "feature",
+      "affects": "shop owner / manager / counter",
+      "evidence": [
+        "manager_insights.md: '[important soon] Product search / filter on Products page'",
+        "manager.png screenshot: Products page shows a flat unsortable list of 5 products with no search bar, no filter, no sort controls"
+      ],
+      "businessImpact": "Any real shop has hundreds to thousands of SKUs; without search the Products page is unusable past 20-30 items and a counter cannot verify a product before scanning, forcing more Needs Review queue items and slowing daily inventory runs",
+      "explanation": "The Products page (confirmed in the manager.png screenshot) renders a flat table with no search input, no category or brand filter, and no column sorting. At seed data scale this is fine. At a real shop scale of 200+ tires or 500+ parts this becomes unusable. This is a common first complaint in paid trials of inventory tools.",
+      "fix": "Add a search input that filters rows by name, brand, part number, or specs as the user types (client-side filter is sufficient for moderate catalogs; server-side pagination for large catalogs is a follow-up). Add column sort on Name, Brand, Category. Add a category filter dropdown. Small build - one afternoon of work.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Audit history viewer UI (audit writes exist, no read surface)",
+      "severity": "high",
+      "confidence": "high",
+      "area": "feature",
+      "affects": "shop owner / manager",
+      "evidence": [
+        "manager_insights.md: '[important soon] Audit history viewer (audit is written; no UI)'",
+        "HOTFIX_FOLLOWUPS.md: audit events documented - alias_link_warning_shown, alias_link_override, alias_moved_or_unlinked, global_alias_candidate_created, global_alias_approved, global_alias_rejected"
+      ],
+      "businessImpact": "The audit trail that protects the shop owner from inventory disputes is being written to the DB but is invisible; any paying shop that has an inventory discrepancy or an employee error has no self-service way to investigate it, forcing a support call or a full recount",
+      "explanation": "The codebase writes audit events for alias changes, overrides, and approvals. No UI exposes them. A manager who finds a wrong count today cannot trace which scan, which user, or which alias repair caused it. An audit viewer is a trust and compliance feature that differentiates a paid tool from a free spreadsheet.",
+      "fix": "Build a read-only Audit Log page (accessible to businessOwner and above, not counter/viewer). Show: timestamp, user, event type, affected product/alias/code, before/after values, session context. Filter by date range and event type. Export to CSV. This is a medium build that reuses the existing audit write schema.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Low-stock threshold alerts and stock-target memory",
+      "severity": "medium",
+      "confidence": "high",
+      "area": "feature",
+      "affects": "shop owner / manager",
+      "evidence": [
+        "manager_insights.md: '[paid add-on candidate] Low-stock / overstock & stock-target memory'",
+        "final count screenshot: Your counts table shows qty per product but no target qty or alert indicator anywhere"
+      ],
+      "businessImpact": "A tire shop that runs out of a fast-moving size loses the sale to a competitor the same day; low-stock alerts let the owner reorder before the shelf is empty, which is the single most cited ROI reason shops pay for inventory software over free spreadsheets",
+      "explanation": "The app counts what is on hand but has no memory of what should be on hand. There is no minimum stock level per product, no visual warning when qty drops below threshold, and no reorder report. This is the feature most directly tied to preventing lost revenue. It is a paid add-on candidate that gives the owner a clear reason to upgrade from a free tier.",
+      "fix": "Add a 'min stock' and 'target stock' field per product (editable inline on the Products page). Show a yellow/red indicator on the count table when qty is at or below min. Add a Low Stock report view that lists all products below threshold with their current qty, target, and last-scanned date. Medium build. Email or push alerts are a follow-up.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Raw scan log export and Needs Review CSV download",
+      "severity": "medium",
+      "confidence": "high",
+      "area": "feature",
+      "affects": "shop owner / manager",
+      "evidence": [
+        "export_headers_by_role.json: raw scan log header shows '(button not present)', unknowns shows '(no download)'",
+        "exports.png screenshot: 'Items to...' export button is greyed out in the ACTIVITY section of the export dropdown",
+        "manager_insights.md: 'Export raw scan log - Present-check came back absent'"
+      ],
+      "businessImpact": "A shop that uses the app for a full inventory count and then cannot export the raw event log for their accountant or for reconciliation against a POS system will not renew; this is a basic deliverable expectation for any paid inventory tool",
+      "explanation": "The export menu (confirmed in the exports.png screenshot) shows Final Counts and Quantity exports working, but the raw scan log button is absent entirely and the Needs Review / Items to Review export is greyed out. A manager who wants to hand off the scan log to an accountant or cross-reference against a purchase order has no path to do so today.",
+      "fix": "Add the raw scan log export (CSV/XLSX) containing: timestamp, scanned code, matched product, match type, qty after, status, user, session. Gate code-bearing fields to businessOwner and above once the role model is in place. Enable the Needs Review CSV download from the queue page. Small-to-medium build.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Products-missing-barcode and recently-repaired alias views",
+      "severity": "medium",
+      "confidence": "medium",
+      "area": "feature",
+      "affects": "shop owner / manager",
+      "evidence": [
+        "manager_insights.md: '[nice to have] Products missing barcode / missing part number views' and '[nice to have] Recently created / recently repaired lists'",
+        "manager.png screenshot: Products page has no filter or flag for products without a barcode or part number"
+      ],
+      "businessImpact": "A shop trying to clean up their product catalog has no way to find incomplete records; products without barcodes silently block scanning and inflate the Needs Review queue, wasting counter time on every inventory run",
+      "explanation": "The Products page shows all products but provides no way to surface which ones are missing a scannable barcode or a part number. A shop owner doing catalog hygiene must scroll every row manually. Similarly there is no view of recently added or recently alias-repaired products, making it hard to audit a counter's work after a session.",
+      "fix": "Add filter chips on the Products page: 'Missing barcode', 'Missing part number', 'Added this week', 'Alias repaired recently'. These are pure client-side filters on the existing product list data. Small build.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Needs Review plain-language copy and first-time onboarding hint",
+      "severity": "low",
+      "confidence": "high",
+      "area": "feature",
+      "affects": "counter / shop owner",
+      "evidence": [
+        "top_ux_confusions.md: 'Understand Needs Review - page exists; copy could be plainer for a new user (quick fix)'",
+        "ux_scorecard.md: Understand Needs Review scored friction 3/5 - highest friction score of any passing task",
+        "top_ux_confusions.md: 'customer-facing wording still exposes internal terms (AI lookup, provider names in Settings)'"
+      ],
+      "businessImpact": "A counter who does not understand Needs Review will ignore the queue and leave unknown codes unresolved, causing the alias database to never grow and keeping every future scan of those codes as unknown - compounding the manual review burden over time",
+      "explanation": "The Needs Review page exists and is reachable, but the UX bot gave it the highest friction score (3/5) among passing tasks. The copy uses technical language. Settings exposes 'AI lookup', 'Gemini', 'OpenAI' provider names directly to any logged-in user. A new counter with no training should understand what to do on the Needs Review page in under 10 seconds without reading docs.",
+      "fix": "Rewrite the Needs Review page header and empty-state copy in plain shop language ('We did not recognize these barcodes. Review each one and link it to the right product so it scans correctly next time.'). Add a dismissible first-scan hint on the Scan page. De-brand Settings by replacing 'AI lookup / Gemini / OpenAI' with 'Product lookup / Lookup engine' for non-platformOwner roles. Trivial build.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "No purchase order or vendor workflow - shops compare against inFlow and Lightspeed and see a gap",
+      "severity": "high",
+      "confidence": "high",
+      "area": "competitive",
+      "affects": "sales",
+      "evidence": [
+        "https://www.inflowinventory.com/software-pricing",
+        "https://www.lightspeedhq.com/pos/retail/pricing/"
+      ],
+      "businessImpact": "Shops with more than one supplier want to receive a PO, auto-decrement expected quantities, and flag overages. Without a PO workflow, Smart Inventory loses evaluations against inFlow ($110/mo) and Lightspeed ($89/mo) whenever the buyer has procurement needs beyond counting.",
+      "explanation": "Smart Inventory is a pure counting layer: scan, alias, count, export. It has no purchase order creation, no vendor catalog pull, no receiving workflow. Competitors like inFlow and Lightspeed treat PO receiving as a first-class feature. A shop manager demoing both will notice this immediately.",
+      "fix": "Short term: position as a count layer that complements an existing DMS or PO system, not a replacement. Medium term: add a lightweight receive-from-PO import (CSV of expected items) so scanned counts can reconcile against expected quantities.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Export is count-only - raw scan log, alias table, and unknowns are not downloadable",
+      "severity": "high",
+      "confidence": "high",
+      "area": "competitive",
+      "affects": "sales",
+      "evidence": [
+        "reports/agent-bots/latest/export_headers_by_role.json"
+      ],
+      "businessImpact": "Competitors offer full data portability (CSV of every table). The export bot found that only final counts download; raw scan log, alias table, products table, and unknowns show no download button. A buyer evaluating data ownership will reject a tool that cannot export its own learned alias table.",
+      "explanation": "The export_headers_by_role.json bot report shows products, aliases, raw scan log, and unknowns all return (button not present) or (no download). This means a shop cannot audit the alias table, cannot migrate to another tool, and cannot give their accountant the full scan log.",
+      "fix": "Add CSV download for: aliases table, raw scan feed, unknowns/Needs Review list. These are already in Zustand state. Exporting them is a one-sprint task with no schema change.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "No role-based access control - auth-bypass noted by security bot, blocks multi-user shop sales",
+      "severity": "high",
+      "confidence": "high",
+      "area": "competitive",
+      "affects": "sales",
+      "evidence": [
+        "reports/agent-bots/latest/export_headers_by_role.json"
+      ],
+      "businessImpact": "Every named competitor (Sortly, inFlow, Square, Lightspeed, Torque360) offers at least two roles (owner vs counter). A shop with three employees cannot let all three touch the alias table or see cost data. Without RBAC, Smart Inventory cannot be sold to shops with more than one person doing inventory.",
+      "explanation": "The export bot notes role as current (auth-bypass; role gating not yet implemented). This is a known deferred item but it is a direct sales blocker for the multi-user shop evaluation.",
+      "fix": "Implement at minimum a two-role model: Manager (can approve aliases, export all, adjust counts) and Counter (can scan and view, no alias edits). Firebase Auth is already the documented future path.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "No COGS, margin, or cost tracking - a gap against Square, Lightspeed, and inFlow",
+      "severity": "medium",
+      "confidence": "high",
+      "area": "competitive",
+      "affects": "sales",
+      "evidence": [
+        "https://www.business.org/finance/inventory-management/square-inventory-review/",
+        "https://www.lightspeedhq.com/pos/retail/"
+      ],
+      "businessImpact": "Shop owners want to know their tire inventory value and margin. Square (Plus+) and Lightspeed (all tiers) show COGS and margin. Without cost fields, Smart Inventory cannot answer the question what is my inventory worth today, which is a standard evaluation criterion.",
+      "explanation": "The current data model tracks quantity, product name, brand, category, specs, part number, location, and session. There are no cost or price fields. This means the CSV export cannot be used to value inventory or compute margin without manual enrichment in a spreadsheet.",
+      "fix": "Add optional cost_per_unit and sale_price fields to the product record. Include them in the final-counts CSV export. This allows a shop to compute COGS in their own spreadsheet even before a reporting dashboard is built.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Onboarding copy exposes internal technical terms - de-branding deferred but visible to evaluators",
+      "severity": "medium",
+      "confidence": "high",
+      "area": "competitive",
+      "affects": "sales",
+      "evidence": [
+        "reports/agent-bots/latest/top_ux_confusions.md"
+      ],
+      "businessImpact": "The UX bot found that customer-facing wording still exposes AI lookup, provider names, and internal terms in Settings. An evaluator (shop owner, not a developer) will see Gemini and OpenAI in the settings panel and either not understand or distrust the product. This raises the evaluation friction for non-technical buyers.",
+      "explanation": "Sortly, Torque360, and Square all present AI/automation features under plain business language (smart reorder, automated alerts). Smart Inventory surfaces provider names and toggle labels that require technical context.",
+      "fix": "Replace provider names with user-language equivalents in all customer-facing surfaces. Example: AI lookup: On becomes Auto-identify unknown items: On. Gemini / OpenAI become lookup service. This is a copy-only change with no logic impact.",
+      "autoFixable": false,
+      "ownerActionNeeded": false,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Biggest threat: Torque360 and TireShop already own the tire shop buyer relationship at lower price",
+      "severity": "high",
+      "confidence": "high",
+      "area": "competitive",
+      "affects": "sales",
+      "evidence": [
+        "https://www.torque360.co/pricing/",
+        "https://www.capterra.com/p/162393/TireShop/"
+      ],
+      "businessImpact": "Torque360 ($89.99/mo) and TireShop ($39.99/mo) are already in tire shops doing scheduling, invoicing, and inventory. A shop manager already using one of these will not replace it with a standalone counter - they will expect inventory counting to be inside their existing DMS. This is the single biggest distribution barrier.",
+      "explanation": "Tire shop buyers are already committed to one of the vertical DMS players. Smart Inventory must enter as a complementary count layer (we sync with your existing system) or find buyers at the moment they are replacing their DMS. Without a clear integration story with Torque360, TireShop, or at minimum a CSV-round-trip workflow, the sales motion stalls.",
+      "fix": "Build and publish a one-page integration story: Smart Inventory exports a CSV that imports into Torque360 and TireShop. Name those products by name in marketing. Offer a free import template. This requires no code change to the app, only documentation and a positioned CSV column mapping.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    },
+    {
+      "team": "business",
+      "title": "Separator-variant alias normalization is a proven differentiator with zero competition coverage",
+      "severity": "low",
+      "confidence": "high",
+      "area": "competitive",
+      "affects": "sales",
+      "evidence": [
+        "reports/human-bots/latest/tire_resolution_result.json"
+      ],
+      "businessImpact": "The human bot proved that 8 code variants (dashed, no separator, space, slash, backslash, underscore, dot, plus retail barcode) all resolve to the same Falken Sincera ST80 A/S product. No named competitor - Sortly, inFlow, Square, Lightspeed, Torque360, TireShop, or Protractor - documents or demonstrates this capability. This is a genuine demo-able differentiator for any shop that scans tires with manufacturer part numbers.",
+      "explanation": "Tire part numbers come from manufacturers in multiple formats and from scanners with different separator conventions. A code that arrives as 2881-6861 from one scanner and 28816861 from another scanner would create duplicate products in any generic inventory tool. Smart Inventory normalizes all variants to one canonical product. This eliminates the double-count problem that shop staff currently solve manually with spreadsheets.",
+      "fix": "Make this the headline feature in demos and marketing copy. Show the 8-variant bot proof as a live demo. This is already built and proven - it needs positioning, not development.",
+      "autoFixable": false,
+      "ownerActionNeeded": true,
+      "status": "new"
+    }
+  ],
+  "scores": [
+    {
+      "dimension": "Overall readiness",
+      "score": 41,
+      "confidence": "high",
+      "reason": "Strong counting and alias-normalization core, but two blocker security holes (leaked keys, open catalog) plus a first-scan focus blocker keep it below pilot-ready.",
+      "topFix": "Rotate/scrub the leaked keys and gate the public catalog read."
+    },
+    {
+      "dimension": "Demo readiness",
+      "score": 55,
+      "confidence": "medium",
+      "reason": "Core scan-to-count flow and the 8-variant alias proof demo well, but the first scan requires a manual click and the phone screen buries the feed, which read as broken in a live demo.",
+      "topFix": "Auto-focus the scan input and collapse session/sync/export controls on mobile."
+    },
+    {
+      "dimension": "Security posture",
+      "score": 28,
+      "confidence": "high",
+      "reason": "Per lens signal: leaked keys in git history, fully open global catalog, client-only role gating, unauthenticated AI endpoint, and serverless spend cap that does not actually cap.",
+      "topFix": "Rotate and scrub the committed keys; that exposure is permanent until history is cleaned."
+    },
+    {
+      "dimension": "Customer data protection",
+      "score": 30,
+      "confidence": "high",
+      "reason": "Raw barcodes, aliases, GTIN/UPC/EAN, decode traces, and admin exports all live in the customer browser in-session; only localStorage is stripped, not in-memory state. idempotencyKey also leaks into customer responses.",
+      "topFix": "Route customer sessions through /api/resolve-scan so the client never loads the raw catalog/alias index."
+    },
+    {
+      "dimension": "Multi-tenant isolation",
+      "score": 78,
+      "confidence": "high",
+      "reason": "Cross-tenant Firestore isolation is proven by emulator tests and the resolve-scan server check; the Falken/Camel cross-product bug is confirmed fixed. The gap is role-within-tenant, not tenant-to-tenant.",
+      "topFix": "Keep the emulator isolation suite in CI on every rules change."
+    },
+    {
+      "dimension": "Mobile usability",
+      "score": 38,
+      "confidence": "high",
+      "reason": "On phone width, session and sync rows push the scan feed off screen, three equal-weight session buttons compete, and the brand name wraps; the scan loop is not thumb-friendly yet.",
+      "topFix": "Hide session/location/sync behind one collapsed Session toggle at mobile width."
+    },
+    {
+      "dimension": "Scanner flow",
+      "score": 50,
+      "confidence": "high",
+      "reason": "Buffering, idempotency, and duplicate-increment are solid, but the input is not auto-focused and the placeholder says 'Click here', so the focused-by-default state is undercut and the UX bot scored this FAIL.",
+      "topFix": "Auto-focus on mount and after navigation; change placeholder to 'Scan or type a code and press Enter'."
+    },
+    {
+      "dimension": "Decode accuracy",
+      "score": 80,
+      "confidence": "high",
+      "reason": "Identity correctness is strong: all 8 separator variants resolve to the right Falken product, never to Camel Crush, and conflicts route to Needs Review instead of guessing.",
+      "topFix": "Keep the Falken/Camel regression test in CI on every alias or catalog change."
+    },
+    {
+      "dimension": "Needs Review quality",
+      "score": 58,
+      "confidence": "medium",
+      "reason": "Queue works and unknowns route correctly, but the 'Correct'/approval button was absent from the counts panel (human-approval gate may be unreachable there) and the copy scored the highest friction of any passing task.",
+      "topFix": "Confirm the approval control renders in final-count-body, then rewrite the copy in plain shop language."
+    },
+    {
+      "dimension": "AI cost safety",
+      "score": 40,
+      "confidence": "high",
+      "reason": "Daily cap is correctly server-side but in-process memory only; on multi-instance serverless each instance gets its own counter so real spend is unbounded, and the unauthenticated GET leaks exactly which model to target.",
+      "topFix": "Move the cap to a shared atomic store (Upstash Redis or Vercel KV) before any cloud deploy."
+    },
+    {
+      "dimension": "Offline readiness",
+      "score": 72,
+      "confidence": "medium",
+      "reason": "Local optimistic state, pending sync queue, retry, and idempotency are designed and tested so scans are not lost offline; no offline-specific failures were reported in this batch.",
+      "topFix": "Add a Playwright offline-then-reconnect proof to lock in the retry/no-double-count behavior."
+    },
+    {
+      "dimension": "Import / export",
+      "score": 45,
+      "confidence": "high",
+      "reason": "Final-counts and quantity exports work, but raw scan log, alias table, products, and unknowns show no download button, blocking accountant handoff and data portability that buyers expect.",
+      "topFix": "Add CSV download for aliases, raw scan log, and unknowns (data already in state), gated by role."
+    },
+    {
+      "dimension": "Business value",
+      "score": 74,
+      "confidence": "high",
+      "reason": "Per lens signal: the separator-variant normalization is a proven, uncontested differentiator and the counting core is real; value is gated mainly by the missing role/data-protection foundation.",
+      "topFix": "Ship the role model so the proven counting engine becomes sellable to multi-employee shops."
+    },
+    {
+      "dimension": "Pricing confidence",
+      "score": 48,
+      "confidence": "medium",
+      "reason": "Counting layer is strong but lacks PO/receiving, COGS/margin, low-stock alerts, and per-user attribution that priced competitors (inFlow $110, Lightspeed $89) include, so it cannot yet defend a comparable price.",
+      "topFix": "Add cost/price fields and low-stock thresholds to support an inventory-value and reorder story."
+    },
+    {
+      "dimension": "Competitive position",
+      "score": 38,
+      "confidence": "high",
+      "reason": "Per lens signal: Torque360 and TireShop already own the tire-shop buyer at lower price with PO/invoicing, and Smart Inventory has no PO, RBAC, COGS, or integration story yet; the alias normalization is the one clear edge.",
+      "topFix": "Position as a complementary count layer with a CSV round-trip into Torque360/TireShop and lead demos with the 8-variant proof."
+    },
+    {
+      "dimension": "Supportability",
+      "score": 50,
+      "confidence": "medium",
+      "reason": "Audit events are written but have no read UI, there is no session history list, and no per-user attribution, so a discrepancy forces a support call or full recount.",
+      "topFix": "Build the read-only audit log viewer on top of the existing audit write schema."
+    }
+  ],
+  "competitors": {
+    "columns": [
+      "Competitor",
+      "Target customer",
+      "Pricing",
+      "Inventory",
+      "Scanning",
+      "Tire support",
+      "Integrations",
+      "AI/automation",
+      "We win",
+      "We lose",
+      "Wedge"
+    ],
+    "rows": [
+      [
+        "Sortly",
+        "SMB generalist (tools, assets, supplies, retail)",
+        "$0 free / $24-$59/mo billed annually (vendor site June 2026)",
+        "Strong: custom folders, tags, fields, low-stock alerts, multi-location",
+        "Mobile barcode + QR scan, label printing, offline access",
+        "None - no tire spec fields, no part-number alias normalization, no separator variants",
+        "CSV import/export, API (paid), Zapier",
+        "Basic: low-stock alerts only, no decode pipeline",
+        "Deterministic alias table (many codes -> one product), separator-variant normalization proven in bot test, tire-spec depth, multi-trade without per-trade config",
+        "Mobile UX polish, brand recognition, label printing, multi-user RBAC (gated plans), integrations marketplace",
+        "Tire-first depth: Sortly cannot match a part number typed as 2881-6861, 28816861, 2881_6861, or 2881/6861 to the same product. Smart Inventory bot-proven to do all 8 variants."
+      ],
+      [
+        "inFlow Inventory",
+        "SMB/mid-market product businesses: wholesale, retail, light manufacturing",
+        "$110-$355/mo billed annually; API add-on $29-$69/mo extra (vendor site June 2026)",
+        "Strong: multi-location, purchase orders, BOM, serial tracking, COGS reports",
+        "Barcode scan via phone or proprietary Smart Scanner hardware; label generation",
+        "None - generic inventory, no tire or auto-part domain awareness",
+        "CSV, API, QuickBooks, Xero, Shopify, WooCommerce",
+        "Basic: low-stock reorder suggestions",
+        "No monthly fee tier, tire-part alias normalization, AI decode for unknown codes, offline-tolerant scan with local queue, idempotent retry",
+        "Purchase orders, BOM/work orders, COGS/margin reporting, proprietary scan hardware, mature integrations, serial tracking",
+        "Cost + complexity wedge: inFlow starts at $110/mo with add-on fees. For a tire shop that just needs to count stock, Smart Inventory is lighter, tire-aware, and adds AI decode for cold inventory with no PO overhead."
+      ],
+      [
+        "Square for Retail",
+        "Small brick-and-mortar retail (apparel, food, accessories)",
+        "$0 free / $49 Plus / $149 Premium per location per month (vendor site June 2026)",
+        "Real-time stock tracking, transfer between locations, vendor and PO management (Plus+), COGS/margin reports",
+        "Barcode scan via Square hardware or phone; label printing",
+        "None - no automotive/tire vertical, no part-number alias normalization",
+        "Square ecosystem (payments, payroll, loyalty), CSV, API, e-commerce",
+        "Low-stock alerts, basic demand forecasting (Premium)",
+        "No transaction fee dependency, tire-specific alias normalization, AI decode for unknown part codes, deterministic counting, offline scan queue",
+        "Free plan with payments bundled, ecosystem lock-in benefits, COGS/margin, vendor POs, loyalty program, brand trust",
+        "Vertical wedge: Square is retail-generic and charges transaction fees. Tire/auto shops do not want payments bundled with inventory. Smart Inventory is count-first, no payment processor dependency."
+      ],
+      [
+        "Lightspeed Retail",
+        "Mid-size to enterprise multi-location retail (cycling, outdoor, auto accessories)",
+        "$89-$289/mo Basic-Plus billed annually per location; higher month-to-month (vendor site June 2026)",
+        "Matrix SKUs, serial tracking, PO workflows, 8M+ preloaded catalog, multi-location transfers",
+        "Barcode scan; label printing; scanner hardware supported",
+        "Has automotive accessories catalog depth but no tire-spec (DOT, load index, speed rating) fields or part-number separator normalization",
+        "Xero, QuickBooks, Shopify, loyalty, analytics add-ons",
+        "Basic reorder point automation, analytics dashboards",
+        "Lower entry price, tire-spec field depth, separator-variant alias matching, AI decode for cold stock codes, deterministic idempotent counting without POS dependency",
+        "8M preloaded catalog, matrix SKUs for color/size variants, multi-location PO workflow, payments, loyalty, analytics, brand trust",
+        "Domain wedge: Lightspeed is premium-priced retail POS. A tire shop does not need loyalty programs or an apparel matrix SKU. Smart Inventory gives them tire-native counting without the overhead."
+      ],
+      [
+        "Torque360",
+        "Auto repair and tire shop (single or multi-location)",
+        "$89.99-$179.99/mo; enterprise custom (vendor site June 2026)",
+        "Parts and labor inventory within work orders; tire inventory listing; stock levels",
+        "Barcode scan for parts receiving and work order lookup",
+        "Tire-specific workflow: tire quotes, labor per service, mounting/balancing pricing",
+        "PartsTech parts catalog, Carfax VIN/plate lookup, Twilio two-way texting, GPay/Apple Pay",
+        "None disclosed; primarily scheduling and workflow automation",
+        "Standalone inventory count mode (no work order required), AI decode for unknown codes, offline scan queue, idempotent retry, multi-trade without automotive vertical lock-in",
+        "Complete shop workflow: work orders, scheduling, invoicing, digital inspections, customer texting, integrated payments, PartsTech catalog lookup",
+        "Count-only wedge: Torque360 is a full shop management suite. A shop already on a DMS just needs inventory counting. Smart Inventory installs alongside any existing DMS as a count layer, no migration required."
+      ],
+      [
+        "TireShop by Freedomsoft",
+        "Tire and auto repair shops (single to multi-branch)",
+        "Starts $39.99/mo, no lock-in contract (Capterra/GetApp June 2026)",
+        "Real-time tire inventory across locations; parts tracking in work orders",
+        "Inventory scan for parts; barcode support in receiving workflow",
+        "Strongest vertical fit: tire quotes, multi-store live counter activity, tire registration (Tiremetrix integration), TPMS",
+        "Tiremetrix tire registration, QuickBooks, credit card processing",
+        "Minimal; primarily workflow automation for scheduling and invoicing",
+        "AI decode for cold/unknown part codes, separator-variant alias normalization proven in bot tests, offline scan queue, multi-trade beyond tires (supplements, tools, warehouse)",
+        "Tire-native work order and quote workflow, multi-store live view, Tiremetrix TPMS registration, established tire shop user base, lower base price",
+        "Decode wedge: TireShop has no AI decode for unknown barcodes. A shop receiving new SKUs from a new supplier hits a dead end. Smart Inventory's Gemini-first decode pipeline identifies unknown codes and teaches the alias permanently."
+      ],
+      [
+        "Protractor (Protractor.NET)",
+        "Mid-size to large auto repair chains, multi-location",
+        "Quote-based; one user report cites ~$149/mo; enterprise tiers undisclosed (Capterra/SoftwareAdvice June 2026)",
+        "Parts and labor inventory, core tracking, return management, catalog lookups, vendor integrations",
+        "Barcode scan for parts receiving within work order workflow",
+        "Auto-repair oriented; tire inventory through parts catalog but no tire-spec fields or separator normalization",
+        "Parts catalog integrations, vendor integrations, warranty handling, integrated payments",
+        "None disclosed",
+        "Standalone scan count (no work order required), AI decode for unknowns, tire-spec fields, offline scan queue, deterministic alias matching, multi-trade",
+        "Mature multi-location chain management, core tracking, parts return workflow, deep catalog integrations, enterprise support",
+        "Simplicity wedge: Protractor is enterprise-weight. An independent tire shop or mid-size operation does not want to manage core returns and parts matrices. Smart Inventory gives them fast deterministic counting with AI fallback."
+      ],
+      [
+        "Spreadsheet or pen-and-paper (manual baseline)",
+        "Any shop that has not yet adopted software - the real default",
+        "$0 (Google Sheets free; Excel ~$10/mo Microsoft 365 Personal)",
+        "Manual: columns for SKU, quantity, location; no real-time, no auto-increment",
+        "None: barcodes must be looked up manually, codes typed by hand",
+        "Manually managed: tire specs entered as free text, no normalization",
+        "CSV export from Google Sheets; no real integrations",
+        "None unless the user builds their own formulas",
+        "Instant scan-to-count (no typing), alias normalization, AI decode for unknowns, offline queue, idempotency, Needs Review queue, export to CSV, 75ms scan-to-feed row (perf bot June 2026)",
+        "$0 cost, infinite flexibility for custom columns, no learning curve, no vendor dependency, universal export compatibility",
+        "Speed wedge: a physical count with a scanner takes a fraction of the time vs typing. Demo the scan-to-row flow in under 30 seconds. The friction of switching from a spreadsheet is near-zero because Smart Inventory exports CSV that drops into any existing sheet."
+      ]
+    ],
+    "sourceNote": "Pricing from vendor sites and review aggregators (Capterra, G2, GetApp, SoftwareAdvice, StackScored) searched June 2026. Feature claims cross-referenced against search summaries. Internal product data from bot scorecard reports (reports/agent-bots/latest/, reports/human-bots/latest/) dated June 2026."
+  },
+  "accuracy": {
+    "provisional": true,
+    "total": 6,
+    "correct": 0,
+    "wrong": 0,
+    "needsReview": 0,
+    "perCode": [
+      {
+        "code": "2881-6861",
+        "expected": "Falken",
+        "got": "(not run)",
+        "verdict": "dry",
+        "note": "dry mode (LIVE_AI_TEST not 1)"
+      },
+      {
+        "code": "878106003504",
+        "expected": "(unconfirmed)",
+        "got": "(not run)",
+        "verdict": "dry",
+        "note": "dry mode (LIVE_AI_TEST not 1)"
+      },
+      {
+        "code": "745125495781",
+        "expected": "POISON / near-match trap - must route to Needs Review, never auto-count",
+        "got": "(not run)",
+        "verdict": "dry",
+        "note": "dry mode (LIVE_AI_TEST not 1)"
+      },
+      {
+        "code": "070330645936",
+        "expected": "(unconfirmed)",
+        "got": "(not run)",
+        "verdict": "dry",
+        "note": "dry mode (LIVE_AI_TEST not 1)"
+      },
+      {
+        "code": "6977228152610",
+        "expected": "(unconfirmed)",
+        "got": "(not run)",
+        "verdict": "dry",
+        "note": "dry mode (LIVE_AI_TEST not 1)"
+      },
+      {
+        "code": "710154236681",
+        "expected": "(unconfirmed)",
+        "got": "(not run)",
+        "verdict": "dry",
+        "note": "dry mode (LIVE_AI_TEST not 1)"
+      }
+    ]
+  },
+  "transparency": {
+    "mode": "lean",
+    "lenses": 10,
+    "rounds": 1,
+    "proposed": 61,
+    "refuted": 0,
+    "accepted": 61,
+    "downgraded": 0,
+    "uncertain": 0
+  },
+  "cost": {
+    "mode": "lean",
+    "capUsd": 0.5,
+    "thirdParty": [],
+    "claude": {
+      "agents": 11,
+      "estTokens": 451793,
+      "note": "Covered by Claude subscription. Zero out-of-pocket cash. ~452k tokens across 11 agents (estimate)."
+    },
+    "skipped": [
+      "live accuracy not run: dry mode (LIVE_AI_TEST not 1)"
+    ]
+  }
+}
