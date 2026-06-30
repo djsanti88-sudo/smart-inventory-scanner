@@ -7,8 +7,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["firebase-admin", "better-sqlite3"],
 
   // Include the generated SQLite knowledge DB in the serverless function bundle.
-  // The DB is generated at build time (scripts/build-knowledge-db.mjs) and read at runtime
-  // for microsecond barcode lookups with minimal memory (~5MB vs ~1GB for JSON parsing).
+  // Currently tire-only (~20MB). The 4M retail products need an external DB (Turso)
+  // because 342MB exceeds Vercel's ~250MB compressed function size limit.
   outputFileTracingIncludes: {
     "/api/ai-lookup": ["./src/server/knowledge.generated.db"],
   },
