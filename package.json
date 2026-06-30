@@ -38,7 +38,10 @@
     "intel:now": "node scripts/weekly-intel.mjs",
     "intel:tire-scan": "node scripts/weekly-tire-scan.ts",
     "intel:report": "node scripts/build-report-html.mjs",
-    "intel:validate": "node scripts/validate-agents.mjs"
+    "intel:validate": "node scripts/validate-agents.mjs",
+    "harvest": "node scripts/barcode-harvester/engine.mjs",
+    "harvest:discount-tire": "node scripts/barcode-harvester/engine.mjs --site discount-tire",
+    "harvest:test": "node scripts/barcode-harvester/engine.mjs --site discount-tire --max-pages 5 --headless false"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

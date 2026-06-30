@@ -1,0 +1,27 @@
+{
+  "name": "discount-tire",
+  "baseUrl": "https://www.discounttire.com",
+  "catalog": {
+    "strategy": "brand-list",
+    "brandListUrl": "/tires-catalog",
+    "brandLinkSelector": "a[href*='/tires/']",
+    "productLinkSelector": "a[href*='/buy-tires/'], a[href*='/p/']",
+    "paginationSelector": "button[aria-label='Next'], [data-testid='pagination-next']",
+    "maxPagesPerBrand": 50
+  },
+  "product": {
+    "barcodeSelector": "[data-testid='gtin'], .gtin, .upc-code, .product-upc",
+    "brandSelector": ".product-brand, [data-testid='brand-name'], h1",
+    "modelSelector": ".product-model, [data-testid='product-name'], h1",
+    "sizeSelector": ".tire-size, [data-testid='tire-size'], .product-size",
+    "specsSelector": ".product-specs, [data-testid='product-specs'], .tire-details"
+  },
+  "pacing": {
+    "interPageDelayMs": 2500,
+    "interBrandDelayMs": 6000,
+    "maxConcurrent": 1,
+    "maxConsecutiveErrors": 10,
+    "respectRobotsTxt": true
+  },
+  "extractor": "discount-tire.mjs"
+}
