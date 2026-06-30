@@ -7,7 +7,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:emulator": "node scripts/dev.mjs --emulator",
     "dev:prod": "node scripts/dev.mjs --prod",
-    "build": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs && rm -f src/server/knowledge.generated.db && next build",
+    "build": "next build",
     "build:knowledge-db": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs",
     "start": "next start",
     "lint": "eslint",

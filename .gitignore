@@ -88,9 +88,8 @@ data/**/*.lock
 # Nested auto-generated Playwright HTML report (root /playwright-report already ignored above)
 reports/**/playwright-report/
 
-# Generated SQLite knowledge DB (built from committed JSON indexes at build time)
+# Generated SQLite knowledge DB (uncompressed is gitignored; .gz is committed via LFS)
 src/server/knowledge.generated.db
-src/server/knowledge.generated.db.gz
 src/server/knowledge.generated.db-wal
 src/server/knowledge.generated.db-shm
 
