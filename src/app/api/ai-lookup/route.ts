@@ -352,10 +352,10 @@ export async function POST(request: Request) {
       }
 
       // RETAIL PRODUCT KNOWLEDGE INDEX (4M+ Open Food Facts products): exact barcode hit resolves
-      // the product WITHOUT AI. Only for non-tire public barcodes (tires are handled by the tire corpus).
+      // the product WITHOUT AI. Tries local SQLite first, then Turso remote DB.
       if (!e2eMode()) {
-        const { lookupRetailBarcode } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
-        const retail = lookupRetailBarcode(code);
+        const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+        const retail = await lookupRetailBarcodeAsync(code);
         if (retail) {
           const result: AiLookupResult = {
             ...emptyResult(),
