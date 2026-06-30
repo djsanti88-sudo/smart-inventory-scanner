@@ -46,16 +46,20 @@ function getStmtBarcode() {
   if (_stmtBarcode) return _stmtBarcode;
   const db = getKnowledgeDb();
   if (!db) return null;
-  _stmtBarcode = db.prepare("SELECT * FROM tires WHERE barcode = ?");
-  return _stmtBarcode;
+  try {
+    _stmtBarcode = db.prepare("SELECT * FROM tires WHERE barcode = ?");
+    return _stmtBarcode;
+  } catch { return null; }
 }
 
 function getStmtPartNumber() {
   if (_stmtPartNumber) return _stmtPartNumber;
   const db = getKnowledgeDb();
   if (!db) return null;
-  _stmtPartNumber = db.prepare("SELECT * FROM tires WHERE manufacturer_part_number = ? LIMIT 1");
-  return _stmtPartNumber;
+  try {
+    _stmtPartNumber = db.prepare("SELECT * FROM tires WHERE manufacturer_part_number = ? LIMIT 1");
+    return _stmtPartNumber;
+  } catch { return null; }
 }
 
 /** EXACT trusted barcode lookup. Returns the corpus row or null. Never near-matches. */
