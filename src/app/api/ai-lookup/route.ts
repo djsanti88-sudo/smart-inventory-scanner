@@ -378,70 +378,12 @@ export async function POST(request: Request) {
         }
       }
 
-      // PREFIX-ANCHORED FAST TIRE HOT PATH (Task 4). A known tire GS1 prefix hit IS the tire signal:
-      // the route may not receive an explicit "tire" scanContext, so a lookupTirePrefix match scopes
-      // this path. The anchor brand comes from the STRONG prefix family only (a hint, never authority).
-      // One grounded 3s call + one decideDecode(scanContext "tire"), then return - with NO synchronous
-      // deep/Firecrawl call. The deep path stays reachable via deepRequested (mode "decode-deep").
-      // Skipped under E2E (mock-only orchestration below) and when the client opted into the deep path.
+      // PREFIX detection for tire scan context (used by the AI decode path below for brand hints
+      // and tire-specific decideDecode). The corpus check above already handles exact barcode hits
+      // instantly — corpus misses fall through to the AI decode with the normal 8s budget.
       const prefixMatch = lookupTirePrefix(code);
       const anchorBrand = prefixMatch ? (prefixMatch.brands.find((b) => b.weight === "strong")?.brand ?? null) : null;
       const isTireScan = !!prefixMatch;
-      if (isTireScan && !deepRequested && !e2eMode()) {
-        // INSTANT: brand from the prefix, NO synchronous grounded call. The size fills from the background
-        // size race (mode "decode-deep" / backgroundVerifyDeep). Returns immediately.
-        const result: AiLookupResult = { ...emptyResult(), brand: anchorBrand ?? "", productName: anchorBrand ?? "", needsHumanReview: true, confidence: 0.6 };
-        const evidence: EvidenceResult = { verified: false, strength: "none", matchedCode: code, matchedSources: [], reason: "size pending background fill" };
-        // decideDecode is the ONLY gate that decides truth/auto-count: it verifies on the app-built
-        // evidence (never the model's self-claim), so false-auto-count stays 0. A brand-only result
-        // has no size/model so hasCountableTireIdentity is false and decideDecode returns "suggested".
-        const decision = decideDecode({
-          codeType,
-          results: [result].filter((r): r is NonNullable<typeof r> => Boolean(r)),
-          evidences: [evidence],
-          confidenceThreshold: threshold,
-          code,
-          scanContext: "tire",
-        });
-        const results = result ? [result] : [];
-        const providerNames = ["prefix-brand"];
-        const providerStatuses = [{
-          provider: "prefix-brand",
-          status: "ok" as const,
-          latencyMs: 0,
-          sourceUrlsReturned: 0,
-          exactCodeFound: false,
-          identityFound: true,
-        }];
-        const hasProductHot = results.some((r) => isUsableProductName(r.productName));
-        const reasonCode = decodeReasonCode({ hasProduct: hasProductHot, fallbackFound: false, timedOut: false, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: false, coverageMissed: false });
-        const reasonText = REASON_TEXT[reasonCode] ?? "";
-        const finalDecision = decision.status !== "verified" && reasonText ? { ...decision, reason: reasonText } : decision;
-        return {
-          mode: "decode" as const,
-          providerNames,
-          results,
-          evidences: [evidence],
-          providerStatuses,
-          decision: finalDecision,
-          reasonCode,
-          reasonText,
-          timedOut: false,
-          debug: {
-            providersAttempted: providerNames,
-            evidenceStrengths: [evidence].map((e) => e.strength),
-            sourceCounts: results.map((r) => (r.sourceUrls ?? []).length),
-            anchorBrand,
-            tireHotPath: true,
-            sizePending: true,
-            aiCalled: false,
-            pageFetched: false,
-            firecrawlCreditsEstimated: 0,
-            cached: false,
-          },
-          sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
-        };
-      }
 
       // FAST PATH - CONCURRENT, HARD ~13s BUDGET. Providers + page-fetch race under one budget signal.
       // On timeout the orchestrator aborts everything and returns Needs Review (never a partial).
