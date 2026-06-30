@@ -12,8 +12,10 @@
 // If the retail JSON is a Git LFS pointer (Vercel without LFS enabled), the retail table is
 // skipped gracefully — tire lookups still work. Enable Git LFS on Vercel for retail coverage.
 
-import { readFileSync, existsSync, unlinkSync, statSync } from "node:fs";
+import { readFileSync, existsSync, unlinkSync, statSync, createReadStream, createWriteStream } from "node:fs";
 import { join } from "node:path";
+import { createGzip } from "node:zlib";
+import { pipeline } from "node:stream/promises";
 import Database from "better-sqlite3";
 
 const ROOT = process.cwd();
@@ -172,13 +174,8 @@ if (tireData) {
 // ---------------------------------------------------------------------------
 // 3. Retail index
 // ---------------------------------------------------------------------------
-// The full retail DB (4M rows, ~320MB) exceeds Vercel's ~250MB compressed function limit.
-// Skip on Vercel builds; retail will use an external DB (Turso) in a future update.
-// Locally, set BUILD_RETAIL=1 to include it for testing.
-const skipRetail = process.env.VERCEL === "1" && process.env.BUILD_RETAIL !== "1";
-const retailData = skipRetail
-  ? (console.log("[knowledge-db] Skipping retail index on Vercel (function size limit). Use Turso for retail in production."), null)
-  : safeReadJson(RETAIL_JSON, "Retail JSON (247MB, may need Git LFS)");
+// Retail is always built when the source JSON exists (the DB is gzipped for the bundle).
+const retailData = safeReadJson(RETAIL_JSON, "Retail JSON (247MB, may need Git LFS)");
 if (retailData) {
   const t2 = performance.now();
   const retailIndex = retailData.index || {};
@@ -233,8 +230,18 @@ db.exec("VACUUM");
 db.close();
 
 const dbSize = statSync(DB_PATH).size;
-console.log(`[knowledge-db] Done in ${elapsed(t0)}. DB size: ${(dbSize / 1024 / 1024).toFixed(1)} MB`);
-console.log(`[knowledge-db] Output: ${DB_PATH}`);
+console.log(`[knowledge-db] DB size: ${(dbSize / 1024 / 1024).toFixed(1)} MB`);
+
+// Gzip the DB for the Vercel function bundle (342MB -> ~125MB compressed).
+// At runtime, the function decompresses to /tmp on the first cold start.
+const GZ_PATH = DB_PATH + ".gz";
+console.log("[knowledge-db] Compressing DB with gzip...");
+await pipeline(createReadStream(DB_PATH), createGzip({ level: 6 }), createWriteStream(GZ_PATH));
+const gzSize = statSync(GZ_PATH).size;
+console.log(`[knowledge-db] Compressed: ${(gzSize / 1024 / 1024).toFixed(1)} MB (${Math.round((1 - gzSize / dbSize) * 100)}% reduction)`);
+
+console.log(`[knowledge-db] Done in ${elapsed(t0)}.`);
+console.log(`[knowledge-db] Output: ${DB_PATH} (${(dbSize / 1024 / 1024).toFixed(0)} MB) + ${GZ_PATH} (${(gzSize / 1024 / 1024).toFixed(0)} MB)`);
 if (!tireData && !retailData) {
   console.warn("[knowledge-db] WARNING: No source data loaded. The DB is empty.");
 }

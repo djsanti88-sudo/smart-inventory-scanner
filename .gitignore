@@ -90,6 +90,7 @@ reports/**/playwright-report/
 
 # Generated SQLite knowledge DB (built from committed JSON indexes at build time)
 src/server/knowledge.generated.db
+src/server/knowledge.generated.db.gz
 src/server/knowledge.generated.db-wal
 src/server/knowledge.generated.db-shm
 
