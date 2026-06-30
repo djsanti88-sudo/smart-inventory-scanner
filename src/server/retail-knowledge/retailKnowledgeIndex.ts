@@ -1,9 +1,10 @@
 // Retail product knowledge index: 4M+ products from Open Food Facts.
 // Barcode -> productName, brand, category. SERVER-SIDE ONLY.
-// Uses SQLite for microsecond lookups with ~5MB memory.
 //
-// The JSON source file stays in git (Git LFS) for regeneration but is NOT loaded at runtime.
-// Run `npm run build:knowledge-db` to generate the SQLite DB from the JSON indexes.
+// Two lookup paths (tried in order):
+//   1. Local SQLite (if knowledge.generated.db exists — local dev with build:knowledge-db)
+//   2. Turso remote DB (if TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are set — production on Vercel)
+// Both return the same RetailLookupResult shape. If neither is available, returns null.
 
 import { getKnowledgeDb } from "@/server/knowledgeDb";
 
@@ -26,48 +27,113 @@ export interface RetailLookupResult {
   barcode: string; // the variant that matched
 }
 
-// SQLite prepared statement (created lazily, cached for process lifetime).
-// The retail table may not exist if the source JSON was an LFS pointer during build.
+// ---------------------------------------------------------------------------
+// Path 1: Local SQLite (dev mode)
+// ---------------------------------------------------------------------------
 let _stmtLookup: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
-let _tableChecked = false;
+let _sqliteChecked = false;
 
-function getStmtLookup() {
+function getSqliteStmt() {
   if (_stmtLookup) return _stmtLookup;
-  if (_tableChecked) return null; // already checked, table missing
+  if (_sqliteChecked) return null;
   const db = getKnowledgeDb();
-  if (!db) { _tableChecked = true; return null; }
+  if (!db) { _sqliteChecked = true; return null; }
   try {
     _stmtLookup = db.prepare("SELECT barcode, product_name, brand, category FROM retail WHERE barcode = ?");
     return _stmtLookup;
   } catch {
-    // Table doesn't exist (retail JSON was LFS pointer during build)
-    console.warn("[retail-knowledge] retail table not found in SQLite DB. Retail lookups disabled.");
-    _tableChecked = true;
+    _sqliteChecked = true;
     return null;
   }
 }
 
-/** Look up a barcode in the retail product index. Returns null on miss. Tries zero-padded variants. */
-export function lookupRetailBarcode(code: string): RetailLookupResult | null {
-  const stmt = getStmtLookup();
+function lookupSqlite(code: string): RetailLookupResult | null {
+  const stmt = getSqliteStmt();
   if (!stmt) return null;
-
   const variants = barcodeVariants(code.trim());
   for (const v of variants) {
     const row = stmt.get(v) as { barcode: string; product_name: string; brand: string; category: string } | undefined;
-    if (row) {
-      return {
-        productName: row.product_name,
-        brand: row.brand,
-        category: row.category,
-        barcode: row.barcode,
-      };
-    }
+    if (row) return { productName: row.product_name, brand: row.brand, category: row.category, barcode: row.barcode };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Path 2: Turso remote DB (production on Vercel)
+// ---------------------------------------------------------------------------
+type TursoClient = { execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
+let _tursoClient: TursoClient | null | "unavailable" = null;
+
+function getTursoClient(): TursoClient | null {
+  if (_tursoClient === "unavailable") return null;
+  if (_tursoClient) return _tursoClient;
+  const url = process.env.TURSO_DATABASE_URL;
+  const token = process.env.TURSO_AUTH_TOKEN;
+  if (!url || !token) { _tursoClient = "unavailable"; return null; }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createClient } = require("@libsql/client");
+    _tursoClient = createClient({ url, authToken: token }) as TursoClient;
+    console.log("[retail-knowledge] Turso client connected:", url);
+    return _tursoClient;
+  } catch (e) {
+    console.warn("[retail-knowledge] Failed to create Turso client:", (e as Error).message);
+    _tursoClient = "unavailable";
+    return null;
+  }
+}
+
+async function lookupTurso(code: string): Promise<RetailLookupResult | null> {
+  const client = getTursoClient();
+  if (!client) return null;
+  const variants = barcodeVariants(code.trim());
+  // Query all variants in one round-trip
+  const placeholders = variants.map(() => "?").join(", ");
+  try {
+    const result = await client.execute({
+      sql: `SELECT barcode, product_name, brand, category FROM retail WHERE barcode IN (${placeholders}) LIMIT 1`,
+      args: variants,
+    });
+    if (result.rows.length > 0) {
+      const row = result.rows[0];
+      return {
+        productName: row.product_name as string,
+        brand: (row.brand as string) || "",
+        category: (row.category as string) || "",
+        barcode: row.barcode as string,
+      };
+    }
+  } catch (e) {
+    console.warn("[retail-knowledge] Turso query error:", (e as Error).message);
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/** Look up a barcode in the retail product index. Tries local SQLite first, then Turso. */
+export function lookupRetailBarcode(code: string): RetailLookupResult | null {
+  // SQLite is synchronous and faster — try it first
+  const sqliteResult = lookupSqlite(code);
+  if (sqliteResult) return sqliteResult;
+
+  // Turso is async but we need a sync return for the existing call site.
+  // Return null here; the async version is used by the API route.
+  return null;
+}
+
+/** Async version for the API route — tries SQLite first, then Turso over the network. */
+export async function lookupRetailBarcodeAsync(code: string): Promise<RetailLookupResult | null> {
+  const sqliteResult = lookupSqlite(code);
+  if (sqliteResult) return sqliteResult;
+  return lookupTurso(code);
 }
 
 /** For tests: reset caches so the next lookup re-initializes. */
 export function __resetRetailKnowledgeCacheForTests(): void {
   _stmtLookup = null;
+  _sqliteChecked = false;
+  _tursoClient = null;
 }
