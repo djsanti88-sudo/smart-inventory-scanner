@@ -6,11 +6,12 @@ const nextConfig: NextConfig = {
   // fixed via patch-package (patches/jwks-rsa+4.0.1.patch).
   serverExternalPackages: ["firebase-admin", "better-sqlite3"],
 
-  // Include the generated SQLite knowledge DB in the serverless function bundle.
-  // Currently tire-only (~20MB). The 4M retail products need an external DB (Turso)
-  // because 342MB exceeds Vercel's ~250MB compressed function size limit.
+  // Include the gzipped SQLite knowledge DB in the serverless function bundle.
+  // The full DB (76K tires + 4M retail = 342MB) compresses to ~125MB via gzip.
+  // At runtime, the first cold start decompresses it to /tmp; Fluid Compute
+  // reuses the instance so subsequent requests use the cached connection.
   outputFileTracingIncludes: {
-    "/api/ai-lookup": ["./src/server/knowledge.generated.db"],
+    "/api/ai-lookup": ["./src/server/knowledge.generated.db.gz"],
   },
 };
 

@@ -7,7 +7,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:emulator": "node scripts/dev.mjs --emulator",
     "dev:prod": "node scripts/dev.mjs --prod",
-    "build": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs && next build",
+    "build": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs && rm -f src/server/knowledge.generated.db && next build",
     "build:knowledge-db": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs",
     "start": "next start",
     "lint": "eslint",
@@ -41,6 +41,7 @@
     "intel:validate": "node scripts/validate-agents.mjs"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.4",
     "better-sqlite3": "^12.11.1",
     "exceljs": "^4.4.0",
     "firebase": "^12.14.0",
