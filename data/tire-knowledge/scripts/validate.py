@@ -43,10 +43,16 @@ SIZE_RE = re.compile(
     r'(?:\s+\d+(?:[/]\d+)?\s*[A-Z]+)?$'
 )
 FLOT_RE  = re.compile(r'^(\d{2})x(\d{2}(?:\.\d+)?)R(\d{2,2})$', re.IGNORECASE)
-COMM_RE  = re.compile(r'^(\d{2,3}(?:/\d{2,3})?)R(\d{2}(?:\.\d)?)$', re.IGNORECASE)
+# COMM_RE now covers empty-aspect sizes: 18-wheeler (11R22.5, 295/75R24.5), OTR/earthmover
+# (30.00R25, 23.5R25) and LT bias (7.00R16). Width may be 1-3 digits with an optional decimal
+# (7, 23.5, 30.00); rim may carry a decimal (22.5, 24.5).
+COMM_RE  = re.compile(r'^(\d{1,3}(?:\.\d+)?(?:/\d{2,3})?)R(\d{2}(?:\.\d+)?)$', re.IGNORECASE)
 
 def normalize_size(raw: str):
     s = raw.strip().replace('×','x').replace(' ','')
+    # Empty aspect-ratio (OTR / 18-wheeler / bias) makes the harvest build "30/R25" or "11/R22.5".
+    # Drop the orphan slash that sits directly before the R so these valid sizes parse as width-R-rim.
+    s = re.sub(r'/(?=[Rr])', '', s)
     m = FLOT_RE.match(s)
     if m:
         od, sw, rim = m.group(1), m.group(2), m.group(3)

@@ -47,6 +47,7 @@ import { buildCleanupRecommendations } from "@/services/cleanup/recommendations"
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
 import { decideLookup, upsertVerified, applyAiCandidate, observeScan } from "@/services/catalog/localCatalogProvider";
 import { planAutoVerify } from "@/services/catalog/catalogAutoVerify";
+import { shopReverseUpcConflict, type UpcRecord } from "@/services/catalog/candidateUpcSet";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { extractTireFields } from "@/services/tire/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
@@ -296,6 +297,11 @@ export interface ScanState {
   updateSettings: (partial: Partial<Settings>) => void;
   lookupUnknown: (reviewId: string) => Promise<void>;
   liveDecode: (reviewId: string) => Promise<void>;
+  /** DECODE-EVERYTHING fallback: when the AI decode is SKIPPED (circuit breaker open / rate-limited / AI
+   *  unavailable / offline / cap), still COUNT the scan as an UNVERIFIED, reviewable provisional row with a
+   *  SAFE label (never fabricated manufacturer anatomy for non-GS1 codes; never an approved alias / verified
+   *  product). Idempotent (no double count). The review stays OPEN so a retry can identify it. */
+  applyDecodeFallback: (reviewId: string, reason: string) => void;
   /** Tasks 5+6: client-orchestrated background verify. After a tire scan's fast decode lands as
    *  suggested/needs_review, fire ONE `mode:"decode-deep"` request WITH `scanContext:"tire"` (the
    *  page-fetch verify gate cannot fire without it). On a `verified` decideDecode result, route it
@@ -1196,6 +1202,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             void get().cloudCatalogResolve(review.id, codes);
           } else if (autoGate.allowed) {
             void get().liveDecode(review.id);
+          } else {
+            // AI decode SKIPPED. Only fire the provisional fallback when decode was INTENDED but blocked
+            // by a TRANSIENT cause (circuit breaker, rate-limit, offline, cap). When AI is explicitly
+            // disabled or keys are missing, the scan goes to Needs Review without a provisional count
+            // (the user chose not to decode — do not fabricate a product).
+            const s = get();
+            const aiIntended = s.settings.aiLookupEnabled && (s.aiStatus.geminiConfigured || s.aiStatus.openaiConfigured);
+            if (aiIntended) {
+              get().applyDecodeFallback(
+                review.id,
+                `${autoGate.reason ?? "AI decode unavailable."} Counted as unverified; retry to identify.`.trim(),
+              );
+            }
           }
         }
         return event;
@@ -1597,13 +1616,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 brandPrefixHint,
               }),
             });
+            // 429 = self-inflicted rate limit (costs $0). Single retry with backoff, respecting Retry-After.
+            if (res.status === 429) {
+              const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
+              await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
+              const retry = await fetch("/api/ai-lookup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  mode: "decode", proRecheck: review.reopenedFromWrong === true,
+                  rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
+                  confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
+                  budgetMs: s.decodeBudgetMs ?? 8000, scanContext, brandPrefixHint,
+                }),
+              });
+              if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);
+              return retry.json();
+            }
             if (!res.ok) throw new Error(`decode failed ${res.status}`);
             return res.json();
           };
-          // Owner cost rule: NO client retry. The old "retry once on a miss" doubled both the wait (up
-          // to ~70s, which dropped the browser connection -> "Failed to fetch") and the token spend. One
-          // call only; a miss is shown fast with its honest reason and is briefly miss-cached server-side
-          // so an immediate re-scan does not re-pay.
+          // Owner cost rule: NO client retry for PROVIDER failures (costs $). The old "retry once on a
+          // miss" doubled wait + spend. One call only. But 429 (self-inflicted rate limit) gets a SINGLE
+          // retry since it costs $0 — see decodeOnce() above.
           const data = await decodeOnce();
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
@@ -1619,6 +1654,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             productName: r.productName,
             sources: (r.sourceUrls ?? []).length,
           }));
+
+          // Phase 1: shop-catalog reverse-UPC guard (client-safe, our OWN catalog/products, full UPCs).
+          // platformOwner heads-up when the proposed product already exists under a DIFFERENT code.
+          const shopRecords: UpcRecord[] = [
+            ...get().catalog.map((c) => ({ name: c.name, brand: c.brand, barcode: c.barcode, normalizedBarcode: c.normalizedBarcode })),
+            ...get().products.map((p) => ({ name: p.name, brand: p.brand, model: p.specsShort, primarySku: p.primarySku, primaryBarcode: p.primaryBarcode, upc: p.upc, ean: p.ean, gtin: p.gtin, aliases: p.aliases })),
+          ];
+          const shopRev = best
+            ? shopReverseUpcConflict({ brand: best.brand, name: best.productName, model: best.primarySku }, review.cleanCode, shopRecords)
+            : { conflict: false, knownUpcs: [] as string[] };
+          const reverseUpcConflictNote = shopRev.conflict ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0, 3).join(", ")}` : "";
 
           set((st) => ({
             needsReviewQueue: st.needsReviewQueue.map((r) =>
@@ -1652,6 +1698,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     decodeProviderSummaries,
                     prefixHint: (data.debug?.prefixHint as string) || "",
                     prefixConflictReason: (data.debug?.firewallReason as string) || "",
+                    reverseUpcConflictNote,
                   }
                 : r,
             ),
@@ -1837,18 +1884,55 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
-          const failReason = `Live decode failed (network or provider error). You can retry. ${
+          const failReason = `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${
             e instanceof Error ? e.message : ""
           }`.trim();
+          // DECODE-EVERYTHING (owner): a FAILED decode (timeout / 429 rate-limit / provider error / AI down)
+          // must NOT leave the scan blank. We still COUNT it as an UNVERIFIED, reviewable provisional row with
+          // a SAFE label and the scanned code - never a fabricated product identity, never an approved alias,
+          // never a verified product. The review STAYS OPEN so a retry can identify it.
+          const code = review.cleanCode;
+          const struct = decodeBarcodeStructure(code, codeType);
+          const fbName = struct.checkDigitValid
+            ? `Unidentified item (barcode ${code})`
+            : `Unidentified item (code ${code})`;
+          const cur = get();
+          const countedIds = new Set(cur.finalCounts.map((c) => c.productId));
+          let provId = cur.products.find(
+            (p) =>
+              countedIds.has(p.id) &&
+              p.status !== "archived" &&
+              [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
+          )?.id;
+          if (!provId) {
+            provId = `prod-${idFactory()}`;
+            const provProduct: Product = {
+              id: provId, businessId: cur.businessId, name: fbName, brand: "", category: "", specsShort: "",
+              specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
+              aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
+              confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+            };
+            set((st) => ({ products: [...st.products, provProduct] }));
+          }
+          const evF = get().scanFeed.find((ev) => ev.cleanCode === code && ev.status !== "known");
+          let countsF = get().finalCounts;
+          let qtyF = 0;
+          if (evF) {
+            const r = incrementInventoryCount(countsF, { ...evF, matchedProductId: provId, status: "known", quantityDelta: 1 }, idFactory);
+            countsF = r.counts;
+            qtyF = r.count.quantity;
+          }
           set((st) => ({
-            // Surface the failure on the review AND the scan-feed row; keep it open for retry.
+            finalCounts: countsF,
             needsReviewQueue: st.needsReviewQueue.map((r) =>
-              r.id === reviewId ? { ...r, decodeStatus: "needs_review", reason: failReason } : r,
+              r.id === reviewId ? { ...r, decodeStatus: "needs_review", reason: failReason, suggestedProductName: r.suggestedProductName || fbName } : r,
             ),
             scanFeed: st.scanFeed.map((ev) =>
-              ev.cleanCode === review.cleanCode && ev.decodeStatus === "decoding"
-                ? { ...ev, decodeStatus: "needs_review", reason: failReason }
-                : ev,
+              evF && ev.id === evF.id
+                ? { ...ev, matchedProductId: provId!, status: "known", quantityAfterScan: qtyF, decodeStatus: "suggested", reason: failReason }
+                : ev.cleanCode === code && ev.decodeStatus === "decoding"
+                  ? { ...ev, decodeStatus: "needs_review", reason: failReason }
+                  : ev,
             ),
             aiLookupLogs: [mkLog("error", s.primaryProvider, 0, nextBreaker), ...st.aiLookupLogs],
             breaker: nextBreaker,
@@ -1856,6 +1940,55 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
           }));
         }
+      },
+
+      applyDecodeFallback: (reviewId, reason) => {
+        const st0 = get();
+        const review = st0.needsReviewQueue.find((r) => r.id === reviewId);
+        if (!review || review.status !== "open") return;
+        const code = review.cleanCode;
+        // IDEMPOTENT: if this code is already counted (any path), do nothing - never double count on retry.
+        const counted = new Set(st0.finalCounts.map((c) => c.productId));
+        const existing = st0.products.find(
+          (p) =>
+            counted.has(p.id) &&
+            p.status !== "archived" &&
+            [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
+        );
+        if (existing) return;
+        // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
+        // anatomy here (no decode response). checkDigitValid only tags whether it is a structurally-valid
+        // public barcode vs any other code; either way the label is non-hallucinated.
+        const struct = decodeBarcodeStructure(code, detectCodeType(code));
+        const fbName = struct.checkDigitValid ? `Unidentified item (barcode ${code})` : `Unidentified item (code ${code})`;
+        const provId = `prod-${idFactory()}`;
+        const provProduct: Product = {
+          id: provId, businessId: st0.businessId, name: fbName, brand: "", category: "", specsShort: "",
+          specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
+          aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
+          confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+        };
+        const ev = st0.scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
+        let counts = st0.finalCounts;
+        let qty = 0;
+        if (ev) {
+          const r = incrementInventoryCount(counts, { ...ev, matchedProductId: provId, status: "known", quantityDelta: 1 }, idFactory);
+          counts = r.counts;
+          qty = r.count.quantity;
+        }
+        set((st) => ({
+          products: [...st.products, provProduct],
+          finalCounts: counts,
+          // Review stays OPEN so a retry can identify it; surface the safe suggestion + honest reason.
+          needsReviewQueue: st.needsReviewQueue.map((r) =>
+            r.id === reviewId ? { ...r, decodeStatus: "needs_review", reason: r.reason || reason, suggestedProductName: r.suggestedProductName || fbName } : r,
+          ),
+          scanFeed: st.scanFeed.map((e) =>
+            ev && e.id === ev.id
+              ? { ...e, matchedProductId: provId, status: "known", quantityAfterScan: qty, decodeStatus: "suggested", reason: e.reason || reason }
+              : e,
+          ),
+        }));
       },
 
       backgroundVerifyDeep: async (reviewId) => {
@@ -3266,6 +3399,13 @@ export const useScanStore = create<ScanState>()(
     onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
   }),
 );
+
+// TEST/DEV ONLY (never production): expose the in-memory store so the local Playwright scan-matrix proof
+// harness can read the FULL unsanitized state (products with verified/provisional, aliases, catalog) that
+// the role-aware localStorage persist deliberately strips for customer browsers. Inert in prod builds.
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+  (window as unknown as { __scanStore?: typeof useScanStore }).__scanStore = useScanStore;
+}
 
 /** Factory for tests: a fresh, non-persisted store with injectable deps. */
 export function createTestScanStore(overrides?: Partial<ScanStoreDeps>) {

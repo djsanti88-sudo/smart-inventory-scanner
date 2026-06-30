@@ -34,11 +34,33 @@ def save_ledger(ledger, path):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(ledger, f, indent=2)
 
-def counts_match_csv(ledger, flat_csv_path):
+def counts_match_csv(ledger, flat_csv_path, behind_tolerance=1000):
+    """Validate the ledger against the corpus CSV, separating REAL corruption from benign flush-lag.
+
+    The 8.3 MB ledger file is flushed in batches while the CSV is appended continuously, so during an
+    active harvest the ledger can sit a little BEHIND the CSV (benign). Real corruption is: CSV duplicate
+    barcodes, the ledger AHEAD of the CSV (phantom entries - the bug we fixed before), or the ledger far
+    behind (its save is broken). Compare against DISTINCT barcodes so a small batch-flush lag isn't
+    confused with duplicates.
+    """
+    rows = 0
+    seen = set()
     with open(flat_csv_path, newline="", encoding="utf-8") as f:
-        n = sum(1 for _ in csv.DictReader(f))
-    if n != ledger["total_trusted_barcode_rows"]:
-        return False, f"ledger {ledger['total_trusted_barcode_rows']} != csv {n}"
+        for r in csv.DictReader(f):
+            rows += 1
+            seen.add((r.get("barcode") or "").strip())
+    distinct = len(seen)
+    led = ledger["total_trusted_barcode_rows"]
+    # 1) CSV duplicate barcodes -> ALWAYS a hard fail (double-count corruption).
+    if rows != distinct:
+        return False, f"csv has {rows - distinct} DUPLICATE barcode rows (rows={rows} distinct={distinct})"
+    # 2) Ledger AHEAD of the CSV -> phantom entries (the corruption we fixed before) -> hard fail.
+    if led > distinct:
+        return False, f"ledger AHEAD of csv (phantom): ledger {led} > csv {distinct}"
+    # 3) Ledger far BEHIND the CSV -> its save is broken / real drift -> hard fail.
+    if distinct - led > behind_tolerance:
+        return False, f"ledger far behind csv: ledger {led} << csv {distinct} (gap {distinct - led} > {behind_tolerance})"
+    # else: small ledger-behind-csv lag from batched flushing during an active harvest = benign.
     return True, ""
 
 

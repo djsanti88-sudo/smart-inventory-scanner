@@ -1,0 +1,121 @@
+id,brand,model,size,load_speed,claimed_barcode,gtin_valid,verified,matched_source,note
+208705,DUNLOP,2ND Generation American Elite,100/90R19,57H,630572798809,True,False,,no grounding sources returned
+369539,FALKEN,Aklimate,185/55R15,82V,,False,False,,no_barcode: 28392937
+224754,NEXEN,Aria AH7,215/55R17,H,00887613519507,True,False,,no source page contained barcode + brand + size
+193667,NOKIAN,Cline Cargo,185/75R16,104/102S,6419440292267,True,False,,no grounding sources returned
+47314,TOYO,800 Ultra,175/65R14,81T,,False,False,,no_barcode: The exact UPC or EAN barcode number for the TOYO 800 Ultra 175/65R14 81T tire co
+208706,DUNLOP,2ND Generation American Elite,130/60R19,61H,,False,False,,no_barcode: The UPC barcode number for the DUNLOP 2ND Generation American Elite 130/60R19 61
+369546,FALKEN,Aklimate,185/55R16,83H,848983028211,True,False,,no grounding sources returned
+172369,NEXEN,Aria AH7,215/60R16,95T,887613450107,True,False,,no grounding sources returned
+193668,NOKIAN,Cline Cargo,195/75R16,107/105S,6419440292274,True,True,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQELwQ7Y1YjnHDuqRa3rw4kD-8Etu2qKRULaSSIyT6YZ6ZznUQYzs4vuh7i4AtQmc1JUqI5W5S4EXjLkIF_4rjhRJh0u_9SZ6gQzkjf198U4VZ2ntHmd5JQeCEMPW0Z-Fw7xunIb93dEACXXOXkh_7J1s7iUo6cJCpwOC8NX7irlA0Qb6PpCsEM=,barcode + brand + size found in source page
+47504,TOYO,800 Ultra,175/70R14,84T,,False,False,,no_barcode: NONE
+146131,DUNLOP,2ND Generation American Elite,130/70R18,63H,605942007775,True,True,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGlG1tYZY2dCfPsMGMHb_SEc0jUPNnOHNXdItha_gphLxAV7Xcy5519drzAja2LNojq10pSaXBWI1AghTqLU0MZzTgFqwmMmKzyI2tJoyuvD6AZO2lpFexkL7QFSU3fGFiTPUidm1pzV75_e0d4yg6WLXNrGBEOiYpMH7Oow-Ai6TLL91hIYJRUXTDM,barcode + brand + size found in source page
+369547,FALKEN,Aklimate,195/55R16,87V,848983028242,True,False,,no source page contained barcode + brand + size
+172365,NEXEN,Aria AH7,215/60R17,96T,887613515509,True,False,,no grounding sources returned
+193669,NOKIAN,Cline Cargo,205/75R16,113/111S,6419440292281,True,False,,no grounding sources returned
+47606,TOYO,800 Ultra,185/60R14,82T,,False,False,,no_barcode: NONE
+146128,DUNLOP,2ND Generation American Elite,130/80R17,65H,,False,False,,no_barcode: NONE
+369570,FALKEN,Aklimate,205/55R17,91V,848983028297,True,False,,no grounding sources returned
+224755,NEXEN,Aria AH7,225/50R18,T,00887613519903,True,False,,no grounding sources returned
+193670,NOKIAN,Cline Cargo,215/75R16,116/114S,6419440292298,True,False,,no grounding sources returned
+47335,TOYO,800 Ultra,185/65R14,85T,,False,False,,no_barcode: 235030
+146129,DUNLOP,2ND Generation American Elite,130/80R17,65H,,False,False,,no_barcode: NONE
+369586,FALKEN,Aklimate,215/45R18,93V,,False,False,,no_barcode: NONE
+172367,NEXEN,Aria AH7,225/65R17,102T,,False,False,,no_barcode: NONE
+261192,NOKIAN,Cline Cargo,235/60R17,117/115R,6419440214221,True,True,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFtvljqKjQwglpS68W_NkGu-nEMRJXNG1-te6D2f93zWGR84pIqIGl_aZDdA1ReTTikZ4LgECK0BbZ_6iA-RzVtNECBU5ZcJNYx3z6d1Q6-jJ2kRW8ty_Z5cO1JaxPMnBMVcd6gtJQBS-Et80DAmbkd-f3pSjWDgCy5zJ1EXHLaFeS8IyKlBf2HtFk=,barcode + brand + size found in source page
+47312,TOYO,800 Ultra,185/65R15,86T,,False,False,,no_barcode: NONE
+146127,DUNLOP,2ND Generation American Elite,130/90R16,67H,630572798786,True,True,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHd6YopCtwNN74pbWS0CzDGlV0cvNFlw1wYerfubB4s-53-veOiiWNodjHzdiR1B4jelTV5tj7_z7yqBdvJIutXvwbUscVKBVgQP_dPFcRp_BMMouiaMWwKyi7SizFauuYSQ323ngs2Au7Q67fGGuE8Yg8ES9kwZQdBSrOaRKubxePVZxUBToPU4eSIDCZPwBsASBN_NHqrvbM=,barcode + brand + size found in source page
+369594,FALKEN,Aklimate,215/55R18,95H,848983028389,True,False,,no source page contained barcode + brand + size
+171701,NEXEN,Classe Premiere,165/60R14,75H,,False,False,,no_barcode: NONE
+193673,NOKIAN,Cline Cargo,235/65R16,121/119R,6419440292441,True,False,,no grounding sources returned
+47573,TOYO,800 Ultra,185/70R14,87T,,False,False,,no_barcode: NONE
+208710,DUNLOP,2ND Generation American Elite,130/90R16,73H,605942912536,True,True,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQH4lxe6BU0n3itH4W6b88kvO66FY3h_zZB2cQogpioKsg97ufdBaJkxfSPNYHTdHZNfW29CwTJcp_aicYQTppJGKq_9W49gRFTmYvEpslvjh7knNJyC_WCFcsmjHI67zTiehn2Y8BrJhDLK1jbxJZqWKZcPuq_GHn88Ns7M3ZY0BdQIZh9CjRMg90s=,barcode + brand + size found in source page
+369611,FALKEN,Aklimate,225/45R19,96W,,False,False,,no_barcode: NONE
+171879,NEXEN,Classe Premiere,165/65R14,79T,,False,False,,no_barcode: NONE
+193649,NOKIAN,Cline Van,165/70R14,89/87S,6419440292311,True,True,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFgEJKWlUARg535Jpk7WmLnNmTzOMciOSz90wK7j0fhl-YKFH0QNOgbDjF6gwzkCTDF2t6hp9UvBPuEBmbodkmo3nVkBWvn_FdkPhLxT8Xua7FoSciSqhbTvI-RFacFie0Lz4zsQiKJzN76EqSPkirfMwY=,barcode + brand + size found in source page
+47524,TOYO,800 Ultra,185/75R14,89T,,False,False,,no_barcode: 234660
+146130,DUNLOP,2ND Generation American Elite,140/75R17,67V,,False,False,,no_barcode: 45131663
+369608,FALKEN,Aklimate,235/40R19,96V,848983028600,True,True,https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQFmBV8WDsuxU6VuHL6qdy_6L8Qrkn5xlnYR95_KeOYElbAErOw7uedSFuXdy6nTyzGYaGN6ExmzsQ4sUJttmXJfvT82XF6x-T-JBT68tMCI9vJz5-eYUGxwbK7Hq6kv7-jav6uiMUJviyYKuFJ2qO-zskBnMAg2aWBdNtXIsofF9nvlX4C8lotCd3woUANbvGbcCboN6bd-q1U7aNeR,barcode + brand + size found in source page
+171702,NEXEN,Classe Premiere,175/60R14,79H,,False,False,,no_barcode: NONE
+193651,NOKIAN,Cline Van,175/65R14,90/88T,6419440292373,True,False,,no source page contained barcode + brand + size
+47296,TOYO,800 Ultra,195/60R14,85T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+208711,DUNLOP,2ND Generation American Elite,140/90R16,77H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369563,FALKEN,Aklimate,235/45R17,97V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171880,NEXEN,Classe Premiere,175/65R14,82H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+193650,NOKIAN,Cline Van,175/70R14,95/93S,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47301,TOYO,800 Ultra,195/60R14,85T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+208712,DUNLOP,2ND Generation American Elite,150/80R16,77H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+410243,FALKEN,Aklimate,235/45R18,98V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171703,NEXEN,Classe Premiere,185/60R14,82H,,False,False,,no_barcode: NONE
+261190,NOKIAN,Cline Van,185/60R15,94/92T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47603,TOYO,800 Ultra,195/60R15,87T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+208713,DUNLOP,2ND Generation American Elite,160/70R17,73V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369612,FALKEN,Aklimate,235/45R19,99H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171707,NEXEN,Classe Premiere,185/60R15,84H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+193659,NOKIAN,Cline Van,195/60R16,99/97T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47313,TOYO,800 Ultra,195/65R14,88T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+146133,DUNLOP,2ND Generation American Elite,180/65R16,81H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369568,FALKEN,Aklimate,235/50R17,96H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171881,NEXEN,Classe Premiere,185/65R14,86H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+193656,NOKIAN,Cline Van,195/65R16,104/102T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47311,TOYO,800 Ultra,195/65R15,89T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+146134,DUNLOP,2ND Generation American Elite,180/65R16,81H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369614,FALKEN,Aklimate,235/50R19,99V,848983028662,True,False,,no grounding sources returned
+171896,NEXEN,Classe Premiere,185/65R15,88H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+193655,NOKIAN,Cline Van,205/65R15,102/100T,6419440292380,True,False,,no source page contained barcode + brand + size
+47494,TOYO,800 Ultra,195/70R14,90T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+146135,DUNLOP,2ND Generation American Elite,180/65R16,81H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369553,FALKEN,Aklimate,235/60R16,100H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171704,NEXEN,Classe Premiere,195/60R14,86H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+193657,NOKIAN,Cline Van,205/65R16,107/105T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47563,TOYO,800 Ultra,195/75R14,92T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+146136,DUNLOP,2ND Generation American Elite,200/55R17,78V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369578,FALKEN,Aklimate,235/60R17,102H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171708,NEXEN,Classe Premiere,195/60R15,88H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+193660,NOKIAN,Cline Van,215/60R16,103/101T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47604,TOYO,800 Ultra,205/60R15,90T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+146249,DUNLOP,491 Elite Ii,130/70R18,63H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369609,FALKEN,Aklimate,245/40R19,94W,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171882,NEXEN,Classe Premiere,195/65R14,89H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+261191,NOKIAN,Cline Van,215/65R15,104/102T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47334,TOYO,800 Ultra,205/65R15,92T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+326400,DUNLOP,491 Elite Ii,130/90R16,67H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369564,FALKEN,Aklimate,245/45R17,99V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171897,NEXEN,Classe Premiere,195/65R15,91H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+277963,NOKIAN,Cline Van,225/55R17,109/107T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47476,TOYO,800 Ultra,205/70R14,93T,,False,False,,no_barcode: 234890
+326401,DUNLOP,491 Elite Ii,140/90R16,77H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369613,FALKEN,Aklimate,245/45R19,102V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171705,NEXEN,Classe Premiere,205/60R14,88H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+109218,NOKIAN,Entyre,185/60R15,88T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47546,TOYO,800 Ultra,205/70R14,93T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+327717,DUNLOP,American Elite,100/90R19,57H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369621,FALKEN,Aklimate,245/45R20,103V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171709,NEXEN,Classe Premiere,205/60R15,91H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+109213,NOKIAN,Entyre,185/65R14,90H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47608,TOYO,800 Ultra,205/70R15,95T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+327718,DUNLOP,American Elite,130/60R19,61H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369593,FALKEN,Aklimate,245/50R18,100V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171884,NEXEN,Classe Premiere,205/65R14,91H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+107174,NOKIAN,Entyre,185/65R15,92H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47555,TOYO,800 Ultra,205/75R14,95T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+327720,DUNLOP,American Elite,130/60R21,69H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369618,FALKEN,Aklimate,245/55R19,103H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171898,NEXEN,Classe Premiere,205/65R15,94H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+107176,NOKIAN,Entyre,195/60R15,92H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47495,TOYO,800 Ultra,205/75R15,97T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+327716,DUNLOP,American Elite,130/70R18,63H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369615,FALKEN,Aklimate,255/50R19,107V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171706,NEXEN,Classe Premiere,215/60R14,91H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+107175,NOKIAN,Entyre,195/65R15,95H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47607,TOYO,800 Ultra,215/60R15,93T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+327713,DUNLOP,American Elite,130/80R17,65H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369598,FALKEN,Aklimate,255/55R18,109V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+171710,NEXEN,Classe Premiere,215/60R15,94H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+107182,NOKIAN,Entyre,205/50R16,91H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47299,TOYO,800 Ultra,215/60R16,94T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+327714,DUNLOP,American Elite,130/80R17,65H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+369619,FALKEN,Aklimate,255/55R19,111V,848983028952,True,False,,no source page contained barcode + brand + size
+171712,NEXEN,Classe Premiere,215/60R16,95H,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+107190,NOKIAN,Entyre,205/50R17,93V,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge
+47324,TOYO,800 Ultra,215/65R15,95T,,False,False,,api_error: 429 Client Error: Too Many Requests for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:ge

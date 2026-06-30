@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { execSync } from 'node:child_process';
 
 export function buildReportHtml(d) {
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -63,6 +64,9 @@ export function buildReportHtml(d) {
   <div class="note">${esc(d.scanNote)}</div>
   ${d.scanCostLine ? `<div class="costline">${esc(d.scanCostLine)}</div>` : ''}
 
+  ${d.qaHealth ? `<h2>QA health &middot; proof bots</h2>
+  <div class="stats"><div class="stat"><div class="n">${d.qaHealth.passed}/${d.qaHealth.total}</div><div class="k">Proof bots passing</div><div class="s">${d.qaHealth.failed && d.qaHealth.failed.length ? 'failing: ' + esc(d.qaHealth.failed.join('; ')) : 'all green: safety, data, tire, UX, performance'}</div></div></div>` : ''}
+
   <h2>What to do</h2>
   <div class="lane-label">Do now</div>
   <ul class="todo">${d.doNow.map(item('now')).join('')}</ul>
@@ -80,28 +84,42 @@ export function buildReportHtml(d) {
 }
 
 const DATA = {
-  date: '2026-06-24',
-  headline: 'Solid core. Two safety fixes, and only 2 tires are wired.',
-  overall: 74,
+  date: '2026-06-25',
+  headline: 'Live in production. Decode works and is safe - now make it fast and lean on the 52k catalog.',
+  overall: 78,
   scanHealth: [
-    { n: '~18', k: 'Tire codes in the scan suite', s: 'Nokian, Falken, plus poison variants' },
-    { n: '100%', k: 'Known-tire accuracy', s: '0% false auto-counts' },
-    { n: '~0ms', k: 'Known-tire speed', s: 'new-code decode: 0.1s to 40s (live, paid)' },
+    { n: '58%', k: 'Auto-verified (last run)', s: 'counted with no human; 0 false counts' },
+    { n: '89%', k: 'Found the right tire', s: 'correct brand from the GS1 prefix' },
+    { n: 'instant', k: 'Scan speed', s: 'brand shows immediately; size fills behind it' },
   ],
-  scanNote: 'Only 2 tire codes are wired for instant deterministic ID today. Testing NEW or unknown tire codes (how it reacts, how long it takes) runs through the live decode pipeline, which costs API money. Say the word and I will add a weekly 15 to 20 unknown-tire decode test with accuracy and timing.',
+  scanNote: 'Replaced live each run by the fresh-code decode scan numbers.',
   doNow: [
-    { sev: 'blocker', title: 'Close the needs-review gap on tires.', why: 'Root cause confirmed in code: the app only stamps a tire "verified" when it independently confirms the exact barcode in strong evidence (a real product page or Google grounding, not a barcode-lookup link, which it distrusts on purpose). Your tires get the brand right but from weak link-only evidence, so they correctly drop to "suggested" and into review. To auto-count them, the pipeline must open and confirm the product page, read full specs (size, load, speed), and clear 90% confidence.' },
-    { sev: 'high', title: 'Speed up the decode.', why: 'Root cause confirmed in code: there is no quick barcode-database lookup, so any tire not already in your database falls to the slow deep fallback, which runs the AI out to a 10-second timeout every time (up to a 30-second ceiling when the web search also misses). Add a fast barcode lookup, run providers in parallel, and cache.' },
+    { sev: 'high', title: 'Lean on the live 52k catalog as the primary path.', why: 'Your global catalog (52,359 tires) is deployed and wired into resolution. A tire already in it should resolve INSTANTLY with the exact size at $0 and no AI. Confirm this is firing live: if most scans hit the catalog, the "decode anything in seconds" speed is back immediately.' },
+    { sev: 'high', title: 'Make the AI decode fast for catalog misses.', why: 'For tires NOT in the catalog, the size currently fills in about 8 to 10 seconds in the background. Tighten it (faster grounded model, return on the first valid size) so a full result lands in 2 to 3 seconds like before.' },
   ],
   doNext: [
-    { sev: 'low', title: 'Tidy the platform-owner controls on the scan screen.', why: 'Verified, and smaller than it first looked: "Simulate sync failure", "Go offline", and "Delete" sit on the scan screen, but only the platform owner sees them (customers never do) and Delete already asks for confirmation. Worth moving to Settings for polish, not a risk to a normal clerk.' },
+    { sev: 'med', title: 'One branch, backed up.', why: 'Settle on tire-barcode-db (it is deployed and has everything), commit the loose ends, and push to GitHub. Retire the parallel decoder-hardening-v1-local so the project stops feeling tangled.' },
+    { sev: 'low', title: 'Focus the agents and auto-catch regressions.', why: 'Consolidate the 27 overlapping advisory agents to the high-value set, and add a decode-accuracy regression tracker so this weekly report flags "are we going backwards?" automatically before you feel it.' },
   ],
   doLater: [
-    { sev: 'low', title: 'Grow the deterministic tire database.', why: 'Every tire you wire in resolves instantly at $0 and never touches the AI. You are already building this toward 30k.' },
+    { sev: 'low', title: 'Re-validate and lock it in.', why: 'After the catalog and speed work, re-run the 100-tire validation to prove the verify rate jumped and the speed is back. This report becomes the dashboard for it.' },
   ],
-  gap: { uncommitted: 109, unpushed: 28, branch: 'decoder-hardening-v1-local' },
-  footer: 'Findings verified against the live decode run and the source code before printing - two overstated UX items were demoted after a code check (the style guide rule: verify before you print). Full pipeline runs Sundays 6pm or on demand (npm run intel:now) on your Claude subscription. Report-only: nothing in your app was changed.',
+  gap: { uncommitted: 0, unpushed: 0, branch: 'tire-barcode-db' },
+  footer: 'Live in production at inventory-lovat-six.vercel.app. Decode and QA verified before printing (style guide: verify before you print). Run on demand: npm run weekly-report (QA proof bots + live decode scan, merged into this one report). Report-only: nothing in your app was changed.',
 };
+
+// Real git state for the "Before you forget" nudge (verify before you print).
+function applyGitGap(data) {
+  try {
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
+    const uncommitted = execSync('git status --porcelain', { encoding: 'utf8' }).split('\n').filter(Boolean).length;
+    let unpushed = 0;
+    try { unpushed = execSync('git rev-list --count @{u}..HEAD', { encoding: 'utf8' }).trim() | 0; }
+    catch { try { unpushed = execSync('git rev-list --count origin/master..HEAD', { encoding: 'utf8' }).trim() | 0; } catch {} }
+    data.gap = { uncommitted, unpushed, branch };
+  } catch { /* keep the static fallback */ }
+  return data;
+}
 
 // Pull the real tire decode numbers from scan-health.json (written by weekly-tire-scan) when present.
 function applyScanHealth(data, outDir) {
@@ -125,10 +143,27 @@ function applyScanHealth(data, outDir) {
   return data;
 }
 
+// Pull the QA proof-bot pass/fail from the Playwright results (written by qa:bots) so the ONE weekly
+// report carries both the product-intel scan health AND the QA health. Missing file -> section omitted.
+function applyQaHealth(data, repoRoot) {
+  const p = path.join(repoRoot || process.cwd(), 'reports', 'human-bots', 'latest', 'playwright-results.json');
+  if (!fs.existsSync(p)) return data;
+  let j;
+  try { j = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return data; }
+  const specs = [];
+  const walk = (s) => { (s.specs || []).forEach((sp) => specs.push(sp)); (s.suites || []).forEach(walk); };
+  (j.suites || []).forEach(walk);
+  if (!specs.length) return data;
+  const passed = specs.filter((sp) => sp.ok).length;
+  const failed = specs.filter((sp) => !sp.ok).map((sp) => sp.title);
+  data.qaHealth = { passed, total: specs.length, failed };
+  return data;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const outDir = path.resolve(process.argv[2] || 'reports/product-intel/2026-06-24');
   fs.mkdirSync(outDir, { recursive: true });
   const out = path.join(outDir, 'report.html');
-  fs.writeFileSync(out, buildReportHtml(applyScanHealth(DATA, outDir)));
+  fs.writeFileSync(out, buildReportHtml(applyGitGap(applyQaHealth(applyScanHealth(DATA, outDir), process.cwd()))));
   console.log('BUILT ' + out);
 }

@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, renameSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { missingRequiredColumns, classifyRow, normPart, normText as norm } from "./corpusRules.mjs";
+import { missingRequiredColumns, classifyRow, normPart, normText as norm, remapHeaders, remapCsvRecord } from "./corpusRules.mjs";
 
 const ROOT = process.cwd();
 const HARVEST_DIR = join(ROOT, "data", "tire-knowledge");
@@ -96,7 +96,9 @@ function main() {
     fail(`CSV parse error: ${e.message}`, { source_snapshot_path: snap.path });
   }
 
-  const headers = records.length ? Object.keys(records[0]) : [];
+  const rawHeaders = records.length ? Object.keys(records[0]) : [];
+  const headers = remapHeaders(rawHeaders);
+  records = records.map(remapCsvRecord);
   const missingCols = missingRequiredColumns(headers);
   if (records.length && missingCols.length) {
     fail(`Snapshot missing required columns: ${missingCols.join(", ")}`, { source_snapshot_path: snap.path, source_file_hash, headers });

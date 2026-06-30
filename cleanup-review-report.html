@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cleanup Review Report — inventory</title>
+<style>
+  :root{
+    --green:#15803d;--green-bg:#f0fdf4;--green-bd:#bbf7d0;
+    --amber:#b45309;--amber-bg:#fffbeb;--amber-bd:#fde68a;
+    --red:#b91c1c;--red-bg:#fef2f2;--red-bd:#fecaca;
+    --blue:#1d4ed8;--blue-bg:#eff6ff;--blue-bd:#bfdbfe;
+    --ink:#18181b;--muted:#52525b;--line:#e4e4e7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#f6f6f7;color:var(--ink);font:15px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:30px 20px 90px}
+  h1{font-size:30px;margin:0 0 4px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin:0 0 8px;font-size:14px}
+  .meta{color:var(--muted);font-size:12.5px;margin:0 0 24px}
+  nav{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin:0 0 26px;font-size:14px;display:flex;flex-wrap:wrap;gap:6px 18px}
+  nav a{color:var(--blue);text-decoration:none}
+  nav a:hover{text-decoration:underline}
+  section{background:#fff;border:1px solid var(--line);border-radius:14px;padding:24px 26px;margin:0 0 22px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  h2{font-size:22px;margin:0 0 14px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  h2 .n{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:#18181b;color:#fff;font-size:15px;font-weight:700;flex:none}
+  h3{font-size:16px;margin:22px 0 6px;display:flex;align-items:center;gap:9px}
+  p{margin:8px 0}
+  code,.mono{font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f4f4f5;border-radius:5px;padding:1px 6px}
+  .tag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  .keep{color:var(--green);background:var(--green-bg);border:1px solid var(--green-bd)}
+  .review{color:var(--amber);background:var(--amber-bg);border:1px solid var(--amber-bd)}
+  .junk{color:var(--red);background:var(--red-bg);border:1px solid var(--red-bd)}
+  .info{color:var(--blue);background:var(--blue-bg);border:1px solid var(--blue-bd)}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;background:#fafafa}
+  tr:hover td{background:#fafafa}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 14px;margin:10px 0;font-size:14px}
+  .kv .k{color:var(--muted);font-weight:600;font-size:12.5px}
+  pre{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:13px 15px;overflow:auto;font:12px ui-monospace,Menlo,Consolas,monospace;line-height:1.5;margin:8px 0}
+  pre .add{color:#86efac}.pre .del{color:#fca5a5}pre .c{color:#64748b}
+  .banner{border-radius:12px;padding:14px 18px;margin:0 0 8px;font-size:14.5px}
+  .banner.green{background:var(--green-bg);border:1px solid var(--green-bd)}
+  .banner.blue{background:var(--blue-bg);border:1px solid var(--blue-bd)}
+  .verdict{border-radius:10px;padding:11px 15px;margin-top:12px;font-size:14px}
+  .verdict.keep{background:var(--green-bg);border:1px solid var(--green-bd)}
+  .verdict.review{background:var(--amber-bg);border:1px solid var(--amber-bd)}
+  .verdict.junk{background:var(--red-bg);border:1px solid var(--red-bd)}
+  .file-card{border:1px solid var(--line);border-radius:11px;padding:16px 18px;margin:14px 0;background:#fcfcfc}
+  .file-card h4{margin:0 0 8px;font:13px ui-monospace,Menlo,Consolas,monospace;font-weight:700}
+  .ok{color:var(--green);font-weight:700}.no{color:var(--red);font-weight:700}.warn{color:var(--amber);font-weight:700}
+  ul{margin:6px 0 6px 2px;padding-left:20px}li{margin:3px 0}
+  small.dim{color:var(--muted)}
+  .right{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Cleanup Review Report</h1>
+  <p class="sub">Repository: <code>C:\Users\djsan\inventory</code> &nbsp;·&nbsp; Branch: <code>feat/weekly-report-system</code> &nbsp;·&nbsp; HEAD <code>b9dea2a</code></p>
+  <p class="meta">Generated 2026-06-29 · Read-only analysis · <b>No files were deleted, moved, committed, or cleaned.</b> Only this report (and an optional JSON summary) were created.</p>
+
+  <nav>
+    <a href="#s1">1 · Executive Summary</a>
+    <a href="#s2">2 · The 3 wiring files</a>
+    <a href="#s3">3 · data/** (81 files)</a>
+    <a href="#s4">4 · 11 deleted PNGs</a>
+    <a href="#s5">5 · Cleanup plan</a>
+    <a href="#s6">6 · Commands (for later)</a>
+  </nav>
+
+  <!-- ================= SECTION 1 ================= -->
+  <section id="s1">
+    <h2><span class="n">1</span> Executive Summary</h2>
+
+    <div class="banner green">
+      <b>Your finished work is safe.</b> Commit <code>24d1797</code> lives in a <b>different folder</b> —
+      the candidate worktree <code>C:\tmp\inventory-release-repair</code> (branch <code>repair/baseline-v1-plus-reviewed-good-work</code>) — and that folder is <b>100% clean</b> (<code>git status --short</code> → 0). <b>Nothing below affects it.</b>
+    </div>
+
+    <div class="kv">
+      <div class="k">Why VS Code shows many changes</div>
+      <div>VS Code is open on <code>C:\Users\djsan\inventory</code>, a <b>separate folder &amp; branch</b> from the candidate. It counts every untracked file individually: <b>137</b> by default, <b>300</b> with <code>-uall</code> (≈ the “299” you saw). These are pre-existing WIP + generated artifacts on <code>feat/weekly-report-system</code> — unrelated to the Option 3 commit.</div>
+      <div class="k">Which folder</div>
+      <div><code>C:\Users\djsan\inventory</code> (NOT the candidate). The candidate has the committed work; this folder has the loose changes.</div>
+      <div class="k">Do they affect 24d1797?</div>
+      <div><span class="no">No.</span> <code>24d1797</code> is on another branch in another folder. It contains the full Option 3 feature; none of these 3 groups are part of it.</div>
+      <div class="k">Safe / useful / generated / review?</div>
+      <div>All three groups are <b>safe</b> (no risk to the commit). Mix of <b>useful WIP</b> (group 1, group 2 corpus), <b>generated junk</b> (group 2 .pyc/.log, group 3 PNGs), and <b>items needing your decision</b> (noted per section).</div>
+    </div>
+
+    <table>
+      <tr><th>Group</th><th>What</th><th>Count / size</th><th>Verdict</th></tr>
+      <tr><td><b>1</b></td><td>3 “wiring” source files (a reverse-UPC safety heads-up)</td><td>+20 lines</td><td><span class="tag review">Keep · owner review</span></td></tr>
+      <tr><td><b>2</b></td><td><code>data/**</code> — parked tire-DB pipeline (corpus + scripts + junk)</td><td>81 files · 62.8 MB</td><td><span class="tag keep">Mostly keep</span> <span class="tag junk">junk: ignore</span></td></tr>
+      <tr><td><b>3</b></td><td>Deleted screenshots inside an auto-generated test report</td><td>11 PNGs</td><td><span class="tag junk">Nothing lost · ignore</span></td></tr>
+    </table>
+  </section>
+
+  <!-- ================= SECTION 2 ================= -->
+  <section id="s2">
+    <h2><span class="n">2</span> The 3 wiring files</h2>
+    <div class="banner blue">
+      <b>What this feature is:</b> a “reverse-UPC heads-up.” When the AI suggests a product for an unknown scanned code, the app checks <b>your own catalog</b>; if that product already exists under a <b>different barcode</b>, it shows you (the owner) an amber note <em>“Already in your catalog under: …”</em>. Helps catch mis-scans &amp; duplicate products. The <b>engine</b> (<code>candidateUpcSet.ts</code>) is already committed in the candidate but <b>dormant</b>; these 3 files are the “on switch.”
+      <br><small class="dim">Confirmed wired end-to-end here (references found in <code>types.ts</code>, <code>scanStore.ts</code>, <code>NeedsReviewTable.tsx</code>, <code>candidateUpcSet.ts</code>, <code>candidateUpcSet.test.ts</code>). Candidate <code>24d1797</code> has <b>0</b> references — so it does NOT have this wiring.</small>
+    </div>
+
+    <!-- File A -->
+    <div class="file-card">
+      <h4>📄 src/types.ts &nbsp; <span class="tag info">+2 lines</span></h4>
+      <div class="kv">
+        <div class="k">Branch / status</div><div><code>feat/weekly-report-system</code> · <code>M</code> (modified, uncommitted)</div>
+        <div class="k">Last commit / author</div><div><code>3e02c8f</code> · 2026-06-28 19:13 · santiago echeverri <small class="dim">(the +2 are uncommitted on top)</small></div>
+        <div class="k">Diff summary</div><div>Adds one optional field to the <code>UnknownCodeReview</code> type.</div>
+        <div class="k">Plain English</div><div>Defines the place to store the heads-up note.</div>
+        <div class="k">Overlaps 24d1797?</div><div><span class="no">No</span> — not in the candidate.</div>
+        <div class="k">Needed?</div><div>Only if you want the feature. Harmless if kept (optional field).</div>
+        <div class="k">Risk</div><div><span class="ok">Very low</span> — additive optional field.</div>
+      </div>
+      <pre><span class="c">// src/types.ts — interface UnknownCodeReview</span>
+<span class="add">+  // platformOwner-only: proposed product already exists under a different code.</span>
+<span class="add">+  reverseUpcConflictNote?: string;</span></pre>
+      <div class="verdict review"><b>Recommendation:</b> port with the other two (below), or abandon together.</div>
+    </div>
+
+    <!-- File B -->
+    <div class="file-card">
+      <h4>📄 src/stores/scanStore.ts &nbsp; <span class="tag info">+13 lines</span></h4>
+      <div class="kv">
+        <div class="k">Branch / status</div><div><code>feat/weekly-report-system</code> · <code>M</code> (modified, uncommitted)</div>
+        <div class="k">Last commit / author</div><div><code>3e02c8f</code> · 2026-06-28 19:13 · santiago echeverri</div>
+        <div class="k">Diff summary</div><div>Imports the engine, builds a list of your catalog+products, asks the engine whether the suggestion already exists under another code, and stores the note on the review.</div>
+        <div class="k">Plain English</div><div>The actual logic that produces the heads-up.</div>
+        <div class="k">Overlaps 24d1797?</div><div><span class="no">No</span> — the candidate’s <code>scanStore.ts</code> has <b>0</b> references to this. Unique WIP.</div>
+        <div class="k">Needed?</div><div>Optional safety. Nothing breaks without it.</div>
+        <div class="k">Risk</div><div><span class="warn">Low–medium</span> — sits in the decode/resolve path; purely additive but worth its own test before porting.</div>
+      </div>
+      <pre><span class="c">// src/stores/scanStore.ts — inside the decode handler</span>
+<span class="add">+ const shopRecords = [ ...get().catalog, ...get().products ];   // your own data</span>
+<span class="add">+ const shopRev = best</span>
+<span class="add">+   ? shopReverseUpcConflict(suggestion, review.cleanCode, shopRecords)</span>
+<span class="add">+   : { conflict:false, knownUpcs:[] };</span>
+<span class="add">+ const reverseUpcConflictNote = shopRev.conflict</span>
+<span class="add">+   ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0,3).join(", ")}` : "";</span></pre>
+      <div class="verdict review"><b>Recommendation:</b> <b>port to the candidate as its own small, tested commit</b> (don’t fold into 24d1797) — or commit it here on <code>feat/weekly-report-system</code> where it already works — or abandon (~13 lines, easily rebuilt).</div>
+    </div>
+
+    <!-- File C -->
+    <div class="file-card">
+      <h4>📄 src/components/NeedsReviewTable.tsx &nbsp; <span class="tag info">+5 lines</span></h4>
+      <div class="kv">
+        <div class="k">Branch / status</div><div><code>feat/weekly-report-system</code> · <code>M</code> (modified, uncommitted)</div>
+        <div class="k">Last commit / author</div><div><code>3e02c8f</code> · 2026-06-28 19:13 · santiago echeverri</div>
+        <div class="k">Diff summary</div><div>Renders the note as an amber badge — only for the platform owner.</div>
+        <div class="k">Plain English</div><div>Shows the heads-up on the Needs Review screen.</div>
+        <div class="k">Overlaps 24d1797?</div><div><span class="no">No</span> — not in the candidate.</div>
+        <div class="k">Needed?</div><div>Only with the other two. Owner-only display.</div>
+        <div class="k">Risk</div><div><span class="ok">Very low</span> — additive, role-gated (<code>isPlatform</code>).</div>
+      </div>
+      <pre><span class="c">// src/components/NeedsReviewTable.tsx — ReviewRow</span>
+<span class="add">+ {isPlatform &amp;&amp; review.reverseUpcConflictNote &amp;&amp; (</span>
+<span class="add">+   &lt;span className="... bg-amber-50 text-amber-800" data-testid="reverse-upc-conflict"&gt;</span>
+<span class="add">+     {review.reverseUpcConflictNote}</span>
+<span class="add">+   &lt;/span&gt; )}</span></pre>
+      <div class="verdict review"><b>Recommendation:</b> port with the other two, or abandon together.</div>
+    </div>
+
+    <div class="banner green" style="margin-top:14px">
+      <b>Group verdict:</b> a complete, low-risk, <b>optional</b> feature (3 files / +20 lines) that works here but is missing from the candidate. <b>Keep for now.</b> Decision needed: <b>port to candidate</b> (recommended, as a separate tested commit) · <b>commit on this branch</b> · or <b>abandon</b>.
+    </div>
+  </section>
+
+  <!-- ================= SECTION 3 ================= -->
+  <section id="s3">
+    <h2><span class="n">3</span> data/** — 81 untracked files · 62.8 MB</h2>
+    <p>This is your <b>parked tire-database pipeline</b> (the harvested corpus + scripts you told me to keep and never truncate). Dates span <b>2026-06-22 → 06-26</b>. It’s a mix of real data and auto-generated junk. CSV headers below are <b>column names only</b> (no prices, no secrets).</p>
+
+    <p><b>Breakdown:</b> <span class="tag info" style="margin-right:6px">40 .pyc</span><span class="tag info" style="margin-right:6px">21 .csv</span><span class="tag info" style="margin-right:6px">9 .json</span><span class="tag info" style="margin-right:6px">6 .log</span><span class="tag info" style="margin-right:6px">3 .py</span><span class="tag info">1 .txt · 1 .lock</span> &nbsp;|&nbsp; generated junk (.pyc + .log) = <b>1.6 MB</b>; the rest is data, dominated by a few big CSVs. <small class="dim">(Also 114 already-tracked files under <code>data/</code>, of which 5 are modified — listed at the bottom.)</small></p>
+
+    <table>
+      <tr><th>Path (under data/)</th><th class="right">Size</th><th>Modified</th><th>Tracked</th><th>Likely type</th><th>Header / note</th><th>Important?</th><th>Action</th></tr>
+
+      <tr><td><code>tire-knowledge/outputs/backup_corpus_before_vendor_clean_…csv</code></td><td class="right">28.7 MB</td><td>06-24</td><td>untracked</td><td>One-time backup</td><td>Pre-clean corpus snapshot</td><td><span class="warn">Maybe</span></td><td><span class="tag review">Archive / review</span></td></tr>
+      <tr><td><code>tire-knowledge/outputs/tirelibrary_missing_barcodes.csv</code></td><td class="right">22.5 MB</td><td>06-26</td><td>untracked</td><td>Harvest output</td><td>Gap list from harvest</td><td><span class="warn">Maybe</span></td><td><span class="tag review">Archive / review</span></td></tr>
+      <tr><td><code>tire-knowledge/coverage_ledger.json</code></td><td class="right">9.5 MB</td><td>06-26</td><td>untracked</td><td>Pipeline state</td><td>Coverage ledger</td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/tire_identifiers.csv</code></td><td class="right">2.9 MB</td><td>06-23</td><td>untracked</td><td>Authored corpus</td><td><code>canonical_product_uid, identifier_type, identifier_value, source_url, …</code></td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/outputs/tirelibrary_harvest.log</code></td><td class="right">392 KB</td><td>06-26</td><td>untracked</td><td><b>Generated log</b></td><td>Harvest run log</td><td><span class="no">No</span></td><td><span class="tag junk">Gitignore</span></td></tr>
+      <tr><td><code>tire-knowledge/outputs/enrich.log</code></td><td class="right">253 KB</td><td>06-26</td><td>untracked</td><td><b>Generated log</b></td><td>Enrichment log</td><td><span class="no">No</span></td><td><span class="tag junk">Gitignore</span></td></tr>
+      <tr><td><code>tire-knowledge/tire_model_queue.csv</code></td><td class="right">144 KB</td><td>06-23</td><td>untracked</td><td>Authored corpus</td><td>Model work queue</td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/outputs/gemini_qa/verify_sample_n140_seed2026.csv</code></td><td class="right">49 KB</td><td>06-23</td><td>untracked</td><td>QA sample</td><td>Decode verification sample</td><td><span class="warn">Maybe</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/tire_enrichment_backlog.csv</code></td><td class="right">39 KB</td><td>06-24</td><td>untracked</td><td>Authored corpus</td><td>Enrichment backlog</td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/seed/TIRE_C_1.csv</code></td><td class="right">36 KB</td><td>06-22</td><td>untracked</td><td>Seed corpus</td><td><code>canonical_product_uid, brand, model, size_canonical, …, barcode</code></td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>data/imports/tyres_demo.csv</code></td><td class="right">24 KB</td><td>—</td><td>untracked</td><td>Import sample</td><td><code>vendor_id;model_id;vendor_name;model_name;year;season;…</code></td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/outputs/ai_barcode_candidates.csv</code></td><td class="right">16 KB</td><td>—</td><td>untracked</td><td>Pipeline output</td><td><code>id, brand, model, size, claimed_barcode, gtin_valid, prefix_match, confidence, sources</code></td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/outputs/ai_enriched_staging.csv</code></td><td class="right">15 KB</td><td>—</td><td>untracked</td><td>Pipeline output</td><td>Staged enrichment</td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/{tire_products, tire_brand_aliases, tire_model_aliases, tire_size_aliases, tire_sources, rejected_rows}.csv</code></td><td class="right">&lt;15 KB ea</td><td>06-23/24</td><td>untracked</td><td>Authored corpus</td><td><code>tire_products</code>: <code>canonical_product_uid, brand, model, size_canonical, …</code></td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/{harvested_brands, firecrawl_policy, api_progress, current_run_progress}.json</code></td><td class="right">small</td><td>06-26</td><td>untracked</td><td>Pipeline state/config</td><td>Run state &amp; policy</td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/scripts/*.py</code> (3 untracked)</td><td class="right">small</td><td>06-2x</td><td>untracked</td><td>Pipeline code</td><td>Harvest/enrich scripts</td><td><span class="ok">Yes</span></td><td><span class="tag keep">Keep</span></td></tr>
+      <tr><td><code>tire-knowledge/scripts/**/__pycache__/*.pyc</code> (40 files)</td><td class="right">~1.4 MB</td><td>06-22/25</td><td>untracked</td><td><b>Generated bytecode</b></td><td>Python compile cache</td><td><span class="no">No</span></td><td><span class="tag junk">Gitignore</span></td></tr>
+      <tr><td><code>tire-knowledge/**/*.log</code> (4 more) &amp; <code>*.lock</code></td><td class="right">~0.1 MB</td><td>06-26</td><td>untracked</td><td><b>Generated</b></td><td>Run logs / lock</td><td><span class="no">No</span></td><td><span class="tag junk">Gitignore</span></td></tr>
+    </table>
+
+    <h3>Tracked &amp; modified under data/ (already committed, just edited) — owner review</h3>
+    <table>
+      <tr><th>Path</th><th>Status</th><th>Note</th><th>Action</th></tr>
+      <tr><td><code>data/tire-knowledge/scripts/barcode_enrich.py</code></td><td><code>M</code></td><td rowspan="5">Committed pipeline files that were edited. They belong to the parked tire-DB work; decide whether to commit or revert these edits <b>on the tire branch</b>, not here.</td><td rowspan="5"><span class="tag review">Owner review</span></td></tr>
+      <tr><td><code>data/tire-knowledge/scripts/ledger.py</code></td><td><code>M</code></td></tr>
+      <tr><td><code>data/tire-knowledge/scripts/tirelibrary_api_harvest.py</code></td><td><code>M</code></td></tr>
+      <tr><td><code>data/tire-knowledge/scripts/validate.py</code></td><td><code>M</code></td></tr>
+      <tr><td><code>data/tire-knowledge/tire_corpus_flat.csv</code></td><td><code>M</code></td></tr>
+    </table>
+
+    <div class="verdict keep"><b>Group verdict:</b> <b>Keep the corpus, scripts, ledger &amp; config</b> (your parked tire-DB asset). <b>Gitignore the .pyc / __pycache__ / .log / .lock junk.</b> The two big one-time outputs (28.7 MB backup, 22.5 MB missing-barcodes) — <b>archive or confirm</b> before ignoring, since they’re large and may be reproducible.</div>
+  </section>
+
+  <!-- ================= SECTION 4 ================= -->
+  <section id="s4">
+    <h2><span class="n">4</span> 11 deleted <code>playwright-report/data/*.png</code></h2>
+    <div class="banner blue">
+      <b>Confirmed:</b> these are screenshots <b>inside an auto-generated Playwright HTML report</b> at <code>reports/human-bots/playwright-report/</code> (a fresh <code>index.html</code> of 561 KB + <b>12 new</b> PNGs are present right now). The 11 “deleted” files are <b>old screenshots replaced by a newer test run</b> — git sees the old random-hash names as deleted. They were <b>tracked before</b> (12 PNGs tracked at HEAD), so they are <b>fully restorable</b> with <code>git checkout</code> if ever needed.
+    </div>
+
+    <div class="kv">
+      <div class="k">Were they tracked?</div><div><span class="ok">Yes</span> — committed in <code>e5c2e16</code> (“qa:bots proof artifacts”).</div>
+      <div class="k">Likely source</div><div>Playwright HTML reporter — embeds step screenshots under <code>data/&lt;hash&gt;.png</code>, regenerated every run.</div>
+      <div class="k">Regenerated asset?</div><div><span class="ok">Yes</span> — the report folder already holds a newer set (12 PNGs + new index.html).</div>
+      <div class="k">Restorable?</div><div><span class="ok">Yes</span> — <code>git checkout -- &lt;path&gt;</code> brings any back (they’re in history).</div>
+      <div class="k">Safe to ignore later?</div><div><span class="ok">Yes</span> — nothing depends on these specific files.</div>
+    </div>
+
+    <table>
+      <tr><th>#</th><th>Deleted file (reports/human-bots/playwright-report/data/)</th><th>Tracked before</th><th>Regenerated</th><th>Restorable</th></tr>
+      <tr><td>1</td><td><code>0437a345394dee4424999476d408f3c26a60eb5d.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>2</td><td><code>790d635534b365fad015a8a1ee3185d5ca6ab0be.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>3</td><td><code>7e3034f974bd2538b30dff1b8e917985886aeb8f.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>4</td><td><code>9be9ff7da9aaef9824373f96e27939bcf9746e6f.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>5</td><td><code>b6968d901a6350260f7eed9499fd06c4fe015df3.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>6</td><td><code>bddaffe82020c6bb71fedb594b41519c336d5f8e.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>7</td><td><code>c88b344f7ad8382fe9a9481065e6febc61ddd77c.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>8</td><td><code>ccbbc0b8903c4af11e06b0d25afe61c2263dff40.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>9</td><td><code>ccc5b7a4382e9657dcf35a33bd75818d1a265d21.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>10</td><td><code>e3bb09941b26218f81609e2fbd562666483fa543.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>11</td><td><code>ee976ca071cb91b84e1a04daeb85728a02c4df33.png</code></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+    </table>
+
+    <div class="verdict junk"><b>Group verdict:</b> <span class="no">Nothing was lost</span> — these are stale auto-generated report images, already replaced. <b>Do not restore.</b> Recommended: gitignore the nested report folder so it stops appearing as changes. <small class="dim">(Your root <code>/playwright-report</code> is already ignored; this nested copy under <code>reports/</code> was simply missed.)</small></div>
+  </section>
+
+  <!-- ================= SECTION 5 ================= -->
+  <section id="s5">
+    <h2><span class="n">5</span> Cleanup plan <span class="tag info" style="margin-left:6px">NOT executed</span></h2>
+
+    <h3><span class="tag keep">Keep</span></h3>
+    <ul>
+      <li>The 3 wiring files (until you decide port vs commit vs abandon).</li>
+      <li><code>data/**</code> tire corpus, ledger, config &amp; scripts (CSVs/JSONs/.py) — the parked tire-DB asset.</li>
+      <li>Already-archived proof: <code>proof-archive/24d1797-option3/</code> (5 screenshots + README).</li>
+    </ul>
+
+    <h3><span class="tag review">Archive</span></h3>
+    <ul>
+      <li>Loose root proof screenshots (already copied into <code>proof-archive/24d1797-option3/</code>).</li>
+      <li>Big one-time outputs: <code>backup_corpus_before_vendor_clean_*.csv</code> (28.7 MB), <code>tirelibrary_missing_barcodes.csv</code> (22.5 MB) — move to an archive folder if you want them out of the working tree.</li>
+    </ul>
+
+    <h3><span class="tag junk">Gitignore</span> <small class="dim">(stops the count from re-inflating; touches nothing tracked)</small></h3>
+    <ul>
+      <li><code>*.pyc</code>, <code>__pycache__/</code> — Python bytecode (40 files).</li>
+      <li><code>data/**/*.log</code> and <code>*.lock</code> — run logs (6) + lock.</li>
+      <li><code>reports/**/playwright-report/</code> — the nested generated test report.</li>
+      <li><code>.playwright-mcp/</code>, <code>.superpowers/</code> — session/tooling scratch (from earlier survey).</li>
+    </ul>
+
+    <h3><span class="tag review">Owner review</span></h3>
+    <ul>
+      <li>The 3 wiring files → port to candidate / commit here / abandon.</li>
+      <li>The 5 tracked-modified tire scripts + <code>tire_corpus_flat.csv</code> → commit or revert on the tire branch.</li>
+      <li>The two big CSV outputs (50 MB combined) → keep, archive, or regenerate-on-demand.</li>
+    </ul>
+
+    <h3><span class="tag junk">Safe to delete later — only after approval</span></h3>
+    <ul>
+      <li><code>*.pyc</code> / <code>__pycache__/</code>, <code>*.log</code>, the nested <code>playwright-report/</code>, <code>.playwright-mcp/</code> session files. All regenerate or are stale.</li>
+    </ul>
+  </section>
+
+  <!-- ================= SECTION 6 ================= -->
+  <section id="s6">
+    <h2><span class="n">6</span> Exact commands <span class="tag junk" style="margin-left:6px">FOR LATER — NOT RUN</span></h2>
+    <p>Listed as text only. <b>Nothing here has been executed.</b> Review before running. None are destructive except where noted; even those touch only generated/stale files.</p>
+
+    <p style="margin-top:14px"><b>a) Add gitignore entries (safe, reversible):</b></p>
+    <pre><span class="c"># append to .gitignore</span>
+*.pyc
+__pycache__/
+data/**/*.log
+data/**/*.lock
+reports/**/playwright-report/
+.playwright-mcp/
+.superpowers/</pre>
+
+    <p><b>b) Port the wiring feature into the candidate (recommended path) — done by hand as a tested commit:</b></p>
+    <pre><span class="c"># in C:\tmp\inventory-release-repair, on a NEW branch off 24d1797</span>
+git switch -c feat/reverse-upc-heads-up
+<span class="c"># re-apply the +20 lines (types.ts, scanStore.ts, NeedsReviewTable.tsx) + add a test, then:</span>
+git add src/types.ts src/stores/scanStore.ts src/components/NeedsReviewTable.tsx src/services/catalog/candidateUpcSet.test.ts
+git commit -m "feat(review): platformOwner reverse-UPC heads-up on Needs Review"</pre>
+
+    <p><b>c) OR commit the wiring where it already lives:</b></p>
+    <pre><span class="c"># in C:\Users\djsan\inventory (feat/weekly-report-system)</span>
+git add src/types.ts src/stores/scanStore.ts src/components/NeedsReviewTable.tsx
+git commit -m "feat(review): reverse-UPC heads-up wiring"</pre>
+
+    <p><b>d) Archive the big one-time CSV outputs (move, not delete):</b></p>
+    <pre>mkdir -p data/_archive
+git mv? <span class="c"># N/A (untracked) — use a normal move:</span>
+mv data/tire-knowledge/outputs/backup_corpus_before_vendor_clean_*.csv data/_archive/
+mv data/tire-knowledge/outputs/tirelibrary_missing_barcodes.csv      data/_archive/</pre>
+
+    <p><b>e) The deleted report PNGs — restore (only if ever wanted) or leave as-is:</b></p>
+    <pre><span class="c"># restore all 11 (NOT recommended — they’re stale &amp; regenerated):</span>
+git checkout -- reports/human-bots/playwright-report/data/
+<span class="c"># preferred: just ignore the folder (see command set a).</span></pre>
+
+    <p><b>f) Verify candidate stays clean at any time:</b></p>
+    <pre>git -C C:/tmp/inventory-release-repair status --short   <span class="c"># expect: empty</span>
+git -C C:/tmp/inventory-release-repair rev-parse --short HEAD   <span class="c"># expect: 24d1797</span></pre>
+
+    <div class="verdict review" style="margin-top:18px"><b>No command above runs until you say <code>CLEANUP APPROVED</code>.</b> For the wiring feature, tell me <b>port / commit-here / abandon</b>.</div>
+  </section>
+
+</div>
+</body>
+</html>

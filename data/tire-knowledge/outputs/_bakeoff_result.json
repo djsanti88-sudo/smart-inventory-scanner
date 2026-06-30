@@ -1,0 +1,184 @@
+{
+ "summary": {
+  "n": 25,
+  "gemini_found": 0,
+  "gemini_429": 25,
+  "fc_found": 2,
+  "both": 0,
+  "gemini_only": 0,
+  "fc_only_incremental": 2,
+  "fc_credits_spent": 86,
+  "fc_credits_per_found": 43.0
+ },
+ "results": [
+  {
+   "q": "ACCELERA Accelera 651 195/50R15 82V tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "ACHILLES 838 MT 235/45R16 117D tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "ADVANCE AR1000 Series 280/70R18 114D tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 7,
+   "fc_src": ""
+  },
+  {
+   "q": "AEOLUS Cross Ace H/T AS02 205/70R15 96H tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AGSTAR 1630 R-1 250/80R18 119A6 tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "ALLIANCE 221 Grassland Flotation 450/55R17 120A8 tire UPC barcode numb",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AMERICAN American Platinum (H & V Rated) 185/60R14 82H tire UPC barcod",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AMERICAN ROAD STAR A/T 225/55R18 102T tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AMERICAN TOURER SL309 H/T 215/75R15 100/97Q tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AMERICUS Americus CLT 215/85R16 115/112Q tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AMERITREAD Total Comfort 175/65R14 82H tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AMP Terrain Attack R/T 285/55R20 122/119Q tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "ANTARES Blitzk RS 195/50R15 82V tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "ANTYRE HP 188 225/30R20 85W tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "AOTELI Ecosaver 245/65R17 107H tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "APLUS A501 155/65R14 75T tire UPC barcode number",
+   "gemini": "429",
+   "fc": "6220800562339",
+   "fc_credits": 3,
+   "fc_src": "https://www.barcodelookup.com/"
+  },
+  {
+   "q": "APTANY RA301 195/45R16 84V tire UPC barcode number",
+   "gemini": "429",
+   "fc": "6950306321948",
+   "fc_credits": 3,
+   "fc_src": "https://www.reifen.com/en-de/19545-r16-84v-aptany-"
+  },
+  {
+   "q": "ARCTIC CLAW Arctic Claw Winter Txi 175/65R14 82T tire UPC barcode numb",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 7,
+   "fc_src": ""
+  },
+  {
+   "q": "ARDENT A/S RX718 215/85R16 115/112S tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 7,
+   "fc_src": ""
+  },
+  {
+   "q": "ARGUS ADVANTA Advanta A/T 235/75R15 104/101Q tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 7,
+   "fc_src": ""
+  },
+  {
+   "q": "ARISUN Altrans Pro ZX05 195/75R16 110/108R tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 3,
+   "fc_src": ""
+  },
+  {
+   "q": "ARIZONIAN Rocky Mountain A/S 215/65R16 98S tire UPC barcode number",
+   "gemini": "429",
+   "fc": null,
+   "fc_credits": 7,
+   "fc_src": ""
+  },
+  {
+   "q": "ARMOHERO Crosstrac H/T 215/60R17 96V tire UPC barcode number",
+   "gemini": "429",
+   "fc": "SKIP_capreached"
+  },
+  {
+   "q": "ARMSTRONG Blu-Trac HP 195/45R16 84V tire UPC barcode number",
+   "gemini": "429",
+   "fc": "SKIP_capreached"
+  },
+  {
+   "q": "ARROYO Eco Pro H/T 285/50R20 116V tire UPC barcode number",
+   "gemini": "429",
+   "fc": "SKIP_capreached"
+  }
+ ]
+}

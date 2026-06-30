@@ -106,6 +106,12 @@ export interface Product {
   // True only for trusted identity: seed/manual or human-created. AI never sets this true.
   // The resolver may return "known" from a product identifier ONLY when verified is true.
   verified: boolean;
+  // PHASE 2 (Suggested provisional count): true ONLY for a product born from a weak AI suggestion that is
+  // counted but unconfirmed (verified:false, NO approved alias). A re-scan increments it deterministically
+  // (processScan provMatch) without re-deciding, and it stays in Needs Review until a human confirms it
+  // (which flips provisional->false, verified->true, + creates the approved alias). Distinguishes it from an
+  // ORPHANED verified product (verified lost on persist reset) which must still re-alias via resolveUnknown.
+  provisional?: boolean;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -227,6 +233,8 @@ export interface UnknownCodeReview {
   // anti-hallucination firewall's conflict reason (if any). Hints/evidence only, never identity truth.
   prefixHint?: string;
   prefixConflictReason?: string;
+  // platformOwner-only: the proposed product already exists in the shop's catalog under a different code.
+  reverseUpcConflictNote?: string;
   // Confidence-based auto-verify outcome (when a decode was scored but did NOT auto-save).
   autoVerifyScore?: number;
   blockingReasons?: string[];
