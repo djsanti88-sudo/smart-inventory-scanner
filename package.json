@@ -7,7 +7,8 @@
     "dev": "node scripts/dev.mjs",
     "dev:emulator": "node scripts/dev.mjs --emulator",
     "dev:prod": "node scripts/dev.mjs --prod",
-    "build": "next build",
+    "build": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs && next build",
+    "build:knowledge-db": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -40,6 +41,7 @@
     "intel:validate": "node scripts/validate-agents.mjs"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "exceljs": "^4.4.0",
     "firebase": "^12.14.0",
     "firebase-admin": "^14.0.0",
@@ -58,6 +60,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

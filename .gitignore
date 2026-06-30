@@ -88,6 +88,11 @@ data/**/*.lock
 # Nested auto-generated Playwright HTML report (root /playwright-report already ignored above)
 reports/**/playwright-report/
 
+# Generated SQLite knowledge DB (built from committed JSON indexes at build time)
+src/server/knowledge.generated.db
+src/server/knowledge.generated.db-wal
+src/server/knowledge.generated.db-shm
+
 # Agent/session scratch (Playwright MCP snapshots + superpowers tooling state)
 .playwright-mcp/
 .superpowers/
