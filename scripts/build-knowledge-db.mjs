@@ -7,9 +7,12 @@
 //
 // Source files (committed to git):
 //   src/server/tire-knowledge/tireKnowledge.generated.json   (53MB, 76K tires)
-//   src/server/retail-knowledge/retailKnowledge.generated.json (247MB, 4M+ retail products)
+//   src/server/retail-knowledge/retailKnowledge.generated.json (247MB, 4M+ retail products, Git LFS)
+//
+// If the retail JSON is a Git LFS pointer (Vercel without LFS enabled), the retail table is
+// skipped gracefully — tire lookups still work. Enable Git LFS on Vercel for retail coverage.
 
-import { readFileSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, existsSync, unlinkSync, statSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 
@@ -23,28 +26,55 @@ function elapsed(start) {
   return ((performance.now() - start) / 1000).toFixed(1) + "s";
 }
 
+/** Detect Git LFS pointer files (~130 bytes, starts with "version https://git-lfs"). */
+function isLfsPointer(path) {
+  try {
+    const size = statSync(path).size;
+    if (size > 500) return false; // real files are much larger
+    const content = readFileSync(path, "utf8");
+    return content.startsWith("version https://git-lfs");
+  } catch { return false; }
+}
+
+/** Safely read and parse a JSON file. Returns null if missing, LFS pointer, or invalid. */
+function safeReadJson(path, label) {
+  if (!existsSync(path)) {
+    console.warn(`[knowledge-db] ${label} not found, skipping`);
+    return null;
+  }
+  if (isLfsPointer(path)) {
+    console.warn(`[knowledge-db] ${label} is a Git LFS pointer (not the real file). Enable Git LFS on your build server. Skipping.`);
+    return null;
+  }
+  try {
+    console.log(`[knowledge-db] Reading ${label}...`);
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    console.warn(`[knowledge-db] ${label} failed to parse: ${e.message}. Skipping.`);
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 1. Initialize DB
 // ---------------------------------------------------------------------------
 console.log("[knowledge-db] Building SQLite knowledge database...");
 const t0 = performance.now();
 
-// Remove old DB if it exists (clean rebuild)
 if (existsSync(DB_PATH)) unlinkSync(DB_PATH);
 
 const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
-db.pragma("synchronous = OFF");    // safe: we're building, not serving
-db.pragma("page_size = 8192");     // larger pages = fewer seeks for reads
-db.pragma("cache_size = -64000");  // 64MB cache during build
+db.pragma("synchronous = OFF");
+db.pragma("page_size = 8192");
+db.pragma("cache_size = -64000");
 
 // ---------------------------------------------------------------------------
 // 2. Tire index
 // ---------------------------------------------------------------------------
-if (existsSync(TIRE_JSON)) {
+const tireData = safeReadJson(TIRE_JSON, "Tire JSON");
+if (tireData) {
   const t1 = performance.now();
-  console.log("[knowledge-db] Reading tire JSON...");
-  const tireData = JSON.parse(readFileSync(TIRE_JSON, "utf8"));
 
   db.exec(`
     CREATE TABLE tires (
@@ -90,7 +120,6 @@ if (existsSync(TIRE_JSON)) {
     )
   `);
 
-  // Normalize barcode key the same way the runtime does: strip spaces/dashes
   function normBarcode(code) {
     return (code ?? "").toString().replace(/[ -]/g, "").trim();
   }
@@ -132,24 +161,20 @@ if (existsSync(TIRE_JSON)) {
     insertTireBatch(barcodeEntries.slice(i, i + BATCH_SIZE));
   }
 
-  // Create indexes AFTER inserts (much faster)
   console.log("[knowledge-db] Creating tire indexes...");
   db.exec("CREATE UNIQUE INDEX idx_tire_barcode ON tires(barcode)");
   db.exec("CREATE INDEX idx_tire_part_number ON tires(manufacturer_part_number)");
   db.exec("CREATE INDEX idx_tire_uid ON tires(canonical_product_uid)");
 
   console.log(`[knowledge-db] Tire: ${barcodeEntries.length} rows in ${elapsed(t1)}`);
-} else {
-  console.warn("[knowledge-db] Tire JSON not found, skipping tire table");
 }
 
 // ---------------------------------------------------------------------------
 // 3. Retail index
 // ---------------------------------------------------------------------------
-if (existsSync(RETAIL_JSON)) {
+const retailData = safeReadJson(RETAIL_JSON, "Retail JSON (247MB, may need Git LFS)");
+if (retailData) {
   const t2 = performance.now();
-  console.log("[knowledge-db] Reading retail JSON (this may take a moment for 247MB)...");
-  const retailData = JSON.parse(readFileSync(RETAIL_JSON, "utf8"));
   const retailIndex = retailData.index || {};
   const retailEntries = Object.entries(retailIndex);
 
@@ -171,12 +196,7 @@ if (existsSync(RETAIL_JSON)) {
   const insertRetailBatch = db.transaction((batch) => {
     for (const [barcode, entry] of batch) {
       if (!barcode) continue;
-      insertRetail.run(
-        barcode,
-        entry[0] || "",
-        entry[1] || "",
-        entry[2] || "",
-      );
+      insertRetail.run(barcode, entry[0] || "", entry[1] || "", entry[2] || "");
     }
   });
 
@@ -190,16 +210,10 @@ if (existsSync(RETAIL_JSON)) {
     }
   }
 
-  // Create index AFTER inserts
   console.log("[knowledge-db] Creating retail barcode index...");
   db.exec("CREATE INDEX idx_retail_barcode ON retail(barcode)");
 
   console.log(`[knowledge-db] Retail: ${retailEntries.length} rows in ${elapsed(t2)}`);
-
-  // Free the parsed JSON from memory
-  // (retailData and retailIndex will be GC'd after this scope)
-} else {
-  console.warn("[knowledge-db] Retail JSON not found, skipping retail table");
 }
 
 // ---------------------------------------------------------------------------
@@ -207,16 +221,14 @@ if (existsSync(RETAIL_JSON)) {
 // ---------------------------------------------------------------------------
 console.log("[knowledge-db] Running ANALYZE...");
 db.exec("ANALYZE");
-
-// Switch from WAL to DELETE journal for the read-only production file
 db.pragma("journal_mode = DELETE");
-
-// VACUUM to reclaim space and compact the file
 console.log("[knowledge-db] Running VACUUM...");
 db.exec("VACUUM");
-
 db.close();
 
-const stat = readFileSync(DB_PATH);
-console.log(`[knowledge-db] Done in ${elapsed(t0)}. DB size: ${(stat.length / 1024 / 1024).toFixed(1)} MB`);
+const dbSize = statSync(DB_PATH).size;
+console.log(`[knowledge-db] Done in ${elapsed(t0)}. DB size: ${(dbSize / 1024 / 1024).toFixed(1)} MB`);
 console.log(`[knowledge-db] Output: ${DB_PATH}`);
+if (!tireData && !retailData) {
+  console.warn("[knowledge-db] WARNING: No source data loaded. The DB is empty.");
+}
