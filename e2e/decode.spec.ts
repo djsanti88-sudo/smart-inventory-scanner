@@ -140,7 +140,9 @@ test("live decode: verified vs suggested vs conflict vs vendor label, all mocked
   await expect(page.getByTestId("review-row-049000999888").getByTestId("decode-status")).toHaveText(/Suggested/);
 
   await decodeOn("049000777666");
-  await expect(page.getByTestId("review-row-049000777666").getByTestId("decode-status")).toHaveText(/Conflict/);
+  // Plan C, Task 1: providers-conflict is a non-blocking LABEL, collapsed into the single
+  // "Suggested" state (no separate "Conflict" wall state on the decode-status badge).
+  await expect(page.getByTestId("review-row-049000777666").getByTestId("decode-status")).toHaveText(/Suggested/);
 
   await decodeOn("X004DY7YUT");
   await expect(page.getByTestId("review-row-X004DY7YUT").getByTestId("decode-status")).not.toHaveText(/Verified/);

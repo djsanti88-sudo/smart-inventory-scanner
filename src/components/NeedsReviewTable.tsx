@@ -29,9 +29,13 @@ function buildDiscoveredIdentifiers(review: UnknownCodeReview): { code: string; 
   return out;
 }
 
-// Shows the decode pipeline outcome. "Verified AI Decode" requires the app to have independently
-// verified the exact code in strong evidence AND cross-checked providers - it is never the model's
-// self-claim, and it still requires human approval to count (unless the owner opts into auto-accept).
+// Shows the decode pipeline outcome. Two visible states only: "Verified" (app-confirmed) and
+// "Suggested" (everything else, including a provider conflict) - Plan C collapses the old
+// "Conflict" wall state into "Suggested" since it is a non-blocking label, not a gate (Plan A
+// already makes every scan count). "Verified match" requires the app to have independently
+// verified the exact code in strong evidence AND cross-checked providers - it is never the
+// model's self-claim, and it still requires human approval to count (unless the owner opts
+// into auto-accept).
 function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlatform: boolean }) {
   // Customer-facing labels avoid "AI"/"providers"; platformOwner sees the technical wording.
   const status = review.decodeStatus ?? "none";
@@ -39,13 +43,6 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
     return (
       <span className="w-fit rounded-md bg-green-100 px-1.5 py-0.5 text-sm font-medium text-green-800" data-testid="decode-status">
         {isPlatform ? "Verified match (app-confirmed)" : "Verified match"}
-      </span>
-    );
-  }
-  if (status === "conflict") {
-    return (
-      <span className="w-fit rounded-md bg-red-100 px-1.5 py-0.5 text-sm font-medium text-red-800" data-testid="decode-status">
-        {isPlatform ? "Conflict - sources disagree" : "Conflict - needs review"}
       </span>
     );
   }
@@ -66,11 +63,11 @@ export function NeedsReviewTable() {
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="border-b border-zinc-200 px-4 py-3">
-        <h2 id="review-heading" className="text-lg font-semibold text-zinc-900">{isPlatform ? "Review" : "Check these"}</h2>
+        <h2 id="review-heading" className="text-lg font-semibold text-zinc-900">Suggested items (confirm if you like)</h2>
         <p className="text-sm text-zinc-700">
           {isPlatform
-            ? "Unknown or conflicting codes. Results here are suggestions only and need your approval. Once approved, the barcode is saved so future scans count automatically."
-            : "These codes need a quick look. Pick the right product once, and from then on scanning that code counts it for you."}
+            ? "Unknown or lower-confidence codes. Results here are suggestions only, already counted, and confirming just makes future scans of that code deterministic. Once confirmed, the barcode is saved so future scans count automatically."
+            : "These codes already count. Confirm the right product once if you like, and from then on scanning that code is automatic."}
         </p>
       </div>
       <div className="overflow-auto">
