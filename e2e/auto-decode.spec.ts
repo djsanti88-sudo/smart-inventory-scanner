@@ -87,9 +87,10 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   await scan(page, "111111111119");
   await expect(page.getByTestId("final-count-body")).not.toContainText("Maybe Energy Bar");
 
-  // Conflict: providers disagree -> NOT auto-added, stays in Needs Review.
+  // Conflict: providers disagree -> NOT auto-added, stays in Needs Review. Plan C, Task 1
+  // collapses the conflict label into the single "Suggested" state (non-blocking label).
   await scan(page, "222222222226");
-  await expect(page.getByTestId("scan-feed-body")).toContainText("Conflict");
+  await expect(page.getByTestId("scan-feed-body")).toContainText("Suggested");
   await expect(page.getByTestId("scanner-input")).toBeFocused();
   await page.screenshot({ path: `${PROOF}/auto-decode-01-feed.png`, fullPage: true });
 
