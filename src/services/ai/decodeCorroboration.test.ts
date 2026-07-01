@@ -52,14 +52,18 @@ describe("decideDecode - any-source single-provider verify (baseline v1)", () =>
     expect(r.status).not.toBe("verified");
   });
 
-  it("BRAND SANITY: a catalog-derived brand-prefix conflict blocks auto-count (wrong brand for this barcode)", () => {
+  it("PLAN C: a catalog-derived brand-prefix conflict is ADVISORY - with strong exact-code evidence it no longer blocks auto-count", () => {
+    // Reconciled (Plan C Task 2): the brand-prefix mismatch used to hard-block every auto-count path. Owner
+    // rule: GS1 prefixes are many-to-one, so a brand-prefix mismatch alone must never block when the app
+    // confirmed the EXACT code in STRONG evidence (grounding/corpus wins over the prefix). The CATEGORY /
+    // poison guard (wrong product TYPE) stays a hard block elsewhere (scanContextFirewall / store).
     const r = decideDecode({
       codeType: "upc_a",
       results: [tire({ productName: "Bridgestone Dueler H/T 245/75R16 120R", brand: "Bridgestone", specsShort: "245/75R16 120R" })],
       evidences: [strongEv("029142712886")], confidenceThreshold: 0.8, code: "029142712886", scanContext: "tire",
       brandPrefixConflict: true,
     });
-    expect(r.status).not.toBe("verified");
+    expect(r.status).toBe("verified");
   });
 
   it("two independent providers that AGREE also verify (two_ai_agreement)", () => {

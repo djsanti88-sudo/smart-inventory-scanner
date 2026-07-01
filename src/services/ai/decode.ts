@@ -94,6 +94,12 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
 
   const bestEvidence = strongestEvidence(params.evidences);
   const strong = isStrongEvidence(bestEvidence);
+  // PLAN C (owner rule): the catalog-derived brand-prefix conflict is ADVISORY, not a hard block. GS1
+  // prefixes are many-to-one, so a brand-prefix mismatch alone must NEVER block a verify when the app
+  // independently confirmed the EXACT code in STRONG evidence (grounding/corpus wins over the prefix).
+  // It still blocks weaker verify paths (no strong app-verified exact-code evidence). The CATEGORY /
+  // poison guard (wrong product TYPE) is separate (scanContextFirewall) and STAYS a hard block downstream.
+  const prefixBlocks = !!params.brandPrefixConflict && !strong;
   const isPublicBarcode = PUBLIC_BARCODE_TYPES.includes(codeType);
   const maxConfidence = present.reduce((m, r) => Math.max(m, r.confidence), 0);
   const identityNonEmpty = present.length > 0;
@@ -121,7 +127,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     strong &&
     identityNonEmpty &&
     passesThreshold &&
-    !params.brandPrefixConflict &&
+    !prefixBlocks &&
     cc.decision === "agree";
 
   // SINGLE SOURCE (owner policy, supersedes the old two-provider / trusted-only rules): one provider
@@ -135,7 +141,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     strong &&
     identityNonEmpty &&
     passesThreshold &&
-    !params.brandPrefixConflict &&
+    !prefixBlocks &&
     !!a &&
     (cc.decision === "single_provider" || cc.decision === "agree");
 
@@ -153,7 +159,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     bestEvidence.verified &&
     identityNonEmpty &&
     passesThreshold &&
-    !params.brandPrefixConflict &&
+    !prefixBlocks &&
     !!a &&
     (cc.decision === "single_provider" || cc.decision === "agree");
 
@@ -213,9 +219,12 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     !!code &&
     isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
 
-  // BRAND SANITY (owner baseline v1): a catalog-derived brand-prefix conflict blocks EVERY auto-count
-  // path, not just the single-source one (wrong brand for this barcode is never auto-counted).
-  if (!params.brandPrefixConflict && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize || nonPublicTrustedVerified)) {
+  // BRAND SANITY (Plan C, owner rule): a catalog-derived brand-prefix conflict is ADVISORY, not a hard
+  // block. It only vetoes a verify when the app did NOT confirm the exact code in STRONG evidence
+  // (prefixBlocks). With strong app-verified exact-code evidence, grounding/corpus wins over the prefix,
+  // so a brand-prefix mismatch alone never blocks. The CATEGORY / poison guard is enforced separately
+  // (scanContextFirewall) and still blocks a wrong-product-TYPE identity downstream.
+  if (!prefixBlocks && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize || nonPublicTrustedVerified)) {
     const corroborationPath = canVerify
       ? "two_ai_agreement"
       : singleSourceVerified

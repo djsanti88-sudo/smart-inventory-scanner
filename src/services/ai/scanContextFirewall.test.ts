@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyProductDomain, detectScanContextConflict, detectIdentityContextConflict } from "@/services/ai/scanContextFirewall";
+import { classifyProductDomain, detectScanContextConflict, detectIdentityContextConflict, detectBrandPrefixAdvisory } from "@/services/ai/scanContextFirewall";
 import type { AiLookupResult } from "@/types";
 
 const r = (over: Partial<AiLookupResult>): AiLookupResult => ({
@@ -27,10 +27,14 @@ describe("detectScanContextConflict (Phase 8 firewall)", () => {
     expect(detectScanContextConflict({ scanContext: "tire", code: "745125495781", codeType: "upc_a", result, brandPrefixHints: [] })).toBeNull();
   });
 
-  it("brand contradiction vs an unambiguous learned prefix -> brand_prefix_conflict (any context)", () => {
+  it("PLAN C: brand contradiction vs an unambiguous learned prefix is ADVISORY now - no longer a blocking conflict", () => {
+    // Reconciled (Plan C Task 2): the brand-prefix arm is demoted. A brand mismatch vs a learned prefix used
+    // to return "brand_prefix_conflict" (a block). GS1 prefixes are many-to-one, so it must not block by
+    // itself; it is surfaced via detectBrandPrefixAdvisory() as a soft, non-blocking flag instead.
     const result = r({ productName: "Some Snack", brand: "Manstel" });
     const hints = [{ prefix: "0745125", brand: "fortune" }];
-    expect(detectScanContextConflict({ scanContext: "any", code: "745125495781", codeType: "upc_a", result, brandPrefixHints: hints })).toBe("brand_prefix_conflict");
+    expect(detectScanContextConflict({ scanContext: "any", code: "745125495781", codeType: "upc_a", result, brandPrefixHints: hints })).toBeNull();
+    expect(detectBrandPrefixAdvisory({ code: "745125495781", codeType: "upc_a", result, brandPrefixHints: hints })).toBe(true);
   });
 
   it("no learned prefix + ambiguous product -> no false conflict", () => {
@@ -85,11 +89,16 @@ describe("brand-FAMILY suppression via the tire prefix hint table (Phase 11)", (
     ).toBeNull(); // suppressed: siblings, and a hint never marks anything verified - only allows/blocks
   });
 
-  it("a brand OUTSIDE the family still conflicts vs a learned prefix", () => {
+  it("PLAN C: a brand OUTSIDE the family is an ADVISORY mismatch now, not a blocking conflict", () => {
+    // Reconciled (Plan C Task 2): out-of-family brand vs a learned prefix used to block; it is now advisory
+    // (detectScanContextConflict returns null) and surfaced via detectBrandPrefixAdvisory().
     const result = r({ productName: "Bridgestone Dueler H/T", brand: "Bridgestone" });
     expect(
       detectScanContextConflict({ scanContext: "any", code: "086699220585", codeType: "upc_a", result, brandPrefixHints: michelinPrefix }),
-    ).toBe("brand_prefix_conflict");
+    ).toBeNull();
+    expect(
+      detectBrandPrefixAdvisory({ code: "086699220585", codeType: "upc_a", result, brandPrefixHints: michelinPrefix }),
+    ).toBe(true);
   });
 
   it("the family table never weakens the category firewall (poisoned non-tire in tire context still blocks)", () => {

@@ -65,7 +65,7 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 // firewall is OVERRIDE-AWARE - strong app-verified exact-code evidence makes fw.conflict false - so this
 // never blocks a legitimately exact-verified decode, only conflicting non-exact verify paths (e.g. the
 // internet-two-source-size tire path) and Gemini-style "plausible product, wrong code" hallucinations.
-function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): { conflict: boolean; hint: string; reason: string } {
+function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): { conflict: boolean; hint: string; reason: string; brandPrefixAdvisory: boolean } {
   const strongExact = isStrongEvidence(strongestEvidence(evidences));
   const prefix = lookupPrefix(code);
   const fw = evaluatePrefixFirewall({
@@ -76,11 +76,18 @@ function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, 
     candidateKnownPrefixes: candidateKnownPrefixes(result?.brand), // reverse guard: brand's known prefix footprint
     exactCodeVerifiedByApp: strongExact,
   });
-  const conflict = prefixBrandConflict(code, result?.brand) || fw.conflict;
+  // PLAN C (owner rule): the catalog-derived brand-prefix sanity is ADVISORY now, not a hard block. GS1
+  // prefixes are many-to-one, so a brand-prefix mismatch alone must NEVER block a verify/count - grounding
+  // /corpus evidence wins over the prefix. It is still REPORTED (brandPrefixAdvisory) for transparency. The
+  // evidence-weighted firewall (fw) still vetoes non-exact conflicting verify paths and is already
+  // OVERRIDE-AWARE (strong app-verified exact-code evidence clears it), so it never false-rejects a
+  // legitimately exact-verified decode. The category/poison guard stays in the store's contextConflict gate.
+  const brandPrefixAdvisory = prefixBrandConflict(code, result?.brand);
+  const conflict = fw.conflict;
   // platformOwner-only display: what the barcode prefix maps to, and why a conflict (if any) fired.
   const hint = prefix?.dominant ? `${prefix.dominant.name} (${prefix.dominant.kind}, from barcode prefix - ${prefix.source})` : "";
   const reason = fw.conflict ? fw.reason : "";
-  return { conflict, hint, reason };
+  return { conflict, hint, reason, brandPrefixAdvisory };
 }
 
 export const dynamic = "force-dynamic";
@@ -488,6 +495,7 @@ export async function POST(request: Request) {
       const fw0 = evalCombinedFirewall(code, results[0], evidences);
       let prefixHint = fw0.hint;
       let firewallReason = fw0.reason;
+      let brandPrefixAdvisory = fw0.brandPrefixAdvisory; // Plan C: advisory-only, non-blocking (reported, never blocks)
       let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict, allowNonPublicAutoCount });
       let fallbackFound = false;
       let coverageMissed = false;
@@ -578,6 +586,7 @@ export async function POST(request: Request) {
             const fwW = evalCombinedFirewall(code, winnerWithSize, [outcome.hit.evidence]);
             prefixHint = fwW.hint;
             firewallReason = fwW.reason;
+            brandPrefixAdvisory = fwW.brandPrefixAdvisory;
             decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict, allowNonPublicAutoCount });
           }
         }
@@ -623,6 +632,7 @@ export async function POST(request: Request) {
           cached: false,
           prefixHint, // platformOwner-only: brand the barcode prefix maps to (recall/transparency)
           firewallReason, // platformOwner-only: why a prefix/UPC conflict routed this to review (if any)
+          brandPrefixAdvisory, // Plan C: catalog brand-prefix mismatch is ADVISORY (reported, never blocks)
           retailLookup: retailLookupStatus, // "turso_error" (broken connection) vs "turso_miss"/"unavailable" (genuine miss/not configured) — makes a swallowed Turso failure visible instead of silently falling through to this AI path
         },
         sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
