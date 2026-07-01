@@ -25,7 +25,7 @@ import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerif
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 import { runSizeRace } from "@/services/ai/sizeRace";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { killSwitchOn, checkRateLimit, checkAndIncrementDaily } from "@/services/security/aiSpendGuard";
+import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv } from "@/services/security/aiSpendGuard";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -108,27 +108,6 @@ const TRUSTED_HOSTS = [
   "lowes.com", "kroger.com", "ebay.com", "chewy.com", "wayfair.com",
 ];
 
-// TRUTH-MODEL host tiers (owner). AGGREGATOR_HOSTS are generic barcode databases that template a page for
-// ANY code and can carry recycled/wrong data (upcitemdb listed 078742051451 as a "Velvet Torch dress" plus
-// 2 unrelated Calvin Klein shoes). A LONE aggregator source must NEVER alone auto-verify into permanent
-// truth + an approved alias - it drops to "suggested" (recall-first still counts it provisionally). The rest
-// (GS1/official registries + major retailers + manufacturers) are AUTHORITATIVE and can single-source verify.
-const AGGREGATOR_HOSTS = ["go-upc.com", "upcitemdb.com", "barcodelookup.com", "barcodespider.com", "eandata.com", "ean-search.org", "buycott.com"];
-const AUTHORITATIVE_HOSTS = TRUSTED_HOSTS.filter((h) => !AGGREGATOR_HOSTS.includes(h));
-function hostInList(url: string, list: string[]): boolean {
-  try {
-    const h = new URL(url).hostname.toLowerCase();
-    return list.some((t) => h === t || h.endsWith("." + t));
-  } catch {
-    return false;
-  }
-}
-// Authoritative when ANY decoded result cites at least one authoritative host (so a code corroborated by a
-// retailer/registry stays Verified; one seen ONLY on aggregators does not).
-function hasAuthoritativeSource(results: { sourceUrls?: string[] }[]): boolean {
-  return results.some((r) => (r.sourceUrls ?? []).some((u) => hostInList(u, AUTHORITATIVE_HOSTS)));
-}
-
 function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
 }
@@ -197,7 +176,24 @@ function pageReader(): ((pageText: string, code: string) => Promise<Partial<AiLo
 
 // GET reports which keys/flags are configured. NO secrets are returned (booleans + names only),
 // so the client can decide whether to auto-decode and show exactly which keys are missing.
-export async function GET() {
+export async function GET(request: Request) {
+  // Lightweight per-IP rate limit so the public status endpoint cannot be scraped or flooded unthrottled.
+  // It returns only booleans + model names (no secrets), but an unbounded GET is still a cheap DoS / config-
+  // scrape vector. Generous default for legit client polling; SEPARATE bucket from POST (GET: prefix) so the
+  // two never interfere. Skipped under E2E mock mode, matching the POST guards.
+  if (!e2eMode()) {
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "local";
+    const rl = checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120) });
+    if (!rl.allowed) {
+      return Response.json(
+        { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+      );
+    }
+  }
   const geminiConfigured = !!process.env.GEMINI_API_KEY;
   const openaiConfigured = !!process.env.OPENAI_API_KEY;
   // firecrawlConfigured gates the Stage-2 open-web fallback. Absent is NOT a blocker (decode still
@@ -267,7 +263,7 @@ export async function POST(request: Request) {
     proRecheck?: boolean; // correction-only: use the strongest configured Gemini verification model
     scanContext?: "any" | "tire"; // Phase 8B: app-derived, non-authoritative prompt hint
     brandPrefixHint?: string; // Phase 8B: unambiguous learned brand-prefix hint (non-authoritative)
-    autoCountNonPublicWithEvidence?: boolean; // Option 3: non-public codes auto-verify from single trusted source
+    autoCountNonPublicWithEvidence?: boolean; // Option 3 (owner): allow a non-public code (SKU/vendor/FNSKU) to auto-verify from a single trusted source. Default true.
   };
   try {
     body = await request.json();
@@ -292,6 +288,20 @@ export async function POST(request: Request) {
     scanContext: body.scanContext,
     brandPrefixHint: body.brandPrefixHint,
   };
+
+  // Hard server-side daily spend cap (auth DEFERRED) - applies to EVERY provider-calling POST mode
+  // (decode, decode-deep, AND the legacy lookup path) so no mode can bypass it. Once the day's cap is hit,
+  // return blocked with ZERO provider calls. Skipped under E2E mock mode (no real spend). Known scans never
+  // reach this route, so the cap bounds genuine AI-eligible lookups per day.
+  if (!e2eMode()) {
+    const cap = checkAndIncrementDaily();
+    if (!cap.allowed) {
+      return Response.json(
+        { error: `Daily AI lookup cap reached (${cap.used}/${cap.limit}). No AI call made.`, reasonCode: "daily_cap" },
+        { status: 429 }
+      );
+    }
+  }
 
   if (body.mode === "decode" || body.mode === "decode-deep") {
     // Task 4/5: the tire hot path issues NO synchronous deep/Firecrawl call. The deep path stays
@@ -420,6 +430,39 @@ export async function POST(request: Request) {
       let providerNames = run.providerNames;
       let providerStatuses = run.providerStatuses;
 
+      // ESCALATION ON FAST-PATH FAILURE: when Gemini (the only fast-path provider) returns a hard
+      // error (rate_limited, error) with zero usable results, immediately run the escalation
+      // providers (OpenAI) within the same live request. This preserves the baseline rule "a normal
+      // Gemini hit never spends an OpenAI call" while ensuring a dead Gemini (spending cap, outage)
+      // doesn't send every scan to Needs Review with no suggestion.
+      // Escalation triggers when the fast path produced ZERO usable results: either all providers
+      // hard-failed (rate_limited/error), OR the budget timed out before any provider found a product.
+      // This ensures a dead/slow Gemini always falls through to OpenAI instead of silently routing
+      // to Needs Review with no suggestion.
+      const hasUsableResult = results.some((r) => isUsableProductName(r.productName));
+      const fastPathFailed = !hasUsableResult
+        && providerStatuses.length > 0
+        && providerStatuses.every((s) => s.status !== "ok" || !s.identityFound);
+      if (fastPathFailed && !e2eMode()) {
+        // The escalation budget is INDEPENDENT of the fast-path budget. When the fast path's only
+        // provider (Gemini) is dead, we give OpenAI a fresh 20s window — not the leftover from the
+        // 8s clamp. This is the only path where a live scan can exceed 8s; it only fires when the
+        // primary provider hard-failed (spending cap, outage), never on a normal slow decode.
+        const ESCALATION_BUDGET_MS = Number(process.env.ESCALATION_BUDGET_MS || 20_000);
+        const escRun = await runDecode({
+          code, codeType, confidenceThreshold: threshold,
+          providers: escProviders,
+          enrich: enrich ? (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, corroborate }) : undefined,
+          budgetMs: ESCALATION_BUDGET_MS,
+          providerTimeoutMs: ESCALATION_BUDGET_MS - 2_000, // give each provider nearly the full budget
+          trustedHosts: TRUSTED_HOSTS,
+        });
+        results = [...results, ...escRun.results];
+        evidences = [...evidences, ...escRun.evidences];
+        providerNames = [...providerNames, ...escRun.providerNames];
+        providerStatuses = [...providerStatuses, ...escRun.providerStatuses.map((s) => ({ ...s, provider: `esc:${s.provider}` }))];
+      }
+
       // Arm A: grounded search size (from groundedSpecFind run concurrently above).
       const armASize = tireSizeToken(groundedForRace?.result ?? null) || "";
       // Arm B: page-fetch size - the page-fetch path (enrichWithPageFetch) sets fetchedSourceText on
@@ -440,7 +483,7 @@ export async function POST(request: Request) {
       const fw0 = evalCombinedFirewall(code, results[0], evidences);
       let prefixHint = fw0.hint;
       let firewallReason = fw0.reason;
-      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict, allowNonPublicAutoCount, authoritativeEvidence: hasAuthoritativeSource(results) });
+      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict, allowNonPublicAutoCount });
       let fallbackFound = false;
       let coverageMissed = false;
       let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
@@ -530,7 +573,7 @@ export async function POST(request: Request) {
             const fwW = evalCombinedFirewall(code, winnerWithSize, [outcome.hit.evidence]);
             prefixHint = fwW.hint;
             firewallReason = fwW.reason;
-            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict, allowNonPublicAutoCount, authoritativeEvidence: hasAuthoritativeSource([winnerWithSize]) });
+            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict, allowNonPublicAutoCount });
           }
         }
       }

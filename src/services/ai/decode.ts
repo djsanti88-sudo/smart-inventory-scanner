@@ -38,15 +38,6 @@ export interface DecodeParams {
   // brand-prefix firewall, 0.8 threshold, non-empty identity, and app-verified evidence all still apply, so
   // an evidence-LESS guess never reaches it (Velvet Torch stays dead).
   allowNonPublicAutoCount?: boolean;
-  // TRUTH-MODEL (owner): true when the primary decoded result is backed by an AUTHORITATIVE source
-  // (GS1 / official registry / a major retailer / manufacturer), as opposed to ONLY a generic barcode
-  // aggregator (upcitemdb / go-upc / barcodespider ...). A LONE aggregator source - which templates a
-  // page for ANY code and can carry recycled/wrong data (078742051451 water -> "Velvet Torch dress") -
-  // must NEVER alone auto-verify into permanent truth + an approved alias. Computed by the caller from
-  // the result's source hosts. When false and there is no two-provider agreement, the public single-
-  // source verify path is withheld -> the code stays "suggested" (recall-first still counts it as a
-  // provisional, reviewable row; it just never becomes a permanent Verified product/alias).
-  authoritativeEvidence?: boolean;
 }
 
 // --- Product-name quality gate (junk firewall) ------------------------------------------------
@@ -68,32 +59,15 @@ const TITLE_CODE_SUFFIX = /\s*[|–—-]\s*(?:upc|ean|gtin|isbn|barcode)\b[\s\S]
 const TITLE_SITE_SUFFIX =
   /\s*[|–—-]\s*(?:barcode lookup|upcitemdb|go-?upc|buycott|barcodespider|barcode ?finder|barcodes? ?database|ean-?search|eandata|barcodes?\.(?:com|net|org)|gtin ?lookup)\b[\s\S]*$/i;
 
-// Aggregator-site name cruft: "UPC 078742051451 - Product Name" → "Product Name"
-const BARCODE_PREFIX = /^(?:UPC|EAN|GTIN|BARCODE)\s+[\d\s]+\s*[-\u2013\u2014]\s*/i;
-const PRICE_CASE_PREFIX = /^Price\/Case\)\s*/i;
-// HTML entities from scraped pages
-const HTML_ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'" };
-function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
-    .replace(/&(amp|lt|gt|quot|apos);/gi, (m) => HTML_ENTITIES[m.toLowerCase()] ?? m);
-}
-
-/** Strip AI hedges, barcode-site title cruft, aggregator prefixes, HTML entities, trademark junk. */
+/** Strip AI hedges + barcode-site title cruft; keep real descriptors like "(Texas)" and hyphens. */
 export function cleanProductName(name: string): string {
-  return decodeHtmlEntities(
-    (name ?? "")
-      .replace(BARCODE_PREFIX, "")
-      .replace(PRICE_CASE_PREFIX, "")
-      .replace(/\((?:r|R|®)\)/g, "")
-      .replace(HEDGE_PAREN, "")
-      .replace(HEDGE_TAIL, "")
-      .replace(TITLE_CODE_SUFFIX, "")
-      .replace(TITLE_SITE_SUFFIX, "")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
+  return (name ?? "")
+    .replace(HEDGE_PAREN, "")
+    .replace(HEDGE_TAIL, "")
+    .replace(TITLE_CODE_SUFFIX, "")
+    .replace(TITLE_SITE_SUFFIX, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** True only for a clean, real product name (not a website title, hedge, placeholder, or junk). */
@@ -139,9 +113,9 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     };
   }
 
-  // Auto-count ONLY when BOTH providers agree. A single provider, even with strong app-verified
-  // evidence, is downgraded to "suggested" (human review) - two providers must independently land on
-  // the same identity before we trust it enough to count.
+  // canVerify: the two-provider AGREEMENT path - both providers independently land on the same identity.
+  // This is ONE of several verify paths (NOT the only one); the single-source path below
+  // (singleSourceVerified) auto-counts a lone app-verified provider without a second one.
   const canVerify =
     isPublicBarcode &&
     strong &&
@@ -155,10 +129,28 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
   // strong evidence (the code appears in a real snippet / grounding chunk / fetched page) - ANY source,
   // not just a trusted-tier site. Catalog-miss fallback for ANY item. Still rejects vendor/label code
   // types, weak/unverified evidence, and below-threshold (those stay "suggested" -> human review). The
-  // downstream identity firewall + >=0.9 store gate still apply.
+  // downstream identity firewall + >=0.8 store gate still apply.
   const singleSourceVerified =
     isPublicBarcode &&
     strong &&
+    identityNonEmpty &&
+    passesThreshold &&
+    !params.brandPrefixConflict &&
+    !!a &&
+    (cc.decision === "single_provider" || cc.decision === "agree");
+
+  // OPTION 3 (owner) - NON-PUBLIC single trusted source. A SKU/part-number/vendor/internal/FNSKU/alphanumeric
+  // code auto-verifies when the app independently confirmed the EXACT code in a real source - INCLUDING a
+  // single TRUSTED retailer / barcode-DB url_only (verifyEvidence returns verified:true for trusted hosts),
+  // so a product found on Amazon/Walmart/Go-UPC etc. is enough ("found it on Amazon = enough"). Uses
+  // bestEvidence.verified (NOT isStrongEvidence) so a trusted-host url_only counts. Same hard floors as the
+  // public path: >= threshold, non-empty identity, NO brand-prefix conflict, single/agreeing provider. An
+  // evidence-LESS guess (verified===false) never reaches it, so Velvet Torch stays dead. Off unless the owner
+  // setting is on (route passes it; default on).
+  const nonPublicTrustedVerified =
+    params.allowNonPublicAutoCount === true &&
+    !isPublicBarcode &&
+    bestEvidence.verified &&
     identityNonEmpty &&
     passesThreshold &&
     !params.brandPrefixConflict &&
@@ -189,7 +181,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
   // page-fetch (deterministic) + model - and unlocks auto-count WITHOUT needing the strong prefix family.
   // It is NOT confidence-only and NOT page-fetch alone: it requires the model agreement flag AND strong
   // app-verified exact-code evidence AND tire domain AND a countable identity (size + model). The firewall + brand_prefix conflict +
-  // the >=0.9 store gate still apply downstream, so a non-tire (poison) can never reach a count this way.
+  // the >=0.8 store gate still apply downstream, so a non-tire (poison) can never reach a count this way.
   const pageFetchModelAgreement =
     scanContext === "tire" &&
     isPublicBarcode &&
@@ -223,7 +215,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
 
   // BRAND SANITY (owner baseline v1): a catalog-derived brand-prefix conflict blocks EVERY auto-count
   // path, not just the single-source one (wrong brand for this barcode is never auto-counted).
-  if (!params.brandPrefixConflict && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize)) {
+  if (!params.brandPrefixConflict && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize || nonPublicTrustedVerified)) {
     const corroborationPath = canVerify
       ? "two_ai_agreement"
       : singleSourceVerified
@@ -232,7 +224,9 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
           ? "deterministic_prefix"
           : pageFetchModelAgreement
             ? "page_fetch_model_agreement"
-            : "internet_two_source_size";
+            : internetTwoSourceSize
+              ? "internet_two_source_size"
+              : "non_public_trusted_source";
     return {
       status: "verified",
       confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
@@ -244,9 +238,11 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
             ? "Verified AI Decode: tire corroborated by the barcode's strong brand-prefix family + size + model + app-verified exact code (independent of the AI text)."
             : pageFetchModelAgreement
               ? "Verified AI Decode: the app's page-fetch and an independent model read agree on the tire identity, with size + model + app-verified exact code."
-              : "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size.",
+              : internetTwoSourceSize
+                ? "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size."
+                : "Verified AI Decode: the app confirmed the exact code in a trusted source (one trusted source is enough for this code type).",
       evidenceStrength: bestEvidence.strength,
-      exactCodeEvidenceVerifiedByApp: canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement,
+      exactCodeEvidenceVerifiedByApp: canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || nonPublicTrustedVerified,
       crossCheck: baseCrossCheck,
       corroborationPath,
     };
