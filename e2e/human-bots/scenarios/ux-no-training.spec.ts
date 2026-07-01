@@ -26,7 +26,7 @@ test("ConfusedHumanBot: no-training usability scorecard", async ({ page }) => {
   // scan + feedback
   const inp = page.getByTestId("scanner-input");
   await inp.click(); await inp.fill("049000028904"); await inp.press("Enter"); await page.waitForTimeout(150);
-  add("See whether a scan worked", await visible(page, '[data-testid="scan-feed-body"]'), 2, "P2", false, "live feed row appears with product + Known");
+  add("See whether a scan worked", await visible(page, '[data-testid="scan-feed-body"]'), 2, "P2", false, "live feed row appears with product + Counted");
   add("See the current count", await visible(page, '[data-testid="final-count-body"]'), 2, "P2", false, "Final Count Database table");
   add("Start / finish an inventory session", await visible(page, '[data-testid="start-session"]') && await visible(page, '[data-testid="finish-session"]'), 2, "P2", false, "buttons present on scan page");
   await page.getByTestId("export-menu-trigger").click(); // open the unified Export dropdown

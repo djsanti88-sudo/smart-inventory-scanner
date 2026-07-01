@@ -97,7 +97,7 @@ test("full inventory scan proof", async ({ page }) => {
   await scan(page, "T432119"); // Nokian 3 -> 4 locally
   await expect(page.getByTestId("qty-prod-nokian")).toHaveText("4");
   await expect(page.getByTestId("pending-warning")).toBeVisible();
-  await expect(page.getByTestId("pending-count")).not.toContainText("Pending sync: 0");
+  await expect(page.getByTestId("pending-count")).not.toContainText("Waiting to save: 0");
   await page.screenshot({ path: `${PROOF}/08-pending-sync.png`, fullPage: true });
 
   // 7. Retry proof: stop failing, retry repeatedly, confirm queue drains and count never doubles.
@@ -107,7 +107,7 @@ test("full inventory scan proof", async ({ page }) => {
   if (await page.getByTestId("retry-sync").isEnabled()) {
     await page.getByTestId("retry-sync").click();
   }
-  await expect(page.getByTestId("pending-count")).toContainText("Pending sync: 0");
+  await expect(page.getByTestId("pending-count")).toContainText("Waiting to save: 0");
   await expect(page.getByTestId("qty-prod-nokian")).toHaveText("4"); // not doubled
   await page.screenshot({ path: `${PROOF}/09-retry-sync.png`, fullPage: true });
 

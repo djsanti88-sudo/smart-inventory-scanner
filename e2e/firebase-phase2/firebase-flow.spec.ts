@@ -29,7 +29,7 @@ async function scan(page: Page, code: string) {
 
 async function waitDrained(page: Page) {
   // Cloud sync is async; wait until everything queued has reached the emulator before asserting/refresh.
-  await expect(page.getByTestId("pending-count")).toContainText("Pending sync: 0", { timeout: 15_000 });
+  await expect(page.getByTestId("pending-count")).toContainText("Waiting to save: 0", { timeout: 15_000 });
 }
 
 test("Firebase-backed end-to-end (real auth, real business context, survive-refresh)", async ({ page }) => {

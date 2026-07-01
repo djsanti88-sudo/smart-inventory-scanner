@@ -26,7 +26,7 @@ test("database products resolve instantly (no AI)", async ({ page }) => {
   await page.goto(TEST_URL, { waitUntil: "networkidle", timeout: 30000 });
   expect(page.url()).toContain("/scan");
 
-  const scanInput = page.getByPlaceholder("Click here, then scan or type a code and press Enter");
+  const scanInput = page.getByPlaceholder("Scan or type a code");
   await expect(scanInput).toBeVisible({ timeout: 10000 });
 
   let known = 0;
@@ -40,9 +40,9 @@ test("database products resolve instantly (no AI)", async ({ page }) => {
     const firstRow = feedTable.locator("[role='row'], tr").filter({ hasNot: page.locator("th") }).first();
     const text = (await firstRow.textContent({ timeout: 5000 })) || "";
 
-    const status = text.includes("Known") ? "Known" : text.includes("Needs Review") ? "Needs Review" : "other";
+    const status = text.includes("Counted") ? "Counted" : text.includes("Needs review") ? "Needs review" : "other";
     console.log(`${barcode.code} | ${barcode.expected.padEnd(30)} | ${status}`);
-    if (status === "Known") known++;
+    if (status === "Counted") known++;
   }
 
   await page.screenshot({ path: "e2e/proof/db-products.png", fullPage: true });
@@ -54,7 +54,7 @@ test("AI decode works for products not in database (Gemini down, OpenAI escalati
   await page.goto(TEST_URL, { waitUntil: "networkidle", timeout: 30000 });
   expect(page.url()).toContain("/scan");
 
-  const scanInput = page.getByPlaceholder("Click here, then scan or type a code and press Enter");
+  const scanInput = page.getByPlaceholder("Scan or type a code");
   await expect(scanInput).toBeVisible({ timeout: 10000 });
 
   const results: { code: string; expected: string; status: string; product: string }[] = [];
@@ -75,11 +75,11 @@ test("AI decode works for products not in database (Gemini down, OpenAI escalati
     const text = (await firstRow.textContent({ timeout: 5000 })) || "";
 
     let status = "unknown";
-    if (text.includes("Known")) status = "Known";
+    if (text.includes("Counted")) status = "Counted";
     else if (text.includes("Verified")) status = "Verified AI";
     else if (text.includes("Suggested")) status = "Suggested";
-    else if (text.includes("Needs Review") || text.includes("needs_review")) status = "Needs Review";
-    else if (text.includes("Decoding")) status = "Still decoding";
+    else if (text.includes("Needs review") || text.includes("Not recognised")) status = "Needs review";
+    else if (text.includes("Looking up")) status = "Still decoding";
 
     // Extract product name from the feed row if present
     const product = text.substring(0, 150);
@@ -93,7 +93,7 @@ test("AI decode works for products not in database (Gemini down, OpenAI escalati
   console.log("\n\n=== AI DECODE RESULTS ===");
   let resolved = 0;
   for (const r of results) {
-    const ok = r.status !== "Needs Review" && r.status !== "Still decoding" && r.status !== "unknown";
+    const ok = r.status !== "Needs review" && r.status !== "Still decoding" && r.status !== "unknown";
     if (ok) resolved++;
     console.log(`  ${ok ? "PASS" : "FAIL"} | ${r.code} | ${r.expected.padEnd(25)} | ${r.status}`);
   }

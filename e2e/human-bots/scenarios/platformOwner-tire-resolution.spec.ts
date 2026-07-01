@@ -27,7 +27,7 @@ async function classifyResult(page: Page, _cleanCode: string): Promise<{ product
   let product = "(none)";
   if (lower.includes("falken")) product = "Falken";
   else if (lower.includes("camel")) product = "Camel";
-  const status = /known/.test(lower) ? "known" : /needs review|unknown|conflict/.test(lower) ? "needs_review" : "other";
+  const status = /counted/.test(lower) ? "known" : /needs review|not recognised|conflict/.test(lower) ? "needs_review" : "other";
   return { product, status, rowText };
 }
 
