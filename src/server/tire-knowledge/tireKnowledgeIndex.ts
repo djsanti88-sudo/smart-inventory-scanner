@@ -1,5 +1,6 @@
 import "server-only";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getKnowledgeDb } from "@/server/knowledgeDb";
 
@@ -38,6 +39,33 @@ function normPartKey(pn: string): string {
   return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
 }
 
+const TIRE_JSON_PATH = join(process.cwd(), "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
+
+interface TireJsonIndex {
+  barcodeIndex: Record<string, TireKnowledgeRow>;
+  partNumberIndex: Record<string, string>;
+}
+let _jsonIndex: TireJsonIndex | null | "missing" = null;
+let _uidToRow: Map<string, TireKnowledgeRow> | null = null;
+
+/** Load the committed tire JSON into memory once (cached for the process lifetime). Used when the
+ *  SQLite knowledge DB is unavailable (the normal case on Vercel, where the .db file is not bundled). */
+function getJsonIndex(): TireJsonIndex | null {
+  if (_jsonIndex === "missing") return null;
+  if (_jsonIndex) return _jsonIndex;
+  try {
+    const parsed = JSON.parse(readFileSync(TIRE_JSON_PATH, "utf8")) as TireJsonIndex;
+    _jsonIndex = { barcodeIndex: parsed.barcodeIndex ?? {}, partNumberIndex: parsed.partNumberIndex ?? {} };
+    _uidToRow = new Map();
+    for (const row of Object.values(_jsonIndex.barcodeIndex)) _uidToRow.set(row.canonical_product_uid, row);
+    return _jsonIndex;
+  } catch (e) {
+    console.warn("[tire-knowledge] in-memory JSON index load failed:", (e as Error).message);
+    _jsonIndex = "missing";
+    return null;
+  }
+}
+
 // SQLite prepared statements (created lazily, cached for process lifetime)
 let _stmtBarcode: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 let _stmtPartNumber: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
@@ -67,8 +95,9 @@ export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeR
   const key = normBarcodeKey(code);
   if (!key) return null;
   const stmt = getStmtBarcode();
-  if (!stmt) return null;
-  return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
+  if (stmt) return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
+  const idx = getJsonIndex();
+  return idx ? (idx.barcodeIndex[key] ?? null) : null;
 }
 
 /** EXACT trusted manufacturer-part-number lookup. Returns the corpus row or null. */
@@ -76,8 +105,11 @@ export async function lookupByExactPartNumber(partNumber: string): Promise<TireK
   const key = normPartKey(partNumber);
   if (!key) return null;
   const stmt = getStmtPartNumber();
-  if (!stmt) return null;
-  return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
+  if (stmt) return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
+  const idx = getJsonIndex();
+  if (!idx) return null;
+  const uid = idx.partNumberIndex[key];
+  return uid && _uidToRow ? (_uidToRow.get(uid) ?? null) : null;
 }
 
 /** Read the generated metadata (counts/version) — for platformOwner diagnostics only. Fail-closed. */
@@ -91,4 +123,6 @@ export function __resetTireKnowledgeCacheForTests(): void {
   _metaPromise = null;
   _stmtBarcode = null;
   _stmtPartNumber = null;
+  _jsonIndex = null;
+  _uidToRow = null;
 }
