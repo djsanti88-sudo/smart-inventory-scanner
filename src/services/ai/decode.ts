@@ -181,7 +181,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
   // page-fetch (deterministic) + model - and unlocks auto-count WITHOUT needing the strong prefix family.
   // It is NOT confidence-only and NOT page-fetch alone: it requires the model agreement flag AND strong
   // app-verified exact-code evidence AND tire domain AND a countable identity (size + model). The firewall + brand_prefix conflict +
-  // the >=0.9 store gate still apply downstream, so a non-tire (poison) can never reach a count this way.
+  // the >=0.8 store gate still apply downstream, so a non-tire (poison) can never reach a count this way.
   const pageFetchModelAgreement =
     scanContext === "tire" &&
     isPublicBarcode &&
