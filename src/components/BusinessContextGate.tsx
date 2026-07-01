@@ -14,7 +14,11 @@ import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness
 // (renders children directly). This is mount-time wiring only - it does NOT touch the scanner hot path,
 // decode, barcode buffer, cache, Firecrawl, or count idempotency.
 export function BusinessContextGate({ children }: { children: React.ReactNode }) {
-  const cloud = isFirebaseBackend();
+  // Open access mode: skip the entire Firebase business-context flow even if the Firebase backend is
+  // configured. The mock/local path runs instead — no login, no business selection, no Firebase sync.
+  // Owner rule: open to the public until login is re-enabled.
+  const openAccess = process.env.NEXT_PUBLIC_REQUIRE_LOGIN !== "1";
+  const cloud = !openAccess && isFirebaseBackend();
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const setBusinessContext = useScanStore((s) => s.setBusinessContext);
