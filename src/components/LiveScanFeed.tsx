@@ -20,30 +20,30 @@ export function LiveScanFeed() {
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-        <h2 className="text-lg font-semibold text-zinc-900">What you just scanned</h2>
-        <span className="text-sm text-zinc-600">{scanFeed.length} events</span>
+        <h2 id="scan-feed-heading" className="text-lg font-semibold text-zinc-900">What you just scanned</h2>
+        <span className="text-sm text-zinc-600">{scanFeed.length} scans</span>
       </div>
       <div className="max-h-72 overflow-auto">
-        <table className="w-full border-collapse text-left text-base">
-          <thead className="sticky top-0 bg-zinc-50 text-sm font-semibold text-zinc-700">
+        <table className="w-full border-collapse text-left text-base" aria-labelledby="scan-feed-heading">
+          <thead className="sticky top-0 border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
-              <th className="px-3 py-2">Time</th>
-              {isPlatform && <th className="px-3 py-2">Raw code</th>}
-              <th className="px-3 py-2">Barcode</th>
-              {isPlatform && <th className="px-3 py-2">Match</th>}
-              <th className="px-3 py-2">Product</th>
-              <th className="px-3 py-2">{isPlatform ? "SKU" : "Part number"}</th>
-              <th className="px-3 py-2">Qty after</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Reason</th>
-              <th className="px-3 py-2">Saved</th>
+              <th scope="col" className="px-4 py-3">Time</th>
+              {isPlatform && <th scope="col" className="px-4 py-3">Raw code</th>}
+              <th scope="col" className="px-4 py-3">Barcode</th>
+              {isPlatform && <th scope="col" className="px-4 py-3">Match</th>}
+              <th scope="col" className="px-4 py-3">Product</th>
+              <th scope="col" className="px-4 py-3">{isPlatform ? "SKU" : "Part number"}</th>
+              <th scope="col" className="px-4 py-3">Qty on hand</th>
+              <th scope="col" className="px-4 py-3">Status</th>
+              <th scope="col" className="px-4 py-3">Reason</th>
+              <th scope="col" className="px-4 py-3">Sync</th>
             </tr>
           </thead>
           <tbody data-testid="scan-feed-body">
             {scanFeed.length === 0 ? (
               <tr>
-                <td colSpan={colSpan} className="px-3 py-6 text-center text-base text-zinc-600">
-                  No scans yet. Click the scan box and scan a code.
+                <td colSpan={colSpan} className="px-4 py-6 text-center text-base text-zinc-600">
+                  No scans yet. Scan a barcode above to start counting.
                 </td>
               </tr>
             ) : (
@@ -60,37 +60,37 @@ export function LiveScanFeed() {
                 const displaySku = product?.primarySku || suggestion?.suggestedPrimarySku || "-";
                 const isSuggestionOnly = !product && !!suggestion?.suggestedProductName;
                 return (
-                  <tr key={e.id} className="border-t border-zinc-100">
-                    <td className="px-3 py-2 text-xs text-zinc-500">
+                  <tr key={e.id} className="animate-[row-appear_200ms_ease-out] border-t border-zinc-100 hover:bg-zinc-50">
+                    <td className="px-4 py-3 text-sm text-zinc-600">
                       {e.createdAt ? new Date(e.createdAt).toLocaleTimeString() : "-"}
                     </td>
-                    {isPlatform && <td className="px-3 py-2 font-mono text-xs">{e.rawCode}</td>}
-                    <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-barcode-${e.id}`}>{e.cleanCode || "-"}</td>
+                    {isPlatform && <td className="px-4 py-3 font-mono text-sm">{e.rawCode}</td>}
+                    <td className="px-4 py-3 font-mono text-sm" data-testid={`feed-barcode-${e.id}`}>{e.cleanCode || "-"}</td>
                     {isPlatform && (
-                      <td className="px-3 py-2">
+                      <td className="px-4 py-3">
                         <MatchBadge type={e.matchType} />
                       </td>
                     )}
-                    <td className="px-3 py-2" data-testid={`feed-product-${e.id}`}>
+                    <td className="px-4 py-3" data-testid={`feed-product-${e.id}`}>
                       {displayName}
-                      {isSuggestionOnly ? <span className="ml-1 text-xs text-amber-600">(suggested)</span> : null}
+                      {isSuggestionOnly ? <span className="ml-1 text-xs text-amber-700">(suggested)</span> : null}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-part-number-${e.id}`}>
+                    <td className="px-4 py-3 font-mono text-sm" data-testid={`feed-part-number-${e.id}`}>
                       {displaySku}
                     </td>
-                    <td className="px-3 py-2 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-4 py-3 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
+                    <td className="px-4 py-3">
                       {e.decodeStatus && e.decodeStatus !== "none" ? (
                         <DecodeStatusBadge status={e.decodeStatus} />
                       ) : (
                         <StatusBadge status={e.status} />
                       )}
                     </td>
-                    <td className="max-w-56 px-3 py-2 text-xs text-zinc-500" title={isPlatform && e.decodeNote ? `${e.reason} — ${e.decodeNote}` : e.reason}>
+                    <td className="max-w-56 px-4 py-3 text-sm text-zinc-600" title={isPlatform && e.decodeNote ? `${e.reason}: ${e.decodeNote}` : e.reason}>
                       {e.reason}
-                      {isPlatform && e.decodeNote ? <span className="text-zinc-400"> — {e.decodeNote}</span> : null}
+                      {isPlatform && e.decodeNote ? <span className="text-zinc-500">: {e.decodeNote}</span> : null}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-4 py-3">
                       <SyncBadge status={e.syncStatus} />
                     </td>
                   </tr>

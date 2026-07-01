@@ -123,7 +123,7 @@ export default function ScanPage() {
             default for real users (P4); expanded under E2E so every control stays reachable. */}
         <details open={expandSecondary} className="group mt-1 border-t border-zinc-200 pt-3">
           <summary className="cursor-pointer list-none text-base font-medium text-zinc-700 hover:text-zinc-900">
-            <span className="select-none">More options (session, sync, export)</span>
+            <span className="select-none">Sessions and export</span>
           </summary>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-base">
           <span className="text-zinc-700">
@@ -134,13 +134,13 @@ export default function ScanPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="New session name"
-            className="rounded border border-zinc-300 px-2 py-1 text-sm"
+            className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
           />
           <select
             aria-label="location"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            className="rounded border border-zinc-300 px-2 py-1 text-sm"
+            className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
           >
             <option>Main</option>
             <option>Bay A</option>
@@ -180,15 +180,15 @@ export default function ScanPage() {
           {isPlatform && (
             <span className="ml-auto flex items-center gap-3 text-xs text-zinc-500">
               <span data-testid="auto-decode-status">
-                Auto decode on scan:{" "}
+                Auto lookup:{" "}
                 <strong className={autoDecodeOn ? "text-green-700" : "text-zinc-700"}>
                   {autoDecodeOn ? "On" : "Off"}
                 </strong>
               </span>
               <span data-testid="ai-status">AI lookup: {settings.aiLookupEnabled ? "On" : "Off"}</span>
               {settings.aiLookupEnabled && !hasKey && (
-                <span className="text-red-600" data-testid="missing-keys">
-                  Missing keys: {aiStatus.missingKeys.join(", ") || "GEMINI_API_KEY, OPENAI_API_KEY"}
+                <span className="text-red-700" data-testid="missing-keys">
+                  AI keys not set. Auto lookup is disabled.
                 </span>
               )}
               <span>

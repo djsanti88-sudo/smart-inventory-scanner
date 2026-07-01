@@ -21,25 +21,25 @@ export default function ProductsPage() {
       {isPlatform && <UndoDeleteBanner />}
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-          <h2 className="text-lg font-semibold text-zinc-900">Product Database</h2>
+          <h2 id="products-heading" className="text-lg font-semibold text-zinc-900">Your products</h2>
           <span className="text-sm text-zinc-600">{products.length} products</span>
         </div>
         <div className="overflow-auto">
-          <table className="w-full border-collapse text-left text-base">
-            <thead className="bg-zinc-50 text-sm font-semibold text-zinc-700">
+          <table className="w-full border-collapse text-left text-base" aria-labelledby="products-heading">
+            <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
               <tr>
-                <th className="px-3 py-2">Name</th>
-                <th className="px-3 py-2">Brand</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">Specs</th>
-                <th className="px-3 py-2">{isPlatform ? "SKU" : "Part number"}</th>
-                {isPlatform && <th className="px-3 py-2">Primary barcode</th>}
-                {isPlatform && <th className="px-3 py-2">GTIN/UPC/EAN</th>}
-                {isPlatform && <th className="px-3 py-2">Codes</th>}
-                <th className="px-3 py-2">Image</th>
-                <th className="px-3 py-2">Location</th>
-                {isPlatform && <th className="px-3 py-2">Source</th>}
-                {isPlatform && <th className="px-3 py-2">Actions</th>}
+                <th scope="col" className="px-4 py-3">Name</th>
+                <th scope="col" className="px-4 py-3">Brand</th>
+                <th scope="col" className="px-4 py-3">Category</th>
+                <th scope="col" className="px-4 py-3">Specs</th>
+                <th scope="col" className="px-4 py-3">{isPlatform ? "SKU" : "Part number"}</th>
+                {isPlatform && <th scope="col" className="px-4 py-3">Barcode</th>}
+                {isPlatform && <th scope="col" className="px-4 py-3">Global barcode (GTIN/UPC/EAN)</th>}
+                {isPlatform && <th scope="col" className="px-4 py-3">Codes</th>}
+                <th scope="col" className="px-4 py-3">Image</th>
+                <th scope="col" className="px-4 py-3">Location</th>
+                {isPlatform && <th scope="col" className="px-4 py-3">Source</th>}
+                {isPlatform && <th scope="col" className="px-4 py-3">Actions</th>}
               </tr>
             </thead>
             <tbody data-testid="products-body">
@@ -66,31 +66,31 @@ function ProductRow({ product: p, allProducts, isPlatform }: { product: Product;
 
   return (
     <>
-      <tr className="border-t border-zinc-100" data-testid={`product-row-${p.id}`}>
-        <td className="px-3 py-2 font-medium text-zinc-800">{isPlatform ? p.name : customerDisplayName(p.name)}</td>
-        <td className="px-3 py-2">{p.brand}</td>
-        <td className="px-3 py-2">{p.category}</td>
-        <td className="px-3 py-2">{p.specsShort}</td>
-        <td className="px-3 py-2 font-mono text-xs">{p.primarySku || "-"}</td>
-        {isPlatform && <td className="px-3 py-2 font-mono text-xs">{p.primaryBarcode || "-"}</td>}
-        {isPlatform && <td className="px-3 py-2 font-mono text-xs text-zinc-500">{[p.gtin, p.upc, p.ean].filter(Boolean).join(" / ") || "-"}</td>}
+      <tr className="border-t border-zinc-100 hover:bg-zinc-50" data-testid={`product-row-${p.id}`}>
+        <td className="px-4 py-3 font-medium text-zinc-800">{isPlatform ? p.name : customerDisplayName(p.name)}</td>
+        <td className="px-4 py-3">{p.brand}</td>
+        <td className="px-4 py-3">{p.category}</td>
+        <td className="px-4 py-3">{p.specsShort}</td>
+        <td className="px-4 py-3 font-mono text-sm">{p.primarySku || "-"}</td>
+        {isPlatform && <td className="px-4 py-3 font-mono text-sm">{p.primaryBarcode || "-"}</td>}
+        {isPlatform && <td className="px-4 py-3 font-mono text-sm text-zinc-600">{[p.gtin, p.upc, p.ean].filter(Boolean).join(" / ") || "-"}</td>}
         {isPlatform && (
-          <td className="px-3 py-2 text-xs">
-            <button type="button" onClick={() => setOpen((v) => !v)} className="rounded border border-zinc-300 px-2 py-0.5 hover:bg-zinc-50" data-testid={`manage-codes-${p.id}`}>
-              {approvedCount} {open ? "▲" : "▼"}
+          <td className="px-4 py-3 text-sm">
+            <button type="button" onClick={() => setOpen((v) => !v)} className="rounded-lg border border-zinc-300 px-3 py-1 hover:bg-zinc-50" data-testid={`manage-codes-${p.id}`}>
+              {approvedCount} <span className={`inline-block transition-transform ${open ? "rotate-180" : ""}`}>&#x25BE;</span>
             </button>
           </td>
         )}
-        <td className="px-3 py-2"><ImageHoverPreview imageUrl={p.imageUrl} alt={p.name} /></td>
-        <td className="px-3 py-2">{p.location || "-"}</td>
-        {isPlatform && <td className="px-3 py-2 text-xs text-zinc-500">{p.source}</td>}
+        <td className="px-4 py-3"><ImageHoverPreview imageUrl={p.imageUrl} alt={p.name} /></td>
+        <td className="px-4 py-3">{p.location || "-"}</td>
+        {isPlatform && <td className="px-4 py-3 text-sm text-zinc-600">{p.source}</td>}
         {isPlatform && (
-          <td className="px-3 py-2">
+          <td className="px-4 py-3">
             <button
               type="button"
               data-testid={`delete-product-${p.id}`}
               onClick={() => confirmAndDeleteProduct(p.id, p.name)}
-              className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+              className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-800 hover:bg-red-100"
             >
               Delete
             </button>

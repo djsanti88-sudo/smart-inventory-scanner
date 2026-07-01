@@ -95,7 +95,7 @@ export default function SettingsPage() {
           onChange={(v) => update({ autoSuggestUnknowns: v })}
         />
         <Toggle
-          label="Auto-add decoded products to the count (verified + sourced suggestions)"
+          label="Automatically count verified products (no approval needed for high-confidence matches)"
           checked={settings.autoAddDecodedProducts ?? true}
           testid="setting-auto-add"
           onChange={(v) => update({ autoAddDecodedProducts: v })}
@@ -195,37 +195,37 @@ export default function SettingsPage() {
           should never see "Submit mode", "Debounce (ms)", "pending sync queue", or "idempotent sync". */}
       {isPlatform && (<>
       <Section title="Scanner">
-        <Row label="Submit mode">
+        <Row label="Scanner trigger">
           <select
             value={settings.scannerSubmitMode}
             onChange={(e) => update({ scannerSubmitMode: e.target.value as "enter" | "debounce" | "both" })}
-            className="rounded border border-zinc-300 px-2 py-1 text-sm"
+            className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-sm"
             data-testid="setting-submit-mode"
           >
-            <option value="both">Enter + debounce</option>
-            <option value="enter">Enter only</option>
-            <option value="debounce">Debounce only</option>
+            <option value="both">Enter key + auto-submit</option>
+            <option value="enter">Enter key only</option>
+            <option value="debounce">Auto-submit only</option>
           </select>
         </Row>
-        <Row label="Debounce (ms)">
+        <Row label="Auto-submit delay (ms)">
           <input
             type="number"
             min={10}
             value={settings.scannerDebounceMs}
             onChange={(e) => update({ scannerDebounceMs: Number(e.target.value) })}
-            className="w-24 rounded border border-zinc-300 px-2 py-1 text-sm"
+            className="w-24 min-h-[44px] rounded-lg border border-zinc-300 px-3 text-sm"
           />
         </Row>
       </Section>
 
       <Section title="Sync">
         <Toggle
-          label="Enable pending sync queue"
+          label="Save scans locally when offline"
           checked={settings.enablePendingSyncQueue}
           onChange={(v) => update({ enablePendingSyncQueue: v })}
         />
         <Toggle
-          label="Enable idempotent sync"
+          label="Prevent duplicate saves (recommended)"
           checked={settings.enableIdempotentSync}
           onChange={(v) => update({ enableIdempotentSync: v })}
         />
@@ -237,14 +237,14 @@ export default function SettingsPage() {
       </Section>
 
       {isPlatform && (<>
-      <Section title="Auto-catalog learning">
+      <Section title="Smart matching">
         <Toggle
-          label="Auto-save strong matches to the verified catalog (fewer manual approvals)"
+          label="Save verified matches automatically (reduces manual approval work)"
           checked={settings.autoCatalogLearningEnabled ?? true}
           testid="setting-auto-learning"
           onChange={(v) => update({ autoCatalogLearningEnabled: v })}
         />
-        <Row label="Auto-save confidence threshold">
+        <Row label="Minimum confidence to auto-save">
           <input
             type="number"
             min={70}
@@ -268,7 +268,7 @@ export default function SettingsPage() {
           </select>
         </Row>
         <Toggle
-          label="Trusted-source fast path (Tier 1/2 exact barcode auto-verifies)"
+          label="Fast barcode lookup (auto-confirms high-quality matches)"
           checked={settings.trustedSourceAutoVerifyEnabled ?? true}
           testid="setting-trusted-source"
           onChange={(v) => update({ trustedSourceAutoVerifyEnabled: v })}
@@ -310,7 +310,7 @@ export default function SettingsPage() {
       </Section>
 
       <div className="rounded-lg border border-red-200 bg-white p-4">
-        <h2 className="mb-1 text-sm font-semibold text-red-700">Danger zone</h2>
+        <h2 className="mb-1 text-base font-semibold text-red-700">Danger zone</h2>
         <p className="mb-3 text-xs text-zinc-500">
           Clear this browser&apos;s local cache (scan session, learned aliases, pending sync) and
           reload clean demo data. Use this to remove any bad/poisoned mappings. Local only - it does
@@ -320,7 +320,7 @@ export default function SettingsPage() {
           type="button"
           data-testid="clear-cache"
           onClick={handleClearCache}
-          className="rounded border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100"
+          className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-800 hover:bg-red-100"
         >
           Clear local cache
         </button>
@@ -337,7 +337,7 @@ export default function SettingsPage() {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
-      <h2 className="mb-3 text-sm font-semibold text-zinc-800">{title}</h2>
+      <h2 className="mb-3 text-base font-semibold text-zinc-900">{title}</h2>
       <div className="flex flex-col gap-3">{children}</div>
     </div>
   );
@@ -364,9 +364,19 @@ function Toggle({
   testid?: string;
 }) {
   return (
-    <label className="flex items-center justify-between gap-4">
+    <label className="flex cursor-pointer items-center justify-between gap-4">
       <span className="text-sm text-zinc-600">{label}</span>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} data-testid={testid} />
+      <span className="relative inline-flex">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          data-testid={testid}
+          className="peer sr-only"
+        />
+        <span className={`block h-6 w-10 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-zinc-300"}`} />
+        <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : ""}`} />
+      </span>
     </label>
   );
 }
