@@ -95,7 +95,7 @@ describe("retail catalog resolution (827e398): recoverable -> Known, unsafe -> s
     })).toBe(false); // no wrong count
   });
 
-  it("an AI-only dress guess with no safe evidence can NEVER become a verified product/alias/count", async () => {
+  it("an AI-only dress guess with no safe evidence provisionally counts but is NEVER verified/approved", async () => {
     const store = storeWithRetail(() => Promise.resolve(null)); // force the AI path (no catalog hit)
     const { restore } = stubFetch(DRESS_NO_EVIDENCE);
     try {
@@ -104,9 +104,12 @@ describe("retail catalog resolution (827e398): recoverable -> Known, unsafe -> s
     } finally {
       restore();
     }
-    // The dress is surfaced only as a SUGGESTION a human could approve - never auto-verified/counted.
-    expect(store.getState().products.find((p) => /velvet torch|dress/i.test(p.name))).toBeUndefined();
-    expect(store.getState().finalCounts).toHaveLength(0);
+    // The dress provisionally counts but is NEVER verified/approved.
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => /velvet torch|dress/i.test(p.name));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
     expect(store.getState().needsReviewQueue.at(-1)?.status).toBe("open");
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === WATER_CODE)?.verificationStatus).not.toBe("verified");
   });

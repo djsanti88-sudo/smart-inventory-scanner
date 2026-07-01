@@ -73,7 +73,7 @@ describe("Option 3 - non-public auto-count (owner: 'found it on Amazon = enough'
     expect(store.getState().finalCounts.find((c) => c.productId === prods[0].id)?.quantity, "qty 2").toBe(2);
   });
 
-  it("OPTION 3 OFF: the same non-public code does NOT auto-count (the store-side gate blocks it)", async () => {
+  it("OPTION 3 OFF: a non-public code provisionally counts (option 3 no longer gates provisional counting)", async () => {
     const store = aiOnStore();
     store.getState().updateSettings({ autoCountNonPublicWithEvidence: false });
     const restore = stub(VERIFIED_NONPUBLIC);
@@ -83,7 +83,11 @@ describe("Option 3 - non-public auto-count (owner: 'found it on Amazon = enough'
     } finally {
       restore();
     }
-    expect(store.getState().finalCounts, "no count when the setting is off").toHaveLength(0);
+    expect(store.getState().finalCounts, "provisionally counted even with option 3 off").toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name === "NatureBell Magnesium Glycinate 500mg");
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
   });
 
   it("PHASE 2 + VELVET TORCH DEAD: a weak non-public suggestion counts PROVISIONALLY but is NEVER verified or approved-aliased", async () => {

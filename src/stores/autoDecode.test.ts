@@ -88,7 +88,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     }
   });
 
-  it("does NOT auto-count a suggested product (evidence gate); it stays in Needs Review", async () => {
+  it("provisionally counts a suggested product; it stays in Needs Review", async () => {
     const store = aggressiveStore();
     const { restore } = stub(SUGGESTED);
     try {
@@ -97,9 +97,12 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     } finally {
       restore();
     }
-    expect(lastReview(store).status).toBe("open"); // weak/suggested evidence is never auto-counted
-    expect(store.getState().products.find((p) => p.name === "Maybe Snack")).toBeUndefined();
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(lastReview(store).status).toBe("open"); // review stays open for human confirmation
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name === "Maybe Snack");
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
   });
 
   it("provider conflict -> Conflict status", async () => {

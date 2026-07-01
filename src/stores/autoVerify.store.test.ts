@@ -148,7 +148,7 @@ describe("confidence-based auto-verify (speed-first)", () => {
     expect(store.getState().finalCounts.find((c) => c.productId === prod.id)?.quantity).toBe(2);
   });
 
-  it("does NOT auto-count a weak/no-evidence product (evidence gate); Needs Review + pending catalog", async () => {
+  it("provisionally counts a weak/no-evidence product; Needs Review stays open + pending catalog", async () => {
     const store = aiOnStore();
     const { restore } = stub(WEAK);
     try {
@@ -157,12 +157,14 @@ describe("confidence-based auto-verify (speed-first)", () => {
     } finally {
       restore();
     }
-    // RECALL (Fix 4): the weak candidate is SHOWN (name surfaced) but never counted - high-confidence
-    // first, then any source as a suggestion the human can approve.
+    // The weak candidate is SHOWN and PROVISIONALLY COUNTED but never verified/approved.
     expect(store.getState().needsReviewQueue.at(-1)!.suggestedProductName).toBe("Maybe Snack");
-    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // never auto-counted
-    expect(store.getState().products.find((p) => p.name === "Maybe Snack")).toBeUndefined();
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // review stays open
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name === "Maybe Snack");
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === CODE)?.verificationStatus).toBe("pending");
   });
 
