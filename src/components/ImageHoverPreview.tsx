@@ -70,7 +70,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="text-sm text-zinc-500 hover:text-zinc-800"
+                className="text-sm text-zinc-700 hover:text-zinc-900"
               >
                 Close
               </button>

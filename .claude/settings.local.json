@@ -8,7 +8,18 @@
       "Bash(python3 -c \"import sys,json;d=json.loads\\(sys.stdin.readline\\(\\)\\);print\\(json.dumps\\({k:d[k] for k in list\\(d.keys\\(\\)\\)[:8]},indent=2\\)\\)\")",
       "Bash(npx tsx:*)",
       "Bash(git lfs:*)",
-      "Bash(echo \"staged exit: $?\")"
+      "Bash(echo \"staged exit: $?\")",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git worktree:*)",
+      "Bash(git stash:*)",
+      "Bash(npx vercel:*)",
+      "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code} from %{url}\" https://inventory-eight-ashen.vercel.app/)",
+      "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code}\" https://smart-inventory-scanner.vercel.app/)"
     ]
+  },
+  "remote": {
+    "defaultEnvironmentId": "env_01WtbU5o7gmPtwnwQdcWYMy1"
   }
 }

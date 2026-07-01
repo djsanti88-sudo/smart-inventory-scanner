@@ -185,14 +185,14 @@ export default function ScanPage() {
                   {autoDecodeOn ? "On" : "Off"}
                 </strong>
               </span>
-              <span data-testid="ai-status">AI lookup: {settings.aiLookupEnabled ? "On" : "Off"}</span>
+              <span data-testid="ai-status">Product lookup: {settings.aiLookupEnabled ? "On" : "Off"}</span>
               {settings.aiLookupEnabled && !hasKey && (
                 <span className="text-red-700" data-testid="missing-keys">
                   AI keys not set. Auto lookup is disabled.
                 </span>
               )}
               <span>
-                Daily lookups: {settings.dailyLookupCount}/{settings.dailyLookupLimit}
+                Lookups today: {settings.dailyLookupCount} of {settings.dailyLookupLimit}
               </span>
             </span>
           )}

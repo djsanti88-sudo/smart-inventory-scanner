@@ -61,16 +61,16 @@ export default function SettingsPage() {
           testid="setting-ai-enabled"
           onChange={(v) => update({ aiLookupEnabled: v })}
         />
-        <Row label="Primary provider">
+        <Row label="AI service">
           <select
             value={settings.primaryProvider}
             onChange={(e) => update({ primaryProvider: e.target.value as "mock" | "gemini" | "openai" })}
             className="rounded border border-zinc-300 px-2 py-1 text-sm"
             data-testid="setting-provider"
           >
-            <option value="mock">Mock (local, free)</option>
-            <option value="gemini">Gemini (requires key, server-side)</option>
-            <option value="openai">OpenAI (requires key, server-side)</option>
+            <option value="mock">Test mode (free, no key needed)</option>
+            <option value="gemini">Fast AI (requires server key)</option>
+            <option value="openai">Backup AI (requires server key)</option>
           </select>
         </Row>
         <Row label="Daily lookup limit">
@@ -100,7 +100,7 @@ export default function SettingsPage() {
           testid="setting-auto-add"
           onChange={(v) => update({ autoAddDecodedProducts: v })}
         />
-        <Row label="AI decode time budget (ms)">
+        <Row label="Max lookup wait (ms)">
           <input
             type="number"
             min={5000}
@@ -140,17 +140,17 @@ export default function SettingsPage() {
         <Row label="Auto decode on scan">
           <span className="text-sm">{aiStatus.autoDecodeOnScan ? "On" : "Off"}</span>
         </Row>
-        <Row label="Gemini live lookup">
-          <span className={`text-sm ${aiStatus.geminiConfigured ? "text-green-700" : "text-red-600"}`} data-testid="gemini-status">
-            {aiStatus.geminiConfigured ? "On (key configured)" : "Missing GEMINI_API_KEY"}
+        <Row label="Fast AI lookup">
+          <span className={`text-sm ${aiStatus.geminiConfigured ? "text-green-700" : "text-red-700"}`} data-testid="gemini-status">
+            {aiStatus.geminiConfigured ? "Connected (key configured)" : "Not connected (key missing)"}
           </span>
         </Row>
-        <Row label="OpenAI live lookup">
-          <span className={`text-sm ${aiStatus.openaiConfigured ? "text-green-700" : "text-red-600"}`} data-testid="openai-status">
-            {aiStatus.openaiConfigured ? "On (key configured)" : "Missing OPENAI_API_KEY"}
+        <Row label="Backup AI lookup">
+          <span className={`text-sm ${aiStatus.openaiConfigured ? "text-green-700" : "text-red-700"}`} data-testid="openai-status">
+            {aiStatus.openaiConfigured ? "Connected (key configured)" : "Not connected (key missing)"}
           </span>
         </Row>
-        <Row label="Premium fallback">
+        <Row label="Thorough lookup mode">
           <span className="text-sm">{aiStatus.premiumFallback ? "On" : "Off"}</span>
         </Row>
         <Row label="Daily lookup count">
@@ -183,7 +183,7 @@ export default function SettingsPage() {
           type="button"
           data-testid="refresh-ai-status"
           onClick={() => void refreshAiStatus()}
-          className="w-fit rounded border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+          className="inline-flex min-h-[44px] w-fit items-center rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
         >
           Refresh status
         </button>
@@ -372,9 +372,9 @@ function Toggle({
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
           data-testid={testid}
-          className="absolute inset-0 z-10 cursor-pointer opacity-0"
+          className="peer absolute inset-0 z-10 cursor-pointer opacity-0"
         />
-        <span className={`pointer-events-none block h-6 w-10 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-zinc-300"}`} />
+        <span className={`pointer-events-none block h-6 w-10 rounded-full transition-colors peer-focus:ring-2 peer-focus:ring-blue-500 peer-focus:ring-offset-1 ${checked ? "bg-blue-600" : "bg-zinc-300"}`} />
         <span className={`pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : ""}`} />
       </span>
     </label>

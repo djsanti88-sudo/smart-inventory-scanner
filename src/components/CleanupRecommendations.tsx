@@ -166,7 +166,7 @@ export function CleanupRecommendations() {
                 <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${CONF_STYLE[g.confidence]}`}>
                   {g.confidence}
                 </span>
-                <span className="text-xs text-zinc-400">{g.items.length} row(s)</span>
+                <span className="text-xs text-zinc-600">{g.items.length} row(s)</span>
               </div>
               <ul className="flex flex-col gap-1">
                 {g.items.map((r) => (
@@ -180,11 +180,11 @@ export function CleanupRecommendations() {
                     />
                     <span>
                       <span className="font-medium text-zinc-800">{r.productName}</span>{" "}
-                      <span className="text-zinc-400">(qty {r.quantity})</span>
+                      <span className="text-zinc-600">(qty {r.quantity})</span>
                       <br />
                       <span className="text-zinc-500">{r.explanation}</span>
                       <br />
-                      <span className="text-zinc-400">
+                      <span className="text-zinc-600">
                         {r.removesProduct
                           ? `Removes the product + ${r.aliasIds.length} alias(es).`
                           : "Removes this count row only (product kept - still has other counts)."}
