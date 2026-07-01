@@ -39,7 +39,11 @@ describe("scanStore - acceptance scan sequence", () => {
     expect(store.getState().scanFeed).toHaveLength(SEQUENCE.length);
   });
 
-  it("routes the unknown code to Needs Review (not counted)", () => {
+  it("routes the unknown code to Needs Review (still open for human resolution)", () => {
+    // Per the owner rule "scan N = count N" (Plan A, Task 2), an unresolved code is now ALSO counted
+    // synchronously as an anonymous provisional row -- but it still stays in Needs Review, unidentified,
+    // pending human resolution. This test asserts the review-queue side of that; the count side is
+    // asserted below in "groups the final count table by product, not by code".
     const review = store.getState().needsReviewQueue;
     expect(review).toHaveLength(1);
     expect(review[0].cleanCode).toBe("UNKNOWN123");
@@ -47,8 +51,10 @@ describe("scanStore - acceptance scan sequence", () => {
   });
 
   it("groups the final count table by product, not by code", () => {
-    // 5 known codes across 3 products -> exactly 3 count rows
-    expect(store.getState().finalCounts).toHaveLength(3);
+    // 5 known codes across 3 products -> 3 count rows, PLUS 1 provisional row for the unresolved
+    // UNKNOWN123 (owner rule "scan N = count N", Plan A Task 2: every scan counts immediately, even
+    // an unresolved one) -> 4 count rows total.
+    expect(store.getState().finalCounts).toHaveLength(4);
   });
 
   it("syncs known scans to the mock backend with matching server quantities", () => {
@@ -596,16 +602,19 @@ describe("scanStore - AI suggestions NEVER auto-save (trust boundary)", () => {
       restore();
     }
 
-    // The suggestion is recorded on the review, but nothing was trusted/saved/counted.
+    // The suggestion is recorded on the review, but the IDENTITY was never trusted/saved: no product
+    // named after the AI suggestion, no alias created. Per the owner rule "scan N = count N" (Plan A,
+    // Task 2), the scan itself already counted synchronously as an anonymous provisional row the instant
+    // it was captured -- that count is independent of, and happens before, this AI suggestion.
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
     expect(review.status).toBe("open"); // still needs human review
     expect(review.suggestedProductName).toBe("Laird Superfood Creamer"); // shown as a suggestion
     expect(store.getState().products.some((p) => p.name === "Laird Superfood Creamer")).toBe(false);
     expect(store.getState().aliases.some((a) => a.cleanCode === "855724007602")).toBe(false);
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(store.getState().finalCounts).toHaveLength(1); // counted synchronously as provisional (scan N = count N)
   });
 
-  it("a re-scan after an AI suggestion still routes to Needs Review, never Known", async () => {
+  it("a re-scan after an AI suggestion still routes to Needs Review (resolverStatus), never a trusted Known identity", async () => {
     const db = new MockDb();
     const store = createTestScanStore({ db });
     store.getState().processScan("855724007602");
@@ -618,7 +627,11 @@ describe("scanStore - AI suggestions NEVER auto-save (trust boundary)", () => {
       restore();
     }
     const ev = store.getState().processScan("855724007602");
-    expect(ev?.matchedProductId).toBeNull();
+    // Plan A, Task 2 ("scan N = count N"): the first scan already counted synchronously as an
+    // anonymous provisional row, so this re-scan matches THAT provisional product (never the
+    // AI-suggested identity, which was never trusted/saved). resolverStatus stays "needs_review":
+    // the AI suggestion still did not make this code deterministically Known.
+    expect(ev?.matchedProductId).toBe(store.getState().products.find((p) => p.provisional)?.id);
     expect(ev?.resolverStatus).toBe("needs_review");
   });
 
