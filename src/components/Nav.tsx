@@ -41,17 +41,20 @@ export function Nav() {
             </Link>
           );
         })}
-        <button
-          type="button"
-          onClick={async () => {
-            if (!window.confirm("Log out now? Your counts are saved - you can sign back in any time to keep going.")) return;
-            await signOut();
-            router.replace("/login");
-          }}
-          className="ml-auto inline-flex min-h-[44px] items-center rounded-lg px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50"
-        >
-          Log out
-        </button>
+        {process.env.NEXT_PUBLIC_REQUIRE_LOGIN === "1" && (
+          <button
+            type="button"
+            onClick={async () => {
+              if (!window.confirm("Log out now? Your counts are saved - you can sign back in any time to keep going.")) return;
+              await signOut();
+              router.replace("/login");
+            }}
+            className="ml-auto inline-flex min-h-[44px] items-center rounded-lg px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Log out
+          </button>
+        )}
+
       </nav>
     </header>
   );
