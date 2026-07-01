@@ -11,10 +11,12 @@ describe("ensureProvisionalCount is idempotent", () => {
     const store = createTestScanStore({ db: new MockDb() });
     // A scan feed row must exist for the code (processScan normally makes it).
     store.getState().processScan("111111111116");
-    const before = totalCount(store);
-    // Direct double-invoke of the primitive must not add a second count.
+    // Two direct invocations of the primitive must yield EXACTLY ONE count, never two.
+    // (Asserted as an absolute value so this test is self-contained in Task 1 — it does not
+    // depend on processScan counting synchronously, which is Task 2's job. Still holds after
+    // Task 2: processScan would count it to 1, then both calls below are idempotent no-ops.)
     store.getState().ensureProvisionalCount("111111111116", "test");
     store.getState().ensureProvisionalCount("111111111116", "test");
-    expect(totalCount(store)).toBe(before);
+    expect(totalCount(store)).toBe(1);
   });
 });
