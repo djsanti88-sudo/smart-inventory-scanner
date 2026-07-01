@@ -420,6 +420,30 @@ export async function POST(request: Request) {
       let providerNames = run.providerNames;
       let providerStatuses = run.providerStatuses;
 
+      // ESCALATION ON FAST-PATH FAILURE: when Gemini (the only fast-path provider) returns a hard
+      // error (rate_limited, error) with zero usable results, immediately run the escalation
+      // providers (OpenAI) within the same live request. This preserves the baseline rule "a normal
+      // Gemini hit never spends an OpenAI call" while ensuring a dead Gemini (spending cap, outage)
+      // doesn't send every scan to Needs Review with no suggestion.
+      const fastPathFailed = !run.timedOut
+        && results.length === 0
+        && providerStatuses.length > 0
+        && providerStatuses.every((s) => s.status === "rate_limited" || s.status === "error");
+      if (fastPathFailed && !e2eMode()) {
+        const remainingBudget = Math.max(budgetMs - run.latencyMs, 5_000);
+        const escRun = await runDecode({
+          code, codeType, confidenceThreshold: threshold,
+          providers: escProviders,
+          enrich: enrich ? (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, corroborate }) : undefined,
+          budgetMs: remainingBudget,
+          trustedHosts: TRUSTED_HOSTS,
+        });
+        results = [...results, ...escRun.results];
+        evidences = [...evidences, ...escRun.evidences];
+        providerNames = [...providerNames, ...escRun.providerNames];
+        providerStatuses = [...providerStatuses, ...escRun.providerStatuses.map((s) => ({ ...s, provider: `esc:${s.provider}` }))];
+      }
+
       // Arm A: grounded search size (from groundedSpecFind run concurrently above).
       const armASize = tireSizeToken(groundedForRace?.result ?? null) || "";
       // Arm B: page-fetch size - the page-fetch path (enrichWithPageFetch) sets fetchedSourceText on
