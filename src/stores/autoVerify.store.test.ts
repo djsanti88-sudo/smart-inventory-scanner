@@ -168,7 +168,7 @@ describe("confidence-based auto-verify (speed-first)", () => {
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === CODE)?.verificationStatus).toBe("pending");
   });
 
-  it("only a decode with NO usable product goes to Needs Review (even at a low threshold)", async () => {
+  it("a decode with NO usable product provisionally counts as Unidentified item (review stays open)", async () => {
     const store = aiOnStore();
     store.getState().updateSettings({ autoVerifyConfidenceThreshold: 70 });
     const { restore } = stub(NOPRODUCT);
@@ -179,7 +179,11 @@ describe("confidence-based auto-verify (speed-first)", () => {
       restore();
     }
     expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open");
-    expect(store.getState().finalCounts).toHaveLength(0);
+    // Provisionally counted as "Unidentified item" — scan 10 = count 10
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.provisional === true);
+    expect(prov).toBeTruthy();
+    expect(prov!.name).toMatch(/Unidentified item/);
   });
 
   it("a pre-existing verified catalog entry resolves WITHOUT AI (AI can't overwrite it)", () => {

@@ -1834,15 +1834,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               newProduct,
             });
           } else {
-            // Suggested provisional count: a decode that found a USABLE product but could not be fully
-            // trust-verified is COUNTED as an UNVERIFIED, shop-local, REVIEWABLE provisional count.
-            // It shows + counts on the scan page (tag "Suggested") but creates NO approved alias and
-            // NO verified product, and the review STAYS OPEN for human confirmation - so a wrong weak
-            // guess can never become permanent truth (Velvet Torch stays dead). Owner rule: scan 10
-            // barcodes = 10 items in the count, even if some are suggestions pending review.
-            // A firewall (brand-prefix/context) conflict still blocks provisional counting.
-            if (isUsableProductName(best?.productName ?? "") && !contextConflict) {
+            // DECODE-EVERYTHING provisional count: EVERY scan that reached decode gets counted, even if
+            // the AI returned a weak/empty product or no product at all. Owner rule: scan 10 = count 10.
+            // The provisional product has verified:false, provisional:true, no approved alias, and the
+            // review STAYS OPEN for human confirmation. A context conflict is the only thing that blocks.
+            if (!contextConflict) {
               const code = review.cleanCode;
+              const hasUsableName = isUsableProductName(best?.productName ?? "");
+              const provName = hasUsableName
+                ? (cleanName || code)
+                : `Unidentified item (barcode ${code})`;
               const cur = get();
               // DEDUP: reuse a still-counted product whose identifier matches this code (orphaned-count rule),
               // so re-scans increment the SAME provisional row instead of duplicating. Never fuzzy.
@@ -1856,7 +1857,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               if (!provId) {
                 provId = `prod-${idFactory()}`;
                 const provProduct: Product = {
-                  id: provId, businessId: cur.businessId, name: cleanName || code, brand: best?.brand ?? "",
+                  id: provId, businessId: cur.businessId, name: provName, brand: best?.brand ?? "",
                   category: best?.category ?? "", specsShort: best?.specsShort ?? "", specsFull: best?.specsFull ?? "",
                   primarySku: best?.primarySku ?? "", primaryBarcode: code, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
                   ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
@@ -1874,9 +1875,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 const { counts, count } = incrementInventoryCount(get().finalCounts, countEvent, idFactory);
                 set((st) => ({
                   finalCounts: counts,
+                  // Clear lastSyncError so provisionally counted items don't show a stale error banner.
+                  lastSyncError: null,
                   scanFeed: st.scanFeed.map((e) =>
                     e.id === ev.id
-                      ? { ...e, matchedProductId: provId!, status: "known", quantityAfterScan: count.quantity, decodeStatus: "suggested" }
+                      ? { ...e, matchedProductId: provId!, status: "known", quantityAfterScan: count.quantity, decodeStatus: hasUsableName ? "suggested" : "needs_review", syncStatus: "synced" as const }
                       : e,
                   ),
                 }));
