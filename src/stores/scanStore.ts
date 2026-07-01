@@ -1837,8 +1837,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // DECODE-EVERYTHING provisional count: EVERY scan that reached decode gets counted, even if
             // the AI returned a weak/empty product or no product at all. Owner rule: scan 10 = count 10.
             // The provisional product has verified:false, provisional:true, no approved alias, and the
-            // review STAYS OPEN for human confirmation. A context conflict is the only thing that blocks.
-            if (!contextConflict) {
+            // review STAYS OPEN for human confirmation. NOTHING blocks provisional counting — not even a
+            // brand/context conflict (the prefix firewall is a suggestion, not a blocker for counting).
+            {
               const code = review.cleanCode;
               const hasUsableName = isUsableProductName(best?.productName ?? "");
               const provName = hasUsableName
