@@ -55,8 +55,13 @@ describe("Phase 8C side-door firewall - deterministic count path", () => {
     const totalCounted = store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0);
     expect(totalCounted, "the scan counts exactly once (owner rule scan N = count N)").toBe(1);
     const placeholder = store.getState().products.find((p) => p.provisional && p.primaryBarcode === "049000028904");
-    expect(placeholder, "a safe Unidentified-item placeholder holds the count").toBeDefined();
-    expect(placeholder!.name).toMatch(/Unidentified item/);
+    expect(placeholder, "a safe placeholder holds the count").toBeDefined();
+    // PREFIX FLOOR (Plan C Task 3): 049000028904's GS1 prefix (0049000) resolves to a known brand
+    // (Coca-Cola) in the derived catalog, so the placeholder states the brand with confidence instead
+    // of a bare "Unidentified item" - it still never claims the specific SUSPECT product identity, and
+    // stays unverified.
+    expect(placeholder!.name).toBe("Coca-Cola / product unconfirmed");
+    expect(placeholder!.brand).toBe("Coca-Cola");
     expect(countFor(store, placeholder!.id)).toBe(1);
     expect(placeholder!.verified).toBe(false);
 

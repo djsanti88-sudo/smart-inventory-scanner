@@ -53,6 +53,7 @@ import { extractTireFields } from "@/services/tire/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
+import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
@@ -1882,9 +1883,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             {
               const code = review.cleanCode;
               const hasUsableName = isUsableProductName(best?.productName ?? "");
+              // PREFIX FLOOR (Plan C Task 3): no usable AI name - before falling back to the bare
+              // "Unidentified item" placeholder, check whether the GS1 company prefix maps to a known
+              // brand. If so, state the brand with confidence and flag the product unconfirmed instead
+              // of an empty row. Never fabricates a specific product; never verified.
+              const floor = hasUsableName ? null : prefixFloorName(code, codeType);
               const provName = hasUsableName
                 ? (cleanName || code)
-                : `Unidentified item (barcode ${code})`;
+                : floor
+                  ? floor.name
+                  : `Unidentified item (barcode ${code})`;
               const cur = get();
               // DEDUP: reuse a still-counted product whose identifier matches this code (orphaned-count rule),
               // so re-scans increment the SAME provisional row instead of duplicating. Never fuzzy.
@@ -1898,7 +1906,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               if (!provId) {
                 provId = `prod-${idFactory()}`;
                 const provProduct: Product = {
-                  id: provId, businessId: cur.businessId, name: provName, brand: best?.brand ?? "",
+                  id: provId, businessId: cur.businessId, name: provName, brand: best?.brand || (floor?.brand ?? ""),
                   category: best?.category ?? "", specsShort: best?.specsShort ?? "", specsFull: best?.specsFull ?? "",
                   primarySku: best?.primarySku ?? "", primaryBarcode: code, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
                   ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
@@ -2055,9 +2063,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // never a verified product. The review STAYS OPEN so a retry can identify it.
           const code = review.cleanCode;
           const struct = decodeBarcodeStructure(code, codeType);
-          const fbName = struct.checkDigitValid
-            ? `Unidentified item (barcode ${code})`
-            : `Unidentified item (code ${code})`;
+          // PREFIX FLOOR (Plan C Task 3): a failed decode must not leave a bare "Unidentified item"
+          // when the GS1 prefix maps to a known brand - see prefixFloorName.
+          const floor = prefixFloorName(code, codeType);
+          const fbName = floor
+            ? floor.name
+            : struct.checkDigitValid
+              ? `Unidentified item (barcode ${code})`
+              : `Unidentified item (code ${code})`;
           const cur = get();
           const countedIds = new Set(cur.finalCounts.map((c) => c.productId));
           let provId = cur.products.find(
@@ -2069,7 +2082,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (!provId) {
             provId = `prod-${idFactory()}`;
             const provProduct: Product = {
-              id: provId, businessId: cur.businessId, name: fbName, brand: "", category: "", specsShort: "",
+              id: provId, businessId: cur.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
               specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
               aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
               confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
@@ -2118,11 +2131,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
         // anatomy here (no decode response). checkDigitValid only tags whether it is a structurally-valid
         // public barcode vs any other code; either way the label is non-hallucinated.
-        const struct = decodeBarcodeStructure(code, detectCodeType(code));
-        const fbName = struct.checkDigitValid ? `Unidentified item (barcode ${code})` : `Unidentified item (code ${code})`;
+        // PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a known brand, in which case the
+        // row states the brand with confidence and flags the product unconfirmed - see prefixFloorName.
+        const ct = detectCodeType(code);
+        const struct = decodeBarcodeStructure(code, ct);
+        const floor = prefixFloorName(code, ct);
+        const fbName = floor
+          ? floor.name
+          : struct.checkDigitValid
+            ? `Unidentified item (barcode ${code})`
+            : `Unidentified item (code ${code})`;
         const provId = `prod-${idFactory()}`;
         const provProduct: Product = {
-          id: provId, businessId: st0.businessId, name: fbName, brand: "", category: "", specsShort: "",
+          id: provId, businessId: st0.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
           specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
           aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
           confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
