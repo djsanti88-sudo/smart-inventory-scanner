@@ -48,7 +48,7 @@ export function MatchBadge({ type }: { type: MatchType }) {
 
 export function SyncBadge({ status }: { status: SyncStatus }) {
   const map: Record<SyncStatus, string> = {
-    synced: "bg-green-100 text-green-700 transition-colors duration-300",
+    synced: "bg-green-100 text-green-800 transition-colors duration-300",
     pending: "bg-amber-100 text-amber-900",
     error: "bg-red-100 text-red-800",
   };

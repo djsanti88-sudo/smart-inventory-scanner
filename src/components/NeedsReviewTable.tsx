@@ -78,7 +78,7 @@ export function NeedsReviewTable() {
           <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
               {isPlatform && <th scope="col" className="px-4 py-3">Raw code</th>}
-              {isPlatform && <th scope="col" className="px-4 py-3">Clean code</th>}
+              {isPlatform && <th scope="col" className="px-4 py-3">Normalised barcode</th>}
               <th scope="col" className="px-4 py-3">Reason</th>
               <th scope="col" className="px-4 py-3">Suggested product</th>
               <th scope="col" className="px-4 py-3">Confidence</th>
@@ -179,7 +179,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             {isPlatform && review.decodeProviderSummaries && review.decodeProviderSummaries.length > 0 && (
               <span className="text-zinc-500" data-testid="provider-results">
                 {review.decodeProviderSummaries
-                  .map((p) => `${p.provider}: ${p.productName || "no result"} (${p.sources} src)`)
+                  .map((p) => `${p.provider}: ${p.productName || "no result"} (${p.sources} source${p.sources === 1 ? "" : "s"})`)
                   .join(" | ")}
               </span>
             )}

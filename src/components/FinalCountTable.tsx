@@ -195,7 +195,7 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
               Edit details
             </button>
             <button type="button" data-testid={`remove-count-${product.id}`} onClick={onRemove} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-800 hover:bg-red-100 active:scale-95">
-              Delete
+              Remove from count
             </button>
             {SHOW_ADVANCED_ACTIONS && isPlatform && (
               <button type="button" data-testid={`mark-wrong-${product.id}`} onClick={onMarkWrong} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">

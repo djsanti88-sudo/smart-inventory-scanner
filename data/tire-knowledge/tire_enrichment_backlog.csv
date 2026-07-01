@@ -245,3 +245,4 @@ canonical_product_uid,brand,model,size_canonical,size_compact,barcode,barcode_ty
 ,Fortune Tire,,285/75R24.5,28575245,840139602351,upc,,https://api.upcitemdb.com/prod/trial/search,missing model,missing model,2026-06-24T14:52:10Z,api_harvest_20260624_144651
 ,Fortune Tire,,295/75R22.5,29575225,840139602368,upc,,https://api.upcitemdb.com/prod/trial/search,missing model,missing model,2026-06-24T14:52:10Z,api_harvest_20260624_144651
 ,Toyo Tires,,LT275/70R18,2757018,498191072560,upc,,https://api.upcitemdb.com/prod/trial/search?s=toyo+tire&offset=0,missing model,missing model,2026-06-24T15:33:50Z,fc_api_harvest_20260624_153317
+,Fortune,,295/75R22.5,29575225,461134329168,upc,,https://api.upcitemdb.com/prod/trial/search,missing model,missing model,2026-07-01T14:34:24Z,api_harvest_20260701_090039

@@ -39,7 +39,7 @@ export function Nav() {
             >
               {l.label}
               {typeof l.badge === "number" && l.badge > 0 && (
-                <span className="ml-1.5 rounded-full bg-red-500 px-1.5 py-0.5 text-xs text-white">
+                <span className="ml-1.5 rounded-full bg-red-600 px-1.5 py-0.5 text-xs text-white">
                   {l.badge}
                 </span>
               )}
