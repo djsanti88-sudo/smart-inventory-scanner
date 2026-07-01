@@ -423,7 +423,9 @@ describe("scanStore - W2 discovered-alias approval", () => {
     const ev = store.getState().processScan("WIDGETALT1");
     expect(ev?.resolverStatus).toBe("known");
     expect(ev?.matchedProductId).toBe(prod.id);
-    expect(countFor(store, prod.id)).toBe(1);
+    // scan N = count N: the original WIDGETMAIN scan was counted synchronously into this product's provisional
+    // placeholder (now upgraded), and the WIDGETALT1 scan counts again -> quantity 2 (two physical scans).
+    expect(countFor(store, prod.id)).toBe(2);
   });
 
   // P2: a counted product whose barcode lives ONLY inside its NAME must be reused on a re-scan of that

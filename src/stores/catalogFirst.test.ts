@@ -195,11 +195,17 @@ describe("cloud global catalog lookup (Option 1 wiring)", () => {
       restore();
     }
 
-    // No product auto-created and no count
+    // The firewall blocked the CONFLICTING cloud identity: no "Coca-Cola" product is auto-created and no
+    // found_from_catalog resolution happens (the tire-context scan never becomes a can of soda).
     expect(store.getState().products.find((p) => p.name === "Coca-Cola Can 330ml")).toBeUndefined();
-    expect(store.getState().finalCounts).toHaveLength(0);
-    // Feedback NOT found_from_catalog (firewall blocked it)
     expect(store.getState().feedbackEvents.some((e) => e.type === "found_from_catalog")).toBe(false);
+    // scan N = count N: the scan is still provisionally counted as a safe "Unidentified item" placeholder
+    // (never as the blocked identity) so the physical count is never silently dropped.
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.primaryBarcode === CLOUD_CODE && p.provisional === true);
+    expect(prov, "firewall-blocked scan still counts as a provisional Unidentified item").toBeDefined();
+    expect(prov!.name).toMatch(/Unidentified item/);
+    expect(prov!.name).not.toMatch(/coca-cola/i);
   });
 
   it("shop-owned approved alias still counts into the shop's product (cloud lookup NOT consulted)", () => {
