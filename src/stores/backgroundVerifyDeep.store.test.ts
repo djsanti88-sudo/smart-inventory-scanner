@@ -178,21 +178,25 @@ describe("client-orchestrated background verify (suggested tire -> verified -> c
     expect(store.getState().aliases.filter((a) => a.cleanCode === HANKOOK_CODE && a.approved)).toHaveLength(1);
   });
 
-  it("a NON-verified deep result never counts (stays open, finalCounts empty)", async () => {
+  it("a NON-verified deep result provisionally counts (stays open, no approved alias)", async () => {
     const store = tireAiStore();
     const original = globalThis.fetch;
-    // Both passes return suggested -> the deep pass must NOT count.
+    // Both passes return suggested -> the deep pass does NOT fully verify, but provisionally counts.
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => HANKOOK_FAST_SUGGESTED })) as unknown as typeof fetch;
     try {
       store.getState().processScan(HANKOOK_CODE);
       const reviewId = store.getState().needsReviewQueue.at(-1)!.id;
       await vi.waitFor(() => expect(store.getState().needsReviewQueue.at(-1)!.hasSuggestion).toBe(true));
-      // Drive the background pass explicitly and confirm it does not count a suggested result.
+      // Drive the background pass explicitly - it does not fully verify a suggested result.
       await store.getState().backgroundVerifyDeep(reviewId);
     } finally {
       globalThis.fetch = original;
     }
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.brand === "Hankook");
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
     expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open");
     expect(store.getState().aliases.some((a) => a.cleanCode === HANKOOK_CODE && a.approved)).toBe(false);
   });

@@ -148,5 +148,8 @@ export function strongestEvidence(results: EvidenceResult[]): EvidenceResult {
 }
 
 export function isStrongEvidence(r: EvidenceResult): boolean {
-  return r.verified && (r.strength === "snippet" || r.strength === "grounding_chunk" || r.strength === "fetched_source");
+  // url_only is strong when VERIFIED (= the URL is from an explicitly trusted host: Amazon, Walmart,
+  // Target, major retailers, GS1 registries, barcode DBs). An untrusted-host url_only has verified=false
+  // and is correctly excluded. Owner rule: "found it on Amazon = that's all it takes."
+  return r.verified && (r.strength === "snippet" || r.strength === "grounding_chunk" || r.strength === "fetched_source" || r.strength === "url_only");
 }

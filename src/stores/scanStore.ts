@@ -1834,14 +1834,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               newProduct,
             });
           } else {
-            // PHASE 2 (Suggested provisional count): a weak-source NON-public code (vendor/SKU/FNSKU/internal)
-            // that found a USABLE product but could not be trust-verified is COUNTED as an UNVERIFIED,
-            // shop-local, REVIEWABLE provisional count. It shows + counts on the scan page (tag "Suggested")
-            // but creates NO approved alias and NO verified product, and the review STAYS OPEN for human
-            // confirmation - so a wrong weak guess can never become permanent truth (Velvet Torch stays dead).
-            // Public UPC/EAN/GTIN behavior is untouched; a firewall (brand-prefix/context) conflict still blocks.
-            const isPublicCode2 = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
-            if ((s.autoCountNonPublicWithEvidence ?? true) && !isPublicCode2 && isUsableProductName(best?.productName ?? "") && !contextConflict) {
+            // Suggested provisional count: a decode that found a USABLE product but could not be fully
+            // trust-verified is COUNTED as an UNVERIFIED, shop-local, REVIEWABLE provisional count.
+            // It shows + counts on the scan page (tag "Suggested") but creates NO approved alias and
+            // NO verified product, and the review STAYS OPEN for human confirmation - so a wrong weak
+            // guess can never become permanent truth (Velvet Torch stays dead). Owner rule: scan 10
+            // barcodes = 10 items in the count, even if some are suggestions pending review.
+            // A firewall (brand-prefix/context) conflict still blocks provisional counting.
+            if (isUsableProductName(best?.productName ?? "") && !contextConflict) {
               const code = review.cleanCode;
               const cur = get();
               // DEDUP: reuse a still-counted product whose identifier matches this code (orphaned-count rule),
@@ -2375,11 +2375,40 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // PHASE 2: if the reused row is a PROVISIONAL count, this resolution CONFIRMS it -> upgrade it
             // in place to a verified, non-provisional product (the approved alias is added below, so future
             // scans resolve it as a normal Known) and do NOT re-count it (it was already counted).
+            // POISON GUARD (dedup path): apply the same weak-guess check here. If the user is approving
+            // the review's evidence-less AI suggestion, the provisional must NOT be upgraded to verified
+            // (same rule as the create-new branch). Only a human typing their OWN product or a suggestion
+            // with real evidence upgrades the provisional.
             if (products.find((p) => p.id === productId)?.provisional === true) {
               approvingProvisional = true;
-              products = products.map((p) =>
-                p.id === productId ? { ...p, verified: true, provisional: false, updatedAt: now() } : p,
-              );
+              const normName = (s: string) => cleanProductName(s ?? "").trim().toLowerCase();
+              const suggestedName = normName(review.suggestedProductName ?? "");
+              const acceptingSuggestion =
+                !!review.hasSuggestion && suggestedName.length > 0 && normName(np.name ?? "") === suggestedName;
+              const suggestionHasRealEvidence =
+                (review.suggestedBrand ?? "").trim().length > 0 ||
+                [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
+                (review.sourceUrls?.length ?? 0) > 0;
+              // When origin is "human", the user is deliberately confirming the provisional - skip the guard.
+              const isWeakGuessReuse = acceptingSuggestion && !suggestionHasRealEvidence && payload.origin !== "human";
+              if (isWeakGuessReuse) {
+                weakGuessProduct = true;
+                // Leave the provisional as-is (not upgraded to verified).
+              } else {
+                // Upgrade the provisional to a verified product. When the human typed a DIFFERENT name
+                // (not the AI suggestion), apply the human's product details to the upgraded row so the
+                // product identity reflects what the human actually intended, not the AI's provisional guess.
+                products = products.map((p) => {
+                  if (p.id !== productId) return p;
+                  const updates: Partial<Product> = { verified: true, provisional: false, updatedAt: now(), updatedBy: "human" };
+                  if (np.name && normName(np.name) !== normName(p.name)) {
+                    updates.name = np.name;
+                    if (np.brand !== undefined) updates.brand = np.brand;
+                    if (np.category !== undefined) updates.category = np.category;
+                  }
+                  return { ...p, ...updates };
+                });
+              }
             }
             emitAudit({ entityType: "Product", entityId: productId, action: "product_dedup_reused", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
           } else {

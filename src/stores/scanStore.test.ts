@@ -700,7 +700,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(0);
   });
 
-  it("does NOT auto-count a tire decode missing size/load/speed even if verified (incomplete specs)", async () => {
+  it("provisionally counts a tire decode missing size/load/speed even if verified (incomplete specs)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     const { reviewId } = await decode(
       store,
@@ -711,8 +711,12 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       ),
     );
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
-    expect(review.status).toBe("open"); // thin tire identity is NOT counted
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(review.status).toBe("open"); // thin tire identity stays open for review
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name.includes("Falken Wildpeak"));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
     expect(review.reason.toLowerCase()).toContain("size");
   });
 
@@ -731,7 +735,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(1);
   });
 
-  it("does NOT auto-count when confidence is below the 0.80 gate even if verified", async () => {
+  it("provisionally counts when confidence is below the 0.80 gate even if verified", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     const { reviewId } = await decode(
       store,
@@ -742,7 +746,11 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       ),
     );
     expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name === "Coca-Cola Classic");
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
   });
 
   it("does NOT auto-add a CONFLICT (providers disagree) - that stays in Needs Review", async () => {
@@ -760,7 +768,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(0);
   });
 
-  it("respects autoAddDecodedProducts=false (then a verified decode just shows, no auto-count)", async () => {
+  it("respects autoAddDecodedProducts=false (verified decode provisionally counts, review stays open)", async () => {
     const db = new MockDb();
     const store = createTestScanStore({ db });
     store.getState().processScan("049000111222");
@@ -778,7 +786,11 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       restore();
     }
     expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name === "Coca-Cola Classic");
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
   });
 
   it("FIREWALL: 745125495781 rivet kit in tire context does NOT auto-count (category conflict)", async () => {

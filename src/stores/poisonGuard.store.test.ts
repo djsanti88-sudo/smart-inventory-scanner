@@ -60,7 +60,7 @@ function approveSuggestionPayload(review: { suggestedProductName: string; sugges
 }
 
 describe("Phase-2 review-flow poison guard (078742051451 -> dress)", () => {
-  it("approving the weak dress suggestion creates NO verified product, NO approved alias, NO count", async () => {
+  it("approving the weak dress suggestion creates NO verified product, NO approved alias, but provisionally counts", async () => {
     const store = await seedDressSuggestion();
     const review = store.getState().needsReviewQueue.at(-1)!;
     store.getState().resolveUnknown(review.id, "create_new", approveSuggestionPayload(review));
@@ -69,11 +69,15 @@ describe("Phase-2 review-flow poison guard (078742051451 -> dress)", () => {
     if (dressProduct) expect(dressProduct.verified, "dress product must not be verified").toBe(false);
     const dressAlias = store.getState().aliases.find((a) => a.cleanCode === WATER_CODE);
     if (dressAlias) expect(dressAlias.approved, "078742051451 alias must not be approved").toBe(false);
-    expect(store.getState().finalCounts, "the dress must not be counted").toHaveLength(0);
+    expect(store.getState().finalCounts, "the dress provisionally counts").toHaveLength(1);
+    const prov = store.getState().products.find((p) => /velvet torch|dress/i.test(p.name));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === WATER_CODE)?.verificationStatus).not.toBe("verified");
   });
 
-  it("ROBUSTNESS: accepting the weak suggestion via a CASE + hedge-phrase name variant is STILL caught (no verified product / approved alias / count)", async () => {
+  it("ROBUSTNESS: accepting the weak suggestion via a CASE + hedge-phrase name variant is STILL caught (no verified product / approved alias, but provisionally counts)", async () => {
     const store = await seedDressSuggestion();
     const review = store.getState().needsReviewQueue.at(-1)!;
     // Same evidence-less suggestion, but the saved name differs from the suggestion only by CASE and a
@@ -91,24 +95,31 @@ describe("Phase-2 review-flow poison guard (078742051451 -> dress)", () => {
     if (dressProduct) expect(dressProduct.verified, "case/hedge variant must not be verified").toBe(false);
     const dressAlias = store.getState().aliases.find((a) => a.cleanCode === WATER_CODE);
     if (dressAlias) expect(dressAlias.approved, "case/hedge variant alias must not be approved").toBe(false);
-    expect(store.getState().finalCounts, "case/hedge variant must not be counted").toHaveLength(0);
+    expect(store.getState().finalCounts, "case/hedge variant provisionally counts").toHaveLength(1);
+    const prov = store.getState().products.find((p) => /velvet torch|dress/i.test(p.name));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
   });
 
-  it("after approving the weak dress, a re-scan of 078742051451 does NOT resolve to / count the dress", async () => {
+  it("after approving the weak dress, a re-scan of 078742051451 increments the provisional product (no verified/approved)", async () => {
     const store = await seedDressSuggestion();
     const review = store.getState().needsReviewQueue.at(-1)!;
     store.getState().resolveUnknown(review.id, "create_new", approveSuggestionPayload(review));
     const restore = stub(DRESS_SUGGESTION);
     try {
-      store.getState().processScan(WATER_CODE); // re-scan: deterministic resolver must not return the dress
+      store.getState().processScan(WATER_CODE); // re-scan: increments the provisional product
     } finally {
       restore();
     }
     const dressProduct = store.getState().products.find((p) => /velvet torch|dress/i.test(p.name));
-    if (dressProduct) {
-      expect(store.getState().finalCounts.find((c) => c.productId === dressProduct.id)).toBeUndefined();
-    }
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(dressProduct).toBeDefined();
+    expect(dressProduct!.provisional).toBe(true);
+    expect(dressProduct!.verified).toBe(false);
+    expect(store.getState().finalCounts).toHaveLength(1);
+    // The dress is still NOT an approved alias - the poison guard prevents that.
+    const dressAlias = store.getState().aliases.find((a) => a.cleanCode === WATER_CODE);
+    if (dressAlias) expect(dressAlias.approved, "alias must not be approved").toBe(false);
   });
 
   it("SURGICAL: a human typing their OWN product (not the AI's guess) is still verified + counted", async () => {
