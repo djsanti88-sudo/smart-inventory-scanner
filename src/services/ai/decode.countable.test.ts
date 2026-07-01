@@ -29,8 +29,11 @@ describe("decode-level verify (any-source baseline)", () => {
       evidences: [{ verified: true, strength: "fetched_source" } as any] });
     expect(d.status).toBe("verified");
   });
-  it("does NOT verify when a catalog-derived brand-prefix conflict is flagged (wrong brand for this barcode)", () => {
+  it("PLAN C: a catalog-derived brand-prefix conflict is ADVISORY - with strong (fetched_source) evidence it no longer blocks", () => {
+    // Reconciled (Plan C Task 2): GS1 prefixes are many-to-one; with the app-confirmed EXACT code in strong
+    // evidence the brand-prefix mismatch no longer blocks (grounding/corpus wins). Category/poison guard is
+    // enforced separately downstream (scanContextFirewall / store) and is unaffected.
     const d = decideDecode({ ...cooper, brandPrefixConflict: true });
-    expect(d.status).not.toBe("verified");
+    expect(d.status).toBe("verified");
   });
 });

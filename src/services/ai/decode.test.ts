@@ -169,11 +169,15 @@ describe("decideDecode - the gate that produces a Verified AI Decode", () => {
     expect(d.status).not.toBe("verified");
   });
 
-  it("OPTION 3 still respects the brand-prefix firewall for a non-public code", () => {
+  it("PLAN C: the brand-prefix conflict is ADVISORY - with strong exact-code evidence it no longer blocks a non-public verify", () => {
+    // Reconciled (Plan C Task 2): brand-prefix mismatch used to hard-block. Owner rule: GS1 prefixes are
+    // many-to-one, so a brand-prefix mismatch alone must never block when the app confirmed the EXACT code
+    // in STRONG evidence (a snippet here) - grounding/corpus wins over the prefix. Category/poison guard is
+    // separate and unaffected. The prefix mismatch is surfaced as a non-blocking advisory instead.
     const np = result({ productName: "NatureBell Magnesium", brand: "NatureBell" });
     const ev: EvidenceResult = { verified: true, strength: "snippet", matchedCode: "X004DY7YUT", matchedSources: ["s"], reason: "" };
     const d = decideDecode({ codeType: "vendor_label", results: [np], evidences: [ev], confidenceThreshold: 0.8, allowNonPublicAutoCount: true, brandPrefixConflict: true });
-    expect(d.status).not.toBe("verified");
+    expect(d.status).toBe("verified");
   });
 
   it("a single provider auto-verifies from ANY source when the app confirmed the exact code (owner single-source policy)", () => {
