@@ -11,7 +11,7 @@ export interface BreakerState {
   openedAt: number | null;
 }
 
-export const FAILURE_THRESHOLD = 3;
+export const FAILURE_THRESHOLD = 12;
 export const COOLDOWN_MS = 30_000;
 
 export function initBreaker(): BreakerState {
