@@ -77,7 +77,7 @@ describe("retail catalog resolution (827e398): recoverable -> Known, unsafe -> s
     expect(store.getState().needsReviewQueue.some((r) => r.cleanCode === WATER_CODE && r.status === "open")).toBe(false);
   });
 
-  it("a code with NO catalog hit and NO usable AI product fails SAFELY (no count, no product, stays open)", async () => {
+  it("a code with NO catalog hit and NO usable AI product provisionally counts as Unidentified item (review stays open)", async () => {
     const store = storeWithRetail(() => Promise.resolve(null));
     const UNKNOWN = "999000111222";
     const { restore } = stubFetch(NOPRODUCT);
@@ -87,12 +87,10 @@ describe("retail catalog resolution (827e398): recoverable -> Known, unsafe -> s
     } finally {
       restore();
     }
-    expect(store.getState().needsReviewQueue.at(-1)?.status).toBe("open"); // safe-fail (unrecoverable)
-    expect(store.getState().products.some((p) => p.primaryBarcode === UNKNOWN)).toBe(false); // no fake product
-    expect(store.getState().finalCounts.some((c) => {
-      const p = store.getState().products.find((pp) => pp.id === c.productId);
-      return p?.primaryBarcode === UNKNOWN;
-    })).toBe(false); // no wrong count
+    expect(store.getState().needsReviewQueue.at(-1)?.status).toBe("open"); // review stays open
+    // Provisionally counted as "Unidentified item" — scan 10 = count 10, even with no AI product
+    expect(store.getState().products.some((p) => p.primaryBarcode === UNKNOWN && p.provisional === true)).toBe(true);
+    expect(store.getState().finalCounts).toHaveLength(1);
   });
 
   it("an AI-only dress guess with no safe evidence provisionally counts but is NEVER verified/approved", async () => {
