@@ -10,7 +10,11 @@ import { enrichWithPageFetch } from "@/services/ai/pageFetch";
 import { runDecode, type DecodeProvider } from "@/services/ai/decodeOrchestrator";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { decideDecode, isUsableProductName } from "@/services/ai/decode";
-import { discoverViaFirecrawl } from "@/services/ai/firecrawlProvider";
+import { discoverViaFirecrawl, firecrawlScrapeCheap } from "@/services/ai/firecrawlProvider";
+import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
+import { groundIdentify } from "@/services/ai/flashLiteGrounding";
+import { resolveUnknownFast } from "@/services/ai/parallelResolve";
+import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { filterSafeUrls } from "@/services/ai/urlSafety";
 import { shouldRunFallback, decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
 import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
@@ -395,6 +399,57 @@ export async function POST(request: Request) {
             providerStatuses: [{ provider: "retail-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
             decision, reasonCode: "ok", reasonText: "", timedOut: false,
             debug: { providersAttempted: ["retail-corpus"], evidenceStrengths: ["fetched_source"], sourceCounts: [0], corroborationPath: "retail_exact_barcode", aiCalled: false, pageFetched: false, cached: false, retailLookup: retailLookupStatus },
+            sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+          };
+        }
+      }
+
+      // PLAN D - PARALLEL FAST RESOLVER (barcode-DB || flash-lite grounding). Runs AFTER the free
+      // corpus/retail misses and BEFORE the legacy Gemini/OpenAI fast path. The two legs race; the first
+      // confident answer wins (~1s), escalating to Firecrawl + the prefix floor only on a double-miss.
+      // Gated to PUBLIC barcodes (upc/ean/gtin): a SKU/vendor label must never auto-verify from grounding
+      // (semantic firewall - those still route through the legacy path -> Needs Review). A VERIFIED win
+      // short-circuits here and returns like the corpus hit (withDecodeCache caches it to a 0ms Tier-1 hit
+      // next time); a floor/miss returns null-ish and falls through to the legacy path UNCHANGED, so the
+      // store still applies the Plan C floor. Never runs under E2E (mock-only).
+      const isPublicBarcode = codeType === "upc_a" || codeType === "ean_13" || codeType === "gtin_14";
+      if (!e2eMode() && isPublicBarcode) {
+        const fast = await resolveUnknownFast(code, {
+          lookupBarcodeDb: (c) => lookupBarcodeDb(c),
+          groundIdentify: (c, opts) => groundIdentify(c, opts),
+          firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
+          prefixFloor: (c) => prefixFloorName(c, codeType),
+        }).catch(() => null);
+        // Only a VERIFIED win (barcode-DB / grounding / firecrawl) short-circuits. The prefix floor is
+        // NOT verified, so it falls through to the legacy path exactly as before.
+        if (fast && fast.verified && isUsableProductName(fast.name)) {
+          const result: AiLookupResult = {
+            ...emptyResult(),
+            productName: fast.name,
+            brand: fast.brand,
+            confidence: 0.9,
+            needsHumanReview: false,
+            sourceUrls: [],
+          };
+          const evidence: EvidenceResult = {
+            verified: true,
+            strength: "fetched_source",
+            matchedCode: code,
+            matchedSources: [`parallel-${fast.source}`],
+            reason: `Exact identification via parallel ${fast.source}`,
+          };
+          const decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false });
+          return {
+            mode: "decode" as const,
+            providerNames: [`parallel:${fast.source}`],
+            results: [result],
+            evidences: [evidence],
+            providerStatuses: [{ provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
+            decision,
+            reasonCode: "ok",
+            reasonText: "",
+            timedOut: false,
+            debug: { providersAttempted: [`parallel:${fast.source}`], evidenceStrengths: ["fetched_source"], sourceCounts: [0], corroborationPath: `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
