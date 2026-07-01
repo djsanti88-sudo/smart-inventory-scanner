@@ -444,6 +444,7 @@ export async function POST(request: Request) {
           providers: escProviders,
           enrich: enrich ? (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, corroborate }) : undefined,
           budgetMs: ESCALATION_BUDGET_MS,
+          providerTimeoutMs: ESCALATION_BUDGET_MS - 2_000, // give each provider nearly the full budget
           trustedHosts: TRUSTED_HOSTS,
         });
         results = [...results, ...escRun.results];
