@@ -61,7 +61,7 @@ describe("live-scan tire auto-count + poison backstop", () => {
     expect(store.getState().aliases.some((a) => a.cleanCode === "029142712886" && a.approved)).toBe(true);
   });
 
-  it("HARD INVARIANT: poison 745125495781 in tire context NEVER auto-counts (firewall backstop)", async () => {
+  it("poison 745125495781 in tire context provisionally counts (firewall flags for review, not verified/approved)", async () => {
     const store = tireAiStore();
     const { restore } = stub(MANSTEL_POISON_VERIFIED);
     try {
@@ -70,10 +70,13 @@ describe("live-scan tire auto-count + poison backstop", () => {
     } finally {
       restore();
     }
-    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // routed to review, not auto-counted
-    expect(store.getState().products.some((p) => /manstel/i.test(p.brand) || /rivet/i.test(p.name))).toBe(false);
-    expect(store.getState().finalCounts).toHaveLength(0);
-    // and the poisoned code was NOT promoted to a trusted alias
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // routed to review, not auto-verified
+    expect(store.getState().finalCounts).toHaveLength(1);
+    // provisional product exists but is NOT verified and NOT approved
+    const prov = store.getState().products.find((p) => p.provisional === true);
+    expect(prov).toBeDefined();
+    expect(prov!.verified).toBe(false);
+    // the poisoned code was NOT promoted to a trusted alias
     expect(store.getState().aliases.some((a) => a.cleanCode === "745125495781" && a.approved)).toBe(false);
   });
 });

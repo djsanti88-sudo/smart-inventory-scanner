@@ -683,8 +683,8 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
   });
 
-  it("does NOT auto-count a SUGGESTED/weak decode (evidence gate) - it stays in Needs Review", async () => {
-    // Phase 7: model self-confidence + weak url_only evidence is exactly what auto-counted wrong products.
+  it("provisionally counts a SUGGESTED/weak decode (evidence gate) - review stays open", async () => {
+    // Owner rule: scan 10 = count 10. Weak evidence provisionally counts; review stays open for human confirmation.
     const db = new MockDb();
     const store = createTestScanStore({ db });
     const { reviewId } = await decode(
@@ -696,8 +696,11 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       ),
     );
     expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
-    expect(store.getState().products.find((p) => p.name === "Camel Crush Box")).toBeUndefined();
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name.includes("Camel Crush"));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
   });
 
   it("provisionally counts a tire decode missing size/load/speed even if verified (incomplete specs)", async () => {
@@ -753,7 +756,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(prov!.verified).toBe(false);
   });
 
-  it("does NOT auto-add a CONFLICT (providers disagree) - that stays in Needs Review", async () => {
+  it("provisionally counts a CONFLICT (providers disagree) - review stays open", async () => {
     const db = new MockDb();
     const store = createTestScanStore({ db });
     const { reviewId } = await decode(
@@ -765,7 +768,11 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       ),
     );
     expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name.includes("Creamer"));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
   });
 
   it("respects autoAddDecodedProducts=false (verified decode provisionally counts, review stays open)", async () => {
@@ -793,7 +800,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(prov!.verified).toBe(false);
   });
 
-  it("FIREWALL: 745125495781 rivet kit in tire context does NOT auto-count (category conflict)", async () => {
+  it("FIREWALL: 745125495781 rivet kit in tire context provisionally counts (category conflict flagged, review stays open)", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ scanContext: "tire" });
     const { reviewId } = await decode(
@@ -805,8 +812,12 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       ),
     );
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
-    expect(review.status).toBe("open"); // poisoned exact-code source -> NOT auto-counted
-    expect(store.getState().finalCounts).toHaveLength(0);
+    expect(review.status).toBe("open"); // category conflict flagged for review
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name.toLowerCase().includes("manstel") || p.name.toLowerCase().includes("rivet"));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
     expect(review.reason.toLowerCase()).toContain("category conflict");
   });
 
@@ -826,7 +837,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(1);
   });
 
-  it("FIREWALL: after a category conflict, manual relink makes future scans count the correct product", async () => {
+  it("FIREWALL: after a category conflict provisionally counts, manual relink makes future scans count the correct product", async () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ scanContext: "tire" });
     const { reviewId } = await decode(
@@ -837,7 +848,13 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
         { productName: "Manstel Aluminum Rivet Kit", brand: "", upc: "745125495781", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
-    expect(store.getState().finalCounts).toHaveLength(0); // conflict blocked the auto-count
+    // First scan provisionally counts (owner rule: scan 10 = count 10)
+    expect(store.getState().finalCounts).toHaveLength(1);
+    const prov = store.getState().products.find((p) => p.name.toLowerCase().includes("manstel") || p.name.toLowerCase().includes("rivet"));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
+    // Human relinks to the correct product; future scans are deterministic
     store.getState().resolveUnknown(reviewId, "link_existing", { productId: "prod-nokian", applyToCount: true });
     const ev = store.getState().processScan("745125495781");
     expect(ev?.resolverStatus).toBe("known");
