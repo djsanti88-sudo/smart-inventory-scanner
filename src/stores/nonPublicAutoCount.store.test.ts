@@ -95,7 +95,9 @@ describe("Option 3 - non-public auto-count (owner: 'found it on Amazon = enough'
     const restore = stub(WEAK_NONPUBLIC);
     try {
       store.getState().processScan(FNSKU);
-      await vi.waitFor(() => expect(store.getState().finalCounts.length).toBe(1));
+      // scan N = count N: finalCounts hits 1 synchronously (the placeholder), so wait for the async decode
+      // to ENRICH that placeholder with the suggested identity instead of racing it.
+      await vi.waitFor(() => expect(store.getState().products.some((p) => /velvet torch|dress/i.test(p.name))).toBe(true));
     } finally {
       restore();
     }
@@ -115,7 +117,9 @@ describe("Option 3 - non-public auto-count (owner: 'found it on Amazon = enough'
     let restore = stub(WEAK_NONPUBLIC);
     try {
       store.getState().processScan(FNSKU);
-      await vi.waitFor(() => expect(store.getState().finalCounts.length).toBe(1));
+      // scan N = count N: wait for the async decode to enrich the placeholder (finalCounts is 1 instantly)
+      // BEFORE the second scan, so the re-scan increments the SAME enriched provisional row.
+      await vi.waitFor(() => expect(store.getState().products.some((p) => /velvet torch|dress/i.test(p.name))).toBe(true));
     } finally {
       restore();
     }
