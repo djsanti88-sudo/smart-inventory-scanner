@@ -435,10 +435,14 @@ export async function POST(request: Request) {
       // providers (OpenAI) within the same live request. This preserves the baseline rule "a normal
       // Gemini hit never spends an OpenAI call" while ensuring a dead Gemini (spending cap, outage)
       // doesn't send every scan to Needs Review with no suggestion.
-      const fastPathFailed = !run.timedOut
-        && results.length === 0
+      // Escalation triggers when the fast path produced ZERO usable results: either all providers
+      // hard-failed (rate_limited/error), OR the budget timed out before any provider found a product.
+      // This ensures a dead/slow Gemini always falls through to OpenAI instead of silently routing
+      // to Needs Review with no suggestion.
+      const hasUsableResult = results.some((r) => isUsableProductName(r.productName));
+      const fastPathFailed = !hasUsableResult
         && providerStatuses.length > 0
-        && providerStatuses.every((s) => s.status === "rate_limited" || s.status === "error");
+        && providerStatuses.every((s) => s.status !== "ok" || !s.identityFound);
       if (fastPathFailed && !e2eMode()) {
         // The escalation budget is INDEPENDENT of the fast-path budget. When the fast path's only
         // provider (Gemini) is dead, we give OpenAI a fresh 20s window — not the leftover from the
