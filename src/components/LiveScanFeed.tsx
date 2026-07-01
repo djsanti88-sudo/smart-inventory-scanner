@@ -10,6 +10,7 @@ import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/compone
 export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
   const getProduct = useScanStore((s) => s.getProduct);
+  const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
@@ -48,6 +49,16 @@ export function LiveScanFeed() {
             ) : (
               scanFeed.map((e) => {
                 const product = getProduct(e.matchedProductId);
+                // PHASE 1 (Suggested display): for a scan that did NOT count (no matched product), surface the
+                // decoded SUGGESTION from its Needs Review item so the row shows the product name instead of
+                // "-". This is read-only display: the row still reads "Suggested", Qty stays "-", and nothing
+                // is counted, aliased, or verified here.
+                const suggestion = product
+                  ? undefined
+                  : needsReviewQueue.find((r) => r.cleanCode === e.cleanCode && r.suggestedProductName);
+                const displayName = product?.name ?? suggestion?.suggestedProductName ?? "-";
+                const displaySku = product?.primarySku || suggestion?.suggestedPrimarySku || "-";
+                const isSuggestionOnly = !product && !!suggestion?.suggestedProductName;
                 return (
                   <tr key={e.id} className="border-t border-zinc-100">
                     <td className="px-3 py-2 text-xs text-zinc-500">
@@ -60,9 +71,12 @@ export function LiveScanFeed() {
                         <MatchBadge type={e.matchType} />
                       </td>
                     )}
-                    <td className="px-3 py-2">{product ? product.name : "-"}</td>
+                    <td className="px-3 py-2" data-testid={`feed-product-${e.id}`}>
+                      {displayName}
+                      {isSuggestionOnly ? <span className="ml-1 text-xs text-amber-600">(suggested)</span> : null}
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs" data-testid={`feed-part-number-${e.id}`}>
-                      {product ? product.primarySku || "-" : "-"}
+                      {displaySku}
                     </td>
                     <td className="px-3 py-2 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
                     <td className="px-3 py-2">

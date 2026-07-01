@@ -7,7 +7,7 @@ import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } 
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
 // AFTER the human-confirmed business catalog/flywheel. A MISS returns null so the existing AI/page-fetch/
 // Needs-Review path runs unchanged. The corpus is GROUNDING, not blind trust: the same downstream store
-// auto-count gate (firewall + tire specs + brand-prefix conflict + >=0.9) still applies, so a non-tire or a
+// auto-count gate (firewall + tire specs + brand-prefix conflict + >=0.8) still applies, so a non-tire or a
 // near-match can never auto-count this way. EXACT match only - never fuzzy, never near-match.
 
 export interface CorpusDecodeResult {
@@ -19,7 +19,7 @@ export interface CorpusDecodeResult {
 }
 
 // verified_2src is the strongest tier (independent two-source). verified_1src_strong is strong single
-// source. Both clear the store's >=0.9 gate; nothing weaker reaches this code (the generator only ingests
+// source. Both clear the store's >=0.8 gate; nothing weaker reaches this code (the generator only ingests
 // these two tiers), so a low-trust row can never produce a corpus auto-count.
 const CONF: Record<string, number> = { verified_2src: 0.97, verified_1src_strong: 0.92 };
 

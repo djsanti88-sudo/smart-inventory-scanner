@@ -12,6 +12,19 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * Parse an integer env var. A MISSING, blank, or non-numeric value falls back to the default.
+ * Guards the production failure mode where the var is present-but-EMPTY (e.g. a Vercel "sensitive"
+ * var that does not decrypt on pull): `Number("" ?? 200)` evaluates to 0, which would silently set a
+ * 0 daily cap / 0 rate limit and block EVERY decode before any provider call. An explicit numeric
+ * value (including 0) is honored; only blank/invalid falls back. To DISABLE lookups, use the kill switch.
+ */
+export function intEnv(raw: string | undefined, fallback: number): number {
+  if (raw == null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export function killSwitchOn(env: NodeJS.ProcessEnv = process.env): boolean {
   const v = env.AI_LOOKUP_KILL_SWITCH;
   return v === "1" || v === "true";
@@ -25,8 +38,8 @@ export function checkRateLimit(
   ip: string,
   opts: { limit?: number; windowMs?: number; now?: number } = {}
 ): { allowed: boolean; retryAfterMs: number; remaining: number } {
-  const limit = opts.limit ?? Number(process.env.AI_LOOKUP_RATE_LIMIT ?? 120);
-  const windowMs = opts.windowMs ?? Number(process.env.AI_LOOKUP_RATE_WINDOW_MS ?? 60_000);
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_RATE_LIMIT, 120);
+  const windowMs = opts.windowMs ?? intEnv(process.env.AI_LOOKUP_RATE_WINDOW_MS, 60_000);
   const now = opts.now ?? Date.now();
   const key = ip || "unknown";
   const b = ipBuckets.get(key);
@@ -56,7 +69,7 @@ function todayKey(now: Date = new Date()): string {
 export function checkAndIncrementDaily(
   opts: { limit?: number; file?: string; dateKey?: string } = {}
 ): { allowed: boolean; used: number; limit: number } {
-  const limit = opts.limit ?? Number(process.env.AI_LOOKUP_DAILY_LIMIT ?? 200);
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
   const file = opts.file ?? counterFile();
   const date = opts.dateKey ?? todayKey();
   let state: DailyState | null = memDaily;
