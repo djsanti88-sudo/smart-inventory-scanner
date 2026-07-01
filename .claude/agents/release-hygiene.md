@@ -36,3 +36,16 @@ block, each finding team `verification`:
 ```
 Then one line: `release_hygiene: <0-100>` (higher = safer / fully shipped) with a half-sentence why.
 Never push, commit, or deploy yourself - you only report. No em dashes or en dashes.
+
+## Deploy-safety gate (release-sentinel) - run before ANY production deploy
+For the deploy decision (not just commit/push), also run `node scripts/release-sentinel.mjs`
+(`npm run release:check`). It EXTENDS this git check into a full DEPLOY gate and BLOCKS on: dirty tree,
+staged generated artifacts, staged secret-risk files, missing exact SHA approval, SHA mismatch, missing
+rollback target, multiple Vercel projects on one repo, wrong Vercel project / production alias, dirty
+(gitDirty=1) deployment, production-branch mismatch, unprotected production branch, Firebase prod-project
+mismatch, Firestore rules drift, a non-demo Firebase project during local proof, and live AI keys present
+during local proof. The cross-system facts (Vercel project count, prod alias/SHA, prod Firebase project,
+branch protection) are READ by you via MCP and passed to the sentinel as SENTINEL_* env - the sentinel is
+pure and never touches the network. `npm run deploy:card` emits the deploy card (masked env names) ending
+in the required owner phrase. NO production deploy is allowed unless the owner types exactly:
+DEPLOY THIS SHA
