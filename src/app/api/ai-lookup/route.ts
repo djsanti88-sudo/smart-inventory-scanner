@@ -430,12 +430,16 @@ export async function POST(request: Request) {
         && providerStatuses.length > 0
         && providerStatuses.every((s) => s.status === "rate_limited" || s.status === "error");
       if (fastPathFailed && !e2eMode()) {
-        const remainingBudget = Math.max(budgetMs - run.latencyMs, 5_000);
+        // The escalation budget is INDEPENDENT of the fast-path budget. When the fast path's only
+        // provider (Gemini) is dead, we give OpenAI a fresh 20s window — not the leftover from the
+        // 8s clamp. This is the only path where a live scan can exceed 8s; it only fires when the
+        // primary provider hard-failed (spending cap, outage), never on a normal slow decode.
+        const ESCALATION_BUDGET_MS = Number(process.env.ESCALATION_BUDGET_MS || 20_000);
         const escRun = await runDecode({
           code, codeType, confidenceThreshold: threshold,
           providers: escProviders,
           enrich: enrich ? (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, corroborate }) : undefined,
-          budgetMs: remainingBudget,
+          budgetMs: ESCALATION_BUDGET_MS,
           trustedHosts: TRUSTED_HOSTS,
         });
         results = [...results, ...escRun.results];
