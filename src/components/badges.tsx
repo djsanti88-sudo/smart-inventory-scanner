@@ -5,16 +5,16 @@ import type { FeedDecodeStatus, MatchType, ScanStatus, SyncStatus } from "@/type
 export function DecodeStatusBadge({ status }: { status: FeedDecodeStatus }) {
   const map: Record<FeedDecodeStatus, [string, string]> = {
     none: ["", ""],
-    decoding: ["bg-blue-100 text-blue-700", "Decoding with AI..."],
-    verified: ["bg-green-100 text-green-800", "Verified AI Decode"],
-    suggested: ["bg-amber-100 text-amber-800", "Suggested"],
-    conflict: ["bg-red-100 text-red-700", "Conflict"],
+    decoding: ["bg-blue-100 text-blue-700 animate-pulse", "Looking up product..."],
+    verified: ["bg-green-100 text-green-800", "Verified match"],
+    suggested: ["bg-amber-100 text-amber-900", "Suggested"],
+    conflict: ["bg-red-100 text-red-800", "Conflict"],
     needs_review: ["bg-zinc-100 text-zinc-600", "Needs review"],
     vendor_label: ["bg-purple-100 text-purple-700", "Vendor label"],
   };
   const [cls, label] = map[status];
   return (
-    <span className={`rounded px-2 py-1 text-sm font-medium ${cls}`} data-testid="decode-row-status">
+    <span className={`rounded-md px-2 py-1 text-sm font-medium ${cls}`} data-testid="decode-row-status">
       {label}
     </span>
   );
@@ -37,28 +37,28 @@ const MATCH_LABEL: Record<MatchType, string> = {
 export function MatchBadge({ type }: { type: MatchType }) {
   const color =
     type === "unknown"
-      ? "bg-red-100 text-red-700"
+      ? "bg-red-100 text-red-800"
       : type === "conflict"
-        ? "bg-amber-100 text-amber-800"
+        ? "bg-amber-100 text-amber-900"
         : "bg-blue-100 text-blue-700";
   return (
-    <span className={`rounded px-2 py-1 text-sm font-medium ${color}`}>{MATCH_LABEL[type]}</span>
+    <span className={`rounded-md px-2 py-1 text-sm font-medium ${color}`}>{MATCH_LABEL[type]}</span>
   );
 }
 
 export function SyncBadge({ status }: { status: SyncStatus }) {
   const map: Record<SyncStatus, string> = {
-    synced: "bg-green-100 text-green-700",
-    pending: "bg-amber-100 text-amber-800",
-    error: "bg-red-100 text-red-700",
+    synced: "bg-green-100 text-green-700 transition-colors duration-300",
+    pending: "bg-amber-100 text-amber-900",
+    error: "bg-red-100 text-red-800",
   };
   const label: Record<SyncStatus, string> = {
-    synced: "Synced",
-    pending: "Pending",
-    error: "Sync error",
+    synced: "Saved",
+    pending: "Not saved yet",
+    error: "Save error",
   };
   return (
-    <span className={`rounded px-2 py-1 text-sm font-medium ${map[status]}`} data-testid="sync-badge">
+    <span className={`rounded-md px-2 py-1 text-sm font-medium ${map[status]}`} data-testid="sync-badge">
       {label[status]}
     </span>
   );
@@ -67,19 +67,19 @@ export function SyncBadge({ status }: { status: SyncStatus }) {
 export function StatusBadge({ status }: { status: ScanStatus }) {
   const map: Record<ScanStatus, string> = {
     known: "bg-green-100 text-green-700",
-    unknown: "bg-red-100 text-red-700",
-    needs_review: "bg-amber-100 text-amber-800",
+    unknown: "bg-red-100 text-red-800",
+    needs_review: "bg-amber-100 text-amber-900",
     resolved: "bg-blue-100 text-blue-700",
     ignored: "bg-zinc-100 text-zinc-600",
-    conflict: "bg-amber-100 text-amber-800",
+    conflict: "bg-amber-100 text-amber-900",
   };
   const label: Record<ScanStatus, string> = {
-    known: "Known",
-    unknown: "Unknown",
+    known: "Counted",
+    unknown: "Not recognised",
     needs_review: "Needs review",
     resolved: "Resolved",
     ignored: "Ignored",
     conflict: "Conflict",
   };
-  return <span className={`rounded px-2 py-1 text-sm font-medium ${map[status]}`}>{label[status]}</span>;
+  return <span className={`rounded-md px-2 py-1 text-sm font-medium ${map[status]}`}>{label[status]}</span>;
 }

@@ -24,3 +24,49 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── Scan flash: green border fades out instead of cutting off ── */
+@keyframes flash-green {
+  0%, 60% { border-color: #22c55e; box-shadow: 0 0 0 2px #bbf7d0; }
+  100% { border-color: #d4d4d8; box-shadow: none; }
+}
+
+/* ── Error shake for unknown/conflict scans ── */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* ── Row entry: new scan rows slide in ── */
+@keyframes row-appear {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── Panel entry: confirmation panels fade in ── */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── Count tick: quantity number pulses on increment ── */
+@keyframes count-tick {
+  0% { transform: scale(1.2); color: #16a34a; }
+  100% { transform: scale(1); }
+}
+
+/* ── Sync success flash ── */
+@keyframes sync-ok {
+  0% { background-color: #bbf7d0; }
+  100% { background-color: #dcfce7; }
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

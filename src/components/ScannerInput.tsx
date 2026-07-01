@@ -37,8 +37,8 @@ export function ScannerInput({
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lastResult, setLastResult] = useState<ScanEvent | null>(null);
-  // Brief green border flash on a successful (counted) scan - a big, obvious "it worked" cue.
-  const [flash, setFlash] = useState(false);
+  // Brief green border flash on a successful (counted) scan; red shake on unknown/error.
+  const [flash, setFlash] = useState<false | "success" | "error">(false);
   // Role-aware scan confirmation. platformOwner sees the technical detail (clean code + match type);
   // a customer ("business") must NEVER see the raw/clean code (denylisted) or internal match type - they
   // see the product NAME + PART NUMBER (primarySku) instead, so the confirmation matches the rest of the
@@ -67,13 +67,15 @@ export function ScannerInput({
     const ev = onScan(raw); // preserve the raw value exactly; cleaning happens downstream
     setLastResult(ev);
 
-    // Flash the input border green when a scan actually counted - a large, obvious success cue.
+    // Flash the input border green when a scan counted; shake on unknown/error.
     if (ev?.status === "known") {
-      setFlash(true);
+      setFlash("success");
       if (flashTimer.current) clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlash(false), 900);
-    } else {
-      setFlash(false);
+    } else if (ev) {
+      setFlash("error");
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlash(false), 400);
     }
 
     el.value = "";
@@ -97,10 +99,10 @@ export function ScannerInput({
   function statusMessage(ev: ScanEvent): string {
     if (isPlatform) {
       return ev.status === "known"
-        ? `Counted: ${ev.cleanCode} (${ev.matchType}). New quantity ${ev.quantityAfterScan}.`
+        ? `Counted: ${ev.cleanCode}. Quantity is now ${ev.quantityAfterScan}.`
         : ev.status === "conflict"
-          ? `Conflict: ${ev.cleanCode} matches more than one product. Sent to Needs Review.`
-          : `Unknown: ${ev.cleanCode}. Sent to Needs Review.`;
+          ? `Conflict: ${ev.cleanCode} matches more than one product. Sent to review.`
+          : `New code: ${ev.cleanCode}. Sent to review for identification.`;
     }
     // Customer view: product-facing only.
     if (ev.status === "known") {
@@ -108,20 +110,21 @@ export function ScannerInput({
       const name = product?.name || "Product";
       const partNumber = product?.primarySku;
       const partLabel = partNumber ? ` (part no. ${partNumber})` : "";
-      return `Counted: ${name}${partLabel}. New quantity ${ev.quantityAfterScan}.`;
+      return `Counted: ${name}${partLabel}. Quantity is now ${ev.quantityAfterScan}.`;
     }
     if (ev.status === "conflict") {
-      return "Conflict: this code matches more than one product. Sent to Needs Review.";
+      return "This code matches more than one product. Check the review list.";
     }
-    return "Unknown code. Sent to Needs Review.";
+    return "New code. Check the review list to identify it.";
   }
 
   const counted = lastResult?.status === "known";
+  const isDecoding = lastResult?.decodeStatus === "decoding";
 
   return (
     <div className="w-full">
       <label htmlFor="scanner-input" className="mb-1.5 block text-base font-semibold text-zinc-800">
-        Scan a code
+        Scan a barcode
       </label>
       <input
         id="scanner-input"
@@ -131,12 +134,17 @@ export function ScannerInput({
         autoComplete="off"
         spellCheck={false}
         disabled={disabled}
-        placeholder="Click here, then scan or type a code and press Enter"
+        autoFocus={autoFocus}
+        placeholder="Scan or type a code"
         onKeyDown={handleKeyDown}
         aria-label="Scan a code"
         data-testid={rest["data-testid"] ?? "scanner-input"}
         className={`w-full rounded-lg border-2 bg-white px-4 py-4 text-xl text-zinc-900 shadow-sm outline-none transition-colors focus:ring-2 focus:ring-blue-200 ${
-          flash ? "border-green-500 ring-2 ring-green-200" : "border-zinc-300 focus:border-blue-500"
+          flash === "success"
+            ? "animate-[flash-green_900ms_ease-out] border-green-500 ring-2 ring-green-200"
+            : flash === "error"
+              ? "animate-[shake_300ms_ease-in-out] border-red-400"
+              : "border-zinc-300 focus:border-blue-500"
         }`}
       />
 
@@ -144,7 +152,7 @@ export function ScannerInput({
           low-vision user can see "it worked" from across the room. Errors are equally large and clear. */}
       {counted ? (
         <div
-          className="mt-3 flex items-center justify-between gap-3 rounded-xl border-2 border-green-600 bg-green-50 px-4 py-3"
+          className="mt-3 flex min-h-[72px] animate-[panel-in_150ms_ease-out] items-center justify-between gap-3 rounded-lg border-2 border-green-600 bg-green-50 px-4 py-3"
           data-testid="scan-success"
           role="status"
           aria-live="polite"
@@ -156,18 +164,27 @@ export function ScannerInput({
             </p>
           </div>
           <div className="shrink-0 text-right">
-            <div className="text-4xl font-extrabold tabular-nums text-green-700">{lastResult!.quantityAfterScan}</div>
+            <div className="animate-[count-tick_300ms_ease-out] text-4xl font-extrabold tabular-nums text-green-700">{lastResult!.quantityAfterScan}</div>
             <div className="text-xs font-medium uppercase tracking-wide text-green-700">on hand</div>
           </div>
         </div>
       ) : lastResult == null ? (
-        <p className="mt-3 text-base text-zinc-600" data-testid="scan-status" role="status" aria-live="polite">
+        <p className="mt-3 min-h-[72px] text-base text-zinc-600" data-testid="scan-status" role="status" aria-live="polite">
           Ready to scan.
         </p>
+      ) : isDecoding ? (
+        <div
+          className="mt-3 min-h-[72px] animate-[panel-in_150ms_ease-out] rounded-lg border-2 border-blue-400 bg-blue-50 px-4 py-3 text-base font-medium text-blue-800"
+          data-testid="scan-status"
+          role="status"
+          aria-live="polite"
+        >
+          Looking up this product... Check the feed below in a moment.
+        </div>
       ) : (
         <div
-          className={`mt-3 rounded-xl border-2 px-4 py-3 text-base font-medium ${
-            lastResult.status === "conflict" ? "border-amber-500 bg-amber-50 text-amber-900" : "border-red-500 bg-red-50 text-red-800"
+          className={`mt-3 min-h-[72px] animate-[panel-in_150ms_ease-out] rounded-lg border-2 px-4 py-3 text-base font-medium ${
+            lastResult.status === "conflict" ? "border-amber-500 bg-amber-50 text-amber-900" : "border-amber-400 bg-amber-50 text-amber-900"
           }`}
           data-testid="scan-status"
           role="status"

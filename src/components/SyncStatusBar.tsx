@@ -20,20 +20,19 @@ export function SyncStatusBar() {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-base">
       <span className="flex items-center gap-1.5" data-testid="online-status">
-        <span className={`inline-block h-2.5 w-2.5 rounded-full ${online ? "bg-green-500" : "bg-zinc-400"}`} />
+        <span className={`inline-block h-2.5 w-2.5 rounded-full ${online ? "bg-green-500" : "bg-zinc-400"}`} aria-hidden="true" />
         {online ? "Online" : "Offline"}
       </span>
 
-      <span className="text-zinc-300">|</span>
+      <span className="h-4 w-px self-center bg-zinc-200" aria-hidden="true" />
 
       <span data-testid="pending-count">
-        {/* platformOwner keeps the precise "Pending sync" wording; a customer sees plain language. */}
-        {isPlatform ? "Pending sync" : pending > 0 ? "Saving" : "Saved"}:{" "}
+        {isPlatform ? "Waiting to save" : pending > 0 ? "Saving" : "All saved"}:{" "}
         <strong className={pending > 0 ? "text-amber-700" : "text-zinc-700"}>{pending}</strong>
       </span>
 
       {pending > 0 && (
-        <span className="text-sm text-amber-700" data-testid="pending-warning">
+        <span className="text-sm text-amber-900" data-testid="pending-warning">
           Saved locally, not synced yet.
         </span>
       )}
@@ -73,8 +72,7 @@ export function SyncStatusBar() {
 
       {lastSyncError && (
         <span className="w-full text-sm text-red-600" data-testid="sync-error">
-          {/* P3: the raw technical error is platformOwner only; a customer gets a plain, non-scary message. */}
-          {isPlatform ? `Last sync error: ${lastSyncError}` : "Some items haven't saved yet. Tap Try saving again."}
+          {isPlatform ? `Last save error: ${lastSyncError}` : "Some items haven't saved yet. Tap Try saving again."}
         </span>
       )}
     </div>

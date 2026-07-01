@@ -37,21 +37,21 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
   const status = review.decodeStatus ?? "none";
   if (status === "verified" && review.exactCodeEvidenceVerifiedByApp) {
     return (
-      <span className="w-fit rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-800" data-testid="decode-status">
-        {isPlatform ? "Verified AI Decode (app-verified)" : "Verified match"}
+      <span className="w-fit rounded-md bg-green-100 px-1.5 py-0.5 text-sm font-medium text-green-800" data-testid="decode-status">
+        {isPlatform ? "Verified match (app-confirmed)" : "Verified match"}
       </span>
     );
   }
   if (status === "conflict") {
     return (
-      <span className="w-fit rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800" data-testid="decode-status">
-        {isPlatform ? "Conflict - providers disagree" : "Conflict - needs review"}
+      <span className="w-fit rounded-md bg-red-100 px-1.5 py-0.5 text-sm font-medium text-red-800" data-testid="decode-status">
+        {isPlatform ? "Conflict - sources disagree" : "Conflict - needs review"}
       </span>
     );
   }
   return (
-    <span className="w-fit rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800" data-testid="decode-status">
-      {isPlatform ? "Suggested - not trusted" : "Suggested product"}
+    <span className="w-fit rounded-md bg-amber-100 px-1.5 py-0.5 text-sm font-medium text-amber-900" data-testid="decode-status">
+      {isPlatform ? "Suggested - needs approval" : "Suggested product"}
     </span>
   );
 }
@@ -66,33 +66,33 @@ export function NeedsReviewTable() {
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="border-b border-zinc-200 px-4 py-3">
-        <h2 className="text-lg font-semibold text-zinc-900">{isPlatform ? "Needs Review" : "Check these"}</h2>
+        <h2 id="review-heading" className="text-lg font-semibold text-zinc-900">{isPlatform ? "Review" : "Check these"}</h2>
         <p className="text-sm text-zinc-700">
           {isPlatform
-            ? "Unknown, vendor-label, or conflicting codes. AI results here are SUGGESTIONS only and are never trusted until you approve them. Approving saves a permanent alias so future scans count automatically."
+            ? "Unknown or conflicting codes. Results here are suggestions only and need your approval. Once approved, the barcode is saved so future scans count automatically."
             : "These codes need a quick look. Pick the right product once, and from then on scanning that code counts it for you."}
         </p>
       </div>
       <div className="overflow-auto">
-        <table className="w-full border-collapse text-left text-base">
-          <thead className="bg-zinc-50 text-sm font-semibold text-zinc-700">
+        <table className="w-full border-collapse text-left text-base" aria-labelledby="review-heading">
+          <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
-              {isPlatform && <th className="px-3 py-2">Raw code</th>}
-              {isPlatform && <th className="px-3 py-2">Clean code</th>}
-              <th className="px-3 py-2">Reason</th>
-              <th className="px-3 py-2">Suggested product</th>
-              <th className="px-3 py-2">Confidence</th>
-              {isPlatform && <th className="px-3 py-2">Provider</th>}
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Sync</th>
-              <th className="px-3 py-2">Actions</th>
+              {isPlatform && <th scope="col" className="px-4 py-3">Raw code</th>}
+              {isPlatform && <th scope="col" className="px-4 py-3">Clean code</th>}
+              <th scope="col" className="px-4 py-3">Reason</th>
+              <th scope="col" className="px-4 py-3">Suggested product</th>
+              <th scope="col" className="px-4 py-3">Confidence</th>
+              {isPlatform && <th scope="col" className="px-4 py-3">Provider</th>}
+              <th scope="col" className="px-4 py-3">Status</th>
+              <th scope="col" className="px-4 py-3">Sync</th>
+              <th scope="col" className="px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody data-testid="review-body">
             {reviews.length === 0 ? (
               <tr>
-                <td colSpan={isPlatform ? 9 : 6} className="px-3 py-6 text-center text-base text-zinc-600">
-                  Nothing to review. Unknown codes will appear here.
+                <td colSpan={isPlatform ? 9 : 6} className="px-4 py-6 text-center text-base text-zinc-600">
+                  Nothing to review. Unrecognised codes will appear here for you to identify.
                 </td>
               </tr>
             ) : (
@@ -142,14 +142,14 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   const btnSecondary = `${btnBase} border border-zinc-300 text-zinc-700 hover:bg-zinc-50`;
 
   return (
-    <tr className="border-t border-zinc-100 align-top" data-testid={`review-row-${review.cleanCode}`}>
-      {isPlatform && <td className="px-3 py-2 font-mono text-xs">{review.rawCode}</td>}
-      {isPlatform && <td className="px-3 py-2 font-mono text-xs">{review.cleanCode}</td>}
-      <td className="max-w-48 px-3 py-2 text-sm text-zinc-700" data-testid="review-reason">
+    <tr className="border-t border-zinc-100 align-top hover:bg-zinc-50" data-testid={`review-row-${review.cleanCode}`}>
+      {isPlatform && <td className="px-4 py-3 font-mono text-sm">{review.rawCode}</td>}
+      {isPlatform && <td className="px-4 py-3 font-mono text-sm">{review.cleanCode}</td>}
+      <td className="max-w-48 px-4 py-3 text-sm text-zinc-700" data-testid="review-reason">
         {review.reason || "Unknown code."}
         {typeof review.autoVerifyScore === "number" && (
-          <span className="mt-1 block text-zinc-500" data-testid="review-score">
-            Confidence: {review.autoVerifyScore}/100 (below auto-save threshold)
+          <span className="mt-1 block text-zinc-600" data-testid="review-score">
+            Confidence too low to save automatically ({review.autoVerifyScore}/100)
           </span>
         )}
         {review.blockingReasons && review.blockingReasons.length > 0 && (
@@ -160,15 +160,15 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           </ul>
         )}
       </td>
-      <td className="max-w-56 px-3 py-2 text-sm">
+      <td className="max-w-56 px-4 py-3 text-sm">
         {review.hasSuggestion || (review.sourceUrls?.length ?? 0) > 0 ? (
           <div className="flex flex-col gap-1">
             <DecodeBadge review={review} isPlatform={isPlatform} />
             {isPlatform && review.evidenceStrength && review.evidenceStrength !== "none" && (
-              <span className="text-zinc-500" data-testid="evidence-strength">
-                Evidence: {review.evidenceStrength.replace(/_/g, " ")} - app-verified:{" "}
-                {review.exactCodeEvidenceVerifiedByApp ? "yes" : "no"}
-                {review.crossCheckDecision ? ` - cross-check: ${review.crossCheckDecision}` : ""}
+              <span className="text-zinc-600" data-testid="evidence-strength">
+                Evidence: {({ url_only: "URL match", snippet: "Text snippet", grounding_chunk: "Grounded source", fetched_source: "Fetched page" } as Record<string, string>)[review.evidenceStrength] ?? review.evidenceStrength.replace(/_/g, " ")}{" "}
+                ({review.exactCodeEvidenceVerifiedByApp ? "verified by app" : "not verified"})
+                {review.crossCheckDecision ? ` - ${({ agree: "two sources agree", single_provider: "one source only", conflict: "sources disagree", weak: "low confidence" } as Record<string, string>)[review.crossCheckDecision] ?? review.crossCheckDecision}` : ""}
               </span>
             )}
             <span className="font-medium text-zinc-800">
@@ -189,8 +189,8 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               </span>
             )}
             {isPlatform && review.prefixConflictReason && (
-              <span className="w-fit rounded bg-amber-50 px-1.5 py-0.5 text-amber-800" data-testid="prefix-conflict">
-                Prefix firewall: {review.prefixConflictReason}
+              <span className="w-fit rounded-md bg-amber-50 px-1.5 py-0.5 text-sm text-amber-900" data-testid="prefix-conflict">
+                Brand check blocked: {review.prefixConflictReason}
               </span>
             )}
             {isPlatform && review.reverseUpcConflictNote && (
@@ -218,17 +218,17 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           <span className="text-zinc-600">No suggestion</span>
         )}
       </td>
-      <td className="px-3 py-2 text-sm tabular-nums">
+      <td className="px-4 py-3 text-sm tabular-nums">
         {review.confidence > 0 ? `${Math.round(review.confidence * 100)}%` : "-"}
       </td>
-      {isPlatform && <td className="px-3 py-2 text-xs">{review.providerName || "-"}</td>}
-      <td className="px-3 py-2">
+      {isPlatform && <td className="px-4 py-3 text-sm">{review.providerName || "-"}</td>}
+      <td className="px-4 py-3">
         <StatusBadge status={review.status === "open" ? "needs_review" : (review.status as "resolved" | "ignored")} />
       </td>
-      <td className="px-3 py-2">
+      <td className="px-4 py-3">
         <SyncBadge status={review.syncStatus} />
       </td>
-      <td className="px-3 py-2">
+      <td className="px-4 py-3">
         {warn && (
           <div className="mb-2 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-800" data-testid="mismatch-warning">
             <p className="font-semibold">Possible wrong product</p>
@@ -259,10 +259,10 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
         )}
         {isPlatform && !resolved && discovered.length > 0 && (
           <div className="mb-2 rounded border border-zinc-200 bg-zinc-50 p-2" data-testid="discovered-identifiers">
-            <p className="text-[11px] font-medium text-zinc-600">Discovered identifiers (select to approve as aliases)</p>
+            <p className="text-xs font-medium text-zinc-600">Extra barcodes found (check the ones to save for future scans)</p>
             <div className="mt-1 flex flex-col gap-0.5">
               {discovered.map((d) => (
-                <label key={d.code} className="flex items-center gap-1 text-[11px] text-zinc-600">
+                <label key={d.code} className="flex items-center gap-1 text-xs text-zinc-600">
                   <input
                     type="checkbox"
                     data-testid={`discovered-${d.code}`}
@@ -410,13 +410,13 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 onClick={() => void liveDecode(review.id)}
                 title={
                   aiEnabled
-                    ? "Run a live AI decode (cross-checked + app-verified evidence). Result is a suggestion you approve."
+                    ? "Look up this barcode with AI. The result is a suggestion you approve."
                     : "AI lookup is off (enable it in Settings)"
                 }
                 className={`${btnSecondary} disabled:opacity-40`}
                 disabled={!aiEnabled}
               >
-                Live decode
+                Look up with AI
               </button>
             )}
             {isPlatform && (
@@ -424,16 +424,16 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 type="button"
                 data-testid="stronger-redecode"
                 onClick={() => void correctionRecheck(review.id, { retry: true })}
-                title="Re-decode with the stronger Gemini Pro model (correction-only). Result is a suggestion you approve - never auto-saved."
+                title="Try again with a more thorough lookup. The result is a suggestion you approve."
                 className={`${btnBase} border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-40`}
                 disabled={!aiEnabled}
               >
-                Re-decode (stronger model)
+                Deep lookup
               </button>
             )}
             <label className="flex items-center gap-1.5 text-base text-zinc-700">
-              <input type="checkbox" className="h-4 w-4" checked={applyToCount} onChange={(e) => setApplyToCount(e.target.checked)} />
-              count it
+              <input type="checkbox" className="h-5 w-5 rounded" checked={applyToCount} onChange={(e) => setApplyToCount(e.target.checked)} />
+              Add to count
             </label>
           </div>
         )}

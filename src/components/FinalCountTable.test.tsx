@@ -27,13 +27,13 @@ afterEach(() => {
 });
 
 describe("FinalCountTable role gating (Phase 6)", () => {
-  it("hides Primary barcode + Aliases (and the raw codes) from a business/customer role", () => {
+  it("hides Barcode + Other codes scanned (and the raw codes) from a business/customer role", () => {
     delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER; // business / customer
     seed();
     render(<FinalCountTable />);
     expect(screen.getByText("Test Widget")).toBeTruthy(); // product IS visible
-    expect(screen.queryByText("Primary barcode")).toBeNull();
-    expect(screen.queryByText("Aliases")).toBeNull();
+    expect(screen.queryByText("Barcode")).toBeNull();
+    expect(screen.queryByText("Other codes scanned")).toBeNull();
     expect(screen.queryAllByText(/111222333444/).length).toBe(0); // raw barcode not leaked
     expect(screen.queryAllByText(/ALT-CODE-9/).length).toBe(0); // alias DB not leaked
     // Mark wrong (destructive alias repair) is platformOwner-only
@@ -43,12 +43,12 @@ describe("FinalCountTable role gating (Phase 6)", () => {
     expect(screen.queryByTestId("remove-count-p1")).not.toBeNull();
   });
 
-  it("shows Primary barcode + Aliases to the platformOwner (Mark wrong hidden for now)", () => {
+  it("shows Barcode + Other codes scanned to the platformOwner (Mark wrong hidden for now)", () => {
     process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1"; // platformOwner
     seed();
     render(<FinalCountTable />);
-    expect(screen.queryByText("Primary barcode")).not.toBeNull();
-    expect(screen.queryByText("Aliases")).not.toBeNull();
+    expect(screen.queryByText("Barcode")).not.toBeNull();
+    expect(screen.queryByText("Other codes scanned")).not.toBeNull();
     expect(screen.queryAllByText(/111222333444/).length).toBeGreaterThan(0);
     // Owner request: row is simplified to Modify + Delete; Mark wrong + hard product-delete are hidden
     // behind SHOW_ADVANCED_ACTIONS (code kept). The two core controls remain.
