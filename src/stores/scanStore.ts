@@ -1116,6 +1116,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         set((s) => ({ scanFeed: [event, ...s.scanFeed] }));
 
+        // OWNER RULE "scan N = count N": count EVERY unresolved scan immediately, synchronously, before any
+        // network work. The AI/catalog lookup below only ENRICHES this provisional row (name/verified); it
+        // can never again decide whether the scan counts. ensureProvisionalCount is idempotent, so the later
+        // decode handlers (which filter on status !== "known") find nothing to re-count.
+        get().ensureProvisionalCount(cleaned.cleanCode, resolution.reason);
+
         if (!existingOpen) {
           const review: UnknownCodeReview = {
             id: idFactory(),

@@ -20,3 +20,38 @@ describe("ensureProvisionalCount is idempotent", () => {
     expect(totalCount(store)).toBe(1);
   });
 });
+
+describe("every scan counts synchronously, regardless of lookup state", () => {
+  it("counts an unknown scan when AI is OFF", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    store.getState().processScan("222222222229");
+    expect(totalCount(store)).toBe(1);
+  });
+
+  it("counts an unknown scan when OFFLINE", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    store.getState().setOnline(false);
+    store.getState().processScan("333333333332");
+    expect(totalCount(store)).toBe(1);
+  });
+
+  it("counts an unknown scan when the circuit breaker is OPEN", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, emergencyStop: true });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    store.getState().processScan("444444444445");
+    expect(totalCount(store)).toBe(1);
+  });
+
+  it("re-scanning the same unknown code increments the SAME row (count 2, one product)", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    store.getState().processScan("555555555558");
+    store.getState().processScan("555555555558");
+    expect(totalCount(store)).toBe(2);
+    expect(store.getState().finalCounts.length).toBe(1);
+  });
+});
