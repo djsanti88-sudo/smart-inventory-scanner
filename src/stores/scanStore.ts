@@ -303,6 +303,10 @@ export interface ScanState {
    *  SAFE label (never fabricated manufacturer anatomy for non-GS1 codes; never an approved alias / verified
    *  product). Idempotent (no double count). The review stays OPEN so a retry can identify it. */
   applyDecodeFallback: (reviewId: string, reason: string) => void;
+  /** Idempotent primitive: count one provisional row for `code` (create it if absent), keyed by an
+   *  already-existing scan-feed row. Safe to call any number of times for the same code (never double
+   *  counts). Used synchronously by processScan and by applyDecodeFallback. */
+  ensureProvisionalCount: (code: string, reason: string) => void;
   /** Tasks 5+6: client-orchestrated background verify. After a tire scan's fast decode lands as
    *  suggested/needs_review, fire ONE `mode:"decode-deep"` request WITH `scanContext:"tire"` (the
    *  page-fetch verify gate cannot fire without it). On a `verified` decideDecode result, route it
@@ -2024,12 +2028,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
       },
 
-      applyDecodeFallback: (reviewId, reason) => {
+      ensureProvisionalCount: (code, reason) => {
         const st0 = get();
-        const review = st0.needsReviewQueue.find((r) => r.id === reviewId);
-        if (!review || review.status !== "open") return;
-        const code = review.cleanCode;
-        // IDEMPOTENT: if this code is already counted (any path), do nothing - never double count on retry.
+        // IDEMPOTENT: if this code is already counted (any path), do nothing - never double count.
         const counted = new Set(st0.finalCounts.map((c) => c.productId));
         const existing = st0.products.find(
           (p) =>
@@ -2061,16 +2062,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         set((st) => ({
           products: [...st.products, provProduct],
           finalCounts: counts,
-          // Review stays OPEN so a retry can identify it; surface the safe suggestion + honest reason.
           needsReviewQueue: st.needsReviewQueue.map((r) =>
-            r.id === reviewId ? { ...r, decodeStatus: "needs_review", reason: r.reason || reason, suggestedProductName: r.suggestedProductName || fbName } : r,
+            r.cleanCode === code && r.status === "open"
+              ? { ...r, decodeStatus: "needs_review", reason: r.reason || reason, suggestedProductName: r.suggestedProductName || fbName }
+              : r,
           ),
           scanFeed: st.scanFeed.map((e) =>
             ev && e.id === ev.id
-              ? { ...e, matchedProductId: provId, status: "known", quantityAfterScan: qty, decodeStatus: "suggested", reason: e.reason || reason }
+              ? { ...e, matchedProductId: provId, status: "known", quantityAfterScan: qty, decodeStatus: "suggested", syncStatus: "synced" as const, reason: e.reason || reason }
               : e,
           ),
         }));
+      },
+
+      applyDecodeFallback: (reviewId, reason) => {
+        const review = get().needsReviewQueue.find((r) => r.id === reviewId);
+        if (!review || review.status !== "open") return;
+        get().ensureProvisionalCount(review.cleanCode, reason);
       },
 
       backgroundVerifyDeep: async (reviewId) => {
