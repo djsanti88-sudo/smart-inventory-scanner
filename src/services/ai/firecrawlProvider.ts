@@ -97,6 +97,77 @@ function creditsFrom(d: unknown): number {
   return typeof n === "number" && Number.isFinite(n) ? n : 0;
 }
 
+// --- Cost-optimized single-URL scrape (Plan D Task 1) ---------------------------------------------
+// Used when we already have a candidate URL (from a barcode-DB hit or an earlier cheap tier) and just
+// need the page text for OUR extractor to read. This is the workhorse path: basic proxy + markdown
+// only + onlyMainContent = 1 credit/page (NEVER json/LLM-extract mode, which costs 5). It rotates
+// across up to 4 Firecrawl API keys so one exhausted key never blocks a lookup, and it NEVER throws
+// into the scan flow - a fully exhausted/absent key set is a clean null ("unavailable").
+
+export interface FirecrawlCheapDeps {
+  fetchImpl?: FcFetch;
+  signal?: AbortSignal;
+  // Explicit key list for tests/callers that already resolved keys. When omitted, falls back to
+  // FIRECRAWL_API_KEY_1..4 (then the legacy single FIRECRAWL_API_KEY) read from env, server-side only.
+  apiKeys?: string[];
+}
+
+export interface FirecrawlCheapResult {
+  markdown: string;
+  title: string;
+  creditsUsed: number;
+  keyIndex: number; // which key (0-based, in rotation order) actually served the request
+}
+
+/** Reads FIRECRAWL_API_KEY_1..4 in order (skipping unset ones); falls back to legacy FIRECRAWL_API_KEY. */
+export function firecrawlKeysFromEnv(): string[] {
+  const numbered = [1, 2, 3, 4]
+    .map((n) => process.env[`FIRECRAWL_API_KEY_${n}`])
+    .filter((k): k is string => !!k && k.trim().length > 0);
+  if (numbered.length > 0) return numbered;
+  const legacy = process.env.FIRECRAWL_API_KEY;
+  return legacy && legacy.trim().length > 0 ? [legacy] : [];
+}
+
+/**
+ * Scrape ONE known URL as cheaply as possible (1 credit, basic proxy, markdown-only) and rotate
+ * across configured keys when a key is out of credits (402) or rate-limited (429). Any other failure,
+ * or a fully exhausted key list, resolves to null - never throws - so a bad key never breaks a scan.
+ */
+export async function firecrawlScrapeCheap(
+  url: string,
+  deps: FirecrawlCheapDeps = {},
+  opts?: { maxAge?: number; proxy?: "basic" | "stealth" },
+): Promise<FirecrawlCheapResult | null> {
+  if (!isSafePublicUrl(url)) return null;
+  const keys = deps.apiKeys && deps.apiKeys.length > 0 ? deps.apiKeys.filter(Boolean) : firecrawlKeysFromEnv();
+  if (keys.length === 0) return null;
+
+  const fetchFn = deps.fetchImpl ?? (globalThis.fetch as unknown as FcFetch);
+  const body: Record<string, unknown> = { url, formats: ["markdown"], onlyMainContent: true, proxy: opts?.proxy ?? "basic" };
+  if (opts?.maxAge != null) body.maxAge = opts.maxAge;
+
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const res = await fetchFn(`${FIRECRAWL_BASE}/scrape`, {
+        method: "POST",
+        headers: headers(keys[i]),
+        body: JSON.stringify(body),
+        signal: deps.signal,
+      });
+      if (res.status === 402 || res.status === 429) continue; // this key is out of credits/quota: rotate
+      if (!res.ok) return null; // any other failure: clean unavailable, never throw into the scan
+      const d = (await res.json()) as { data?: { markdown?: string; md?: string; metadata?: { title?: string; ogTitle?: string } } };
+      const markdown = String(d?.data?.markdown ?? d?.data?.md ?? "");
+      const title = String(d?.data?.metadata?.title ?? d?.data?.metadata?.ogTitle ?? "");
+      return { markdown, title, creditsUsed: creditsFrom(d), keyIndex: i };
+    } catch {
+      continue; // network/parse error on this key: try the next one rather than failing the whole lookup
+    }
+  }
+  return null; // every key exhausted/rate-limited: clean unavailable, never throw
+}
+
 const noneEvidence = (): EvidenceResult => ({
   verified: false,
   strength: "none",
