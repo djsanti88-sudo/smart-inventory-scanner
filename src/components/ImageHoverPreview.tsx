@@ -23,6 +23,9 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
       <button
         type="button"
         onClick={() => setOpen(true)}
+        onFocus={() => setHovering(true)}
+        onBlur={() => setHovering(false)}
+        aria-label={`View image for ${alt}`}
         className="text-sm font-medium text-blue-600 underline underline-offset-2 hover:text-blue-800"
         data-testid="image-link"
       >
@@ -31,7 +34,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
 
       {hovering && (
         <span
-          className="absolute left-0 top-6 z-20 block w-40 rounded-md border border-zinc-200 bg-white p-2 shadow-lg"
+          className="absolute left-0 top-6 z-20 block w-40 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg"
           data-testid="image-hover-card"
         >
           {broken ? (
@@ -43,6 +46,7 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
             <img
               src={imageUrl}
               alt={alt}
+              loading="lazy"
               className="h-24 w-full rounded object-contain"
               onError={() => setBroken(true)}
             />
@@ -54,6 +58,10 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => setOpen(false)}
+          onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={alt}
           data-testid="image-modal"
         >
           <div className="max-w-lg rounded-lg bg-white p-4" onClick={(e) => e.stopPropagation()}>

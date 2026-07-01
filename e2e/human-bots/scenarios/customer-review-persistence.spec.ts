@@ -19,7 +19,7 @@ async function scan(page: Page, code: string) {
 }
 
 const reviewRows = (page: Page) => page.locator('[data-testid^="review-row-"]');
-const badge = (page: Page) => page.getByRole("link", { name: /Needs Review/ }).locator("span");
+const badge = (page: Page) => page.getByRole("link", { name: /Review/ }).locator("span");
 
 test("CustomerReviewPersistenceBot: pending reviews + badge survive a full reload (P1)", async ({ page }) => {
   mkdirSync(PROOF, { recursive: true });
@@ -28,7 +28,7 @@ test("CustomerReviewPersistenceBot: pending reviews + badge survive a full reloa
   await page.goto("/scan");
   for (const c of codes) await scan(page, c);
   // Sanity: the most recent scan is in the feed as Needs Review (feed prepends).
-  await expect(page.getByTestId("scan-feed-body").locator("tr").first()).toContainText(/needs review|unknown/i);
+  await expect(page.getByTestId("scan-feed-body").locator("tr").first()).toContainText(/needs review|not recognised/i);
 
   await page.goto("/review");
   await expect(reviewRows(page).first()).toBeVisible();

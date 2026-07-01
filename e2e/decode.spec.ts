@@ -132,7 +132,7 @@ test("live decode: verified vs suggested vs conflict vs vendor label, all mocked
   };
 
   await decodeOn("049000111222");
-  await expect(page.getByTestId("review-row-049000111222").getByTestId("decode-status")).toHaveText(/Verified AI Decode/);
+  await expect(page.getByTestId("review-row-049000111222").getByTestId("decode-status")).toHaveText(/Verified match/);
   // Verified, but NOT auto-counted (default), still open for approval.
   await expect(page.getByTestId("review-row-049000111222")).toContainText("Needs review");
 

@@ -78,7 +78,7 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
 
   // Verified: unknown scan auto-decodes AND AUTO-ADDS the product to the count (no clicking).
   await scan(page, "878106003504");
-  await expect(page.getByTestId("scan-feed-body")).toContainText("Verified AI Decode");
+  await expect(page.getByTestId("scan-feed-body")).toContainText("Verified match");
   await expect(page.getByTestId("final-count-body")).toContainText("Coca-Cola Classic"); // auto-added
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // focus retained across async decode
   expect(postHits).toBeGreaterThan(0); // AI WAS called automatically

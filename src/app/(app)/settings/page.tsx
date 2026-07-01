@@ -174,9 +174,9 @@ export default function SettingsPage() {
           onChange={(v) => setEmergencyStop(v)}
         />
         {aiStatus.missingKeys.length > 0 && (
-          <p className="text-xs text-red-600" data-testid="missing-keys-settings">
-            Missing keys: {aiStatus.missingKeys.join(", ")}. Add them to .env.local (server-side only)
-            and restart the dev server, then click Refresh.
+          <p className="text-xs text-red-700" data-testid="missing-keys-settings">
+            Missing API keys: {aiStatus.missingKeys.join(", ")}. Ask your developer to add these to the
+            server configuration, then click Refresh status.
           </p>
         )}
         <button
@@ -366,16 +366,16 @@ function Toggle({
   return (
     <label className="flex cursor-pointer items-center justify-between gap-4">
       <span className="text-sm text-zinc-600">{label}</span>
-      <span className="relative inline-flex">
+      <span className="relative inline-flex h-6 w-10">
         <input
           type="checkbox"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
           data-testid={testid}
-          className="peer sr-only"
+          className="absolute inset-0 z-10 cursor-pointer opacity-0"
         />
-        <span className={`block h-6 w-10 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-zinc-300"}`} />
-        <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : ""}`} />
+        <span className={`pointer-events-none block h-6 w-10 rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-zinc-300"}`} />
+        <span className={`pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : ""}`} />
       </span>
     </label>
   );

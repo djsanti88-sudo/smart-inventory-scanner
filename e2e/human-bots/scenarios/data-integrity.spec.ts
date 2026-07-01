@@ -43,7 +43,7 @@ test("DataIntegrityBot: increment correctness, refresh persistence, unknown -> N
   await scan(page, "999000111222");
   const feedRow = page.getByTestId("scan-feed-body").locator("tr").first();
   const feedText = (await feedRow.innerText()).toLowerCase();
-  checks.push({ check: "unknown code -> Needs Review (not auto-resolved)", pass: /needs review|unknown/.test(feedText), detail: feedText.slice(0, 80) });
+  checks.push({ check: "unknown code -> Needs Review (not auto-resolved)", pass: /needs review|not recognised/.test(feedText), detail: feedText.slice(0, 80) });
   await page.screenshot({ path: `${PROOF}/02-unknown.png`, fullPage: true });
 
   const allPass = checks.every((c) => c.pass);

@@ -104,9 +104,9 @@ export function CleanupRecommendations() {
   return (
     <div className="flex flex-col gap-3" data-testid="cleanup-recommendations">
       <p className="text-xs text-zinc-500">
-        Recommendation-first cleanup. Review exactly what is recommended for removal and why, then you
-        press the final button. A JSON backup downloads first and you can Undo. Verified, seed, and
-        still-counted products are never offered for removal. Local only.
+        Review what is recommended for removal and why before anything is deleted. A backup file
+        downloads first, and you can undo any removal. Products that have been verified or still have
+        counts are never removed automatically. Changes stay on this device only.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -133,7 +133,7 @@ export function CleanupRecommendations() {
       {isPlatform && (backfillCandidates.length > 0 || lastIdentifierBackfill) && (
         <div className="flex flex-wrap items-center gap-2 rounded border border-zinc-200 p-2" data-testid="identifier-backfill">
           <span className="text-xs text-zinc-600">
-            {backfillCandidates.length} product(s) carry a barcode only in the name. Backfill the barcode field so re-scans dedup cleanly.
+            {backfillCandidates.length} product(s) have a barcode in the name but not in the barcode field. Fix this so the same product is not counted twice.
           </span>
           {backfillCandidates.length > 0 && (
             <button type="button" data-testid="backfill-apply" onClick={runBackfill}

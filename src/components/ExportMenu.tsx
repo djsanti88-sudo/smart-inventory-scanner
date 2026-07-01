@@ -58,12 +58,12 @@ export function ExportMenu() {
         ] },
         { group: "Activity", datasets: [
           { testid: "export-raw-log", title: "Raw scan log", filenameBase: "raw-scan-log", rows: s.scanFeed.length, csv: () => exportRawScanLog(s.scanFeed) },
-          { testid: "export-unknowns", title: "Unknowns", filenameBase: "unknown-codes", rows: s.needsReviewQueue.length, csv: () => exportUnknowns(s.needsReviewQueue) },
-          { testid: "export-pending", title: "Pending queue", filenameBase: "pending-sync", rows: s.pendingSyncQueue.length, csv: () => exportPendingQueue(s.pendingSyncQueue) },
+          { testid: "export-unknowns", title: "Unrecognised codes", filenameBase: "unknown-codes", rows: s.needsReviewQueue.length, csv: () => exportUnknowns(s.needsReviewQueue) },
+          { testid: "export-pending", title: "Items waiting to sync", filenameBase: "pending-sync", rows: s.pendingSyncQueue.length, csv: () => exportPendingQueue(s.pendingSyncQueue) },
         ] },
         { group: "Catalog", datasets: [
           { testid: "export-products", title: "Products", filenameBase: "products", rows: s.products.length, csv: () => exportProducts(s.products) },
-          { testid: "export-aliases", title: "Aliases", filenameBase: "aliases", rows: s.aliases.length, csv: () => exportAliases(s.aliases) },
+          { testid: "export-aliases", title: "Barcode mappings", filenameBase: "aliases", rows: s.aliases.length, csv: () => exportAliases(s.aliases) },
         ] },
       ]
     : [
@@ -110,7 +110,7 @@ export function ExportMenu() {
     const r = s.importProductsCsv(text);
     const conflictNote = r.conflicts.length ? `, ${r.conflicts.length} conflict(s) skipped` : "";
     const dupNote = r.duplicates ? `, ${r.duplicates} duplicate(s)` : "";
-    setImportMsg(`Imported ${r.productsCreated} product(s), ${r.aliasesCreated} alias(es) from ${r.rowsParsed} row(s)${dupNote}${conflictNote}.`);
+    setImportMsg(`Imported ${r.productsCreated} products and ${r.aliasesCreated} barcodes from ${r.rowsParsed} rows${dupNote}${conflictNote}.`);
   }
 
   const FORMATS: { fmt: Fmt; label: string }[] = [
@@ -138,7 +138,7 @@ export function ExportMenu() {
           <div
             data-testid="export-menu"
             role="menu"
-            className="absolute left-0 z-20 mt-1 w-80 rounded-xl border border-zinc-200 bg-white p-2 shadow-lg"
+            className="absolute left-0 z-20 mt-1 w-80 rounded-lg border border-zinc-200 bg-white p-2 shadow-lg"
           >
             {groups.map((g) => (
               <div key={g.group} className="mb-1 last:mb-0">
@@ -161,7 +161,7 @@ export function ExportMenu() {
                             data-testid={fmt === "csv" ? d.testid : `${d.testid}-${fmt}`}
                             disabled={d.rows === 0 || isBusy}
                             onClick={() => void run(d, fmt)}
-                            className="min-w-[44px] rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40"
+                            className="min-h-[44px] min-w-[44px] rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40"
                             title={`${label} - ${d.title}`}
                           >
                             {isBusy ? "..." : isDone ? "✓" : label}
