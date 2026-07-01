@@ -1515,7 +1515,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             set((s) => ({
               scanFeed: s.scanFeed.map((e) =>
                 e.cleanCode === review.cleanCode &&
-                (e.decodeStatus === "decoding" || e.decodeStatus === "needs_review")
+                e.status !== "resolved" &&
+                (e.decodeStatus === "decoding" || e.decodeStatus === "needs_review" || e.decodeStatus === "suggested")
                   ? { ...e, decodeStatus: "verified" as const, reason: "Matched from global catalog - no AI used." }
                   : e,
               ),
@@ -1843,6 +1844,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : undefined,
               newProduct,
             });
+            // TASK 3: the scan was counted synchronously, so its feed row is already "known" (which
+            // resolveUnknown's resolved-row remap skips). Flip that row's badge to "verified" so the feed
+            // shows the auto-verified decode instead of the stale "suggested" placeholder badge.
+            set((st) => ({
+              scanFeed: st.scanFeed.map((e) =>
+                e.cleanCode === review.cleanCode && e.status === "known"
+                  ? { ...e, decodeStatus: "verified" as ScanEvent["decodeStatus"], reason: decision?.reason ?? e.reason }
+                  : e,
+              ),
+            }));
           } else {
             // DECODE-EVERYTHING provisional count: EVERY scan that reached decode gets counted, even if
             // the AI returned a weak/empty product or no product at all. Owner rule: scan 10 = count 10.
@@ -1877,6 +1888,35 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 };
                 set((st) => ({ products: [...st.products, provProduct] }));
                 emitAudit({ entityType: "Product", entityId: provId, action: "product_created", metadata: { code, origin: "ai_suggested_provisional" } });
+              } else if (hasUsableName) {
+                // TASK 3 ENRICH: the scan was already counted synchronously (ensureProvisionalCount) as an
+                // "Unidentified item" placeholder. Upgrade that SAME row in place with the decoded identity
+                // (name / brand / specs) - NEVER re-count (its feed row is already "known"). It stays
+                // provisional + unverified; the review stays open for human confirmation.
+                const enrichId = provId;
+                set((st) => ({
+                  products: st.products.map((p) =>
+                    p.id === enrichId
+                      ? {
+                          ...p,
+                          name: provName,
+                          brand: best?.brand ?? p.brand,
+                          category: best?.category ?? p.category,
+                          specsShort: best?.specsShort ?? p.specsShort,
+                          specsFull: best?.specsFull ?? p.specsFull,
+                          primarySku: p.primarySku || (best?.primarySku ?? ""),
+                          gtin: p.gtin || (best?.gtin ?? ""),
+                          upc: p.upc || (best?.upc ?? ""),
+                          ean: p.ean || (best?.ean ?? ""),
+                          imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? p.imageUrl) : p.imageUrl,
+                          productUrl: best?.productUrl || p.productUrl,
+                          confidence: decision?.confidence ?? p.confidence,
+                          updatedAt: now(),
+                          updatedBy: "ai",
+                        }
+                      : p,
+                  ),
+                }));
               }
               // Count it on the EXISTING scan event for this code (idempotent by event id), and surface the
               // provisional product + qty on that feed row while keeping the "Suggested" badge.
@@ -1891,6 +1931,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   scanFeed: st.scanFeed.map((e) =>
                     e.id === ev.id
                       ? { ...e, matchedProductId: provId!, status: "known", quantityAfterScan: count.quantity, decodeStatus: hasUsableName ? "suggested" : "needs_review", syncStatus: "synced" as const }
+                      : e,
+                  ),
+                }));
+              } else {
+                // Already counted synchronously at scan time: just refresh the decode badge on the known
+                // provisional row (no re-count). Never downgrade a row already flipped to "verified".
+                const badge: ScanEvent["decodeStatus"] = hasUsableName ? "suggested" : "needs_review";
+                set((st) => ({
+                  scanFeed: st.scanFeed.map((e) =>
+                    e.cleanCode === code && e.status === "known" && e.decodeStatus !== "verified" && e.matchedProductId === provId
+                      ? { ...e, decodeStatus: badge }
                       : e,
                   ),
                 }));
@@ -2339,6 +2390,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // (no double-count) - it only upgrades the product to verified + adds the approved alias.
         let approvingProvisional = false;
 
+        // TASK 3 (scan N = count N): ensureProvisionalCount mints a provisional placeholder product for every
+        // unresolved scan and counts it synchronously. When the human/decode later resolves that code to a
+        // DIFFERENT product (or a genuine conflict), the placeholder must be merged/removed so a unique code
+        // never leaves a duplicate product row. `provOrphanId` is that placeholder for THIS review's code;
+        // `removeOrphanId` / `orphanTransferTargetId` drive the merge at commit time.
+        const countedIdsForOrphan = new Set(state.finalCounts.map((c) => c.productId));
+        const provOrphanId =
+          state.products.find(
+            (p) =>
+              p.provisional === true &&
+              countedIdsForOrphan.has(p.id) &&
+              p.status !== "archived" &&
+              [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku]
+                .map((c) => (c ?? "").trim())
+                .includes(review.cleanCode),
+          )?.id ?? null;
+        let removeOrphanId: string | null = null;
+        let orphanTransferTargetId: string | null = null;
+
         if (action === "create_new") {
           const np = payload.newProduct ?? {};
 
@@ -2369,6 +2439,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
           for (const p of state.products) {
             if (!countedProductIds.has(p.id) || p.status === "archived") continue;
+            // The provisional placeholder for THIS code is the row being resolved, not a competing owner -
+            // exclude it so it never causes a false "multiple products own this identity" conflict.
+            if (p.id === provOrphanId) continue;
             const pCodes = [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).filter(Boolean);
             if (pCodes.some((c) => identityCodes.includes(c))) matchedIds.add(p.id);
             // BARCODE-IN-NAME DEDUP (P2): a legacy product can carry its barcode ONLY inside the name
@@ -2377,10 +2450,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // EXACT whole token in its name (never fuzzy name matching). >1 match -> conflict block below.
             else if (blobContainsCodeToken(p.name, identityCodes)) matchedIds.add(p.id);
           }
+          if (provOrphanId) matchedIds.delete(provOrphanId); // never let the placeholder count as an owner
 
           if (matchedIds.size > 1) {
             // MORE THAN ONE existing product owns this identity -> never guess; keep it in Needs Review
             // (same rule as the resolver conflict guard). The human picks the right one via link_existing.
+            // Remove this code's transient provisional placeholder (its count too): the scan is unresolved
+            // again until the human picks, and the row must not linger as a duplicate product.
+            if (provOrphanId) {
+              const oid = provOrphanId;
+              set((st) => ({
+                products: st.products.filter((p) => p.id !== oid),
+                finalCounts: st.finalCounts.filter((c) => c.productId !== oid),
+                scanFeed: st.scanFeed.map((e) =>
+                  e.matchedProductId === oid
+                    ? { ...e, matchedProductId: null, status: "needs_review" as const, decodeStatus: "needs_review" as ScanEvent["decodeStatus"] }
+                    : e,
+                ),
+              }));
+            }
             set({ lastAliasConflicts: [...matchedIds].map((existingProductId) => ({ reviewId, code: review.cleanCode, existingProductId })) });
             emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "alias_conflict_blocked", metadata: { code: review.cleanCode, reason: "dedup_multiple_match", productIds: [...matchedIds].join(",") } });
             return;
@@ -2390,6 +2478,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // EXACTLY ONE existing product owns this identity -> reuse it (count the existing row) and fall
             // through to the alias-add + applyToCount path. Do NOT create a duplicate.
             productId = [...matchedIds][0];
+            // TASK 3: this code's provisional placeholder is being merged into a DIFFERENT existing product.
+            // Move its count onto that product and remove the placeholder; do NOT re-count (approvingProvisional).
+            if (provOrphanId && provOrphanId !== productId) {
+              removeOrphanId = provOrphanId;
+              orphanTransferTargetId = productId;
+              approvingProvisional = true;
+            }
             // PHASE 2: if the reused row is a PROVISIONAL count, this resolution CONFIRMS it -> upgrade it
             // in place to a verified, non-provisional product (the approved alias is added below, so future
             // scans resolve it as a normal Known) and do NOT re-count it (it was already counted).
@@ -2429,6 +2524,50 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               }
             }
             emitAudit({ entityType: "Product", entityId: productId, action: "product_dedup_reused", metadata: { code: review.cleanCode, origin: payload.origin ?? "human" } });
+          } else if (provOrphanId) {
+            // TASK 3: no OTHER product owns this identity, but this code already has a provisional placeholder
+            // (counted synchronously at scan time). Upgrade THAT row in place into the created product: reuse
+            // its id + its existing count (never re-count), and run the full create machinery below (multi-code
+            // aliases, product_created audit, catalog write) exactly like a fresh mint. The Phase-2 poison
+            // guard still applies (an evidence-less AI suggestion stays unverified + provisional).
+            productId = provOrphanId;
+            approvingProvisional = true;
+            const normName = (s: string) => cleanProductName(s ?? "").trim().toLowerCase();
+            const suggestedName = normName(review.suggestedProductName ?? "");
+            const acceptingSuggestion =
+              !!review.hasSuggestion && suggestedName.length > 0 && normName(np.name ?? "") === suggestedName;
+            const suggestionHasRealEvidence =
+              (review.suggestedBrand ?? "").trim().length > 0 ||
+              [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
+              (review.sourceUrls?.length ?? 0) > 0;
+            weakGuessProduct = acceptingSuggestion && !suggestionHasRealEvidence && payload.origin !== "human";
+            const orphan = products.find((p) => p.id === provOrphanId)!;
+            const upgraded: Product = {
+              ...orphan,
+              name: np.name ?? orphan.name,
+              brand: np.brand ?? orphan.brand,
+              category: np.category ?? orphan.category,
+              specsShort: np.specsShort ?? orphan.specsShort,
+              specsFull: np.specsFull ?? orphan.specsFull,
+              primarySku: np.primarySku ?? orphan.primarySku,
+              primaryBarcode: orphan.primaryBarcode || review.cleanCode,
+              gtin: np.gtin ?? orphan.gtin,
+              upc: np.upc ?? orphan.upc,
+              ean: np.ean ?? orphan.ean,
+              vendorCodes: orphan.vendorCodes ?? [],
+              aliases: [review.cleanCode],
+              imageUrl: np.imageUrl ?? orphan.imageUrl,
+              productUrl: np.productUrl ?? orphan.productUrl,
+              location: np.location ?? orphan.location,
+              source: np.source ?? orphan.source,
+              confidence: 1,
+              verified: !weakGuessProduct,
+              provisional: weakGuessProduct ? true : false,
+              updatedAt: now(),
+              updatedBy: payload.origin === "human" ? "human" : orphan.updatedBy,
+            };
+            products = products.map((p) => (p.id === provOrphanId ? upgraded : p));
+            createdProduct = upgraded;
           } else {
             productId = `prod-${idFactory()}`;
             // POISON GUARD: is this create_new accepting the review's AI suggestion (the new product's
@@ -2504,6 +2643,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (verdict.risk === "high_risk" && payload.confirmedMismatch) {
             emitAudit({ entityType: "Alias", entityId: review.cleanCode, action: "alias_link_override", metadata: { code: review.cleanCode, productId, targetProductName: target?.name ?? "", suggestedName: verdict.suggestedName ?? "", suggestedDomain: verdict.suggestedDomain ?? "", reason: verdict.reason } });
           }
+          // TASK 3: linking this code to an EXISTING product orphans its provisional placeholder. Merge it -
+          // move its count onto the linked product and remove the placeholder (no duplicate row, no re-count).
+          if (provOrphanId && provOrphanId !== productId) {
+            removeOrphanId = provOrphanId;
+            orphanTransferTargetId = productId;
+            approvingProvisional = true;
+          }
         }
 
         // Permanently learn the alias (deterministic from now on, even before sync completes).
@@ -2565,7 +2711,42 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : e,
         );
 
+        // TASK 3: drop the merged provisional placeholder from the product list before committing so the
+        // resolved identity never coexists with its own duplicate row.
+        if (removeOrphanId) {
+          products = products.filter((p) => p.id !== removeOrphanId);
+        }
+
         set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null, lastAliasConflicts: null, lastCategoryWarning: null });
+
+        // TASK 3: transfer the merged placeholder's count onto the resolved product and re-point its feed
+        // row, then remove its count row. This preserves the scanned quantity (scan N = count N) while
+        // keeping exactly one product row + one count row per identity (no double count, no orphan).
+        if (removeOrphanId) {
+          const oid = removeOrphanId;
+          const targetId = orphanTransferTargetId;
+          set((st) => {
+            const orphanRow = st.finalCounts.find((c) => c.productId === oid);
+            const orphanQty = orphanRow?.quantity ?? 0;
+            let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
+            if (targetId && orphanQty > 0) {
+              const targetRow = finalCounts.find((c) => c.productId === targetId);
+              finalCounts = targetRow
+                ? finalCounts.map((c) =>
+                    c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
+                  )
+                : orphanRow
+                  ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
+                  : finalCounts;
+            }
+            return {
+              finalCounts,
+              scanFeed: st.scanFeed.map((e) =>
+                e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
+              ),
+            };
+          });
+        }
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
