@@ -362,10 +362,15 @@ export async function POST(request: Request) {
       }
 
       // RETAIL PRODUCT KNOWLEDGE INDEX (4M+ Open Food Facts products): exact barcode hit resolves
-      // the product WITHOUT AI. Tries local SQLite first, then Turso remote DB.
+      // the product WITHOUT AI. Tries local SQLite first, then Turso remote DB. retailLookupStatus
+      // is surfaced in the decode debug payload below (both the hit-return here and the AI-path
+      // fallback) so a broken Turso connection ("turso_error") is distinguishable from a genuine
+      // corpus miss ("turso_miss") instead of both silently falling through to paid AI decode.
+      let retailLookupStatus: string | undefined;
       if (!e2eMode()) {
-        const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+        const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
         const retail = await lookupRetailBarcodeAsync(code);
+        retailLookupStatus = getLastRetailLookupStatus();
         if (retail) {
           const result: AiLookupResult = {
             ...emptyResult(),
@@ -382,7 +387,7 @@ export async function POST(request: Request) {
             mode: "decode" as const, providerNames: ["retail-corpus"], results: [result], evidences: [evidence],
             providerStatuses: [{ provider: "retail-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
             decision, reasonCode: "ok", reasonText: "", timedOut: false,
-            debug: { providersAttempted: ["retail-corpus"], evidenceStrengths: ["fetched_source"], sourceCounts: [0], corroborationPath: "retail_exact_barcode", aiCalled: false, pageFetched: false, cached: false },
+            debug: { providersAttempted: ["retail-corpus"], evidenceStrengths: ["fetched_source"], sourceCounts: [0], corroborationPath: "retail_exact_barcode", aiCalled: false, pageFetched: false, cached: false, retailLookup: retailLookupStatus },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
@@ -618,6 +623,7 @@ export async function POST(request: Request) {
           cached: false,
           prefixHint, // platformOwner-only: brand the barcode prefix maps to (recall/transparency)
           firewallReason, // platformOwner-only: why a prefix/UPC conflict routed this to review (if any)
+          retailLookup: retailLookupStatus, // "turso_error" (broken connection) vs "turso_miss"/"unavailable" (genuine miss/not configured) — makes a swallowed Turso failure visible instead of silently falling through to this AI path
         },
         sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
       };
