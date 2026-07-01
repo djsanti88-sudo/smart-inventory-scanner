@@ -41,6 +41,29 @@ describe("Phase 8C side-door firewall - deterministic count path", () => {
     expect(ev?.status).toBe("known");
     expect(countFor(store, "prod-nokian")).toBe(1);
   });
+
+  it("FIX 2 (scan N = count N): a known-but-context-conflicted scan STILL counts provisionally + review stays open", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+
+    // Verified Coca-Cola matched deterministically but blocked by the tire firewall.
+    store.getState().processScan("049000028904");
+
+    // The SUSPECT/poisoned product is never counted...
+    expect(countFor(store, "prod-coke")).toBe(0);
+    // ...but the physical scan is NOT lost: it counts once against a SAFE provisional placeholder.
+    const totalCounted = store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0);
+    expect(totalCounted, "the scan counts exactly once (owner rule scan N = count N)").toBe(1);
+    const placeholder = store.getState().products.find((p) => p.provisional && p.primaryBarcode === "049000028904");
+    expect(placeholder, "a safe Unidentified-item placeholder holds the count").toBeDefined();
+    expect(placeholder!.name).toMatch(/Unidentified item/);
+    expect(countFor(store, placeholder!.id)).toBe(1);
+    expect(placeholder!.verified).toBe(false);
+
+    // The review is still open with the suspect identity surfaced for a human to confirm.
+    const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === "049000028904");
+    expect(review?.status).toBe("open");
+  });
 });
 
 describe("Phase 8C markWrong - clears verified identity so it cannot re-match", () => {

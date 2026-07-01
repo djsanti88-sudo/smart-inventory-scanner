@@ -478,7 +478,15 @@ describe("scanStore - W2 discovered-alias approval", () => {
     const id = openReview(store, "029142712886");
     store.getState().resolveUnknown(id, "create_new", { newProduct: { name: "Cooper" }, applyToCount: true });
 
-    expect(store.getState().products.length, "no product minted on a conflict").toBe(before);
+    // FIX 1 (owner rule "scan N = count N"): the conflict now RETAINS this code's provisional placeholder
+    // (the scan's OWN counted row) + its count instead of deleting them, so products.length is before + 1.
+    // The real dedup invariant still holds: NO second/duplicate product ("Cooper") is minted on the
+    // ambiguous identity, and the count that was already taken is not silently lost.
+    expect(store.getState().products.length, "only the scan's own retained placeholder, no duplicate minted").toBe(before + 1);
+    expect(store.getState().products.some((p) => p.name === "Cooper"), "no product minted on a conflict").toBe(false);
+    const placeholder = store.getState().products.find((p) => p.provisional && p.primaryBarcode === "029142712886");
+    expect(placeholder, "the scan's provisional placeholder survives the conflict").toBeDefined();
+    expect(countFor(store, placeholder!.id), "the already-taken count is preserved (not dropped)").toBeGreaterThanOrEqual(1);
     expect((store.getState().lastAliasConflicts ?? []).length, "conflict recorded for human to resolve").toBeGreaterThan(1);
     expect(store.getState().needsReviewQueue.find((r) => r.id === id)?.status).toBe("open");
   });

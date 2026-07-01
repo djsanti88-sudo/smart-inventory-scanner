@@ -50,6 +50,43 @@ describe("catalog-first lookup (saves AI tokens; offline-first)", () => {
     expect(store.getState().feedbackEvents.some((e) => e.type === "found_from_catalog")).toBe(true);
   });
 
+  it("FIX 3: the synchronous catalog-first path flips the feed badge to 'verified' (not stuck on 'suggested')", () => {
+    const store = aiOnStore();
+    store.setState({ catalog: [verifiedEntry(CODE, "Catalog Cola")] });
+    const { restore } = stub(SUGGESTED);
+    try {
+      store.getState().processScan(CODE);
+    } finally {
+      restore();
+    }
+    const row = store.getState().scanFeed.find((e) => e.cleanCode === CODE);
+    expect(row, "feed row exists for the scan").toBeDefined();
+    expect(row!.decodeStatus, "catalog-first match shows Verified").toBe("verified");
+  });
+
+  it("FIX 3: a low-confidence / no-match fast decode flips the feed badge OFF 'suggested' to 'needs_review'", async () => {
+    const NO_MATCH = {
+      providerNames: ["gemini", "openai"],
+      results: [{ productName: "", brand: "", category: "", gtin: "", upc: "", ean: "", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [], confidence: 0.2 }],
+      decision: { status: "needs_review", confidence: 0.2, reason: "No match found", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "weak" } },
+    };
+    const store = aiOnStore();
+    const { restore } = stub(NO_MATCH);
+    try {
+      store.getState().processScan(CODE);
+      // The scan counts synchronously (badge starts "suggested"); the async fast decode must then flip
+      // the badge to reflect the REAL no-match outcome instead of leaving it stuck on "suggested".
+      await vi.waitFor(() => {
+        const row = store.getState().scanFeed.find((e) => e.cleanCode === CODE);
+        expect(row?.decodeStatus).toBe("needs_review");
+      });
+    } finally {
+      restore();
+    }
+    const row = store.getState().scanFeed.find((e) => e.cleanCode === CODE);
+    expect(row?.decodeStatus, "badge reflects the decode outcome, not the placeholder").not.toBe("suggested");
+  });
+
   it("a verified shop override wins over the global catalog (and skips AI)", () => {
     const store = aiOnStore();
     const override: ShopOverride = {
