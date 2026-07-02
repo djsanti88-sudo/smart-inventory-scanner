@@ -383,26 +383,14 @@ export async function POST(request: Request) {
         const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
         const retail = await lookupRetailBarcodeAsync(code);
         retailLookupStatus = getLastRetailLookupStatus();
-        if (retail) {
-          const result: AiLookupResult = {
-            ...emptyResult(),
-            productName: retail.productName,
-            brand: retail.brand,
-            category: retail.category,
-            confidence: 0.95,
-            needsHumanReview: false,
-            sourceUrls: [],
-          };
-          const evidence: EvidenceResult = { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: ["retail-knowledge-index"], reason: "Exact barcode match in retail product database" };
-          const decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false });
-          return {
-            mode: "decode" as const, providerNames: ["retail-corpus"], results: [result], evidences: [evidence],
-            providerStatuses: [{ provider: "retail-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
-            decision, reasonCode: "ok", reasonText: "", timedOut: false,
-            debug: { providersAttempted: ["retail-corpus"], evidenceStrengths: ["fetched_source"], sourceCounts: [0], corroborationPath: "retail_exact_barcode", aiCalled: false, pageFetched: false, cached: false, retailLookup: retailLookupStatus },
-            sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
-          };
-        }
+        // FIX 5 (2026-07-01): the Open Food Facts retail data is UNRELIABLE (crowd-sourced). It maps the
+        // glycine UPC 0737870166917 to "Coconut oil" (brand "Life Extensions") - right brand, WRONG product -
+        // and 0 of the owner's real codes are even in it. Trusting an OFF hit as a Verified auto-count (and
+        // short-circuiting BEFORE the accurate grounding-first + fetch-verify resolver) produced wrong
+        // identities. So an OFF retail hit NO LONGER auto-verifies: the lookup still runs for observability
+        // (retailLookupStatus is surfaced in the AI-path debug below), but the code now FALLS THROUGH to the
+        // grounding-first resolver, which fetch-confirms the exact code on a real page before Verifying.
+        void retail;
       }
 
       // PLAN D - GROUNDING-FIRST FAST RESOLVER (flash-lite grounding -> fetch-verify -> barcode-DB fallback).
