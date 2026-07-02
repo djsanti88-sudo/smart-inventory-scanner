@@ -25,6 +25,22 @@ describe("product-name quality gate (junk firewall)", () => {
     }
   });
 
+  it("rejects AI refusal sentences (preview-bot regression: grounding refusals were shown as Verified products)", () => {
+    // Exact strings observed in reports/human-bots/preview-mass-scan (2026-07-01).
+    for (const refusal of [
+      "Unable to identify product.",
+      "Unable to identify the product associated with UPC 703039151421.",
+      "Unable to identify product for UPC 4250635202270.",
+      "Unable to identify the product for UPC 791596585414.",
+      "The UPC 999900001036 is not a recognized product in major public barcode databases.",
+      "I could not find a product matching this barcode.",
+      "This barcode does not correspond to any known product.",
+      "No product information is available for this UPC.",
+    ]) {
+      expect(isUsableProductName(refusal), refusal).toBe(false);
+    }
+  });
+
   it("accepts real product names", () => {
     for (const ok of ["BIC Classic Pocket Lighter", "PHATOIL Lavender Essential Oil 100ml", "Camel Crush Box", "BIC Classic Pocket Lighter (Texas)"]) {
       expect(isUsableProductName(ok), ok).toBe(true);

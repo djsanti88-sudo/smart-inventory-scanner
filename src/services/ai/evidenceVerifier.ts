@@ -71,6 +71,17 @@ function isTrustedHost(url: string, trusted: string[]): boolean {
   return trusted.some((t) => host === t.toLowerCase() || host.endsWith("." + t.toLowerCase()));
 }
 
+/** FINDING-1 gate (Plan D parallel resolver): does the exact NUMERIC public barcode - including its
+ *  GTIN zero-padding variants (UPC-12 / GTIN-13 / GTIN-14) - appear in any of the given source texts
+ *  (grounding chunk titles / uris)? Invalidation prose ("not a valid UPC", "did you mean") never
+ *  counts as confirmation. Pure and app-side: the model's self-claim is never consulted. */
+export function numericCodeInTexts(code: string, texts: string[]): boolean {
+  const norm = (code ?? "").trim();
+  if (!norm || !texts?.length) return false;
+  const candidates = numericVariants(norm);
+  return texts.some((t) => candidates.some((c) => matchInText(t, c, true)) && !looksInvalidating(t));
+}
+
 export function verifyEvidence(
   code: string,
   codeType: CodeType,
