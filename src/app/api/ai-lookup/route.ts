@@ -19,7 +19,7 @@ import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { filterSafeUrls } from "@/services/ai/urlSafety";
 import { shouldRunFallback, decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
 import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
-import { withDecodeCache } from "@/services/ai/decodeCache";
+import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
@@ -301,11 +301,12 @@ export async function POST(request: Request) {
     brandPrefixHint: body.brandPrefixHint,
   };
 
-  // Hard server-side daily spend cap (auth DEFERRED) - applies to EVERY provider-calling POST mode
-  // (decode, decode-deep, AND the legacy lookup path) so no mode can bypass it. Once the day's cap is hit,
-  // return blocked with ZERO provider calls. Skipped under E2E mock mode (no real spend). Known scans never
-  // reach this route, so the cap bounds genuine AI-eligible lookups per day.
-  if (!e2eMode()) {
+  // Hard server-side daily spend cap (auth DEFERRED) for the LEGACY lookup path. The decode modes run
+  // their own cap check below (after the decode-cache peek) so a zero-spend cached repeat scan never
+  // consumes a cap slot - checking here for decode too would double-count every decode POST (each scan
+  // burned 2 slots; regression tests in route.test.ts). Skipped under E2E mock mode (no real spend).
+  const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
+  if (!e2eMode() && !isDecodeMode) {
     const cap = checkAndIncrementDaily();
     if (!cap.allowed) {
       return Response.json(
@@ -315,7 +316,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (body.mode === "decode" || body.mode === "decode-deep") {
+  if (isDecodeMode) {
     // Task 4/5: the tire hot path issues NO synchronous deep/Firecrawl call. The deep path stays
     // reachable for the client: it sends mode "decode-deep" (or "decode" with deep:true) to opt INTO
     // the existing multi-stage deep/Firecrawl orchestration and SKIP the tire hot path below.
@@ -327,10 +328,11 @@ export async function POST(request: Request) {
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
     const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
 
-    // Hard server-side daily spend cap (auth DEFERRED). Once the day's cap is hit, return blocked with
-    // ZERO provider calls. Skipped under E2E mock mode (no real spend). This route is the unknown-code
-    // path (known scans never reach it), so the cap bounds genuine AI-eligible lookups per day.
-    if (!e2eMode()) {
+    // Hard server-side daily spend cap (auth DEFERRED). Checked AFTER a decode-cache peek: a cached
+    // repeat scan makes ZERO provider calls, so it must not consume a cap slot nor be blocked once the
+    // cap trips (the cap bounds genuine compute runs, not free repeats). The per-IP rate limit above
+    // still throttles floods of cached hits. Skipped under E2E mock mode (no real spend).
+    if (!e2eMode() && getDecodeCache(code) === undefined) {
       const cap = checkAndIncrementDaily();
       if (!cap.allowed) {
         return Response.json(
