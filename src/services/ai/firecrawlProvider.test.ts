@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { discoverViaFirecrawl, urlPreferenceScore, type FcFetch } from "@/services/ai/firecrawlProvider";
+import { discoverViaFirecrawl, urlPreferenceScore, searchIdentifyByBarcode, type FcFetch } from "@/services/ai/firecrawlProvider";
 
 // Mock the Firecrawl REST API (no live calls / credits). Real shapes confirmed against api.firecrawl.dev/v2.
 function mockFc(search: Array<{ url: string; title: string }>, scrapeMap: Record<string, { markdown: string; title: string }>): { fetchImpl: FcFetch; scraped: string[] } {
@@ -141,5 +141,74 @@ describe("discoverViaFirecrawl (Stage-2 fallback, mocked)", () => {
     const disc = await discoverViaFirecrawl("810118139604", "upc_a", { apiKey: "k", fetchImpl });
     expect(disc.status).toBe("ok");
     expect(scraped).not.toContain("http://169.254.169.254/latest/meta-data"); // blocked by SSRF guard
+  });
+});
+
+describe("searchIdentifyByBarcode (/search snippet identities, mocked)", () => {
+  const CODE = "00051000212412";
+  // Search returns title+description snippets; a search mock that yields the given web results.
+  function searchMock(web: Array<{ url: string; title: string; description?: string }>, onCall?: (key: string) => number) {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string, init?: { headers?: Record<string, string> }) => {
+      if (url.endsWith("/search")) {
+        const key = (init?.headers?.Authorization ?? "").replace("Bearer ", "");
+        calls.push(key);
+        const status = onCall ? onCall(key) : 200;
+        if (status !== 200) return { ok: false, status, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({ success: true, data: { web } }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as FcFetch;
+    return { fetchImpl, calls };
+  }
+
+  it("returns ONLY identities from snippets that carry the exact barcode, with usable names", async () => {
+    const { fetchImpl } = searchMock([
+      { url: "https://walmart.com/p", title: "CAMPBELL'S Cream Of Chicken Condensed Soup 22.6 oz", description: `UPC ${CODE}` },
+      { url: "https://random.com/q", title: "Totally Unrelated Gadget", description: "no code here" }, // no barcode -> dropped
+      { url: "https://openfoodfacts.org/p", title: "Search results", description: `barcode ${CODE}` }, // barcode but junk name -> dropped
+    ]);
+    const out = await searchIdentifyByBarcode(CODE, { apiKeys: ["k1"], fetchImpl });
+    expect(out).not.toBeNull();
+    expect(out!.length).toBe(1);
+    expect(out![0].name).toMatch(/Campbell/i);
+  });
+
+  it("rotates to the next key on 402 (out of credits) and still returns results", async () => {
+    const { fetchImpl, calls } = searchMock(
+      [{ url: "https://walmart.com/p", title: "Campbell's Cream of Chicken Soup", description: `UPC ${CODE}` }],
+      (key) => (key === "k1" ? 402 : 200), // first key exhausted
+    );
+    const out = await searchIdentifyByBarcode(CODE, { apiKeys: ["k1", "k2"], fetchImpl });
+    expect(calls).toEqual(["k1", "k2"]);
+    expect(out?.length).toBe(1);
+  });
+
+  it("returns null ONLY when every key is exhausted (so the resolver can degrade to free signals)", async () => {
+    const { fetchImpl } = searchMock([{ url: "https://x/y", title: "x", description: CODE }], () => 402);
+    const out = await searchIdentifyByBarcode(CODE, { apiKeys: ["k1", "k2"], fetchImpl });
+    expect(out).toBeNull();
+  });
+
+  it("returns [] (not null) when it searched but nothing carried the code", async () => {
+    const { fetchImpl } = searchMock([{ url: "https://x/y", title: "Some Product", description: "no barcode present" }]);
+    const out = await searchIdentifyByBarcode(CODE, { apiKeys: ["k1"], fetchImpl });
+    expect(out).toEqual([]);
+  });
+
+  it("returns null when there are no keys at all", async () => {
+    const { fetchImpl } = searchMock([]);
+    const out = await searchIdentifyByBarcode(CODE, { apiKeys: [], fetchImpl });
+    expect(out).toBeNull();
+  });
+
+  it("SSRF: drops a snippet whose URL is an internal/metadata address even if it carries the code", async () => {
+    const { fetchImpl } = searchMock([
+      { url: "http://169.254.169.254/meta", title: "Campbell's Cream of Chicken", description: `UPC ${CODE}` },
+      { url: "https://walmart.com/p", title: "Campbell's Cream of Chicken Soup", description: `UPC ${CODE}` },
+    ]);
+    const out = await searchIdentifyByBarcode(CODE, { apiKeys: ["k1"], fetchImpl });
+    expect(out!.every((o) => !o.url.includes("169.254"))).toBe(true);
+    expect(out!.length).toBe(1);
   });
 });

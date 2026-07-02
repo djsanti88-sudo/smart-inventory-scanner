@@ -10,7 +10,7 @@ import { enrichWithPageFetch } from "@/services/ai/pageFetch";
 import { runDecode, type DecodeProvider } from "@/services/ai/decodeOrchestrator";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { decideDecode, isUsableProductName } from "@/services/ai/decode";
-import { discoverViaFirecrawl, firecrawlScrapeCheap } from "@/services/ai/firecrawlProvider";
+import { discoverViaFirecrawl, firecrawlScrapeCheap, searchIdentifyByBarcode } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
@@ -413,6 +413,7 @@ export async function POST(request: Request) {
           groundIdentify: (c, opts) => groundIdentify(c, opts),
           verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
           firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
+          searchIdentify: (c) => searchIdentifyByBarcode(c),
           prefixFloor: (c) => prefixFloorName(c, codeType),
         }).catch(() => null);
         if (fast) {
