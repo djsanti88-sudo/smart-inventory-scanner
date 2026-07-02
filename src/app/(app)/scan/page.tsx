@@ -8,6 +8,7 @@ import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { ExportMenu } from "@/components/ExportMenu";
+import { SessionLockControl } from "@/components/SessionLockControl";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 export default function ScanPage() {
@@ -165,6 +166,7 @@ export default function ScanPage() {
           >
             Finish session
           </button>
+          <SessionLockControl />
           <button
             type="button"
             onClick={() => {

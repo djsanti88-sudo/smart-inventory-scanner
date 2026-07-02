@@ -5,6 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
+import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -43,6 +44,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
+      <OwnerPinSettings />
       {/* P3: the raw Business ID is an internal identifier - platformOwner only. Customers see only
           Export, Clean up, and Danger zone. */}
       {isPlatform && (
