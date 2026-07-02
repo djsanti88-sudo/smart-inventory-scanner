@@ -5,7 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { SyncBadge } from "@/components/badges";
-import { ImageHoverPreview } from "@/components/ImageHoverPreview";
+import { plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import type { InventoryCount, Product } from "@/types";
 
@@ -43,10 +43,10 @@ export function FinalCountTable() {
               <th scope="col" className="px-4 py-3">Brand</th>
               <th scope="col" className="px-4 py-3">Category</th>
               <th scope="col" className="px-4 py-3">Specs</th>
+              <th scope="col" className="px-4 py-3">Size</th>
               <th scope="col" className="px-4 py-3">{isPlatform ? "SKU" : "Part number"}</th>
               {isPlatform && <th scope="col" className="px-4 py-3">Barcode</th>}
               {isPlatform && <th scope="col" className="px-4 py-3">Other codes scanned</th>}
-              <th scope="col" className="px-4 py-3">Image</th>
               <th scope="col" className="px-4 py-3">Location</th>
               <th scope="col" className="px-4 py-3">Last scanned</th>
               <th scope="col" className="px-4 py-3">Sync</th>
@@ -116,6 +116,9 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
       <td className="px-4 py-3">{product.brand}</td>
       <td className="px-4 py-3">{product.category}</td>
       <td className="px-4 py-3">{product.specsShort}</td>
+      <td className="px-4 py-3 font-mono text-sm tabular-nums" data-testid={`size-${product.id}`}>
+        {plainTireSizeDigits(product.specsShort) || "-"}
+      </td>
       <td className="px-4 py-3 font-mono text-sm">
         <div>{product.primarySku || "-"}</div>
         {discovered.length > 0 && (
@@ -137,9 +140,6 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
       </td>
       {isPlatform && <td className="px-4 py-3 font-mono text-sm">{product.primaryBarcode || "-"}</td>}
       {isPlatform && <td className="px-4 py-3 font-mono text-sm text-zinc-600">{count.aliasesSeen.join(", ")}</td>}
-      <td className="px-4 py-3">
-        <ImageHoverPreview imageUrl={product.imageUrl} alt={product.name} />
-      </td>
       <td className="px-4 py-3">{product.location || "-"}</td>
       <td className="px-4 py-3 text-sm text-zinc-600">
         {count.lastScannedAt ? new Date(count.lastScannedAt).toLocaleTimeString() : "-"}
