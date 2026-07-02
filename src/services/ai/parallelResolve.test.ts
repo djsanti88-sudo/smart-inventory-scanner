@@ -54,9 +54,13 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     ground.resolve(null); // cleanup the still-pending loser
   });
 
-  it("(b) barcode-DB miss + grounding usable -> source grounding, aiCalled true, verified", async () => {
+  it("(b) barcode-DB miss + grounding usable WITH the exact code in its sources -> Verified grounding win", async () => {
     const bdbMock = vi.fn(async () => null);
-    const groundMock = vi.fn(async () => ({ text: "Sony WH-1000XM5 Wireless Headphones", grounded: true }));
+    const groundMock = vi.fn(async () => ({
+      text: "Sony WH-1000XM5 Wireless Headphones",
+      grounded: true,
+      sources: [`UPC ${CODE} - Sony WH-1000XM5 Wireless Headphones | go-upc`],
+    }));
     const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
     const r = await resolveUnknownFast(CODE, deps);
@@ -67,6 +71,101 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     expect(r?.aiCalled).toBe(true);
     expect(bdbMock).toHaveBeenCalledTimes(1);
     expect(groundMock).toHaveBeenCalledTimes(1);
+  });
+
+  // FINDING 1 fix (preview mass-scan 2026-07-01): grounding hallucinations auto-counted as Verified.
+  // Owner revisit-trigger fired -> Option 1: a grounding answer is Verified ONLY when the APP finds the
+  // exact code in the grounding sources; otherwise it is DEMOTED to an unverified suggestion.
+  it("(b2) grounding answer WITHOUT the code in its sources is DEMOTED: verified false, still a grounding suggestion", async () => {
+    const groundMock = vi.fn(async () => ({
+      text: "Nagoya Mosaic Clay Drop",
+      grounded: true,
+      sources: ["https://vertexaisearch.cloud.google.com/grounding-api-redirect/x", "Some Unrelated Page Title"],
+    }));
+    const floorMock = vi.fn(() => ({ name: "Acme / product unconfirmed", brand: "Acme" }));
+    const deps = baseDeps({ groundIdentify: groundMock, prefixFloor: floorMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.source).toBe("grounding");
+    expect(r?.verified).toBe(false); // Suggested downstream - NEVER auto-counted
+    expect(r?.aiCalled).toBe(true);
+    expect(r?.name).toMatch(/Nagoya Mosaic/);
+    expect(floorMock).not.toHaveBeenCalled(); // a named suggestion beats the brand-only floor
+  });
+
+  it("(b3) grounding sources match the code across GTIN zero-padding variants", async () => {
+    const groundMock = vi.fn(async () => ({
+      text: "Michelin Defender LTX M/S",
+      grounded: true,
+      sources: [`EAN 0${CODE} - Michelin Defender listing`], // 13-digit zero-padded form of the UPC-12
+    }));
+    const r = await resolveUnknownFast(CODE, baseDeps({ groundIdentify: groundMock }));
+    expect(r?.source).toBe("grounding");
+    expect(r?.verified).toBe(true);
+  });
+
+  it("(b4) a refusal sentence from grounding is rejected outright -> falls to the floor (never a product)", async () => {
+    const groundMock = vi.fn(async () => ({
+      text: `Unable to identify the product associated with UPC ${CODE}.`,
+      grounded: true,
+      sources: [`UPC ${CODE} search results`], // code IS in sources - the refusal must still never win
+    }));
+    const floorMock = vi.fn(() => ({ name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola" }));
+    const r = await resolveUnknownFast(CODE, baseDeps({ groundIdentify: groundMock, prefixFloor: floorMock }));
+    expect(r?.source).toBe("floor");
+    expect(r?.verified).toBe(false);
+  });
+
+  it("(b4b) a refusal phrase isRefusal catches (but isUsableProductName does not) is rejected -> floor", async () => {
+    // "couldn't find" is a genuine product-name shape to isUsableProductName, so only the grounding-leg
+    // isRefusal guard stops it from becoming a hallucinated Verified product. Code IS in sources.
+    const groundMock = vi.fn(async () => ({
+      text: `We couldn't find a product for ${CODE}`,
+      grounded: true,
+      sources: [`UPC ${CODE} listing`],
+    }));
+    const floorMock = vi.fn(() => ({ name: "Pepsi / product unconfirmed", brand: "Pepsi" }));
+    const r = await resolveUnknownFast(CODE, baseDeps({ groundIdentify: groundMock, prefixFloor: floorMock }));
+    expect(r?.source).toBe("floor");
+    expect(r?.verified).toBe(false);
+  });
+
+  it("(b5) a fast UNVERIFIED grounding answer never beats a slower confident barcode-DB hit", async () => {
+    const bdb = deferred<{ name: string; brand: string; sourceUrl: string } | null>();
+    const bdbMock = vi.fn(() => bdb.promise);
+    const groundMock = vi.fn(async () => ({
+      text: "Hallucinated Product Name",
+      grounded: true,
+      sources: ["No code anywhere in these sources"],
+    }));
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
+
+    const pending = resolveUnknownFast(CODE, deps);
+    // Let the (unverified) grounding leg settle first, then the structured hit arrives.
+    await new Promise((res) => setTimeout(res, 0));
+    bdb.resolve({ name: "Real Structured Product", brand: "RealBrand", sourceUrl: "https://x/y" });
+    const r = await pending;
+
+    expect(r?.source).toBe("barcode_db");
+    expect(r?.verified).toBe(true);
+    expect(r?.name).toMatch(/Real Structured Product/);
+  });
+
+  it("(b6) the premium grounding escalation obeys the same code-in-sources gate", async () => {
+    const premiumMock = vi.fn(async () => ({
+      text: "Premium Guessed Product",
+      grounded: true,
+      sources: ["nothing matching here"],
+    }));
+    const floorMock = vi.fn(() => null);
+    const deps = baseDeps({ groundIdentifyPremium: premiumMock, prefixFloor: floorMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(premiumMock).toHaveBeenCalledTimes(1);
+    expect(r?.source).toBe("grounding");
+    expect(r?.verified).toBe(false); // premium answer without code-in-sources -> suggestion only
   });
 
   it("(c1) double miss with a source URL -> escalates to firecrawl, source firecrawl", async () => {
@@ -134,7 +233,7 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     const bdbMock = vi.fn(async () => {
       throw new Error("barcode DB blew up");
     });
-    const groundMock = vi.fn(async () => ({ text: "Fallback Product Name Works", grounded: true }));
+    const groundMock = vi.fn(async () => ({ text: "Fallback Product Name Works", grounded: true, sources: [`UPC ${CODE} - Fallback Product Name Works`] }));
     const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
     const r = await resolveUnknownFast(CODE, deps);

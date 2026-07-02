@@ -53,6 +53,13 @@ const SITE_BLOCKLIST =
   /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|search results|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
 const PLACEHOLDER_NAME = /^\s*(unknown|unidentified|n\/a)\b|no (public )?match|not found|no result/i;
 
+// AI REFUSAL sentences returned as if they were product names ("Unable to identify product for
+// UPC ...", "... is not a recognized product ..."). Observed live in the preview mass-scan bots
+// (reports/human-bots/preview-mass-scan, 2026-07-01) where they auto-counted as Verified rows.
+// A refusal is an answer SHAPE, never a product identity - reject it everywhere.
+const REFUSAL_NAME =
+  /\b(?:unable to (?:identify|find|determine|locate)|cannot (?:identify|find|determine|locate)|can(?:no|')t (?:identify|find|determine|locate)|could not (?:identify|find|determine|locate)|not a recognized product|not recognized as a product|does not (?:correspond|match|appear)|no product (?:information|match|listing)|no information (?:is )?available)\b/i;
+
 // Barcode-site title cruft appended after a separator (incl. em/en dash), e.g.
 // "Bic Lighter Texas — UPC 70330645936 — Go-UPC" or "Widget | Barcode Lookup".
 const TITLE_CODE_SUFFIX = /\s*[|–—-]\s*(?:upc|ean|gtin|isbn|barcode)\b[\s\S]*$/i;
@@ -75,6 +82,7 @@ export function isUsableProductName(raw: string): boolean {
   const name = cleanProductName(raw);
   if (name.length < 3 || name.length > 120) return false;
   if (PLACEHOLDER_NAME.test(name)) return false;
+  if (REFUSAL_NAME.test(name)) return false;
   if (SITE_BLOCKLIST.test(name)) return false;
   if (/^https?:\/\//i.test(name) || /^[a-z0-9.-]+\.(com|org|net|io)\b/i.test(name)) return false; // bare domain/url
   return true;
