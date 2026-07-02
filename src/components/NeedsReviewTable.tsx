@@ -57,8 +57,11 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
 // Human resolution permanently learns an alias (handled by the store), so the AI is never asked
 // about that code again.
 export function NeedsReviewTable() {
-  const reviews = useScanStore((s) => s.needsReviewQueue);
+  const allReviews = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
+  // Owner rule: an item that is ALREADY solved AND synced is done - it must not linger in Needs Review.
+  // A resolved item that is NOT yet synced stays visible (so nothing looks lost before it saves).
+  const reviews = allReviews.filter((r) => r.status === "open" || r.syncStatus !== "synced");
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">

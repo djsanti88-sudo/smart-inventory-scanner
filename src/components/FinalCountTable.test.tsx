@@ -43,6 +43,17 @@ describe("FinalCountTable role gating (Phase 6)", () => {
     expect(screen.queryByTestId("remove-count-p1")).not.toBeNull();
   });
 
+  it("removes the Image column and shows a plain-number Size column for a tire (owner request)", () => {
+    process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
+    const tire: Product = { ...product, id: "p2", name: "Michelin Latitude Tour HP", specsShort: "255/55R19 111 V" };
+    const tcount: InventoryCount = { ...count, id: "c2", productId: "p2" };
+    useScanStore.setState({ products: [tire], finalCounts: [tcount] });
+    render(<FinalCountTable />);
+    expect(screen.queryByText("Image")).toBeNull(); // image column removed
+    expect(screen.queryByText("Size")).not.toBeNull(); // plain-number size column present
+    expect(screen.getByTestId("size-p2").textContent?.trim()).toBe("2555519"); // size only, no letters/slashes/spaces
+  });
+
   it("shows Barcode + Other codes scanned to the platformOwner (Mark wrong hidden for now)", () => {
     process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1"; // platformOwner
     seed();
