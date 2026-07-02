@@ -8,7 +8,8 @@ import fs from "node:fs";
 vi.mock("server-only", () => ({}));
 
 import { POST, GET } from "@/app/api/ai-lookup/route";
-import { __resetForTest } from "@/services/security/aiSpendGuard";
+import { __resetForTest, dailyUsage } from "@/services/security/aiSpendGuard";
+import { clearDecodeCache } from "@/services/ai/decodeCache";
 
 // Route-level wallet-protection smoke tests for /api/ai-lookup (6937cf3). They run with NO API keys and a
 // fully STUBBED global.fetch, so NO live provider call and NO real network can occur. The guards run only
@@ -32,6 +33,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
   beforeEach(() => {
     __resetForTest();
+    clearDecodeCache();
     for (const k of keys) saved[k] = process.env[k];
     // Guards ACTIVE (not E2E) + NO provider keys (so providers fall back to the local mock).
     delete process.env.IS_E2E;
@@ -103,4 +105,27 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(["kill_switch", "daily_cap", "rate_limited"]).not.toContain(json.reasonCode);
     expect(hitAnAiProvider(), "no Gemini/OpenAI host may be contacted with no keys").toBe(false);
   }, 20000);
+
+  // Regression (2026-07-02 scale500 run): each decode POST was incrementing the daily cap TWICE (the
+  // route-wide check plus a duplicate inside the decode branch), halving the effective cap.
+  it("one decode POST consumes exactly ONE daily-cap slot", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const res = await POST(makeRequest({ cleanCode: "111000222444", mode: "decode" }));
+    expect(res.status).toBe(200);
+    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+  }, 20000);
+
+  // Regression (same run): the cap was consumed BEFORE the decode cache was read, so a zero-spend
+  // cached repeat scan burned cap slots and, once the cap tripped, returned 429 instead of the cached
+  // product (the harness saw 109 "name mismatches" that were really empty 429 bodies).
+  it("a cached repeat decode is FREE: no cap slot consumed and it still succeeds AT the cap", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "1";
+    const first = await POST(makeRequest({ cleanCode: "111000222555", mode: "decode" }));
+    expect(first.status).toBe(200); // consumed the single slot
+    const repeat = await POST(makeRequest({ cleanCode: "111000222555", mode: "decode" }));
+    expect(repeat.status, "cached repeat must not be blocked by the cap").toBe(200);
+    const json = await repeat.json();
+    expect(json.debug?.cached).toBe(true);
+    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+  }, 40000);
 });
