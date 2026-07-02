@@ -41,9 +41,19 @@ describe("flash-lite grounding", () => {
     expect(joined).toContain("UPC 086699087829 - Michelin LTX M/S2 | go-upc");
     expect(joined).toContain("https://example.com/p/086699087829");
   });
-  it("returns empty sources when the response has no grounding metadata (never undefined)", async () => {
+  it("returns sourceUrls = ONLY the grounding chunk web.uri values (fetchable/redirect URLs)", async () => {
+    const r = await groundIdentify("086699087829", { apiKey: "k", fetch: mockFetch(geminiGrounded) });
+    expect(r?.sourceUrls).toEqual([
+      "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
+      "https://example.com/p/086699087829",
+    ]);
+    // titles are NOT in sourceUrls (those are fetched, not text-matched)
+    expect((r?.sourceUrls ?? []).join(" ")).not.toContain("go-upc");
+  });
+  it("returns empty sources + sourceUrls when the response has no grounding metadata (never undefined)", async () => {
     const r = await groundIdentify("086699087829", { apiKey: "k", fetch: mockFetch(geminiOk) });
     expect(r?.sources).toEqual([]);
+    expect(r?.sourceUrls).toEqual([]);
   });
   it("returns null on empty content", async () => {
     const r = await groundIdentify("086699087829", { apiKey: "k", fetch: mockFetch(geminiEmpty) });

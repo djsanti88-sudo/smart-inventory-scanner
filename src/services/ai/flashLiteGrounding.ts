@@ -10,7 +10,7 @@ interface GeminiResponse {
   }>;
 }
 
-export async function groundIdentify(code: string, opts?: { url?: string; apiKey?: string; fetch?: typeof fetch }): Promise<{ text: string; grounded: boolean; sources: string[] } | null> {
+export async function groundIdentify(code: string, opts?: { url?: string; apiKey?: string; fetch?: typeof fetch }): Promise<{ text: string; grounded: boolean; sources: string[]; sourceUrls: string[] } | null> {
   const key = opts?.apiKey ?? process.env.GEMINI_API_KEY;
   if (!key) return null;
   const f = opts?.fetch ?? fetch;
@@ -28,10 +28,12 @@ export async function groundIdentify(code: string, opts?: { url?: string; apiKey
   const parts = candidate?.content?.parts ?? [];
   const text = parts.map((p) => p.text ?? "").join(" ").trim();
   if (!text) return null;
-  // FINDING-1 guard: hand the APP the grounding sources (chunk titles + uris) so it can verify the
-  // exact code appears in them (evidenceVerifier.numericCodeInTexts). The model's answer alone is
-  // never trusted as Verified anymore.
+  // GROUNDING-FIRST VERIFY: hand the APP the grounding sources so it can independently confirm the code.
+  // `sources` = chunk titles + uris (legacy code-in-sources text signal). `sourceUrls` = ONLY the web.uri
+  // values (the fetchable/redirect URLs) - these are what verifyCodeOnPage fetches to confirm the exact
+  // code is really on the candidate page. The model's answer alone is never trusted as Verified.
   const chunks = candidate?.groundingMetadata?.groundingChunks ?? [];
   const sources = chunks.flatMap((c) => [c.web?.title ?? "", c.web?.uri ?? ""]).filter(Boolean);
-  return { text, grounded: !opts?.url, sources };
+  const sourceUrls = chunks.map((c) => c.web?.uri ?? "").filter(Boolean);
+  return { text, grounded: !opts?.url, sources, sourceUrls };
 }
