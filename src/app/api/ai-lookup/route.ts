@@ -408,10 +408,14 @@ export async function POST(request: Request) {
       // corpus/retail misses and BEFORE the legacy Gemini/OpenAI fast path. The two legs race; the first
       // confident answer wins (~1s), escalating to Firecrawl + the prefix floor only on a double-miss.
       // Gated to PUBLIC barcodes (upc/ean/gtin): a SKU/vendor label must never auto-verify from grounding
-      // (semantic firewall - those still route through the legacy path -> Needs Review). A VERIFIED win
-      // short-circuits here and returns like the corpus hit (withDecodeCache caches it to a 0ms Tier-1 hit
-      // next time); a floor/miss returns null-ish and falls through to the legacy path UNCHANGED, so the
-      // store still applies the Plan C floor. Never runs under E2E (mock-only).
+      // (semantic firewall - those still route through the legacy path -> Needs Review).
+      //
+      // TERMINAL for public barcodes (Fix 2, 2026-07-01): whenever the resolver returns ANY result - a
+      // VERIFIED win OR the prefix floor / an unverified grounding suggestion - computeDecode RETURNS it
+      // and NEVER runs the expensive legacy Gemini/OpenAI fast path (the real money-pit). A verified win
+      // auto-counts (like a corpus hit); a floor/suggestion returns as Suggested/Needs Review with NO
+      // legacy AI call at all. Only a null return (non-public code, or no floor) falls through to legacy.
+      // Never runs under E2E (mock-only).
       const isPublicBarcode = codeType === "upc_a" || codeType === "ean_13" || codeType === "gtin_14";
       if (!e2eMode() && isPublicBarcode) {
         const fast = await resolveUnknownFast(code, {
@@ -420,36 +424,34 @@ export async function POST(request: Request) {
           firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
           prefixFloor: (c) => prefixFloorName(c, codeType),
         }).catch(() => null);
-        // Only a VERIFIED win (barcode-DB / grounding / firecrawl) short-circuits. The prefix floor is
-        // NOT verified, so it falls through to the legacy path exactly as before.
-        if (fast && fast.verified && isUsableProductName(fast.name)) {
+        if (fast) {
+          const verifiedWin = fast.verified && isUsableProductName(fast.name);
           const result: AiLookupResult = {
             ...emptyResult(),
             productName: fast.name,
             brand: fast.brand,
-            confidence: 0.9,
-            needsHumanReview: false,
+            confidence: verifiedWin ? 0.9 : 0.5,
+            needsHumanReview: !verifiedWin,
             sourceUrls: [],
           };
-          const evidence: EvidenceResult = {
-            verified: true,
-            strength: "fetched_source",
-            matchedCode: code,
-            matchedSources: [`parallel-${fast.source}`],
-            reason: `Exact identification via parallel ${fast.source}`,
-          };
-          const decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false });
+          const evidence: EvidenceResult = verifiedWin
+            ? { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: [`parallel-${fast.source}`], reason: `Exact identification via parallel ${fast.source}` }
+            : { verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: `Unverified parallel ${fast.source} (suggestion/floor) - not auto-counted` };
+          let decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false });
+          const reasonCode = decodeReasonCode({ hasProduct: isUsableProductName(fast.name), fallbackFound: false, timedOut: false, decisionStatus: decision.status, statuses: [], firecrawlKey: !!firecrawlKey, coverageMissed: false });
+          const reasonText = verifiedWin ? "" : (REASON_TEXT[reasonCode] ?? "");
+          if (decision.status !== "verified" && reasonText) decision = { ...decision, reason: reasonText };
           return {
             mode: "decode" as const,
             providerNames: [`parallel:${fast.source}`],
             results: [result],
             evidences: [evidence],
-            providerStatuses: [{ provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
+            providerStatuses: [{ provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: verifiedWin, identityFound: isUsableProductName(fast.name) }],
             decision,
-            reasonCode: "ok",
-            reasonText: "",
+            reasonCode: verifiedWin ? "ok" : reasonCode,
+            reasonText,
             timedOut: false,
-            debug: { providersAttempted: [`parallel:${fast.source}`], evidenceStrengths: ["fetched_source"], sourceCounts: [0], corroborationPath: `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false },
+            debug: { providersAttempted: [`parallel:${fast.source}`], evidenceStrengths: [evidence.strength], sourceCounts: [0], corroborationPath: `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
