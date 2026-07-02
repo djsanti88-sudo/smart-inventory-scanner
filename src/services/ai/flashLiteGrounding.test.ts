@@ -26,7 +26,8 @@ describe("flash-lite grounding", () => {
     const r = await groundIdentify("086699087829", { apiKey: "k", fetch: f });
     expect(r?.text).toMatch(/Michelin/);
     const call = (f as any).mock.calls[0];
-    expect(call[0]).toContain("gemini-flash-lite-latest");
+    // default grounding model is Gemini 2.5 Flash-Lite (1,500 free grounding req/day; owner decision 2026-07-01)
+    expect(call[0]).toContain("gemini-2.5-flash-lite");
     expect(JSON.parse(call[1].body).tools[0]).toHaveProperty("google_search");
   });
   it("uses url_context when a url is provided", async () => {

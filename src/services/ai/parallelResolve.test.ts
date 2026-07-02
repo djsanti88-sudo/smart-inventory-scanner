@@ -1,28 +1,27 @@
 // @vitest-environment node
 //
-// Plan D Task 4 - BARCODE-DB-FIRST + FETCH-VERIFY resolver. Proves: (1) one FREE UPCitemdb lookup is the
-// accurate primary; a usable hit is Verified ONLY when the APP fetches its sourceUrl page and confirms the
-// exact code is on it AND a distinctive token of the name corroborates that page; (2) an unconfirmed name is
-// a held Suggestion, never auto-counted; (3) a stale/wrong DB row whose name is not on the code's page is
-// rejected by the name-corroboration guard; (4) grounding fires ONLY as a fallback when barcode-DB gives
-// nothing usable, obeys the same fetch-verify gate, and a grounding refusal / 429 still ends at the terminal
-// floor - NEVER null, NEVER a legacy fall-through. ALL providers + fetch-verify are mocked here - ZERO live
-// network / AI / credits are ever touched by this suite.
+// Plan D Task 4 - CROSS-CHECK auto-count resolver. Proves: (1) barcode-DB + grounding are queried
+// CONCURRENTLY; (2) an auto-count (Verified) happens ONLY when the two independent names AGREE on identity;
+// (3) a lone wrong DB row and a lone grounding hallucination each land in Needs Review (Suggestion), NEVER
+// auto-counted; (4) a disagreement between the two -> Needs Review; (5) firewall-conflicted DB brands are
+// dropped; (6) a public miss ends at the terminal floor - NEVER null, NEVER a legacy fall-through. ALL
+// providers are mocked here - ZERO live network / AI / credits are ever touched by this suite.
 //
-// RECONCILED (2026-07-01, owner decision): barcode-DB now runs FIRST (bake-off: 6/6 correct, free, ~1s; the
-// "coconut oil for glycine" bug was Open Food Facts, NOT UPCitemdb). Grounding is the paid, rate-capped
-// FALLBACK. Every trust / hallucination / count / refusal (Fix 1) / terminal-floor (Fix 4) assertion is
-// preserved, only re-pointed at the new order.
+// RECONCILED (2026-07-01, owner decision): a 21-code regression proved single-source trust auto-counts ~40%
+// WRONG on hard codes (a dress for Member's Mark water; Oreo for Pico de Gallo). Auto-count now requires
+// TWO-SOURCE AGREEMENT. Every trust / hallucination / count / refusal / terminal-floor assertion is
+// preserved, re-pointed at the cross-check rule.
 
 import { describe, it, expect, vi } from "vitest";
 import {
   resolveUnknownFast,
+  identitiesAgree,
   type ParallelResolveDeps,
 } from "@/services/ai/parallelResolve";
 
 const CODE = "086699087829";
 
-/** A deferred promise whose resolution we control - lets us prove a slow leg never delays the winner. */
+/** A deferred promise whose resolution we control - lets us prove both legs run concurrently. */
 function deferred<T>() {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => {
@@ -31,176 +30,195 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-/** Base deps: every leg misses; fetch-verify finds nothing. Individual tests override the legs they exercise. */
+/** Base deps: every leg misses. Individual tests override the legs they exercise. */
 function baseDeps(over: Partial<ParallelResolveDeps> = {}): ParallelResolveDeps {
   return {
     lookupBarcodeDb: vi.fn(async () => null),
     groundIdentify: vi.fn(async () => null),
-    verifyCodeOnPage: vi.fn(async () => null),
     firecrawlScrapeCheap: vi.fn(async () => null),
     prefixFloor: vi.fn(() => null),
     ...over,
   };
 }
 
-/** A fetch-verify mock that "confirms" the code and hands back the given page text. */
-function verifyHit(pageText: string) {
-  return vi.fn(async (urls: string[]) => ({ url: urls[0] ?? "https://page.example/p", pageText }));
+/** A grounding leg returning a given product text. */
+function ground(text: string, sourceUrls: string[] = []) {
+  return vi.fn(async () => ({ text, grounded: true, sources: [], sourceUrls }));
 }
 
-describe("resolveUnknownFast - barcode-DB first, fetch-verify, grounding fallback", () => {
-  it("(bd1) barcode-DB usable + no brand-prefix conflict -> AUTO-COUNT (Verified barcode_db, aiCalled false); grounding + fetch-verify never run", async () => {
-    const bdbMock = vi.fn(async () => ({
-      name: "Michelin LTX M/S2 All-Season",
-      brand: "Michelin",
-      sourceUrl: "https://shop.example/p/1",
-    }));
-    const verifyMock = vi.fn(async () => null);
-    const groundMock = vi.fn(async () => ({ text: "Should Not Run", grounded: true, sources: [], sourceUrls: ["https://x/y"] }));
-    // firewall says NO conflict -> the trusted structured hit auto-counts.
-    const conflictMock = vi.fn(() => false);
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, verifyCodeOnPage: verifyMock, groundIdentify: groundMock, brandPrefixConflict: conflictMock });
+describe("identitiesAgree", () => {
+  it("agrees when two names share >=2 distinctive tokens", () => {
+    expect(identitiesAgree("Jumbo Stone Crab Claws", "JUMBO STONE CRAB CLAWS")).toBe(true);
+    expect(identitiesAgree("Life Extension - Glycine 1000 mg 100 Vegetarian Capsules", "Life Extension Glycine 1000mg")).toBe(true);
+    expect(identitiesAgree("Pringles Scorchin Cheddar Potato Crisps", "Pringles Scorchin Cheddar")).toBe(true);
+  });
+  it("does NOT agree on the real wrong-identity cases from the 21-code regression", () => {
+    expect(identitiesAgree("Velvet Torch Womens Lace Strapless Dress", "Member's Mark Purified Water")).toBe(false);
+    expect(identitiesAgree("Mott's Fruit Snacks Assorted Animals", "Cheerios Veggie Blends Blueberry Banana")).toBe(false);
+    expect(identitiesAgree("Oreo Cookies", "Pico De Gallo Chips")).toBe(false);
+    expect(identitiesAgree("Doritos Cool Ranch Tortilla Chips", "Lay's Potato Chips")).toBe(false);
+  });
+  it("does NOT agree when the only shared words are generic (Chips/Potato/Water/...)", () => {
+    expect(identitiesAgree("Acme Potato Chips", "Zenith Potato Chips")).toBe(false); // only generic overlap
+  });
+});
+
+describe("resolveUnknownFast - cross-check auto-count", () => {
+  it("(x1) barcode-DB + grounding AGREE -> Verified auto-count, structured DB name/brand, both legs called", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Jumbo Stone Crab Claws", brand: "Joe's", sourceUrl: "https://x/y" }));
+    const groundMock = ground("Jumbo Stone Crab Claws");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
     const r = await resolveUnknownFast(CODE, deps);
 
     expect(r?.source).toBe("barcode_db");
-    expect(r?.verified).toBe(true); // TRUSTED structured DB auto-counts (owner decision)
-    expect(r?.aiCalled).toBe(false);
-    expect(r?.brand).toBe("Michelin");
-    expect(r?.name).toMatch(/Michelin LTX/);
+    expect(r?.verified).toBe(true); // two independent sources agree -> trustworthy auto-count
+    expect(r?.aiCalled).toBe(true);
+    expect(r?.name).toMatch(/Stone Crab/);
+    expect(r?.brand).toBe("Joe's"); // structured DB brand preferred
     expect(bdbMock).toHaveBeenCalledTimes(1);
-    expect(conflictMock).toHaveBeenCalledWith(CODE, "Michelin");
-    expect(verifyMock).not.toHaveBeenCalled(); // no fetch-verify for the structured DB (fast, $0)
-    expect(groundMock).not.toHaveBeenCalled(); // barcode-DB won -> the paid grounding fallback never runs
+    expect(groundMock).toHaveBeenCalledTimes(1);
   });
 
-  it("(bd2) barcode-DB usable but the GS1 brand-prefix firewall flags a wrong-brand conflict -> held Suggestion (verified false); grounding + floor never run", async () => {
-    // The DB says "Coconut Oil"/"Generic" but the barcode's known prefix belongs to Life Extension -> conflict.
-    const bdbMock = vi.fn(async () => ({ name: "Coconut Oil", brand: "Generic Foods", sourceUrl: "https://shop.example/p/1" }));
+  it("(x2) DB says a DRESS, grounding says WATER, NO Firecrawl tiebreaker -> Needs Review (the real 078742051451 case)", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Velvet Torch Womens Lace Strapless Dress", brand: "Velvet Torch", sourceUrl: "https://x/y" }));
+    const groundMock = ground("Member's Mark Purified Water 500ml");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock }); // no searchIdentify
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.verified).toBe(false); // disagreement + no tiebreaker -> Suggestion, never a wrong auto-count
+    expect(r?.source).toBe("barcode_db"); // structured DB name preferred for the suggestion
+    expect(r?.name).toMatch(/Dress/);
+  });
+
+  it("(c1) DB=dress, grounding=water, Firecrawl snippet=water -> WATER gets 2 votes -> AUTO-COUNT water, dress OUTVOTED", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Velvet Torch Womens Lace Strapless Dress", brand: "Velvet Torch", sourceUrl: "https://x/y" }));
+    const groundMock = ground("Member's Mark Purified Water 500ml");
+    const searchMock = vi.fn(async () => [{ name: "Members Mark Purified Water 16.91 oz", url: "https://amazon.com/p" }]);
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock, searchIdentify: searchMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(searchMock).toHaveBeenCalledTimes(1); // fired because the two free sources disagreed
+    expect(r?.verified).toBe(true); // grounding + Firecrawl snippet agree on WATER -> auto-count
+    expect(r?.name).toMatch(/Water/i);
+    expect(r?.name).not.toMatch(/Dress/);
+  });
+
+  it("(c2) the two free sources already AGREE -> Firecrawl /search is NOT called (zero credits spent)", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Jumbo Stone Crab Claws", brand: "Joe's", sourceUrl: "https://x/y" }));
+    const groundMock = ground("Jumbo Stone Crab Claws");
+    const searchMock = vi.fn(async () => [{ name: "should not run", url: "https://x/y" }]);
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock, searchIdentify: searchMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.verified).toBe(true);
+    expect(searchMock).not.toHaveBeenCalled(); // free agreement short-circuits -> no Firecrawl credits
+  });
+
+  it("(c3) both free sources miss, but TWO Firecrawl snippets agree -> AUTO-COUNT (real pages self-corroborate)", async () => {
+    const searchMock = vi.fn(async () => [
+      { name: "Pringles Scorchin Cheddar Potato Crisps", url: "https://openfoodfacts.org/p" },
+      { name: "Pringles Scorchin Cheddar", url: "https://ewg.org/p" },
+    ]);
+    const deps = baseDeps({ searchIdentify: searchMock }); // DB + grounding both null
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.source).toBe("firecrawl");
+    expect(r?.verified).toBe(true);
+    expect(r?.name).toMatch(/Pringles Scorchin/);
+  });
+
+  it("(c4) Firecrawl keys exhausted (searchIdentify null) -> degrade gracefully to free signals -> Needs Review", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Velvet Torch Dress", brand: "Velvet Torch", sourceUrl: "https://x/y" }));
+    const groundMock = ground("Member's Mark Purified Water");
+    const searchMock = vi.fn(async () => null); // all Firecrawl keys exhausted
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock, searchIdentify: searchMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(searchMock).toHaveBeenCalledTimes(1);
+    expect(r?.verified).toBe(false); // no tiebreaker available -> safe Needs Review, never a wrong count
+  });
+
+  it("(c5) a single Firecrawl snippet with no agreeing source -> Suggestion (Needs Review), not auto-count", async () => {
+    const searchMock = vi.fn(async () => [{ name: "Some Lone Product Listing", url: "https://x/y" }]);
+    const deps = baseDeps({ searchIdentify: searchMock }); // DB + grounding null
+
+    const r = await resolveUnknownFast(CODE, deps);
+    expect(r?.source).toBe("firecrawl");
+    expect(r?.verified).toBe(false); // one snippet is one source - needs a second to agree
+    expect(r?.name).toMatch(/Some Lone Product/);
+  });
+
+  it("(x3) lone grounding hallucination (DB miss) -> Needs Review, NOT auto-counted (the real Oreo-for-Pico case)", async () => {
+    const bdbMock = vi.fn(async () => null); // DB miss
+    const groundMock = ground("Oreo Cookies");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.source).toBe("grounding");
+    expect(r?.verified).toBe(false); // single source can never auto-count
+    expect(r?.aiCalled).toBe(true);
+    expect(r?.name).toMatch(/Oreo/);
+  });
+
+  it("(x4) lone barcode-DB hit (grounding miss) -> Needs Review, NOT auto-counted", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Some Structured Product", brand: "BD", sourceUrl: "https://x/y" }));
+    const groundMock = vi.fn(async () => null); // grounding miss
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.source).toBe("barcode_db");
+    expect(r?.verified).toBe(false); // single source -> Suggestion
+    expect(r?.name).toMatch(/Some Structured Product/);
+  });
+
+  it("(x5) brand-prefix firewall drops a wrong-brand DB row -> grounding becomes the lone source -> Needs Review", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Amazonia Patio Dining Set", brand: "Amazonia", sourceUrl: "https://x/y" }));
     const conflictMock = vi.fn(() => true); // firewall: brand clearly wrong for this barcode's prefix
-    const groundMock = vi.fn(async () => ({ text: "Grounding Name", grounded: true, sources: [], sourceUrls: ["https://g/x"] }));
-    const floorMock = vi.fn(() => ({ name: "Acme / product unconfirmed", brand: "Acme" }));
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, brandPrefixConflict: conflictMock, groundIdentify: groundMock, prefixFloor: floorMock });
+    const groundMock = ground("Lay's Barbecue Potato Chips");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, brandPrefixConflict: conflictMock, groundIdentify: groundMock });
 
     const r = await resolveUnknownFast(CODE, deps);
 
+    expect(conflictMock).toHaveBeenCalledWith(CODE, "Amazonia");
+    expect(r?.source).toBe("grounding"); // the firewalled DB row is dropped -> grounding is the only name
+    expect(r?.verified).toBe(false); // lone source -> Suggestion (the garbage DB row never even shows)
+    expect(r?.name).toMatch(/Lay's Barbecue/);
+  });
+
+  it("(x6) DB + grounding agree, but the DB brand conflicts with the prefix -> DB dropped -> no agreement -> Needs Review", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Wrongbrand Cola", brand: "Wrongbrand", sourceUrl: "https://x/y" }));
+    const conflictMock = vi.fn(() => true);
+    const groundMock = ground("Wrongbrand Cola");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, brandPrefixConflict: conflictMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+    expect(r?.verified).toBe(false); // a firewalled DB row can't be one of the two agreeing sources
+    expect(r?.source).toBe("grounding");
+  });
+
+  it("(r1) a grounding refusal sentence is treated as absent -> lone DB source -> Needs Review", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Coca-Cola Classic 12 Pack", brand: "Coca-Cola", sourceUrl: "https://x/y" }));
+    const groundMock = ground(`Unable to identify the product associated with UPC ${CODE}.`);
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
     expect(r?.source).toBe("barcode_db");
-    expect(r?.verified).toBe(false); // wrong-brand-for-prefix -> Suggested, NEVER auto-counted (coconut-oil guard)
-    expect(r?.aiCalled).toBe(false);
-    expect(r?.name).toMatch(/Coconut Oil/);
-    expect(groundMock).not.toHaveBeenCalled(); // a usable (if conflicted) barcode-DB name short-circuits the fallback
-    expect(floorMock).not.toHaveBeenCalled(); // a named suggestion beats the brand-only floor
+    expect(r?.verified).toBe(false); // refusal is not a second source -> no agreement -> Suggestion
+    expect(r?.name).toMatch(/Coca-Cola/);
   });
 
-  it("(bd3) firewall lets an unknown-prefix / unbranded hit pass (real default returns false) -> Verified", async () => {
-    // Uses the REAL prefixBrandConflict (not injected): an empty brand never conflicts, so a usable name auto-counts.
-    const bdbMock = vi.fn(async () => ({ name: "Life Extension Glycine 1000mg", brand: "", sourceUrl: "https://x/y" }));
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock });
-
+  it("(floor-generic) both sources miss -> generic terminal floor (Fix 4: never null, never legacy, never Verified)", async () => {
+    const deps = baseDeps(); // DB null, grounding null, prefixFloor null
     const r = await resolveUnknownFast(CODE, deps);
-    expect(r?.source).toBe("barcode_db");
-    expect(r?.verified).toBe(true);
-    expect(r?.name).toMatch(/Glycine/);
-  });
-
-  it("(gr1) barcode-DB null (miss) -> grounding fallback; a fetched page confirms the code + name -> Verified grounding, aiCalled true", async () => {
-    const bdbMock = vi.fn(async () => null); // barcode-DB miss
-    const groundMock = vi.fn(async () => ({
-      text: "Sony WH-1000XM5 Wireless Headphones",
-      grounded: true,
-      sources: [],
-      sourceUrls: ["https://vertexaisearch.cloud.google.com/redirect/a", "https://sony.example/p"],
-    }));
-    const verifyMock = verifyHit(`Sony WH-1000XM5 Wireless Headphones product page - UPC ${CODE}`);
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock, verifyCodeOnPage: verifyMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-
-    expect(bdbMock).toHaveBeenCalledTimes(1);
-    expect(groundMock).toHaveBeenCalledTimes(1); // fallback fires ONLY because barcode-DB gave nothing usable
-    expect(r?.source).toBe("grounding");
-    expect(r?.verified).toBe(true);
-    expect(r?.aiCalled).toBe(true);
-    expect(r?.name).toMatch(/Sony WH-1000XM5/);
-    expect(verifyMock).toHaveBeenCalledWith(
-      ["https://vertexaisearch.cloud.google.com/redirect/a", "https://sony.example/p"],
-      CODE,
-    );
-  });
-
-  it("(gr2) grounding fallback hit but NO fetched page carries the code -> Suggested grounding (verified false)", async () => {
-    const groundMock = vi.fn(async () => ({
-      text: "Nagoya Mosaic Clay Drop",
-      grounded: true,
-      sources: [],
-      sourceUrls: ["https://x.example/redirect"],
-    }));
-    const verifyMock = vi.fn(async () => null); // code confirmed on NO page
-    const floorMock = vi.fn(() => ({ name: "Acme / product unconfirmed", brand: "Acme" }));
-    const deps = baseDeps({ groundIdentify: groundMock, verifyCodeOnPage: verifyMock, prefixFloor: floorMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-
-    expect(r?.source).toBe("grounding");
-    expect(r?.verified).toBe(false);
-    expect(r?.aiCalled).toBe(true);
-    expect(r?.name).toMatch(/Nagoya Mosaic/);
-    expect(floorMock).not.toHaveBeenCalled(); // a named grounding suggestion beats the brand-only floor
-  });
-
-  it("(gr3) NAME-CORROBORATION guard on grounding too: code on page but hallucinated name -> Suggested, not Verified", async () => {
-    const groundMock = vi.fn(async () => ({
-      text: "Coconut Oil",
-      grounded: true,
-      sources: [],
-      sourceUrls: ["https://vitamins.example/glycine"],
-    }));
-    const verifyMock = verifyHit(`Glycine 1000mg by Life Extension - UPC ${CODE} - amino acid supplement`);
-    const deps = baseDeps({ groundIdentify: groundMock, verifyCodeOnPage: verifyMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-
-    expect(r?.source).toBe("grounding");
-    expect(r?.verified).toBe(false); // code on page, but the NAME does not corroborate -> held suggestion
-    expect(r?.name).toMatch(/Coconut Oil/);
-  });
-
-  it("(r1) a refusal sentence from the grounding fallback is rejected BEFORE any fetch -> falls to the floor", async () => {
-    const groundMock = vi.fn(async () => ({
-      text: `Unable to identify the product associated with UPC ${CODE}.`,
-      grounded: true,
-      sources: [],
-      sourceUrls: [`https://search.example/${CODE}`],
-    }));
-    const verifyMock = vi.fn(async () => ({ url: "x", pageText: `page with ${CODE}` }));
-    const floorMock = vi.fn(() => ({ name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola" }));
-    const deps = baseDeps({ groundIdentify: groundMock, verifyCodeOnPage: verifyMock, prefixFloor: floorMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-    expect(r?.source).toBe("floor");
-    expect(r?.verified).toBe(false);
-    expect(verifyMock).not.toHaveBeenCalled(); // a refusal never even reaches fetch-verify
-  });
-
-  it("(r2) a refusal phrase isRefusal catches (but isUsableProductName does not) -> floor, never a product", async () => {
-    const groundMock = vi.fn(async () => ({
-      text: `We couldn't find a product for ${CODE}`,
-      grounded: true,
-      sources: [],
-      sourceUrls: [`https://search.example/${CODE}`],
-    }));
-    const floorMock = vi.fn(() => ({ name: "Pepsi / product unconfirmed", brand: "Pepsi" }));
-    const deps = baseDeps({ groundIdentify: groundMock, prefixFloor: floorMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-    expect(r?.source).toBe("floor");
-    expect(r?.verified).toBe(false);
-  });
-
-  it("(429-floor) barcode-DB null + grounding null -> a public miss ends at the generic terminal floor (Fix 4: never null, never legacy)", async () => {
-    const deps = baseDeps(); // barcode-DB null, grounding null, prefixFloor null (e.g. unassigned 999-prefix)
-    const r = await resolveUnknownFast(CODE, deps);
-    expect(r).not.toBeNull(); // null used to fall through to the legacy Gemini/OpenAI money-pit
+    expect(r).not.toBeNull();
     expect(r?.source).toBe("floor");
     expect(r?.verified).toBe(false);
     expect(r?.aiCalled).toBe(false);
@@ -208,123 +226,78 @@ describe("resolveUnknownFast - barcode-DB first, fetch-verify, grounding fallbac
     expect(r?.name).toContain(CODE);
   });
 
-  it("(floor-brand) barcode-DB + grounding miss with a brand-only prefix floor -> Suggested floor (verified false)", async () => {
+  it("(floor-brand) both miss with a brand-only prefix floor -> Suggested floor (verified false)", async () => {
     const floorMock = vi.fn(() => ({ name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola" }));
     const deps = baseDeps({ prefixFloor: floorMock });
     const r = await resolveUnknownFast(CODE, deps);
     expect(r?.source).toBe("floor");
     expect(r?.name).toMatch(/Coca-Cola/);
     expect(r?.verified).toBe(false);
-    expect(r?.aiCalled).toBe(false);
   });
 
-  it("(fc) double miss with a barcode-DB offer URL (empty name); scrape CARRIES the code -> Verified firecrawl", async () => {
+  it("(fc) both sources give no usable name but a candidate URL exists -> Firecrawl scrape -> Suggestion (never auto-count)", async () => {
     const bdbMock = vi.fn(async () => ({ name: "", brand: "", sourceUrl: "https://shop.example.com/p/1" }));
-    const groundMock = vi.fn(async () => null);
-    const fcMock = vi.fn(async () => ({ title: "Stanley Quencher H2.0 Tumbler 40oz", markdown: `product page UPC ${CODE}` }));
-    const floorMock = vi.fn(() => ({ name: "Should Not Be Used / product unconfirmed", brand: "Should Not" }));
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock, firecrawlScrapeCheap: fcMock, prefixFloor: floorMock });
+    const fcMock = vi.fn(async () => ({ title: "Stanley Quencher H2.0 Tumbler 40oz", markdown: "" }));
+    const floorMock = vi.fn(() => ({ name: "Should Not Be Used", brand: "Should Not" }));
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, firecrawlScrapeCheap: fcMock, prefixFloor: floorMock });
 
     const r = await resolveUnknownFast(CODE, deps);
 
-    expect(fcMock).toHaveBeenCalledTimes(1);
     expect(fcMock).toHaveBeenCalledWith("https://shop.example.com/p/1");
     expect(r?.source).toBe("firecrawl");
     expect(r?.name).toMatch(/Stanley Quencher/);
-    expect(r?.verified).toBe(true); // the scrape carries the exact code -> trusted enough to auto-count
-    expect(r?.aiCalled).toBe(true);
+    expect(r?.verified).toBe(false); // a lone scraped page is a single source -> Suggestion
     expect(floorMock).not.toHaveBeenCalled();
   });
 
-  it("(fc-nocode) firecrawl scrape whose page does NOT carry the code -> Suggested firecrawl (verified false), never a blind auto-count", async () => {
-    const bdbMock = vi.fn(async () => ({ name: "", brand: "", sourceUrl: "https://shop.example.com/p/1" }));
-    const fcMock = vi.fn(async () => ({ title: "Some Unrelated Category Page Title", markdown: "no barcode here at all" }));
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, firecrawlScrapeCheap: fcMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-
-    expect(r?.source).toBe("firecrawl");
-    expect(r?.verified).toBe(false); // code not on the scraped page -> Suggestion, not auto-counted
-    expect(r?.aiCalled).toBe(true);
-  });
-
-  it("(fc-error-title) a scrape titled 'Error' is NOT a usable product -> skips firecrawl, falls to the floor (no blind auto-count)", async () => {
+  it("(fc-error) a scrape titled 'Error' is rejected as a name -> falls to the floor (no blind suggestion)", async () => {
     const bdbMock = vi.fn(async () => ({ name: "", brand: "", sourceUrl: "https://shop.example.com/p/1" }));
     const fcMock = vi.fn(async () => ({ title: "Error", markdown: "" }));
     const floorMock = vi.fn(() => ({ name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola" }));
     const deps = baseDeps({ lookupBarcodeDb: bdbMock, firecrawlScrapeCheap: fcMock, prefixFloor: floorMock });
 
     const r = await resolveUnknownFast(CODE, deps);
-
-    expect(r?.source).toBe("floor"); // "Error" rejected as a name -> no firecrawl win, lands on the floor
-    expect(r?.name).toMatch(/Coca-Cola/);
-    expect(r?.verified).toBe(false);
-  });
-
-  it("(fc-null) double miss, firecrawl null too -> prefix floor, source floor, verified false", async () => {
-    const bdbMock = vi.fn(async () => ({ name: "", brand: "", sourceUrl: "https://shop.example.com/p/1" }));
-    const fcMock = vi.fn(async () => null);
-    const floorMock = vi.fn(() => ({ name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola" }));
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, firecrawlScrapeCheap: fcMock, prefixFloor: floorMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-    expect(fcMock).toHaveBeenCalledTimes(1);
     expect(r?.source).toBe("floor");
     expect(r?.name).toMatch(/Coca-Cola/);
-    expect(r?.verified).toBe(false);
   });
 
-  it("(prem) premium grounding escalation obeys the same fetch-verify gate: no page confirm -> suggestion only", async () => {
-    const premiumMock = vi.fn(async () => ({ text: "Premium Guessed Product", grounded: true, sources: [], sourceUrls: [] }));
+  it("(prem) premium grounding escalation is a lone source -> Suggestion only, never auto-count", async () => {
+    const premiumMock = ground("Premium Guessed Product");
     const deps = baseDeps({ groundIdentifyPremium: premiumMock });
 
     const r = await resolveUnknownFast(CODE, deps);
-
     expect(premiumMock).toHaveBeenCalledTimes(1);
     expect(r?.source).toBe("grounding");
-    expect(r?.verified).toBe(false); // premium answer without a fetch-confirmed page -> suggestion only
-    expect(r?.aiCalled).toBe(true);
+    expect(r?.verified).toBe(false);
   });
 
-  it("(prem-verified) premium grounding whose page fetch-confirms the code + name -> Verified", async () => {
-    const premiumMock = vi.fn(async () => ({ text: "Premium Real Product", grounded: true, sources: [], sourceUrls: ["https://p.example/x"] }));
-    const verifyMock = verifyHit(`Premium Real Product listing - UPC ${CODE}`);
-    const deps = baseDeps({ groundIdentifyPremium: premiumMock, verifyCodeOnPage: verifyMock });
-
-    const r = await resolveUnknownFast(CODE, deps);
-    expect(r?.source).toBe("grounding");
-    expect(r?.verified).toBe(true);
-    expect(r?.name).toMatch(/Premium Real Product/);
-  });
-
-  it("a throwing leg does not reject the whole resolve (per-leg catch -> null), fallback still resolves", async () => {
+  it("a throwing leg does not reject the whole resolve (per-leg catch -> null); the other source still resolves", async () => {
     const bdbMock = vi.fn(async () => {
       throw new Error("barcode-DB blew up");
     });
-    const groundMock = vi.fn(async () => ({ text: "Fallback Product Name Works", grounded: true, sources: [], sourceUrls: ["https://x/y"] }));
-    const verifyMock = verifyHit(`Fallback Product Name Works - UPC ${CODE}`);
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock, verifyCodeOnPage: verifyMock });
+    const groundMock = ground("Fallback Product Name Works");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
     const r = await resolveUnknownFast(CODE, deps);
-    expect(r?.source).toBe("grounding");
-    expect(r?.verified).toBe(true);
+    expect(r?.source).toBe("grounding"); // DB threw -> lone grounding source
+    expect(r?.verified).toBe(false);
     expect(r?.name).toMatch(/Fallback Product Name/);
   });
 
-  it("(slow-barcode-db) a slow barcode-DB leg is awaited first; its verified win ends the pipeline without the grounding fallback", async () => {
+  it("(concurrent) both legs are queried concurrently (a slow DB does not stop grounding from being called)", async () => {
     const bd = deferred<{ name: string; brand: string; sourceUrl: string } | null>();
     const bdbMock = vi.fn(() => bd.promise);
-    const verifyMock = verifyHit(`Real Structured Product listing - UPC ${CODE}`);
-    const groundMock = vi.fn(async () => ({ text: "Should Never Run", grounded: true, sources: [], sourceUrls: ["https://x/y"] }));
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, verifyCodeOnPage: verifyMock, groundIdentify: groundMock });
+    const groundMock = ground("Jumbo Stone Crab Claws");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
     const pending = resolveUnknownFast(CODE, deps);
     await new Promise((res) => setTimeout(res, 0));
-    bd.resolve({ name: "Real Structured Product", brand: "", sourceUrl: "https://x.example/p" });
+    // grounding was dispatched WITHOUT waiting for the slow DB leg
+    expect(groundMock).toHaveBeenCalledTimes(1);
+    bd.resolve({ name: "Jumbo Stone Crab Claws", brand: "Joe's", sourceUrl: "https://x/y" });
     const r = await pending;
 
     expect(r?.source).toBe("barcode_db");
-    expect(r?.verified).toBe(true);
-    expect(groundMock).not.toHaveBeenCalled();
+    expect(r?.verified).toBe(true); // both agree
   });
 });

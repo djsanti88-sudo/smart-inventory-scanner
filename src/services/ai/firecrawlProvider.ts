@@ -3,6 +3,7 @@ import { normalizeResult } from "@/services/ai/provider";
 import { verifyEvidence } from "@/services/ai/evidenceVerifier";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
+import { pageTextHasCode } from "@/services/ai/verifyCodeOnPage";
 
 // Firecrawl fallback (Stage 2 source discovery). SERVER-SIDE ONLY. Used ONLY when the fast path
 // returns no usable product. It does what a person does: search the open web for the barcode, open
@@ -166,6 +167,61 @@ export async function firecrawlScrapeCheap(
     }
   }
   return null; // every key exhausted/rate-limited: clean unavailable, never throw
+}
+
+export interface SearchIdentity {
+  name: string;
+  url: string;
+}
+
+/**
+ * Firecrawl /search the BARCODE and return product identities from result SNIPPETS that actually contain
+ * the exact code. This is the reliable, deterministic cross-check source: it reads real Google-style
+ * result titles/descriptions (Open Food Facts, Amazon, nutrition/retail pages) - NO scrape, NO model
+ * opinion, so it cannot hallucinate. Snippets-only = 2 credits/call (never the per-page scrape cost).
+ * Rotates FIRECRAWL_API_KEY_1..4 (skip on 402/429); returns null ONLY when every key is exhausted/absent
+ * (so the caller can fall back), and [] when it searched but nothing carried the code. Every URL is
+ * SSRF-checked. Never throws into the scan flow.
+ */
+export async function searchIdentifyByBarcode(
+  code: string,
+  deps: FirecrawlCheapDeps = {},
+  opts?: { limit?: number },
+): Promise<SearchIdentity[] | null> {
+  const keys = deps.apiKeys && deps.apiKeys.length > 0 ? deps.apiKeys.filter(Boolean) : firecrawlKeysFromEnv();
+  if (keys.length === 0) return null;
+
+  const fetchFn = deps.fetchImpl ?? (globalThis.fetch as unknown as FcFetch);
+  const body = JSON.stringify({ query: code, limit: opts?.limit ?? 8 });
+
+  for (let i = 0; i < keys.length; i++) {
+    let res: Awaited<ReturnType<FcFetch>>;
+    try {
+      res = await fetchFn(`${FIRECRAWL_BASE}/search`, { method: "POST", headers: headers(keys[i]), body, signal: deps.signal });
+    } catch {
+      continue; // network error on this key: try the next
+    }
+    if (res.status === 402 || res.status === 429) continue; // key out of credits/quota: rotate
+    if (!res.ok) return null; // any other failure: clean unavailable (caller falls back), never throw
+
+    const d = (await res.json()) as { data?: { web?: unknown[] } | unknown[]; web?: unknown[] };
+    const web = (Array.isArray(d?.data) ? d?.data : (d?.data as { web?: unknown[] })?.web ?? d?.web) ?? [];
+    const out: SearchIdentity[] = [];
+    for (const r of web as Array<{ url?: string; title?: string; description?: string }>) {
+      const url = String(r.url ?? "");
+      const title = String(r.title ?? "");
+      const desc = String(r.description ?? "");
+      if (url && !isSafePublicUrl(url)) continue;
+      // ONLY trust a snippet that actually shows the exact barcode - this is the whole point (deterministic).
+      if (!pageTextHasCode(`${title} ${desc} ${url}`, code)) continue;
+      // The product name comes from the result TITLE only (descriptions are sentences/noise). A title that
+      // is a site/search/error label (SITE_BLOCKLIST) is not a product and is dropped.
+      if (!isUsableProductName(title)) continue;
+      out.push({ name: cleanProductName(title), url });
+    }
+    return out; // empty [] = searched, nothing carried the code (distinct from null = no keys)
+  }
+  return null; // every key exhausted/rate-limited
 }
 
 const noneEvidence = (): EvidenceResult => ({

@@ -1,4 +1,8 @@
-const MODEL = process.env.GEMINI_GROUND_MODEL || "gemini-flash-lite-latest";
+// Grounding runs on Gemini 2.5 Flash-Lite by default (owner decision 2026-07-01): the 2.5 line gives
+// 1,500 FREE grounding requests/day (~45k/month) billed per-prompt, vs the 3.x "-latest" line which is
+// capped at 5,000 grounded prompts/MONTH and bills per search-query. Override with GEMINI_GROUND_MODEL
+// (e.g. drop to "gemini-2.0-flash-lite" if the 2.5 daily quota is ever exhausted too).
+const MODEL = process.env.GEMINI_GROUND_MODEL || "gemini-2.5-flash-lite";
 
 interface GroundingChunk {
   web?: { uri?: string; title?: string };
