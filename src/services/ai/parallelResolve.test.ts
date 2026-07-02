@@ -284,20 +284,59 @@ describe("resolveUnknownFast - cross-check auto-count", () => {
     expect(r?.name).toMatch(/Fallback Product Name/);
   });
 
-  it("(concurrent) both legs are queried concurrently (a slow DB does not stop grounding from being called)", async () => {
-    const bd = deferred<{ name: string; brand: string; sourceUrl: string } | null>();
-    const bdbMock = vi.fn(() => bd.promise);
-    const groundMock = ground("Jumbo Stone Crab Claws");
-    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
+  it("(concurrent-dbs) the two structured DBs are queried concurrently (a slow retail DB does not serialize UPCitemdb)", async () => {
+    const rt = deferred<{ name: string; brand: string } | null>();
+    const retailMock = vi.fn(() => rt.promise);
+    const bdbMock = vi.fn(async () => ({ name: "Jumbo Stone Crab Claws", brand: "Joe's", sourceUrl: "https://x/y" }));
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, retailDb: retailMock });
 
     const pending = resolveUnknownFast(CODE, deps);
     await new Promise((res) => setTimeout(res, 0));
-    // grounding was dispatched WITHOUT waiting for the slow DB leg
-    expect(groundMock).toHaveBeenCalledTimes(1);
-    bd.resolve({ name: "Jumbo Stone Crab Claws", brand: "Joe's", sourceUrl: "https://x/y" });
+    expect(bdbMock).toHaveBeenCalledTimes(1); // UPCitemdb dispatched without waiting for the slow retail DB
+    expect(retailMock).toHaveBeenCalledTimes(1);
+    rt.resolve({ name: "Jumbo Stone Crab Claws", brand: "OFF" });
     const r = await pending;
+    expect(r?.source).toBe("barcode_db");
+    expect(r?.verified).toBe(true); // the two DBs agree
+  });
+
+  it("(rt1) UPCitemdb + 4M retail DB AGREE -> AUTO-COUNT with NO AI call (aiCalled false), grounding never runs", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Campbell's Cream of Chicken Soup", brand: "Campbell's", sourceUrl: "https://x/y" }));
+    const retailMock = vi.fn(async () => ({ name: "Campbell's Cream Of Chicken Condensed Soup", brand: "Campbell's" }));
+    const groundMock = ground("should not run");
+    const searchMock = vi.fn(async () => [{ name: "should not run", url: "https://x/y" }]);
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, retailDb: retailMock, groundIdentify: groundMock, searchIdentify: searchMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
 
     expect(r?.source).toBe("barcode_db");
-    expect(r?.verified).toBe(true); // both agree
+    expect(r?.verified).toBe(true);
+    expect(r?.aiCalled).toBe(false); // two FREE structured DBs agreed -> no grounding, no Firecrawl, $0
+    expect(groundMock).not.toHaveBeenCalled();
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("(rt2) the 4M DB's WRONG row is OUTVOTED: retail=coconut oil, UPCitemdb+grounding=glycine -> glycine auto-counts", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Life Extension Glycine 1000 mg", brand: "Life Extension", sourceUrl: "https://x/y" }));
+    const retailMock = vi.fn(async () => ({ name: "Coconut oil", brand: "Life Extensions" })); // the real bad OFF row
+    const groundMock = ground("Life Extension Glycine 1000mg");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, retailDb: retailMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.verified).toBe(true);
+    expect(r?.name).toMatch(/Glycine/);
+    expect(r?.name).not.toMatch(/Coconut/); // coconut oil (1 vote) outvoted by glycine (2 votes)
+  });
+
+  it("(rt3) retail DB + grounding agree while UPCitemdb misses -> auto-count", async () => {
+    const bdbMock = vi.fn(async () => null); // UPCitemdb miss
+    const retailMock = vi.fn(async () => ({ name: "Pringles Scorchin Cheddar", brand: "Pringles" }));
+    const groundMock = ground("Pringles Scorchin Cheddar Potato Crisps");
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, retailDb: retailMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+    expect(r?.verified).toBe(true);
+    expect(r?.name).toMatch(/Pringles Scorchin/);
   });
 });

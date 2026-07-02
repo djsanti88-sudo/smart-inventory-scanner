@@ -6,27 +6,28 @@
 // OREO for Pico de Gallo and DORITOS for Lay's. Wrong identity is FAILURE, so a lone source may NEVER
 // auto-count. The rule is now CROSS-CHECK:
 //
-//   1. Query TWO INDEPENDENT sources CONCURRENTLY: the free structured barcode-DB (UPCitemdb) and one free
-//      Gemini 2.5 grounding call. Each candidate must be a usable, non-refusal product name; the barcode-DB
-//      brand must also pass the GS1 brand-prefix firewall (prefixBrandConflict).
-//   2. AUTO-COUNT (Verified) ONLY when the two names AGREE on identity (>=2 shared distinctive tokens -
-//      typically brand + product/flavor). A lone wrong DB row and a lone grounding hallucination can't clear
-//      this because the other source disagrees or is absent.
-//   3. NO agreement (single source, or they differ) -> the best available name is a SUGGESTION shown for
-//      one-tap human approval in Needs Review, NEVER auto-counted.
-//   4. Neither source named it -> Firecrawl escalation (Suggestion), then the Plan C prefix floor, then the
-//      Fix 4 generic terminal floor. NEVER a hallucinated product; NEVER null for a public code.
+//   1. Query TWO FREE STRUCTURED DBs CONCURRENTLY: UPCitemdb + the owner's 4M-row Open Food Facts retail DB
+//      (Turso, ~50-160ms). Both firewall-checked (prefixBrandConflict).
+//   2. If the two DBs AGREE -> AUTO-COUNT in ~160ms with NO AI call and NO Firecrawl (the common food/retail
+//      path). aiCalled:false.
+//   3. Else add one free Gemini 2.5 grounding call, and CONSENSUS across the THREE free sources: AUTO-COUNT
+//      (Verified) the identity >=2 of them agree on (>=2 shared distinctive tokens). This is where the 4M DB's
+//      bad rows (coconut-oil-for-glycine) get OUTVOTED - one wrong vote never wins.
+//   4. Still no agreement -> ONE Firecrawl /search (paid, rare) adds barcode-confirmed real-page votes.
+//   5. No consensus anywhere -> the best available name is a SUGGESTION shown in Needs Review (still counted
+//      by the store's provisional-count rule), then Firecrawl-scrape, then the Plan C prefix floor, then the
+//      Fix 4 generic terminal floor. NEVER a hallucinated Verified; NEVER null for a public code.
 //
-// Cost/speed: 1 free UPCitemdb lookup + 1 free Gemini 2.5 grounding call (1,500/day free), run concurrently
-// (~1.5s wall), every win cached upstream (resolved once per code, ever). A 429 / rate-cap / error on either
-// leg falls back GRACEFULLY (the safe() wrapper turns a throw into a clean null - never crash, never guess).
+// Cost/speed: the common path is 2 free DB lookups (~160ms, $0, no AI). Grounding (free, 1,500/day) only on
+// DB disagreement; Firecrawl (2 credits) only when all free sources disagree. Every win cached upstream
+// (resolved once per code). A 429 / rate-cap / error on any leg falls back GRACEFULLY (safe() -> null).
 //
 // All external work is injected via `deps` so tests mock every provider - ZERO live spend / fetch in tests.
 
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 
-export type ResolveSource = "barcode_db" | "grounding" | "firecrawl" | "floor";
+export type ResolveSource = "barcode_db" | "retail_db" | "grounding" | "firecrawl" | "floor";
 
 export interface ParallelResolveResult {
   name: string;
@@ -63,6 +64,10 @@ export interface FloorLegResult {
 export interface ParallelResolveDeps {
   /** Structured barcode-DB lookup (UPCitemdb). Returns null on miss/rate-limit/error - never throws into us. */
   lookupBarcodeDb: (code: string) => Promise<BarcodeDbLegResult | null>;
+  /** The owner's 4M-row Open Food Facts retail DB (Turso). A FREE, fast (~50-160ms) structured source. Its
+   *  data is mostly right but has some bad rows (e.g. coconut-oil-for-glycine) - safe here because it is only
+   *  ONE consensus vote, outvoted by disagreeing sources. Null on miss/unconfigured. */
+  retailDb?: (code: string) => Promise<{ name: string; brand: string } | null>;
   /** Fast grounded identify (gemini-2.5-flash-lite). `url` switches google_search -> url_context. Null on miss. */
   groundIdentify: (code: string, opts?: { url?: string }) => Promise<GroundingLegResult | null>;
   /** 1-credit cheap Firecrawl scrape of ONE known URL (last-ditch name when no source named it). Null when unavailable. */
@@ -156,7 +161,12 @@ function findConsensus(pool: Candidate[]): Candidate | null {
   for (let i = 0; i < pool.length; i++) {
     const cluster = pool.filter((p, j) => j === i || identitiesAgree(pool[i].name, p.name));
     if (cluster.length >= 2) {
-      return cluster.find((p) => p.source === "barcode_db") ?? cluster[0];
+      // Prefer a structured-DB member's clean name/brand (UPCitemdb, then the 4M retail DB), else the first.
+      return (
+        cluster.find((p) => p.source === "barcode_db") ??
+        cluster.find((p) => p.source === "retail_db") ??
+        cluster[0]
+      );
     }
   }
   return null;
@@ -186,41 +196,47 @@ export async function resolveUnknownFast(
   // A candidate URL (barcode-DB offer link or a grounding chunk) so a double-miss can escalate to Firecrawl.
   let bestUrl = "";
 
-  // 1. Query the TWO INDEPENDENT sources CONCURRENTLY (barcode-DB free; grounding free on Gemini 2.5).
-  const [bd, gr] = await Promise.all([
+  // 1. TWO FREE STRUCTURED DBs, CONCURRENTLY: UPCitemdb + the owner's 4M-row Open Food Facts retail DB
+  //    (Turso, ~50-160ms). Both firewall-checked. Cheapest, fastest sources - and no AI spend.
+  const [bd, rt] = await Promise.all([
     safe(() => deps.lookupBarcodeDb(code)),
-    safe(() => deps.groundIdentify(code)),
+    deps.retailDb ? safe(() => deps.retailDb!(code)) : Promise.resolve(null),
   ]);
   if (bd?.sourceUrl) bestUrl = bd.sourceUrl;
-
-  // Usable, firewall-passed candidate name from each source (empty string = that source did not name it).
   const bdName =
     bd && isUsable(bd.name) && !brandConflict(code, bd.brand) ? cleanProductName(bd.name) : "";
-  const grUsable = !!gr && isUsable(gr.text) && !isRefusal(gr.text);
-  const grName = grUsable ? cleanProductName(gr.text) : "";
+  const rtName =
+    rt && isUsable(rt.name) && !brandConflict(code, rt.brand) ? cleanProductName(rt.name) : "";
+
+  // 2. FASTEST FREE PATH: the two structured DBs AGREE -> auto-count in ~160ms with NO AI call and NO
+  //    Firecrawl. This is the new common path for food/retail (both DBs cover it). aiCalled:false.
+  if (bdName && rtName && identitiesAgree(bdName, rtName)) {
+    return { name: bdName, brand: bd!.brand, verified: true, aiCalled: false, source: "barcode_db" };
+  }
+
+  // 3. Add Gemini 2.5 grounding (free, <=1500/day) - only because the two DBs did not settle it.
+  const gr = await safe(() => deps.groundIdentify(code));
+  const grName = gr && isUsable(gr.text) && !isRefusal(gr.text) ? cleanProductName(gr.text) : "";
   if (gr) {
     const u = gr.sourceUrls ?? [];
     if (u[0] && !bestUrl) bestUrl = u[0];
   }
 
-  // 2. FAST FREE PATH: the two free sources already AGREE -> auto-count, spend ZERO Firecrawl credits.
-  if (bdName && grName && identitiesAgree(bdName, grName)) {
-    return { name: bdName, brand: bd!.brand, verified: true, aiCalled: true, source: "barcode_db" };
-  }
-
-  // 3. FIRECRAWL /search TIEBREAKER (prepaid credits) - called ONLY because the two free sources did not
-  //    agree. It returns barcode-CONFIRMED identities from real result snippets (deterministic, no
-  //    hallucination). null = keys exhausted (degrade to the free signals); [] = searched, nothing carried
-  //    the code. Each hit is an independent real-page vote in the consensus below.
-  const searchHits = deps.searchIdentify ? await safe(() => deps.searchIdentify!(code)) : null;
-  if (searchHits && searchHits[0]?.url && !bestUrl) bestUrl = searchHits[0].url;
-
-  // 4. CONSENSUS: pool every source (UPCitemdb + grounding + each barcode-confirmed snippet) and AUTO-COUNT
-  //    the identity that >=2 of them agree on. A lone wrong DB row / lone grounding hallucination / single
-  //    stray snippet can never clear this - two independent sources must name the same product.
+  // 4. CONSENSUS across the THREE free sources (UPCitemdb + retail-DB + grounding). AUTO-COUNT the identity
+  //    >=2 of them agree on. This is where the 4M DB's coconut-oil-for-glycine gets OUTVOTED: OFF says
+  //    coconut oil, UPCitemdb + grounding say glycine -> glycine wins, free, no Firecrawl.
   const pool: Candidate[] = [];
   if (bdName) pool.push({ name: bdName, brand: bd!.brand, source: "barcode_db" });
+  if (rtName) pool.push({ name: rtName, brand: rt!.brand, source: "retail_db" });
   if (grName) pool.push({ name: grName, brand: "", source: "grounding" });
+  const freeConsensus = findConsensus(pool);
+  if (freeConsensus) return { ...freeConsensus, verified: true, aiCalled: true };
+
+  // 5. FIRECRAWL /search TIEBREAKER (prepaid credits) - ONLY because the three free sources did not agree.
+  //    Barcode-CONFIRMED identities from real result snippets. null = keys exhausted (degrade to free
+  //    signals); [] = nothing carried the code. Each hit is an independent real-page vote.
+  const searchHits = deps.searchIdentify ? await safe(() => deps.searchIdentify!(code)) : null;
+  if (searchHits && searchHits[0]?.url && !bestUrl) bestUrl = searchHits[0].url;
   for (const h of searchHits ?? []) {
     const n = cleanProductName(h.name);
     if (isUsable(n) && !isRefusal(n)) pool.push({ name: n, brand: "", source: "firecrawl" });
@@ -228,15 +244,16 @@ export async function resolveUnknownFast(
   const consensus = findConsensus(pool);
   if (consensus) return { ...consensus, verified: true, aiCalled: true };
 
-  // 5. No consensus -> the best available name is a SUGGESTION (Needs Review), NEVER auto-counted. Prefer a
-  //    barcode-confirmed Firecrawl snippet (real page), then the structured barcode-DB name, then grounding.
+  // 6. No consensus -> the best available name is a SUGGESTION (Needs Review), NEVER auto-counted. Prefer a
+  //    barcode-confirmed Firecrawl snippet (real page), then the structured DBs, then grounding.
   const best =
     pool.find((p) => p.source === "firecrawl") ??
     pool.find((p) => p.source === "barcode_db") ??
+    pool.find((p) => p.source === "retail_db") ??
     pool[0];
   if (best) return { ...best, verified: false, aiCalled: true };
 
-  // 6. LAST-DITCH: no source named it, but a candidate URL exists -> scrape it cheaply for a name (Suggestion
+  // 7. LAST-DITCH: no source named it, but a candidate URL exists -> scrape it cheaply for a name (Suggestion
   //    only - a lone scraped page is a single source). Junk/error titles are rejected by isUsableProductName.
   if (bestUrl) {
     const fc = await safe(() => deps.firecrawlScrapeCheap(bestUrl));
@@ -248,7 +265,7 @@ export async function resolveUnknownFast(
     }
   }
 
-  // 7. Optional premium grounding escalation - a lone source, so a SUGGESTION only (never auto-count).
+  // 8. Optional premium grounding escalation - a lone source, so a SUGGESTION only (never auto-count).
   if (deps.groundIdentifyPremium) {
     const g = await safe(() => deps.groundIdentifyPremium!(code, bestUrl ? { url: bestUrl } : undefined));
     if (g && isUsable(g.text) && !isRefusal(g.text)) {
@@ -256,7 +273,7 @@ export async function resolveUnknownFast(
     }
   }
 
-  // 6. PREFIX FLOOR (Plan C): name the brand from the GS1 prefix, product explicitly unconfirmed (NOT verified).
+  // 9. PREFIX FLOOR (Plan C): name the brand from the GS1 prefix, product explicitly unconfirmed (NOT verified).
   const floor = deps.prefixFloor(code);
   if (floor) return { name: floor.name, brand: floor.brand, verified: false, aiCalled: false, source: "floor" };
 

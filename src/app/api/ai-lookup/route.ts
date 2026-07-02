@@ -379,18 +379,17 @@ export async function POST(request: Request) {
       // fallback) so a broken Turso connection ("turso_error") is distinguishable from a genuine
       // corpus miss ("turso_miss") instead of both silently falling through to paid AI decode.
       let retailLookupStatus: string | undefined;
+      let retailHit: { productName: string; brand: string } | null = null;
       if (!e2eMode()) {
         const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
-        const retail = await lookupRetailBarcodeAsync(code);
+        retailHit = await lookupRetailBarcodeAsync(code);
         retailLookupStatus = getLastRetailLookupStatus();
-        // FIX 5 (2026-07-01): the Open Food Facts retail data is UNRELIABLE (crowd-sourced). It maps the
-        // glycine UPC 0737870166917 to "Coconut oil" (brand "Life Extensions") - right brand, WRONG product -
-        // and 0 of the owner's real codes are even in it. Trusting an OFF hit as a Verified auto-count (and
-        // short-circuiting BEFORE the accurate grounding-first + fetch-verify resolver) produced wrong
-        // identities. So an OFF retail hit NO LONGER auto-verifies: the lookup still runs for observability
-        // (retailLookupStatus is surfaced in the AI-path debug below), but the code now FALLS THROUGH to the
-        // grounding-first resolver, which fetch-confirms the exact code on a real page before Verifying.
-        void retail;
+        // The 4M-row Open Food Facts retail DB (Turso) is a FREE structured source. Its data is mostly right
+        // but has some WRONG rows (glycine UPC 0737870166917 -> "Coconut oil"), so it is NO LONGER trusted
+        // ALONE (that produced wrong Verified identities - the old Fix 5). Instead it is passed into the
+        // resolver below as ONE consensus VOTE (the retailDb dep): a wrong OFF row is OUTVOTED by UPCitemdb +
+        // grounding, while its millions of correct rows give FREE, instant (~50-160ms) coverage - so most
+        // food/retail codes auto-count with no AI and no Firecrawl.
       }
 
       // PLAN D - GROUNDING-FIRST FAST RESOLVER (flash-lite grounding -> fetch-verify -> barcode-DB fallback).
@@ -410,6 +409,7 @@ export async function POST(request: Request) {
       if (!e2eMode() && isPublicBarcode) {
         const fast = await resolveUnknownFast(code, {
           lookupBarcodeDb: (c) => lookupBarcodeDb(c),
+          retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
           groundIdentify: (c, opts) => groundIdentify(c, opts),
           verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
           firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),

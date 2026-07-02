@@ -5,6 +5,38 @@
 > `.claude/plans/ultrathink-role-you-are-kind-allen.md`.
 
 ## Current phase
+**CONSENSUS CROSS-CHECK DECODE (2026-07-02): auto-count only on 2-source agreement. Owner-validated. Not pushed.**
+
+Branch `fix/grounding-ladder`. SUPERSEDES the earlier grounding-first ladder (which auto-counted
+hallucinations - the FINDING 1 revisit-trigger below - and, in a later single-source "trust UPCitemdb"
+variant, auto-counted ~40% WRONG on 21 hard codes: a women's dress for Member's Mark water, Oreo for Pico).
+
+- **Design (commit dfc86e3):** for an unknown PUBLIC barcode, `resolveUnknownFast`
+  (`src/services/ai/parallelResolve.ts`) queries UPCitemdb (`barcodeDbProvider.ts`, free) + gemini-2.5-flash-lite
+  grounding (`flashLiteGrounding.ts`, free <=1500/day) CONCURRENTLY. If the two AGREE on identity (>=2 shared
+  distinctive tokens, `identitiesAgree`) -> auto-count, ZERO Firecrawl credits. Only on disagreement, spend ONE
+  Firecrawl `/search` (2cr, snippets only, `searchIdentifyByBarcode`) returning barcode-CONFIRMED names from
+  real result titles. CONSENSUS (`findConsensus`): auto-count the identity >=2 sources agree on; lone source /
+  disagreement -> Needs Review. Firecrawl keys exhausted -> degrade to free signals. Wired in `route.ts` ~L411.
+- **Local gate:** 885 unit tests / tsc / eslint (edited files) all green (2026-07-02).
+- **Owner-validated live proof:** 21 historically-problematic codes (`e2e/fixtures/owner-problem-codes.json`):
+  auto-count 1->18/21, 0 wrong auto-counts, Member's Mark water FIXED. Owner double-checked and confirmed the
+  system's decodes were RIGHT and their own expected-sheet had errors. Only genuine miss: Home Depot Homer
+  Bucket `051596320812` -> a Hampton Bay fan, but lands in Needs Review (SAFE, not a wrong count).
+- **Scale proof (2026-07-02, in progress):** ~190 unique real codes (Open Food Facts + corpus) through the
+  ladder + rescans to 500 total. NOTE: the app's daily AI-lookup cap (200, `AI_LOOKUP_DAILY_LIMIT`) is a real
+  cost guard - it halted an earlier run; raised locally for the scale test only. [results pending]
+- **Cost:** Gemini 2.5 grounding free (1500/day); Firecrawl `/search` 2cr only on disagreement, cached once per
+  code, 4 keys x 1000 free/mo. ~$0 cash for typical volume. If 2.5 grounding caps -> `gemini-2.0-flash`.
+- **Residual risk:** two sources sharing the SAME bad data can still agree -> a real GS1 prefix-brand firewall
+  would close it (`brandPrefixMap.json` is currently tire-focused).
+- **RESOLVED (was FINDING 1):** grounding-leg hallucination auto-counts - consensus + refusal rejection + the
+  "Error"-title / firecrawl code-gate fixes closed it.
+- Preview only. NO production deploy (needs explicit owner sign-off - [[no-deploy-without-asking]]).
+
+---
+
+## Prior phase
 **FINAL (2026-06-14): decode reverted to "trust the AI" + fast; strict confidence-gating removed; everything else kept.**
 
 Owner directive: the strict confidence gate was sending good products to Needs Review and slowing scans; restore the
