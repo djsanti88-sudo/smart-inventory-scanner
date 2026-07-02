@@ -244,10 +244,17 @@ describe("resolveUnknownFast - barcode-DB first, grounding only on a miss", () =
     expect(r?.aiCalled).toBe(false);
   });
 
-  it("(c3) total miss with no URL and no floor -> returns null (caller falls through to legacy path)", async () => {
-    const deps = baseDeps(); // all legs miss, floor null
+  it("(c3) FIX 4: total miss with no URL and no brand floor -> a GENERIC unidentified floor, NEVER null (so it never falls through to the legacy path)", async () => {
+    const deps = baseDeps(); // all legs miss, prefixFloor returns null (e.g. an unassigned 999-prefix)
     const r = await resolveUnknownFast(CODE, deps);
-    expect(r).toBeNull();
+    // Must NOT be null (null used to fall through to the legacy Gemini/OpenAI path, which hallucinated
+    // fake-verified canaries and drove the money-pit). Instead: a terminal, counted, NEVER-verified floor.
+    expect(r).not.toBeNull();
+    expect(r?.source).toBe("floor");
+    expect(r?.verified).toBe(false);
+    expect(r?.aiCalled).toBe(false);
+    expect(r?.name).toMatch(/Unidentified item/);
+    expect(r?.name).toContain(CODE);
   });
 
   it("(d) a barcode-DB hit returns immediately without ever firing (or waiting on) the grounding leg", async () => {

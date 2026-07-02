@@ -161,10 +161,14 @@ export async function resolveUnknownFast(
   // A held unverified grounding suggestion (usable name, code not in sources) beats the brand-only floor.
   if (groundingSuggestion) return groundingSuggestion;
 
-  // PREFIX FLOOR (Plan C): never fail to decode a public barcode - name the brand, leave the product
-  // explicitly unconfirmed (NOT verified). Non-public codes have no floor -> null -> caller falls through.
+  // PREFIX FLOOR (Plan C): name the brand from the GS1 prefix, product explicitly unconfirmed (NOT verified).
   const floor = deps.prefixFloor(code);
   if (floor) return { name: floor.name, brand: floor.brand, verified: false, aiCalled: false, source: "floor" };
 
-  return null;
+  // FIX 4: the caller only invokes this for a PUBLIC barcode, so we must ALWAYS be terminal here and NEVER
+  // return null (a null fall-through reaches the expensive, hallucination-prone legacy Gemini/OpenAI path -
+  // which auto-verified fake canary codes with garbage names, the last remaining leak). When the prefix
+  // maps to no brand (e.g. an unassigned 999-prefix), return a GENERIC unidentified floor: counted,
+  // Suggested, NEVER Verified, no AI. This closes both the last hallucinations and the legacy money-pit.
+  return { name: `Unidentified item (barcode ${code})`, brand: "", verified: false, aiCalled: false, source: "floor" };
 }
