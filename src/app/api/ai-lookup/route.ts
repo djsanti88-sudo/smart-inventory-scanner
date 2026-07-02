@@ -13,6 +13,7 @@ import { decideDecode, isUsableProductName } from "@/services/ai/decode";
 import { discoverViaFirecrawl, firecrawlScrapeCheap } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify } from "@/services/ai/flashLiteGrounding";
+import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { filterSafeUrls } from "@/services/ai/urlSafety";
@@ -404,9 +405,10 @@ export async function POST(request: Request) {
         }
       }
 
-      // PLAN D - PARALLEL FAST RESOLVER (barcode-DB || flash-lite grounding). Runs AFTER the free
-      // corpus/retail misses and BEFORE the legacy Gemini/OpenAI fast path. The two legs race; the first
-      // confident answer wins (~1s), escalating to Firecrawl + the prefix floor only on a double-miss.
+      // PLAN D - GROUNDING-FIRST FAST RESOLVER (flash-lite grounding -> fetch-verify -> barcode-DB fallback).
+      // Runs AFTER the free corpus/retail misses and BEFORE the legacy Gemini/OpenAI fast path. One flash-lite
+      // grounding call names the product; the APP fetch-verifies the exact code on a candidate page before
+      // marking Verified, falling back to the barcode-DB leg, Firecrawl, and the prefix floor on a miss.
       // Gated to PUBLIC barcodes (upc/ean/gtin): a SKU/vendor label must never auto-verify from grounding
       // (semantic firewall - those still route through the legacy path -> Needs Review).
       //
@@ -421,6 +423,7 @@ export async function POST(request: Request) {
         const fast = await resolveUnknownFast(code, {
           lookupBarcodeDb: (c) => lookupBarcodeDb(c),
           groundIdentify: (c, opts) => groundIdentify(c, opts),
+          verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
           firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
           prefixFloor: (c) => prefixFloorName(c, codeType),
         }).catch(() => null);
