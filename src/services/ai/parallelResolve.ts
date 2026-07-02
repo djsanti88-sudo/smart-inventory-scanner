@@ -1,12 +1,12 @@
-// Plan D Task 4 - PARALLEL RESOLVER (the speed-first heart of the grounding ladder).
+// Plan D Task 4 - identification resolver (the heart of the grounding ladder), COST-ORDERED (Fix 3).
 //
-// For an unknown code (one that missed the corpus/retail/cache), race two independent identification
-// legs CONCURRENTLY and take the FIRST confident answer (target ~1s wall-clock):
-//   - barcode-DB leg  (UPCitemdb, structured {name,brand,sourceUrl}) -> a hit is Verified, aiCalled:false
-//   - grounding leg   (gemini-flash-lite google_search text)         -> a usable name is Verified, aiCalled:true
-// The two legs are genuinely parallel: a slow LOSER never delays a fast winner (we resolve on the FIRST
-// confident result via a small race helper, never awaiting the slower leg). If both legs resolve about
-// together, the STRUCTURED barcode-DB answer wins the tie.
+// For an unknown code (one that missed the corpus/retail/cache), try the FREE structured barcode-DB leg
+// FIRST; only on a miss run the paid grounding leg. This is cost-ordered, not a parallel race: the
+// expensive google_search grounding ($35/1k) must never fire when the free barcode-DB already has the code
+// (it was mostly re-finding upcitemdb - the same source barcode-DB queries for free).
+//   - barcode-DB leg (UPCitemdb, structured {name,brand,sourceUrl}) -> a hit is Verified, aiCalled:false; STOP.
+//   - grounding leg  (gemini-flash-lite google_search) runs ONLY on a barcode-DB miss -> Verified ONLY when
+//     the exact code is in its sources (FINDING-1), else a demoted unverified suggestion; aiCalled:true.
 //
 // Only a DOUBLE MISS escalates: firecrawl the best candidate URL (1-credit cheap scrape, Task 1) and
 // parse a name, optionally one premium grounding call, then the Plan C prefix floor - so the resolver
@@ -102,39 +102,6 @@ function bestNameFromPage(title: string, markdown: string, isUsable: (n: string)
   return "";
 }
 
-/**
- * Resolve to the FIRST confident leg. `preferred` wins a same-tick tie (registered first); a confident
- * `other` that finishes FIRST while `preferred` is still pending wins immediately (speed priority - the
- * slow preferred leg never delays it). Resolves to null only when BOTH settle non-confident.
- */
-function firstConfident<T>(preferred: Promise<T | null>, other: Promise<T | null>): Promise<T | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let preferredDone = false;
-    let otherDone = false;
-    let otherVal: T | null = null;
-    const done = (v: T | null) => {
-      if (!settled) {
-        settled = true;
-        resolve(v);
-      }
-    };
-    preferred.then((v) => {
-      preferredDone = true;
-      if (v) return done(v); // preferred is confident -> it wins (also wins a same-tick tie)
-      if (otherDone) return done(otherVal); // preferred missed and other already settled -> use other
-      // else: preferred missed, other still pending -> wait for other
-    });
-    other.then((v) => {
-      otherDone = true;
-      otherVal = v;
-      if (v) return done(v); // other confident -> wins whether preferred is pending OR already-missed
-      if (preferredDone) return done(null); // both settled non-confident
-      // else: other missed, preferred still pending -> wait for preferred
-    });
-  });
-}
-
 export async function resolveUnknownFast(
   code: string,
   deps: ParallelResolveDeps,
@@ -147,33 +114,30 @@ export async function resolveUnknownFast(
   let bestUrl = "";
 
   // FINDING-1: a usable grounding NAME whose exact code is NOT in the grounding sources is a low-confidence
-  // SUGGESTION, not a Verified win. We hold it here so it can NEVER beat a slower CONFIRMED barcode-DB hit
-  // in the race, yet still beats the brand-only floor on a genuine double-miss (verified:false downstream).
+  // SUGGESTION, not a Verified win. We hold it here so it still beats the brand-only floor on a genuine
+  // miss, but downstream it counts as verified:false.
   let groundingSuggestion: ParallelResolveResult | null = null;
 
-  const barcodeLeg: Promise<ParallelResolveResult | null> = safe(async () => {
-    const r = await deps.lookupBarcodeDb(code);
-    if (r?.sourceUrl) bestUrl = r.sourceUrl;
-    if (r && isUsable(r.name)) {
-      return { name: cleanProductName(r.name), brand: r.brand, verified: true, aiCalled: false, source: "barcode_db" };
-    }
-    return null;
-  });
+  // COST FIX (Fix 3): barcode-DB FIRST. A confident hit returns WITHOUT ever calling the expensive
+  // google_search grounding leg ($35/1k). The barcode-DB leg is free and hits most codes, so grounding
+  // fires ONLY on a genuine barcode-DB miss - not on every scan (which was mostly re-finding upcitemdb,
+  // the very source the barcode-DB leg already queries for free).
+  const bd = await safe(() => deps.lookupBarcodeDb(code));
+  if (bd?.sourceUrl) bestUrl = bd.sourceUrl;
+  if (bd && isUsable(bd.name)) {
+    return { name: cleanProductName(bd.name), brand: bd.brand, verified: true, aiCalled: false, source: "barcode_db" };
+  }
 
-  const groundingLeg: Promise<ParallelResolveResult | null> = safe(async () => {
-    const r = await deps.groundIdentify(code);
-    // A refusal sentence or non-usable text is not a product identity at all -> the leg misses.
-    if (!r || !isUsable(r.text) || isRefusal(r.text)) return null;
-    const result: ParallelResolveResult = { name: cleanProductName(r.text), brand: "", verified: true, aiCalled: true, source: "grounding" };
-    if (codeInSources(code, r.sources ?? [])) return result; // exact code in sources -> Verified win
-    // Code NOT in sources: demote to an unverified suggestion. Return null for the RACE (so a confirmed
-    // barcode-DB hit still wins) but remember it as the double-miss fallback.
-    groundingSuggestion = { ...result, verified: false };
-    return null;
-  });
-
-  const winner = await firstConfident(barcodeLeg, groundingLeg);
-  if (winner) return winner;
+  // barcode-DB MISS -> now (and only now) run grounding. Same FINDING-1 gate: Verified only when the exact
+  // code is in the grounding sources; a usable-but-unconfirmed name is demoted to a held suggestion; a
+  // refusal sentence is not a product identity at all -> the leg misses.
+  const gr = await safe(() => deps.groundIdentify(code));
+  if (gr && isUsable(gr.text) && !isRefusal(gr.text)) {
+    const verified = codeInSources(code, gr.sources ?? []);
+    const result: ParallelResolveResult = { name: cleanProductName(gr.text), brand: "", verified, aiCalled: true, source: "grounding" };
+    if (verified) return result; // exact code in sources -> Verified win
+    groundingSuggestion = result; // usable but unconfirmed -> held (verified:false)
+  }
 
   // DOUBLE MISS -> escalate. Both legs have settled (firstConfident returned null), so bestUrl is final.
   if (bestUrl) {

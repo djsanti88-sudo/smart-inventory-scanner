@@ -33,10 +33,50 @@ function baseDeps(over: Partial<ParallelResolveDeps> = {}): ParallelResolveDeps 
   };
 }
 
-describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
-  it("(a) barcode-DB fast, grounding slow -> source barcode_db, aiCalled false, BOTH legs fired (parallel)", async () => {
+describe("resolveUnknownFast - barcode-DB first, grounding only on a miss", () => {
+  // FIX 3 (cost): the EXPENSIVE google_search grounding leg ($35/1k) must fire ONLY when the free
+  // barcode-DB leg MISSES. These two tests are the cost proof.
+  it("(cost-1) barcode-DB HIT -> the expensive grounding leg is NEVER called (0 calls)", async () => {
+    const groundMock = vi.fn(async () => ({ text: "Should Never Run", grounded: true, sources: [`UPC ${CODE}`] }));
+    const bdbMock = vi.fn(async () => ({ name: "Michelin LTX M/S2 All-Season", brand: "Michelin", sourceUrl: "https://x/y" }));
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(r?.source).toBe("barcode_db");
+    expect(r?.verified).toBe(true);
+    expect(r?.aiCalled).toBe(false);
+    expect(bdbMock).toHaveBeenCalledTimes(1);
+    expect(groundMock).not.toHaveBeenCalled(); // <- the cost fix: no google_search on a barcode-DB hit
+  });
+
+  it("(cost-2) barcode-DB MISS -> grounding IS called and its Fix-1 code-in-sources gate still applies", async () => {
+    const bdbMock = vi.fn(async () => null); // miss
+    const verifiedGround = vi.fn(async () => ({
+      text: "Sony WH-1000XM5 Wireless Headphones",
+      grounded: true,
+      sources: [`UPC ${CODE} - Sony WH-1000XM5 | go-upc`], // code IN sources -> Verified
+    }));
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: verifiedGround });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    expect(bdbMock).toHaveBeenCalledTimes(1);
+    expect(verifiedGround).toHaveBeenCalledTimes(1); // grounding fires ONLY because barcode-DB missed
+    expect(r?.source).toBe("grounding");
+    expect(r?.verified).toBe(true);
+    expect(r?.aiCalled).toBe(true);
+
+    // ...and with the SAME miss, a grounding answer whose code is NOT in sources is still demoted (Fix 1).
+    const demotedGround = vi.fn(async () => ({ text: "Hallucinated Name", grounded: true, sources: ["no code here"] }));
+    const r2 = await resolveUnknownFast(CODE, baseDeps({ lookupBarcodeDb: vi.fn(async () => null), groundIdentify: demotedGround }));
+    expect(r2?.source).toBe("grounding");
+    expect(r2?.verified).toBe(false);
+  });
+
+  it("(a) barcode-DB HIT -> source barcode_db, aiCalled false, grounding leg NOT fired (cost)", async () => {
     const ground = deferred<{ text: string; grounded: boolean } | null>();
-    const groundMock = vi.fn(() => ground.promise); // slow: stays pending until we resolve it
+    const groundMock = vi.fn(() => ground.promise);
     const bdbMock = vi.fn(async () => ({ name: "Michelin LTX M/S2 All-Season", brand: "Michelin", sourceUrl: "https://x/y" }));
     const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
@@ -48,10 +88,9 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     expect(r?.name).toMatch(/Michelin LTX/);
     expect(r?.verified).toBe(true);
     expect(r?.aiCalled).toBe(false);
-    // Proof of PARALLELISM: the grounding leg was invoked concurrently, not skipped.
+    // RECONCILED for Fix 3: barcode-DB is awaited FIRST, so a hit never fires the expensive grounding leg.
     expect(bdbMock).toHaveBeenCalledTimes(1);
-    expect(groundMock).toHaveBeenCalledTimes(1);
-    ground.resolve(null); // cleanup the still-pending loser
+    expect(groundMock).not.toHaveBeenCalled();
   });
 
   it("(b) barcode-DB miss + grounding usable WITH the exact code in its sources -> Verified grounding win", async () => {
@@ -131,7 +170,9 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     expect(r?.verified).toBe(false);
   });
 
-  it("(b5) a fast UNVERIFIED grounding answer never beats a slower confident barcode-DB hit", async () => {
+  it("(b5) a confident barcode-DB hit wins and grounding never runs (even a slow barcode-DB leg)", async () => {
+    // RECONCILED for Fix 3: grounding no longer races barcode-DB. barcode-DB is awaited first, so a
+    // confident hit (however slow it arrives) ends the pipeline and the grounding leg is never fired.
     const bdb = deferred<{ name: string; brand: string; sourceUrl: string } | null>();
     const bdbMock = vi.fn(() => bdb.promise);
     const groundMock = vi.fn(async () => ({
@@ -142,14 +183,14 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
     const pending = resolveUnknownFast(CODE, deps);
-    // Let the (unverified) grounding leg settle first, then the structured hit arrives.
-    await new Promise((res) => setTimeout(res, 0));
+    await new Promise((res) => setTimeout(res, 0)); // resolver is parked awaiting the (slow) barcode-DB leg
     bdb.resolve({ name: "Real Structured Product", brand: "RealBrand", sourceUrl: "https://x/y" });
     const r = await pending;
 
     expect(r?.source).toBe("barcode_db");
     expect(r?.verified).toBe(true);
     expect(r?.name).toMatch(/Real Structured Product/);
+    expect(groundMock).not.toHaveBeenCalled(); // cost: hit -> zero grounding spend
   });
 
   it("(b6) the premium grounding escalation obeys the same code-in-sources gate", async () => {
@@ -209,13 +250,11 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     expect(r).toBeNull();
   });
 
-  it("(d) a slow LOSER never delays the winner (winner resolves while loser still pending)", async () => {
-    const loser = deferred<{ text: string; grounded: boolean } | null>();
-    let loserSettled = false;
-    loser.promise.then(() => {
-      loserSettled = true;
-    });
-    const groundMock = vi.fn(() => loser.promise); // never settles during the assertion window
+  it("(d) a barcode-DB hit returns immediately without ever firing (or waiting on) the grounding leg", async () => {
+    // RECONCILED for Fix 3: previously proved a slow grounding LOSER didn't delay the barcode-DB winner
+    // in a parallel race. Now the guarantee is stronger and cheaper: on a barcode-DB hit the grounding
+    // leg is not fired at all, so it trivially cannot delay the winner.
+    const groundMock = vi.fn(async () => ({ text: "Should Never Run", grounded: true, sources: [] }));
     const bdbMock = vi.fn(async () => ({ name: "Instant Winner Product", brand: "Acme", sourceUrl: "" }));
     const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
 
@@ -223,10 +262,7 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
 
     expect(r?.source).toBe("barcode_db");
     expect(r?.name).toMatch(/Instant Winner/);
-    // The loser was fired (parallel) but had NOT settled when the winner returned - proof of no-delay.
-    expect(groundMock).toHaveBeenCalledTimes(1);
-    expect(loserSettled).toBe(false);
-    loser.resolve(null); // cleanup
+    expect(groundMock).not.toHaveBeenCalled(); // hit -> grounding never runs (no delay, no spend)
   });
 
   it("a throwing leg does not reject the whole resolve (per-leg catch -> null)", async () => {
@@ -241,7 +277,9 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     expect(r?.name).toMatch(/Fallback Product Name/);
   });
 
-  it("prefers barcode-DB over grounding when both are confident and resolve together (structured wins the tie)", async () => {
+  it("barcode-DB is tried first: a confident structured hit wins and grounding is not consulted", async () => {
+    // RECONCILED for Fix 3: there is no longer a "tie" to break - barcode-DB is awaited first, so a
+    // confident structured hit is returned before grounding would ever be called.
     const bdbMock = vi.fn(async () => ({ name: "Structured DB Product", brand: "DBBrand", sourceUrl: "https://x/y" }));
     const groundMock = vi.fn(async () => ({ text: "Grounded Model Product", grounded: true }));
     const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
@@ -249,5 +287,6 @@ describe("resolveUnknownFast - parallel barcode-DB || grounding race", () => {
     const r = await resolveUnknownFast(CODE, deps);
     expect(r?.source).toBe("barcode_db");
     expect(r?.brand).toBe("DBBrand");
+    expect(groundMock).not.toHaveBeenCalled();
   });
 });
