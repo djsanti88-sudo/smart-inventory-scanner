@@ -21,6 +21,7 @@ import { normalizeCode } from "@/services/codeNormalizer";
 import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismatchGuard";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
+import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProduct } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
@@ -220,6 +221,8 @@ export interface ScanStoreDeps {
 
 export const DEFAULT_SETTINGS: Settings = {
   businessId: DEMO_BUSINESS_ID,
+  ownerPinHash: "", // no owner PIN set until the owner chooses one in Settings
+
   // Internal lookup is ALWAYS-ON by default: unknown codes auto-attempt the internal decode pipeline
   // (when configured server-side) before going to Needs Review. The toggle remains platformOwner-only.
   aiLookupEnabled: true,
@@ -314,6 +317,14 @@ export interface ScanState {
   startSession: (name: string, location: string) => void;
   /** Mark the current session completed (status=completed, completedAt set) and persist it. */
   finishSession: () => void;
+  /** Owner PIN lock. setOwnerPin/resetOwnerPin manage the single owner PIN (stored as a salted hash);
+   *  lockSession freezes a session (requires a PIN to be set); unlockSession verifies the entered PIN. */
+  setOwnerPin: (pin: string) => Promise<boolean>;
+  resetOwnerPin: () => void;
+  verifyOwnerPin: (pin: string) => Promise<boolean>;
+  hasOwnerPin: () => boolean;
+  lockSession: (sessionId: string) => boolean;
+  unlockSession: (sessionId: string, pin: string) => Promise<boolean>;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
   retrySync: () => void;
@@ -862,6 +873,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           createdBy: get().userId ?? "demo",
           notes: "",
           syncStatus: "synced",
+          locked: false,
+          lockedAt: null,
         };
         set({
           sessionId: id,
@@ -915,7 +928,69 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         emitAudit({ entityType: "CountSession", entityId: completed.id, action: "session_completed", metadata: { completedAt: completed.completedAt } });
       },
 
+      // --- Owner PIN lock -------------------------------------------------------------------------------
+      hasOwnerPin: () => !!get().settings.ownerPinHash,
+
+      setOwnerPin: async (pin) => {
+        if (!isValidPinFormat(pin)) return false;
+        const ownerPinHash = await hashPin(pin);
+        set((s) => ({ settings: { ...s.settings, ownerPinHash } }));
+        emitAudit({ entityType: "CountSession", entityId: "-", action: "owner_pin_set", metadata: {} });
+        return true;
+      },
+
+      resetOwnerPin: () => {
+        // Escape hatch: clear the PIN and UNLOCK every session (so a forgotten PIN can never trap a count).
+        set((s) => ({
+          settings: { ...s.settings, ownerPinHash: "" },
+          currentSession: s.currentSession?.locked ? { ...s.currentSession, locked: false, lockedAt: null } : s.currentSession,
+        }));
+        emitAudit({ entityType: "CountSession", entityId: "-", action: "owner_pin_reset", metadata: {} });
+      },
+
+      verifyOwnerPin: async (pin) => verifyPin(pin, get().settings.ownerPinHash),
+
+      lockSession: (sessionId) => {
+        // A PIN must exist first (nothing to unlock with otherwise).
+        if (!get().settings.ownerPinHash) return false;
+        const cur = get().currentSession;
+        if (!cur || cur.id !== sessionId || cur.locked) return false;
+        const locked: InventorySession = { ...cur, locked: true, lockedAt: now() };
+        set({ currentSession: locked });
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory, now, businessId: locked.businessId, sessionId: locked.id,
+            entityType: "CountSession", entityId: locked.id, operation: "SAVE_SESSION", payload: locked,
+            idempotencyKey: buildIdempotencyKey(locked.businessId, locked.id, `${locked.id}-locked-${locked.lockedAt}`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
+        emitAudit({ entityType: "CountSession", entityId: locked.id, action: "session_locked", metadata: {} });
+        return true;
+      },
+
+      unlockSession: async (sessionId, pin) => {
+        const cur = get().currentSession;
+        if (!cur || cur.id !== sessionId || !cur.locked) return false;
+        if (!(await verifyPin(pin, get().settings.ownerPinHash))) return false;
+        const unlocked: InventorySession = { ...cur, locked: false, lockedAt: null };
+        set({ currentSession: unlocked });
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory, now, businessId: unlocked.businessId, sessionId: unlocked.id,
+            entityType: "CountSession", entityId: unlocked.id, operation: "SAVE_SESSION", payload: unlocked,
+            idempotencyKey: buildIdempotencyKey(unlocked.businessId, unlocked.id, `${unlocked.id}-unlocked-${now()}`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
+        emitAudit({ entityType: "CountSession", entityId: unlocked.id, action: "session_unlocked", metadata: {} });
+        return true;
+      },
+
       processScan: (rawInput) => {
+        // OWNER PIN LOCK: a locked session is read-only - no new scan may land in it. Block before any work
+        // so a locked count can never change until it is unlocked with the owner PIN.
+        if (get().currentSession?.locked) return null;
         const cleaned = cleanScanCode(rawInput);
         if (!cleaned.cleanCode) return null;
 
@@ -3117,6 +3192,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // --- Phase 6: wrong-decode correction -------------------------------------------------------
 
       removeFromCount: (productId) => {
+        if (get().currentSession?.locked) return; // locked session: counts are read-only until unlocked
         const state = get();
         const removed = state.finalCounts.find((c) => c.productId === productId);
         if (!removed) return;
@@ -3126,6 +3202,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       correctProduct: (productId, fields) => {
+        if (get().currentSession?.locked) return; // locked session: product edits are blocked until unlocked
         const state = get();
         const product = state.products.find((p) => p.id === productId);
         if (!product) return;
