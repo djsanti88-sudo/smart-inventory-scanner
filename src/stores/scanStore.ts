@@ -325,6 +325,10 @@ export interface ScanState {
   hasOwnerPin: () => boolean;
   lockSession: (sessionId: string) => boolean;
   unlockSession: (sessionId: string, pin: string) => Promise<boolean>;
+  /** Browse-and-reopen. listSessions returns every saved session (newest first). reopenSession switches the
+   *  active context to a saved session and reloads its counts from the durable store. */
+  listSessions: () => InventorySession[];
+  reopenSession: (sessionId: string) => boolean;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
   retrySync: () => void;
@@ -984,6 +988,38 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }),
         ]);
         emitAudit({ entityType: "CountSession", entityId: unlocked.id, action: "session_unlocked", metadata: {} });
+        return true;
+      },
+
+      // --- Browse + reopen saved sessions --------------------------------------------------------------
+      listSessions: () =>
+        getMockDb()
+          .getSessions(get().businessId)
+          .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? "")),
+
+      reopenSession: (sessionId) => {
+        const db = getMockDb();
+        const session = db.getSession(sessionId);
+        if (!session || session.businessId !== get().businessId) return false;
+        // Reload this session's counts from the durable store into the live view. The counts we leave behind
+        // are already saved (synced), so switching never loses data.
+        const finalCounts: InventoryCount[] = db.getSessionCounts(sessionId).map((c) => ({
+          id: `count-${c.sessionId}-${c.productId}`,
+          businessId: c.businessId,
+          sessionId: c.sessionId,
+          productId: c.productId,
+          quantity: c.quantity,
+          lastScannedAt: "",
+          aliasesSeen: [],
+          scanEventIds: c.scanEventIds,
+          createdAt: session.startedAt,
+          updatedAt: session.startedAt,
+          syncStatus: "synced",
+          syncError: null,
+          appliedIdempotencyKeys: c.appliedIdempotencyKeys,
+        }));
+        set({ currentSession: session, sessionId: session.id, finalCounts, scanFeed: [], needsReviewQueue: [] });
+        emitAudit({ entityType: "CountSession", entityId: session.id, action: "session_reopened", metadata: {} });
         return true;
       },
 

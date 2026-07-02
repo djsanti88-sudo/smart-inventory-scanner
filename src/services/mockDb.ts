@@ -182,6 +182,14 @@ export class MockDb {
   getSession(id: string): InventorySession | undefined {
     return this.state.sessions[id];
   }
+  /** All saved sessions for a business (for the browse-and-reopen list). */
+  getSessions(businessId: string): InventorySession[] {
+    return Object.values(this.state.sessions).filter((s) => s.businessId === businessId);
+  }
+  /** All server counts for one session (used to reload that session's finalCounts when reopened). */
+  getSessionCounts(sessionId: string): ServerCount[] {
+    return Object.values(this.state.counts).filter((c) => c.sessionId === sessionId);
+  }
   snapshot(): MockDbState {
     return JSON.parse(JSON.stringify(this.state));
   }
