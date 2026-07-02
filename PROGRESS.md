@@ -5,7 +5,7 @@
 > `.claude/plans/ultrathink-role-you-are-kind-allen.md`.
 
 ## Current phase
-**CONSENSUS CROSS-CHECK DECODE (2026-07-02): auto-count only on 2-source agreement. Owner-validated. Not pushed.**
+**CONSENSUS CROSS-CHECK DECODE (2026-07-02): auto-count only on 2-source agreement. Owner-validated. Pushed to `origin/fix/grounding-ladder` (PR #10, preview only - production untouched).**
 
 Branch `fix/grounding-ladder`. SUPERSEDES the earlier grounding-first ladder (which auto-counted
 hallucinations - the FINDING 1 revisit-trigger below - and, in a later single-source "trust UPCitemdb"
@@ -23,9 +23,15 @@ variant, auto-counted ~40% WRONG on 21 hard codes: a women's dress for Member's 
   auto-count 1->18/21, 0 wrong auto-counts, Member's Mark water FIXED. Owner double-checked and confirmed the
   system's decodes were RIGHT and their own expected-sheet had errors. Only genuine miss: Home Depot Homer
   Bucket `051596320812` -> a Hampton Bay fan, but lands in Needs Review (SAFE, not a wrong count).
-- **Scale proof (2026-07-02, in progress):** ~190 unique real codes (Open Food Facts + corpus) through the
-  ladder + rescans to 500 total. NOTE: the app's daily AI-lookup cap (200, `AI_LOOKUP_DAILY_LIMIT`) is a real
-  cost guard - it halted an earlier run; raised locally for the scale test only. [results pending]
+- **Scale proof (2026-07-02, COMPLETE):** 190 unique real codes (Open Food Facts + corpus) + rescans to 500
+  total. Phase 1: verified(auto-count)=18, needs_review=36, suggested=136, err=0; fresh latency p50=3.6s
+  p95=11.5s; ~300 Firecrawl credits (of 4000 free/mo). Phase 2 rescans: cached p50=10ms, 302/310 <1.5s.
+  The run's "109 rescan name mismatches" were NOT resolver flapping - root-caused (2026-07-02) to a
+  daily-cap bug: each decode POST incremented the cap TWICE (route-wide check + duplicate in the decode
+  branch) and the cap was consumed BEFORE the decode-cache read, so cached zero-spend repeats burned slots
+  and returned empty 429s mid-run. FIXED in commit 5a42964 (one slot per compute; cached repeats free;
+  legacy lookup unchanged) with 2 regression tests in `route.test.ts`. Suite 906 green / tsc / eslint clean.
+  (`cloudDrainRace.store.test.ts` is timing-flaky under full parallel load only - passes isolated + on rerun.)
 - **Cost:** Gemini 2.5 grounding free (1500/day); Firecrawl `/search` 2cr only on disagreement, cached once per
   code, 4 keys x 1000 free/mo. ~$0 cash for typical volume. If 2.5 grounding caps -> `gemini-2.0-flash`.
 - **Residual risk:** two sources sharing the SAME bad data can still agree -> a real GS1 prefix-brand firewall
