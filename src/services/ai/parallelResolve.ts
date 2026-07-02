@@ -1,28 +1,34 @@
-// Plan D Task 4 - identification resolver (the heart of the grounding ladder), GROUNDING-FIRST + FETCH-VERIFY.
+// Plan D Task 4 - identification resolver (the heart of the grounding ladder), BARCODE-DB-FIRST + FETCH-VERIFY.
 //
-// OWNER DECISION (2026-07-01, SUPERSEDES the older barcode-DB-first cost order): for an unknown code (one
-// that missed corpus/retail/cache) Google/grounding is the ACCURATE primary now. The free structured
-// barcode-DB (UPCitemdb) proved UNRELIABLE - it returned "coconut oil" for glycine 737870166917 and
-// blindly trusting it auto-verified a WRONG product. So:
+// OWNER DECISION (2026-07-01, SUPERSEDES the short-lived grounding-first order): a 6-code bake-off + online
+// accuracy research settled it. The free structured barcode-DB (UPCitemdb, 711M records, ~1s, $0) resolved
+// 6/6 real codes CORRECTLY - including glycine 737870166917. The earlier "UPCitemdb is unreliable - it said
+// coconut oil for glycine" claim was a MISDIAGNOSIS: that coconut-oil row came from Open Food Facts (removed
+// in Fix 5), NOT UPCitemdb. Grounding is slower AND rate-capped, so it is now the FALLBACK, not the primary:
 //
-//   1. GROUNDING FIRST: exactly ONE flash-lite google_search call. A usable, non-refusal answer is marked
-//      VERIFIED only when the APP independently FETCHES a candidate page and confirms (a) the exact code is
-//      really on that page AND (b) a distinctive token of the grounding name is on that same page (guards a
-//      hallucinated name like "coconut oil" from being "verified" against a glycine page). Otherwise the
-//      name is HELD as an unverified suggestion (never auto-counts).
-//   2. BARCODE-DB FALLBACK (only when grounding gave nothing usable): a UPCitemdb hit is Verified ONLY if
-//      its sourceUrl page fetch-confirms the exact code (+ name corroboration); otherwise it is a Suggestion.
-//   3. Held grounding suggestion, then Firecrawl escalation (existing), then the Plan C prefix floor,
+//   1. BARCODE-DB FIRST: one free UPCitemdb lookup. OWNER DECISION (2026-07-01): a usable structured hit on
+//      a public barcode is TRUSTED like the tire/retail corpus and AUTO-COUNTS (Verified) - the bake-off
+//      proved 6/6 accuracy and UPCitemdb's affiliate "offer" links can't fetch-confirm a raw code, so a
+//      fetch gate would just route every correct hit to Needs Review. The ONE free guardrail: the GS1
+//      brand-prefix firewall (prefixBrandConflict) - if the barcode's known single-brand prefix clearly
+//      disagrees with the DB's brand (the coconut-oil-style wrong-identity case), the hit is HELD as an
+//      unverified Suggestion instead (shown for one-tap human approval, never auto-counted). Grounding does
+//      NOT run on a usable barcode-DB hit - so the common path spends $0, no fetch, and no rate-capped call.
+//   2. GROUNDING FALLBACK (only when barcode-DB gave nothing usable): exactly ONE flash-lite google_search
+//      call, Verified ONLY when the APP fetch-confirms the exact code (+ name corroboration); else a Suggestion.
+//   3. Held barcode-DB suggestion, then Firecrawl escalation (existing), then the Plan C prefix floor,
 //      then the Fix 4 generic terminal floor. NEVER a hallucinated product; NEVER null for a public code.
 //
-// Cost/speed: 1 grounding call + AT MOST 2 candidate-page fetches (plain FREE fetch, ~5s each), every win
-// cached upstream (paid once per code), and a 429 / rate-cap / error on any leg falls back GRACEFULLY (the
-// safe() wrapper turns a throw into a clean null - never crash, never guess a product).
+// Cost/speed: the common path is 1 free barcode-DB lookup + AT MOST 1 candidate-page fetch (plain FREE fetch,
+// ~5s). Grounding (paid, rate-capped) fires only on a barcode-DB miss. Every win is cached upstream (resolved
+// once per code), and a 429 / rate-cap / error on any leg falls back GRACEFULLY (the safe() wrapper turns a
+// throw into a clean null - never crash, never guess a product).
 //
 // All external work is injected via `deps` so tests mock every provider - ZERO live spend / fetch in tests.
 
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
-import { verifyCodeOnPage as realVerifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
+import { verifyCodeOnPage as realVerifyCodeOnPage, pageTextHasCode } from "@/services/ai/verifyCodeOnPage";
+import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 
 export type ResolveSource = "barcode_db" | "grounding" | "firecrawl" | "floor";
 
@@ -71,6 +77,10 @@ export interface ParallelResolveDeps {
   groundIdentifyPremium?: (code: string, opts?: { url?: string }) => Promise<GroundingLegResult | null>;
   /** Injectable "is this a real product name" check (defaults to the shared isUsableProductName). */
   isUsable?: (name: string) => boolean;
+  /** Injectable GS1 brand-prefix firewall: true when the barcode-DB brand clearly conflicts with the code's
+   *  known single-brand prefix (the wrong-identity guard). Defaults to the real prefixBrandConflict. A hit is
+   *  auto-counted ONLY when this returns false. */
+  brandPrefixConflict?: (code: string, brand: string) => boolean;
   /** Injectable fetch-verify: fetch candidate URLs and return the first page that carries the exact code
    *  (or a GTIN variant), else null. Defaults to the real verifyCodeOnPage; tests inject a mock so ZERO
    *  live network runs. A grounding/barcode-DB answer is Verified ONLY when this confirms the code. */
@@ -127,56 +137,64 @@ export async function resolveUnknownFast(
 ): Promise<ParallelResolveResult | null> {
   const isUsable = deps.isUsable ?? isUsableProductName;
   const verifyPage = deps.verifyCodeOnPage ?? realVerifyCodeOnPage;
+  const brandConflict = deps.brandPrefixConflict ?? prefixBrandConflict;
 
-  // Best candidate URL seen (a grounding chunk or a barcode-DB offer link) so a double-miss can still
+  // Best candidate URL seen (a barcode-DB offer link or a grounding chunk) so a double-miss can still
   // escalate to a targeted Firecrawl scrape.
   let bestUrl = "";
 
-  // A usable grounding NAME that could NOT be fetch-confirmed on any candidate page is a low-confidence
-  // SUGGESTION, not a Verified win. Held here so it still beats the brand-only floor, but counts verified:false.
-  let groundingSuggestion: ParallelResolveResult | null = null;
+  // A usable barcode-DB NAME whose brand FAILS the prefix firewall is a low-confidence SUGGESTION, not a
+  // Verified win. Held here so it still beats the brand-only floor, but counts verified:false.
+  let barcodeSuggestion: ParallelResolveResult | null = null;
 
-  // 1. GROUNDING FIRST (accurate primary). One flash-lite google_search call. A usable, non-refusal answer
-  //    is VERIFIED only when the APP fetches a candidate page, confirms the exact code is on it, AND a
-  //    distinctive token of the grounding name corroborates that page. Otherwise it is a held suggestion.
-  const gr = await safe(() => deps.groundIdentify(code));
-  if (gr && isUsable(gr.text) && !isRefusal(gr.text)) {
-    const urls = gr.sourceUrls ?? [];
-    if (urls[0]) bestUrl = urls[0];
-    const page = urls.length ? await safe(() => verifyPage(urls, code)) : null;
-    if (page && nameCorroboratedOnPage(gr.text, page.pageText)) {
-      return { name: cleanProductName(gr.text), brand: "", verified: true, aiCalled: true, source: "grounding" };
+  // 1. BARCODE-DB FIRST (free, fast, TRUSTED primary). One UPCitemdb lookup. A usable hit on a public
+  //    barcode AUTO-COUNTS (Verified) - owner-approved trust of the structured DB (bake-off 6/6). The only
+  //    free guardrail: the GS1 brand-prefix firewall. If the barcode's known single-brand prefix clearly
+  //    disagrees with the DB brand (wrong-identity case), it is HELD as a Suggestion instead. No fetch-verify
+  //    is done here (affiliate offer links can't confirm the raw code), so a hit is fast and spends $0, and
+  //    grounding never runs on a usable hit.
+  const bd = await safe(() => deps.lookupBarcodeDb(code));
+  if (bd?.sourceUrl) bestUrl = bd.sourceUrl;
+  if (bd && isUsable(bd.name)) {
+    if (!brandConflict(code, bd.brand)) {
+      return { name: cleanProductName(bd.name), brand: bd.brand, verified: true, aiCalled: false, source: "barcode_db" };
     }
-    groundingSuggestion = { name: cleanProductName(gr.text), brand: "", verified: false, aiCalled: true, source: "grounding" };
+    // brand clearly conflicts with the barcode's known prefix -> hold as Suggestion, never auto-count.
+    barcodeSuggestion = { name: cleanProductName(bd.name), brand: bd.brand, verified: false, aiCalled: false, source: "barcode_db" };
   }
 
-  // 2. BARCODE-DB FALLBACK - ONLY when grounding gave nothing usable (null / refusal / unusable). UPCitemdb
-  //    proved unreliable, so a bare hit is a Suggestion; it is Verified ONLY when its sourceUrl page
-  //    fetch-confirms the exact code (+ name corroboration). Prefer confirmed-on-page for Verified.
-  if (!groundingSuggestion) {
-    const bd = await safe(() => deps.lookupBarcodeDb(code));
-    if (bd?.sourceUrl && !bestUrl) bestUrl = bd.sourceUrl;
-    if (bd && isUsable(bd.name)) {
-      if (bd.sourceUrl) {
-        const page = await safe(() => verifyPage([bd.sourceUrl], code));
-        if (page && nameCorroboratedOnPage(bd.name, page.pageText)) {
-          return { name: cleanProductName(bd.name), brand: bd.brand, verified: true, aiCalled: false, source: "barcode_db" };
-        }
+  // 2. GROUNDING FALLBACK - ONLY when barcode-DB gave nothing usable (null / rate-limit / unusable name).
+  //    Exactly ONE flash-lite google_search call. A usable, non-refusal answer is VERIFIED only when the APP
+  //    fetches a candidate page, confirms the exact code is on it, AND a distinctive token of the grounding
+  //    name corroborates that page. Otherwise it is a Suggestion (never auto-counted).
+  if (!barcodeSuggestion) {
+    const gr = await safe(() => deps.groundIdentify(code));
+    if (gr && isUsable(gr.text) && !isRefusal(gr.text)) {
+      const urls = gr.sourceUrls ?? [];
+      if (urls[0] && !bestUrl) bestUrl = urls[0];
+      const page = urls.length ? await safe(() => verifyPage(urls, code)) : null;
+      if (page && nameCorroboratedOnPage(gr.text, page.pageText)) {
+        return { name: cleanProductName(gr.text), brand: "", verified: true, aiCalled: true, source: "grounding" };
       }
-      // usable name but NOT fetch-confirmed -> Suggested (verified:false), NEVER auto-counted.
-      return { name: cleanProductName(bd.name), brand: bd.brand, verified: false, aiCalled: false, source: "barcode_db" };
+      return { name: cleanProductName(gr.text), brand: "", verified: false, aiCalled: true, source: "grounding" };
     }
   }
 
-  // 3. Held unverified grounding suggestion (usable name, code not confirmed on a page) beats everything below.
-  if (groundingSuggestion) return groundingSuggestion;
+  // 3. Held unverified barcode-DB suggestion (usable name, code not confirmed on a page) beats everything below.
+  if (barcodeSuggestion) return barcodeSuggestion;
 
-  // 4. FIRECRAWL escalation (existing): a double-miss with a candidate URL scrapes it cheaply for a name.
+  // 4. FIRECRAWL escalation: a double-miss with a candidate URL scrapes it cheaply for a name. A scraped
+  //    arbitrary page is the LEAST-trusted source, so it AUTO-COUNTS (Verified) ONLY when the scrape actually
+  //    carries the exact scanned code (same digit-boundary match as verifyCodeOnPage). Otherwise the name is
+  //    a held Suggestion, never a blind auto-count (this is what stopped an "Error"-titled page verifying).
   if (bestUrl) {
     const fc = await safe(() => deps.firecrawlScrapeCheap(bestUrl));
     if (fc) {
       const name = bestNameFromPage(fc.title, fc.markdown, isUsable);
-      if (name) return { name, brand: "", verified: true, aiCalled: true, source: "firecrawl" };
+      if (name && !isRefusal(name)) {
+        const codeOnPage = pageTextHasCode(`${fc.title}\n${fc.markdown}`, code);
+        return { name, brand: "", verified: codeOnPage, aiCalled: true, source: "firecrawl" };
+      }
     }
   }
 

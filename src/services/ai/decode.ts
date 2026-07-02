@@ -53,6 +53,13 @@ const SITE_BLOCKLIST =
   /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|search results|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
 const PLACEHOLDER_NAME = /^\s*(unknown|unidentified|n\/a)\b|no (public )?match|not found|no result/i;
 
+// A SCRAPED page can hand back an error / bot-challenge / maintenance TITLE (e.g. "Error", "Error 500",
+// "Just a moment", "Access Denied", "Attention Required"). Anchored to the WHOLE name (^...$) so a real
+// product that merely CONTAINS a word (e.g. "Error Coin 1955 Double Die") is not blocked. Observed live:
+// a scrape titled "Error" auto-counted as a Verified product (2026-07-01).
+const SCRAPE_ERROR_TITLE =
+  /^(?:error(?:\s*\d{3})?|oops|access denied|forbidden|unauthorized|just a moment|attention required|are you (?:a )?(?:human|robot)|(?:please )?enable javascript|service unavailable|bad gateway|gateway timeout|temporarily unavailable|(?:site )?under maintenance)\s*$/i;
+
 // AI REFUSAL sentences returned as if they were product names ("Unable to identify product for
 // UPC ...", "... is not a recognized product ..."). Observed live in the preview mass-scan bots
 // (reports/human-bots/preview-mass-scan, 2026-07-01) where they auto-counted as Verified rows.
@@ -83,6 +90,7 @@ export function isUsableProductName(raw: string): boolean {
   if (name.length < 3 || name.length > 120) return false;
   if (PLACEHOLDER_NAME.test(name)) return false;
   if (REFUSAL_NAME.test(name)) return false;
+  if (SCRAPE_ERROR_TITLE.test(name)) return false;
   if (SITE_BLOCKLIST.test(name)) return false;
   if (/^https?:\/\//i.test(name) || /^[a-z0-9.-]+\.(com|org|net|io)\b/i.test(name)) return false; // bare domain/url
   return true;
