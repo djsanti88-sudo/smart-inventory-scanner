@@ -8,6 +8,8 @@ import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { ExportMenu } from "@/components/ExportMenu";
+import { SessionLockControl } from "@/components/SessionLockControl";
+import { SessionsList } from "@/components/SessionsList";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 export default function ScanPage() {
@@ -165,6 +167,7 @@ export default function ScanPage() {
           >
             Finish session
           </button>
+          <SessionLockControl />
           <button
             type="button"
             onClick={() => {
@@ -197,6 +200,8 @@ export default function ScanPage() {
             </span>
           )}
         </div>
+
+        <SessionsList />
 
         <div className="mt-3">
           <SyncStatusBar />

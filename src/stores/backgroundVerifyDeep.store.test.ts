@@ -145,7 +145,9 @@ describe("client-orchestrated background verify (suggested tire -> verified -> c
     }) as unknown as typeof fetch;
     try {
       store.getState().processScan(HANKOOK_CODE);
-      await vi.waitFor(() => expect(store.getState().finalCounts).toHaveLength(1));
+      // scan N = count N: the scan is counted synchronously (finalCounts hits 1 immediately), so that can
+      // no longer signal "the background deep pass fired". Wait for the decode-deep request itself instead.
+      await vi.waitFor(() => expect(bodies.some((b) => b.mode === "decode-deep")).toBe(true));
     } finally {
       globalThis.fetch = original;
     }

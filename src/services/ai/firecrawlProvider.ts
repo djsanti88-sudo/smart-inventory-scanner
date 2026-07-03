@@ -3,6 +3,7 @@ import { normalizeResult } from "@/services/ai/provider";
 import { verifyEvidence } from "@/services/ai/evidenceVerifier";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
+import { pageTextHasCode } from "@/services/ai/verifyCodeOnPage";
 
 // Firecrawl fallback (Stage 2 source discovery). SERVER-SIDE ONLY. Used ONLY when the fast path
 // returns no usable product. It does what a person does: search the open web for the barcode, open
@@ -95,6 +96,132 @@ function creditsFrom(d: unknown): number {
   const o = d as { creditsUsed?: number; data?: { creditsUsed?: number }; scrape?: { creditsUsed?: number } };
   const n = o?.creditsUsed ?? o?.data?.creditsUsed ?? o?.scrape?.creditsUsed;
   return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
+
+// --- Cost-optimized single-URL scrape (Plan D Task 1) ---------------------------------------------
+// Used when we already have a candidate URL (from a barcode-DB hit or an earlier cheap tier) and just
+// need the page text for OUR extractor to read. This is the workhorse path: basic proxy + markdown
+// only + onlyMainContent = 1 credit/page (NEVER json/LLM-extract mode, which costs 5). It rotates
+// across up to 4 Firecrawl API keys so one exhausted key never blocks a lookup, and it NEVER throws
+// into the scan flow - a fully exhausted/absent key set is a clean null ("unavailable").
+
+export interface FirecrawlCheapDeps {
+  fetchImpl?: FcFetch;
+  signal?: AbortSignal;
+  // Explicit key list for tests/callers that already resolved keys. When omitted, falls back to
+  // FIRECRAWL_API_KEY_1..4 (then the legacy single FIRECRAWL_API_KEY) read from env, server-side only.
+  apiKeys?: string[];
+}
+
+export interface FirecrawlCheapResult {
+  markdown: string;
+  title: string;
+  creditsUsed: number;
+  keyIndex: number; // which key (0-based, in rotation order) actually served the request
+}
+
+/** Reads FIRECRAWL_API_KEY_1..4 in order (skipping unset ones); falls back to legacy FIRECRAWL_API_KEY. */
+export function firecrawlKeysFromEnv(): string[] {
+  const numbered = [1, 2, 3, 4]
+    .map((n) => process.env[`FIRECRAWL_API_KEY_${n}`])
+    .filter((k): k is string => !!k && k.trim().length > 0);
+  if (numbered.length > 0) return numbered;
+  const legacy = process.env.FIRECRAWL_API_KEY;
+  return legacy && legacy.trim().length > 0 ? [legacy] : [];
+}
+
+/**
+ * Scrape ONE known URL as cheaply as possible (1 credit, basic proxy, markdown-only) and rotate
+ * across configured keys when a key is out of credits (402) or rate-limited (429). Any other failure,
+ * or a fully exhausted key list, resolves to null - never throws - so a bad key never breaks a scan.
+ */
+export async function firecrawlScrapeCheap(
+  url: string,
+  deps: FirecrawlCheapDeps = {},
+  opts?: { maxAge?: number; proxy?: "basic" | "stealth" },
+): Promise<FirecrawlCheapResult | null> {
+  if (!isSafePublicUrl(url)) return null;
+  const keys = deps.apiKeys && deps.apiKeys.length > 0 ? deps.apiKeys.filter(Boolean) : firecrawlKeysFromEnv();
+  if (keys.length === 0) return null;
+
+  const fetchFn = deps.fetchImpl ?? (globalThis.fetch as unknown as FcFetch);
+  const body: Record<string, unknown> = { url, formats: ["markdown"], onlyMainContent: true, proxy: opts?.proxy ?? "basic" };
+  if (opts?.maxAge != null) body.maxAge = opts.maxAge;
+
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const res = await fetchFn(`${FIRECRAWL_BASE}/scrape`, {
+        method: "POST",
+        headers: headers(keys[i]),
+        body: JSON.stringify(body),
+        signal: deps.signal,
+      });
+      if (res.status === 402 || res.status === 429) continue; // this key is out of credits/quota: rotate
+      if (!res.ok) return null; // any other failure: clean unavailable, never throw into the scan
+      const d = (await res.json()) as { data?: { markdown?: string; md?: string; metadata?: { title?: string; ogTitle?: string } } };
+      const markdown = String(d?.data?.markdown ?? d?.data?.md ?? "");
+      const title = String(d?.data?.metadata?.title ?? d?.data?.metadata?.ogTitle ?? "");
+      return { markdown, title, creditsUsed: creditsFrom(d), keyIndex: i };
+    } catch {
+      continue; // network/parse error on this key: try the next one rather than failing the whole lookup
+    }
+  }
+  return null; // every key exhausted/rate-limited: clean unavailable, never throw
+}
+
+export interface SearchIdentity {
+  name: string;
+  url: string;
+}
+
+/**
+ * Firecrawl /search the BARCODE and return product identities from result SNIPPETS that actually contain
+ * the exact code. This is the reliable, deterministic cross-check source: it reads real Google-style
+ * result titles/descriptions (Open Food Facts, Amazon, nutrition/retail pages) - NO scrape, NO model
+ * opinion, so it cannot hallucinate. Snippets-only = 2 credits/call (never the per-page scrape cost).
+ * Rotates FIRECRAWL_API_KEY_1..4 (skip on 402/429); returns null ONLY when every key is exhausted/absent
+ * (so the caller can fall back), and [] when it searched but nothing carried the code. Every URL is
+ * SSRF-checked. Never throws into the scan flow.
+ */
+export async function searchIdentifyByBarcode(
+  code: string,
+  deps: FirecrawlCheapDeps = {},
+  opts?: { limit?: number },
+): Promise<SearchIdentity[] | null> {
+  const keys = deps.apiKeys && deps.apiKeys.length > 0 ? deps.apiKeys.filter(Boolean) : firecrawlKeysFromEnv();
+  if (keys.length === 0) return null;
+
+  const fetchFn = deps.fetchImpl ?? (globalThis.fetch as unknown as FcFetch);
+  const body = JSON.stringify({ query: code, limit: opts?.limit ?? 8 });
+
+  for (let i = 0; i < keys.length; i++) {
+    let res: Awaited<ReturnType<FcFetch>>;
+    try {
+      res = await fetchFn(`${FIRECRAWL_BASE}/search`, { method: "POST", headers: headers(keys[i]), body, signal: deps.signal });
+    } catch {
+      continue; // network error on this key: try the next
+    }
+    if (res.status === 402 || res.status === 429) continue; // key out of credits/quota: rotate
+    if (!res.ok) return null; // any other failure: clean unavailable (caller falls back), never throw
+
+    const d = (await res.json()) as { data?: { web?: unknown[] } | unknown[]; web?: unknown[] };
+    const web = (Array.isArray(d?.data) ? d?.data : (d?.data as { web?: unknown[] })?.web ?? d?.web) ?? [];
+    const out: SearchIdentity[] = [];
+    for (const r of web as Array<{ url?: string; title?: string; description?: string }>) {
+      const url = String(r.url ?? "");
+      const title = String(r.title ?? "");
+      const desc = String(r.description ?? "");
+      if (url && !isSafePublicUrl(url)) continue;
+      // ONLY trust a snippet that actually shows the exact barcode - this is the whole point (deterministic).
+      if (!pageTextHasCode(`${title} ${desc} ${url}`, code)) continue;
+      // The product name comes from the result TITLE only (descriptions are sentences/noise). A title that
+      // is a site/search/error label (SITE_BLOCKLIST) is not a product and is dropped.
+      if (!isUsableProductName(title)) continue;
+      out.push({ name: cleanProductName(title), url });
+    }
+    return out; // empty [] = searched, nothing carried the code (distinct from null = no keys)
+  }
+  return null; // every key exhausted/rate-limited
 }
 
 const noneEvidence = (): EvidenceResult => ({

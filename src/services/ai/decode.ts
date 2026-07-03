@@ -53,6 +53,20 @@ const SITE_BLOCKLIST =
   /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|search results|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
 const PLACEHOLDER_NAME = /^\s*(unknown|unidentified|n\/a)\b|no (public )?match|not found|no result/i;
 
+// A SCRAPED page can hand back an error / bot-challenge / maintenance TITLE (e.g. "Error", "Error 500",
+// "Just a moment", "Access Denied", "Attention Required"). Anchored to the WHOLE name (^...$) so a real
+// product that merely CONTAINS a word (e.g. "Error Coin 1955 Double Die") is not blocked. Observed live:
+// a scrape titled "Error" auto-counted as a Verified product (2026-07-01).
+const SCRAPE_ERROR_TITLE =
+  /^(?:error(?:\s*\d{3})?|oops|access denied|forbidden|unauthorized|just a moment|attention required|are you (?:a )?(?:human|robot)|(?:please )?enable javascript|service unavailable|bad gateway|gateway timeout|temporarily unavailable|(?:site )?under maintenance)\s*$/i;
+
+// AI REFUSAL sentences returned as if they were product names ("Unable to identify product for
+// UPC ...", "... is not a recognized product ..."). Observed live in the preview mass-scan bots
+// (reports/human-bots/preview-mass-scan, 2026-07-01) where they auto-counted as Verified rows.
+// A refusal is an answer SHAPE, never a product identity - reject it everywhere.
+const REFUSAL_NAME =
+  /\b(?:unable to (?:identify|find|determine|locate)|cannot (?:identify|find|determine|locate)|can(?:no|')t (?:identify|find|determine|locate)|could not (?:identify|find|determine|locate)|not a recognized product|not recognized as a product|does not (?:correspond|match|appear)|no product (?:information|match|listing)|no information (?:is )?available)\b/i;
+
 // Barcode-site title cruft appended after a separator (incl. em/en dash), e.g.
 // "Bic Lighter Texas — UPC 70330645936 — Go-UPC" or "Widget | Barcode Lookup".
 const TITLE_CODE_SUFFIX = /\s*[|–—-]\s*(?:upc|ean|gtin|isbn|barcode)\b[\s\S]*$/i;
@@ -75,6 +89,8 @@ export function isUsableProductName(raw: string): boolean {
   const name = cleanProductName(raw);
   if (name.length < 3 || name.length > 120) return false;
   if (PLACEHOLDER_NAME.test(name)) return false;
+  if (REFUSAL_NAME.test(name)) return false;
+  if (SCRAPE_ERROR_TITLE.test(name)) return false;
   if (SITE_BLOCKLIST.test(name)) return false;
   if (/^https?:\/\//i.test(name) || /^[a-z0-9.-]+\.(com|org|net|io)\b/i.test(name)) return false; // bare domain/url
   return true;
@@ -94,6 +110,12 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
 
   const bestEvidence = strongestEvidence(params.evidences);
   const strong = isStrongEvidence(bestEvidence);
+  // PLAN C (owner rule): the catalog-derived brand-prefix conflict is ADVISORY, not a hard block. GS1
+  // prefixes are many-to-one, so a brand-prefix mismatch alone must NEVER block a verify when the app
+  // independently confirmed the EXACT code in STRONG evidence (grounding/corpus wins over the prefix).
+  // It still blocks weaker verify paths (no strong app-verified exact-code evidence). The CATEGORY /
+  // poison guard (wrong product TYPE) is separate (scanContextFirewall) and STAYS a hard block downstream.
+  const prefixBlocks = !!params.brandPrefixConflict && !strong;
   const isPublicBarcode = PUBLIC_BARCODE_TYPES.includes(codeType);
   const maxConfidence = present.reduce((m, r) => Math.max(m, r.confidence), 0);
   const identityNonEmpty = present.length > 0;
@@ -121,7 +143,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     strong &&
     identityNonEmpty &&
     passesThreshold &&
-    !params.brandPrefixConflict &&
+    !prefixBlocks &&
     cc.decision === "agree";
 
   // SINGLE SOURCE (owner policy, supersedes the old two-provider / trusted-only rules): one provider
@@ -135,7 +157,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     strong &&
     identityNonEmpty &&
     passesThreshold &&
-    !params.brandPrefixConflict &&
+    !prefixBlocks &&
     !!a &&
     (cc.decision === "single_provider" || cc.decision === "agree");
 
@@ -153,7 +175,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     bestEvidence.verified &&
     identityNonEmpty &&
     passesThreshold &&
-    !params.brandPrefixConflict &&
+    !prefixBlocks &&
     !!a &&
     (cc.decision === "single_provider" || cc.decision === "agree");
 
@@ -213,9 +235,12 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
     !!code &&
     isBrandInPrefixFamily(code, a.brand, { strongOnly: true });
 
-  // BRAND SANITY (owner baseline v1): a catalog-derived brand-prefix conflict blocks EVERY auto-count
-  // path, not just the single-source one (wrong brand for this barcode is never auto-counted).
-  if (!params.brandPrefixConflict && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize || nonPublicTrustedVerified)) {
+  // BRAND SANITY (Plan C, owner rule): a catalog-derived brand-prefix conflict is ADVISORY, not a hard
+  // block. It only vetoes a verify when the app did NOT confirm the exact code in STRONG evidence
+  // (prefixBlocks). With strong app-verified exact-code evidence, grounding/corpus wins over the prefix,
+  // so a brand-prefix mismatch alone never blocks. The CATEGORY / poison guard is enforced separately
+  // (scanContextFirewall) and still blocks a wrong-product-TYPE identity downstream.
+  if (!prefixBlocks && (canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || internetTwoSourceSize || nonPublicTrustedVerified)) {
     const corroborationPath = canVerify
       ? "two_ai_agreement"
       : singleSourceVerified

@@ -175,6 +175,10 @@ export interface InventorySession {
   createdBy: string;
   notes: string;
   syncStatus: SyncStatus;
+  /** Owner-PIN lock: when true the session is read-only - no new scans land in it and its counts cannot be
+   *  edited until it is unlocked with the owner PIN. Optional for back-compat with older persisted sessions. */
+  locked?: boolean;
+  lockedAt?: string | null;
 }
 
 export interface InventoryCount {
@@ -295,6 +299,9 @@ export interface PendingSyncItem {
 
 export interface Settings {
   businessId: string;
+  /** Salted SHA-256 hash of the owner PIN ("" = no PIN set). Never the plaintext PIN. Locking a session
+   *  requires this to be set; unlocking verifies the entered PIN against it. See services/security/pinLock. */
+  ownerPinHash: string;
   aiLookupEnabled: boolean;
   primaryProvider: "mock" | "gemini" | "openai";
   fallbackProvider: "mock" | "gemini" | "openai";

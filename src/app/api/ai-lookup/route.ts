@@ -10,11 +10,16 @@ import { enrichWithPageFetch } from "@/services/ai/pageFetch";
 import { runDecode, type DecodeProvider } from "@/services/ai/decodeOrchestrator";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { decideDecode, isUsableProductName } from "@/services/ai/decode";
-import { discoverViaFirecrawl } from "@/services/ai/firecrawlProvider";
+import { discoverViaFirecrawl, firecrawlScrapeCheap, searchIdentifyByBarcode } from "@/services/ai/firecrawlProvider";
+import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
+import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
+import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
+import { resolveUnknownFast } from "@/services/ai/parallelResolve";
+import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { filterSafeUrls } from "@/services/ai/urlSafety";
 import { shouldRunFallback, decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
 import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
-import { withDecodeCache } from "@/services/ai/decodeCache";
+import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
@@ -65,7 +70,7 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 // firewall is OVERRIDE-AWARE - strong app-verified exact-code evidence makes fw.conflict false - so this
 // never blocks a legitimately exact-verified decode, only conflicting non-exact verify paths (e.g. the
 // internet-two-source-size tire path) and Gemini-style "plausible product, wrong code" hallucinations.
-function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): { conflict: boolean; hint: string; reason: string } {
+function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): { conflict: boolean; hint: string; reason: string; brandPrefixAdvisory: boolean } {
   const strongExact = isStrongEvidence(strongestEvidence(evidences));
   const prefix = lookupPrefix(code);
   const fw = evaluatePrefixFirewall({
@@ -76,11 +81,18 @@ function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, 
     candidateKnownPrefixes: candidateKnownPrefixes(result?.brand), // reverse guard: brand's known prefix footprint
     exactCodeVerifiedByApp: strongExact,
   });
-  const conflict = prefixBrandConflict(code, result?.brand) || fw.conflict;
+  // PLAN C (owner rule): the catalog-derived brand-prefix sanity is ADVISORY now, not a hard block. GS1
+  // prefixes are many-to-one, so a brand-prefix mismatch alone must NEVER block a verify/count - grounding
+  // /corpus evidence wins over the prefix. It is still REPORTED (brandPrefixAdvisory) for transparency. The
+  // evidence-weighted firewall (fw) still vetoes non-exact conflicting verify paths and is already
+  // OVERRIDE-AWARE (strong app-verified exact-code evidence clears it), so it never false-rejects a
+  // legitimately exact-verified decode. The category/poison guard stays in the store's contextConflict gate.
+  const brandPrefixAdvisory = prefixBrandConflict(code, result?.brand);
+  const conflict = fw.conflict;
   // platformOwner-only display: what the barcode prefix maps to, and why a conflict (if any) fired.
   const hint = prefix?.dominant ? `${prefix.dominant.name} (${prefix.dominant.kind}, from barcode prefix - ${prefix.source})` : "";
   const reason = fw.conflict ? fw.reason : "";
-  return { conflict, hint, reason };
+  return { conflict, hint, reason, brandPrefixAdvisory };
 }
 
 export const dynamic = "force-dynamic";
@@ -289,11 +301,12 @@ export async function POST(request: Request) {
     brandPrefixHint: body.brandPrefixHint,
   };
 
-  // Hard server-side daily spend cap (auth DEFERRED) - applies to EVERY provider-calling POST mode
-  // (decode, decode-deep, AND the legacy lookup path) so no mode can bypass it. Once the day's cap is hit,
-  // return blocked with ZERO provider calls. Skipped under E2E mock mode (no real spend). Known scans never
-  // reach this route, so the cap bounds genuine AI-eligible lookups per day.
-  if (!e2eMode()) {
+  // Hard server-side daily spend cap (auth DEFERRED) for the LEGACY lookup path. The decode modes run
+  // their own cap check below (after the decode-cache peek) so a zero-spend cached repeat scan never
+  // consumes a cap slot - checking here for decode too would double-count every decode POST (each scan
+  // burned 2 slots; regression tests in route.test.ts). Skipped under E2E mock mode (no real spend).
+  const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
+  if (!e2eMode() && !isDecodeMode) {
     const cap = checkAndIncrementDaily();
     if (!cap.allowed) {
       return Response.json(
@@ -303,7 +316,7 @@ export async function POST(request: Request) {
     }
   }
 
-  if (body.mode === "decode" || body.mode === "decode-deep") {
+  if (isDecodeMode) {
     // Task 4/5: the tire hot path issues NO synchronous deep/Firecrawl call. The deep path stays
     // reachable for the client: it sends mode "decode-deep" (or "decode" with deep:true) to opt INTO
     // the existing multi-stage deep/Firecrawl orchestration and SKIP the tire hot path below.
@@ -315,10 +328,11 @@ export async function POST(request: Request) {
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
     const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
 
-    // Hard server-side daily spend cap (auth DEFERRED). Once the day's cap is hit, return blocked with
-    // ZERO provider calls. Skipped under E2E mock mode (no real spend). This route is the unknown-code
-    // path (known scans never reach it), so the cap bounds genuine AI-eligible lookups per day.
-    if (!e2eMode()) {
+    // Hard server-side daily spend cap (auth DEFERRED). Checked AFTER a decode-cache peek: a cached
+    // repeat scan makes ZERO provider calls, so it must not consume a cap slot nor be blocked once the
+    // cap trips (the cap bounds genuine compute runs, not free repeats). The per-IP rate limit above
+    // still throttles floods of cached hits. Skipped under E2E mock mode (no real spend).
+    if (!e2eMode() && getDecodeCache(code) === undefined) {
       const cap = checkAndIncrementDaily();
       if (!cap.allowed) {
         return Response.json(
@@ -362,27 +376,78 @@ export async function POST(request: Request) {
       }
 
       // RETAIL PRODUCT KNOWLEDGE INDEX (4M+ Open Food Facts products): exact barcode hit resolves
-      // the product WITHOUT AI. Tries local SQLite first, then Turso remote DB.
+      // the product WITHOUT AI. Tries local SQLite first, then Turso remote DB. retailLookupStatus
+      // is surfaced in the decode debug payload below (both the hit-return here and the AI-path
+      // fallback) so a broken Turso connection ("turso_error") is distinguishable from a genuine
+      // corpus miss ("turso_miss") instead of both silently falling through to paid AI decode.
+      let retailLookupStatus: string | undefined;
+      let retailHit: { productName: string; brand: string } | null = null;
       if (!e2eMode()) {
-        const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
-        const retail = await lookupRetailBarcodeAsync(code);
-        if (retail) {
+        const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+        retailHit = await lookupRetailBarcodeAsync(code);
+        retailLookupStatus = getLastRetailLookupStatus();
+        // The 4M-row Open Food Facts retail DB (Turso) is a FREE structured source. Its data is mostly right
+        // but has some WRONG rows (glycine UPC 0737870166917 -> "Coconut oil"), so it is NO LONGER trusted
+        // ALONE (that produced wrong Verified identities - the old Fix 5). Instead it is passed into the
+        // resolver below as ONE consensus VOTE (the retailDb dep): a wrong OFF row is OUTVOTED by UPCitemdb +
+        // grounding, while its millions of correct rows give FREE, instant (~50-160ms) coverage - so most
+        // food/retail codes auto-count with no AI and no Firecrawl.
+      }
+
+      // PLAN D - GROUNDING-FIRST FAST RESOLVER (flash-lite grounding -> fetch-verify -> barcode-DB fallback).
+      // Runs AFTER the free corpus/retail misses and BEFORE the legacy Gemini/OpenAI fast path. One flash-lite
+      // grounding call names the product; the APP fetch-verifies the exact code on a candidate page before
+      // marking Verified, falling back to the barcode-DB leg, Firecrawl, and the prefix floor on a miss.
+      // Gated to PUBLIC barcodes (upc/ean/gtin): a SKU/vendor label must never auto-verify from grounding
+      // (semantic firewall - those still route through the legacy path -> Needs Review).
+      //
+      // TERMINAL for public barcodes (Fix 2, 2026-07-01): whenever the resolver returns ANY result - a
+      // VERIFIED win OR the prefix floor / an unverified grounding suggestion - computeDecode RETURNS it
+      // and NEVER runs the expensive legacy Gemini/OpenAI fast path (the real money-pit). A verified win
+      // auto-counts (like a corpus hit); a floor/suggestion returns as Suggested/Needs Review with NO
+      // legacy AI call at all. Only a null return (non-public code, or no floor) falls through to legacy.
+      // Never runs under E2E (mock-only).
+      const isPublicBarcode = codeType === "upc_a" || codeType === "ean_13" || codeType === "gtin_14";
+      if (!e2eMode() && isPublicBarcode) {
+        const fast = await resolveUnknownFast(code, {
+          lookupBarcodeDb: (c) => lookupBarcodeDb(c),
+          retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
+          groundIdentify: (c, opts) => groundIdentify(c, opts),
+          verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
+          firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
+          searchIdentify: (c) => searchIdentifyByBarcode(c),
+          prefixFloor: (c) => prefixFloorName(c, codeType),
+        }).catch(() => null);
+        if (fast) {
+          const verifiedWin = fast.verified && isUsableProductName(fast.name);
           const result: AiLookupResult = {
             ...emptyResult(),
-            productName: retail.productName,
-            brand: retail.brand,
-            category: retail.category,
-            confidence: 0.95,
-            needsHumanReview: false,
+            productName: fast.name,
+            brand: fast.brand,
+            confidence: verifiedWin ? 0.9 : 0.5,
+            needsHumanReview: !verifiedWin,
             sourceUrls: [],
           };
-          const evidence: EvidenceResult = { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: ["retail-knowledge-index"], reason: "Exact barcode match in retail product database" };
-          const decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false });
+          const evidence: EvidenceResult = verifiedWin
+            ? { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: [`parallel-${fast.source}`], reason: `Exact identification via parallel ${fast.source}` }
+            : { verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: `Unverified parallel ${fast.source} (suggestion/floor) - not auto-counted` };
+          let decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false });
+          const reasonCode = decodeReasonCode({ hasProduct: isUsableProductName(fast.name), fallbackFound: false, timedOut: false, decisionStatus: decision.status, statuses: [], firecrawlKey: !!firecrawlKey, coverageMissed: false });
+          const reasonText = verifiedWin ? "" : (REASON_TEXT[reasonCode] ?? "");
+          if (decision.status !== "verified" && reasonText) decision = { ...decision, reason: reasonText };
           return {
-            mode: "decode" as const, providerNames: ["retail-corpus"], results: [result], evidences: [evidence],
-            providerStatuses: [{ provider: "retail-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
-            decision, reasonCode: "ok", reasonText: "", timedOut: false,
-            debug: { providersAttempted: ["retail-corpus"], evidenceStrengths: ["fetched_source"], sourceCounts: [0], corroborationPath: "retail_exact_barcode", aiCalled: false, pageFetched: false, cached: false },
+            mode: "decode" as const,
+            providerNames: [`parallel:${fast.source}`],
+            results: [result],
+            evidences: [evidence],
+            providerStatuses: [{ provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: verifiedWin, identityFound: isUsableProductName(fast.name) }],
+            decision,
+            reasonCode: verifiedWin ? "ok" : reasonCode,
+            reasonText,
+            timedOut: false,
+            // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
+            // debug instead of consensus quietly degrading to the two correlated DB votes.
+            debug: { providersAttempted: [`parallel:${fast.source}`], evidenceStrengths: [evidence.strength], sourceCounts: [0], corroborationPath: `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
@@ -483,6 +548,7 @@ export async function POST(request: Request) {
       const fw0 = evalCombinedFirewall(code, results[0], evidences);
       let prefixHint = fw0.hint;
       let firewallReason = fw0.reason;
+      let brandPrefixAdvisory = fw0.brandPrefixAdvisory; // Plan C: advisory-only, non-blocking (reported, never blocks)
       let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict, allowNonPublicAutoCount });
       let fallbackFound = false;
       let coverageMissed = false;
@@ -573,6 +639,7 @@ export async function POST(request: Request) {
             const fwW = evalCombinedFirewall(code, winnerWithSize, [outcome.hit.evidence]);
             prefixHint = fwW.hint;
             firewallReason = fwW.reason;
+            brandPrefixAdvisory = fwW.brandPrefixAdvisory;
             decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict, allowNonPublicAutoCount });
           }
         }
@@ -618,6 +685,8 @@ export async function POST(request: Request) {
           cached: false,
           prefixHint, // platformOwner-only: brand the barcode prefix maps to (recall/transparency)
           firewallReason, // platformOwner-only: why a prefix/UPC conflict routed this to review (if any)
+          brandPrefixAdvisory, // Plan C: catalog brand-prefix mismatch is ADVISORY (reported, never blocks)
+          retailLookup: retailLookupStatus, // "turso_error" (broken connection) vs "turso_miss"/"unavailable" (genuine miss/not configured) — makes a swallowed Turso failure visible instead of silently falling through to this AI path
         },
         sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
       };

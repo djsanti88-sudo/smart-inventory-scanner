@@ -90,10 +90,59 @@ describe("scanStore - dedup on create_new (one product per identity)", () => {
       newProduct: { name: "Ambiguous", upc: "111111111116", primaryBarcode: "222222222220" },
     });
 
-    expect(store.getState().products.length, "no product minted on ambiguous identity").toBe(before);
+    // FIX 1 (owner rule "scan N = count N"): the conflict RETAINS the scan's own provisional placeholder
+    // (minted + counted by processScan) instead of deleting it, so products.length is before + 1. The real
+    // dedup invariant still holds: NO duplicate "Ambiguous" product is minted for the ambiguous identity.
+    expect(store.getState().products.length, "only the scan's own retained placeholder, no duplicate minted").toBe(before + 1);
+    expect(store.getState().products.some((p) => p.name === "Ambiguous"), "no product minted on ambiguous identity").toBe(false);
+    const placeholder = store.getState().products.find((p) => p.provisional && p.primaryBarcode === "333333333334");
+    expect(placeholder, "the scan's provisional placeholder survives the conflict").toBeDefined();
+    expect(qtyFor(store, placeholder!.id), "the already-taken count is preserved (not dropped)").toBe(1);
     const review = store.getState().needsReviewQueue.find((x) => x.id === r)!;
     expect(review.status, "stays in Needs Review for a human to pick").toBe("open");
     const conflicts = store.getState().lastAliasConflicts ?? [];
     expect(conflicts.length, "both candidate products surfaced as a conflict").toBeGreaterThan(1);
+  });
+
+  it("FIX 1: a conflict PRESERVES the scanned count (scan 3 = count 3); link_existing transfers the full 3", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const bizId = store.getState().businessId;
+    // Two distinct verified owners of DIFFERENT identifiers (the plausible legacy-data multi-owner case).
+    store.setState((s) => ({
+      products: [
+        ...s.products,
+        verifiedProduct(bizId, { id: "prod-A", name: "Alpha", upc: "111111111116" }),
+        verifiedProduct(bizId, { id: "prod-B", name: "Beta", primaryBarcode: "222222222220" }),
+      ],
+    }));
+    const before = store.getState().products.length;
+
+    // Scan a FRESH unknown code 3 times -> its provisional placeholder count = 3 (scan N = count N).
+    store.getState().processScan("333333333334");
+    store.getState().processScan("333333333334");
+    store.getState().processScan("333333333334");
+    const placeholder = store.getState().products.find((p) => p.provisional && p.primaryBarcode === "333333333334")!;
+    expect(placeholder, "provisional placeholder minted for the scanned code").toBeDefined();
+    expect(qtyFor(store, placeholder.id), "3 physical scans counted").toBe(3);
+    expect(store.getState().products.length).toBe(before + 1);
+
+    // A create_new auto-add proposes an identity that matches BOTH pre-existing owners -> multi-owner conflict.
+    const r = store.getState().needsReviewQueue.find((x) => x.cleanCode === "333333333334" && x.status === "open")!.id;
+    store.getState().resolveUnknown(r, "create_new", {
+      applyToCount: true, origin: "ai",
+      newProduct: { name: "Ambiguous", upc: "111111111116", primaryBarcode: "222222222220" },
+    });
+
+    // The 3 counts are NOT lost: the placeholder + its count survive, review stays open.
+    const stillThere = store.getState().products.find((p) => p.id === placeholder.id);
+    expect(stillThere, "placeholder retained through the conflict").toBeDefined();
+    expect(qtyFor(store, placeholder.id), "all 3 counts preserved (never silently dropped)").toBe(3);
+    expect(store.getState().needsReviewQueue.find((x) => x.id === r)!.status).toBe("open");
+
+    // Human resolves the conflict by linking to prod-A: the FULL retained 3 transfer onto prod-A.
+    store.getState().resolveUnknown(r, "link_existing", { productId: "prod-A", applyToCount: true });
+    expect(qtyFor(store, "prod-A"), "full 3 transferred to the linked product").toBe(3);
+    expect(store.getState().products.some((p) => p.id === placeholder.id), "placeholder merged away, no duplicate row").toBe(false);
+    expect(store.getState().products.filter((p) => p.provisional && p.primaryBarcode === "333333333334"), "no leftover duplicate placeholder").toHaveLength(0);
   });
 });
