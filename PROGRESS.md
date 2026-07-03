@@ -34,8 +34,22 @@ variant, auto-counted ~40% WRONG on 21 hard codes: a women's dress for Member's 
   (`cloudDrainRace.store.test.ts` is timing-flaky under full parallel load only - passes isolated + on rerun.)
 - **Cost:** Gemini 2.5 grounding free (1500/day); Firecrawl `/search` 2cr only on disagreement, cached once per
   code, 4 keys x 1000 free/mo. ~$0 cash for typical volume. If 2.5 grounding caps -> `gemini-2.0-flash`.
+- **Grounding resilience (2026-07-02, commit 4d6ee14):** a live gemini-2.5-flash-lite 503 outage silently
+  nulled every grounding vote (preview recall fell to 3/21 with no trace). `groundIdentify` now auto-falls-back
+  ONCE to `gemini-2.5-flash` (the whole 2.0 line is decommissioned for generateContent - live-verified 404)
+  and `getLastGroundingStatus()` is surfaced as `debug.groundingStatus` in the decode payload. Regression
+  tests in `flashLiteGrounding.test.ts`. A lone fallback answer still cannot auto-count.
+- **Preview human-bot proof (2026-07-02, 2 runs):** 21 owner problem codes + 5 fake 999-canaries through the
+  real preview UI (`reports/human-bots/preview-consensus-check/`). Canaries 5/5 -> Needs Review both runs
+  (hallucination auto-count class CLOSED). ZERO confirmed wrong auto-counts: the 3 harness flags are stale
+  fixture expectations (072554159725 is genuinely Oreo King Cone - 8 independent sites incl. SmartLabel +
+  icecream.com; 028400325042 is genuinely Cool Ranch Doritos per live OFF; 016000200050's answer satisfies
+  its own "Cheerios-family" expectation). OWNER TODO: correct those fixture rows. Preview recall is 5/21
+  verified vs 18/21 local (UPCitemdb burst rate-limits under bot pacing + grounding refusals on obscure
+  codes) - errs toward Suggested/Review, the SAFE direction; counts still instant via count-decouple.
 - **Residual risk:** two sources sharing the SAME bad data can still agree -> a real GS1 prefix-brand firewall
-  would close it (`brandPrefixMap.json` is currently tire-focused).
+  would close it (`brandPrefixMap.json` is currently tire-focused). Firecrawl keys 1-3 are OUT OF CREDITS
+  (402, reset monthly); rotation is carrying everything on key 4.
 - **RESOLVED (was FINDING 1):** grounding-leg hallucination auto-counts - consensus + refusal rejection + the
   "Error"-title / firecrawl code-gate fixes closed it.
 - Preview only. NO production deploy (needs explicit owner sign-off - [[no-deploy-without-asking]]).
