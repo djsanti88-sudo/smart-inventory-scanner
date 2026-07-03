@@ -12,7 +12,7 @@ import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { decideDecode, isUsableProductName } from "@/services/ai/decode";
 import { discoverViaFirecrawl, firecrawlScrapeCheap, searchIdentifyByBarcode } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
-import { groundIdentify } from "@/services/ai/flashLiteGrounding";
+import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { prefixFloorName } from "@/services/catalog/prefixFloor";
@@ -445,7 +445,9 @@ export async function POST(request: Request) {
             reasonCode: verifiedWin ? "ok" : reasonCode,
             reasonText,
             timedOut: false,
-            debug: { providersAttempted: [`parallel:${fast.source}`], evidenceStrengths: [evidence.strength], sourceCounts: [0], corroborationPath: `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false },
+            // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
+            // debug instead of consensus quietly degrading to the two correlated DB votes.
+            debug: { providersAttempted: [`parallel:${fast.source}`], evidenceStrengths: [evidence.strength], sourceCounts: [0], corroborationPath: `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
