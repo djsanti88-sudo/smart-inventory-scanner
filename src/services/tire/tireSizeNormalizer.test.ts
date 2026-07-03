@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeTireSize, matchTireSize } from "@/services/tire/tireSizeNormalizer";
+import { normalizeTireSize, matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 
 // TEST-FIRST table: every common tire-size shape -> ONE canonical string. Unknown -> null (never guess).
 const CASES: Array<[string, string | null]> = [
@@ -51,5 +51,19 @@ describe("matchTireSize (raw span for description stripping)", () => {
 
   it("returns null when there is no confident size", () => {
     expect(matchTireSize("Coca-Cola Classic")).toBeNull();
+  });
+});
+
+describe("plainTireSizeDigits - size-only digits, no spaces, no load/speed (owner filter column)", () => {
+  it("strips letters/slashes/spaces and drops the load+speed", () => {
+    expect(plainTireSizeDigits("255/55R19 111 V")).toBe("2555519");
+    expect(plainTireSizeDigits("P225/60R18 103H")).toBe("2256018");
+    expect(plainTireSizeDigits("Michelin Latitude Tour HP 255/55R19 111 V Tire")).toBe("2555519");
+    expect(plainTireSizeDigits("265/70R17 115 T")).toBe("2657017");
+  });
+  it("returns empty for non-tire text (never guesses a size from arbitrary numbers)", () => {
+    expect(plainTireSizeDigits("Coca-Cola Classic 12 Pack")).toBe("");
+    expect(plainTireSizeDigits("")).toBe("");
+    expect(plainTireSizeDigits(null)).toBe("");
   });
 });

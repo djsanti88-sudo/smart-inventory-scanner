@@ -86,3 +86,17 @@ export function matchTireSize(input: string | null | undefined): TireSizeMatch |
 export function normalizeTireSize(input: string | null | undefined): string | null {
   return matchTireSize(input)?.canonical ?? null;
 }
+
+/**
+ * PLAIN size digits for quick filtering: the SIZE ONLY (width+aspect+rim), digits run together with no
+ * letters, slashes, dots or spaces, and WITHOUT the load index / speed rating. Owner request: filter a tire
+ * fast by typing plain numbers. e.g. "255/55R19 111 V" -> "2555519", "P225/60R18 103H" -> "2256018".
+ * Returns "" when no confident tire size is found (never guesses a size from arbitrary text).
+ */
+export function plainTireSizeDigits(input: string | null | undefined): string {
+  const m = matchTireSize(input);
+  if (!m) return "";
+  // canonical may carry a trailing " <load><speed>" (e.g. "225/60R18 103H") - keep only the size span.
+  const sizeOnly = m.canonical.split(" ")[0];
+  return sizeOnly.replace(/[^0-9]/g, "");
+}

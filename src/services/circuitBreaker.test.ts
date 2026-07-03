@@ -14,7 +14,9 @@ describe("circuit breaker state machine", () => {
   it("opens after the failure threshold", () => {
     let s = initBreaker();
     expect(s.state).toBe("closed");
-    for (let i = 0; i < FAILURE_THRESHOLD; i++) s = recordFailure(s, 1000);
+    for (let i = 0; i < 11; i++) s = recordFailure(s, 1000);
+    expect(s.state).toBe("closed");
+    s = recordFailure(s, 1000);
     expect(s.state).toBe("open");
   });
 

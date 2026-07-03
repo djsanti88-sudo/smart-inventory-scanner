@@ -64,29 +64,45 @@ export function detectScanContextConflict(params: {
   result: AiLookupResult | null | undefined;
   brandPrefixHints: BrandPrefixHint[];
 }): ConflictKind | null {
-  const { scanContext, code, codeType, result, brandPrefixHints } = params;
+  const { scanContext, result } = params;
   if (!result) return null;
   const domain = classifyProductDomain(result);
 
-  // 1. Category/context conflict: a tire business scanning a clearly non-tire product (source poisoning).
+  // 1. Category/context conflict (poison guard): a tire business scanning a clearly non-tire product
+  //    (source poisoning). This STAYS a hard block - a wrong product TYPE must never auto-count.
   if (scanContext === "tire" && domain === "non_tire") return "category_context_conflict";
 
-  // 2. Brand-prefix conflict: an UNAMBIGUOUS learned brand for this code's candidate prefix that the
-  //    decoded result contradicts (different brand, or a clearly non-tire product for a tire-brand prefix).
-  const prefix = decodeBarcodeStructure(code, codeType).candidateCompanyPrefix;
-  if (prefix) {
-    const hint = brandPrefixHints.find((h) => h.prefix === prefix);
-    if (hint) {
-      const decodedBrand = (result.brand ?? "").trim().toLowerCase();
-      const learned = hint.brand.toLowerCase();
-      const brandMismatch = !!decodedBrand && !decodedBrand.includes(learned) && !learned.includes(decodedBrand);
-      // Brand-FAMILY guard: corporate siblings share a GS1 company prefix (e.g. Michelin / BFGoodrich /
-      // Uniroyal on 086699). A decode of any brand in the prefix family is NOT a real conflict. The hint
-      // table can only SUPPRESS a conflict here - it never creates one and never auto-trusts.
-      if (brandMismatch && !isBrandInPrefixFamily(code, result.brand ?? "")) return "brand_prefix_conflict";
-    }
-  }
+  // 2. Brand-prefix conflict is DEMOTED to ADVISORY (Plan C, owner rule): a decoded-brand mismatch vs a
+  //    learned brand-prefix hint no longer BLOCKS. GS1 company prefixes are many-to-one, so hard prefix
+  //    blocks cause false rejects; grounding/corpus evidence wins over the prefix. Callers surface the
+  //    mismatch via detectBrandPrefixAdvisory() as a soft, non-blocking flag on the row instead.
   return null;
+}
+
+/**
+ * PLAN C: the brand-prefix mismatch as an ADVISORY (never a block). Returns true when the decoded brand
+ * contradicts an UNAMBIGUOUS learned brand for the code's candidate GS1 company prefix AND is not a
+ * corporate sibling in that same prefix family. This is guidance only - surface it as a soft flag; it
+ * MUST NEVER block a verify/count or route a scan to review by itself (grounding wins over the prefix).
+ */
+export function detectBrandPrefixAdvisory(params: {
+  code: string;
+  codeType: CodeType;
+  result: AiLookupResult | null | undefined;
+  brandPrefixHints: BrandPrefixHint[];
+}): boolean {
+  const { code, codeType, result, brandPrefixHints } = params;
+  if (!result) return false;
+  const prefix = decodeBarcodeStructure(code, codeType).candidateCompanyPrefix;
+  if (!prefix) return false;
+  const hint = brandPrefixHints.find((h) => h.prefix === prefix);
+  if (!hint) return false;
+  const decodedBrand = (result.brand ?? "").trim().toLowerCase();
+  const learned = hint.brand.toLowerCase();
+  const brandMismatch = !!decodedBrand && !decodedBrand.includes(learned) && !learned.includes(decodedBrand);
+  // Brand-FAMILY suppression: corporate siblings share a GS1 company prefix (e.g. Michelin / BFGoodrich /
+  // Uniroyal on 086699); a sibling brand is NOT even an advisory mismatch.
+  return brandMismatch && !isBrandInPrefixFamily(code, result.brand ?? "");
 }
 
 /** Safe, product-facing reason for a blocked decode (no provider/source internals). */

@@ -5,6 +5,58 @@
 > `.claude/plans/ultrathink-role-you-are-kind-allen.md`.
 
 ## Current phase
+**CONSENSUS CROSS-CHECK DECODE (2026-07-02): auto-count only on 2-source agreement. Owner-validated. Pushed to `origin/fix/grounding-ladder` (PR #10, preview only - production untouched).**
+
+Branch `fix/grounding-ladder`. SUPERSEDES the earlier grounding-first ladder (which auto-counted
+hallucinations - the FINDING 1 revisit-trigger below - and, in a later single-source "trust UPCitemdb"
+variant, auto-counted ~40% WRONG on 21 hard codes: a women's dress for Member's Mark water, Oreo for Pico).
+
+- **Design (commit dfc86e3):** for an unknown PUBLIC barcode, `resolveUnknownFast`
+  (`src/services/ai/parallelResolve.ts`) queries UPCitemdb (`barcodeDbProvider.ts`, free) + gemini-2.5-flash-lite
+  grounding (`flashLiteGrounding.ts`, free <=1500/day) CONCURRENTLY. If the two AGREE on identity (>=2 shared
+  distinctive tokens, `identitiesAgree`) -> auto-count, ZERO Firecrawl credits. Only on disagreement, spend ONE
+  Firecrawl `/search` (2cr, snippets only, `searchIdentifyByBarcode`) returning barcode-CONFIRMED names from
+  real result titles. CONSENSUS (`findConsensus`): auto-count the identity >=2 sources agree on; lone source /
+  disagreement -> Needs Review. Firecrawl keys exhausted -> degrade to free signals. Wired in `route.ts` ~L411.
+- **Local gate:** 885 unit tests / tsc / eslint (edited files) all green (2026-07-02).
+- **Owner-validated live proof:** 21 historically-problematic codes (`e2e/fixtures/owner-problem-codes.json`):
+  auto-count 1->18/21, 0 wrong auto-counts, Member's Mark water FIXED. Owner double-checked and confirmed the
+  system's decodes were RIGHT and their own expected-sheet had errors. Only genuine miss: Home Depot Homer
+  Bucket `051596320812` -> a Hampton Bay fan, but lands in Needs Review (SAFE, not a wrong count).
+- **Scale proof (2026-07-02, COMPLETE):** 190 unique real codes (Open Food Facts + corpus) + rescans to 500
+  total. Phase 1: verified(auto-count)=18, needs_review=36, suggested=136, err=0; fresh latency p50=3.6s
+  p95=11.5s; ~300 Firecrawl credits (of 4000 free/mo). Phase 2 rescans: cached p50=10ms, 302/310 <1.5s.
+  The run's "109 rescan name mismatches" were NOT resolver flapping - root-caused (2026-07-02) to a
+  daily-cap bug: each decode POST incremented the cap TWICE (route-wide check + duplicate in the decode
+  branch) and the cap was consumed BEFORE the decode-cache read, so cached zero-spend repeats burned slots
+  and returned empty 429s mid-run. FIXED in commit 5a42964 (one slot per compute; cached repeats free;
+  legacy lookup unchanged) with 2 regression tests in `route.test.ts`. Suite 906 green / tsc / eslint clean.
+  (`cloudDrainRace.store.test.ts` is timing-flaky under full parallel load only - passes isolated + on rerun.)
+- **Cost:** Gemini 2.5 grounding free (1500/day); Firecrawl `/search` 2cr only on disagreement, cached once per
+  code, 4 keys x 1000 free/mo. ~$0 cash for typical volume. If 2.5 grounding caps -> `gemini-2.0-flash`.
+- **Grounding resilience (2026-07-02, commit 4d6ee14):** a live gemini-2.5-flash-lite 503 outage silently
+  nulled every grounding vote (preview recall fell to 3/21 with no trace). `groundIdentify` now auto-falls-back
+  ONCE to `gemini-2.5-flash` (the whole 2.0 line is decommissioned for generateContent - live-verified 404)
+  and `getLastGroundingStatus()` is surfaced as `debug.groundingStatus` in the decode payload. Regression
+  tests in `flashLiteGrounding.test.ts`. A lone fallback answer still cannot auto-count.
+- **Preview human-bot proof (2026-07-02, 2 runs):** 21 owner problem codes + 5 fake 999-canaries through the
+  real preview UI (`reports/human-bots/preview-consensus-check/`). Canaries 5/5 -> Needs Review both runs
+  (hallucination auto-count class CLOSED). ZERO confirmed wrong auto-counts: the 3 harness flags are stale
+  fixture expectations (072554159725 is genuinely Oreo King Cone - 8 independent sites incl. SmartLabel +
+  icecream.com; 028400325042 is genuinely Cool Ranch Doritos per live OFF; 016000200050's answer satisfies
+  its own "Cheerios-family" expectation). OWNER TODO: correct those fixture rows. Preview recall is 5/21
+  verified vs 18/21 local (UPCitemdb burst rate-limits under bot pacing + grounding refusals on obscure
+  codes) - errs toward Suggested/Review, the SAFE direction; counts still instant via count-decouple.
+- **Residual risk:** two sources sharing the SAME bad data can still agree -> a real GS1 prefix-brand firewall
+  would close it (`brandPrefixMap.json` is currently tire-focused). Firecrawl keys 1-3 are OUT OF CREDITS
+  (402, reset monthly); rotation is carrying everything on key 4.
+- **RESOLVED (was FINDING 1):** grounding-leg hallucination auto-counts - consensus + refusal rejection + the
+  "Error"-title / firecrawl code-gate fixes closed it.
+- Preview only. NO production deploy (needs explicit owner sign-off - [[no-deploy-without-asking]]).
+
+---
+
+## Prior phase
 **FINAL (2026-06-14): decode reverted to "trust the AI" + fast; strict confidence-gating removed; everything else kept.**
 
 Owner directive: the strict confidence gate was sending good products to Needs Review and slowing scans; restore the

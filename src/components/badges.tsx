@@ -2,14 +2,18 @@
 
 import type { FeedDecodeStatus, MatchType, ScanStatus, SyncStatus } from "@/types";
 
+// PLAN C, TASK 1 (presentational only): collapse the weak decode states into a single
+// "Suggested" label/style. needs_review and conflict are non-blocking LABELS (Plan A already
+// makes every scan count), so the user only ever sees Verified or Suggested here - no wall.
+// This does NOT change the underlying decodeStatus enum or any counting/gating logic.
 export function DecodeStatusBadge({ status }: { status: FeedDecodeStatus }) {
   const map: Record<FeedDecodeStatus, [string, string]> = {
     none: ["", ""],
     decoding: ["bg-blue-100 text-blue-700 animate-pulse", "Looking up product..."],
     verified: ["bg-green-100 text-green-800", "Verified match"],
     suggested: ["bg-amber-100 text-amber-900", "Suggested"],
-    conflict: ["bg-red-100 text-red-800", "Conflict"],
-    needs_review: ["bg-zinc-100 text-zinc-600", "Needs review"],
+    conflict: ["bg-amber-100 text-amber-900", "Suggested"],
+    needs_review: ["bg-amber-100 text-amber-900", "Suggested"],
     vendor_label: ["bg-purple-100 text-purple-700", "Vendor label"],
   };
   const [cls, label] = map[status];

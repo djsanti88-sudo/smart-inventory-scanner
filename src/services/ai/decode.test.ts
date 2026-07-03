@@ -25,6 +25,22 @@ describe("product-name quality gate (junk firewall)", () => {
     }
   });
 
+  it("rejects AI refusal sentences (preview-bot regression: grounding refusals were shown as Verified products)", () => {
+    // Exact strings observed in reports/human-bots/preview-mass-scan (2026-07-01).
+    for (const refusal of [
+      "Unable to identify product.",
+      "Unable to identify the product associated with UPC 703039151421.",
+      "Unable to identify product for UPC 4250635202270.",
+      "Unable to identify the product for UPC 791596585414.",
+      "The UPC 999900001036 is not a recognized product in major public barcode databases.",
+      "I could not find a product matching this barcode.",
+      "This barcode does not correspond to any known product.",
+      "No product information is available for this UPC.",
+    ]) {
+      expect(isUsableProductName(refusal), refusal).toBe(false);
+    }
+  });
+
   it("accepts real product names", () => {
     for (const ok of ["BIC Classic Pocket Lighter", "PHATOIL Lavender Essential Oil 100ml", "Camel Crush Box", "BIC Classic Pocket Lighter (Texas)"]) {
       expect(isUsableProductName(ok), ok).toBe(true);
@@ -169,11 +185,15 @@ describe("decideDecode - the gate that produces a Verified AI Decode", () => {
     expect(d.status).not.toBe("verified");
   });
 
-  it("OPTION 3 still respects the brand-prefix firewall for a non-public code", () => {
+  it("PLAN C: the brand-prefix conflict is ADVISORY - with strong exact-code evidence it no longer blocks a non-public verify", () => {
+    // Reconciled (Plan C Task 2): brand-prefix mismatch used to hard-block. Owner rule: GS1 prefixes are
+    // many-to-one, so a brand-prefix mismatch alone must never block when the app confirmed the EXACT code
+    // in STRONG evidence (a snippet here) - grounding/corpus wins over the prefix. Category/poison guard is
+    // separate and unaffected. The prefix mismatch is surfaced as a non-blocking advisory instead.
     const np = result({ productName: "NatureBell Magnesium", brand: "NatureBell" });
     const ev: EvidenceResult = { verified: true, strength: "snippet", matchedCode: "X004DY7YUT", matchedSources: ["s"], reason: "" };
     const d = decideDecode({ codeType: "vendor_label", results: [np], evidences: [ev], confidenceThreshold: 0.8, allowNonPublicAutoCount: true, brandPrefixConflict: true });
-    expect(d.status).not.toBe("verified");
+    expect(d.status).toBe("verified");
   });
 
   it("a single provider auto-verifies from ANY source when the app confirmed the exact code (owner single-source policy)", () => {
