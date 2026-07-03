@@ -96,7 +96,7 @@ export interface ParallelResolveDeps {
 // A grounding TEXT that is a refusal sentence ("unable to identify", "couldn't find", "not found",
 // "no product", ...) is an answer SHAPE, never a product identity. Reject it so the leg misses.
 const REFUSAL_RE =
-  /\b(?:unable to identify|not a recognized product|no product|couldn'?t find|could not find|cannot identify|can'?t identify|i cannot|i don'?t have|not found|no information)\b/i;
+  /\b(?:unable to identify|not a recognized product|no product|couldn'?t find|could not find|cannot identify|can'?t identify|i cannot|i don'?t have|not found|no information|no results)\b/i;
 export function isRefusal(text: string): boolean {
   return REFUSAL_RE.test(text ?? "");
 }

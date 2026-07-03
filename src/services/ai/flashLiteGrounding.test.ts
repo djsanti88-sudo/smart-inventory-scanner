@@ -99,5 +99,25 @@ describe("flash-lite grounding", () => {
       expect(callsOf(f).length).toBe(1);
       expect(getLastGroundingStatus()).toBe("hit");
     });
+
+    // Recall fix (2026-07-03): flash-lite frequently ANSWERS with a refusal sentence ("No results were
+    // found for the UPC barcode ...") - an HTTP success that still deletes the grounding vote. Treat a
+    // refusal answer like a soft miss: one fallback-model attempt; consensus still gates correctness.
+    const geminiRefusal = { candidates: [{ content: { parts: [{ text: "No results were found for the UPC barcode 086699087829." }] } }] };
+    it("retries the fallback model when the primary ANSWER is a refusal, and returns the rescue", async () => {
+      let n = 0;
+      const f = vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => (++n === 1 ? geminiRefusal : geminiOk), _url: url })) as unknown as typeof fetch;
+      const r = await groundIdentify("086699087829", { apiKey: "k", fetch: f });
+      expect(r?.text).toMatch(/Michelin/);
+      expect(callsOf(f).length).toBe(2);
+      expect(callsOf(f)[1][0]).toContain("gemini-2.5-flash:");
+      expect(getLastGroundingStatus()).toBe("fallback_hit");
+    });
+    it("returns the primary refusal text unchanged when the fallback also refuses (caller filters)", async () => {
+      const f = mockFetch(geminiRefusal);
+      const r = await groundIdentify("086699087829", { apiKey: "k", fetch: f });
+      expect(r?.text).toMatch(/No results were found/);
+      expect(callsOf(f).length).toBe(2);
+    });
   });
 });

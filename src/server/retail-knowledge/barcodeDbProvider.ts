@@ -9,13 +9,25 @@ function variants(code: string): string[] {
   return [...v];
 }
 
-export async function lookupBarcodeDb(code: string, deps?: { fetch?: typeof fetch }): Promise<{ name: string; brand: string; sourceUrl: string } | null> {
+export async function lookupBarcodeDb(code: string, deps?: { fetch?: typeof fetch; backoffMs?: number }): Promise<{ name: string; brand: string; sourceUrl: string } | null> {
   const f = deps?.fetch ?? fetch;
-  for (const v of variants(code.trim())) {
+  // UPCitemdb trial burst-limits aggressively (especially from shared Vercel egress IPs) and this vote is
+  // load-bearing for consensus recall: a transient 429 gets ONE short-backoff retry before giving up.
+  const backoffMs = deps?.backoffMs ?? 1200;
+  let retried = false;
+  const queue = variants(code.trim());
+  for (let i = 0; i < queue.length; i++) {
+    const v = queue[i];
     let res: Response;
     try { res = await f(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(v)}`, { headers: { "User-Agent": "inventory-scanner" } }); }
     catch { _last = "error"; return null; }
-    if (res.status === 429) { _last = "rate_limited"; return null; }
+    if (res.status === 429) {
+      if (retried) { _last = "rate_limited"; return null; }
+      retried = true;
+      await new Promise((r) => setTimeout(r, backoffMs));
+      i--; // retry the SAME variant once after the backoff
+      continue;
+    }
     if (!res.ok) { _last = "error"; continue; }
     const data = (await res.json()) as { items?: Array<{ title?: string; brand?: string; offers?: Array<{ link?: string }> }> };
     const item = data.items?.[0];
