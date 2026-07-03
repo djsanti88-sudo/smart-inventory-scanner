@@ -5,7 +5,23 @@
 > `.claude/plans/ultrathink-role-you-are-kind-allen.md`.
 
 ## Current phase
-**CONSENSUS CROSS-CHECK DECODE (2026-07-02): auto-count only on 2-source agreement. Owner-validated. Pushed to `origin/fix/grounding-ladder` (PR #10, preview only - production untouched).**
+**CONSENSUS CROSS-CHECK DECODE: MERGED TO MASTER 2026-07-03 (PR #10 merge `7fa62a8`; PR #7 auto-merged - branch was fully contained). PRODUCTION NOT DEPLOYED.**
+
+- **Deploy guard:** `vercel.json` sets `git.deploymentEnabled.master=false` - master pushes NEVER
+  auto-deploy. Production still serves pre-merge `192bfa4` (verified via the deployments API after the
+  merge). GO-LIVE checklist (owner-gated): (1) explicit owner sign-off, (2) add AI/Firecrawl/Turso keys
+  to the Vercel PRODUCTION env scope (currently Preview-only), (3) `vercel promote <preview-url>` (or
+  remove the vercel.json guard and push).
+- **Recall fixes (2026-07-03, `8e1700c`):** UPCitemdb 429 -> one backoff retry; a grounding REFUSAL answer
+  ("No results were found...") gets one backup-model attempt (same as an HTTP failure); "no results" added
+  to the shared refusal regex. Consensus still gates every auto-count.
+- **Preview bot run 3 = PASS:** 0 wrong auto-counts, fake canaries 5/5 -> Needs Review, all 4 Verified
+  identities correct. Preview recall stays ~4/21 vs 18/21 local: UPCitemdb trial per-IP limits on SHARED
+  Vercel egress IPs are chronic - the real lever is a paid UPCitemdb key or one more structured DB vote,
+  not more retries. Runs archived in `reports/human-bots/preview-consensus-check/run{1,2,3}-*/`.
+- **Fixtures corrected:** 3 stale rows in `e2e/fixtures/owner-problem-codes.json` (072554159725 = Oreo
+  King Cone per SmartLabel/icecream.com/8 retailers; 028400325042 = Cool Ranch Doritos; 016000200050 =
+  Cheerios Veggie Blends).
 
 Branch `fix/grounding-ladder`. SUPERSEDES the earlier grounding-first ladder (which auto-counted
 hallucinations - the FINDING 1 revisit-trigger below - and, in a later single-source "trust UPCitemdb"
