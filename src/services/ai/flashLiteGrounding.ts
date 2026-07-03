@@ -6,6 +6,8 @@
 // line; the whole 2.0 line is decommissioned for generateContent, live-checked 2026-07-02) so a
 // primary-model outage degrades to the backup instead of silently deleting the grounding vote from
 // the consensus. A lone fallback answer still can't auto-count - consensus gating is unchanged.
+import { isRefusal } from "@/services/ai/parallelResolve";
+
 const MODEL = process.env.GEMINI_GROUND_MODEL || "gemini-2.5-flash-lite";
 const FALLBACK_MODEL = process.env.GEMINI_GROUND_FALLBACK_MODEL || "gemini-2.5-flash";
 
@@ -46,36 +48,59 @@ async function callModel(
   }
 }
 
-export async function groundIdentify(code: string, opts?: { url?: string; apiKey?: string; fetch?: typeof fetch }): Promise<{ text: string; grounded: boolean; sources: string[]; sourceUrls: string[] } | null> {
-  const key = opts?.apiKey ?? process.env.GEMINI_API_KEY;
-  if (!key) { _last = "no_key"; return null; }
+interface GroundingAnswer { text: string; grounded: boolean; sources: string[]; sourceUrls: string[] }
 
-  let usedFallback = false;
-  let { res, networkError } = await callModel(MODEL, code, opts, key);
-  // Provider failure (non-2xx or network) -> ONE retry on the backup model. A grounding call is free-tier
-  // and the vote is load-bearing for consensus recall, so one extra attempt is always worth it.
-  if (!res?.ok) {
-    const failStatus: GroundingStatus = networkError ? "network_error" : (`error_${res!.status}` as GroundingStatus);
-    ({ res, networkError } = await callModel(FALLBACK_MODEL, code, opts, key));
-    if (!res?.ok) {
-      _last = networkError ? "network_error" : failStatus;
-      return null;
-    }
-    usedFallback = true;
-  }
-
+// GROUNDING-FIRST VERIFY: hand the APP the grounding sources so it can independently confirm the code.
+// `sources` = chunk titles + uris (legacy code-in-sources text signal). `sourceUrls` = ONLY the web.uri
+// values (the fetchable/redirect URLs) - these are what verifyCodeOnPage fetches to confirm the exact
+// code is really on the candidate page. The model's answer alone is never trusted as Verified.
+async function parseAnswer(res: Response, urlMode: boolean): Promise<GroundingAnswer | null> {
   const data = (await res.json()) as GeminiResponse;
   const candidate = data.candidates?.[0];
   const parts = candidate?.content?.parts ?? [];
   const text = parts.map((p) => p.text ?? "").join(" ").trim();
-  if (!text) { _last = "empty"; return null; }
-  // GROUNDING-FIRST VERIFY: hand the APP the grounding sources so it can independently confirm the code.
-  // `sources` = chunk titles + uris (legacy code-in-sources text signal). `sourceUrls` = ONLY the web.uri
-  // values (the fetchable/redirect URLs) - these are what verifyCodeOnPage fetches to confirm the exact
-  // code is really on the candidate page. The model's answer alone is never trusted as Verified.
+  if (!text) return null;
   const chunks = candidate?.groundingMetadata?.groundingChunks ?? [];
   const sources = chunks.flatMap((c) => [c.web?.title ?? "", c.web?.uri ?? ""]).filter(Boolean);
   const sourceUrls = chunks.map((c) => c.web?.uri ?? "").filter(Boolean);
-  _last = usedFallback ? "fallback_hit" : "hit";
-  return { text, grounded: !opts?.url, sources, sourceUrls };
+  return { text, grounded: !urlMode, sources, sourceUrls };
+}
+
+export async function groundIdentify(code: string, opts?: { url?: string; apiKey?: string; fetch?: typeof fetch }): Promise<GroundingAnswer | null> {
+  const key = opts?.apiKey ?? process.env.GEMINI_API_KEY;
+  if (!key) { _last = "no_key"; return null; }
+  const urlMode = !!opts?.url;
+
+  const primary = await callModel(MODEL, code, opts, key);
+  // HTTP failure (non-2xx or network) -> ONE retry on the backup model. A grounding call is free-tier
+  // and the vote is load-bearing for consensus recall, so one extra attempt is always worth it.
+  if (!primary.res?.ok) {
+    const failStatus: GroundingStatus = primary.networkError ? "network_error" : (`error_${primary.res!.status}` as GroundingStatus);
+    const fb = await callModel(FALLBACK_MODEL, code, opts, key);
+    if (!fb.res?.ok) {
+      _last = fb.networkError ? "network_error" : failStatus;
+      return null;
+    }
+    const answer = await parseAnswer(fb.res, urlMode);
+    _last = answer ? "fallback_hit" : "empty";
+    return answer;
+  }
+
+  const answer = await parseAnswer(primary.res, urlMode);
+  if (!answer) { _last = "empty"; return null; }
+  // A refusal ANSWER ("No results were found for the UPC barcode ...") is an HTTP success that still
+  // deletes the grounding vote - treat it as a soft miss and give the backup model ONE shot. If the
+  // backup also refuses, return the primary refusal unchanged (the caller's refusal filter drops it).
+  if (isRefusal(answer.text)) {
+    const fb = await callModel(FALLBACK_MODEL, code, opts, key);
+    if (fb.res?.ok) {
+      const rescue = await parseAnswer(fb.res, urlMode);
+      if (rescue && !isRefusal(rescue.text)) {
+        _last = "fallback_hit";
+        return rescue;
+      }
+    }
+  }
+  _last = "hit";
+  return answer;
 }

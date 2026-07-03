@@ -204,6 +204,16 @@ describe("resolveUnknownFast - cross-check auto-count", () => {
     expect(r?.source).toBe("grounding");
   });
 
+  it("(r1b) the live 'No results were found for the UPC barcode ...' phrasing IS a refusal (2026-07-02 flash-lite shape)", async () => {
+    const bdbMock = vi.fn(async () => ({ name: "Coca-Cola Classic 12 Pack", brand: "Coca-Cola", sourceUrl: "https://x/y" }));
+    const groundMock = ground(`No results were found for the UPC barcode ${CODE}.`);
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+    expect(r?.source).toBe("barcode_db");
+    expect(r?.verified).toBe(false); // the refusal must not read as a "product name" that agrees with anything
+  });
+
   it("(r1) a grounding refusal sentence is treated as absent -> lone DB source -> Needs Review", async () => {
     const bdbMock = vi.fn(async () => ({ name: "Coca-Cola Classic 12 Pack", brand: "Coca-Cola", sourceUrl: "https://x/y" }));
     const groundMock = ground(`Unable to identify the product associated with UPC ${CODE}.`);
