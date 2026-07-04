@@ -195,3 +195,12 @@ export, catalog, alias, product-resolution, and customer-facing changes. Unit te
 See `docs/REVISION_GATE.md`, `docs/QA_BOTS.md`, `docs/AGENT_BOT_ROLES.md`. Run the relevant `npm run qa:bots:*`
 (or `qa:revision`); for live-account resolution changes also run `qa:bots:live`. Do not claim a resolution
 or data-protection fix works unless a browser bot proved it through the real UI with a screenshot.
+
+
+# Full Tool Arsenal Rule (owner order, 2026-07-04)
+
+On EVERY task, proactively use the full arsenal of available tools - skills (TDD,
+systematic-debugging, brainstorming), subagents and workflows, browser or Playwright
+proof, MCP tools, memory, offline replays - whatever best fits the task. Never default
+to minimal bare-hands work. Local operations need no permission; the risky gates stay:
+deploy, git push, paid/live API calls, real data, publishing.
