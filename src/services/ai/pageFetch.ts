@@ -191,6 +191,7 @@ export function looksLikeNotFound(text: string): boolean {
 }
 
 async function fetchUntilCodePage(
+  code: string,
   urls: string[],
   codeVariants: string[],
   fetchImpl: FetchImpl,
@@ -209,9 +210,10 @@ async function fetchUntilCodePage(
         pages.push(p);
         if (productPage) return;
         if (!codeVariants.some((v) => p.html.includes(v))) return;
-        // Early-win ONLY on a real product page (usable title, not a "not found" page); otherwise keep
-        // looking at the other sites and hold this only as a last-resort fallback.
-        const usable = isUsableProductName(extractTitleProduct(p.html).productName) && !looksLikeNotFound(p.text);
+        // Early-win ONLY on a real product page (usable title that does not ECHO the queried code,
+        // not a "not found" page); otherwise keep looking at the other sites and hold this only as
+        // a last-resort fallback.
+        const usable = isUsableProductName(extractTitleProduct(p.html).productName, code) && !looksLikeNotFound(p.text);
         if (usable) {
           productPage = p;
           resolveFound();
@@ -261,7 +263,7 @@ export async function enrichWithPageFetch(params: {
 
   const fetchImpl = params.fetchImpl ?? (globalThis.fetch as unknown as FetchImpl);
   const fetchOpts: FetchOpts = { timeoutMs: 7000, maxBytes: 400_000, backoffMs: 400, signal: params.signal };
-  const { codePage, pages } = await fetchUntilCodePage(urls, codeVariants, fetchImpl, fetchOpts);
+  const { codePage, pages } = await fetchUntilCodePage(params.code, urls, codeVariants, fetchImpl, fetchOpts);
 
   const fetchedUrls = pages.map((p) => p.url);
   // The code-bearing page is the authoritative source; read just it (faster than joining every page).
@@ -288,7 +290,7 @@ export async function enrichWithPageFetch(params: {
   // call. Only pay for the model read when the page doesn't self-describe with a usable name. The
   // model read was the ~6s tail and, for barcode-DB pages, returned no extra specs anyway.
   const h = extractTitleProduct(codePage.html);
-  let candidateName = isUsableProductName(h.productName) ? h.productName : "";
+  let candidateName = isUsableProductName(h.productName, params.code) ? h.productName : "";
   let candidateBrand = h.brand;
   let extracted: Partial<AiLookupResult> | null = null;
   if (!candidateName && params.extract) {
@@ -297,7 +299,7 @@ export async function enrichWithPageFetch(params: {
     } catch {
       extracted = null;
     }
-    if (isUsableProductName(extracted?.productName ?? "")) {
+    if (isUsableProductName(extracted?.productName ?? "", params.code)) {
       candidateName = String(extracted?.productName).trim();
       candidateBrand = candidateBrand || (extracted?.brand ?? "").trim();
     }

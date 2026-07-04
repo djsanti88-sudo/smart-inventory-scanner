@@ -77,6 +77,49 @@ describe("product-name quality gate (junk firewall)", () => {
     expect(cleanProductName("Multi-Surface Cleaner & Degreaser")).toBe("Multi-Surface Cleaner & Degreaser");
   });
 
+  it("rejects intl search-page titles observed verifying in the 2026-07-04 ladder dry run", () => {
+    // Exact `product` strings from scripts/tmp-ladder-dryrun-results.json (junkTitleVerifies).
+    for (const junk of [
+      "Search For:3027030038381", // barcode-list.com Search.htm echoes the query
+      "Search For:5000396053432",
+      "CodeCheck - Suchergebnisse", // codecheck.info German "search results" page
+      "UPC Database | 0049022596986", // upcdatabase.org site title + echoed code
+      "UPC Database | 0078742058221",
+    ]) {
+      expect(isUsableProductName(junk), junk).toBe(false);
+    }
+  });
+
+  it("rejects a title that still echoes the scanned code after cleaning (search pages echo the query)", () => {
+    // Generic guard for the same failure class on sites we have not met yet.
+    expect(isUsableProductName("Barcode Portal 3027030038381", "3027030038381")).toBe(false);
+    // zero-padded GTIN variant of the code is still an echo
+    expect(isUsableProductName("Listing 0049022596986", "49022596986")).toBe(false);
+    // a real product name never contains the scanned code -> unaffected
+    expect(isUsableProductName("BIC Classic Pocket Lighter", "3027030038381")).toBe(true);
+    // code-suffix cruft is stripped BEFORE the echo check, so legit barcode-DB titles survive
+    expect(isUsableProductName("Exclusive Smokes Bic Lighter Texas — UPC 70330645936 — Go-UPC", "70330645936")).toBe(true);
+  });
+
+  it("rejects nutrition-facts DB titles (2026-07-04 dry run: recycled Frito-Lay UPCs mapped to the WRONG same-brand product)", () => {
+    // Exact `product` strings (incl. undecoded HTML entities) from scripts/tmp-ladder-dryrun-results.json.
+    for (const junk of [
+      "Lay&#039;s pico de gallo potato chips 2.875 ounces by Frito Lay nutrition facts and analysis.",
+      "Nutrition Facts for Lay&#x27;s - Lay&#x27;s Kettle Cooked Party Size Original Potato Chips 14 Ounce Plastic Bag",
+      "Lay&#039;s barbecue flavored potato chips 9.5 ounce plastic bag by Frito Lay nutrition facts and analysis.",
+      "Nutrition Facts for Frito Lay - Munchies Rold Gold Doritos Cheetos Sun Chips Cheese Fix Snack Mix 3.25 Ounce Plastic Bag",
+    ]) {
+      expect(isUsableProductName(junk), junk).toBe(false);
+    }
+    // A real product whose NAME merely mentions nutrition stays usable.
+    expect(isUsableProductName("Centrum Adult Multivitamin Nutrition Supplement 200 ct")).toBe(true);
+  });
+
+  it("strips a leading code prefix so a real product behind it stays usable under the echo check", () => {
+    expect(cleanProductName("UPC 745125495781 - Manstel 200 Pcs Rivet Kit")).toBe("Manstel 200 Pcs Rivet Kit");
+    expect(isUsableProductName("UPC 745125495781 - Manstel 200 Pcs Rivet Kit", "745125495781")).toBe(true);
+  });
+
   it("strips AI hedge parentheticals but keeps a real name usable", () => {
     const cleaned = cleanProductName("Wholesale Acrylic Paint Markers Set, 24 Metallic Colors (likely wholesale listing)");
     expect(cleaned).not.toMatch(/likely wholesale listing/i);
@@ -88,6 +131,17 @@ describe("product-name quality gate (junk firewall)", () => {
 });
 
 describe("decideDecode applies the quality gate", () => {
+  it("rejects a provider identity that ECHOES the scanned code (search-echo defense in depth)", () => {
+    const d = decideDecode({
+      codeType: "ean_13",
+      code: "3027030038381",
+      results: [{ ...emptyResult(), productName: "Barcode Portal 3027030038381", confidence: 0.9 }],
+      evidences: [{ verified: true, strength: "fetched_source", matchedCode: "3027030038381", matchedSources: ["s"], reason: "" }],
+      confidenceThreshold: 0.8,
+    });
+    expect(d.status).toBe("needs_review");
+  });
+
   it("routes a website-title 'product' to needs_review (not suggested/verified)", () => {
     const d = decideDecode({
       codeType: "ean_13",

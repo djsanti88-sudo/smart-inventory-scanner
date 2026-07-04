@@ -49,8 +49,11 @@ const HEDGE_PAREN = /\s*\((?:likely|possibly|probably|maybe|uncertain|unverified
 const HEDGE_TAIL = /\s*[-–—]\s*(?:exact variant unknown|variant unknown|unverified|unconfirmed|best guess)\s*$/i;
 
 // Barcode-site / search / error / store-nav titles that are NOT products.
+// "search for", "suchergebnisse" (German search results), "codecheck", "upc database" observed live
+// verifying as products in the 2026-07-04 ladder dry run (barcode-list.com "Search For:<code>",
+// codecheck.info "CodeCheck - Suchergebnisse", upcdatabase.org "UPC Database | <code>").
 const SITE_BLOCKLIST =
-  /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|search results|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
+  /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|upc database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|codecheck|search results|search for|suchergebnisse?|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
 const PLACEHOLDER_NAME = /^\s*(unknown|unidentified|n\/a)\b|no (public )?match|not found|no result/i;
 
 // A SCRAPED page can hand back an error / bot-challenge / maintenance TITLE (e.g. "Error", "Error 500",
@@ -67,9 +70,17 @@ const SCRAPE_ERROR_TITLE =
 const REFUSAL_NAME =
   /\b(?:unable to (?:identify|find|determine|locate)|cannot (?:identify|find|determine|locate)|can(?:no|')t (?:identify|find|determine|locate)|could not (?:identify|find|determine|locate)|not a recognized product|not recognized as a product|does not (?:correspond|match|appear)|no product (?:information|match|listing)|no information (?:is )?available)\b/i;
 
+// Nutrition-facts DB page titles ("Nutrition Facts for <brand> - <product>", "<product> by <brand>
+// nutrition facts and analysis."). These sites map RECYCLED UPCs to the wrong same-brand product
+// (2026-07-04 dry run: Lay's <-> Munchies identity swap), so their titles never name a product here.
+const NUTRITION_DB_TITLE = /^\s*nutrition facts for\b|\bnutrition facts (?:and analysis|for)\b/i;
+
 // Barcode-site title cruft appended after a separator (incl. em/en dash), e.g.
 // "Bic Lighter Texas — UPC 70330645936 — Go-UPC" or "Widget | Barcode Lookup".
 const TITLE_CODE_SUFFIX = /\s*[|–—-]\s*(?:upc|ean|gtin|isbn|barcode)\b[\s\S]*$/i;
+// Leading code cruft ("UPC 745125495781 - Manstel Rivet Kit"): stripped so the real product behind it
+// survives the code-echo check below.
+const TITLE_CODE_PREFIX = /^\s*(?:upc|ean|gtin|isbn|barcode)?[\s#:]*\d{8,14}\s*[|–—:-]\s*/i;
 const TITLE_SITE_SUFFIX =
   /\s*[|–—-]\s*(?:barcode lookup|upcitemdb|go-?upc|buycott|barcodespider|barcode ?finder|barcodes? ?database|ean-?search|eandata|barcodes?\.(?:com|net|org)|gtin ?lookup)\b[\s\S]*$/i;
 
@@ -80,30 +91,43 @@ export function cleanProductName(name: string): string {
     .replace(HEDGE_TAIL, "")
     .replace(TITLE_CODE_SUFFIX, "")
     .replace(TITLE_SITE_SUFFIX, "")
+    .replace(TITLE_CODE_PREFIX, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** True only for a clean, real product name (not a website title, hedge, placeholder, or junk). */
-export function isUsableProductName(raw: string): boolean {
+/**
+ * True only for a clean, real product name (not a website title, hedge, placeholder, or junk).
+ * When the scanned `code` is passed, a name that still CONTAINS that code after cleaning is
+ * rejected: search/lookup pages echo the queried code in their title ("Search For:<code>",
+ * "UPC Database | <code>"), and a real product name never carries the full barcode.
+ */
+export function isUsableProductName(raw: string, code?: string): boolean {
   const name = cleanProductName(raw);
   if (name.length < 3 || name.length > 120) return false;
   if (PLACEHOLDER_NAME.test(name)) return false;
   if (REFUSAL_NAME.test(name)) return false;
   if (SCRAPE_ERROR_TITLE.test(name)) return false;
   if (SITE_BLOCKLIST.test(name)) return false;
+  if (NUTRITION_DB_TITLE.test(name)) return false;
   if (/^https?:\/\//i.test(name) || /^[a-z0-9.-]+\.(com|org|net|io)\b/i.test(name)) return false; // bare domain/url
+  if (code) {
+    const digits = code.replace(/\D/g, "");
+    const echoes = [code.trim(), digits, digits.padStart(12, "0"), digits.padStart(13, "0"), digits.padStart(14, "0")]
+      .filter((v) => v.length >= 8); // short fragments would false-positive on sizes/quantities
+    if (echoes.some((v) => name.includes(v))) return false;
+  }
   return true;
 }
 
-function identityOf(r: AiLookupResult): string {
-  const name = isUsableProductName(r.productName) ? cleanProductName(r.productName) : "";
+function identityOf(r: AiLookupResult, code?: string): string {
+  const name = isUsableProductName(r.productName, code) ? cleanProductName(r.productName) : "";
   return `${name} ${r.brand}`.trim();
 }
 
 export function decideDecode(params: DecodeParams): DecodeDecision {
   const { codeType, confidenceThreshold, code, scanContext } = params;
-  const present = params.results.filter((r) => r && identityOf(r).length > 0);
+  const present = params.results.filter((r) => r && identityOf(r, code).length > 0);
   const a = present[0] ?? null;
   const b = present[1] ?? null;
   const cc = crossCheck(a, b);
