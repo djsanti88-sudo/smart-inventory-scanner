@@ -1,12 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   barcodeDbUrls,
   htmlToText,
   extractTitleProduct,
   fetchPages,
   enrichWithPageFetch,
+  resetHostCooldowns,
   type FetchImpl,
 } from "@/services/ai/pageFetch";
+
+// Test-state isolation only: the per-host 429/403 cooldown is module-level by design, and the
+// polite-skip 429 test legitimately trips it for go-upc.com; clear it between tests.
+afterEach(() => resetHostCooldowns());
 
 function page(html: string) {
   return { ok: true, status: 200, text: async () => html };
