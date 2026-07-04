@@ -166,7 +166,7 @@ async function runLadder(row: Row): Promise<Result> {
 
 // --- main ---
 const rows: Row[] = MOCK ? MOCK_CODES : JSON.parse(readFileSync(new URL("../e2e/fixtures/dryrun-codes.json", import.meta.url), "utf8")).codes;
-const WORST_PER_CODE = 0.25; // gemini ~$0.07 worst + 5.5 ~$0.18 worst with caps
+const WORST_PER_CODE = 0.3; // reviewer-corrected: 5.5 worst = 6K out ($0.18) + 5 searches ($0.05) + input; gemini search count uncapped by request -> extra headroom
 const results: Result[] = [];
 for (const row of rows) {
   if (!MOCK && spent + WORST_PER_CODE > BUDGET_USD) { console.log(`BUDGET GUARD: stopping at ${row.code} ($${spent.toFixed(2)} spent)`); break; }
