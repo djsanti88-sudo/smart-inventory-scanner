@@ -1,0 +1,3431 @@
+{
+  "spent": 12.318004000000004,
+  "rows": [
+    {
+      "code": "051596320812",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Home Depot 5 Gal Orange Homer Bucket / 05GLHD2",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Eaton Moeller series DILEEM Mini contactor",
+      "cost": 0.208,
+      "secs": 59.3,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "078742051451",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Member's Mark Purified Water 500ml / 16.9 oz",
+      "codeType": "upc",
+      "outcome": "verified",
+      "product": "Member's Mark Purified Water 500ml",
+      "cost": 0.003,
+      "secs": 3.6,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "078742028477",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Member's Mark Purified Water 40 Pack / 16.9 oz",
+      "codeType": "upc",
+      "outcome": "verified",
+      "product": "Member's Mark Purified Water 40 Pack / 16.9 Oz",
+      "cost": 0.004,
+      "secs": 3.1,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "10019320009355",
+      "group": "owner",
+      "expected": "suggest-only",
+      "truth": "Oreo Cookies Sleeve Pack / case pack",
+      "codeType": "gtin14",
+      "outcome": "verified",
+      "product": "Oreo Price/Case)Oreo Cookies 5 Ounce Package - 24 Packages Per Case",
+      "cost": 0.009,
+      "secs": 5.9,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "009800120871",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Ferrero Rocher Valentine's Fine Hazelnut Chocolate Hearts, 2.6 oz",
+      "codeType": "upc",
+      "outcome": "verified",
+      "product": "Ferrero Rocher Chocolates, Fine Hazelnut 2.6 Oz",
+      "cost": 0.011,
+      "secs": 12,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "044000072742",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Nabisco Oreo / club pack sandwich cookies",
+      "codeType": "upc",
+      "outcome": "verified",
+      "product": "Oreo Chocolate Sandwich Cookies Pack",
+      "cost": 0.004,
+      "secs": 3.9,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "072554159725",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Oreo King Cone ice cream cone 7.5 oz",
+      "codeType": "upc",
+      "outcome": "verified",
+      "product": "Oreo Cone, Frozen Dairy Dessert",
+      "cost": 0.006,
+      "secs": 3.8,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "016000462427",
+      "group": "owner",
+      "expected": "suggest-only",
+      "truth": "General Mills product",
+      "codeType": "upc",
+      "outcome": "verified",
+      "product": "Cheerios Protein Oats &amp; Honey Cereal 35.5 Oz. Box",
+      "cost": 0.007,
+      "secs": 7.5,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "00028400234306",
+      "group": "owner",
+      "expected": "suggest-only",
+      "truth": "Doritos / Frito-Lay product",
+      "codeType": "gtin14",
+      "outcome": "verified",
+      "product": "Lay&#039;s pico de gallo potato chips 2.875 ounces by Frito Lay nutrition facts and analysis.",
+      "cost": 0.077,
+      "secs": 8.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0028400199247",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Lay's Kettle Cooked Potato Chips",
+      "codeType": "ean",
+      "outcome": "suggested",
+      "product": "Flamin' Hot Nacho Flavored Tortilla Chips",
+      "cost": 0.075,
+      "secs": 9.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0087684001127",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Capri Sun Roarin' Waters Tropical Fruit",
+      "codeType": "ean",
+      "outcome": "suggested",
+      "product": "Capri Sun Roarin' Waters Tropical Tide Flavored Water Beverage",
+      "cost": 0.078,
+      "secs": 8.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "00028400076388",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Doritos Cool Ranch Tortilla Chips",
+      "codeType": "gtin14",
+      "outcome": "verified",
+      "product": "Nutrition Facts for Lay&#x27;s - Lay&#x27;s Kettle Cooked Party Size Original Potato Chips 14 Ounce Plastic Bag",
+      "cost": 0.079,
+      "secs": 10.7,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "028400325042",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Doritos Cool Ranch tortilla chips (Frito-Lay)",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Cool Ranch Flavored Tortilla Chips",
+      "cost": 0.072,
+      "secs": 9.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "016000200050",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Cheerios Veggie Blends Blueberry Banana",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Cheerios Veggie Blends Breakfast Cereal, Blueberry Banana Flavored, Family Size",
+      "cost": 0.08,
+      "secs": 11.3,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "00028400160131",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Munchies Cheese Fix Snack Mix",
+      "codeType": "gtin14",
+      "outcome": "verified",
+      "product": "Lay&#039;s barbecue flavored potato chips 9.5 ounce plastic bag by Frito Lay nutrition facts and analysis.",
+      "cost": 0.005,
+      "secs": 4.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "00028400028141",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Lay's Barbecue Potato Chips",
+      "codeType": "gtin14",
+      "outcome": "verified",
+      "product": "Nutrition Facts for Frito Lay - Munchies Rold Gold Doritos Cheetos Sun Chips Cheese Fix Snack Mix 3.25 Ounce Plastic Bag",
+      "cost": 0.076,
+      "secs": 8.6,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "00016000179998",
+      "group": "owner",
+      "expected": "suggest-only",
+      "truth": "DISPUTED: fixture says Cheerios Veggie Blends Family Size; 8 models across 3 providers say Mott's Fruit Flavored Snacks Family Pack",
+      "codeType": "gtin14",
+      "outcome": "suggested",
+      "product": "Mott’s Animals Assorted Fruit Flavored Snacks Family Pack",
+      "cost": 0.078,
+      "secs": 11.3,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "00075391054567",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Jumbo Stone Crab Claws",
+      "codeType": "gtin14",
+      "outcome": "suggested",
+      "product": "Jumbo Stone Crab Claws",
+      "cost": 0.072,
+      "secs": 9,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0038000245534",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Pringles Scorchin' Cheddar Potato Crisps",
+      "codeType": "ean",
+      "outcome": "suggested",
+      "product": "Pringles Scorchin' Cheddar Potato Crisps",
+      "cost": 0.075,
+      "secs": 9.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "00051000212412",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Campbell's Cream of Chicken Soup, 22.6 oz",
+      "codeType": "gtin14",
+      "outcome": "suggested",
+      "product": "Condensed Healthy Request Cream of Chicken Soup, Family Size",
+      "cost": 0.076,
+      "secs": 12.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "00070470001272",
+      "group": "owner",
+      "expected": "verified-ok",
+      "truth": "Yoplait Whips! Raspberry Lowfat Yogurt Mousse",
+      "codeType": "gtin14",
+      "outcome": "suggested",
+      "product": "Yoplait Whips! Raspberry Mousse Low-Fat/Reduced Fat Yogurt Mousse",
+      "cost": 0.076,
+      "secs": 9.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "749000000015",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Unknown product (UPC-A 749000000015)",
+      "cost": 0.184,
+      "secs": 37.3,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "749000000022",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "M23 Signal panel connector housing",
+      "cost": 0.124,
+      "secs": 29,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "749000000039",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Motore gruppo termico kit scooter Yamaha orizzontale diametro 47.6",
+      "cost": 0.121,
+      "secs": 33.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "749000000046",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "TEMPOSTOP exposed self-closing shower valve",
+      "cost": 0.17,
+      "secs": 30.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "ZQX-99417-B",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (invented vendor part number)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Salobrena-C 99417 LED ceiling light",
+      "cost": 0.101,
+      "secs": 36.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "KMD-40521-X",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (invented vendor part number)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Mini Disney The Haunted Mansion",
+      "cost": 0.154,
+      "secs": 44.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "VTR-88316-A",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (invented vendor part number)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Combination Wrench, Metric, 16 mm, part 88316",
+      "cost": 0.127,
+      "secs": 35,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X00ZZZ9ZZ9",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Unknown Amazon FNSKU-labeled product",
+      "cost": 0.09,
+      "secs": 19.5,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X00QZ9WZ9Q",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Unknown Amazon FNSKU-labeled product",
+      "cost": 0.102,
+      "secs": 19.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X00Z9VZ0Z9",
+      "group": "canary",
+      "expected": "must-refuse",
+      "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+      "codeType": "canary",
+      "outcome": "suggested",
+      "product": "Unknown Amazon FNSKU-labeled product",
+      "cost": 0.079,
+      "secs": 18.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "848983006257",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Falken Wildpeak A/T3W 265/70R17",
+      "codeType": "tire_barcode",
+      "outcome": "verified",
+      "product": "Wildpeak A/T3W 265/70R17 SL All Terrain Tire",
+      "cost": 0.003,
+      "secs": 3,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "4981910515661",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Toyo Proxes R888R 255/40R17",
+      "codeType": "tire_barcode",
+      "outcome": "verified",
+      "product": "CodeCheck - Suchergebnisse",
+      "cost": 0.004,
+      "secs": 5.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "715459537587",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Hankook Ventus S1 AS H125 255/40R19",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "Ventus S1 AS H125 tire",
+      "cost": 0.076,
+      "secs": 10,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "4981910504887",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Nitto Ridge Grappler 265/60R18",
+      "codeType": "tire_barcode",
+      "outcome": "verified",
+      "product": "CodeCheck - Suchergebnisse",
+      "cost": 0.003,
+      "secs": 4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "086699183804",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "BFGoodrich All-Terrain T/A KO3 LT275/70R17",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "BFGoodrich All-Terrain T/A KO3 LT275/70R17 124/121S tire",
+      "cost": 0.077,
+      "secs": 9.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "086699294739",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Michelin Pilot Sport 4 SUV 225/55R19 99V",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "Michelin Pilot Sport 4 SUV 225/55R19 99V SL BSW Tire",
+      "cost": 0.076,
+      "secs": 9.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "092971270650",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Bridgestone Dueler H/T 685 LT265/75R16",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "Dueler H/T 685 LT265/75R16 123R E1 OWL tire",
+      "cost": 0.081,
+      "secs": 13.3,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "191563015096",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Nexen Roadian HTX2 LT265/75R16",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "Nexen Roadian HTX2 LT265/75R16 123/120S Load Range E Light Truck Tire",
+      "cost": 0.068,
+      "secs": 8.6,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "697662139348",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Goodyear Eagle F1 Supercar 3R 285/35R19",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "Eagle F1 SuperCar 3R tire",
+      "cost": 0.073,
+      "secs": 8.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "051342142453",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Continental ContiSportContact 5P 265/35R21",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "ContiSportContact 5P tire",
+      "cost": 0.074,
+      "secs": 7.5,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "715459460670",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Laufenn X Fit AT (LC01) LT35x12.50R20",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "Laufenn X Fit AT LT 35X12.50R20 121S E All Terrain Tire",
+      "cost": 0.075,
+      "secs": 8.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "812561025343",
+      "group": "tire",
+      "expected": "verified-ok",
+      "truth": "Travelstar Ecopath ST ST185/80R13 (trailer)",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "Travelstar Ecopath ST ST185/80R13 D/8PLY trailer tire",
+      "cost": 0.065,
+      "secs": 9.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "054137043287",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Pirelli Winter 210 Snowcontrol Serie 3 195/65R15",
+      "codeType": "tire_barcode",
+      "outcome": "suggested",
+      "product": "R502 TXV 1/4 Ton thermostatic expansion valve",
+      "cost": 0.202,
+      "secs": 24.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "28034300",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Falken Wildpeak A/T3W 265/70R17 115T",
+      "codeType": "tire_part",
+      "outcome": "suggested",
+      "product": "Wildpeak A/T3W tire 265/70R17 115T",
+      "cost": 0.087,
+      "secs": 25.5,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "T432158",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Nokian Hakkapeliitta R5 215/50R17 95R XL",
+      "codeType": "tire_part",
+      "outcome": "suggested",
+      "product": "Nokian Hakkapeliitta R5 215/50R17 95R XL winter tire",
+      "cost": 0.077,
+      "secs": 15.5,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "265025944",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Dunlop SP Sport Maxx GT 265/45R20 104Y",
+      "codeType": "tire_part",
+      "outcome": "suggested",
+      "product": "SP Sport Maxx GT tire",
+      "cost": 0.081,
+      "secs": 21.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "312084142",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Goodyear Wrangler DuraTrac LT285/75R18 129Q",
+      "codeType": "tire_part",
+      "outcome": "suggested",
+      "product": "Wrangler DuraTrac LT285/75R18 129Q all-terrain tire",
+      "cost": 0.061,
+      "secs": 21.3,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "110160124",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Yokohama Advan Apex V601 255/30R19 91Y XL",
+      "codeType": "tire_part",
+      "outcome": "suggested",
+      "product": "ADVAN Apex V601 Tire",
+      "cost": 0.081,
+      "secs": 13.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "2710800",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Pirelli Scorpion Winter 275/45R21 107V",
+      "codeType": "tire_part",
+      "outcome": "suggested",
+      "product": "MAM50M electronic torque/angle meter adapter",
+      "cost": 0.13,
+      "secs": 34.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "170284047",
+      "group": "tire",
+      "expected": "suggest-only",
+      "truth": "Cooper Discoverer Stronghold AT LT285/75R16 126/123R",
+      "codeType": "tire_part",
+      "outcome": "suggested",
+      "product": "Discoverer Stronghold AT tire",
+      "cost": 0.079,
+      "secs": 17.6,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "DCB205",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "DeWalt 20V MAX XR 5.0Ah Lithium-Ion Battery",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "20V MAX XR 5.0Ah Lithium-Ion Battery Pack",
+      "cost": 0.058,
+      "secs": 12.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "48-11-1852",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Milwaukee M18 REDLITHIUM XC5.0 Battery two-pack (single = 48-11-1850)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "M18 REDLITHIUM XC5.0 Extended Capacity Battery 2-Pack",
+      "cost": 0.068,
+      "secs": 11.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "BL1850B",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Makita 18V LXT 5.0Ah Lithium-Ion Battery",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Makita BL1850B 18V LXT Lithium-Ion 5.0Ah Battery Pack with Fuel Gauge",
+      "cost": 0.083,
+      "secs": 12.6,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "P108",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Ryobi 18V ONE+ LITHIUM+ 4.0Ah Battery",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "ALFA 10 Port 120W Smart PoE Switch",
+      "cost": 0.076,
+      "secs": 12.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "51348",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "WIX Spin-On Engine Oil Filter 51348",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "WIX 51348 Spin-On Lube / Engine Oil Filter",
+      "cost": 0.079,
+      "secs": 23,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "PH7317",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "FRAM Extra Guard Spin-On Oil Filter PH7317",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "FRAM Extra Guard Oil Filter PH7317",
+      "cost": 0.076,
+      "secs": 9.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "PL14610",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Purolator PurolatorONE Spin-On Oil Filter PL14610",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "PurolatorONE PL14610 Advanced Engine Protection Oil Filter",
+      "cost": 0.076,
+      "secs": 9.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "FL-820-S",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Motorcraft OE Engine Oil Filter FL-820-S (Ford)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Motorcraft FL-820-S Engine Oil Filter",
+      "cost": 0.079,
+      "secs": 11,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "PF63E",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "ACDelco Professional Engine Oil Filter PF63E (superseded by PF63)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "PF63E Professional Engine Oil Filter",
+      "cost": 0.141,
+      "secs": 16,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "HP-1002",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "K&N Performance Gold Spin-On Oil Filter HP-1002",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "K&N Performance Spin-on Canister Engine Oil Filter HP-1002",
+      "cost": 0.08,
+      "secs": 11.9,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "3330",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Bosch Premium FILTECH Engine Oil Filter 3330 (candidate label 'spark plug' CORRECTED: it is an oil filter)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "3330 Non-Grounding Locking Receptacle",
+      "cost": 0.078,
+      "secs": 14.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "6619",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "NGK Iridium IX Spark Plug LFR6AIX-11 (stock no. 6619)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "DJI P3 P3C Gövde MPU Parçası Part3",
+      "cost": 0.084,
+      "secs": 27.2,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "RC12YC",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Champion Copper Plus Spark Plug RC12YC (stock 71)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Champion RC12YC Copper Plus small engine spark plug",
+      "cost": 0.079,
+      "secs": 11.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "K060841",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Gates Micro-V Serpentine Belt K060841 (6-rib, 84-9/16 in)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Micro-V Serpentine Drive Belt K060841",
+      "cost": 0.082,
+      "secs": 13.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "555-070",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Dorman Steel Cup Expansion Plug 555-070 (2-1/8 in)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Engine Camshaft/Expansion Plug",
+      "cost": 0.08,
+      "secs": 14.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "1225",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Moen 1225 One-Handle Faucet Replacement Cartridge",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "WO-1225 Wall Stand For Paint 60x30mm",
+      "cost": 0.09,
+      "secs": 28.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "GP1043211",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Kohler GP1043211 Simplice Pull-Down Sprayhead (spray head, not cartridge)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Kohler K-GP1043211-VS Pulldown Sprayhead for Simplice Faucet",
+      "cost": 0.08,
+      "secs": 13,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "2097",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "3M 2097 Particulate Filter P100 with nuisance-level OV relief (respirator filter)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Tank to Bowl Gasket for American Standard Toilets",
+      "cost": 0.086,
+      "secs": 19.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "1997061",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Andersen Gliding Patio Door Tandem Roller Assembly 1997061 (replaced unverifiable candidate 9134844)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Gliding Patio Door Tandem Roller",
+      "cost": 0.085,
+      "secs": 24.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "041A5273-1",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Chamberlain/LiftMaster Security+ Wall Control Panel 041A5273-1",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "041A5273-1 Security+ Wall-Mounted Door Control Panel / 78LM Multi-Function Garage Door Opener Control Panel",
+      "cost": 0.082,
+      "secs": 15.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "BL1830B",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Makita 18V LXT 3.0Ah Lithium-Ion Battery (with fuel gauge)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "18V LXT Lithium-Ion 3.0Ah Battery BL1830B",
+      "cost": 0.079,
+      "secs": 11.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "M1-110A",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Mobil 1 Extended Performance Oil Filter M1-110A",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Mobil 1 Extended Performance Oil Filter M1-110A",
+      "cost": 0.078,
+      "secs": 9.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "490057",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "WD-40 Multi-Use Smart Straw 12 oz (490057)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "WD-40 Multi-Use Smart Straw Lubricant, 12 oz aerosol can",
+      "cost": 0.082,
+      "secs": 16.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "67847",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "Weber Igniter Kit 67847 (Genesis 300 series, 2008-2010)",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "Jackie Blue Wool",
+      "cost": 0.088,
+      "secs": 30.5,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "PH3593A",
+      "group": "part",
+      "expected": "suggest-only",
+      "truth": "FRAM Extra Guard Spin-On Oil Filter PH3593A",
+      "codeType": "part_number",
+      "outcome": "suggested",
+      "product": "FRAM Extra Guard PH3593A Spin-On Engine Oil Filter",
+      "cost": 0.077,
+      "secs": 10.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "B00FLYWNYQ",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "Instant Pot Duo 7-in-1 Electric Pressure Cooker, 6 Quart",
+      "codeType": "asin",
+      "outcome": "suggested",
+      "product": "",
+      "cost": 0,
+      "secs": 1.9,
+      "guessConfidence": 0.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "B00006JSUA",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "Lodge Seasoned Cast Iron Skillet, 10.25 inch",
+      "codeType": "asin",
+      "outcome": "suggested",
+      "product": "",
+      "cost": 0,
+      "secs": 0.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "B09B8V1LZ3",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "Echo Dot (5th Gen, 2022 release) Smart Speaker, Charcoal",
+      "codeType": "asin",
+      "outcome": "verified",
+      "product": "",
+      "cost": 0,
+      "secs": 1.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "0399226907",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "The Very Hungry Caterpillar (board book) by Eric Carle",
+      "codeType": "asin",
+      "outcome": "suggested",
+      "product": "The Very Hungry Caterpillar Board Book",
+      "cost": 0.07,
+      "secs": 12,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "B00006IFHD",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "Sharpie Permanent Markers, Fine Tip, Black, 12 Count",
+      "codeType": "asin",
+      "outcome": "suggested",
+      "product": "",
+      "cost": 0,
+      "secs": 0.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "B00NHQF6MG",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "LEGO Classic Large Creative Brick Box 10698 Building Set",
+      "codeType": "asin",
+      "outcome": "suggested",
+      "product": "",
+      "cost": 0,
+      "secs": 1.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "B004U3Y8OM",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "Nature Made Vitamin D3 1000 IU (25 mcg), 300 Softgels",
+      "codeType": "asin",
+      "outcome": "suggested",
+      "product": "",
+      "cost": 0,
+      "secs": 0.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "B00IJ0ALYS",
+      "group": "asin",
+      "expected": "verified-ok",
+      "truth": "DEWALT 20V MAX Cordless Drill & Impact Driver Combo Kit (DCK240C2)",
+      "codeType": "asin",
+      "outcome": "suggested",
+      "product": "",
+      "cost": 0,
+      "secs": 1.6,
+      "guessConfidence": 0.4,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "X004DY7YUT",
+      "group": "fnsku",
+      "expected": "suggest-only",
+      "truth": "NatureBell Magnesium Glycinate",
+      "codeType": "fnsku",
+      "outcome": "suggested",
+      "product": "Pure Magnesium Glycinate 500mg with Fat-Soluble Vitamin C",
+      "cost": 0.068,
+      "secs": 16.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X000QKR8BT",
+      "group": "fnsku",
+      "expected": "suggest-only",
+      "truth": "Nested Super Greens",
+      "codeType": "fnsku",
+      "outcome": "suggested",
+      "product": "Super Greens Original Flavor",
+      "cost": 0.068,
+      "secs": 18.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X001YQ13KV",
+      "group": "fnsku",
+      "expected": "suggest-only",
+      "truth": "Minimalist Vitamin C Face Serum",
+      "codeType": "fnsku",
+      "outcome": "suggested",
+      "product": "Unknown Amazon FNSKU-labeled product",
+      "cost": 0.09,
+      "secs": 21.3,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X001YQI3KV",
+      "group": "fnsku",
+      "expected": "suggest-only",
+      "truth": "Minimalist Vitamin C Face Serum (label variant string in same repo record)",
+      "codeType": "fnsku",
+      "outcome": "suggested",
+      "product": "Unknown Amazon FNSKU-labeled product",
+      "cost": 0.09,
+      "secs": 21.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X002QW7HJ4",
+      "group": "fnsku",
+      "expected": "suggest-only",
+      "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+      "codeType": "fnsku",
+      "outcome": "suggested",
+      "product": "Unknown Amazon FNSKU-labeled product",
+      "cost": 0.091,
+      "secs": 23.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X003MT5KP8",
+      "group": "fnsku",
+      "expected": "suggest-only",
+      "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+      "codeType": "fnsku",
+      "outcome": "suggested",
+      "product": "Unknown Amazon marketplace item (likely FNSKU-labeled product)",
+      "cost": 0.106,
+      "secs": 24.5,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "X004RB9LZ2",
+      "group": "fnsku",
+      "expected": "suggest-only",
+      "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+      "codeType": "fnsku",
+      "outcome": "suggested",
+      "product": "Unknown Amazon FBA inventory item with FNSKU X004RB9LZ2",
+      "cost": 0.183,
+      "secs": 35.6,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0011284003151",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "JTM Foods Lightly Glazed Snack Pies",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Lightly Glazed Duos Boston Cream Pie",
+      "cost": 0.076,
+      "secs": 8.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0019600920106",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Van de Kamp's Crispy Battered Fish Fillets",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Crispy Whole Fish Fillets - Golden Battered",
+      "cost": 0.075,
+      "secs": 8.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0021130281213",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Signature Select Old-Fashioned Oats",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Old Fashioned 100% Whole Grain Oat Cereal",
+      "cost": 0.071,
+      "secs": 9.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0030223029076",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "readymeals! Chicken & Bacon Cobb Wrap",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Meisterklasse MS Diatonic Harmonica in C",
+      "cost": 0.229,
+      "secs": 25.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0032917007841",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Traditional Medicinals Organic Immune Zoom Lemon Ginger Tea (16 ct)",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Organic Immune Zoom Lemon Ginger Echinacea Caffeine Free Herbal Tea",
+      "cost": 0.08,
+      "secs": 11.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0035549812920",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "American Valley Creamy Peanut Butter",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Creamy Peanut Butter",
+      "cost": 0.051,
+      "secs": 14.9,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0036800412828",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Food Club Cherry Pre-Baked Pie",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Cherry Pre-Baked Pie",
+      "cost": 0.076,
+      "secs": 10.1,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0041220306794",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Hill Country Fare Buffalo Style Hot Chicken Wings",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "H-E-B private-label grocery item (unidentified)",
+      "cost": 0.158,
+      "secs": 26,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0041268707089",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Hannaford Bakery Double Blueberry Filled Muffins",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Hannaford private-label grocery item",
+      "cost": 0.194,
+      "secs": 27.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0041376201301",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Frankford Candy Marvel Avengers Assemble Mini Milk Chocolate Bar",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Marvel Avengers Assemble Mini Milk Chocolate Bar",
+      "cost": 0.077,
+      "secs": 10.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0041497400805",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Weis Markets Iodized Salt & Pepper",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Iodized Salt & Pepper",
+      "cost": 0.075,
+      "secs": 7.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0041735094315",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "PICS (Price Chopper) Hummus",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Hummus, Classic Original",
+      "cost": 0.088,
+      "secs": 28.8,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0043119001568",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Byrne Dairy Ice Cream",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Dishwasher internal hose",
+      "cost": 0.153,
+      "secs": 42.6,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0046100358122",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Sargento Shareables (cheese snack)",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Sargento cheese product, likely a shredded or sliced cheese variety",
+      "cost": 0.278,
+      "secs": 47.7,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0049022596986",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Walgreens Fruit & Grain Cereal Bar",
+      "codeType": "upc",
+      "outcome": "verified",
+      "product": "UPC Database | 0049022596986",
+      "cost": 0.014,
+      "secs": 19.3,
+      "stageInferred": "cheap",
+      "reconstructed": true
+    },
+    {
+      "code": "0052548597887",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "7-Eleven Marshmallow Treat",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Marshmallow Treat",
+      "cost": 0.075,
+      "secs": 12,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0065776631513",
+      "group": "upcEan",
+      "expected": "verified-ok",
+      "truth": "Flax4Life Carrot Raisin Flax Muffins",
+      "codeType": "upc",
+      "outcome": "suggested",
+      "product": "Flax Muffins Carrot Raisin",
+      "cost": 0.073,
+      "secs": 9.4,
+      "guessConfidence": 0.4,
+      "stageInferred": "escalated",
+      "reconstructed": true
+    },
+    {
+      "code": "0070253492471",
+      "codeType": "ean_13",
+      "truth": "Nash Finch Lemon Sandwich Creme Cookies",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Our Family",
+          "productName": "Our Family Grocery Item",
+          "confidence": 0.4,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.ourfamilyfoods.com/"
+          ],
+          "basis": "The GS1 company prefix 070253 is registered to SpartanNash (formerly Nash Finch Company) for their private label brand 'Our Family'. The exact product name for item code 49247 could not be verified.",
+          "cost": 0.023463,
+          "secs": 28.237
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Nash Finch",
+          "productName": "Lemon Sandwich Cremes Cookies",
+          "confidence": 0.92,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.aqua-calc.com/calculate/food-calories/substance/lemon-blank-sandwich-blank-cremes-blank-cookies-coma-and-blank-lemon-coma-and-blank-upc-column--blank-070253492471",
+            "https://tools.myfooddata.com/nutrition-facts/586217/wt1/"
+          ],
+          "basis": "The searched code 0070253492471 is the GTIN-13 form of UPC-A 070253492471. Multiple food database pages list UPC 070253492471 as Nash Finch / Nash Finch Company Lemon Sandwich Cremes Cookies with matching nutrition details.",
+          "cost": 0.07243000000000001,
+          "secs": 8.513
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Lemon Sandwich Cremes Cookies",
+      "guessConfidence": 0.4,
+      "cost": 0.095893,
+      "secs": 37.449
+    },
+    {
+      "code": "0070784503288",
+      "codeType": "ean_13",
+      "truth": "Tops Markets Conversation Hearts",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Hendi",
+          "productName": "Warmhalteelement GN 1/1 (Wärmeplatte Kunststoff rot)",
+          "confidence": 0.8,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.haushaltskontor.de/waermeplatte-kunststoff-rot-gn-1-1-707845-328"
+          ],
+          "basis": "The barcode contains the manufacturer code 707845 (Hendi Keep Warm Element GN 1/1) and suffix 328, which matches the product number 707845-328 for the red plastic GN 1/1 heat plate.",
+          "cost": 0.04292699999999999,
+          "secs": 48.848
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Tops",
+          "productName": "Conversation Hearts",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://chompthis.com/search/brand.php?p=43&q=Tops+Markets+Llc",
+            "https://www.aqua-calc.com/calculate/food-price/substance/tops-coma-and-blank-conversation-blank-hearts-coma-and-blank-upc-column--blank-070784503288"
+          ],
+          "basis": "Exact 13-digit code found on CHOMP as Tops/Tops Markets LLC Conversation Hearts; matching 12-digit UPC 070784503288 found on Aqua-Calc with same product and manufacturer.",
+          "cost": 0.07076,
+          "secs": 4.72
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Conversation Hearts",
+      "guessConfidence": 0.4,
+      "cost": 0.113687,
+      "secs": 54.144
+    },
+    {
+      "code": "0075925304151",
+      "codeType": "ean_13",
+      "truth": "Crystal Farms Muenster Cheese Slices (Muenster cheese; brand per go-upc, candidate 'Waldbaum' unverified)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Crystal Farms",
+          "productName": "Muenster Cheese Slices",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHnLm16QfQW-GohZ8G3QRI_dOxptPBQvUQXEvOCLuabnKp7Ke8ONGJ1UA1yxa8bKBtLm9ZHl8rtgmiLHd3vm8mf-63V-pKSHj5uMuiQhyDlzE7D_1EZgFkognBvUjQrA0aflkSSNO5KNEP3JFtO7A=="
+          ],
+          "basis": "The barcode 0075925304151 matches Crystal Farms Muenster Cheese Slices (8 oz / 226g) in multiple product databases and nutrition lists.",
+          "cost": 0.004177500000000001,
+          "secs": 4.503
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Crystal Farms",
+          "productName": "Muenster Slices",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://nyswicvendors.com/wp-content/uploads/2025/05/Full-APL-MAY-29-2025.pdf",
+            "https://nyswicvendors.com/wp-content/uploads/2025/09/Cheese-Tofu-Yogurt-SEP-11-2025.pdf",
+            "https://www.aqua-calc.com/calculate/food-calories/substance/muenster-blank-cheese-coma-and-blank-muenster-coma-and-blank-upc-column--blank-075925304151"
+          ],
+          "basis": "Web results list the equivalent UPC-A 075925304151 for Crystal Farms Muenster Slices 8oz; 0075925304151 is the same code zero-padded to GTIN-14.",
+          "cost": 0.076345,
+          "secs": 8.624
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Muenster Slices",
+      "guessConfidence": 0.4,
+      "cost": 0.0805225,
+      "secs": 13.929
+    },
+    {
+      "code": "0077567001672",
+      "codeType": "ean_13",
+      "truth": "Unilever Turmeric Chai Spiced Light Ice Cream",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Culture Republick",
+          "productName": "Turmeric Chai Spiced Light Ice Cream Swirled With Cinnamon Streusel",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHozkH_ueC0xYxlwrqNNP9U0V6_G-LnaZk4B_PuHN0JHMX6FUv9VoAD0qYhynUUYUUHXeEjs6r9vUk2QquHx5mYMlLS12bUY9Y49Mzmv_qZkoeJ_ooi9EuS4nCuV6XZpFhJDD__6Jw=",
+            "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEnEHZ2x_ZAUQFYK-u7JJhddMhHUPlJ-triOMXiHq6EFegQXaUneDpmsQ21t4WQJBxWqDu9jN1R4VoXASx6zPyIfmvThRUIxy7Weka7RuLsVnXFbMAkdPdSgSqfRCt0e1DYQZ0jQUwRFqZJ4QicaI9eEjcfgQ6upbU4a6Q2u2R4mtl7vJNxZ2veIiB4k1KqesOFJzl0dRq4TeBG89tLeZo5uuQfLCVl9qnrs-ZN0ckB2OJw0Yf6KWpHYXxuvZnl8F7Ll9paUw9IBVtl"
+          ],
+          "basis": "Found exact UPC match in multiple product registries and grocery databases.",
+          "cost": 0.0069435,
+          "secs": 5.343
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Culture Republick",
+          "productName": "Turmeric Chai & Cinnamon Light + Probiotic Ice Cream",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.aqua-calc.com/calculate/food-volume-to-weight/substance/turmeric-blank-chai-blank-spiced-blank-light-blank-ice-blank-cream-blank-swirled-blank-with-blank-cinnamon-blank-streusel-coma-and-blank-upc-column--blank-077567001672",
+            "https://spoonfulapp.com/products/turmeric-chai-spiced-light-ice-cream-swirled-with-cinnamon-streusel-turmeric-chai-cinnamon/MDA3NzU2NzAwMTY3Mg%3D%3D",
+            "https://www.leppinksfoodcenters.com/shop/frozen_foods/ice_cream_treats_toppings/ice_cream/culture_republick_ice_cream_light_probiotics_turmeric_chai_cinnamon_1_pt/p/1564405684703890151"
+          ],
+          "basis": "Exact UPC-A 077567001672 found on Aqua-Calc/USDA-derived page for 'TURMERIC CHAI SPICED LIGHT ICE CREAM SWIRLED WITH CINNAMON STREUSEL'; Spoonful URL encodes the exact 14-digit GTIN 0077567001672; retail listings identify the brand/flavor as Culture Republick Turmeric Chai & Cinnamon, 1 pint.",
+          "cost": 0.11364,
+          "secs": 9.745
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Turmeric Chai & Cinnamon Light + Probiotic Ice Cream",
+      "guessConfidence": 0.4,
+      "cost": 0.12058350000000001,
+      "secs": 15.574
+    },
+    {
+      "code": "0078197119232",
+      "codeType": "ean_13",
+      "truth": "Camomile Flowers Herbal Tea",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "3 Crown",
+          "productName": "Camomile Flowers Herbal Tea",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.metro.ca/epicerie-en-ligne/allees/boissons/thes-et-boissons-chaudes/tisanes/tisane-a-la-camomille/p/078197119232",
+            "https://www.foodbasics.ca/aisles/beverages/tea-hot-drinks/herbal-tea/camomile-flowers-herbal-tea/p/078197119232"
+          ],
+          "basis": "Found exact barcode match on Canadian grocery websites (Metro and Food Basics) for 3 Crown Camomile Flowers Herbal Tea 20 g.",
+          "cost": 0.0049245,
+          "secs": 3.667
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 0,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "3 Crown",
+          "productName": "Camomile Flowers Herbal Tea",
+          "confidence": 0.98,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.foodbasics.ca/aisles/beverages/tea-hot-drinks/herbal-tea/camomile-flowers-herbal-tea/p/078197119232",
+            "https://www.metro.ca/en/online-grocery/aisles/beverages/tea-hot-drinks/herbal-tea/camomile-flowers-herbal-tea/p/078197119232"
+          ],
+          "basis": "Exact UPC/GTIN found as Product Number 078197119232 on Food Basics and Metro product pages; 0078197119232 is the same 12-digit UPC with a leading zero GTIN-14 format.",
+          "cost": 0.045935000000000004,
+          "secs": 4.481
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Camomile Flowers Herbal Tea",
+      "guessConfidence": 0.4,
+      "cost": 0.0508595,
+      "secs": 8.987
+    },
+    {
+      "code": "0078783904273",
+      "codeType": "ean_13",
+      "truth": "Cal-Organic Organic Green Chard",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Grimmway Farms",
+          "productName": "Organic Carrots",
+          "confidence": 0.35,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "The barcode prefix 078783 is registered to Grimmway Farms (and its division Cal-Organic Farms), a major producer of fresh carrot products. While the exact GTIN was not found in database listings, it is highly likely to be one of their carrot products.",
+          "cost": 0.0135165,
+          "secs": 24.004
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Grimmway Farms",
+          "productName": "Unknown Grimmway Farms produce item (likely carrot product)",
+          "confidence": 0.3,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/78783001064",
+            "https://www.upcitemdb.com/upc/78783514106"
+          ],
+          "basis": "Exact barcode not found in web search. The valid GTIN converts to UPC-A 078783904273; multiple nearby UPCs with prefix 078783 are listed as Grimmway Farms carrot/produce items, so this is a low-confidence prefix/similar-listing guess.",
+          "cost": 0.12456,
+          "secs": 14.39
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Unknown Grimmway Farms produce item (likely carrot product)",
+      "guessConfidence": 0.3,
+      "cost": 0.1380765,
+      "secs": 41.187
+    },
+    {
+      "code": "3014409009547",
+      "codeType": "ean_13",
+      "truth": "Slaur Sardet Creme de cassis (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Slaur Sardet",
+          "productName": "Crème de cassis",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://fr.openfoodfacts.org/produit/3014409009547/creme-de-cassis-slaur-sardet"
+          ],
+          "basis": "The barcode matches the product 'Crème de cassis' by Slaur Sardet (70 Cl) on Open Food Facts.",
+          "cost": 0.002547,
+          "secs": 2.523
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Crème de cassis – Slaur Sardet – 70 Cl"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Crème de cassis – Slaur Sardet – 70 Cl",
+      "cost": 0.002547,
+      "secs": 3.427
+    },
+    {
+      "code": "3027030038381",
+      "codeType": "ean_13",
+      "truth": "Ancel Mon fondant au chocolat 300g (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Ancel",
+          "productName": "Mon Fondant au Chocolat",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://fr.openfoodfacts.org/produit/3027030038381/mon-fondant-au-chocolat-ancel"
+          ],
+          "basis": "Found exact match for barcode 3027030038381 on Open Food Facts and French retailer sites as Ancel (Dr. Oetker) Mon Fondant au Chocolat 300g.",
+          "cost": 0.003003,
+          "secs": 2.552
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Search For:3027030038381"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Search For:3027030038381",
+      "cost": 0.003003,
+      "secs": 2.72
+    },
+    {
+      "code": "3041090898174",
+      "codeType": "ean_13",
+      "truth": "Gallia Lait Bebe Expert AR 1 (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Gallia",
+          "productName": "Bébé Expert AR 1er Âge",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://fr.openfoodfacts.org/produit/3041090898174/gallia-lait-bebe-expert-ar-1",
+            "https://www.easypara.fr/gallia-bebe-expert-ar-1-lait-en-poudre-anti-regurgitations-0-6-mois-800g.html"
+          ],
+          "basis": "Found exact matches on Open Food Facts and multiple pharmacy websites for Gallia Bébé Expert AR 1er Âge (Anti-Régurgitations) 800g.",
+          "cost": 0.003786,
+          "secs": 3.135
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Gallia Lait Bébé Expert Ar 1 – 800 g"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Gallia Lait Bébé Expert Ar 1 – 800 g",
+      "cost": 0.003786,
+      "secs": 3.57
+    },
+    {
+      "code": "3067163632032",
+      "codeType": "ean_13",
+      "truth": "Delpeyrat Magret de canard fume au bois de hetre (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "",
+          "productName": "French Registered Product (Unidentified)",
+          "confidence": 0.1,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "The barcode prefix 306716 indicates registration with GS1 France, but the exact product details are not available in public databases.",
+          "cost": 0.0141,
+          "secs": 19.528
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Search For:3067163632032"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Search For:3067163632032",
+      "cost": 0.0141,
+      "secs": 20.107
+    },
+    {
+      "code": "4000269100356",
+      "codeType": "ean_13",
+      "truth": "Sangrita Classico (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Sangrita",
+          "productName": "Classico",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://world.openfoodfacts.org/product/4000269100356/sangrita-classic-0-5-l",
+            "https://www.sbunion.de/art/507201/sangrita-classico"
+          ],
+          "basis": "Found exact matches on Open Food Facts and multiple retail sites for Sangrita Classico 0.5L.",
+          "cost": 0.003228,
+          "secs": 2.944
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 2,
+          "product": "Search For:4000269100356"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Search For:4000269100356",
+      "cost": 0.003228,
+      "secs": 3.118
+    },
+    {
+      "code": "4001419007433",
+      "codeType": "ean_13",
+      "truth": "Rodeo Energy Drink (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Rodeo",
+          "productName": "Energy Drink",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://fr.openfoodfacts.org/produit/4001419007433/rodeo-energy-drink",
+            "https://www.nutripedia.pt/alimento/bebida-energetica-regular-250ml-rodeo-4001419007433"
+          ],
+          "basis": "The barcode matches Rodeo Energy Drink (250ml) across multiple databases including Open Food Facts, Nutripédia, and Lekkerland.",
+          "cost": 0.0043619999999999996,
+          "secs": 3.35
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "CodeCheck - Suchergebnisse"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "CodeCheck - Suchergebnisse",
+      "cost": 0.0043619999999999996,
+      "secs": 3.877
+    },
+    {
+      "code": "4002471010003",
+      "codeType": "ean_13",
+      "truth": "Weyengold Frisches Sauerkraut 500g (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Weyengold",
+          "productName": "Frisches Sauerkraut",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://de.openfoodfacts.org/produkt/4002471010003/frisches-sauerkraut-weyengold",
+            "https://www.wikifit.de/kalorientabelle/gemuese/frisches-sauerkraut-fassfrisch-milchsauer"
+          ],
+          "basis": "Found exact matching barcode on Open Food Facts and wikifit for Weyengold Frisches Sauerkraut (500 g).",
+          "cost": 0.0026609999999999997,
+          "secs": 2.421
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Search For:4002471010003"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Search For:4002471010003",
+      "cost": 0.0026609999999999997,
+      "secs": 2.585
+    },
+    {
+      "code": "4004154077952",
+      "codeType": "ean_13",
+      "truth": "Burkhardt Mandel Sirup (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Burkhardt",
+          "productName": "Mandel Sirup",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://de.openfoodfacts.org/produkt/4004154077952/mandel-sirup-burkhardt"
+          ],
+          "basis": "Found exact barcode match on Open Food Facts for Burkhardt Mandel Sirup (Almond Syrup), 5l.",
+          "cost": 0.0022919999999999998,
+          "secs": 2.267
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Search For:4004154077952"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Search For:4004154077952",
+      "cost": 0.0022919999999999998,
+      "secs": 2.432
+    },
+    {
+      "code": "5000129359190",
+      "codeType": "ean_13",
+      "truth": "Coop Summer Squash (UK)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Co-op",
+          "productName": "Quad Strength Summer Fruits Squash",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.coop.co.uk/products/co-op-summer-fruits-squash-750ml"
+          ],
+          "basis": "The barcode matches Co-op Summer Fruits Squash (Quadruple concentrate / Quad Strength) 750ml in online retail and database listings.",
+          "cost": 0.002589,
+          "secs": 2.651
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Search For:5000129359190"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Search For:5000129359190",
+      "cost": 0.002589,
+      "secs": 2.82
+    },
+    {
+      "code": "5000169661659",
+      "codeType": "ean_13",
+      "truth": "Waitrose Hot Cross Bunettone (UK)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Waitrose",
+          "productName": "Hot Cross Bunettone",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://world.openfoodfacts.org/product/5000169661659/hot-cross-bunettone-waitrose"
+          ],
+          "basis": "The exact barcode matches the Waitrose Hot Cross Bunettone (500g) on Open Food Facts and other retail databases.",
+          "cost": 0.0029235,
+          "secs": 3.68
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 2,
+          "product": "CodeCheck - Suchergebnisse"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "CodeCheck - Suchergebnisse",
+      "cost": 0.0029235,
+      "secs": 4.126
+    },
+    {
+      "code": "5000396053432",
+      "codeType": "ean_13",
+      "truth": "McVitie's Flipz Salted Caramel (UK)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "McVitie's",
+          "productName": "Flipz Salted Caramel Pretzels",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.openfoodfacts.org/product/5000396053432/flipz-salted-caramel-mcvitie-s",
+            "https://www.tops.co.th/en/mcvities-flipz-salted-caramel-90g-5000396053432"
+          ],
+          "basis": "The barcode matches McVitie's Flipz Salted Caramel Pretzels (90g) across multiple retail and product database listings.",
+          "cost": 0.003921000000000001,
+          "secs": 3.274
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "Search For:5000396053432"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Search For:5000396053432",
+      "cost": 0.003921000000000001,
+      "secs": 3.792
+    },
+    {
+      "code": "8000130171061",
+      "codeType": "ean_13",
+      "truth": "Nicola Russo Linguine (Italy)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan",
+      "stage": {
+        "gemini": {
+          "brand": "Nicola Russo",
+          "productName": "Linguine",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://fr.openfoodfacts.org/produit/8000130171061/linguine-nicola-russo"
+          ],
+          "basis": "The barcode matches the product 'Linguine' by the Italian pasta brand 'Nicola Russo' (Pastificio Nicola Russo) on Open Food Facts.",
+          "cost": 0.0027119999999999996,
+          "secs": 3.575
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 3,
+          "product": "CodeCheck - Suchergebnisse"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "CodeCheck - Suchergebnisse",
+      "cost": 0.0027119999999999996,
+      "secs": 3.993
+    },
+    {
+      "code": "10016000507255",
+      "codeType": "gtin_14",
+      "truth": "case pack of Nature Valley Oats 'n Dark Chocolate Granola Bars (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Nature Valley",
+          "productName": "Crunchy Oats 'n Dark Chocolate Granola Bars",
+          "confidence": 0.9,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/16000507258"
+          ],
+          "basis": "This is the mathematically verified GTIN-14 case code for UPC 016000507258, which corresponds to Nature Valley Crunchy Oats 'n Dark Chocolate Granola Bars.",
+          "cost": 0.011420999999999999,
+          "secs": 8.487
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 2,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "General Mills",
+          "productName": "General Mills packaged food product (specific SKU unknown)",
+          "confidence": 0.25,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.barcodefinder.info/"
+          ],
+          "basis": "No real page was found containing exact barcode 10016000507255 or likely UPC variants. Best guess is based on the 016000/0016000 barcode prefix pattern commonly seen on General Mills grocery items; exact product/SKU could not be verified.",
+          "cost": 0.15036,
+          "secs": 22.791
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "General Mills packaged food product (specific SKU unknown)",
+      "guessConfidence": 0.25,
+      "cost": 0.16178099999999998,
+      "secs": 32.959
+    },
+    {
+      "code": "10010700557466",
+      "codeType": "gtin_14",
+      "truth": "case pack of Jolly Rancher Gummies Minis (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "The Hershey Company",
+          "productName": "Hershey's Candy / Chocolate Product",
+          "confidence": 0.4,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "The GTIN-14 prefix '10010700' (UPC prefix '010700') is registered to The Hershey Company. The leading '1' indicates a case or bulk packaging level, but the specific product name for item reference '55746' could not be verified.",
+          "cost": 0.076089,
+          "secs": 42.082
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "TOPRAN / Hans Pries",
+          "productName": "Mounting, stabiliser bar / anti-roll bar bush, part 700557466",
+          "confidence": 0.35,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://ulc.com.ua/uk/katalog/produkt/topranhanspries-700557466-zapchast-1434103",
+            "https://www.ebay.de/itm/157373857949",
+            "https://www.ebay.co.uk/itm/117031845497",
+            "https://www.autoprizma.com/wp-content/uploads/2025/01/stanje-robe-25012025.pdf"
+          ],
+          "basis": "No real web page found for exact GTIN/barcode 10010700557466. Best guess is based on strong partial match to product/reference number 700557466, repeatedly listed as TOPRAN/Hans Pries stabiliser-bar mounting/bush in auto-parts listings; the leading digits in the queried code may not be a searchable retail GTIN.",
+          "cost": 0.143895,
+          "secs": 15.73
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Mounting, stabiliser bar / anti-roll bar bush, part 700557466",
+      "guessConfidence": 0.35,
+      "cost": 0.219984,
+      "secs": 71.824
+    },
+    {
+      "code": "10072100024009",
+      "codeType": "gtin_14",
+      "truth": "case pack of Imperial Sugar Extra Fine Granulated Cane Sugar (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Imperial Sugar",
+          "productName": "Extra Fine Granulated Sugar Case",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/72100024002"
+          ],
+          "basis": "The GTIN-14 code 10072100024009 is the case code for Imperial Sugar Extra Fine Granulated Sugar 10 lb bags (UPC 072100024002). The check digit 9 matches the GS1 calculation for this item reference.",
+          "cost": 0.010354499999999999,
+          "secs": 14.698
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 2,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Imperial Sugar",
+          "productName": "Sugar Pure Cane Granulated",
+          "confidence": 0.96,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://data.attribytes.com/products/sell_sheet/by_distributor_and_sku/ben-e-keith/780005.pdf"
+          ],
+          "basis": "Exact GTIN found in a distributor sell sheet listing Imperial Sugar 780005 - Sugar Pure Cane Granulated with pack 4/10 lb.",
+          "cost": 0.067815,
+          "secs": 5.011
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Sugar Pure Cane Granulated",
+      "guessConfidence": 0.4,
+      "cost": 0.0781695,
+      "secs": 21.364
+    },
+    {
+      "code": "10072830011430",
+      "codeType": "gtin_14",
+      "truth": "case pack of Tillamook Extra Sharp White Cheddar Shreds (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Tillamook",
+          "productName": "Extra Sharp White Cheddar Shredded Cheese",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEdyZgFnTwQ08__ijqBtUzpxRg-mJH6bSC5cA0wR_FHliUFmqx9CNtEwLMrT0Ga_Ue52LL05wRiFNihjpdJj69F3wsypuBvHLS7Ag_C2HDpazwjcJxjiGQQXoXCjWDOvblrfq6zpiofdggv-fpll7qAW8j1pw=="
+          ],
+          "basis": "Found exact match in the 2026 Participating Products list for Tillamook (UPC 7283001143 / GTIN 10072830011430) as Tillamook Extra Sharp White Cheddar Shreds, 6 oz.",
+          "cost": 0.007437,
+          "secs": 6.101
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Tillamook",
+          "productName": "Tillamook Extra Sharp Triple White Cheddar Shredded Cheese",
+          "confidence": 0.4,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.webstaurantstore.com/documents/pdf/tillamook_halal.pdf",
+            "https://www.webstaurantstore.com/documents/pdf/halal_certification/marathon_cheese-mountain_home_id_halal_cert_tillamook.pdf"
+          ],
+          "basis": "No real page found with exact GTIN-14 10072830011430. Best guess: it is the valid GTIN-14/case-level form of UPC 0 72830 01143 3, which appears in Tillamook halal certification for Tillamook Extra Sharp Triple White Cheddar Shredded Cheese 6 oz.",
+          "cost": 0.16956000000000002,
+          "secs": 17.699
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Tillamook Extra Sharp Triple White Cheddar Shredded Cheese",
+      "guessConfidence": 0.4,
+      "cost": 0.17699700000000002,
+      "secs": 31.679
+    },
+    {
+      "code": "10028400668696",
+      "codeType": "gtin_14",
+      "truth": "case pack of Rold Gold Garlic Parmesan Pretzel Thins (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Rold Gold",
+          "productName": "Garlic Parmesan Thin Crisps Pretzels",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://world.openfoodfacts.org/product/0028400668699/rold-gold-garlic-parmesan-thin-crisps-pretzels"
+          ],
+          "basis": "The GTIN-14 code 10028400668696 is the case code corresponding to the retail UPC 028400668699, which is Rold Gold Garlic Parmesan Thin Crisps Pretzels.",
+          "cost": 0.034236,
+          "secs": 40.377
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Frito-Lay",
+          "productName": "Unknown Frito-Lay snack product, likely a Lay's/Frito-Lay chips or snack multipack case GTIN",
+          "confidence": 0.25,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://upcfoodsearch.com/food-manufacturers/028400/",
+            "https://www.upcitemdb.com/info-frito-lay",
+            "https://www.upcitemdb.com/info-lay"
+          ],
+          "basis": "No real web page found containing exact GTIN 10028400668696 or likely UPC form 028400668696. The 028400 prefix is associated with Frito-Lay Inc.; similar 028400 listings are Lay's/Frito-Lay snack products, so this is a prefix-based best guess only.",
+          "cost": 0.121915,
+          "secs": 15.577
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Unknown Frito-Lay snack product, likely a Lay's/Frito-Lay chips or snack multipack case GTIN",
+      "guessConfidence": 0.25,
+      "cost": 0.15615099999999998,
+      "secs": 58.683
+    },
+    {
+      "code": "10040822342503",
+      "codeType": "gtin_14",
+      "truth": "case pack of Sabra Bold & Spicy Hummus (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Sabra",
+          "productName": "Grab N Go Hummus Bold and Spicy with Tostitos",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.reasors.com"
+          ],
+          "basis": "The GTIN-14 code 10040822342503 corresponds to UPC 040822342503, which is identified as Sabra Grab N Go Hummus Bold and Spicy with Tostitos (4.56 oz).",
+          "cost": 0.008494499999999999,
+          "secs": 8.915
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Sabra",
+          "productName": "Bold & Spicy Hummus with Tostitos Tortilla Chips",
+          "confidence": 0.38,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.aqua-calc.com/calculate/food-calories/substance/sabra-coma-and-blank-bold-blank-and-blank-spicy-blank-hummus-blank-with-blank-tostitos-blank-tortilla-blank-chips-coma-and-blank-upc-column--blank-040822342506",
+            "https://www.nutritionvalue.org/Sabra%2C_bold_%26_spicy_hummus_with_tostitos_tortilla_chips_by_Sabra_Dipping_Company_LLC_440975_nutritional_value.html",
+            "https://www.whsv.com/content/news/Recall-food-products-with-risk-of-possible-germ-contamination-396377501.html"
+          ],
+          "basis": "Exact GTIN-14 10040822342503 not found. It appears to be a GTIN-14/case-style code related to UPC 040822342506, which multiple pages list as Sabra Bold & Spicy Hummus with Tostitos Tortilla Chips 4.56 oz. Check digit differs because UPC-A and GTIN-14 use different digit sets/packaging indicator.",
+          "cost": 0.13857999999999998,
+          "secs": 22.063
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Bold & Spicy Hummus with Tostitos Tortilla Chips",
+      "guessConfidence": 0.38,
+      "cost": 0.14707449999999997,
+      "secs": 31.584
+    },
+    {
+      "code": "10071430011505",
+      "codeType": "gtin_14",
+      "truth": "case pack of Dole Blueberries (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Dole",
+          "productName": "Fresh Blueberries Case (6 oz Clamshells)",
+          "confidence": 0.9,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/dole-diversified-north-america-inc-announces-limited-recall-dole-fresh-blueberries-potential"
+          ],
+          "basis": "The GTIN-14 code 10071430011505 is the case/shipping code corresponding to the retail UPC 071430011508 for Dole Fresh Blueberries (6 oz clamshell).",
+          "cost": 0.013171500000000001,
+          "secs": 13.662
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Kverneland",
+          "productName": "Kverneland 071430 seitenplatte",
+          "confidence": 0.25,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://bartsparts.com/products/kverneland-071430/"
+          ],
+          "basis": "Exact GTIN/barcode 10071430011505 was not found in web search. The code is a valid GTIN-14 check-digit-wise, but no product page matched it. Best guess is based only on the embedded/partial number 071430 appearing in similar product listings; this is weak evidence and may be unrelated.",
+          "cost": 0.15866500000000003,
+          "secs": 24.844
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Kverneland 071430 seitenplatte",
+      "guessConfidence": 0.25,
+      "cost": 0.17183650000000003,
+      "secs": 38.909
+    },
+    {
+      "code": "10085239054120",
+      "codeType": "gtin_14",
+      "truth": "case pack of Good & Gather Boneless Diced Pork Sirloin (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Good & Gather",
+          "productName": "Target Private Label Grocery Product",
+          "confidence": 0.3,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "The barcode prefix 10085239 / 085239 belongs to Target Brands, Inc. (owner of Good & Gather, Market Pantry, Archer Farms). The 14-digit GTIN represents a case pack of a Target private label product.",
+          "cost": 0.0127155,
+          "secs": 17.832
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Target Stores",
+          "productName": "Target private-label product (unknown specific item)",
+          "confidence": 0.3,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://upcfoodsearch.com/food-manufacturers/085239/",
+            "https://www.upcitemdb.com/upc/85239393741",
+            "https://www.upcitemdb.com/upc/85239029480"
+          ],
+          "basis": "Web searches found no exact match for 10085239054120 / 085239054120. Best guess is based on the 085239 UPC prefix being listed for Target Stores; the specific product item could not be identified.",
+          "cost": 0.17712499999999998,
+          "secs": 21.335
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Target private-label product (unknown specific item)",
+      "guessConfidence": 0.3,
+      "cost": 0.18984049999999997,
+      "secs": 48.382
+    },
+    {
+      "code": "10011110835557",
+      "codeType": "gtin_14",
+      "truth": "case pack of Kroger Applesauce (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Kroger",
+          "productName": "Applesauce Pouches Variety Pack",
+          "confidence": 0.9,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://openfoodfacts.org/product/0011110835550/kroger-applesauce"
+          ],
+          "basis": "The barcode is a GTIN-14 case code (10011110835557) corresponding to the retail UPC-A 011110835550, which is Kroger Applesauce Pouches Variety Pack.",
+          "cost": 0.0190515,
+          "secs": 23.699
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 2,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Kroger",
+          "productName": "Unknown Kroger private-label product, likely a case/pack GTIN for UPC 011110835557",
+          "confidence": 0.35,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://upcfoodsearch.com/food-manufacturers/011110/",
+            "https://upcfoodsearch.com/food-manufacturers/011110/products/",
+            "https://www.gtin.info/upc/"
+          ],
+          "basis": "No exact web match found for 10011110835557 or likely UPC 011110835557. The embedded UPC prefix 011110 is listed for The Kroger Co.; GTIN-14 check digit validates, so best guess is a Kroger/private-label trade item or case code, but product name could not be identified.",
+          "cost": 0.173595,
+          "secs": 20.737
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Unknown Kroger private-label product, likely a case/pack GTIN for UPC 011110835557",
+      "guessConfidence": 0.35,
+      "cost": 0.1926465,
+      "secs": 51.859
+    },
+    {
+      "code": "10051000231458",
+      "codeType": "gtin_14",
+      "truth": "case pack of Campbell's Pasta Chicken Alfredo (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "",
+          "productName": "",
+          "confidence": 0,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "",
+          "cost": 0,
+          "secs": 60.007,
+          "error": "gemini TimeoutError: The operation was aborted due to timeout"
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Campbell's",
+          "productName": "Campbell's foodservice/soup item, UPC item code 23145",
+          "confidence": 0.32,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://upcfoodsearch.com/food-manufacturers/051000/",
+            "https://www.gtin.info/upc/"
+          ],
+          "basis": "No real page found for exact GTIN 10051000231458 or derived UPC 051000231451. Prefix 051000 is listed for Campbell Soup Co.; GTIN structure indicates packaging indicator 1 + Campbell prefix 051000 + item reference 23145, so best guess is a Campbell's case/foodservice soup product, but variant is unverified.",
+          "cost": 0.22060000000000002,
+          "secs": 25.755
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Campbell's foodservice/soup item, UPC item code 23145",
+      "guessConfidence": 0.32,
+      "cost": 0.22060000000000002,
+      "secs": 86.245
+    },
+    {
+      "code": "10075130532735",
+      "codeType": "gtin_14",
+      "truth": "case pack of Krasdale Saltine Crackers (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "GOJO",
+          "productName": "Mild Antibacterial Foam Hand Soap TFX Refill",
+          "confidence": 0.9,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.gojo.com",
+            "https://heyzine.com"
+          ],
+          "basis": "The barcode 10075130532735 is the GTIN-14 case code for GOJO manufacturer part number 5327-02, which corresponds to GOJO Mild Antibacterial Foam Hand Soap 1200 mL refills for the TFX dispenser (packaged as a case of 2).",
+          "cost": 0.022392,
+          "secs": 32.398
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Apollo",
+          "productName": "ApolloPress 801R 2 x 1-1/2 in Press Copper Reducing Coupling",
+          "confidence": 0.32,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.firstsupply.com/Product/CON10075130",
+            "https://www.raptorsupplies.com/pd/apollo/10075130",
+            "https://pexuniverse.com/apollo-2-x-1-1-2-press-copper-coupling",
+            "https://www.easternfirst.com/Product/ApolloAndreg-801R-Series-10075130-Reducing-Coupling-2-in-Press-x-1-1-2-in-Press-Copper-485006"
+          ],
+          "basis": "No real page found for exact GTIN 10075130532735. Best guess is based on multiple listings for product/part number 10075130 matching ApolloPress 2 x 1-1/2 copper reducing coupling; exact barcode suffix 532735 was not found.",
+          "cost": 0.118065,
+          "secs": 13.565
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "ApolloPress 801R 2 x 1-1/2 in Press Copper Reducing Coupling",
+      "guessConfidence": 0.32,
+      "cost": 0.140457,
+      "secs": 46.418
+    },
+    {
+      "code": "10058779144262",
+      "codeType": "gtin_14",
+      "truth": "case pack of Breyers Hazelnut Chocolate Ice Cream (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case",
+      "stage": {
+        "gemini": {
+          "brand": "Loblaws (President's Choice / No Name)",
+          "productName": "Loblaws Private Label Product",
+          "confidence": 0.3,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "The GS1 company prefix 058779 belongs to Loblaws Inc. (Canada), indicating this is a private label product (such as President's Choice, No Name, or Life Brand), but the exact product details for item 14426 could not be verified.",
+          "cost": 0.0486045,
+          "secs": 39.741
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Bergland Linusit",
+          "productName": "Linusit Siesa Leinsamen-Granulat",
+          "confidence": 0.32,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.shop-apotheke.com/ernaehrung/5877914/linusit-siesa-leinsamen-granulat.htm",
+            "https://www.redcare-apotheke.ch/fr/nutrition-minceur-sport/5877914/linusit-siesa-graines-de-lin-en-granules.htm",
+            "https://www.gesund.de/produkt/117646-linusit-siesa-granulat"
+          ],
+          "basis": "No real page found for exact GTIN 10058779144262 or UPC-like forms 058779144262/0058779144262. Best guess is based on strong partial match to 05877914, which multiple pharmacy listings identify as Linusit Siesa 500 g, but those pages list a different EAN, so this is uncertain.",
+          "cost": 0.14809,
+          "secs": 15.321
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Linusit Siesa Leinsamen-Granulat",
+      "guessConfidence": 0.32,
+      "cost": 0.1966945,
+      "secs": 56.133
+    },
+    {
+      "code": "0078741352108",
+      "codeType": "ean_13",
+      "truth": "Great Value Whole Milk",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Great Value",
+          "productName": "Whole Milk",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://world.openfoodfacts.org/product/0078741352108/whole-milk-great-value"
+          ],
+          "basis": "Found exact barcode match on Open Food Facts for Great Value Whole Milk.",
+          "cost": 0.0035685,
+          "secs": 4.007
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 2,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Walmart / Great Value",
+          "productName": "Walmart private-label grocery item, exact variety unknown",
+          "confidence": 0.35,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/",
+            "https://www.barcodelookup.com/"
+          ],
+          "basis": "No real web page found for exact GTIN 0078741352108 or UPC 078741352108. Best guess is Walmart/Great Value because the 078741/078742 UPC prefix range is commonly associated with Walmart private-label products; item code 35210 could not be matched to a specific product.",
+          "cost": 0.193445,
+          "secs": 21.948
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Walmart private-label grocery item, exact variety unknown",
+      "guessConfidence": 0.35,
+      "cost": 0.1970135,
+      "secs": 26.939
+    },
+    {
+      "code": "0194346253272",
+      "codeType": "ean_13",
+      "truth": "Great Value Egg Noodles",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts (us) + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Great Value",
+          "productName": "Egg Noodles (Frozen)",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.ewg.org/foodscores/products/194346253272-GreatValueEggNoodles/",
+            "https://www.walmart.com/ip/Great-Value-Egg-Noodles-24-oz-Bag-Frozen/210134440"
+          ],
+          "basis": "The GTIN 194346253272 matches Great Value Frozen Egg Noodles (24 oz bag) sold at Walmart.",
+          "cost": 0.0071025,
+          "secs": 10.823
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 0,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Great Value",
+          "productName": "Unknown Great Value grocery product",
+          "confidence": 0.25,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://upcfoodsearch.com/food-manufacturers/194346/"
+          ],
+          "basis": "No web results found for exact GTIN/UPC 0194346253272 or 194346253272. Partial prefix 194346 is listed as Wal-Mart Stores, Inc. with brand Great Value, so this is a low-confidence prefix-based guess only.",
+          "cost": 0.082805,
+          "secs": 6.807
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Unknown Great Value grocery product",
+      "guessConfidence": 0.25,
+      "cost": 0.0899075,
+      "secs": 19.251
+    },
+    {
+      "code": "0681131811231",
+      "codeType": "ean_13",
+      "truth": "Great Value Mild Seafood Sauce",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Great Value",
+          "productName": "Mild Seafood Sauce",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.walmart.ca"
+          ],
+          "basis": "Found exact barcode match on Walmart Canada and Open Food Facts for Great Value Mild Seafood Sauce, 250mL.",
+          "cost": 0.003201,
+          "secs": 2.716
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Great Value",
+          "productName": "Mild Seafood Sauce",
+          "confidence": 0.85,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://managemygroceries.ca/10296179.html"
+          ],
+          "basis": "Found a real listing for Great Value Mild Seafood Sauce 250 mL showing UPC 68113181123; this is the UPC-A core corresponding to EAN/GTIN-13 0681131811231, with check digit 1.",
+          "cost": 0.11673,
+          "secs": 12.295
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Mild Seafood Sauce",
+      "guessConfidence": 0.4,
+      "cost": 0.119931,
+      "secs": 15.26
+    },
+    {
+      "code": "096619516698",
+      "codeType": "upc_a",
+      "truth": "Kirkland Signature Protein Bar, Energy Variety Pack (20 ct)",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Kirkland Signature",
+          "productName": "Protein Bar Energy Variety Pack",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/96619516698",
+            "https://openfoodfacts.org/product/0096619516698/protein-bar-kirkland-signature"
+          ],
+          "basis": "Found exact match on UPC databases and retail listings for Kirkland Signature Protein Bar Energy Variety Pack (20 Count).",
+          "cost": 0.003972,
+          "secs": 3.523
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Kirkland Signature",
+          "productName": "Protein Bar Energy Variety Pack",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/96619516698",
+            "https://www.kjaventures.ca/products/kirkland-signature-protein-bars-20-count",
+            "https://www.samedaysupplements.com/kirkland-protein-bars.html",
+            "https://shop.mercaso.com/ko/collections/nutrition-bars/products/kirkland-protein-bar-variety-pack-21g-protein-2-12-oz-20-pack"
+          ],
+          "basis": "Exact UPC 096619516698 found on multiple product/listing pages identifying Kirkland Signature Protein Bar Energy Variety Pack, 20 Count.",
+          "cost": 0.07147999999999999,
+          "secs": 4.701
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Protein Bar Energy Variety Pack",
+      "guessConfidence": 0.4,
+      "cost": 0.07545199999999999,
+      "secs": 8.359
+    },
+    {
+      "code": "096619510702",
+      "codeType": "upc_a",
+      "truth": "Kirkland Signature Premium Chunk Chicken Breast in Water (6x12.5oz)",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Kirkland Signature",
+          "productName": "Premium Chunk Chicken Breast Packed in Water",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/096619510702"
+          ],
+          "basis": "The exact barcode matches Kirkland Signature Premium Chunk Chicken Breast Packed in Water (12.5 oz, 6-pack) across multiple retail and database sources.",
+          "cost": 0.003432,
+          "secs": 3.028
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Kirkland Signature",
+          "productName": "Premium Chunk Chicken Breast Packed in Water",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/96619510702",
+            "https://go-upc.com/search?q=96619510702",
+            "https://www.buycott.com/upc/096619510702",
+            "https://shop.mercaso.com/collections/other-canned-foods/products/kirkland-premium-chunk-chicken-breast-12-5-oz-6-pack",
+            "https://www.ebay.com/itm/177256868238"
+          ],
+          "basis": "Exact UPC 096619510702 found on multiple real pages, including UPCItemDB, Go-UPC, Buycott, Mercaso, and eBay listings, all identifying it as Kirkland Signature premium/chunk chicken breast packed in water, typically 6 x 12.5 oz cans.",
+          "cost": 0.07268499999999999,
+          "secs": 5.951
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Premium Chunk Chicken Breast Packed in Water",
+      "guessConfidence": 0.4,
+      "cost": 0.07611699999999999,
+      "secs": 9.254
+    },
+    {
+      "code": "690284733673",
+      "codeType": "upc_a",
+      "truth": "Trader Joe's Everything But The Bagel Sesame Seasoning Blend 2.3oz",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Trader Joe's",
+          "productName": "Everything But The Bagel Sesame Seasoning Blend",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/690284733673"
+          ],
+          "basis": "The barcode 690284733673 is directly associated with Trader Joe's Everything But The Bagel Sesame Seasoning Blend (2.3 oz) in multiple product databases and retail listings.",
+          "cost": 0.002604,
+          "secs": 2.922
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Trader Joe's",
+          "productName": "Everything but the Bagel Sesame Seasoning Blend",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.ebay.com/itm/365898794855",
+            "https://www.ebay.com/itm/224847009612",
+            "https://colombia.yaxa.co/products/trader-joes-everything-but-the-bagel-sazonadora-de-bagel-de-ajonjoli-2-3-onzas-paquete-de-1-pieza/"
+          ],
+          "basis": "Exact barcode 690284733673 / UPC 0690284733673 found on multiple product listings for Trader Joe's Everything but the Bagel Sesame Seasoning Blend 2.3 oz, including eBay and Yaxa listings.",
+          "cost": 0.07174,
+          "secs": 5.105
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Everything but the Bagel Sesame Seasoning Blend",
+      "guessConfidence": 0.4,
+      "cost": 0.074344,
+      "secs": 8.341
+    },
+    {
+      "code": "009400000061",
+      "codeType": "upc_a",
+      "truth": "Trader Joe's Dark Chocolate Peanut Butter Cups 16oz",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Trader Joe's",
+          "productName": "Dark Chocolate Peanut Butter Cups",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.upcitemdb.com/upc/9400000061"
+          ],
+          "basis": "The exact UPC code 009400000061 is listed on UPCitemdb as Trader Joe's Dark Chocolate Peanut Butter Cups (16 oz).",
+          "cost": 0.003396,
+          "secs": 3.301
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Michelin",
+          "productName": "Lock de-icer / door lock de-icer",
+          "confidence": 0.28,
+          "exactCodeFound": false,
+          "sourceUrls": [
+            "https://www.autodoc.es/michelin/16415565",
+            "https://www.autodoc.de/michelin/16415565"
+          ],
+          "basis": "No real page found for exact code 009400000061; the 12-digit code also fails UPC-A check digit validation. Best guess is from partial match: multiple listings show Michelin product code 009400 as a lock/türschloss de-icer, but not with this GTIN.",
+          "cost": 0.17022,
+          "secs": 15.932
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Lock de-icer / door lock de-icer",
+      "guessConfidence": 0.28,
+      "cost": 0.17361600000000002,
+      "secs": 19.697
+    },
+    {
+      "code": "0041498208059",
+      "codeType": "ean_13",
+      "truth": "Clancy's (Aldi) Wavy Potato Chips",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Clancy's",
+          "productName": "Wavy Potato Chips",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://world.openfoodfacts.org/product/0041498208059/wavy-potato-chips-clancy-s"
+          ],
+          "basis": "Found exact matching barcode on Open Food Facts and nutrition databases for Clancy's Wavy Potato Chips by Aldi-Benner Company.",
+          "cost": 0.00276,
+          "secs": 3.036
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Clancy's",
+          "productName": "Wavy Potato Chips",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://upcfoodsearch.com/food-products/potato-chips/041498163068/",
+            "https://www.aqua-calc.com/calculate/food-calories/substance/clancy-quote-s-coma-and-blank-wavy-blank-potato-blank-chips-coma-and-blank-upc-column--blank-041498208059",
+            "https://tools.myfooddata.com/nutrition-facts/1773554/wt1"
+          ],
+          "basis": "Exact UPC-A 041498208059 / EAN-13 0041498208059 found in multiple food database pages for Clancy's Wavy Potato Chips; one listing shows duplicate size 9.5 oz.",
+          "cost": 0.060860000000000004,
+          "secs": 4.114
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Wavy Potato Chips",
+      "guessConfidence": 0.4,
+      "cost": 0.06362000000000001,
+      "secs": 7.478
+    },
+    {
+      "code": "0041498149208",
+      "codeType": "ean_13",
+      "truth": "Millville (Aldi) Corn Flakes",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Millville",
+          "productName": "Corn Flakes Cereal",
+          "confidence": 1,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://world.openfoodfacts.org/product/0041498149208/corn-flakes-millville"
+          ],
+          "basis": "Found exact UPC/GTIN match in Open Food Facts and USDA Branded Food databases for Millville Corn Flakes Cereal, 18 oz.",
+          "cost": 0.0041400000000000005,
+          "secs": 4.816
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Millville / Aldi-Benner Company",
+          "productName": "Corn Flakes, Golden Flakes of Corn Cereal",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://nutritiondatalist.com/product/corn-flakes-upc-041498149208",
+            "https://allergeninside.com/foods/ingredients/041498149208/Millville-Millville-Corn-Flakes-Golden-Flakes-Of-Corn-Cereal",
+            "https://tools.myfooddata.com/nutrition-facts/1471139/wt1",
+            "https://www.aqua-calc.com/page/density-table/substance/corn-blank-flakes-coma-and-blank-upc-column--blank-041498149208"
+          ],
+          "basis": "Exact UPC 041498149208 (same as GTIN-12 within 0041498149208) found on multiple product/nutrition pages for Corn Flakes by Aldi-Benner/Aldi and Millville.",
+          "cost": 0.07135,
+          "secs": 5.214
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Corn Flakes, Golden Flakes of Corn Cereal",
+      "guessConfidence": 0.4,
+      "cost": 0.07549,
+      "secs": 10.523
+    },
+    {
+      "code": "0078742313801",
+      "codeType": "ean_13",
+      "truth": "Member's Mark Classic Hummus Singles (2.5oz, 16 ct)",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "Member's Mark",
+          "productName": "Classic Hummus Singles",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://openfoodfacts.org/product/0078742313801/classic-hummus-member-s-mark",
+            "https://www.nutritionvalue.org/Classic_hummus_singles%2C_classic_hummus_by_wal-mart_stores%2C_inc._by_Wal-Mart_Stores%2C_Inc._755373_nutrition_value.html"
+          ],
+          "basis": "The barcode matches Member's Mark Classic Hummus Singles (16 Pack) distributed by Walmart Stores, Inc.",
+          "cost": 0.0738345,
+          "secs": 42.219
+        },
+        "fetch": {
+          "verified": false,
+          "strength": "none",
+          "pages": 1,
+          "product": ""
+        },
+        "agreeWithGemini": false,
+        "gpt55": {
+          "brand": "Wal-Mart Stores, Inc.",
+          "productName": "Classic Hummus Singles, Classic Hummus",
+          "confidence": 0.95,
+          "exactCodeFound": true,
+          "sourceUrls": [
+            "https://www.nutritionvalue.org/Classic_hummus_singles%2C_classic_hummus_by_Wal-Mart_Stores%2C_Inc._1712357_nutritional_value.html"
+          ],
+          "basis": "Exact UPC 078742313801 found on NutritionValue page; this is the same GTIN as 0078742313801 with leading EAN-13 zero. Page lists product name, brand, category, serving size, ingredients, and printed code format 0 78742 31380 1.",
+          "cost": 0.0487,
+          "secs": 6.598
+        },
+        "fetch2": {
+          "verified": false,
+          "strength": "none",
+          "product": ""
+        }
+      },
+      "outcome": "suggested",
+      "product": "Classic Hummus Singles, Classic Hummus",
+      "guessConfidence": 0.4,
+      "cost": 0.12253449999999999,
+      "secs": 49.288
+    },
+    {
+      "code": "0078742058221",
+      "codeType": "ean_13",
+      "truth": "Member's Mark Organic Extra Virgin Olive Oil",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "",
+          "productName": "",
+          "confidence": 0,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "",
+          "cost": 0,
+          "secs": 0.129,
+          "error": "gemini 429"
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 1,
+          "product": "UPC Database | 0078742058221"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "UPC Database | 0078742058221",
+      "cost": 0,
+      "secs": 0.412
+    },
+    {
+      "code": "0077890338797",
+      "codeType": "ean_13",
+      "truth": "Wegmans Beef Culinary Stock (32 fl oz)",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure",
+      "stage": {
+        "gemini": {
+          "brand": "",
+          "productName": "",
+          "confidence": 0,
+          "exactCodeFound": false,
+          "sourceUrls": [],
+          "basis": "",
+          "cost": 0,
+          "secs": 0.076,
+          "error": "gemini 429"
+        },
+        "fetch": {
+          "verified": true,
+          "strength": "fetched_source",
+          "pages": 2,
+          "product": "Wegmans Food You Feel Good About Culinary Stock"
+        },
+        "agreeWithGemini": false
+      },
+      "outcome": "verified",
+      "product": "Wegmans Food You Feel Good About Culinary Stock",
+      "cost": 0,
+      "secs": 0.537
+    }
+  ]
+}
