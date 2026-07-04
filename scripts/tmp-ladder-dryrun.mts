@@ -38,8 +38,12 @@ function parseGuess(text: string): Omit<AiGuess, "cost" | "secs"> {
   };
 }
 
+const errGuess = (t0: number, label: string): AiGuess =>
+  ({ brand: "", productName: "", confidence: 0, exactCodeFound: false, sourceUrls: [], basis: "", cost: 0, secs: (Date.now() - t0) / 1000, error: label });
+
 async function geminiGuess(code: string): Promise<AiGuess> {
   const t0 = Date.now();
+  try {
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_KEY}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: PROMPT(code) }] }], tools: [{ google_search: {} }], generationConfig: { temperature: 0.2, maxOutputTokens: 3000, thinkingConfig: { thinkingLevel: "low" } } }),
@@ -54,10 +58,12 @@ async function geminiGuess(code: string): Promise<AiGuess> {
   const cost = ((u.promptTokenCount ?? 0) / 1e6) * 1.5 + (((u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0)) / 1e6) * 9 + ((cand?.groundingMetadata?.webSearchQueries ?? []).length) * 0.014;
   const g = parseGuess(text);
   return { ...g, sourceUrls: [...new Set([...g.sourceUrls, ...urls])], cost, secs: (Date.now() - t0) / 1000 };
+  } catch (e) { return errGuess(t0, `gemini ${String(e).slice(0, 80)}`); }
 }
 
 async function gpt55Guess(code: string): Promise<AiGuess> {
   const t0 = Date.now();
+  try {
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_KEY}` },
     body: JSON.stringify({ model: "gpt-5.5", input: PROMPT(code), tools: [{ type: "web_search", search_context_size: "low" }], reasoning: { effort: "low" }, max_output_tokens: 6000, max_tool_calls: 5 }),
@@ -74,6 +80,7 @@ async function gpt55Guess(code: string): Promise<AiGuess> {
   const cost = ((data?.usage?.input_tokens ?? 0) / 1e6) * 5 + ((data?.usage?.output_tokens ?? 0) / 1e6) * 30 + searches * 0.01;
   const g = parseGuess(text);
   return { ...g, sourceUrls: [...new Set([...g.sourceUrls, ...urls])], cost, secs: (Date.now() - t0) / 1000 };
+  } catch (e) { return errGuess(t0, `openai ${String(e).slice(0, 80)}`); }
 }
 
 // --- mock layer (LADDER_MOCK=1): canned guesses + fetch pages; asserts the ladder wiring ---
@@ -167,15 +174,36 @@ async function runLadder(row: Row): Promise<Result> {
 // --- main ---
 const rows: Row[] = MOCK ? MOCK_CODES : JSON.parse(readFileSync(new URL("../e2e/fixtures/dryrun-codes.json", import.meta.url), "utf8")).codes;
 const WORST_PER_CODE = 0.3; // reviewer-corrected: 5.5 worst = 6K out ($0.18) + 5 searches ($0.05) + input; gemini search count uncapped by request -> extra headroom
-const results: Result[] = [];
-for (const row of rows) {
-  if (!MOCK && spent + WORST_PER_CODE > BUDGET_USD) { console.log(`BUDGET GUARD: stopping at ${row.code} ($${spent.toFixed(2)} spent)`); break; }
-  const r = await runLadder(row);
-  spent += r.cost;
-  results.push(r);
-  console.log(`[${r.group}] ${r.code} -> ${r.outcome}${r.product ? ` "${r.product}"` : ""} | expected ${r.expected} | $${r.cost.toFixed(3)} | ${r.secs.toFixed(1)}s | spent $${spent.toFixed(2)}`);
+const RESULTS_URL = new URL(MOCK ? "./tmp-ladder-mock-results.json" : "./tmp-ladder-dryrun-results.json", import.meta.url);
+
+// RESUME: prior completed rows (incl. log-reconstructed ones) are skipped; their spend still
+// counts against the cap so a crash can never launder budget.
+let results: Result[] = [];
+if (!MOCK) {
+  try {
+    const prior = JSON.parse(readFileSync(RESULTS_URL, "utf8"));
+    results = (prior.rows ?? []).filter((r: Result) => r.outcome !== "error");
+    spent = Number(prior.spent) || results.reduce((s: number, r: Result) => s + (r.cost ?? 0), 0);
+    console.log(`RESUME: ${results.length} rows loaded, $${spent.toFixed(2)} already spent`);
+  } catch { /* fresh run */ }
 }
-writeFileSync(new URL(MOCK ? "./tmp-ladder-mock-results.json" : "./tmp-ladder-dryrun-results.json", import.meta.url), JSON.stringify({ spent, rows: results }, null, 2));
+const done = new Set(results.map((r) => r.code));
+
+for (const row of rows) {
+  if (done.has(row.code)) continue;
+  if (!MOCK && spent + WORST_PER_CODE > BUDGET_USD) { console.log(`BUDGET GUARD: stopping at ${row.code} ($${spent.toFixed(2)} spent)`); break; }
+  let r: Result;
+  try {
+    r = await runLadder(row);
+  } catch (e) {
+    r = { ...row, outcome: "error", error: String(e).slice(0, 160), cost: 0, secs: 0 } as Result;
+  }
+  spent += r.cost ?? 0;
+  results.push(r);
+  console.log(`[${r.group}] ${r.code} -> ${r.outcome}${r.product ? ` "${r.product}"` : ""} | expected ${r.expected} | $${(r.cost ?? 0).toFixed(3)} | ${(r.secs ?? 0).toFixed(1)}s | spent $${spent.toFixed(2)}`);
+  writeFileSync(RESULTS_URL, JSON.stringify({ spent, rows: results }, null, 2)); // incremental: crash-safe
+}
+writeFileSync(RESULTS_URL, JSON.stringify({ spent, rows: results }, null, 2));
 
 if (MOCK) {
   const by = Object.fromEntries(results.map((r) => [r.code, r.outcome]));
