@@ -87,6 +87,29 @@ correctness, not on verification rate).
 - Sequential-with-parallelism identical to prior probes; results JSON checked into `scripts/`.
 - All fetches obey existing SSRF rules (public hosts only, timeouts, size limits).
 
+## Fetch-layer upgrades (owner-approved 2026-07-04; dry run exercises 1-3 directly)
+
+The existing `pageFetch.ts` core stays (early-win race, exact-code rule, not-found detector,
+recycled-UPC guard, backoff/timeouts, structured-data-first extraction). Four upgrades:
+
+1. **Hypothesis wiring**: the ladder feeds Gemini's answer into the fetch - Gemini-cited URLs
+   join the candidate pool, and a fetched-page product that AGREES with Gemini's guess
+   (existing `crossCheck`) is recorded as a corroboration signal.
+2. **ASIN path**: fetch `amazon.com/dp/<ASIN>`; real-product-page detection = verified identity
+   (owner rule). RISK: Amazon bot-blocks server fetches aggressively - the dry run measures the
+   real success rate before this is relied on.
+3. **Broad tiered source pool** (owner: "as broad as possible, legit sites only"): expand from
+   5 hosts to a vetted pool of legitimate barcode/product databases - e.g. go-upc, upcitemdb,
+   barcodelookup, buycott, barcodesdatabase.org, barcodespider, ean-search.org, eandata.com,
+   openfoodfacts.org (live API), upcdatabase.org, barcode-list.com, opengtindb.org (EU),
+   codecheck.info (EU), brickseek (US retail), plus GS1 registries already trusted. A per-code
+   SELECTOR picks the best ~6-8 by code type (UPC-A -> US DBs; foreign EAN prefix -> international
+   DBs; case codes -> GTIN-14-aware DBs) so breadth never costs latency; the early-win race is
+   unchanged. Every added host must pass the existing trust rules (url_only stays weak unless
+   allowlisted; not-found/recycled guards apply to all).
+4. **Per-host 429 cooldown**: after a rate-limit response, skip that host for ~10 minutes
+   (in-memory) instead of re-hitting it every scan.
+
 ## Deliverables
 
 1. `scripts/tmp-ladder-dryrun-results.json` - full per-code, per-stage results.
