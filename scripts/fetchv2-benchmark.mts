@@ -55,15 +55,27 @@ const UAS = [
 const hostCooldown = new Map<string, number>();
 const hostOf = (u: string) => { try { return new URL(u).hostname; } catch { return ""; } };
 
+// A 429 is a rate limit, not a bot block: a 10-min cooldown turned ONE go-upc 429 into a whole
+// batch of lost pattern-door pages (v2.3 batch 8, 9 tires went unknown). 60s is enough; 403
+// (bot block) keeps the long cooldown. Vetted DB hosts also get polite pacing so the 429
+// never happens back-to-back across codes.
+const hostLastHit = new Map<string, number>();
+const PACED_HOST_RE = /go-upc|upcitemdb|eandata|barcodelookup|barcodespider|ean-search/i;
 async function directFetch(url: string): Promise<{ ok: boolean; status: number; html: string }> {
   const host = hostOf(url);
   if (!host || !isSafePublicUrl(url)) return { ok: false, status: 0, html: "" };
   if ((hostCooldown.get(host) ?? 0) > Date.now()) return { ok: false, status: 429, html: "" };
+  if (PACED_HOST_RE.test(host)) {
+    const wait = (hostLastHit.get(host) ?? 0) + 1500 - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    hostLastHit.set(host, Date.now());
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const res = await fetch(url, { headers: { "User-Agent": UAS[braveQueries % UAS.length], Accept: "text/html" }, signal: controller.signal, redirect: "follow" });
-    if (res.status === 429 || res.status === 403) hostCooldown.set(host, Date.now() + 10 * 60_000);
+    if (res.status === 429) hostCooldown.set(host, Date.now() + 60_000);
+    if (res.status === 403) hostCooldown.set(host, Date.now() + 10 * 60_000);
     if (!res.ok) return { ok: false, status: res.status, html: "" };
     const reader = res.body?.getReader();
     let html = "";
