@@ -609,6 +609,17 @@ describe("snippetFindings", () => {
     expect(out[0].name).toContain("Cinturato");
   });
 
+  test("on a QUOTED query the contract labels visible matches too, unless negative context vetoes (CARiD Pirelli live row)", () => {
+    // Batch-5 regression: a quoted-search snippet showed the code WITHOUT a UPC/EAN word nearby and
+    // was labeled=false, while the same result with the code hidden would have been labeled=true.
+    // The quoted-query contract guarantees the string is in the document either way.
+    const out = snippetFindings([
+      cand("https://www.carid.com/pirelli-tires/p-zero.html", "PIRELLI TIRES® 3245800 - P ZERO TROFEO R 245/35ZR19XL 93(Y)", "specs 054137070825 in stock"),
+      cand("https://www.realtor.example.com/mls", "Beautiful Home For Sale", "MLS # 054137070825"),
+    ], variants, "054137070825", { assumeCarrying: true });
+    expect(out.map((s) => s.labeled)).toEqual([true, false]);
+  });
+
   test("snippet findings carry labeled=true only when a barcode label sits near the code", () => {
     const out = snippetFindings([
       cand("https://a.example.com/1", "Pirelli Cinturato P7 245/40R19", "UPC 054137070825 in stock"),
