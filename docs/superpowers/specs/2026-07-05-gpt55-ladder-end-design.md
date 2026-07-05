@@ -36,13 +36,25 @@ owner's rule, with production-grade cost protection.
    GPT results and GPT no-answers are cached the same way. Receipts remain permanent; only the
    owner's manual force-retry overrides.
 
-## Architecture
+## Architecture (reality-corrected 2026-07-05 after recon)
 
-- `src/services/fetchV2/ladder/gptSearch.ts` - pure service, fetch injected (DI), no React/next
+RECON FACT: fetchV2 is benchmark/test-only today - the LIVE ladder is `computeDecode` in
+`src/app/api/ai-lookup/route.ts` (corpus -> Turso retail -> Plan D resolveUnknownFast -> AI fast
+-> escalation -> deep Stage 2). The GPT-5.5 rung therefore ends THAT ladder; full fetchV2
+integration into the live path is a separate future build.
+
+COST FACT (probe-verified pricing): worst case per call = 30K in x $5/M + 6K out x $30/M +
+6 searches x $0.01 = ~$0.39. OpenAI usage IS observable per response and max_tool_calls IS
+enforceable, so budgets count ACTUALS, with a per-call precheck `spent + 0.39 <= cap`.
+Observed probe average ~$0.05-0.09/call.
+
+- `src/services/ai/gptFromScratch.ts` - pure service, fetch injected (DI), no React/next
   imports. Builds prompt v2, parses/validates the JSON reply (bad JSON -> contained error ->
-  needs_review), maps to the outcome tiers above. Exposes `gptSearchFromScratch(code, deps)`.
-- Server route extension (existing `/api/ai-lookup` family): OpenAI key stays server-side; the
-  route enforces the 10s abort, the daily cap (worst-case accounting), breaker, emergency stop.
+  needs_review), maps to the outcome tiers above.
+- Final rung in `computeDecode`: runs ONLY when every prior rung produced neither verified nor
+  suggested; key server-side; 10s abort; kill switch + daily counters gate it; IS_E2E forces mock.
+- New daily DOLLAR guard for this rung (env `GPT_LADDER_DAILY_USD`, default 3.00) counted at
+  actuals alongside the existing call-count cap.
 - Scan store integration: fires after fetchV2 returns empty; feed row shows
   "Decoding (ladder)..." then the tiered outcome. A Verified GPT result creates the product,
   writes the permanent alias (idempotency key reused on retry), and auto-counts once.
@@ -60,10 +72,11 @@ owner's rule, with production-grade cost protection.
   bad JSON, timeout abort, cap exhausted, breaker open, X00 code never calls out,
   brand-prefix conflict blocks auto-count, cache hit skips the call entirely.
 - Persistent cache: unit tests on the DB-backed cache (receipt survives "restart" = new instance).
-- ONE live proof run, owner-approved before execution: the 53-code ladder residue
-  (`scripts/fetchv2-ladder-handoff.json`) + the 10 canaries, batched with the same
-  grade-vs-truth discipline as the v2.3 campaign. Budget cap ~$7 worst case; canaries must
-  produce ZERO auto-counts and ZERO tappable suggestions.
+- ONE live proof run (owner pre-authorized in the autonomous-run order): the 10 canaries FIRST,
+  then the 53-code ladder residue (`scripts/fetchv2-ladder-handoff.json`), batched with the same
+  grade-vs-truth discipline as the v2.3 campaign. HARD budget stop at $7.00 counted from response
+  usage actuals with per-call precheck `spent + 0.39 <= 7`; canaries must produce ZERO
+  auto-count-tier and ZERO suggested-tier results.
 - Playwright: scan an unknown (mocked GPT) -> row shows ladder decode -> auto-count appears;
   count-contract stays green.
 
