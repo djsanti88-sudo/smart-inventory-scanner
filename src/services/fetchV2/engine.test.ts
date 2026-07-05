@@ -917,6 +917,28 @@ describe("fetchV2 pipeline", () => {
     expect(r.product.name).toMatch(/goodride/i);
   });
 
+  test("an INVISIBLE code arriving only on the quoted-RETRY search still rescues (contract label)", async () => {
+    // Closes the re-review coverage gap: assumeCarrying labeling must hold for the freshAgain
+    // retry branch, not only the initial escalation hit.
+    const TIRE = "051342118137";
+    const queries: string[] = [];
+    const r = await fetchV2(TIRE, walmartDeps({
+      fetchPage: async () => ({ ok: true, status: 200, html: "<html><head><title>x</title></head><body>n</body></html>" }),
+      discovery: [
+        { name: "brave", search: async () => [] },
+        { name: "firecrawl", search: async (q: string) => {
+          queries.push(q);
+          if (queries.length <= 2) return [];
+          // Retry result: code NOT visible anywhere - the exact-match contract is the label.
+          return [{ url: "https://wheelmax.example.com/p/1", title: "275/35R20 Continental Contisportcontact 3 Run Flat", snippet: "in stock, ships fast", rank: 0 }];
+        } },
+      ],
+    }));
+    expect(queries).toEqual([`"${TIRE}"`, TIRE, `"${TIRE}"`]);
+    expect(r.outcome).toBe("suggested");
+    expect(r.product.name).toMatch(/contisportcontact/i);
+  });
+
   test("quoted escalation retries ONCE on empty (search-backend variance; 5-search cap total)", async () => {
     const TIRE = "051342118137";
     const queries: string[] = [];
