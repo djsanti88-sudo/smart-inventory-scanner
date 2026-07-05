@@ -296,6 +296,14 @@ describe("FetchV2Cache", () => {
     t += 61_000;
     expect(cache.isBadUrl("https://junk.example.com/search")).toBe(false);
   });
+
+  test("no-result receipts are permanent and round-trip by primary", () => {
+    const cache = new FetchV2Cache();
+    expect(cache.getNoResult("054137070573")).toBeUndefined();
+    cache.markNoResult("054137070573", "probed 2026-07-04: brave+quoted+unquoted empty");
+    expect(cache.getNoResult("054137070573")).toContain("probed 2026-07-04");
+    expect(cache.getNoResult("other")).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------- discovery providers

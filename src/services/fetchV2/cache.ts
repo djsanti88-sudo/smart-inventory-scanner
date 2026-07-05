@@ -53,4 +53,20 @@ export class FetchV2Cache {
     const e = this.badUrls.get(url);
     return e && e.expiresAt > this.now() ? e.reason : "";
   }
+
+  // --- No-result receipts (owner rule 2026-07-04): PERMANENT, no auto-retry ever. A receipted
+  // code spends zero searches until the owner explicitly clears it (ladder handles the residue).
+  private readonly noResults = new Map<string, string>();
+
+  getNoResult(primary: string): string | undefined {
+    return this.noResults.get(primary);
+  }
+
+  markNoResult(primary: string, note: string): void {
+    if (this.noResults.size >= this.maxEntries) {
+      const oldest = this.noResults.keys().next().value;
+      if (oldest !== undefined) this.noResults.delete(oldest);
+    }
+    this.noResults.set(primary, note);
+  }
 }
