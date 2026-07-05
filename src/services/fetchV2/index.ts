@@ -35,6 +35,9 @@ export interface FetchV2Deps {
   structured?: Array<{ name: string; lookup: (variants: string[]) => Promise<StructuredHit | null> }>;
   cache?: FetchV2Cache;
   now?: () => number;
+  /** Optional FREE door: predictable barcode-DB product URLs (V1 selectBarcodeUrls), fetched
+   *  before any paid search. Max 2 are used. */
+  patternUrls?: (variants: string[]) => string[];
 }
 
 export interface FetchV2Options {
@@ -143,7 +146,65 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
   if (needsDiscovery && deps.discovery.length > 0) {
     let candidates: DiscoveryCandidate[] = [];
     let exactMatchCandidates: DiscoveryCandidate[] = [];
-    for (let i = 0; i < deps.discovery.length; i++) {
+
+    const junkUrls = new Set<string>();
+    const processPage = async (cand: DiscoveryCandidate): Promise<SourceFinding | null> => {
+      let page: FetchedPage;
+      try {
+        page = await deps.fetchPage(cand.url);
+      } catch {
+        deps.cache?.markBadUrl(cand.url, "fetch failed");
+        return null;
+      }
+      sourcesChecked.push(cand.url);
+      if (!page.ok) {
+        deps.cache?.markBadUrl(cand.url, `http ${page.status}`);
+        return null;
+      }
+      const title = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() ?? cand.title;
+      const text = htmlToText(page.html);
+      const junk = evaluatePageJunk({ url: cand.url, title, text }, normalized.primary);
+      if (junk.rejected) {
+        if (junk.reasons.some((r) => /search|echo|no-result|not-found|invalidat|recycled|only in the url/i.test(r))) {
+          junkUrls.add(cand.url);
+        }
+        deps.cache?.markBadUrl(cand.url, junk.reasons[0] ?? "junk page");
+        const f: SourceFinding = { url: cand.url, association: { level: "none", matchedVariant: "", matchedField: "", product: null }, product: null, junkRejected: true, junkReasons: junk.reasons, quality: "rejected", score: 0 };
+        findings.push(f);
+        return f;
+      }
+      const products = extractProducts(page.html).map((p) => ({
+        ...p,
+        name: usableIdentityName(p.name, normalized.primary) ? p.name : "",
+        brand: cleanBrand(p.brand),
+      }));
+      const association = proveAssociation(normalized.all, products, text, cand.url);
+      if (association.level === "none" && products.length === 0) {
+        deps.cache?.markBadUrl(cand.url, "no code evidence and no product structure");
+      }
+      const { quality, score } = scoreSource(cand.url, association, false);
+      const f: SourceFinding = { url: cand.url, association, product: association.product, junkRejected: false, junkReasons: [], quality, score };
+      findings.push(f);
+      return f;
+    };
+
+    // FREE pattern-URL door (owner: one good website is enough): predictable barcode-DB product
+    // pages, direct-fetched before any paid search. Identity secured here = zero credits spent.
+    if (deps.patternUrls && identifier.isPublicBarcode) {
+      for (const url of deps.patternUrls(normalized.all).slice(0, 2)) {
+        if (timeLeft() <= 0) { earlyStopped = true; break; }
+        const f = await processPage({ url, title: "", snippet: "", rank: -1 });
+        if (f && !f.junkRejected && f.association.level === "strong" && (f.product?.name ?? "").trim()) {
+          rulesFired.push("free pattern-URL door secured the identity - paid search skipped");
+          break;
+        }
+      }
+    }
+    const identitySecured = findings.some(
+      (f) => !f.junkRejected && f.association.level === "strong" && (f.product?.name ?? "").trim(),
+    );
+
+    for (let i = 0; !identitySecured && i < deps.discovery.length; i++) {
       const provider = deps.discovery[i];
       // Searches are cheap and fast; page fetches are what actually eat the clock. The quoted
       // escalation ALWAYS gets one shot - the time budget must never starve the step most likely
@@ -186,52 +247,11 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
       .map((x) => x.c)
       .slice(0, maxSources);
 
-    const junkUrls = new Set<string>();
     for (const cand of prioritized) {
       if (timeLeft() <= 0) { earlyStopped = true; break; }
-      let page: FetchedPage;
-      try {
-        page = await deps.fetchPage(cand.url);
-      } catch {
-        deps.cache?.markBadUrl(cand.url, "fetch failed");
-        continue;
-      }
-      sourcesChecked.push(cand.url);
-      if (!page.ok) {
-        deps.cache?.markBadUrl(cand.url, `http ${page.status}`);
-        continue;
-      }
-
-      const title = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() ?? cand.title;
-      const text = htmlToText(page.html);
-      const junk = evaluatePageJunk({ url: cand.url, title, text }, normalized.primary);
-      if (junk.rejected) {
-        // Only ACTIVE junk (echo/search/no-result/invalidating/recycled pages) disproves the
-        // snippet mapping; a thin JS-shell title alone must not kill merchant-feed evidence.
-        if (junk.reasons.some((r) => /search|echo|no-result|not-found|invalidat|recycled|only in the url/i.test(r))) {
-          junkUrls.add(cand.url);
-        }
-        deps.cache?.markBadUrl(cand.url, junk.reasons[0] ?? "junk page");
-        findings.push({ url: cand.url, association: { level: "none", matchedVariant: "", matchedField: "", product: null }, product: null, junkRejected: true, junkReasons: junk.reasons, quality: "rejected", score: 0 });
-        continue;
-      }
-
-      // Extracted product NAMES must pass the junk firewall too - a page can be legit while its
-      // structured block carries a site name / generic header instead of an identity.
-      const products = extractProducts(page.html).map((p) => ({
-        ...p,
-        name: usableIdentityName(p.name, normalized.primary) ? p.name : "",
-        brand: cleanBrand(p.brand),
-      }));
-      const association = proveAssociation(normalized.all, products, text, cand.url);
-      if (association.level === "none" && products.length === 0) {
-        deps.cache?.markBadUrl(cand.url, "no code evidence and no product structure");
-      }
-      const { quality, score } = scoreSource(cand.url, association, false);
-      findings.push({ url: cand.url, association, product: association.product, junkRejected: false, junkReasons: [], quality, score });
-
+      const f = await processPage(cand);
       // Early win: a verification-grade finding ends the crawl (fast/balanced).
-      if (mode !== "strict" && association.level === "strong" && quality === "strong") {
+      if (f && mode !== "strict" && f.association.level === "strong" && f.quality === "strong") {
         earlyStopped = true;
         break;
       }
