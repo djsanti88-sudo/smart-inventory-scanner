@@ -30,7 +30,12 @@ function main() {
     throw new Error(`No rows array found in ${inputPath} (expected top-level array or { rows: [...] })`);
   }
 
-  const receipts = load(RECEIPTS_PATH);
+  let receipts = {};
+  try {
+    receipts = load(RECEIPTS_PATH);
+  } catch (err) {
+    console.warn(`fetchv2-ladder-handoff: could not load ${RECEIPTS_PATH} (${err.message}); all receipts will be null`);
+  }
 
   const handoff = rows
     .filter((r) => HANDOFF_OUTCOMES.has(r.v2Outcome))
