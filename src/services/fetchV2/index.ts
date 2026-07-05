@@ -195,21 +195,35 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
         if (timeLeft() <= 0) { earlyStopped = true; break; }
         const f = await processPage({ url, title: "", snippet: "", rank: -1 });
         if (f && !f.junkRejected && f.association.level === "strong" && (f.product?.name ?? "").trim()) {
-          rulesFired.push("free pattern-URL door secured the identity - paid search skipped");
+          rulesFired.push(
+            f.quality === "strong"
+              ? "free pattern-URL door secured a STRONG identity - entire provider loop skipped"
+              : "free pattern-URL door secured the identity - paid search skipped (free corroboration may still run)",
+          );
           break;
         }
       }
     }
-    const identitySecured = findings.some(
-      (f) => !f.junkRejected && f.association.level === "strong" && (f.product?.name ?? "").trim(),
-    );
+    // Economic rule: a STRONG-quality identity skips the ENTIRE provider loop - nothing left to
+    // prove. Any held identity (even medium, e.g. a single structured/pattern hit) still lets the
+    // FREE provider (index 0) run once for corroboration, but PAID escalation providers (i > 0)
+    // never run - we never pay to search for something we already hold.
+    const heldIdentity = () =>
+      findings.some((f) => !f.junkRejected && f.association.level === "strong" && (f.product?.name ?? "").trim());
+    const strongSecured = () =>
+      findings.some(
+        (f) => !f.junkRejected && f.association.level === "strong" && f.quality === "strong" && (f.product?.name ?? "").trim(),
+      );
 
-    for (let i = 0; !identitySecured && i < deps.discovery.length; i++) {
+    for (let i = 0; !strongSecured() && i < deps.discovery.length; i++) {
       const provider = deps.discovery[i];
       // Searches are cheap and fast; page fetches are what actually eat the clock. The quoted
       // escalation ALWAYS gets one shot - the time budget must never starve the step most likely
       // to solve a hard code (live bug: Brave slowness consumed 25s and Firecrawl never ran).
       if (i === 0 && timeLeft() <= 0) { earlyStopped = true; break; }
+      // Never PAY to find what we already hold: once ANY identity is secured, only the FREE
+      // provider (index 0) may still run for corroboration - every paid escalation stops here.
+      if (i > 0 && heldIdentity()) break;
       // Escalation providers get the QUOTED exact-match query (the owner's "comillas" move) -
       // used only when earlier providers produced no candidate that carries the code. Their
       // results matched the code BY CONTRACT even when snippets hide it (canary-proven).
