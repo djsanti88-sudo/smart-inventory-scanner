@@ -28,6 +28,24 @@ function gtinMatches(variant: string, gtin: string): boolean {
   return variant.padStart(14, "0") === gtin.padStart(14, "0");
 }
 
+// Search-style URLs (e.g. go-upc.com/search?q=CODE) echo the queried code back onto the page,
+// sometimes inside a table-like element. A detail_table "gtin" match on such a URL is that echo,
+// not proof the code belongs to the page's product - it must never count as strong evidence.
+function isQueryEcho(url: string, variant: string): boolean {
+  if (!variant) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const needle = variant.replace(/[\s-]/g, "");
+  for (const value of parsed.searchParams.values()) {
+    if (value.replace(/[\s-]/g, "").includes(needle)) return true;
+  }
+  return false;
+}
+
 export function proveAssociation(
   variants: string[],
   products: ExtractedProduct[],
@@ -38,9 +56,17 @@ export function proveAssociation(
 
   // strong: structured field match, JSON-LD before detail tables (richer identity).
   const ordered = [...products].sort((a, b) => (a.source === "json_ld" ? -1 : 1) - (b.source === "json_ld" ? -1 : 1));
+  let echoCandidate: AssociationProof | null = null;
   for (const p of ordered) {
     for (const v of vs) {
       if (p.gtins.some((g) => gtinMatches(v, g))) {
+        // A detail-table "gtin" on a search-style URL (?q=CODE) is the page echoing the query
+        // back, not a structured product record - it can never be strong. JSON-LD matches on the
+        // same URL are unaffected: structured product data is not an echo.
+        if (p.source === "detail_table" && isQueryEcho(url, v)) {
+          echoCandidate ??= { level: "weak", matchedVariant: v, matchedField: "detail_table_echo", product: p };
+          continue;
+        }
         return { level: "strong", matchedVariant: v, matchedField: `${p.source}.gtin`, product: p };
       }
       if (p.sku && v.length >= 6 && p.sku.toUpperCase() === v.toUpperCase()) {
@@ -48,6 +74,7 @@ export function proveAssociation(
       }
     }
   }
+  if (echoCandidate) return echoCandidate;
 
   // weak: somewhere in page text (may still ONLY produce suggested/needs_review upstream).
   // Short digit strings collide with order numbers, case ids, and phone numbers (live: 8-digit

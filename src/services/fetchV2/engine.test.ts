@@ -748,6 +748,7 @@ describe("fetchV2 pipeline", () => {
       "UPC Lookup for 0929712##### - Meros.io", // lookup-site echo (forensic)
       "225/65 R16 pneus auto achetez en ligne", // French category page (loop-10 live)
       "255/35 R18 große PKW Sommerreifen zum Hammerpreis bei uns im Shop", // German variant 2 (loop-10 live)
+      "Euro to US Dollar, EUR to USD conversion rates", // currency-widget headline (canary breach 749000000022)
     ];
     for (const title of junkTitles) {
       const r = await fetchV2(TIRE, walmartDeps({
@@ -770,6 +771,18 @@ describe("fetchV2 pipeline", () => {
     }));
     expect(r.outcome).not.toBe("verified");
     expect(r.outcome).not.toBe("suggested");
+  });
+
+  test("CANARY: an echo-table page from the pattern door can never produce an identity", async () => {
+    const html = `<html><head><title>Currency</title></head><body><h1>Euro to US Dollar, EUR to USD</h1><table><tr><th>UPC</th><td>749000000022</td></tr></table></body></html>`;
+    const r = await fetchV2("749000000022", {
+      fetchPage: async () => ({ ok: true, status: 200, html }),
+      discovery: [{ name: "m", search: async () => [] }],
+      patternUrls: () => ["https://go-upc.example.com/search?q=749000000022"],
+    });
+    expect(r.outcome).not.toBe("suggested");
+    expect(r.outcome).not.toBe("verified");
+    expect(r.product.name).toBe("");
   });
 
   test("escalates to the SECOND provider with a QUOTED query when no candidate carries the code", async () => {

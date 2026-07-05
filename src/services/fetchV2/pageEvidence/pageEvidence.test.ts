@@ -140,4 +140,16 @@ describe("proveAssociation", () => {
     const proof = proveAssociation(["12345678"], [], "part 9912345678001 is different", "https://x.example.com/");
     expect(proof.level).toBe("none");
   });
+
+  test("an echoed code in a table on a search-style URL is WEAK, never strong (canary breach)", () => {
+    const products = extractProducts(`<html><body><h1>Euro to US Dollar</h1><table><tr><th>UPC</th><td>749000000022</td></tr></table></body></html>`);
+    const proof = proveAssociation(["749000000022"], products, "", "https://go-upc.example.com/search?q=749000000022");
+    expect(proof.level).not.toBe("strong");
+  });
+
+  test("a detail-table gtin on a NON-search URL stays strong", () => {
+    const products = extractProducts(`<html><body><h1>Toyo Proxes R888R</h1><table><tr><th>UPC</th><td>4981910515661</td></tr></table></body></html>`);
+    const proof = proveAssociation(["4981910515661"], products, "", "https://tires.example.com/product/toyo-r888r");
+    expect(proof.level).toBe("strong");
+  });
 });
