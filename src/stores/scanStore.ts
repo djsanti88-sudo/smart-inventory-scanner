@@ -63,6 +63,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
+import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
@@ -445,6 +446,13 @@ export interface ScanState {
       selectedAliasCodes?: string[];
     },
   ) => void;
+  /** Build 3: batch-approve the Suggested pile. Chunks `reviewIds` (25/commit) and calls the EXACT same
+   *  path as the single-row "Approve suggestion" button (resolveUnknown "create_new", applyToCount: true,
+   *  origin: "human", newProduct built from the review's suggested* fields, selectedAliasCodes = every
+   *  discovered identifier) for each id - no new approval semantics, idempotency is resolveUnknown's own
+   *  open-status guard. A row that throws, has no open suggestion, or is already resolved/ignored is
+   *  recorded and the loop continues; it never aborts the rest of the batch. */
+  batchApprove: (reviewIds: string[]) => { approved: string[]; failed: Array<{ id: string; reason: string }> };
   /** Evaluate (without committing) whether linking a review's code to a product looks like a mistake. */
   evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
   /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
@@ -3262,6 +3270,69 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         } else {
           get().syncPending();
         }
+      },
+
+      batchApprove: (reviewIds) => {
+        const approved: string[] = [];
+        const failed: Array<{ id: string; reason: string }> = [];
+        const CHUNK_SIZE = 25;
+
+        for (let i = 0; i < reviewIds.length; i += CHUNK_SIZE) {
+          const chunk = reviewIds.slice(i, i + CHUNK_SIZE);
+          for (const reviewId of chunk) {
+            try {
+              const review = get().needsReviewQueue.find((r) => r.id === reviewId);
+              if (!review) {
+                failed.push({ id: reviewId, reason: "Review not found" });
+                continue;
+              }
+              // Idempotent: a review already resolved/ignored (this call or an earlier one) is silently
+              // skipped, exactly like resolveUnknown's own open-status guard - a re-click or a retried
+              // batch never double-counts and is not reported as a failure.
+              if (review.status !== "open") continue;
+              if (!review.hasSuggestion || !review.suggestedProductName) {
+                failed.push({ id: reviewId, reason: "No suggestion to approve" });
+                continue;
+              }
+
+              const discovered = buildDiscoveredIdentifiers(review);
+              get().resolveUnknown(reviewId, "create_new", {
+                applyToCount: true,
+                origin: "human",
+                newProduct: {
+                  name: review.suggestedProductName,
+                  brand: review.suggestedBrand,
+                  category: review.suggestedCategory,
+                  specsShort: review.suggestedSpecsShort,
+                  primarySku: review.suggestedPrimarySku,
+                  primaryBarcode: review.suggestedPrimaryBarcode || review.cleanCode,
+                  gtin: review.suggestedGtin,
+                  upc: review.suggestedUpc,
+                  ean: review.suggestedEan,
+                  imageUrl: review.suggestedImageUrl,
+                  productUrl: review.suggestedProductUrl,
+                },
+                // Default = every discovered identifier approved, matching the single-approve row's
+                // default UI state (all checked; the human unchecks to exclude) since batch approval
+                // has no per-row checkbox interaction.
+                selectedAliasCodes: discovered.map((d) => d.code),
+              });
+
+              // resolveUnknown silently no-ops on a guard it hit (e.g. a dedup conflict); only count this
+              // row as approved if it actually left the open state.
+              const after = get().needsReviewQueue.find((r) => r.id === reviewId);
+              if (after && after.status !== "open") {
+                approved.push(reviewId);
+              } else {
+                failed.push({ id: reviewId, reason: "Could not resolve automatically - needs manual review" });
+              }
+            } catch (e) {
+              failed.push({ id: reviewId, reason: e instanceof Error ? e.message : String(e) });
+            }
+          }
+        }
+
+        return { approved, failed };
       },
 
       evaluateLinkMismatch: (reviewId, productId) => {
