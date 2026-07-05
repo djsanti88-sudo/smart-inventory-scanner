@@ -9,10 +9,11 @@ import type { AiStatus } from "@/types";
 export function GptLadderPanel({ gptLadder }: { gptLadder: AiStatus["gptLadder"] }) {
   if (!gptLadder) return null;
   const { spentTodayUsd, capUsd, callsToday, enabled } = gptLadder;
+  const blockedReason = spentTodayUsd + 0.39 > capUsd ? "daily cap reached" : "no key";
   return (
     <p className="text-sm text-zinc-600" data-testid="gpt-ladder-status">
       GPT ladder today: ${spentTodayUsd.toFixed(2)} of ${capUsd.toFixed(2)}, {callsToday} calls,{" "}
-      {enabled ? "Enabled" : "Blocked"}.
+      {enabled ? "Enabled" : `Blocked (${blockedReason})`}.
     </p>
   );
 }

@@ -17,11 +17,16 @@ describe("GptLadderPanel", () => {
     expect(el.textContent).not.toContain("Blocked");
   });
 
-  it('shows "Blocked" when enabled is false', () => {
+  it('shows "Blocked (no key)" when disabled with budget headroom', () => {
     render(<GptLadderPanel gptLadder={{ spentTodayUsd: 0, capUsd: 3, callsToday: 0, enabled: false }} />);
     const el = screen.getByTestId("gpt-ladder-status");
-    expect(el.textContent).toContain("Blocked");
+    expect(el.textContent).toContain("Blocked (no key)");
     expect(el.textContent).not.toContain("Enabled");
+  });
+
+  it('shows "Blocked (daily cap reached)" when the next worst-case call would not fit', () => {
+    render(<GptLadderPanel gptLadder={{ spentTodayUsd: 2.75, capUsd: 3, callsToday: 9, enabled: false }} />);
+    expect(screen.getByTestId("gpt-ladder-status").textContent).toContain("Blocked (daily cap reached)");
   });
 
   it("formats dollar amounts to two decimal places even for sub-cent internal precision", () => {
