@@ -78,16 +78,17 @@ test("decoded tire fills Size / Brand / Part number with a clean description", a
   await expect(rowA.locator("td").nth(1)).toContainText("DEFENDER LTX M/S BSW"); // clean description
   await expect(rowA.locator("td").nth(1)).not.toContainText("235/65R18"); // size NOT dumped in the name cell
   await expect(rowA.locator("td").nth(2)).toContainText("Michelin"); // brand
-  await expect(rowA.locator("td").nth(4)).toContainText("235/65R18 104H"); // size in Specs
-  await expect(rowA.locator("td").nth(5)).toContainText("MICH-99812"); // part number
+  // Column index +1 vs pre-Task-4: a Model column was inserted between Brand and Category.
+  await expect(rowA.locator("td").nth(5)).toContainText("235/65R18 104H"); // size in Specs
+  await expect(rowA.locator("td").nth(6)).toContainText("MICH-99812"); // part number
 
   // Tire B: real tire, NO SKU -> Part number blank ("-"), not fabricated.
   await scan(page, "036625112233");
   const rowB = page.locator('[data-testid^="count-row-"]', { hasText: "Wildpeak" });
   await expect(rowB).toBeVisible();
   await expect(rowB.locator("td").nth(2)).toContainText("Falken");
-  await expect(rowB.locator("td").nth(4)).toContainText("275/55R20 113T");
-  await expect(rowB.locator("td").nth(5)).toHaveText("-"); // blank, NOT an invented part number
+  await expect(rowB.locator("td").nth(5)).toContainText("275/55R20 113T");
+  await expect(rowB.locator("td").nth(6)).toHaveText("-"); // blank, NOT an invented part number
 
   await page.screenshot({ path: `${PROOF}/tire-fields.png`, fullPage: true });
 });

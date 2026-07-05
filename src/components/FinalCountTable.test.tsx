@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import type { InventoryCount, Product } from "@/types";
@@ -31,7 +31,10 @@ describe("FinalCountTable role gating (Phase 6)", () => {
     delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER; // business / customer
     seed();
     render(<FinalCountTable />);
-    expect(screen.getByText("Test Widget")).toBeTruthy(); // product IS visible
+    // product IS visible (Task 4 adds a Model column that falls back to the raw name when no
+    // structured model exists yet - this fixture predates structuring - so it can legitimately
+    // appear twice: once as the Product name, once as the Model fallback).
+    expect(screen.getAllByText("Test Widget").length).toBeGreaterThan(0);
     expect(screen.queryByText("Barcode")).toBeNull();
     expect(screen.queryByText("Other codes scanned")).toBeNull();
     expect(screen.queryAllByText(/111222333444/).length).toBe(0); // raw barcode not leaked
@@ -66,5 +69,39 @@ describe("FinalCountTable role gating (Phase 6)", () => {
     expect(screen.queryByTestId("mark-wrong-p1")).toBeNull();
     expect(screen.queryByTestId("correct-p1")).not.toBeNull(); // Modify
     expect(screen.queryByTestId("remove-count-p1")).not.toBeNull(); // Delete
+  });
+});
+
+describe("FinalCountTable Brand/Model/Size columns + digits filter (Build 2 Task 4)", () => {
+  it("renders structured Brand/Model/Size and the digits filter narrows rows by sizeTag prefix", () => {
+    process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
+    const tireA: Product = {
+      ...product, id: "pA", name: "Cooper Discoverer AT3 205/55R16", brand: "Cooper",
+      structuredBrand: "Cooper", structuredModel: "Discoverer AT3", structuredDescription: "Cooper Discoverer AT3 205/55R16",
+      sizeTag: "2055516", structuredBy: "deterministic",
+    };
+    const tireB: Product = {
+      ...product, id: "pB", name: "Michelin Defender 225/45R17", brand: "Michelin",
+      structuredBrand: "Michelin", structuredModel: "Defender", structuredDescription: "Michelin Defender 225/45R17",
+      sizeTag: "2254517", structuredBy: "deterministic",
+    };
+    const cA: InventoryCount = { ...count, id: "cA", productId: "pA" };
+    const cB: InventoryCount = { ...count, id: "cB", productId: "pB" };
+    useScanStore.setState({ products: [tireA, tireB], finalCounts: [cA, cB] });
+    render(<FinalCountTable />);
+
+    expect(screen.getByTestId("brand-pA").textContent).toBe("Cooper");
+    expect(screen.getByTestId("model-pA").textContent).toBe("Discoverer AT3");
+    expect(screen.getByTestId("size-pA").textContent).toBe("2055516");
+    expect(screen.queryByTestId("count-row-pA")).not.toBeNull();
+    expect(screen.queryByTestId("count-row-pB")).not.toBeNull();
+
+    fireEvent.change(screen.getByTestId("polish-filter"), { target: { value: "205" } });
+    expect(screen.queryByTestId("count-row-pA")).not.toBeNull();
+    expect(screen.queryByTestId("count-row-pB")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("polish-filter"), { target: { value: "michelin" } });
+    expect(screen.queryByTestId("count-row-pA")).toBeNull();
+    expect(screen.queryByTestId("count-row-pB")).not.toBeNull();
   });
 });

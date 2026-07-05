@@ -63,6 +63,8 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
+import { structuredFieldsFor } from "@/services/polish/structuredFields";
+import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
 
 /** Result summary of a CSV product import (shown in the UI). */
@@ -2832,6 +2834,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     if (np.brand !== undefined) updates.brand = np.brand;
                     if (np.category !== undefined) updates.category = np.category;
                   }
+                  // Task 4: (re)structure only when the name/brand actually changed above; the guard
+                  // inside structuredFieldsFor never overwrites a row already stamped "human".
+                  Object.assign(updates, structuredFieldsFor(updates.name ?? p.name, updates.brand ?? p.brand, p.structuredBy));
                   return { ...p, ...updates };
                 });
               }
@@ -2870,6 +2875,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               provisional: weakGuessProduct ? true : false,
               updatedAt: now(),
               updatedBy: payload.origin === "human" ? "human" : orphan.updatedBy,
+              // Task 4: structure the upgraded identity (deterministic only, never LLM on the hot
+              // path). Guarded against clobbering a prior "human" stamp.
+              ...structuredFieldsFor(np.name ?? orphan.name, np.brand ?? orphan.brand, orphan.structuredBy),
             };
             products = products.map((p) => (p.id === provOrphanId ? upgraded : p));
             createdProduct = upgraded;
@@ -2884,11 +2892,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // NOTE: unlike the two provisional-reuse sites above, this fresh-mint site does NOT gate on
             // origin !== "human" (behavior preserved from before the extraction).
             weakGuessProduct = isWeakGuess(review, np);
+            const mintedName = np.name ?? review.cleanCode;
+            const mintedBrand = np.brand ?? "";
             const newProduct: Product = {
               id: productId,
               businessId: state.businessId,
-              name: np.name ?? review.cleanCode,
-              brand: np.brand ?? "",
+              name: mintedName,
+              brand: mintedBrand,
               category: np.category ?? "",
               specsShort: np.specsShort ?? "",
               specsFull: np.specsFull ?? "",
@@ -2913,6 +2923,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               updatedAt: now(),
               createdBy: "human",
               updatedBy: "human",
+              // Task 4: fresh mint - always deterministic-structure (no prior stamp to protect).
+              ...structuredFieldsFor(mintedName, mintedBrand),
             };
             products = [...products, newProduct];
             createdProduct = newProduct;
@@ -3396,6 +3408,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (fields[k] !== undefined) safe[k] = fields[k];
         }
         const updated: Product = { ...product, ...safe, updatedAt: now(), updatedBy: "human" };
+        // Task 4: a human editing the name or brand is a PERMANENT correction - stamp structuredBy
+        // "human" so no later automatic re-structuring (hot path or the offline backfill) ever
+        // overwrites it. Mirror the corrected brand into structuredBrand so the table's Brand column
+        // (which prefers structuredBrand) reflects the edit immediately rather than a stale value.
+        if (safe.name !== undefined || safe.brand !== undefined) {
+          updated.structuredBy = "human";
+          if (safe.brand !== undefined) updated.structuredBrand = safe.brand;
+        }
         const key = buildIdempotencyKey(state.businessId, state.sessionId, productId, "SAVE_PRODUCT");
         set((s) => ({ products: s.products.map((p) => (p.id === productId ? updated : p)) }));
         enqueueAndSync([
@@ -4008,7 +4028,7 @@ const appDeps: ScanStoreDeps = {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 5,
+    version: 6,
     storage: createJSONStorage(() => localStorage),
     skipHydration: true,
     // v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
@@ -4020,18 +4040,33 @@ export const useScanStore = create<ScanState>()(
     // (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
     // v5: auto-purge the poisoned duplicates (e.g. the ~235 "Manstel rivet kit" rows saved on the
     // non-matching code 745125495781) by resetting products/aliases to clean verified seed on next load.
-    migrate: (persisted: unknown) => {
+    // v6 (Task 4 backfill): THIS APP HAS NO SERVER-SIDE PRODUCT JSON/DB IN LOCAL/MOCK MODE - products
+    // live ONLY in this persisted browser state, so the "backfill" for real users runs here, at next
+    // load, instead of a script touching a file. Unlike v3/v5, a version-5 install is NOT reset (its
+    // products are real, not poisoned) - existing rows are kept and simply gain structured fields via
+    // the same skip-human-stamped rule as scripts/polish-backfill.mts (see backfillProducts.ts, shared
+    // by both). Only installs older than v5 still get the full poison-cleanup reset (unchanged), with
+    // structuring applied to the resulting seed as a no-op convenience.
+    migrate: (persisted: unknown, version: number) => {
       const p = (persisted ?? {}) as Record<string, unknown>;
-      const fresh = getSeed();
+      if (version < 5) {
+        const fresh = getSeed();
+        return {
+          ...p,
+          products: backfillProducts(fresh.products).products,
+          aliases: fresh.aliases,
+          scanFeed: [],
+          finalCounts: [],
+          needsReviewQueue: [],
+          pendingSyncQueue: [],
+          syncedScanEventIds: [],
+          settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
+        } as never;
+      }
+      const existingProducts = Array.isArray(p.products) ? (p.products as Product[]) : [];
       return {
         ...p,
-        products: fresh.products,
-        aliases: fresh.aliases,
-        scanFeed: [],
-        finalCounts: [],
-        needsReviewQueue: [],
-        pendingSyncQueue: [],
-        syncedScanEventIds: [],
+        products: backfillProducts(existingProducts).products,
         settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
       } as never;
     },

@@ -64,7 +64,8 @@ test("corroborated tire auto-counts on live scan; poison stays in Needs Review",
   await expect(row).toBeVisible();
   await expect(row.locator("td").nth(0)).toHaveText("1"); // qty 1
   await expect(row.locator("td").nth(2)).toContainText("Cooper"); // brand
-  await expect(row.locator("td").nth(4)).toContainText("LT245/75R16 120R"); // specs
+  // Column index +1 vs pre-Task-4: a Model column was inserted between Brand and Category.
+  await expect(row.locator("td").nth(5)).toContainText("LT245/75R16 120R"); // specs
   await page.screenshot({ path: `${PROOF}/auto-count-tire-01-counted.png`, fullPage: true });
 
   // 2. Scan the poison -> firewall blocks it: NOT counted, no rivet identity anywhere on the page.

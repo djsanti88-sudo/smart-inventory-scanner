@@ -12,7 +12,7 @@ import { test as base, expect } from "@playwright/test";
 // that module instantiates the persisted store, which touches `localStorage` and crashes in Node. Keep
 // in sync with DEFAULT_SETTINGS; only `scanContext` differs ("any" here vs "tire" in production).
 const PERSIST_KEY = "sis-scan-v1";
-const PERSIST_VERSION = 5;
+const PERSIST_VERSION = 6;
 
 const GENERIC_SETTINGS = {
   businessId: "demo-business",
