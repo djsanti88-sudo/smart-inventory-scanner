@@ -1072,4 +1072,33 @@ describe("fetchV2 pipeline", () => {
     });
     expect(r.outcome).toBe("verified");
   });
+
+  test("a third DISAGREEING labeled snippet blocks the door+snippet verified pair (recycled-code guard order)", async () => {
+    const C = "028400325042";
+    const html = `<html><head><title>Doritos Cool Ranch 9.25oz</title></head><body><h1>Doritos Cool Ranch Tortilla Chips 9.25 oz</h1><table><tr><th>UPC</th><td>${C}</td></tr></table></body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async (u: string) => u.includes("buycott") ? { ok: true, status: 200, html } : { ok: false, status: 403, html: "" },
+      discovery: [{ name: "brave", search: async () => [
+        { url: "https://www.grocer.example.com/p/1", title: "Doritos Cool Ranch Tortilla Chips 9.25 oz", snippet: `UPC ${C}`, rank: 0 },
+        { url: "https://www.other.example.net/p/2", title: "Charmin Ultra Soft Toilet Paper Mega Rolls", snippet: `UPC ${C}`, rank: 1 },
+      ] }],
+      patternUrls: () => ["https://buycott.example.com/product/" + C],
+    });
+    expect(r.outcome).toBe("needs_review");
+    expect(r.conflicts.length).toBeGreaterThan(0);
+  });
+
+  test("www vs bare domain is the SAME host: no false corroboration pair", async () => {
+    const C = "028400325042";
+    const html = `<html><head><title>Doritos Cool Ranch 9.25oz</title></head><body><h1>Doritos Cool Ranch Tortilla Chips 9.25 oz</h1><table><tr><th>UPC</th><td>${C}</td></tr></table></body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async (u: string) => u.includes("buycott") ? { ok: true, status: 200, html } : { ok: false, status: 403, html: "" },
+      discovery: [{ name: "brave", search: async () => [
+        // Same real site as the door page, just with www - must NOT count as an independent host.
+        { url: "https://www.buycott.example.com/product/" + C, title: "Doritos Cool Ranch Tortilla Chips 9.25 oz", snippet: `UPC ${C}`, rank: 0 },
+      ] }],
+      patternUrls: () => ["https://buycott.example.com/product/" + C],
+    });
+    expect(r.outcome).not.toBe("verified");
+  });
 });

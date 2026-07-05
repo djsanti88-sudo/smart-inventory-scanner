@@ -9,7 +9,7 @@ import { cleanBrand, evaluatePageJunk, usableIdentityName } from "./pageEvidence
 import { extractProducts, type ExtractedProduct } from "./pageEvidence/extract";
 import { proveAssociation } from "./pageEvidence/association";
 import { snippetFindings } from "./pageEvidence/snippetEvidence";
-import { scoreSource, decideOutcome, type SourceFinding } from "./scoring";
+import { scoreSource, decideOutcome, hostOf, type SourceFinding } from "./scoring";
 import { identityRelation } from "./siblingGuard";
 import { makeResult, type FetchV2Mode, type FetchV2Result } from "./types";
 import type { DiscoveryProvider, DiscoveryCandidate } from "./sources/discovery";
@@ -237,7 +237,7 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
       const query = i === 0 ? normalized.primary : `"${normalized.primary}"`;
       const got = await provider.search(query);
       sourcesChecked.push(`discovery:${provider.name}`);
-      if (i === 0) freeTitles.push(...got.map((g) => { let h = ""; try { h = new URL(g.url).hostname; } catch { /* keep "" */ } return { title: g.title, host: h }; }));
+      if (i === 0) freeTitles.push(...got.map((g) => ({ title: g.title, host: hostOf(g.url) })));
       const fresh = got.filter((g) => !candidates.some((c) => c.url === g.url));
       candidates = [...candidates, ...fresh];
       if (i > 0) exactMatchCandidates = [...exactMatchCandidates, ...fresh];
@@ -315,8 +315,7 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
     // existing path anyway).
     for (const f of findings) {
       if (f.association.level === "strong" && (f.product?.name ?? "").trim()) {
-        let fHost = "";
-        try { fHost = new URL(f.url).hostname; } catch { /* keep "" */ }
+        const fHost = hostOf(f.url);
         f.freeAgree = freeTitles.some(
           (t) => t.host !== fHost && identityRelation({ name: t.title, brand: "" }, { name: f.product!.name, brand: f.product!.brand ?? "" }) === "agree",
         );
