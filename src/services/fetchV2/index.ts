@@ -287,9 +287,11 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
     const ACTIVE_JUNK_RE = /search|echo|no-result|not-found|invalidat|recycled|only in the url|junk/i;
     const liveCand = (list: DiscoveryCandidate[]) =>
       list.filter((c) => !junkUrls.has(c.url) && !(deps.cache && ACTIVE_JUNK_RE.test(deps.cache.badUrlReason(c.url))));
+    // Quoted-door URLs live in BOTH lists; the contract-labeled copy must win the URL dedupe
+    // (live regression: CARiD's labeled finding was built and then discarded for its bare twin).
     const snips = [
-      ...snippetFindings(liveCand(candidates), normalized.all, normalized.primary),
       ...snippetFindings(liveCand(exactMatchCandidates), normalized.all, normalized.primary, { assumeCarrying: true }),
+      ...snippetFindings(liveCand(candidates), normalized.all, normalized.primary),
     ].filter((s, i, arr) => arr.findIndex((x) => x.url === s.url) === i);
     for (const s of snips) {
       const product: ExtractedProduct | null = s.name

@@ -628,6 +628,22 @@ describe("snippetFindings", () => {
     expect(out.map((s) => s.labeled)).toEqual([true, false]);
   });
 
+  test("a quoted-door result keeps its contract label through the URL dedupe (CARiD live regression)", async () => {
+    // The live bug: an escalation (quoted) result is pushed into BOTH candidate lists; the snips
+    // merge built the UNASSUMED copy first and the URL dedupe kept it, discarding the labeled one.
+    const TIRE = "054137070825";
+    const carid = { url: "https://www.carid.com/pirelli-tires/p-zero.html", title: "PIRELLI TIRES® 3245800 - P ZERO TROFEO R 245/35ZR19XL 93(Y)", snippet: `specs ${TIRE} in stock`, rank: 0 };
+    const r = await fetchV2(TIRE, {
+      fetchPage: async () => ({ ok: false, status: 403, html: "" }), // page is bot-blocked; the snippet is all we have
+      discovery: [
+        { name: "free", search: async () => [] },
+        { name: "escalation", search: async (q: string) => (q.startsWith('"') ? [carid] : []) },
+      ],
+    });
+    expect(r.outcome).toBe("suggested");
+    expect(r.product.name).toContain("TROFEO");
+  });
+
   test("a single BARE-number snippet cannot be the sole identity (labeled can)", async () => {
     const TIRE = "054137070825";
     const mk = (snippet: string) => walmartDeps({
@@ -1044,13 +1060,12 @@ describe("fetchV2 pipeline", () => {
       ],
     }));
     expect(queries).toEqual([`"${TIRE}"`, TIRE, `"${TIRE}"`]);
-    // This fixture's snippet is a bare, unlabeled number from a single host - under the separate,
-    // already-tested barcode-label-context rule (owner rule 2026-07-05; see "a single BARE-number
-    // snippet cannot be the sole identity" above) that alone can never reach "suggested" regardless
-    // of the quoted exact-match contract, since the code IS visible here (the contract only backstops
-    // truly invisible matches - see snippetEvidence.ts). The regression this test guards is the
-    // retry/query-count behavior above, which still holds.
-    expect(r.outcome).toBe("unknown");
+    // The quoted contract labels this result whether the snippet shows the code or hides it
+    // (CARiD live regression: visible-but-unlabeled on a quoted result was punished relative to
+    // the invisible twin fixture above). Negative context (MLS/listing/item#) still vetoes; a
+    // bare number on an UNQUOTED result still cannot suggest (locked separately below).
+    expect(r.outcome).toBe("suggested");
+    expect(r.product.name).toMatch(/contisportcontact/i);
   });
 
   test("a single visible bare-number snippet still cannot be the sole identity", async () => {
