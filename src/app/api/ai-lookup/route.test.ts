@@ -133,13 +133,12 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
   }, 40000);
 
-  // --- GPT-5.5 ladder rung wiring (route-level; Task 3 review fixes) -----------------------------
-  // These codes are deliberately 8-digit NUMERIC (detectCodeType -> "numeric_sku", not upc_a/ean_13/
-  // gtin_14) so the earlier Plan-D fast resolver (resolveUnknownFast, gated to PUBLIC barcode types)
-  // never short-circuits computeDecode before the ladder rung at the end - a real public barcode is
-  // ALWAYS terminal in that fast resolver (it has a generic "Unidentified item" floor fallback), so a
-  // 12/13/14-digit code would never reach the ladder in this harness. A non-public code type still
-  // clears shouldRunGptRung's codeType gate (only vendor_label/FNSKU-shaped codes are blocked).
+  // --- GPT-5.5 ladder rung wiring (route-level; Task 3 review fixes + Task 3b) -------------------
+  // The first block of tests uses 8-digit NUMERIC codes (detectCodeType -> "numeric_sku"): those skip
+  // the Plan-D fast resolver (public-barcode-gated) and exercise the rung at computeDecode's FINAL
+  // exit. The Task 3b block below uses REAL 12-digit UPCs (upc_a) that end at Plan D's generic
+  // "Unidentified item" floor and exercises the rung at the Plan D early-return exit - the fix that
+  // made the rung reachable for public barcodes at all.
 
   /** Build a Responses-API-shaped body carrying the given JSON as the model's output_text. */
   function responsesBody(parsed: Record<string, unknown>, usage = { input_tokens: 200, output_tokens: 100 }) {
@@ -276,4 +275,86 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       nowSpy.mockRestore();
     }
   }, 60000);
+
+  // --- Task 3b: the rung is reachable from the Plan D early return (REAL public 12-digit UPCs) ----
+  // Plan D (resolveUnknownFast) is TERMINAL for public barcodes: it always returns at least the
+  // generic "Unidentified item (barcode X)" floor, never null, so before Task 3b the GPT ladder rung
+  // at computeDecode's final exit was UNREACHABLE for every real upc_a/ean_13/gtin_14 scan.
+  // NOTE on the test code: the coordinator-prescribed 848983006257 is an exact TIRE-CORPUS row in
+  // this repo (tireKnowledge.generated.json) - it terminates VERIFIED at the corpus rung (locked by
+  // decode-corpus.test.ts) and the ladder must correctly never fire for it. These tests instead use
+  // 12-digit UPCs whose prefix maps to NOTHING in the catalog prefix index (verified against
+  // brandPrefixMap.json + derivedPrefixMap.json), so corpus/retail/Plan D all miss and Plan D ends at
+  // the generic unresolved floor (needs_review) - the exact scenario the fix must catch.
+
+  it("Task 3b: GPT rung fires for a REAL 12-digit UPC that ends at Plan D's unresolved floor, and REPLACES the floor", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    const verifiedBody = responsesBody({
+      brand: "Acme", productName: "Acme Widget Pro 500", specs: "500 ml", gtin: "",
+      confidence: 0.9, exactCodeFound: true, basis: "exact code found on a real page", sourceUrls: [],
+    });
+    fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
+        return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const res = await POST(makeRequest({ cleanCode: "111000222777", mode: "decode" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // The code DID travel the Plan D path (floor produced), and the GPT verified self-report REPLACED it.
+    expect(json.providerNames).toContain("parallel:floor");
+    expect(json.providerNames).toContain("gpt-5.5-ladder");
+    expect(json.decision.status).toBe("verified");
+    expect(json.decision.corroborationPath).toBe("gpt_self_report");
+    expect(json.reasonCode).toBe("gpt_ladder");
+    expect(json.results[0].productName).toBe("Acme Widget Pro 500");
+    expect(fetchSpy.mock.calls.some(([u, init]) => String(u).includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5")).toBe(true);
+  }, 40000);
+
+  it("Task 3b: GPT HTTP 500 on the Plan D floor preserves the floor result untouched and records worst-case spend", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("api.openai.com/v1/responses")) {
+        return new Response("Internal Server Error", { status: 500 });
+      }
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const res = await POST(makeRequest({ cleanCode: "111000222778", mode: "decode" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // The ladder ran (endpoint contacted) but produced a none-tier - Plan D's floor is NOT clobbered.
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com/v1/responses"))).toBe(true);
+    expect(json.decision.status).toBe("needs_review");
+    expect(json.reasonCode).not.toBe("gpt_ladder");
+    expect(json.providerNames).toEqual(["parallel:floor"]);
+    expect(json.results[0].productName).toBe("Unidentified item (barcode 111000222778)");
+    // Cost truth: a failed call is still billed - the worst case must land in the spend file.
+    const spend = JSON.parse(fs.readFileSync(tmpGptLadderFile, "utf8"));
+    expect(spend[gptLadderTodayKey()].spentUsd).toBe(0.39);
+  }, 40000);
+
+  it("Task 3b: a 12-digit UPC with NO key still ends at the floor with a visible ladder skip (no endpoint call)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    // beforeEach already deletes OPENAI_API_KEY.
+    const res = await POST(makeRequest({ cleanCode: "111000222779", mode: "decode" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.providerNames).toEqual(["parallel:floor"]);
+    expect(json.debug.gptLadderSkipReason).toBe("no_api_key");
+    expect(
+      json.providerStatuses.some(
+        (s: { provider: string; status: string; errorCode?: string }) =>
+          s.provider === "gpt-5.5-ladder" && s.status === "skipped" && s.errorCode === "no_api_key",
+      ),
+    ).toBe(true);
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com/v1/responses"))).toBe(false);
+  }, 40000);
 });
