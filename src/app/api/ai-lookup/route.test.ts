@@ -28,7 +28,7 @@ const AI_PROVIDER_HOSTS = ["generativelanguage.googleapis.com", "api.openai.com"
 
 describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "AI_LOOKUP_GET_RATE_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_LADDER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "AI_LOOKUP_GET_RATE_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_LADDER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "GPT_LADDER_DAILY_USD"];
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
   let tmpGptLadderFile: string;
@@ -500,6 +500,8 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect((await first.json()).decision.status).toBe("verified");
     const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
     expect(stored[code].kind).toBe("result");
+    // IMPORTANT 3 (review): a GPT-ladder result must record which PAID stage produced it.
+    expect(stored[code].sourceTier).toBe("gpt_ladder");
     expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
 
     const ladderCallsBefore = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
@@ -521,4 +523,123 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(res.status).toBe(200);
     expect(fs.existsSync(tmpDecodeCacheFile), "E2E must never create the persistent cache file").toBe(false);
   });
+
+  // --- Review fixes (post-Task-4): CRITICAL 1, CRITICAL 2, IMPORTANT 3 ----------------------------
+
+  // CRITICAL 1 lock: forceRetry must burn a daily-cap slot even when L1 (in-memory decodeCache) is still
+  // warm. Before the fix, the cap-check condition only looked at `getDecodeCache(code) === undefined &&
+  // !persistedHit` - both false with a warm L1 entry - so the cap check was SKIPPED. But
+  // `withDecodeCache(..., { forceRefresh: forceRetry })` bypasses L1 UNCONDITIONALLY, so the provider(s)
+  // genuinely ran again for FREE (zero cap slots burned). This test deliberately does NOT call
+  // clearDecodeCache() between the two POSTs, so a warm L1 entry is exactly what forceRetry must see.
+  it("CRITICAL 1: forceRetry burns a daily-cap slot even with a warm L1 entry (no clearDecodeCache)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    // A REAL public 12-digit UPC whose prefix maps to nothing (same family as the Task 3b codes above) -
+    // Plan D is TERMINAL for it, so the GPT ladder rung fires EXACTLY ONCE per compute at the Plan D
+    // exit (no legacy fast+escalation race to entangle the call count with, unlike a numeric_sku code).
+    const code = "111000222990";
+    let openaiCallCount = 0;
+    const verifiedBody = responsesBody({
+      brand: "Acme", productName: "Acme ForceRetry Widget", specs: "", gtin: "",
+      confidence: 0.9, exactCodeFound: true, basis: "exact code found on a real page", sourceUrls: [],
+    });
+    fetchSpy = vi.fn(async (url: string) => {
+      if (String(url).includes("api.openai.com/v1/responses")) {
+        openaiCallCount++;
+        // First call: ends non-verified (tier none) so L1 caches it with the short miss TTL (still
+        // warm - not expired - for the immediately-following forceRetry POST below). Second (forceRetry)
+        // call: returns a verified hit, proving the provider genuinely re-ran.
+        if (openaiCallCount === 1) return new Response("Internal Server Error", { status: 500 });
+        return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
+    expect(first.status).toBe(200);
+    const firstJson = await first.json();
+    expect(firstJson.decision.status).not.toBe("verified");
+    expect(openaiCallCount, "sanity: the ladder genuinely ran once on the first POST").toBe(1);
+    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+
+    // Deliberately NO clearDecodeCache() here: L1's short-TTL miss entry for `code` is still warm.
+    const retried = await POST(makeRequest({ cleanCode: code, mode: "decode", forceRetry: true }));
+    expect(retried.status).toBe(200);
+    const retriedJson = await retried.json();
+    expect(retriedJson.decision.status, "forceRetry must genuinely bypass the warm L1 entry").toBe("verified");
+    expect(openaiCallCount, "forceRetry must genuinely re-call the provider despite warm L1").toBe(2);
+    expect(dailyUsage({ file: tmpCounter }).count, "forceRetry must burn its own daily-cap slot, even with a warm L1 entry").toBe(2);
+  }, 60000);
+
+  // CRITICAL 2 lock (doctrine correction): a code blocked by the GPT ladder's OWN dollar budget was
+  // NEVER PROBED - it must NOT become a permanent no_result_receipt (that would freeze the code forever,
+  // surviving past the daily budget resetting tomorrow, with no automatic recovery). A second POST, once
+  // the budget allows, must genuinely re-attempt the ladder rather than short-circuit on a stale receipt.
+  it("CRITICAL 2: a budget-blocked ladder outcome leaves NO permanent receipt; a later POST re-attempts once budget allows", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    process.env.OPENAI_API_KEY = "test-openai-key";
+    process.env.GPT_LADDER_DAILY_USD = "0"; // worst-case reservation (0.39) always exceeds a 0 cap
+    // A REAL public 12-digit UPC whose prefix maps to nothing - Plan D is TERMINAL for it, so there is
+    // NO legacy fast+escalation race to entangle with (a numeric_sku code would trigger a legitimate
+    // OpenAI escalation call unrelated to the ladder, which is not what this test is about).
+    const code = "111000222992";
+
+    const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
+    expect(first.status).toBe(200);
+    const firstJson = await first.json();
+    expect(firstJson.decision.status).toBe("needs_review");
+    expect(firstJson.debug.gptLadderSkipReason).toBe("budget_exceeded");
+    // The ladder endpoint was never even contacted (budget check short-circuits before the call).
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com/v1/responses"))).toBe(false);
+    // No permanent receipt: the persistent cache file must not have gained an entry for this code.
+    let storedAfterFirst: Record<string, unknown> = {};
+    try { storedAfterFirst = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8")); } catch { /* file never created is also valid proof */ }
+    expect(storedAfterFirst[code], "a budget-blocked code must never receive a permanent receipt").toBeUndefined();
+
+    // Raise the budget and simulate a fresh attempt (L1's short miss TTL would otherwise replay the same
+    // needs_review without proving anything about L2 - clearDecodeCache proves this is genuinely NOT
+    // gated by any persisted receipt).
+    delete process.env.GPT_LADDER_DAILY_USD;
+    clearDecodeCache();
+    const verifiedBody = responsesBody({
+      brand: "Acme", productName: "Acme Budget-Recovered Widget", specs: "", gtin: "",
+      confidence: 0.9, exactCodeFound: true, basis: "exact code found on a real page", sourceUrls: [],
+    });
+    fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
+        return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
+    expect(second.status).toBe(200);
+    const secondJson = await second.json();
+    expect(secondJson.decision.status, "the ladder must genuinely re-attempt, not be blocked by a stale receipt").toBe("verified");
+    expect(secondJson.debug.persistedCacheHit, "there was no receipt to replay").not.toBe(true);
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com/v1/responses"))).toBe(true);
+  }, 60000);
+
+  // IMPORTANT 3 lock (a): a FREE-rung result (tire corpus) must NEVER be written to L2, even though it
+  // is "verified". A permanent L2 cache entry for a free rung would mask a future corpus correction
+  // forever, for zero cost benefit (nothing paid was spent to justify durability).
+  it("IMPORTANT 3(a): a tire-corpus hit (free rung) is verified but writes NO L2 entry", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const KNOWN_TIRE_BARCODE = "848983006257"; // committed corpus row (see decode-corpus.test.ts)
+    const res = await POST(makeRequest({ cleanCode: KNOWN_TIRE_BARCODE, mode: "decode" }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.decision.status).toBe("verified");
+    expect(json.providerNames).toEqual(["tire-corpus"]);
+    // No persistDecode call ever happened for this code -> the file was never created (or, if some
+    // other assertion in this suite ever shares a file, at minimum has no entry for this code).
+    expect(fetchSpy).not.toHaveBeenCalled();
+    let stored: Record<string, unknown> = {};
+    try { stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8")); } catch { /* file never created is also valid proof */ }
+    expect(stored[KNOWN_TIRE_BARCODE], "a free-rung (tire-corpus) result must never be persisted to L2").toBeUndefined();
+  }, 20000);
 });

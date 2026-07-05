@@ -127,6 +127,31 @@ function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
 }
 
+// Task 4 review fix (IMPORTANT 3): the L2 persistent decode cache must persist a "result" ONLY when the
+// outcome came from a PAID stage. Free/instant rungs - the tire corpus, the Turso retail index, and the
+// Plan D grounding-first fast resolver - must NEVER be persisted: a wrong free-rung guess would become a
+// PERMANENT wrong answer that masks future corpus corrections forever ("wrong product identity is
+// FAILURE" doctrine), for zero cost benefit (nothing paid was spent to justify a durable cache entry).
+//
+// Discriminator: reasonCode "gpt_ladder" is unambiguous - BOTH computeDecode exits (the Plan D early
+// return and the final return) set it only when the paid GPT-5.5 ladder rung itself resolved the code.
+// Otherwise, "paid_ai" is detected from the literal provider-name strings that ONLY the legacy
+// fast/escalation/deep-fallback path ever pushes into providerNames: "gemini"/"openai" (decodeProviders /
+// escalationProviders - the default AiProvider names from createGeminiProvider/createOpenAiProvider),
+// "gemini:read"/"openai:read" (the pageReader's label override, used by enrichWithPageFetch to read a
+// fetched page), and "ai-deep"/"ai-cited-deep"/"firecrawl" (the Stage-2 deep fallback finders). Neither
+// the tire-corpus exit (providerNames come from TireKnowledgeProvider, e.g. "tire-corpus") nor the Plan D
+// exit (providerNames are always "parallel:<source>", e.g. "parallel:groundIdentify") ever emits any of
+// these literal strings - even though Plan D's own internals may call a paid grounding/Firecrawl API, it
+// is explicitly classified as a free/local rung for L2-persistence purposes per the review brief, so it
+// correctly falls through to "not paid" (null) here regardless of what it calls internally.
+const PAID_AI_PROVIDER_MARKERS = new Set(["gemini", "openai", "gemini:read", "openai:read", "ai-deep", "ai-cited-deep", "firecrawl"]);
+function classifySourceTier(reasonCode: string, providerNames: string[]): "paid_ai" | "gpt_ladder" | null {
+  if (reasonCode === "gpt_ladder") return "gpt_ladder";
+  if (providerNames.some((n) => PAID_AI_PROVIDER_MARKERS.has(n))) return "paid_ai";
+  return null;
+}
+
 /** Fill in the full GptFromScratchResult shape from a Playwright test-fixture body (E2E only). */
 function normalizeMockGptLadder(raw: Partial<GptFromScratchResult> | undefined): GptFromScratchResult | null {
   if (!raw || typeof raw !== "object") return null;
@@ -374,7 +399,12 @@ export async function POST(request: Request) {
     // repeat scan (L1 or L2) makes ZERO provider calls, so it must not consume a cap slot nor be
     // blocked once the cap trips (the cap bounds genuine compute runs, not free repeats). The per-IP
     // rate limit above still throttles floods of cached hits. Skipped under E2E mock mode (no real spend).
-    if (!e2eMode() && getDecodeCache(code) === undefined && !persistedHit) {
+    // CRITICAL FIX (review): forceRetry ALWAYS burns a slot, even with a warm L1 entry. Before this fix
+    // the condition only looked at getDecodeCache(code)/persistedHit, but withDecodeCache below is called
+    // with { forceRefresh: forceRetry } which bypasses L1 UNCONDITIONALLY - so a forceRetry with a warm L1
+    // entry recomputed (real provider calls) while burning ZERO daily-cap slots. forceRetry must count as
+    // "genuinely going to compute" regardless of cache state.
+    if (!e2eMode() && (forceRetry || (getDecodeCache(code) === undefined && !persistedHit))) {
       const cap = checkAndIncrementDaily();
       if (!cap.allowed) {
         return Response.json(
@@ -469,16 +499,21 @@ export async function POST(request: Request) {
     // no_result_receipt) vs a TRANSIENT skip that must stay retryable on the next scan. Genuine
     // exhaustion is exactly: the GPT rung actually ran and returned tier "none" (payload null, no skip
     // reason - the rung was never short-circuited) or "info_only" (payload present but never auto-count
-    // worthy), OR the rung was blocked by its OWN dollar budget ("budget_exceeded"). Every other skip
-    // (no_api_key, non_public_code_type, e2e_mode, request_budget_exhausted, or the ladder itself
-    // already resolving the code) is transient and must NOT create a receipt.
+    // worthy). Every other skip is transient and must NOT create a receipt.
+    // DOCTRINE CORRECTION (review, supersedes Task 4's original "budget_exceeded is eligible" rule): a
+    // receipt certifies "the ladder was fully probed and every door came back empty." A code blocked by
+    // the ladder's OWN dollar budget was NEVER probed at all - it is exactly as unresolved as a missing
+    // API key or an e2e run, and the daily budget resets tomorrow. Treating "budget_exceeded" as eligible
+    // would permanently freeze every code unlucky enough to arrive right when the daily cap was tight,
+    // with no automatic recovery once the cap resets (only a manual forceRetry would ever revisit it).
+    // "budget_exceeded" therefore now falls into the same transient/not-eligible bucket as no_api_key,
+    // non_public_code_type, e2e_mode, and request_budget_exhausted (all `ladder.surfaceSkip === true`).
     const classifyReceipt = (ladder: { payload: ReturnType<typeof gptResultToDecodePayload>; skipReason?: string; surfaceSkip: boolean }): { eligible: boolean; reason?: string } => {
       if (ladder.payload && (ladder.payload.decision.status === "verified" || ladder.payload.decision.status === "suggested")) {
         return { eligible: false }; // resolved by the ladder itself
       }
       if (ladder.payload) return { eligible: true, reason: "gpt_info_only" }; // ran, tier info_only
-      if (ladder.skipReason === "budget_exceeded") return { eligible: true, reason: "budget_exceeded" };
-      if (ladder.surfaceSkip) return { eligible: false }; // transient: no key / non-public / e2e / request budget exhausted
+      if (ladder.surfaceSkip) return { eligible: false }; // transient: no key / non-public / e2e / request budget exhausted / OWN dollar budget exhausted
       if (!ladder.skipReason) return { eligible: true, reason: "gpt_none" }; // ran, tier none
       return { eligible: false }; // prior_status_already_decided (resolved before the ladder ran)
     };
@@ -905,18 +940,24 @@ export async function POST(request: Request) {
       ? { value: await computeDecode(), cached: false }
       : await withDecodeCache(code, hasUsable, computeDecode, { forceRefresh: forceRetry });
 
-    // L2 WRITE-THROUGH (Task 4): only on a genuinely fresh compute (cached === false) - a repeat served
-    // straight from L1 must never re-persist. Never touches the store under E2E. verified/suggested ->
-    // permanent "result" (a later decode of this code replays it with zero provider work, in ANY
-    // serverless instance, not just this one). A genuinely exhausted ladder (classifyReceipt, tracked in
-    // receiptState from whichever exit ran the ladder) -> permanent "no_result_receipt". Anything else
-    // (needs_review from a transient skip, or a conflict) is left untouched - it stays retryable exactly
-    // like today's short-TTL L1 miss cache. forceRetry's fresh compute overwrites whatever was there
-    // (persistDecode is an upsert by code).
+    // L2 WRITE-THROUGH (Task 4; IMPORTANT 3 review fix): only on a genuinely fresh compute
+    // (cached === false) - a repeat served straight from L1 must never re-persist. Never touches the
+    // store under E2E. verified/suggested -> permanent "result" ONLY when classifySourceTier says the
+    // outcome came from a PAID stage (a later decode of this code then replays it with zero provider
+    // work, in ANY serverless instance, not just this one); a free-rung win (tire corpus / Turso retail /
+    // Plan D) is intentionally left UNPERSISTED so a future corpus/index correction is never masked by a
+    // stale permanent cache entry. A genuinely exhausted ladder (classifyReceipt, tracked in receiptState
+    // from whichever exit ran the ladder) -> permanent "no_result_receipt". Anything else (needs_review
+    // from a transient skip, or a conflict) is left untouched - it stays retryable exactly like today's
+    // short-TTL L1 miss cache. forceRetry's fresh compute overwrites whatever was there (persistDecode is
+    // an upsert by code).
     if (!e2eMode() && !cached) {
       const status = payload.decision.status;
       if (status === "verified" || status === "suggested") {
-        await persistDecode({ code, kind: "result", payload: JSON.stringify(payload), tier: status, createdAt: Date.now() });
+        const sourceTier = classifySourceTier(payload.reasonCode, payload.providerNames);
+        if (sourceTier) {
+          await persistDecode({ code, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
+        }
       } else if (receiptState.eligible) {
         await persistDecode({ code, kind: "no_result_receipt", payload: JSON.stringify(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
       }
