@@ -108,10 +108,23 @@ function containment(a: Set<string>, b: Set<string>): number {
   return inTokens / small.size;
 }
 
+/** One company, many brand-name forms ("Grabill" / "Grabill Country Meat(s)"): compatible when the
+ *  shorter brand's tokens all appear in the longer (singular/plural-tolerant). Disjoint brands
+ *  (Kroger vs Grabill) stay incompatible - a false "compatible" only defers to the name checks,
+ *  which keep their own thresholds; a false "incompatible" kills a correct verify outright. */
+function brandsCompatible(brandA: string, brandB: string): boolean {
+  if (!brandA || !brandB || brandA === brandB) return true;
+  const toks = (s: string) =>
+    new Set(s.replace(/[^a-z0-9]+/gi, " ").toLowerCase().split(" ").filter((t) => t.length > 1).map((t) => t.replace(/s$/, "")));
+  const [small, big] = ((x: Set<string>, y: Set<string>) => (x.size <= y.size ? [x, y] : [y, x]))(toks(brandA), toks(brandB));
+  if (small.size === 0) return true;
+  return [...small].every((t) => big.has(t));
+}
+
 export function identityRelation(a: IdentityCandidate, b: IdentityCandidate): IdentityRelation {
   const brandA = (a.brand ?? "").trim().toLowerCase();
   const brandB = (b.brand ?? "").trim().toLowerCase();
-  if (brandA && brandB && brandA !== brandB) return "unrelated";
+  if (brandA && brandB && !brandsCompatible(brandA, brandB)) return "unrelated";
   const ta = tokensOf(a.name);
   const tb = tokensOf(b.name);
   const sa = sizesOf(a.name);

@@ -65,6 +65,26 @@ describe("detectSiblingAmbiguity", () => {
     }
   });
 
+  test("brand-family name forms are compatible, not a brand conflict (Grabill live flip, v2.3 batch 3)", () => {
+    // One company, many brand-name forms ("Grabill Country" / "Grabill Country Meat(s)"). The old
+    // exact-string brand gate returned "unrelated" before name containment could ever run.
+    expect(identityRelation(
+      { name: "Beef Chunks", brand: "Grabill Country Meat" },
+      { name: "Grabill Country Meats Beef Chunks, 27 oz", brand: "Grabill Country" },
+    )).toBe("agree");
+    expect(identityRelation(
+      { name: "Beef Chunks", brand: "Grabill" },
+      { name: "Grabill Country Meats Beef Chunks, 27 oz", brand: "Grabill Country Meats" },
+    )).toBe("agree");
+  });
+
+  test("genuinely DISJOINT brands still conflict even with similar names", () => {
+    expect(identityRelation(
+      { name: "Beef Chunks 27 oz", brand: "Kroger" },
+      { name: "Beef Chunks, 27 oz", brand: "Grabill Country Meat" },
+    )).toBe("unrelated");
+  });
+
   test("grams-serving vs oz-pack is NOT a size conflict (Mt Olive live row)", () => {
     const v = detectSiblingAmbiguity([
       { name: "Mt Olive Hot Banana Pepper Rings, 12 oz", brand: "" },
