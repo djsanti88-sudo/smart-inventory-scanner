@@ -214,7 +214,8 @@ async function main() {
     cache,
     patternUrls: (variants) => {
       const code = variants.find((v) => /^\d{12,14}$/.test(v)) ?? variants[0];
-      return selectBarcodeUrls(code).slice(0, 2);
+      const all = selectBarcodeUrls(code); // already tiered by GTIN class
+      return all.slice(0, 4);
     },
   };
   let pool = fixture.codes;

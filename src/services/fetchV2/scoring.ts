@@ -90,11 +90,33 @@ export function decideOutcome(identifier: FetchV2Identifier, findings: SourceFin
   if (identifier.isPublicBarcode && identifier.checkDigitValid !== false) {
     const strongSource = strongAssoc.find((f) => f.quality === "strong");
     const mediumPlus = strongAssoc.filter((f) => f.quality === "strong" || f.quality === "medium");
-    // Corroboration = two code-tied sources on DIFFERENT hosts whose identities AGREE
-    // (host distinctness alone is not agreement - that hole was masked by the old guard).
-    const corroborated = mediumPlus.some((a, i) =>
-      mediumPlus.some((b, j) => j > i && hostOf(a.url) !== hostOf(b.url) && identityRelation(ident(a), ident(b)) === "agree"),
+    // Pairing pool for corroboration: strong-assoc medium/strong findings (pages that TIED the
+    // code to a product record) PLUS labeled snippet findings (a barcode label sat next to the
+    // code in a search result, and it carries a named identity). A pattern-door page (e.g. a
+    // barcode-DB host outside the narrow vetted list) can pair with such a snippet on a different
+    // host that agrees - two labeled snippets ALONE must never pair here; that would bypass the
+    // dedicated 3-host snippet-consensus rule below, which demands more independent agreement.
+    const labeledSnips = valid.filter(
+      (f) => f.association.matchedField === "search_snippets" && f.labeled === true && (f.product?.name ?? "").trim(),
     );
+    const pairPool = [...mediumPlus, ...labeledSnips];
+    // Corroboration = two code-tied sources on DIFFERENT hosts whose identities AGREE, with AT
+    // LEAST ONE side a strong-assoc medium/strong finding (host distinctness alone is not
+    // agreement - that hole was masked by the old guard; two labeled snippets alone must never
+    // pair here, that is the dedicated 3-host snippet-consensus rule below). The winner of a
+    // corroborated pair is always the strong-assoc mediumPlus side.
+    let corroboratedWinner: SourceFinding | null = null;
+    for (let i = 0; i < pairPool.length && !corroboratedWinner; i++) {
+      for (let j = i + 1; j < pairPool.length; j++) {
+        const a = pairPool[i];
+        const b = pairPool[j];
+        if (hostOf(a.url) === hostOf(b.url)) continue;
+        if (identityRelation(ident(a), ident(b)) !== "agree") continue;
+        if (mediumPlus.includes(a)) { corroboratedWinner = a; break; }
+        if (mediumPlus.includes(b)) { corroboratedWinner = b; break; }
+      }
+    }
+    const corroborated = corroboratedWinner !== null;
 
     if (mode === "strict") {
       if (strongSource && corroborated) {
@@ -123,7 +145,7 @@ export function decideOutcome(identifier: FetchV2Identifier, findings: SourceFin
       }
       if (mode === "balanced" && corroborated) {
         rules.push("balanced: two independent medium sources agree");
-        return { outcome: "verified", confidence: 0.85, winner: mediumPlus[0], conflicts: [], rulesFired: rules };
+        return { outcome: "verified", confidence: 0.85, winner: corroboratedWinner, conflicts: [], rulesFired: rules };
       }
     }
   } else if (!identifier.isPublicBarcode) {
