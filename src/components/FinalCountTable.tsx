@@ -1,13 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { SyncBadge } from "@/components/badges";
 import { plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
+import { filterProducts } from "@/services/polish/filterProducts";
 import type { InventoryCount, Product } from "@/types";
+
+// Task 4 (product-name polish): resolves the display Brand / Model / Size for one row, preferring
+// the deterministic-structurer fields and falling back to the existing product.brand/name/specsShort
+// so older (pre-structuring) products still render sensibly.
+function resolvedBrand(product: Product): string {
+  return product.structuredBrand || product.brand;
+}
+function resolvedModel(product: Product): string {
+  return product.structuredModel || product.name;
+}
+function resolvedSizeTag(product: Product): string {
+  return product.sizeTag || plainTireSizeDigits(product.specsShort);
+}
 
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). Raw codes (barcode +
 // aliases) are platformOwner-only. Row actions let the owner fix a wrong saved decode safely:
@@ -17,23 +31,48 @@ export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
   const getProduct = useScanStore((s) => s.getProduct);
   const isPlatform = useIsPlatformOwner();
+  const [filterQuery, setFilterQuery] = useState("");
 
   const rows = finalCounts
     .map((c) => ({ count: c, product: getProduct(c.productId) }))
     .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
     .sort((a, b) => b.count.quantity - a.count.quantity);
 
+  // Task 4: digits-only query filters by sizeTag prefix; any other text filters brand/model/description.
+  const visibleRows = useMemo(() => {
+    const filterable = rows.map((r) => ({
+      id: r.count.id,
+      brand: resolvedBrand(r.product),
+      model: resolvedModel(r.product),
+      description: r.product.structuredDescription || r.product.name,
+      sizeTag: resolvedSizeTag(r.product),
+    }));
+    const kept = new Set(filterProducts(filterable, filterQuery).map((f) => f.id));
+    return rows.filter((r) => kept.has(r.count.id));
+  }, [rows, filterQuery]);
+
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
         <h2 id="counts-heading" className="text-lg font-semibold text-zinc-900">Your counts</h2>
-        <span className="text-sm text-zinc-600">{rows.length} products</span>
+        <span className="text-sm text-zinc-600">{visibleRows.length} of {rows.length} products</span>
       </div>
       {isPlatform && (
         <div className="px-4 pt-3">
           <UndoDeleteBanner />
         </div>
       )}
+      <div className="px-4 pt-3">
+        <input
+          type="text"
+          data-testid="polish-filter"
+          value={filterQuery}
+          onChange={(e) => setFilterQuery(e.target.value)}
+          placeholder="Filter by brand, model, description, or size (e.g. 205)"
+          aria-label="Filter counts"
+          className="min-h-[44px] w-full max-w-md rounded-lg border border-zinc-300 px-3 text-base"
+        />
+      </div>
       <div className="overflow-auto">
         <table className="w-full border-collapse text-left text-base" aria-labelledby="counts-heading">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
@@ -41,6 +80,7 @@ export function FinalCountTable() {
               <th scope="col" className="px-4 py-3">Qty</th>
               <th scope="col" className="px-4 py-3">Product</th>
               <th scope="col" className="px-4 py-3">Brand</th>
+              <th scope="col" className="px-4 py-3">Model</th>
               <th scope="col" className="px-4 py-3">Category</th>
               <th scope="col" className="px-4 py-3">Specs</th>
               <th scope="col" className="px-4 py-3">Size</th>
@@ -54,14 +94,16 @@ export function FinalCountTable() {
             </tr>
           </thead>
           <tbody data-testid="final-count-body">
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <tr>
-                <td colSpan={isPlatform ? 13 : 11} className="px-4 py-6 text-center text-base text-zinc-600">
-                  No counts yet. Scan a barcode to start counting your inventory.
+                <td colSpan={isPlatform ? 14 : 12} className="px-4 py-6 text-center text-base text-zinc-600">
+                  {rows.length === 0
+                    ? "No counts yet. Scan a barcode to start counting your inventory."
+                    : "No products match this filter."}
                 </td>
               </tr>
             ) : (
-              rows.map(({ count, product }) => (
+              visibleRows.map(({ count, product }) => (
                 <CountRow key={count.id} count={count} product={product} isPlatform={isPlatform} />
               ))
             )}
@@ -113,11 +155,12 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
         {count.quantity}
       </td>
       <td className="px-4 py-3 font-medium text-zinc-800">{isPlatform ? product.name : customerDisplayName(product.name)}</td>
-      <td className="px-4 py-3">{product.brand}</td>
+      <td className="px-4 py-3" data-testid={`brand-${product.id}`}>{resolvedBrand(product)}</td>
+      <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(product)}</td>
       <td className="px-4 py-3">{product.category}</td>
       <td className="px-4 py-3">{product.specsShort}</td>
       <td className="px-4 py-3 font-mono text-sm tabular-nums" data-testid={`size-${product.id}`}>
-        {plainTireSizeDigits(product.specsShort) || "-"}
+        {resolvedSizeTag(product) || "-"}
       </td>
       <td className="px-4 py-3 font-mono text-sm">
         <div>{product.primarySku || "-"}</div>

@@ -112,6 +112,16 @@ export interface Product {
   // (which flips provisional->false, verified->true, + creates the approved alias). Distinguishes it from an
   // ORPHANED verified product (verified lost on persist reset) which must still re-alias via resolveUnknown.
   provisional?: boolean;
+  // Build 2 (product-name polish): fields split out of `name` by the deterministic structurer
+  // (src/services/polish/structurer.ts) or, as a fallback, the LLM polish path. All optional so
+  // older persisted products (no structuring run yet) fall back to `brand` / `name` at display time.
+  structuredBrand?: string;
+  structuredModel?: string;
+  structuredDescription?: string;
+  sizeTag?: string; // glued-digits tire size ("2657017") or weight/count/volume tag; "" / undefined = none
+  // Who last produced the structured fields above. "human" is a PERMANENT lock: automatic
+  // re-structuring (hot path AND the offline backfill) must skip a row stamped "human".
+  structuredBy?: "deterministic" | "llm" | "human";
   createdAt: string;
   updatedAt: string;
   createdBy: string;

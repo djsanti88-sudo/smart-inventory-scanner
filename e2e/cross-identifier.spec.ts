@@ -64,7 +64,8 @@ test("discovered part number: approve, then it counts the same product as the UP
   await expect(row).toBeVisible();
   await expect(row.locator("td").nth(0)).toHaveText("1"); // qty 1
   await expect(row.locator("td").nth(2)).toContainText("Falken"); // brand from confirmed data
-  await expect(row.locator("td").nth(4)).toContainText("275/55R20 113T"); // specs (size)
+  // Column index +1 vs pre-Task-4: a Model column was inserted between Brand and Category.
+  await expect(row.locator("td").nth(5)).toContainText("275/55R20 113T"); // specs (size)
   const approveBtn = row.locator('[data-testid^="approve-discovered-"]');
   await expect(approveBtn).toBeVisible(); // discovered part number offered, NOT yet trusted
   await page.screenshot({ path: `${PROOF}/cross-identifier-01-discovered.png`, fullPage: true });
