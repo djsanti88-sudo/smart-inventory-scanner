@@ -20,7 +20,19 @@ export interface PersistedDecode {
   code: string;
   kind: "result" | "no_result_receipt";
   payload: string; // JSON string of the route's cached decode response
-  tier: string; // diagnostic: decision.status for "result", or the exhaustion reason for a receipt
+  /** Diagnostic-only, never read back for decision logic: decision.status ("verified"/"suggested") for a
+   *  "result" entry, or the ladder-exhaustion reason ("gpt_none"/"gpt_info_only") for a
+   *  "no_result_receipt" entry. Disambiguated from `sourceTier` below, which is result-only and answers
+   *  a different question ("which stage paid for this"), not "what did the ladder decide". */
+  tier: string;
+  /** Result-only (never set on a "no_result_receipt"): which PAID stage produced this "result" -
+   *  "gpt_ladder" (the GPT-5.5 ladder rung) or "paid_ai" (the legacy Gemini/OpenAI fast/escalation/
+   *  deep-fallback path). A free-rung result (tire corpus / Turso retail / Plan D) is never persisted at
+   *  all (see route.ts's classifySourceTier), so this field is always present whenever `kind` is
+   *  "result". NOT yet stored by the Turso backend (schema unchanged by this fix - documented debt);
+   *  the file-fallback backend persists it as a normal JSON property.
+   */
+  sourceTier?: "paid_ai" | "gpt_ladder";
   createdAt: number;
 }
 
