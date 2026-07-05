@@ -110,8 +110,74 @@ export function dailyUsage(opts: { file?: string; dateKey?: string } = {}): Dail
   return { date, count: 0 };
 }
 
+type GptLadderState = { date: string; spentUsd: number };
+const memGptLadder = new Map<string, GptLadderState>();
+
+function gptLadderKey(dateKey: string): string {
+  return `gptLadderUsd:${dateKey}`;
+}
+
+/**
+ * Daily DOLLAR guard for the paid GPT ladder rung. Same local-first pattern as
+ * checkAndIncrementDaily (in-memory per process + best-effort JSON file persistence, same
+ * serverless caveats: per-instance memory, possibly read-only FS on Vercel). The FILE is the
+ * source of truth across "restarts" - checkGptLadderBudget always re-reads the file and takes
+ * the max of file vs in-memory spend, so a fresh process picks up spend recorded before it started.
+ */
+export function checkGptLadderBudget(
+  opts: { capUsd?: number; file?: string; dateKey?: string; worstCaseUsd?: number } = {}
+): { allowed: boolean; spentUsd: number; capUsd: number } {
+  const capUsd = opts.capUsd ?? Number(process.env.GPT_LADDER_DAILY_USD ?? 3);
+  const worstCaseUsd = opts.worstCaseUsd ?? 0.39;
+  const file = opts.file ?? counterFile();
+  const date = opts.dateKey ?? todayKey();
+  const key = gptLadderKey(date);
+
+  let spentUsd = 0;
+  const mem = memGptLadder.get(key);
+  if (mem && mem.date === date) spentUsd = mem.spentUsd;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const fileSpent = raw && raw[key] && raw[key].date === date ? Number(raw[key].spentUsd) : 0;
+    if (Number.isFinite(fileSpent) && fileSpent > spentUsd) spentUsd = fileSpent;
+  } catch {
+    // no file yet / unreadable -> fall back to in-memory (or 0)
+  }
+
+  return { allowed: spentUsd + worstCaseUsd <= capUsd, spentUsd, capUsd };
+}
+
+/**
+ * Records actual GPT ladder spend for the day. Best-effort JSON persistence under
+ * `gptLadderUsd:<dateKey>` in the same counter file as the daily call cap; extends rather than
+ * forks that file's read/write pattern.
+ */
+export function recordGptLadderSpend(usd: number, opts: { file?: string; dateKey?: string } = {}): void {
+  const file = opts.file ?? counterFile();
+  const date = opts.dateKey ?? todayKey();
+  const key = gptLadderKey(date);
+
+  const existing = checkGptLadderBudget({ file, dateKey: date, capUsd: Infinity, worstCaseUsd: 0 });
+  const spentUsd = Math.round((existing.spentUsd + usd) * 100) / 100;
+  memGptLadder.set(key, { date, spentUsd });
+
+  let all: Record<string, unknown> = {};
+  try {
+    all = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    // no file yet / unreadable -> start fresh
+  }
+  all[key] = { date, spentUsd };
+  try {
+    fs.writeFileSync(file, JSON.stringify(all));
+  } catch {
+    // best-effort persistence; in-memory still enforces within this process
+  }
+}
+
 /** Test-only: clear in-memory state between cases. */
 export function __resetForTest(): void {
   ipBuckets.clear();
   memDaily = null;
+  memGptLadder.clear();
 }
