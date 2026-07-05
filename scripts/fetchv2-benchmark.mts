@@ -14,6 +14,7 @@ import { FetchV2Cache } from "../src/services/fetchV2/cache";
 import { braveProvider, firecrawlSearchProvider, type MinimalFetch } from "../src/services/fetchV2/sources/discovery";
 import { firecrawlKeysFromEnv } from "../src/services/ai/firecrawlProvider";
 import { isSafePublicUrl } from "../src/services/ai/urlSafety";
+import { selectBarcodeUrls } from "../src/services/ai/barcodeSources";
 
 const LIVE = process.argv.includes("--live");
 if (!LIVE) { console.error("web benchmark makes live FREE web calls; pass --live to confirm"); process.exit(1); }
@@ -22,6 +23,8 @@ const RUN2 = process.argv.includes("--run2"); // stratified 50-code re-test afte
 const CODES = process.argv.find((a) => a.startsWith("--codes="))?.slice(8).split(",").map((s) => s.trim()).filter(Boolean);
 const OUT_ARG = process.argv.find((a) => a.startsWith("--out="))?.slice(6);
 const OUT = new URL(OUT_ARG ? `./${OUT_ARG}` : RUN2 ? "./fetchv2-web-results-run2.json" : "./fetchv2-web-results.json", import.meta.url);
+const FORCE_RETRY = process.argv.includes("--force-retry"); // owner's manual override for receipts
+const RECEIPTS = new URL("./fetchv2-noresult-receipts.json", import.meta.url);
 
 // Stratified 50: every owner + half the canaries + a spread of the other groups (deterministic:
 // first N of each group in fixture order, so run 1 rows exist for every one of them).
@@ -201,11 +204,18 @@ const OUTCOME_MAP: Record<string, OutRow["outcome"]> = {
 
 async function main() {
   const cache = new FetchV2Cache();
+  let receipts: Record<string, string> = {};
+  try { receipts = JSON.parse(readFileSync(RECEIPTS, "utf8")); } catch { /* first run */ }
+  if (!FORCE_RETRY) for (const [code, note] of Object.entries(receipts)) cache.markNoResult(code, note);
   const deps: FetchV2Deps = {
     fetchPage,
     discovery: [pacedBrave, fcSearchGuarded],
     structured: [{ name: "openfoodfacts", lookup: offLookup }],
     cache,
+    patternUrls: (variants) => {
+      const code = variants.find((v) => /^\d{12,14}$/.test(v)) ?? variants[0];
+      return selectBarcodeUrls(code).slice(0, 2);
+    },
   };
   let pool = fixture.codes;
   if (CODES) pool = fixture.codes.filter((c) => CODES.includes(c.code));
@@ -247,6 +257,11 @@ async function main() {
     }
     rows.push(row);
     save();
+    const note = cache.getNoResult(fx.code);
+    if (note && !receipts[fx.code]) {
+      receipts[fx.code] = note;
+      writeFileSync(RECEIPTS, JSON.stringify(receipts, null, 1));
+    }
     console.log(`[${i}/${todo.length}] ${fx.code} (${fx.group}) -> ${row.v2Outcome}${row.product ? " | " + row.product.slice(0, 60) : ""} (${row.secs}s)`);
   }
 
