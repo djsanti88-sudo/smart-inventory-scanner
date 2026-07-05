@@ -117,6 +117,33 @@ describe("detectSiblingAmbiguity", () => {
     )).toBe("agree");
   });
 
+  test("multi-size titles are size-AMBIGUOUS, not size-conflicting (Uniroyal live row)", () => {
+    expect(identityRelation(
+      { name: "Uniroyal Power Paw A/S 215 /40 R18 89Y XL BSW | 225 /40 R18 92Y", brand: "" },
+      { name: "Uniroyal Power Paw A/S 225/40R18", brand: "" },
+    )).toBe("agree");
+  });
+
+  test("XL/speed-rating suffixes never break size agreement", () => {
+    expect(identityRelation(
+      { name: "Pirelli P Zero Trofeo R 245/35ZR19XL 93Y", brand: "" },
+      { name: "Pirelli P Zero Trofeo R 245/35R19", brand: "" },
+    )).toBe("agree");
+  });
+
+  // Regression protection for the multi-size ambiguity lens (sizesConflict): confirms the branch
+  // actually discriminates on shared-vs-unshared sizes, not just "multi-size => always agree".
+  test("multi-size titles: a shared size still agrees, but NO shared size is a real clash", () => {
+    expect(identityRelation(
+      { name: "Uniroyal Power Paw A/S 215/40R18 225/40R18", brand: "" },
+      { name: "Uniroyal Power Paw A/S 225/40R18", brand: "" },
+    )).toBe("agree");
+    expect(identityRelation(
+      { name: "Uniroyal Power Paw A/S 215/40R18 235/40R18", brand: "" },
+      { name: "Uniroyal Power Paw A/S 225/40R18", brand: "" },
+    )).toBe("sibling");
+  });
+
   test("agreeing identities are NOT ambiguous (case/punctuation ignored)", () => {
     const v = detectSiblingAmbiguity([
       { name: "Doritos Cool Ranch Flavored Tortilla Chips, 9.25 oz Bag", brand: "Doritos" },

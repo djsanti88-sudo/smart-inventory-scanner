@@ -14,8 +14,9 @@ export interface SiblingVerdict {
 
 // Tire sizes accept "/", "X", or "x" as the width/aspect separator (live row: "215X65R16"), a
 // GLUED service prefix (ST225/75R15 trailer, LT285/70R17) whose letters defeat \b (forensic bug),
-// and DECIMAL commercial rims (275/80R22.5).
-const TIRE_SIZE_RE = /(?:\b(?:ST|LT|P)?|(?<=[A-Za-z])(?:ST|LT|P))?(?<![0-9])\d{3}[/xX]\d{2}\s?Z?R\d{2}(?:\.\d)?\b/gi;
+// DECIMAL commercial rims (275/80R22.5), and a GLUED trailing load-range/speed-rating suffix
+// (245/35ZR19XL) that otherwise defeats the trailing \b (live row: Pirelli XL suffix).
+const TIRE_SIZE_RE = /(?:\b(?:ST|LT|P)?|(?<=[A-Za-z])(?:ST|LT|P))?(?<![0-9])\d{3}[/xX]\d{2}\s?Z?R\d{2}(?:\.\d)?(?:XL)?\b/gi;
 const PACK_SIZE_RE = /\b\d+(?:\.\d+)?\s?(?:oz|fl ?oz|g|kg|ml|l|lb|lbs|ct|count|pk|pack)\b/gi;
 const NOISE_WORDS = new Set(["flavored", "flavor", "bag", "box", "the", "a", "of", "with", "and"]);
 
@@ -39,8 +40,10 @@ function sizesOf(name: string): string[] {
   // Normalize: separator to "/", strip glued ST/LT/P service prefixes, so ST225/75R15 ===
   // St225/75r15 === 225/75R15 for agreement purposes.
   // Strip Z speed prefix too: 255/45ZR18 === 255/45R18 (the Z is a speed rating, not a size).
+  // Strip a glued trailing XL FIRST (before the x/X separator swap) so "245/35ZR19XL" normalizes
+  // to 245/35R19 instead of the XL's own "X" being mistaken for the width/aspect separator.
   const tire = (c.toUpperCase().match(TIRE_SIZE_RE) ?? []).map((t) =>
-    t.replace(/^(?:ST|LT|P)/, "").replace(/[xX]/, "/").replace(/ZR/, "R"),
+    t.replace(/XL$/, "").replace(/^(?:ST|LT|P)/, "").replace(/[xX]/, "/").replace(/ZR/, "R"),
   );
   const pack = c.match(PACK_SIZE_RE) ?? [];
   return [...tire.map((t) => t.replace(/\s/g, "").toUpperCase()), ...pack.map((p) => p.replace(/\s/g, ""))];
@@ -55,10 +58,20 @@ function unitOf(size: string): string {
 /**
  * Sizes conflict ONLY when both sides carry a size in the SAME unit and the values differ.
  * "12 oz" vs "28 g" is serving-size noise across unit systems, not a variant conflict (live row).
+ *
+ * A listing that quotes 2+ tire sizes (a multi-size row, e.g. glued by "|") is AMBIGUOUS about
+ * which size the scanned code actually is - it is NOT a hard conflict as long as at least one of
+ * those sizes matches the other side (Uniroyal live row: "215/40R18 ... | 225/40R18" agreeing
+ * with a listing for just "225/40R18"). If NONE of the multi-size side's tire sizes match, that
+ * is still a real clash and must conflict.
  */
 function sizesConflict(sa: string[], sb: string[]): boolean {
+  const tiresA = sa.filter((s) => unitOf(s) === "tire");
+  const tiresB = sb.filter((s) => unitOf(s) === "tire");
+  const multiSizeAgreement = (tiresA.length >= 2 || tiresB.length >= 2) && tiresA.some((t) => tiresB.includes(t));
   for (const a of sa) {
     for (const b of sb) {
+      if (multiSizeAgreement && unitOf(a) === "tire" && unitOf(b) === "tire") continue;
       if (unitOf(a) === unitOf(b) && a !== b) return true;
     }
   }
