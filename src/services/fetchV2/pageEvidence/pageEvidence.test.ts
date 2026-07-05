@@ -13,6 +13,10 @@ describe("usableIdentityName shop-speak firewall", () => {
     expect(usableIdentityName("Buy Milwaukee tools from our shop", "045242599392")).toBe(false);
     expect(usableIdentityName("Wilson NFL Football at the best price online", "026388653331")).toBe(false);
   });
+  test("'Buy cheap X in online store' mid-title shop-speak is not an identity (Contigo live flip)", () => {
+    expect(usableIdentityName("100/80 R17 52H, 52S, 52P Motorcycle tyres » Buy cheap Motorcycle tyres in online store", "4019238377620")).toBe(false);
+  });
+
   test("real product titles containing 'Best' or 'Buy' inside the name still pass", () => {
     expect(usableIdentityName("Simply the Best Honey Mustard Dressing 12oz", "0000946801211")).toBe(true);
     expect(usableIdentityName("Best Foods Real Mayonnaise 30oz", "048001213487")).toBe(true);
