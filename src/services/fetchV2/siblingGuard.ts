@@ -48,7 +48,10 @@ function sizesOf(name: string): string[] {
   // Strip Z speed prefix too: 255/45ZR18 === 255/45R18 (the Z is a speed rating, not a size).
   // Strip a glued trailing XL FIRST (before the x/X separator swap) so "245/35ZR19XL" normalizes
   // to 245/35R19 instead of the XL's own "X" being mistaken for the width/aspect separator.
-  const tire = (c.toUpperCase().match(TIRE_SIZE_RE) ?? []).map((t) =>
+  // canon() scrubs hyphens to spaces, so dash-notation rims are matched on a dash-preserving
+  // variant of the raw name and unioned in (normalized, so duplicates collapse).
+  const dashSource = (name ?? "").toUpperCase().replace(/[^\w./-]+/g, " ");
+  const tire = [...(c.toUpperCase().match(TIRE_SIZE_RE) ?? []), ...(dashSource.match(TIRE_SIZE_RE) ?? [])].map((t) =>
     t.replace(/XL$/, "").replace(/^(?:ST|LT|P)/, "").replace(/[xX]/, "/").replace(/ZR/, "R").replace(/\s?-\s?/, "R"),
   );
   const pack = c.match(PACK_SIZE_RE) ?? [];
