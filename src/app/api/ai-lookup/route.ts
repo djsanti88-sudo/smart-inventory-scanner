@@ -30,7 +30,9 @@ import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerif
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 import { runSizeRace } from "@/services/ai/sizeRace";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv } from "@/services/security/aiSpendGuard";
+import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptLadderBudget, recordGptLadderSpend } from "@/services/security/aiSpendGuard";
+import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
+import { shouldRunGptRung, gptResultToDecodePayload, capTierForFirewall } from "@/services/ai/gptLadderRung";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -122,6 +124,26 @@ const TRUSTED_HOSTS = [
 
 function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
+}
+
+/** Fill in the full GptFromScratchResult shape from a Playwright test-fixture body (E2E only). */
+function normalizeMockGptLadder(raw: Partial<GptFromScratchResult> | undefined): GptFromScratchResult | null {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    tier: raw.tier ?? "none",
+    brand: raw.brand ?? "",
+    productName: raw.productName ?? "",
+    specs: raw.specs ?? "",
+    gtin: raw.gtin ?? "",
+    confidence: typeof raw.confidence === "number" ? raw.confidence : 0,
+    exactCodeFound: raw.exactCodeFound === true,
+    basis: raw.basis ?? "",
+    sourceUrls: Array.isArray(raw.sourceUrls) ? raw.sourceUrls : [],
+    searches: typeof raw.searches === "number" ? raw.searches : 0,
+    usdActual: 0,
+    usdWorstCase: GPT_LADDER_WORST_CASE_USD,
+    aborted: false,
+  };
 }
 
 function selectProvider(name: string): AiProvider {
@@ -276,6 +298,10 @@ export async function POST(request: Request) {
     scanContext?: "any" | "tire"; // Phase 8B: app-derived, non-authoritative prompt hint
     brandPrefixHint?: string; // Phase 8B: unambiguous learned brand-prefix hint (non-authoritative)
     autoCountNonPublicWithEvidence?: boolean; // Option 3 (owner): allow a non-public code (SKU/vendor/FNSKU) to auto-verify from a single trusted source. Default true.
+    // Playwright test hook ONLY: under IS_E2E, a request carrying this fixture runs the GPT ladder
+    // rung's mapping logic with ZERO network so E2E can prove the rung's UI/decision wiring
+    // deterministically. Ignored entirely outside E2E.
+    mockGptLadder?: Partial<GptFromScratchResult>;
   };
   try {
     body = await request.json();
@@ -549,7 +575,8 @@ export async function POST(request: Request) {
       let prefixHint = fw0.hint;
       let firewallReason = fw0.reason;
       let brandPrefixAdvisory = fw0.brandPrefixAdvisory; // Plan C: advisory-only, non-blocking (reported, never blocks)
-      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw0.conflict, allowNonPublicAutoCount });
+      let brandPrefixConflict = fw0.conflict; // tracked across the fallback winner below - the GPT ladder rung at the end needs the LATEST value
+      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict, allowNonPublicAutoCount });
       let fallbackFound = false;
       let coverageMissed = false;
       let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
@@ -640,13 +667,14 @@ export async function POST(request: Request) {
             prefixHint = fwW.hint;
             firewallReason = fwW.reason;
             brandPrefixAdvisory = fwW.brandPrefixAdvisory;
-            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fwW.conflict, allowNonPublicAutoCount });
+            brandPrefixConflict = fwW.conflict;
+            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict, allowNonPublicAutoCount });
           }
         }
       }
 
-      const reasonCode = decodeReasonCode({ hasProduct: hasProduct(), fallbackFound, timedOut: run.timedOut, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: !!firecrawlKey, coverageMissed });
-      const reasonText = REASON_TEXT[reasonCode] ?? "";
+      let reasonCode = decodeReasonCode({ hasProduct: hasProduct(), fallbackFound, timedOut: run.timedOut, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: !!firecrawlKey, coverageMissed });
+      let reasonText = REASON_TEXT[reasonCode] ?? "";
       // Never surface the generic "no provider returned a usable product": prefer the honest reason.
       if (decision.status !== "verified" && reasonText) decision = { ...decision, reason: reasonText };
 
@@ -655,6 +683,49 @@ export async function POST(request: Request) {
       // In-memory + server-side; gated by isLearnablePrefix; LEARNED is the lowest-precedence prefix tier.
       if (isLearnablePrefix({ status: decision.status, confidence: decision.confidence, exactCodeEvidenceVerifiedByApp: decision.exactCodeEvidenceVerifiedByApp, codeType, brand: results[0]?.brand })) {
         recordLearnedPrefix(code, results[0]!.brand, results[0]?.category);
+      }
+
+      // GPT-5.5 LADDER RUNG (owner spec 2026-07-05): the paid END of the decode ladder. Runs ONLY
+      // when nothing above already verified or suggested a product - it never runs in parallel with,
+      // and never overrides, an earlier win. Every call (success, error, or abort) records its spend
+      // via recordGptLadderSpend so the daily dollar guard can never be silently bypassed by a
+      // provider failure (usdActual carries the worst-case reservation on abort/HTTP failure). The
+      // catalog-derived brand-prefix firewall still gates auto-count: a firewall conflict downgrades
+      // an otherwise-verified GPT self-report to suggested (capTierForFirewall), same as every other
+      // rung on this ladder.
+      let gptLadderPayload: ReturnType<typeof gptResultToDecodePayload> = null;
+      if (e2eMode()) {
+        // Deterministic Playwright hook ONLY (zero network): lets E2E prove the rung's decision/UI
+        // wiring without a live OpenAI call. Ignored when the request carries no mockGptLadder fixture.
+        const mock = normalizeMockGptLadder(body.mockGptLadder);
+        if (mock && decision.status !== "verified" && decision.status !== "suggested") {
+          gptLadderPayload = capTierForFirewall(gptResultToDecodePayload(mock, code), brandPrefixConflict);
+        }
+      } else {
+        const rung = shouldRunGptRung({
+          code,
+          codeType,
+          priorStatus: decision.status,
+          e2e: false,
+          apiKeyPresent: !!process.env.OPENAI_API_KEY,
+          budget: checkGptLadderBudget(),
+        });
+        if (rung.run) {
+          const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY! });
+          recordGptLadderSpend(r.usdActual); // ALWAYS - success, error, or abort; never skip this.
+          gptLadderPayload = capTierForFirewall(gptResultToDecodePayload(r, code), brandPrefixConflict);
+        }
+      }
+      if (gptLadderPayload) {
+        results = [gptLadderPayload.result, ...results];
+        evidences = [
+          { verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: "gpt-5.5 self-report (not independently evidence-verified)" },
+          ...evidences,
+        ];
+        providerNames = [...providerNames, "gpt-5.5-ladder"];
+        decision = gptLadderPayload.decision;
+        reasonCode = "gpt_ladder";
+        reasonText = gptLadderPayload.reasonText;
       }
 
       return {
