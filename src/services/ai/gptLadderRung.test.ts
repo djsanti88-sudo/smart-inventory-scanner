@@ -120,6 +120,20 @@ function gptResult(overrides: Partial<GptFromScratchResult>): GptFromScratchResu
 }
 
 describe("gptResultToDecodePayload", () => {
+  test("short codes (under 10 digits, EAN-8 class) can never auto-count: verified is capped at suggested (live proof: 2 wrong EAN-8 identities)", () => {
+    // 8-digit codes are recycled across national numbering ranges - the same digits map to
+    // different products in different countries. GPT finds A product, not THE product.
+    const r = gptResult({
+      tier: "verified", brand: "Qbake", productName: "Qbake Arabic Bread Brown",
+      confidence: 0.86, exactCodeFound: true, gtin: "10011126",
+    });
+    const payload = gptResultToDecodePayload(r, "10011126");
+    expect(payload).not.toBeNull();
+    expect(payload!.decision.status).toBe("suggested");
+    expect(payload!.decision.reason).toContain("short code");
+    expect(payload!.result.needsHumanReview).toBe(true);
+  });
+
   test("tier none maps to null (nothing to apply)", () => {
     expect(gptResultToDecodePayload(gptResult({ tier: "none" }), "049000028904")).toBeNull();
   });

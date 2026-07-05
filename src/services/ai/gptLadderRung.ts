@@ -89,6 +89,15 @@ function identifierFieldsFrom(gtin: string): { gtin: string; upc: string; ean: s
 export function gptResultToDecodePayload(r: GptFromScratchResult, code: string): GptRungDecodePayload | null {
   if (r.tier === "none") return null;
 
+  // Short codes (under 10 digits, the EAN-8 class) are recycled across national numbering
+  // ranges: GPT finds A product carrying those digits, not THE product. Live proof 2026-07-05
+  // produced two wrong identities on exactly this class - they can never auto-count. Same
+  // 10-digit floor the fetchV2 snippet fence uses.
+  const digits = (code ?? "").replace(/\D/g, "");
+  const tier = r.tier === "verified" && digits.length < 10 ? "suggested" : r.tier;
+  const shortCodeNote = tier !== r.tier ? " | short code (under 10 digits): recycled-range risk, auto-count blocked" : "";
+  r = tier === r.tier ? r : { ...r, tier };
+
   const ids = identifierFieldsFrom(r.gtin);
   const result: AiLookupResult = {
     ...emptyResult(),
@@ -123,12 +132,12 @@ export function gptResultToDecodePayload(r: GptFromScratchResult, code: string):
     const decision: DecodeDecision = {
       status: "suggested",
       confidence: r.confidence,
-      reason: GPT_LADDER_REASON,
+      reason: GPT_LADDER_REASON + shortCodeNote,
       evidenceStrength: "none",
       exactCodeEvidenceVerifiedByApp: false,
       crossCheck: crossCheckSingleProvider(r.confidence),
     };
-    return { result, decision, reasonText: "" };
+    return { result: { ...result, needsHumanReview: true }, decision, reasonText: "" };
   }
 
   // tier === "info_only": background info, never auto-count-worthy. CACHE-SAFETY CONTRACT (decode.ts's

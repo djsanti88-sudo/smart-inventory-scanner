@@ -189,7 +189,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const res = await POST(makeRequest({ cleanCode: "11122901", mode: "decode" }));
+    const res = await POST(makeRequest({ cleanCode: "111000222901", mode: "decode" }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.decision.status).toBe("verified");
@@ -495,7 +495,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const code = "11144905";
+    const code = "111000222905";
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect((await first.json()).decision.status).toBe("verified");
     const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
