@@ -62,8 +62,12 @@ export function snippetFindings(
     // Visible matches need a barcode-label context word nearby (bare numbers aren't evidence).
     // Invisible matches only exist because the QUOTED exact-match query's own contract
     // guarantees the string was in the document (canary-proven live: quoted searches for
-    // invented codes return zero results) - that contract itself counts as the label.
-    const labeled = visible ? hasBarcodeLabelContext(hay, matched) && !hasNegativeContext(hay, matched) : true;
+    // invented codes return zero results) - that contract itself counts as the label. The same
+    // contract labels a VISIBLE match on a quoted result too (live: CARiD prints the code with
+    // no UPC word nearby), but negative context (MLS/listing/item#) still vetoes what it means.
+    const labeled = visible
+      ? (hasBarcodeLabelContext(hay, matched) || !!opts?.assumeCarrying) && !hasNegativeContext(hay, matched)
+      : true;
     out.push({ url: c.url, host, name: usable ? cleanProductName(c.title) : "", matchedVariant: matched, labeled });
   }
   return out;
