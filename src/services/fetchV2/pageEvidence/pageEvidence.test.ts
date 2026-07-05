@@ -1,9 +1,23 @@
 import { describe, expect, test } from "vitest";
-import { evaluatePageJunk } from "./junkRules";
+import { evaluatePageJunk, usableIdentityName } from "./junkRules";
 import { extractProducts } from "./extract";
 import { hasBarcodeLabelContext, proveAssociation } from "./association";
 
 const CODE = "028400325042";
+
+// v2.3 live batch 2 flip: this eBay-aggregator title carried the code and voted "unrelated" in the
+// snippet-conflict guard, demoting a correct verify. Storefront speak is never a product identity.
+describe("usableIdentityName shop-speak firewall", () => {
+  test("'Buy X from Amazon at the best price' storefront titles are not identities", () => {
+    expect(usableIdentityName("Buy Augason Farms from Amazon in Europe at the best price", "0000946801211")).toBe(false);
+    expect(usableIdentityName("Buy Milwaukee tools from our shop", "045242599392")).toBe(false);
+    expect(usableIdentityName("Wilson NFL Football at the best price online", "026388653331")).toBe(false);
+  });
+  test("real product titles containing 'Best' or 'Buy' inside the name still pass", () => {
+    expect(usableIdentityName("Simply the Best Honey Mustard Dressing 12oz", "0000946801211")).toBe(true);
+    expect(usableIdentityName("Best Foods Real Mayonnaise 30oz", "048001213487")).toBe(true);
+  });
+});
 
 // ------------------------------------------------------------------ junk rules (dry-run failures)
 describe("evaluatePageJunk", () => {
