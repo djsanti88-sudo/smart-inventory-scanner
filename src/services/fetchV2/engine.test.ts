@@ -1002,4 +1002,33 @@ describe("fetchV2 pipeline", () => {
     const r = await fetchV2(CODE, deps, { maxTotalMs: 8000 });
     expect(r.performance.earlyStopped).toBe(true);
   });
+
+  test("vetted DB host + labeled structured code + FREE agreement => VERIFIED (owner one-good-source rule)", async () => {
+    const C = "051342118137";
+    const html = `<html><head><title>Continental ContiSportContact 3 275/35R20 - Go-UPC</title></head><body>
+<h1>Continental ContiSportContact 3 275/35R20</h1><table><tr><th>UPC</th><td>${C}</td></tr></table></body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async (u: string) => u.includes("go-upc") ? { ok: true, status: 200, html } : { ok: false, status: 403, html: "" },
+      discovery: [{ name: "brave", search: async () => [
+        { url: "https://wheelmax.example.com/p/1", title: "275/35R20 Continental Contisportcontact 3 Run Flat", snippet: "in stock", rank: 0 },
+      ] }],
+      patternUrls: () => ["https://go-upc.example.com/product/" + C], // NON-search URL: no echo
+    });
+    expect(r.outcome).toBe("verified");
+    expect(r.evidence.finalConfidence).toBeCloseTo(0.8, 2);
+  });
+
+  test("vetted host WITHOUT free agreement stays suggested (recycled-code fence, pre-tested live)", async () => {
+    const C = "092971135485";
+    const html = `<html><head><title>Westlake SU318 275/65R17 - Go-UPC</title></head><body>
+<h1>Westlake SU318 All Season 275/65R17</h1><table><tr><th>UPC</th><td>${C}</td></tr></table></body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async (u: string) => u.includes("go-upc") ? { ok: true, status: 200, html } : { ok: false, status: 403, html: "" },
+      discovery: [{ name: "brave", search: async () => [
+        { url: "https://random.example.com/1", title: "Standard Electrical System Parts Ignition Sensors", snippet: "", rank: 0 },
+      ] }],
+      patternUrls: () => ["https://go-upc.example.com/product/" + C],
+    });
+    expect(r.outcome).toBe("suggested");
+  });
 });

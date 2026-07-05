@@ -10,6 +10,7 @@ import { extractProducts, type ExtractedProduct } from "./pageEvidence/extract";
 import { proveAssociation } from "./pageEvidence/association";
 import { snippetFindings } from "./pageEvidence/snippetEvidence";
 import { scoreSource, decideOutcome, type SourceFinding } from "./scoring";
+import { identityRelation } from "./siblingGuard";
 import { makeResult, type FetchV2Mode, type FetchV2Result } from "./types";
 import type { DiscoveryProvider, DiscoveryCandidate } from "./sources/discovery";
 import type { FetchV2Cache } from "./cache";
@@ -147,6 +148,9 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
   if (needsDiscovery && deps.discovery.length > 0) {
     let candidates: DiscoveryCandidate[] = [];
     let exactMatchCandidates: DiscoveryCandidate[] = [];
+    // Every candidate TITLE the FREE provider (index 0) returned, captured before any filtering -
+    // this is the free-agreement fence for the vetted single-source verify rule (scoring.ts).
+    const freeTitles: string[] = [];
 
     const junkUrls = new Set<string>();
     const processPage = async (cand: DiscoveryCandidate): Promise<SourceFinding | null> => {
@@ -231,6 +235,7 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
       const query = i === 0 ? normalized.primary : `"${normalized.primary}"`;
       const got = await provider.search(query);
       sourcesChecked.push(`discovery:${provider.name}`);
+      if (i === 0) freeTitles.push(...got.map((g) => g.title));
       const fresh = got.filter((g) => !candidates.some((c) => c.url === g.url));
       candidates = [...candidates, ...fresh];
       if (i > 0) exactMatchCandidates = [...exactMatchCandidates, ...fresh];
@@ -298,6 +303,20 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
         score: 20,
         labeled: s.labeled,
       });
+    }
+
+    // Free-agreement fence (owner "one good source" rule, scoring.ts): a vetted single-source
+    // finding only verifies when the FREE provider's OWN raw candidates independently agree with
+    // its identity. strongSecured() can skip the provider loop entirely (fast/balanced early win) -
+    // in that case freeTitles stays empty and freeAgree correctly comes out false: no free evidence
+    // was gathered, so the vetted rule must not fire (strong-quality findings verify by the
+    // existing path anyway).
+    for (const f of findings) {
+      if (f.association.level === "strong" && (f.product?.name ?? "").trim()) {
+        f.freeAgree = freeTitles.some(
+          (t) => identityRelation({ name: t, brand: "" }, { name: f.product!.name, brand: f.product!.brand ?? "" }) === "agree",
+        );
+      }
     }
   }
 

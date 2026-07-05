@@ -16,7 +16,13 @@ export interface SourceFinding {
   quality: "strong" | "medium" | "weak" | "rejected";
   score: number; // 0-100
   labeled?: boolean; // snippet findings only: true when a barcode label sits near the code
+  freeAgree?: boolean; // true when the FREE discovery provider's own candidates agree with this identity
 }
+
+// Vetted barcode-DB hosts: the owner-approved "one good source" list. A vetted host that carries
+// the exact code in a labeled/structured position AND is corroborated by the free provider's own
+// results (the free-agreement fence) verifies alone at 0.8 - this list is intentionally narrow.
+export const TRUSTED_DB_HOSTS = /go-upc|upcitemdb|eandata|barcodelookup|barcodespider/i;
 
 const QUALITY_SCORE = { strong: 85, medium: 55, weak: 30, rejected: 0 } as const;
 
@@ -99,6 +105,21 @@ export function decideOutcome(identifier: FetchV2Identifier, findings: SourceFin
       if (strongSource) {
         rules.push(`${mode}: single strong source with proven code-to-product association`);
         return { outcome: "verified", confidence: 0.9, winner: strongSource, conflicts: [], rulesFired: rules };
+      }
+      // Owner "one good source" rule: a VETTED barcode-DB host with the exact code in a
+      // labeled/structured position verifies ALONE at 0.8 - but only behind the free-agreement
+      // fence (>=1 free-provider result title agreeing with the identity). Pre-tested live: this
+      // fence blocks the two known recycled-code traps while passing real products.
+      const vettedFenced = strongAssoc.find(
+        (f) =>
+          f.quality === "medium" &&
+          TRUSTED_DB_HOSTS.test(hostOf(f.url)) &&
+          f.association.matchedField !== "detail_table_echo" &&
+          f.freeAgree === true,
+      );
+      if (vettedFenced) {
+        rules.push("vetted DB host with exact labeled code + free-agreement fence");
+        return { outcome: "verified", confidence: 0.8, winner: vettedFenced, conflicts: [], rulesFired: rules };
       }
       if (mode === "balanced" && corroborated) {
         rules.push("balanced: two independent medium sources agree");
