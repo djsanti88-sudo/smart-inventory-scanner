@@ -76,6 +76,8 @@ reports/**/cloud-playwright-results.json
 # Runtime daily spend-cap counter for /api/ai-lookup (local-first state, regenerated)
 .ai-lookup-usage.json
 .gpt-ladder-usage.json
+# Persistent decode cache (L2) file fallback when Turso is not configured - regenerated
+.decode-cache.json
 .env*.local
 
 # Python bytecode + compile caches (tire-knowledge pipeline scripts) - regenerated

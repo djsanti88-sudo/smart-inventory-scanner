@@ -33,6 +33,7 @@ import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptLadderBudget, recordGptLadderSpend } from "@/services/security/aiSpendGuard";
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
 import { shouldRunGptRung, gptResultToDecodePayload, capTierForFirewall } from "@/services/ai/gptLadderRung";
+import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -302,6 +303,9 @@ export async function POST(request: Request) {
     // rung's mapping logic with ZERO network so E2E can prove the rung's UI/decision wiring
     // deterministically. Ignored entirely outside E2E.
     mockGptLadder?: Partial<GptFromScratchResult>;
+    // Task 4 (owner manual override): bypasses a permanent no_result_receipt AND overwrites it once the
+    // fresh compute finishes. Also forces a fresh compute past the in-memory L1 cache (forceRefresh).
+    forceRetry?: boolean;
   };
   try {
     body = await request.json();
@@ -332,6 +336,7 @@ export async function POST(request: Request) {
   // consumes a cap slot - checking here for decode too would double-count every decode POST (each scan
   // burned 2 slots; regression tests in route.test.ts). Skipped under E2E mock mode (no real spend).
   const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
+  const forceRetry = body.forceRetry === true;
   if (!e2eMode() && !isDecodeMode) {
     const cap = checkAndIncrementDaily();
     if (!cap.allowed) {
@@ -354,17 +359,48 @@ export async function POST(request: Request) {
     // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
     const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
 
-    // Hard server-side daily spend cap (auth DEFERRED). Checked AFTER a decode-cache peek: a cached
-    // repeat scan makes ZERO provider calls, so it must not consume a cap slot nor be blocked once the
-    // cap trips (the cap bounds genuine compute runs, not free repeats). The per-IP rate limit above
-    // still throttles floods of cached hits. Skipped under E2E mock mode (no real spend).
-    if (!e2eMode() && getDecodeCache(code) === undefined) {
+    // L2 PERSISTENT DECODE CACHE (Task 4): consulted on an L1 miss, BEFORE the daily cap check below -
+    // same guard window as the existing L1 peek, so a persisted "result" OR a permanent
+    // "no_result_receipt" never burns a daily slot. Never touched under E2E (tests/Playwright must
+    // never read/write the real store) and skipped entirely when the caller asks for forceRetry
+    // (owner manual override: bypasses the receipt here, and overwrites it once the fresh compute
+    // below finishes - see the write-through at the withDecodeCache call site).
+    let persistedHit: PersistedDecode | null = null;
+    if (!e2eMode() && !forceRetry && getDecodeCache(code) === undefined) {
+      persistedHit = await getPersistedDecode(code);
+    }
+
+    // Hard server-side daily spend cap (auth DEFERRED). Checked AFTER both cache peeks: a cached
+    // repeat scan (L1 or L2) makes ZERO provider calls, so it must not consume a cap slot nor be
+    // blocked once the cap trips (the cap bounds genuine compute runs, not free repeats). The per-IP
+    // rate limit above still throttles floods of cached hits. Skipped under E2E mock mode (no real spend).
+    if (!e2eMode() && getDecodeCache(code) === undefined && !persistedHit) {
       const cap = checkAndIncrementDaily();
       if (!cap.allowed) {
         return Response.json(
           { error: `Daily AI lookup cap reached (${cap.used}/${cap.limit}). No AI call made.`, reasonCode: "daily_cap" },
           { status: 429 }
         );
+      }
+    }
+
+    // A persisted hit short-circuits with ZERO provider work: a "result" replays the prior
+    // verified/suggested decode; a "no_result_receipt" replays the prior unresolved shape so the
+    // ladder is never re-run for a code it has already exhausted (owner rule: no auto-retry - only
+    // forceRetry above bypasses this). A corrupted stored payload degrades to a miss (recompute).
+    if (persistedHit) {
+      let parsedPayload: Record<string, unknown> | null = null;
+      try {
+        parsedPayload = JSON.parse(persistedHit.payload);
+      } catch {
+        parsedPayload = null;
+      }
+      if (parsedPayload) {
+        const priorDebug = (parsedPayload.debug as Record<string, unknown> | undefined) ?? {};
+        return Response.json({
+          ...parsedPayload,
+          debug: { ...priorDebug, cached: true, persistedCacheHit: true, persistedKind: persistedHit.kind, persistedTier: persistedHit.tier },
+        });
       }
     }
 
@@ -428,6 +464,28 @@ export async function POST(request: Request) {
     const gptLadderEvidenceStub = (): EvidenceResult => ({
       verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: "gpt-5.5 self-report (not independently evidence-verified)",
     });
+
+    // Task 4: classify whether a ladder outcome represents GENUINE exhaustion (worth a permanent
+    // no_result_receipt) vs a TRANSIENT skip that must stay retryable on the next scan. Genuine
+    // exhaustion is exactly: the GPT rung actually ran and returned tier "none" (payload null, no skip
+    // reason - the rung was never short-circuited) or "info_only" (payload present but never auto-count
+    // worthy), OR the rung was blocked by its OWN dollar budget ("budget_exceeded"). Every other skip
+    // (no_api_key, non_public_code_type, e2e_mode, request_budget_exhausted, or the ladder itself
+    // already resolving the code) is transient and must NOT create a receipt.
+    const classifyReceipt = (ladder: { payload: ReturnType<typeof gptResultToDecodePayload>; skipReason?: string; surfaceSkip: boolean }): { eligible: boolean; reason?: string } => {
+      if (ladder.payload && (ladder.payload.decision.status === "verified" || ladder.payload.decision.status === "suggested")) {
+        return { eligible: false }; // resolved by the ladder itself
+      }
+      if (ladder.payload) return { eligible: true, reason: "gpt_info_only" }; // ran, tier info_only
+      if (ladder.skipReason === "budget_exceeded") return { eligible: true, reason: "budget_exceeded" };
+      if (ladder.surfaceSkip) return { eligible: false }; // transient: no key / non-public / e2e / request budget exhausted
+      if (!ladder.skipReason) return { eligible: true, reason: "gpt_none" }; // ran, tier none
+      return { eligible: false }; // prior_status_already_decided (resolved before the ladder ran)
+    };
+    // Set by whichever computeDecode exit actually ran the ladder (Plan D early return or the final
+    // return below); read at the withDecodeCache call site to decide the L2 write-through. Declared
+    // outside computeDecode (per-request, not per-process) so it reflects THIS request's outcome only.
+    let receiptState: { eligible: boolean; reason?: string } = { eligible: false };
 
     // The expensive decode (fast path + deep fallback) is cached by code: once a barcode resolves to a
     // real product, a repeat scan in this server returns instantly with NO AI/Firecrawl spend. Only a
@@ -550,6 +608,7 @@ export async function POST(request: Request) {
             gptLadderSkipReason = ladder.skipReason;
             pdProviderStatuses = [...pdProviderStatuses, gptLadderSkipEntry(ladder.skipReason!)];
           }
+          receiptState = classifyReceipt(ladder);
 
           return {
             mode: "decode" as const,
@@ -803,6 +862,7 @@ export async function POST(request: Request) {
         reasonCode = "gpt_ladder";
         reasonText = gptLadderPayload.reasonText;
       }
+      receiptState = classifyReceipt(ladder);
 
       return {
         mode: "decode" as const,
@@ -843,7 +903,24 @@ export async function POST(request: Request) {
     const hasUsable = (p: Awaited<ReturnType<typeof computeDecode>>) => p.results.some((r) => isUsableProductName(r.productName));
     const { value: payload, cached } = e2eMode()
       ? { value: await computeDecode(), cached: false }
-      : await withDecodeCache(code, hasUsable, computeDecode);
+      : await withDecodeCache(code, hasUsable, computeDecode, { forceRefresh: forceRetry });
+
+    // L2 WRITE-THROUGH (Task 4): only on a genuinely fresh compute (cached === false) - a repeat served
+    // straight from L1 must never re-persist. Never touches the store under E2E. verified/suggested ->
+    // permanent "result" (a later decode of this code replays it with zero provider work, in ANY
+    // serverless instance, not just this one). A genuinely exhausted ladder (classifyReceipt, tracked in
+    // receiptState from whichever exit ran the ladder) -> permanent "no_result_receipt". Anything else
+    // (needs_review from a transient skip, or a conflict) is left untouched - it stays retryable exactly
+    // like today's short-TTL L1 miss cache. forceRetry's fresh compute overwrites whatever was there
+    // (persistDecode is an upsert by code).
+    if (!e2eMode() && !cached) {
+      const status = payload.decision.status;
+      if (status === "verified" || status === "suggested") {
+        await persistDecode({ code, kind: "result", payload: JSON.stringify(payload), tier: status, createdAt: Date.now() });
+      } else if (receiptState.eligible) {
+        await persistDecode({ code, kind: "no_result_receipt", payload: JSON.stringify(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
+      }
+    }
 
     return Response.json({ ...payload, debug: { ...payload.debug, cached } });
   }

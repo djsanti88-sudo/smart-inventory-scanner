@@ -32,6 +32,7 @@ import fs from "node:fs";
 import { POST } from "@/app/api/ai-lookup/route";
 import { __resetForTest } from "@/services/security/aiSpendGuard";
 import { __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
 
 // A barcode confirmed present in the committed barcodeIndex (see tireKnowledge.generated.json /
 // tireKnowledgeIndex.jsonfallback.test.ts).
@@ -46,13 +47,15 @@ function makeDecodeRequest(cleanCode: string, ip = "9.9.9.9") {
 }
 
 describe("/api/ai-lookup decode: a committed tire barcode resolves from the corpus with ZERO AI spend", () => {
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"];
   const saved: Record<string, string | undefined> = {};
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
+  let tmpDecodeCacheFile: string;
 
   beforeEach(() => {
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     __resetTireKnowledgeCacheForTests();
     for (const k of keys) saved[k] = process.env[k];
     // Real (non-E2E) code path so the corpus check in computeDecode() actually runs: the E2E branch
@@ -64,9 +67,15 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
     delete process.env.OPENAI_API_KEY;
     delete process.env.FIRECRAWL_API_KEY;
     delete process.env.AI_LOOKUP_KILL_SWITCH;
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     tmpCounter = path.join(os.tmpdir(), `ai-usage-decode-corpus-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
     process.env.AI_LOOKUP_COUNTER_FILE = tmpCounter;
+    // Task 4: a real (non-E2E) decode now write-throughs to the persistent L2 cache - point it at a tmp
+    // file so this test never touches the repo's real .decode-cache.json.
+    tmpDecodeCacheFile = path.join(os.tmpdir(), `decode-cache-corpus-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
+    process.env.DECODE_CACHE_FILE = tmpDecodeCacheFile;
     // No real network at all: if ANY code path reached fetch (i.e. the AI/page-fetch path), this spy
     // would record the call and the assertions below would fail. A corpus hit must never touch this.
     fetchSpy = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
@@ -76,7 +85,9 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
   afterEach(() => {
     for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
     try { fs.unlinkSync(tmpCounter); } catch {}
+    try { fs.unlinkSync(tmpDecodeCacheFile); } catch {}
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     vi.restoreAllMocks();
   });
 
@@ -114,13 +125,15 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
 // expensive legacy Gemini/OpenAI fast path. With no provider keys, the legacy fast path uses mockProvider
 // (providerNames ["mock"], a fabricated product name) - so a floor return proves the legacy path was skipped.
 describe("/api/ai-lookup decode: parallel resolver is TERMINAL for public barcodes (no legacy money-pit)", () => {
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"];
   const saved: Record<string, string | undefined> = {};
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
+  let tmpDecodeCacheFile: string;
 
   beforeEach(() => {
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     __resetTireKnowledgeCacheForTests();
     for (const k of keys) saved[k] = process.env[k];
     delete process.env.IS_E2E;
@@ -128,9 +141,13 @@ describe("/api/ai-lookup decode: parallel resolver is TERMINAL for public barcod
     delete process.env.OPENAI_API_KEY;
     delete process.env.FIRECRAWL_API_KEY;
     delete process.env.AI_LOOKUP_KILL_SWITCH;
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     tmpCounter = path.join(os.tmpdir(), `ai-usage-terminal-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
     process.env.AI_LOOKUP_COUNTER_FILE = tmpCounter;
+    tmpDecodeCacheFile = path.join(os.tmpdir(), `decode-cache-terminal-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
+    process.env.DECODE_CACHE_FILE = tmpDecodeCacheFile;
     // The only fetch a floor-return path may touch is the free upcitemdb barcode-DB leg. This spy returns
     // an EMPTY body so that leg misses; any call to a legacy AI endpoint would be visibly wrong.
     fetchSpy = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
@@ -140,7 +157,9 @@ describe("/api/ai-lookup decode: parallel resolver is TERMINAL for public barcod
   afterEach(() => {
     for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
     try { fs.unlinkSync(tmpCounter); } catch {}
+    try { fs.unlinkSync(tmpDecodeCacheFile); } catch {}
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     vi.restoreAllMocks();
   });
 
