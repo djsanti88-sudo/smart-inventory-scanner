@@ -22,6 +22,10 @@ describe("usableIdentityName shop-speak firewall", () => {
     expect(usableIdentityName("Motorcycle tyres » Continental » ContiGO", "4019238377620")).toBe(false);
   });
 
+  test("German Preisvergleich (price comparison) titles are not identities (Contigo live flip, voter 3)", () => {
+    expect(usableIdentityName("Motorradreifen Continental - Preisvergleich", "4019238377620")).toBe(false);
+  });
+
   test("real product titles containing 'Best' or 'Buy' inside the name still pass", () => {
     expect(usableIdentityName("Simply the Best Honey Mustard Dressing 12oz", "0000946801211")).toBe(true);
     expect(usableIdentityName("Best Foods Real Mayonnaise 30oz", "048001213487")).toBe(true);
