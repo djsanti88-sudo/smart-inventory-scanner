@@ -4,6 +4,8 @@ import {
   checkAndIncrementDaily,
   checkGptLadderBudget,
   dailyUsage,
+  getGptLadderStatus,
+  recordGptLadderCall,
   recordGptLadderSpend,
 } from "./aiSpendGuard";
 import { mkdtempSync } from "node:fs";
@@ -58,6 +60,50 @@ describe("GPT ladder dollar guard", () => {
     recordGptLadderSpend(0.003, { file, dateKey: "subcent-d1" });
     const r = checkGptLadderBudget({ capUsd: 1.0, file, dateKey: "subcent-d1", worstCaseUsd: 0 });
     expect(r.spentUsd).toBeCloseTo(0.009, 6);
+  });
+});
+
+describe("GPT ladder call counter (Task 6: Settings spend panel + GET status)", () => {
+  beforeEach(() => {
+    __resetForTest();
+  });
+
+  test("recordGptLadderCall increments the day's call count", () => {
+    const file = tmpFile();
+    expect(getGptLadderStatus({ file, dateKey: "calls-d1" }).calls).toBe(0);
+    recordGptLadderCall({ file, dateKey: "calls-d1" });
+    expect(getGptLadderStatus({ file, dateKey: "calls-d1" }).calls).toBe(1);
+    recordGptLadderCall({ file, dateKey: "calls-d1" });
+    recordGptLadderCall({ file, dateKey: "calls-d1" });
+    expect(getGptLadderStatus({ file, dateKey: "calls-d1" }).calls).toBe(3);
+  });
+
+  test("call count coexists with spend in the same file without clobbering either key", () => {
+    const file = tmpFile(); // deliberately the SAME physical file both guards already share
+    const dateKey = "calls-coexist-d1";
+    recordGptLadderSpend(0.42, { file, dateKey });
+    recordGptLadderCall({ file, dateKey });
+    recordGptLadderCall({ file, dateKey });
+    __resetForTest(); // simulate a cold start: only the file remains
+    const status = getGptLadderStatus({ file, dateKey, capUsd: 1.0, worstCaseUsd: 0 });
+    expect(status.spentUsd).toBeCloseTo(0.42, 5);
+    expect(status.calls).toBe(2);
+  });
+
+  test("a new day resets the call count", () => {
+    const file = tmpFile();
+    recordGptLadderCall({ file, dateKey: "calls-reset-d1" });
+    recordGptLadderCall({ file, dateKey: "calls-reset-d1" });
+    expect(getGptLadderStatus({ file, dateKey: "calls-reset-d2" }).calls).toBe(0);
+  });
+
+  test("getGptLadderStatus reports allowed alongside spend/cap/calls", () => {
+    const file = tmpFile();
+    const before = getGptLadderStatus({ file, dateKey: "calls-allowed-d1", capUsd: 1.0, worstCaseUsd: 0.39 });
+    expect(before.allowed).toBe(true);
+    recordGptLadderSpend(0.7, { file, dateKey: "calls-allowed-d1" });
+    const after = getGptLadderStatus({ file, dateKey: "calls-allowed-d1", capUsd: 1.0, worstCaseUsd: 0.39 });
+    expect(after.allowed).toBe(false); // 0.7 + 0.39 > 1.0
   });
 });
 

@@ -479,6 +479,14 @@ export interface AiStatus {
   lastAttemptAt: string | null;
   lastProvider: string;
   lastFailureReason: string;
+  /** GPT-5.5 ladder rung's own daily dollar/call status (Task 6 Settings spend panel). Optional
+   *  because it is a newer server field; a stale/mocked GET response without it is still valid. */
+  gptLadder?: {
+    spentTodayUsd: number;
+    capUsd: number;
+    callsToday: number;
+    enabled: boolean;
+  };
 }
 
 /** Which approved corroboration path produced a "verified" decode (for honest reporting). */

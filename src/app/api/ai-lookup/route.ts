@@ -30,7 +30,7 @@ import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerif
 import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
 import { runSizeRace } from "@/services/ai/sizeRace";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptLadderBudget, recordGptLadderSpend } from "@/services/security/aiSpendGuard";
+import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall, getGptLadderStatus } from "@/services/security/aiSpendGuard";
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
 import { shouldRunGptRung, gptResultToDecodePayload, capTierForFirewall } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
@@ -263,6 +263,9 @@ export async function GET(request: Request) {
   if (!geminiConfigured) missingKeys.push("GEMINI_API_KEY");
   if (!openaiConfigured) missingKeys.push("OPENAI_API_KEY");
   if (!firecrawlConfigured) missingKeys.push("FIRECRAWL_API_KEY");
+  // Task 6: read-only GPT ladder spend/call status for the Settings panel. getGptLadderStatus makes
+  // no writes and spends nothing (it composes checkGptLadderBudget's peek + the call-count peek).
+  const gptLadderStatus = getGptLadderStatus({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD });
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
     autoDecodeOnScan: process.env.ENABLE_AUTO_DECODE_ON_SCAN !== "false",
@@ -284,6 +287,12 @@ export async function GET(request: Request) {
     dailyLimit: Number(process.env.AI_LOOKUP_DAILY_LIMIT || 200),
     missingKeys,
     e2e: e2eMode(),
+    gptLadder: {
+      spentTodayUsd: gptLadderStatus.spentUsd,
+      capUsd: gptLadderStatus.capUsd,
+      callsToday: gptLadderStatus.calls,
+      enabled: openaiConfigured && gptLadderStatus.allowed,
+    },
   });
 }
 
@@ -483,6 +492,7 @@ export async function POST(request: Request) {
       if (!rung.run) return { payload: null, skipReason: rung.skipReason, surfaceSkip: true };
       const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY! });
       recordGptLadderSpend(r.usdActual); // ALWAYS - success, error, or abort; never skip this.
+      recordGptLadderCall(); // Task 6: Settings spend panel + GET status "calls today" counter.
       const raw = gptResultToDecodePayload(r, code);
       return { payload: raw ? capTierForFirewall(raw, opts.conflictOf(raw.result.brand)) : null, surfaceSkip: false };
     };

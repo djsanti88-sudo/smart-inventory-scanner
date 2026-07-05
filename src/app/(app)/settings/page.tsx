@@ -6,6 +6,7 @@ import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
+import { GptLadderPanel } from "@/components/GptLadderPanel";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -155,6 +156,7 @@ export default function SettingsPage() {
         <Row label="Thorough lookup mode">
           <span className="text-sm">{aiStatus.premiumFallback ? "On" : "Off"}</span>
         </Row>
+        <GptLadderPanel gptLadder={aiStatus.gptLadder} />
         <Row label="Daily lookup count">
           <span className="text-sm text-zinc-600">
             {settings.dailyLookupCount}/{settings.dailyLookupLimit}

@@ -8,7 +8,7 @@ import fs from "node:fs";
 vi.mock("server-only", () => ({}));
 
 import { POST, GET } from "@/app/api/ai-lookup/route";
-import { __resetForTest, dailyUsage } from "@/services/security/aiSpendGuard";
+import { __resetForTest, dailyUsage, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
 
@@ -642,4 +642,37 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     try { stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8")); } catch { /* file never created is also valid proof */ }
     expect(stored[KNOWN_TIRE_BARCODE], "a free-rung (tire-corpus) result must never be persisted to L2").toBeUndefined();
   }, 20000);
+
+  // Task 6: GET /api/ai-lookup exposes the GPT ladder's own spend/call status for the Settings panel.
+  describe("GET status: gptLadder spend panel fields", () => {
+    const mkGet = () => new Request("http://localhost/api/ai-lookup", { headers: { "x-forwarded-for": "5.5.5.5" } });
+
+    it("reports zero spend/calls and enabled:false with no OpenAI key configured", async () => {
+      const res = await GET(mkGet());
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.gptLadder).toEqual({ spentTodayUsd: 0, capUsd: 3, callsToday: 0, enabled: false });
+    });
+
+    it("reflects recorded spend + calls, and enabled:true once a key is configured and budget allows", async () => {
+      process.env.OPENAI_API_KEY = "test-openai-key";
+      recordGptLadderSpend(0.42, { file: tmpGptLadderFile });
+      recordGptLadderCall({ file: tmpGptLadderFile });
+      recordGptLadderCall({ file: tmpGptLadderFile });
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.gptLadder.spentTodayUsd).toBeCloseTo(0.42, 5);
+      expect(json.gptLadder.callsToday).toBe(2);
+      expect(json.gptLadder.enabled).toBe(true);
+    });
+
+    it("enabled is false once spend + worst case would exceed the cap, even with a key configured", async () => {
+      process.env.OPENAI_API_KEY = "test-openai-key";
+      process.env.GPT_LADDER_DAILY_USD = "1";
+      recordGptLadderSpend(0.9, { file: tmpGptLadderFile }); // 0.9 + worst-case(~0.39) > 1.0 cap
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.gptLadder.enabled).toBe(false);
+    });
+  });
 });
