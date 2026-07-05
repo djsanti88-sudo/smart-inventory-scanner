@@ -306,6 +306,32 @@ describe("FetchV2Cache", () => {
   });
 });
 
+describe("no-result receipts in the pipeline (credit efficiency)", () => {
+  test("a receipted code spends ZERO searches and returns unknown (owner: no auto-retry)", async () => {
+    const cache = new FetchV2Cache();
+    cache.markNoResult("054137070573", "probed 2026-07-04");
+    const search = vi.fn(async () => []);
+    const r = await fetchV2("054137070573", { cache, fetchPage: vi.fn(), discovery: [{ name: "m", search }] });
+    expect(search).not.toHaveBeenCalled();
+    expect(r.outcome).toBe("unknown");
+    expect(r.debug.rulesFired.join(" ")).toMatch(/receipt/i);
+    expect(r.countBehavior.mustIncrementQuantity).toBe(true);
+  });
+
+  test("a COMPLETE empty probe writes a receipt", async () => {
+    const cache = new FetchV2Cache();
+    await fetchV2("054137070573", { cache, fetchPage: async () => ({ ok: false, status: 0, html: "" }), discovery: [{ name: "m", search: async () => [] }] });
+    expect(cache.getNoResult("054137070573")).toBeTruthy();
+  });
+
+  test("a budget-truncated probe does NOT write a receipt", async () => {
+    const cache = new FetchV2Cache();
+    let t = 0;
+    await fetchV2("054137090250", { cache, now: () => (t += 30_000), fetchPage: async () => ({ ok: false, status: 0, html: "" }), discovery: [{ name: "m", search: async () => [] }] }, { maxTotalMs: 25_000 });
+    expect(cache.getNoResult("054137090250")).toBeFalsy();
+  });
+});
+
 // ---------------------------------------------------------------------------- discovery providers
 function jsonResponse(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
