@@ -12,7 +12,9 @@ const baseInput = {
   priorStatus: undefined as string | undefined,
   e2e: false,
   apiKeyPresent: true,
-  budget: okBudget,
+  // LAZY budget: a thunk, not a pre-computed value (MINOR 3 - the route must not pay for the sync
+  // budget-file read when an earlier, cheaper check already decided to skip).
+  budget: () => okBudget,
 };
 
 describe("shouldRunGptRung", () => {
@@ -62,7 +64,7 @@ describe("shouldRunGptRung", () => {
   });
 
   test("skips when the daily dollar budget is not allowed", () => {
-    const r = shouldRunGptRung({ ...baseInput, budget: blockedBudget });
+    const r = shouldRunGptRung({ ...baseInput, budget: () => blockedBudget });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
@@ -73,9 +75,28 @@ describe("shouldRunGptRung", () => {
       shouldRunGptRung({ ...baseInput, codeType: "vendor_label" }).skipReason,
       shouldRunGptRung({ ...baseInput, e2e: true }).skipReason,
       shouldRunGptRung({ ...baseInput, apiKeyPresent: false }).skipReason,
-      shouldRunGptRung({ ...baseInput, budget: blockedBudget }).skipReason,
+      shouldRunGptRung({ ...baseInput, budget: () => blockedBudget }).skipReason,
     ]);
     expect(reasons.size).toBe(5);
+  });
+
+  // MINOR 3: the budget guard does a SYNCHRONOUS file read (checkGptLadderBudget). It must never pay
+  // that cost when an earlier, cheaper check (prior status / codeType / e2e / api key) already decided
+  // to skip - so `budget` is a thunk and shouldRunGptRung must not invoke it unless it reaches that
+  // final check.
+  test("never calls the budget thunk when an earlier cheap check already skips", () => {
+    const spy = () => { throw new Error("budget thunk must not be called - an earlier check should have skipped first"); };
+    expect(shouldRunGptRung({ ...baseInput, priorStatus: "verified", budget: spy }).run).toBe(false);
+    expect(shouldRunGptRung({ ...baseInput, codeType: "vendor_label", budget: spy }).run).toBe(false);
+    expect(shouldRunGptRung({ ...baseInput, e2e: true, budget: spy }).run).toBe(false);
+    expect(shouldRunGptRung({ ...baseInput, apiKeyPresent: false, budget: spy }).run).toBe(false);
+  });
+
+  test("DOES call the budget thunk once every cheaper check has passed", () => {
+    let calls = 0;
+    const r = shouldRunGptRung({ ...baseInput, budget: () => { calls++; return okBudget; } });
+    expect(r.run).toBe(true);
+    expect(calls).toBe(1);
   });
 });
 
@@ -146,6 +167,33 @@ describe("gptResultToDecodePayload", () => {
     expect(payload.result.needsHumanReview).toBe(true);
     expect(payload.result.confidence).toBe(0.3);
     expect(payload.reasonText.startsWith("background info only: ")).toBe(true);
+  });
+
+  // CACHE-SAFETY CONTRACT (IMPORTANT 1): decode.ts documents "needs_review is reserved for no provider
+  // produced a product" - the route's withDecodeCache decides PERMANENT-vs-retryable from
+  // isUsableProductName(result.productName). An info_only tier is exactly a weak GPT guess: it must
+  // NEVER carry a usable productName (or that guess gets cached FOREVER and the code can never
+  // re-decode). The guess text must still reach the human via `guesses` instead.
+  test("tier info_only: productName is EMPTY (never poisons the decode cache) and the guess lives in `guesses`", () => {
+    const r = gptResult({
+      tier: "info_only", brand: "Goodyear", productName: "Goodyear (best guess, low confidence)",
+      confidence: 0.3, exactCodeFound: false, basis: "barcode prefix suggests Goodyear family",
+    });
+    const payload = gptResultToDecodePayload(r, "049000028904")!;
+    expect(payload.result.productName).toBe("");
+    expect(payload.result.guesses.length).toBeGreaterThan(0);
+    expect(payload.result.guesses.some((g) => g.includes("Goodyear (best guess, low confidence)"))).toBe(true);
+    expect(payload.result.guesses.some((g) => g.includes("barcode prefix suggests Goodyear family"))).toBe(true);
+  });
+
+  test("tier info_only with no basis: productName still empty, guess still carries the productName text", () => {
+    const r = gptResult({
+      tier: "info_only", brand: "Goodyear", productName: "Goodyear (best guess, low confidence)",
+      confidence: 0.3, exactCodeFound: false, basis: "",
+    });
+    const payload = gptResultToDecodePayload(r, "049000028904")!;
+    expect(payload.result.productName).toBe("");
+    expect(payload.result.guesses).toEqual(["background info: Goodyear (best guess, low confidence)"]);
   });
 
   test("gtin/upc/ean identifier fields are populated only for a 12-14 digit gtin", () => {

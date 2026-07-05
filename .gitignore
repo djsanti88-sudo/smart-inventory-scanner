@@ -75,6 +75,7 @@ reports/**/cloud-playwright-results.json
 
 # Runtime daily spend-cap counter for /api/ai-lookup (local-first state, regenerated)
 .ai-lookup-usage.json
+.gpt-ladder-usage.json
 .env*.local
 
 # Python bytecode + compile caches (tire-knowledge pipeline scripts) - regenerated

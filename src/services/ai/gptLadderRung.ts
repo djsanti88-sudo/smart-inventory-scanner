@@ -13,7 +13,10 @@ export interface GptRungInput {
   priorStatus: string | undefined; // decision?.status of the ladder so far
   e2e: boolean;
   apiKeyPresent: boolean;
-  budget: { allowed: boolean; spentUsd: number; capUsd: number };
+  // LAZY on purpose: checkGptLadderBudget() does a synchronous file read. It must only run once every
+  // cheaper/earlier check (prior status, codeType, e2e, api key) has already passed - so this is a
+  // thunk, not a pre-computed value, and shouldRunGptRung calls it ONLY when it reaches this check.
+  budget: () => { allowed: boolean; spentUsd: number; capUsd: number };
 }
 
 export type GptRungDecodePayload = {
@@ -47,7 +50,8 @@ export function shouldRunGptRung(i: GptRungInput): { run: boolean; skipReason: s
   if (!i.apiKeyPresent) {
     return { run: false, skipReason: "no_api_key" };
   }
-  if (!i.budget.allowed) {
+  // Cheapest checks above all passed - only NOW pay for the budget guard's sync file read.
+  if (!i.budget().allowed) {
     return { run: false, skipReason: "budget_exceeded" };
   }
   return { run: true, skipReason: "" };
@@ -127,9 +131,16 @@ export function gptResultToDecodePayload(r: GptFromScratchResult, code: string):
     return { result, decision, reasonText: "" };
   }
 
-  // tier === "info_only": background info, never auto-count-worthy. Prefixed reasonText lets the
-  // client (Task 5) route this distinctly from a normal needs_review with no lead at all.
+  // tier === "info_only": background info, never auto-count-worthy. CACHE-SAFETY CONTRACT (decode.ts's
+  // documented invariant: "needs_review is reserved for no provider produced a product" - the route's
+  // withDecodeCache decides a PERMANENT vs a short-TTL retryable cache entry from `isUsableProductName`
+  // on `result.productName`): this result must NOT carry a usable productName, or a weak GPT guess would
+  // be cached FOREVER and the code could never re-decode. The guess text instead goes into `guesses`
+  // (Task 5 / the scan store reads it from there, or from reasonText, into decodeNote) and productName
+  // is forced empty here.
+  const guessText = r.basis ? `background info: ${r.productName} - ${r.basis}` : `background info: ${r.productName}`;
   const reasonText = `background info only: ${r.basis || r.productName}`;
+  const infoOnlyResult: AiLookupResult = { ...result, productName: "", guesses: [guessText] };
   const decision: DecodeDecision = {
     status: "needs_review",
     confidence: r.confidence,
@@ -138,7 +149,7 @@ export function gptResultToDecodePayload(r: GptFromScratchResult, code: string):
     exactCodeEvidenceVerifiedByApp: false,
     crossCheck: crossCheckSingleProvider(r.confidence),
   };
-  return { result, decision, reasonText };
+  return { result: infoOnlyResult, decision, reasonText };
 }
 
 /**

@@ -694,6 +694,9 @@ export async function POST(request: Request) {
       // an otherwise-verified GPT self-report to suggested (capTierForFirewall), same as every other
       // rung on this ladder.
       let gptLadderPayload: ReturnType<typeof gptResultToDecodePayload> = null;
+      // Surfaced in `debug` below regardless of e2e/live path, and (except the happy-path "a prior rung
+      // already decided" case) also pushed to providerStatuses - a paid rung must never skip silently.
+      let gptLadderSkipReason: string | undefined;
       if (e2eMode()) {
         // Deterministic Playwright hook ONLY (zero network): lets E2E prove the rung's decision/UI
         // wiring without a live OpenAI call. Ignored when the request carries no mockGptLadder fixture.
@@ -708,12 +711,27 @@ export async function POST(request: Request) {
           priorStatus: decision.status,
           e2e: false,
           apiKeyPresent: !!process.env.OPENAI_API_KEY,
-          budget: checkGptLadderBudget(),
+          // LAZY (MINOR 3): checkGptLadderBudget() does a synchronous file read. shouldRunGptRung checks
+          // priorStatus/codeType/e2e/apiKeyPresent FIRST and only calls this thunk once all of those pass,
+          // so a code that never had a chance to reach the ladder (already decided, non-public, e2e, or no
+          // key) never pays for that file I/O.
+          budget: () => checkGptLadderBudget({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD }),
         });
         if (rung.run) {
           const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY! });
           recordGptLadderSpend(r.usdActual); // ALWAYS - success, error, or abort; never skip this.
           gptLadderPayload = capTierForFirewall(gptResultToDecodePayload(r, code), brandPrefixConflict);
+        } else {
+          gptLadderSkipReason = rung.skipReason;
+          // Don't spam the happy path: "a prior rung already decided" means the ladder simply wasn't
+          // needed. Every OTHER skip (non-public code, no key, budget exceeded) is a real reason a paid
+          // rung did NOT run and must be visible in providerStatuses, matching the firecrawl skip pattern.
+          if (rung.skipReason !== "prior_status_already_decided") {
+            providerStatuses = [
+              ...providerStatuses,
+              { provider: "gpt-5.5-ladder", status: "skipped", latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false, errorCode: rung.skipReason },
+            ];
+          }
         }
       }
       if (gptLadderPayload) {
@@ -753,6 +771,7 @@ export async function POST(request: Request) {
           coverageMissed,
           firecrawlCreditsEstimated,
           firecrawlCandidates,
+          gptLadderSkipReason, // undefined when the rung ran or wasn't needed (a prior rung already decided)
           cached: false,
           prefixHint, // platformOwner-only: brand the barcode prefix maps to (recall/transparency)
           firewallReason, // platformOwner-only: why a prefix/UPC conflict routed this to review (if any)
