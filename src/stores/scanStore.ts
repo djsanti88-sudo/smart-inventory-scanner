@@ -1532,6 +1532,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 mode: typeof d.mode === "string" ? d.mode : s.aiStatus.mode,
                 dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
                 missingKeys: Array.isArray(d.missingKeys) ? d.missingKeys : s.aiStatus.missingKeys,
+                gptLadder:
+                  d.gptLadder && typeof d.gptLadder === "object"
+                    ? {
+                        spentTodayUsd: Number(d.gptLadder.spentTodayUsd) || 0,
+                        capUsd: Number(d.gptLadder.capUsd) || 0,
+                        callsToday: Number(d.gptLadder.callsToday) || 0,
+                        enabled: Boolean(d.gptLadder.enabled),
+                      }
+                    : s.aiStatus.gptLadder,
               },
               // Live AI config is SERVER-AUTHORITATIVE so a stale persisted client value can't disable lookup
               // or pin an old daily cap. When the server confirms a provider key, force lookup ON (always-on),

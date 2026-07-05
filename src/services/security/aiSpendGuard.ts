@@ -210,9 +210,82 @@ export function recordGptLadderSpend(usd: number, opts: { file?: string; dateKey
   }
 }
 
+function gptLadderCallsKey(dateKey: string): string {
+  return `gptLadderCalls:${dateKey}`;
+}
+
+const memGptLadderCalls = new Map<string, number>();
+
+/**
+ * Read-only peek at today's GPT ladder call count. Same file (gptLadderFile()), same
+ * max-of-memory-vs-file pattern as checkGptLadderBudget, so a fresh process (memory cleared)
+ * still sees calls recorded before it started, and a warm process never regresses below what
+ * it already knows.
+ */
+function gptLadderCallCount(opts: { file?: string; dateKey?: string } = {}): number {
+  const file = opts.file ?? gptLadderFile();
+  const date = opts.dateKey ?? todayKey();
+  const key = gptLadderCallsKey(date);
+
+  let calls = 0;
+  const mem = memGptLadderCalls.get(key);
+  if (typeof mem === "number") calls = mem;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    const fileCalls = raw && raw[key] && raw[key].date === date ? Number(raw[key].calls) : 0;
+    if (Number.isFinite(fileCalls) && fileCalls > calls) calls = fileCalls;
+  } catch {
+    // no file yet / unreadable -> fall back to in-memory (or 0)
+  }
+  return calls;
+}
+
+/**
+ * Records one GPT ladder call for the day. Lives in the SAME dedicated file as the dollar spend
+ * guard (gptLadderFile()), under its OWN top-level key (`gptLadderCalls:<dateKey>`), so the two
+ * counters can never clobber each other. Merge-write, not overwrite: read whatever is on disk
+ * (tolerating a missing/corrupt file), touch only this key, write the whole document back - the
+ * same defense used by recordGptLadderSpend and checkAndIncrementDaily after the earlier clobber bug.
+ */
+export function recordGptLadderCall(opts: { file?: string; dateKey?: string } = {}): void {
+  const file = opts.file ?? gptLadderFile();
+  const date = opts.dateKey ?? todayKey();
+  const key = gptLadderCallsKey(date);
+
+  const calls = gptLadderCallCount({ file, dateKey: date }) + 1;
+  memGptLadderCalls.set(key, calls);
+
+  let all: Record<string, unknown> = {};
+  try {
+    all = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    // no file yet / unreadable -> start fresh
+  }
+  all[key] = { date, calls };
+  try {
+    fs.writeFileSync(file, JSON.stringify(all));
+  } catch {
+    // best-effort persistence; in-memory still enforces within this process
+  }
+}
+
+/**
+ * Combined read-only status for the Settings spend panel + GET /api/ai-lookup: today's spend,
+ * cap, call count, and whether the budget currently allows another ladder call. Composes the
+ * existing budget check + call-count peek; makes NO writes and spends nothing.
+ */
+export function getGptLadderStatus(
+  opts: { capUsd?: number; file?: string; dateKey?: string; worstCaseUsd?: number } = {}
+): { spentUsd: number; capUsd: number; calls: number; allowed: boolean } {
+  const budget = checkGptLadderBudget(opts);
+  const calls = gptLadderCallCount(opts);
+  return { spentUsd: budget.spentUsd, capUsd: budget.capUsd, calls, allowed: budget.allowed };
+}
+
 /** Test-only: clear in-memory state between cases. */
 export function __resetForTest(): void {
   ipBuckets.clear();
   memDaily = null;
   memGptLadder.clear();
+  memGptLadderCalls.clear();
 }
