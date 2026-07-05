@@ -89,6 +89,40 @@ describe("detectSiblingAmbiguity", () => {
     )).toBe("agree");
   });
 
+  test("generic tire vocabulary is NOT a distinctive shared token: different brands, same size = UNRELATED (final-review Critical)", () => {
+    // The recycled-code fence must not be satisfiable by the word "Tire": two different brands of
+    // the same size are different products even though every tire listing says "Tire".
+    expect(identityRelation(
+      { name: "Michelin Pilot Sport 4 245/35R19 Tire", brand: "" },
+      { name: "Continental ExtremeContact DWS06 245/35R19 Tire", brand: "" },
+    )).toBe("unrelated");
+    expect(identityRelation(
+      { name: "Goodyear Eagle F1 245/35R19 Tire", brand: "" },
+      { name: "Pirelli P Zero 245/35R19 Tire", brand: "" },
+    )).toBe("unrelated");
+    // Same actual product still agrees through a REAL shared token (brand/model).
+    expect(identityRelation(
+      { name: "Michelin Pilot Sport 4 245/35R19 Tire", brand: "" },
+      { name: "245/35R19 Michelin Pilot Sport 4 XL", brand: "" },
+    )).toBe("agree");
+  });
+
+  test("containment cannot merge numeric variants: differing pure-number tokens are siblings (final-review Important)", () => {
+    expect(identityRelation(
+      { name: "Bosch Icon Wiper Blade 26", brand: "" },
+      { name: "Bosch Icon Wiper Blade 22", brand: "" },
+    )).toBe("sibling");
+    expect(identityRelation(
+      { name: "Nike Air Max 90 size 10", brand: "" },
+      { name: "Nike Air Max 95 size 10", brand: "" },
+    )).toBe("sibling");
+    // Full containment with NO numeric mismatch still agrees (Grabill class must not regress).
+    expect(identityRelation(
+      { name: "Beef Chunks", brand: "" },
+      { name: "Grabill Country Meats Beef Chunks", brand: "" },
+    )).toBe("agree");
+  });
+
   test("motorcycle dash-notation sizes agree with R notation (ContiGO live flip, v2.3 batch 9)", () => {
     // 100/80-17 IS 100/80R17: the dash is the universal motorcycle-tire separator. The fitment
     // vehicle tokens (MBK X-Limit) must not drown the size+brand agreement.
@@ -184,15 +218,17 @@ describe("detectSiblingAmbiguity", () => {
     )).toBe("agree");
   });
 
-  // Regression lock for the XL-strip regex itself: no shared brand/model tokens between the two
-  // names, so containment and jaccard token-overlap CANNOT produce "agree" on their own - the
-  // XL-stripped size (plus the one shared generic "tire" token the tire-agreement branch
-  // requires) is the ONLY path to "agree" here. Proven by reverting the XL group/strip and
-  // confirming this test fails (see task-4-report.md for the RED/GREEN run).
+  // Regression lock for the XL-strip regex itself: the shared MODEL token ("Trailmax") satisfies
+  // the tire branch's distinctive-token requirement, but without the XL strip side A's glued
+  // "245/35ZR19XL" never parses as a size, no tire agreement fires, and containment (0.5),
+  // leading-prefix (uncontained mid-run), and jaccard (0.2) all fall short - so the XL-stripped
+  // size is the deciding signal. (Original fixture shared only generic "Tire"/"Performance"
+  // words; the final-review Critical rightly made generic tire vocabulary non-distinctive, so
+  // the fixture was rebuilt with a real model token.)
   test("XL-stripped tire size is the ONLY shared signal (containment/jaccard alone cannot rescue this)", () => {
     expect(identityRelation(
-      { name: "Trailmax Sport Tire 245/35ZR19XL 93Y", brand: "" },
-      { name: "High Performance Tire 245/35R19", brand: "" },
+      { name: "Trailmax Sport GT-A 245/35ZR19XL 93Y", brand: "" },
+      { name: "245/35R19 Trailmax Radial", brand: "" },
     )).toBe("agree");
   });
 

@@ -108,6 +108,24 @@ export type IdentityRelation = "agree" | "sibling" | "unrelated";
  *             conflict, not a sibling. Missing brands do NOT imply the same family (live bug
  *             2026-07-04: a water and a video game were called "siblings").
  */
+// Words that appear in virtually every tire listing and identify nothing (final-review Critical:
+// "Tire" alone let Michelin agree with Continental at the same size, defeating the recycled-code
+// fence). Kept tight to nouns/marketing that never distinguish one tire from another.
+const TIRE_GENERIC = new Set([
+  "tire", "tires", "tyre", "tyres", "new", "set", "radial", "bsw", "owl", "rwl", "wall", "black",
+  "all", "season", "performance", "run", "flat", "pair", "pcs", "front", "rear", "winter", "summer",
+]);
+
+/** Both sides carry pure-number tokens and they differ (blade 26 vs 22): a variant, not the same
+ *  product. One-sided numbers (a trailing SKU) are noise and do not clash. */
+function numericVariantClash(a: Set<string>, b: Set<string>): boolean {
+  const nums = (s: Set<string>) => new Set([...s].filter((t) => /^\d+$/.test(t)));
+  const na = nums(a), nb = nums(b);
+  if (na.size === 0 || nb.size === 0) return false;
+  const onlyA = [...na].filter((t) => !nb.has(t)), onlyB = [...nb].filter((t) => !na.has(t));
+  return onlyA.length > 0 && onlyB.length > 0;
+}
+
 /** Share of the SHORTER name's tokens contained in the longer name. */
 function containment(a: Set<string>, b: Set<string>): number {
   const [small, big] = a.size <= b.size ? [a, b] : [b, a];
@@ -139,19 +157,23 @@ export function identityRelation(a: IdentityCandidate, b: IdentityCandidate): Id
   const sa = sizesOf(a.name);
   const sb = sizesOf(b.name);
   const sizeClash = sizesConflict(sa, sb);
-  // Tire rule: the SAME exact tire size plus any shared distinctive token = the same tire. Sizes
+  // Tire rule: the SAME exact tire size plus any shared DISTINCTIVE token = the same tire. Sizes
   // are near-unique identifiers; noise tokens (load index, SKU, "4 New", marketplace names) were
-  // producing false conflicts between agreeing listings (200-run live bug).
+  // producing false conflicts between agreeing listings (200-run live bug). Generic tire
+  // vocabulary is NOT distinctive: every listing says "Tire", so it must never satisfy the
+  // recycled-code fence for two different brands of the same size (final-review Critical).
   const tiresA = sa.filter((s) => unitOf(s) === "tire");
   const tiresB = sb.filter((s) => unitOf(s) === "tire");
   if (tiresA.length && tiresB.length && tiresA.some((s) => tiresB.includes(s))) {
     let shared = 0;
-    for (const t of ta) if (tb.has(t) && !/^\d+$/.test(t)) shared++;
+    for (const t of ta) if (tb.has(t) && !/^\d+$/.test(t) && !TIRE_GENERIC.has(t)) shared++;
     if (shared >= 1 && !sizesConflict(tiresA, tiresB)) return "agree";
   }
   // Containment = the same product named short vs long ("Beef Chunks" vs "Grabill Country Meats
-  // Beef Chunks, 27 oz") - AGREEMENT, unless a same-unit size clash proves a variant.
-  if (containment(ta, tb) >= 0.8) return sizeClash ? "sibling" : "agree";
+  // Beef Chunks, 27 oz") - AGREEMENT, unless a same-unit size clash proves a variant, or the two
+  // sides carry DIFFERENT pure-number tokens (wiper blade 26 vs 22, Air Max 90 vs 95 - numeric
+  // variants that sizesOf's units never see; final-review Important).
+  if (containment(ta, tb) >= 0.8) return sizeClash || numericVariantClash(ta, tb) ? "sibling" : "agree";
   // Leading-prefix containment: the shorter name's ONLY uncontained tokens are its leading
   // store/brand prefix ("Harris Teeter Triple berry blend" vs "Triple berry blend ...").
   // True siblings differ AFTER the brand (Doritos COOL RANCH vs Doritos NACHO CHEESE), so
