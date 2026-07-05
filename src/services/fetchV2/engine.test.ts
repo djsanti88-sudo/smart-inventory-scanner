@@ -131,6 +131,18 @@ describe("detectSiblingAmbiguity", () => {
     )).toBe("agree");
   });
 
+  // Regression lock for the XL-strip regex itself: no shared brand/model tokens between the two
+  // names, so containment and jaccard token-overlap CANNOT produce "agree" on their own - the
+  // XL-stripped size (plus the one shared generic "tire" token the tire-agreement branch
+  // requires) is the ONLY path to "agree" here. Proven by reverting the XL group/strip and
+  // confirming this test fails (see task-4-report.md for the RED/GREEN run).
+  test("XL-stripped tire size is the ONLY shared signal (containment/jaccard alone cannot rescue this)", () => {
+    expect(identityRelation(
+      { name: "Trailmax Sport Tire 245/35ZR19XL 93Y", brand: "" },
+      { name: "High Performance Tire 245/35R19", brand: "" },
+    )).toBe("agree");
+  });
+
   // Regression protection for the multi-size ambiguity lens (sizesConflict): confirms the branch
   // actually discriminates on shared-vs-unshared sizes, not just "multi-size => always agree".
   test("multi-size titles: a shared size still agrees, but NO shared size is a real clash", () => {
