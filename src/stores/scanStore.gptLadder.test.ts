@@ -402,4 +402,156 @@ describe("Bounded decode queue (burst-safe)", () => {
       globalThis.fetch = original;
     }
   });
+
+  it("a rejected/failed decode in the middle of a burst does not wedge the queue - later queued decodes still run and complete", async () => {
+    const store = aiOnStore();
+    const codes = ["RJ1", "RJ2", "RJ3", "RJ4"];
+    const reviewIds = codes.map((code) => {
+      store.getState().processScan(code);
+      return store.getState().needsReviewQueue.find((r) => r.cleanCode === code && r.status === "open")!.id;
+    });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+
+    const original = globalThis.fetch;
+    // Same manually-resolvable-promise pattern as the burst test above, extended with an "outcome" so a
+    // caller can settle a given in-flight call as either a normal response OR a thrown/rejected fetch
+    // (simulating a network failure / provider error for exactly one queued task).
+    type Pending = { code: string; settle: (outcome: "ok" | "reject") => void };
+    const pending: Pending[] = [];
+    const startedOrder: string[] = [];
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    let fetchCallCount = 0;
+
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      fetchCallCount++;
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      startedOrder.push(body.cleanCode);
+      concurrent++;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      const outcome = await new Promise<"ok" | "reject">((resolve) => {
+        pending.push({ code: body.cleanCode, settle: resolve });
+      });
+      concurrent--;
+      if (outcome === "reject") {
+        throw new Error(`simulated network failure for ${body.cleanCode}`);
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          providerNames: ["mock"],
+          results: [],
+          decision: { status: "needs_review", confidence: 0, evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, reason: "", crossCheck: crossCheckSingleProvider(0) },
+        }),
+      };
+    }) as unknown as typeof fetch;
+
+    const settle = (code: string, outcome: "ok" | "reject") => {
+      const idx = pending.findIndex((p) => p.code === code);
+      const [item] = pending.splice(idx, 1);
+      item.settle(outcome);
+    };
+
+    try {
+      const donePromise = Promise.all(reviewIds.map((id) => store.getState().liveDecode(id)));
+
+      await vi.waitFor(() => expect(pending.length).toBe(2));
+      expect(maxConcurrent).toBe(2);
+      expect(startedOrder).toEqual(["RJ1", "RJ2"]);
+
+      // Reject the SECOND task mid-burst (synthetic throw from the mocked fetch/decodeOnce path). A
+      // rejected/errored slot must free its concurrency slot exactly like a successful one and the FIFO
+      // queue must keep draining - RJ3 must start next.
+      settle("RJ2", "reject");
+      await vi.waitFor(() => expect(pending.length).toBe(2));
+      expect(startedOrder).toEqual(["RJ1", "RJ2", "RJ3"]);
+      expect(maxConcurrent).toBeLessThanOrEqual(2);
+
+      settle("RJ1", "ok");
+      await vi.waitFor(() => expect(pending.length).toBe(2));
+      expect(startedOrder).toEqual(["RJ1", "RJ2", "RJ3", "RJ4"]);
+      expect(maxConcurrent).toBeLessThanOrEqual(2);
+
+      settle("RJ3", "ok");
+      settle("RJ4", "ok");
+      await donePromise;
+
+      expect(pending.length).toBe(0); // every queued task (including the rejected one) ran to completion
+      expect(maxConcurrent).toBeLessThanOrEqual(2);
+      expect(fetchCallCount).toBe(4);
+
+      // Prove the concurrency counter (activeDecodes) actually returned to 0 and the queue is not wedged:
+      // a brand-new decode enqueued AFTER the burst must start immediately, not sit stuck behind a phantom
+      // "still active" slot left over from the rejected task.
+      const postCode = "RJ5";
+      store.getState().processScan(postCode);
+      const postReview = store.getState().needsReviewQueue.find((r) => r.cleanCode === postCode && r.status === "open")!;
+      const postResp = {
+        providerNames: ["mock"],
+        results: [],
+        decision: { status: "needs_review", confidence: 0, evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, reason: "", crossCheck: crossCheckSingleProvider(0) },
+      };
+      globalThis.fetch = (async () => ({ ok: true, json: async () => postResp })) as unknown as typeof fetch;
+      await store.getState().liveDecode(postReview.id);
+      const postAfter = store.getState().needsReviewQueue.find((r) => r.id === postReview.id)!;
+      expect(postAfter.status).toBe("open"); // completed (not stuck "decoding" forever)
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("Direct idempotency lock (liveDecode re-entry on an already-resolved review)", () => {
+  it("calling liveDecode twice for the SAME review is a no-op the second time (open-status guard, not the rescan/alias path)", async () => {
+    const store = aiOnStore();
+    const review = openReview(store, "GPTIDEM01");
+    const RESP = {
+      providerNames: ["gpt-5.5-ladder"],
+      results: [
+        gptResult({
+          productName: "Continental TerrainContact 235/65R18",
+          brand: "Continental",
+          specsShort: "235/65R18 106T",
+          sourceUrls: ["https://www.tirerack.com/y"],
+          confidence: 0.9,
+          guesses: ["exact code on tirerack page"],
+          needsHumanReview: false,
+        }),
+      ],
+      decision: {
+        status: "verified",
+        confidence: 0.9,
+        reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
+        evidenceStrength: "none",
+        exactCodeEvidenceVerifiedByApp: false,
+        corroborationPath: "gpt_self_report",
+        crossCheck: crossCheckSingleProvider(0.9),
+      },
+    };
+    const { spy, restore } = stub(RESP);
+    try {
+      // First call: GPT verified 0.9 -> auto-count fires, review resolves.
+      await store.getState().liveDecode(review.id);
+      const afterFirst = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
+      expect(afterFirst.status).toBe("resolved");
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      const product = store.getState().products.find((p) => p.name === "Continental TerrainContact 235/65R18");
+      expect(product).toBeDefined();
+      expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
+
+      // Second call for the SAME reviewId, called DIRECTLY (not via processScan/rescan) - this exercises
+      // the `review.status !== "open"` guard at the top of runLiveDecodeOnce, not the deterministic-alias
+      // rescan path. The review is no longer open, so this must be a pure no-op: no second fetch, no
+      // second count, no duplicate product or alias.
+      await store.getState().liveDecode(review.id);
+
+      expect(spy).toHaveBeenCalledTimes(1); // fetch NOT called a second time
+      expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1); // unchanged
+      expect(store.getState().products.filter((p) => p.name === "Continental TerrainContact 235/65R18")).toHaveLength(1); // no duplicate product
+      expect(store.getState().aliases.filter((a) => a.cleanCode === "GPTIDEM01")).toHaveLength(1); // no duplicate alias
+    } finally {
+      restore();
+    }
+  });
 });
