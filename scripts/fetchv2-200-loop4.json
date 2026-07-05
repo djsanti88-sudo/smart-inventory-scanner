@@ -1,0 +1,623 @@
+{
+ "spent": 0,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "0000946801211",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Blue Chip Group Inc. Pancake mix",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Pancake mix",
+   "cost": 0,
+   "secs": 2,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0000946801211",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Augason Farms Buttermilk Pancake Mix 3lbs 4 oz No.10 Cans Survival Food 10 Year 946801211| eBay\" vs \"Buy Augason Farms from Amazon in Europe at the best price\""
+   ]
+  },
+  {
+   "code": "848983006257",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "falken wildpeak a t3w 265/70R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Falken Falken Wildpeak AT3W Tires - 265/70R17 - 28034300",
+   "cost": 0,
+   "secs": 1.62,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.extremecustoms.com/product.php?item_id=106252",
+   "codeLocation": "page_text",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "721506002120",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "yokohama parada 315/35R24",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Yokohama Parada Spec-X Tire - 315/35R24 114V",
+   "cost": 0,
+   "secs": 1.75,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.rvautoparts.com/products/yokohama-parada-spec-x-tire-315-35r24-114v",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "snippet consensus: 2 hosts agree (suggestion-grade)",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "8714692805134",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "vredestein ultrac pro 265/35R21",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "",
+   "cost": 0,
+   "secs": 3.46,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.tires-online.net/tires/vredestein-ultrac_pro/108+205",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"265/30 R21 vs 265/35 R21 tyre size ➤ AUTODOC\" vs \"Vredestein Ultrac Pro 265/35 ZR21 (101Y) (Österreich)\""
+   ]
+  },
+  {
+   "code": "10011126",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Direkt vom Feld Kurkuma",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Direkt vom Feld Kurkuma",
+   "cost": 0,
+   "secs": 2.09,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/10011126",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "conflict guard: recycled/conflicting code: unrelated products both claim it: \"Kurkuma\" vs \"Grand Shadowlite Wingtip Oxfords\""
+   ]
+  },
+  {
+   "code": "10030172",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Mecklenburger Saure Landpute in Aspik",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Mecklenburger Saure Landpute in Aspik",
+   "cost": 0,
+   "secs": 1.97,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/10030172",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "conflict guard: recycled/conflicting code: unrelated products both claim it: \"Saure Landpute in Aspik\" vs \"Stellar Ride (Big Kid)\""
+   ]
+  },
+  {
+   "code": "10056141",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Tesco Potato Salad",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Tesco Potato Salad",
+   "cost": 0,
+   "secs": 2.69,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/10056141",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "conflict guard: recycled/conflicting code: unrelated products both claim it: \"Potato Salad\" vs \"Louisiana Flake (Bulk)\""
+   ]
+  },
+  {
+   "code": "10076538",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Tesco Tesco Egg Noodles",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Tesco Tesco Egg Noodles",
+   "cost": 0,
+   "secs": 1.31,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10076538",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10102817",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "TGI FRIDAYS Cheddar & Bacon Potato Skins Snacks, Cheddar & Bacon",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Cheddar & Bacon Potato Skins Snacks, Cheddar & Bacon",
+   "cost": 0,
+   "secs": 2.04,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10102817",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10202272",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Elle&Vire Micro-pains",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Elle&Vire Micro-pains",
+   "cost": 0,
+   "secs": 9.78,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10202272",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10254226",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "DELI SELECT CORONATION CHICKEN WHITE BREAD",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "DELI SELECT CORONATION CHICKEN WHITE BREAD",
+   "cost": 0,
+   "secs": 2.32,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10254226",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10413760",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Publix fiber therapy, sugar-free",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Publix fiber therapy, sugar-free",
+   "cost": 0,
+   "secs": 2.23,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10413760",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10517741",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Dia Yogur melocoton y maracuya",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Dia Yogur melocoton y maracuya",
+   "cost": 0,
+   "secs": 1.74,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10517741",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10583968",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Powerbar Natural Energy",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "PowerBar Natural Energy",
+   "cost": 0,
+   "secs": 5.47,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10583968",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10641866",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Esselunga Frollini ai 5 cereali",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Esselunga Frollini ai 5 cereali",
+   "cost": 0,
+   "secs": 2.05,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10641866",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10716137",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "The Sweet Co Jelly Cherries",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "The Sweet Co Jelly Cherries",
+   "cost": 0,
+   "secs": 1.36,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10716137",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10803561",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Elviras Bauernladen Aschfelder Bio-Linsen (Beluga)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Elviras Bauernladen Aschfelder Bio-Linsen (Beluga)",
+   "cost": 0,
+   "secs": 1.72,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10803561",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10922262",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "carrefour bio saucisson sec",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Carrefour BIO saucisson sec",
+   "cost": 0,
+   "secs": 1.59,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/10922262",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11040989",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Galbusera Belle Buone Avena e Mix di Semi Cracker",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Galbusera Belle Buone Avena e Mix di Semi Cracker",
+   "cost": 0,
+   "secs": 1.69,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11040989",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11115908",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Le Comptoir de Mathilde Les mendiants",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Le Comptoir de Mathilde Les mendiants",
+   "cost": 0,
+   "secs": 1.21,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11115908",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11148364",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Bang Bang Sriracha Chilli Sauce",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Bang Bang Sriracha Chilli Sauce",
+   "cost": 0,
+   "secs": 1.16,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11148364",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11215790",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Despi Chipolatas",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Despi Chipolatas",
+   "cost": 0,
+   "secs": 1.79,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11215790",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11272151",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Plenish Organic & Unsweetened Plenish Coconut",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Plenish Organic & Unsweetened Plenish Coconut",
+   "cost": 0,
+   "secs": 1.69,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11272151",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11371496",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "WeserGold ExTaleR Mineralquelle",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "WeserGold ExTaleR Mineralquelle",
+   "cost": 0,
+   "secs": 0.96,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11371496",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11472292",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Nestea Iced Tea Peach",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Molecat® 100 Pest Extermination Kit",
+   "cost": 0,
+   "secs": 2.21,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.toolboxsupply.com/products/molecat-100-pest-extermination-kit",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11561262",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "MARIBEL Confiture extra de myrtilles",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "MARIBEL Confiture extra de myrtilles",
+   "cost": 0,
+   "secs": 1.47,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11561262",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11667216",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Sondey organic rice cakes Milk chocolate & coconut",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Erik Mishiyev v. Alphabet, Inc., et al",
+   "cost": 0,
+   "secs": 1.24,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://unicourt.com/case/pc-ap1-erik-mishiyev-v-alphabet-inc-et-al-60956",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "11793083",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Autour du Riz Basmati indien blanc",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "DuPont Tychem 6000 F CHA5 Hooded Coverall Large | Buy Online | DuPont&amp;trade; | Fisher Scientific",
+   "cost": 0,
+   "secs": 16.06,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.fishersci.be/shop/products/model-cha5-tychem-f-hooded-coverall-10/11793083",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "12032464",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Ricamar Ricamar",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Ricamar Ricamar",
+   "cost": 0,
+   "secs": 1.75,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/12032464",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4981910518891",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "toyo extensa a s ii 225/65R17",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Toyo Toyo Extensa A/S II Tires - 225/65R17 - 147940",
+   "cost": 0,
+   "secs": 1.3,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.extremecustoms.com/product.php?cat_id=187&scat_id=9751&item_id=245672",
+   "codeLocation": "page_text",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"4 New 225/65-17 102 H Sl Toyo Tire Extensa A/s Ii Bsw Tires 86688 | eBay\" vs \"Get Toyo Extensa A/S II - 225/65R17 102H - 147940 TOY147940 for 135.58 at Goturbo.net\""
+   ]
+  },
+  {
+   "code": "5420068697281",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "minerva frostrack uhp 225/50R18",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Minerva Winter Size Range 2019 | PDF | Electric Rail Transport | Rolling Stock",
+   "cost": 0,
+   "secs": 0.9,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.scribd.com/document/442322793/MINERVA-WINTER-SIZE-RANGE-2019-xlsx",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Minerva Winter Size Range 2019 | PDF | Electric Rail Transport | Rolling Stock\" vs \"Tyres Toyota C-HR 225 50 R18 | price on AUTODOC\""
+   ]
+  },
+  {
+   "code": "8680830017885",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "petlas explero pt431 h t 215/60R17",
+   "codeType": "ean",
+   "outcome": "verified",
+   "product": "Anvelope Vara PETLAS EXPLERO PT431 215/60 R17 96 V | Acvila Romania",
+   "cost": 0,
+   "secs": 5.59,
+   "guessConfidence": 0.85,
+   "v2Outcome": "verified",
+   "winningSource": "https://www.acvila-romania.ro/anvelope-vara-petlas-explero-pt431-215-60-r17-96-v-162232",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet consensus: 4 independent code-carrying results agree"
+   ]
+  },
+  {
+   "code": "8714692244551",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "vredestein traxion 85 280/85R24",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Vredestein Traxion 85 280 / 85 24 115 A8 | Tirendo.nl",
+   "cost": 0,
+   "secs": 2.09,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.tirendo.nl/vredestein-traxion-85-280-85-r24-115a8-r-202496.html",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Vredestein Traxion 85 280 / 85 24 115 A8 | Tirendo.nl\" vs \"Pneus Vredestein Traxion 85 - Comparer les prix et acheter en ligne pas cher | Pneus.fr\""
+   ]
+  }
+ ]
+}

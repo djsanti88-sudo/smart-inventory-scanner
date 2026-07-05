@@ -1,0 +1,1429 @@
+{
+ "spent": 0.1552,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "092971262761",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "firestone firehawk as 215/50R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.96,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "715459560172",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "hankook dynapro at2 xtreme rf12 LT33/12.50R20",
+   "codeType": "upc",
+   "outcome": "verified",
+   "product": "Hkook DynaPro AT2 Xtreme RF12 33X12.50R20LT 119S F",
+   "cost": 0,
+   "secs": 3.38,
+   "guessConfidence": 0.9,
+   "v2Outcome": "verified",
+   "winningSource": "https://www.amazon.sa/-/en/Hkook-DynaPro-Xtreme-RF12-33X12-50R20LT/dp/B0B1NT9QLQ",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "balanced: single strong source with proven code-to-product association"
+   ]
+  },
+  {
+   "code": "721506701795",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "yokohama advan fleva v701 195/45R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Yokohama ADVAN Fleva V701 Performance Summer 195/45/17 Tire",
+   "cost": 0,
+   "secs": 19.82,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.offroadrimfinancing.com/product/yokohama-advan-fleva-v701-performance-summer-195-45-17-tire/",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "054137090250",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli scorpion winter 2 255/40R22",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Pirelli Tires Pirelli Scorpion Winter 2 255/40R22 103V XL (NE0) (ELECT) Winter Tire",
+   "cost": 0,
+   "secs": 4.4,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.thewheelshop.ca/products/pirelli-scorpion-winter-2-255-40r22-103v-xl-ne0-elect-winter-tire?srsltid=AfmBOorvFRuovKewQX00aD0qVjgQPQAEPFn3Q9j3qLA5fxJlKWTjjQQb",
+   "codeLocation": "json_ld.gtin",
+   "rules": [
+    "sibling guard: sibling variants both claim this code: \"Pirelli Scorpion Winter 2 255/40R22 103V XL (NE0) (ELECT) Winter Tire\" vs \"PIRELLI TIRES® 4200700 - SCORPION WINTER 2 EV (255/40R22XL 103V)\""
+   ]
+  },
+  {
+   "code": "690677301168",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodride st100 ST225/75R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 43.9,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "6959613707599",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "keter kt696 215/45R17",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Keter KT696 215 45 R17 91W Suverehvid odav online EAN ...",
+   "cost": 0,
+   "secs": 39.89,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.autovaruosadonline.ee/rehvipood/keter-215-45-r17-6959613707599-707599.html",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Keter KT696 215 / 45 17 91 W - Tirendo.lv\" vs \"Keter KT696 215/45 R17 91W XL летни гуми 707599 ... - autodoc bg\""
+   ]
+  },
+  {
+   "code": "4981910884903",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "toyo eclipse 185/65R14",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 15.23,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "887613441402",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "nexen nfera au7 255/45R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 39.39,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "086699058874",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich dr454 275/80R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.59,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "092971191016",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone blizzak dm v1 275/60R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 17.35,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "092971144814",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone r280 295/75R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 13.67,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342118137",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental contisportcontact 3 275/35R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.59,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "746573269979",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "doral road ranger at 285/45R22",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.64,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342084333",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "general grabber uhp 265/70R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.57,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "5420068601394",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "minerva transporter rf09 225/65R16",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.62,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "842925103042",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "paragon tour cuv a s 225/60R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "054137056911",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli pzero all season plus 245/45R20",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "P ZERO A/S PLUS 245/45R20XL 103Y - Tires",
+   "cost": 0,
+   "secs": 7.53,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.carid.com/pirelli-tires/p-zero-a-s-plus-245-45r20xl-202723831.html?srsltid=AfmBOoqnwJC_KdYPbp9s4xlh80etV36Q5_pCFvwKbmpIRk0AW9ILC2FU",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"P ZERO A/S PLUS 245/45R20XL 103Y - Tires\" vs \"245 45 20 Pirelli P Zero All Season Plus All\""
+   ]
+  },
+  {
+   "code": "8886459507435",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "radar dimax r8 255/35R18",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "255/35 R18 große PKW Sommerreifen zum Hammerpreis bei uns im Reifenhandel bestellen",
+   "cost": 0,
+   "secs": 19.58,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://reifen.pkwteile.at/sommerreifen/255-35-r18",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "450862674947",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "fortune tormenta a t2 LT35/12.50R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 19.36,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "8904239718519",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "tvs eurogrip im 45 420/55R17",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 10.78,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "715459343980",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "hankook ventus s1 noble2 h452 205/50R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "2 New 205/50-17 Hankook S1 Noble 2 H452 50R R17 Tires | eBay",
+   "cost": 0,
+   "secs": 11.68,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/2-NEW-205-50-17-HANKOOK-S1-NOBLE-2-H452-50R-R17-TIRES-/192496961822?_ul=IL",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "848983006066",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "falken sincera sn250 a s 195/55R16",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Tire Falken Sincera SN250 A/S 195/55R16 87T AS All Season | eBay",
+   "cost": 0,
+   "secs": 17.73,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.ca/itm/334506594424",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "086699976529",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "uniroyal laredo hd h LT225/75R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.67,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "029142923367",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "starfire solarus all season 215/60R15",
+   "codeType": "upc",
+   "outcome": "verified",
+   "product": "Starfire 1 New Starfire Solarus As  - P215/60r15 Tires 2156015 215 60 15",
+   "cost": 0,
+   "secs": 18.88,
+   "guessConfidence": 0.9,
+   "v2Outcome": "verified",
+   "winningSource": "https://www.ebay.co.uk/itm/383396979390?chn=ps&_ul=GB&mkevt=1&mkcid=28",
+   "codeLocation": "json_ld.gtin",
+   "rules": [
+    "balanced: single strong source with proven code-to-product association"
+   ]
+  },
+  {
+   "code": "051342177387",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "general altimax arctic 12 235/65R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "General General AltiMAX Arctic 12 Winter 235/65R17 108T XL Passenger Tire",
+   "cost": 0,
+   "secs": 7,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://crowdfused.com/product/general-altimax-arctic-12-winter-235-65r17-108t-xl-passenger-tire/?srsltid=AfmBOopXJFxABpvKbtBS69K0mxyIOuoeyCpaUbsDABxHaUGnvaTXEVVq",
+   "codeLocation": "json_ld.gtin",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4981910891079",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "nitto ntsn2 winter 235/70R16",
+   "codeType": "ean",
+   "outcome": "verified",
+   "product": "Nitto NT-SN2 Winter Tires - 235/70R16 - 204260 - Extreme Customs",
+   "cost": 0,
+   "secs": 11.97,
+   "guessConfidence": 0.85,
+   "v2Outcome": "verified",
+   "winningSource": "https://www.extremecustoms.com/product.php?item_id=107022&srsltid=AfmBOor2u00m1KstT8IqFhDfdI3lG-r_FYgiivmNhKaob5Xa3fgvhToh",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet consensus: 3 independent code-carrying results agree"
+   ]
+  },
+  {
+   "code": "051342174379",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "general grabber hts60 255/55R20",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Tire General Grabber HTS 60 255/55R20 107H A/S All Season 51342174379 | eBay",
+   "cost": 0,
+   "secs": 51.67,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/334715765143",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "029142965947",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "hercules terra trac at x venture 255/75R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "2 New Hercules Terra Trac At X-venture - 255x75r17 Tires 2557517 255 75 17 29142965947 | eBay",
+   "cost": 0,
+   "secs": 61.92,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/355550215315",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "086699870391",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich g force comp 2 a s plus 255/45R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 12.51,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "721506902413",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "yokohama w drive zps 195/55R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 34.86,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "086699058539",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "michelin pilot sport 4 225/40R19",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "2 New Michelin Pilot Sport 4 Tire(s) 225/40R19 RF 93Y BSW 225/40-19 2254019 | eBay",
+   "cost": 0,
+   "secs": 11.48,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/156147159936",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "054137076483",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli scorpion zero all season 285/40R22",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 9.24,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "029142993094",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "cooper discoverer stronghold at LT265/75R16",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Cooper Discoverer Stronghold AT All Terrain 265/75/16 Tire",
+   "cost": 0,
+   "secs": 54.07,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.offroadrimfinancing.com/product/cooper-discoverer-stronghold-at-all-terrain-265-75-16-tire/?srsltid=AfmBOopMjsAGHn3vQj54TVoFCds1qx8j4lGghl40Iisd_B575gdI1udW",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Cooper Discoverer Stronghold AT LT265/75R16 123/120S 10 BW ...\" vs \"COOPER TIRES® 170276047 - DISCOVERER STRONGHOLD AT ...\""
+   ]
+  },
+  {
+   "code": "051342120505",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental vancowinter 2 225/70R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 46.03,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342198474",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental cross contact lx25 245/55R19",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Continental CrossContact LX25 245/55R19 Tire (1) | eBay",
+   "cost": 0,
+   "secs": 26.73,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/124580521951",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "092971179533",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone dueler h l alenza P275/55R20",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "2 New Bridgestone Dueler H/L Alenza 111H Tires 2755520,275/55/20,27555R20 | eBay",
+   "cost": 0,
+   "secs": 14.36,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/167763268151",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "450434347217",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "blackhawk ridgecrawler ht02 265/70R18",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Blackhawk Blackhawk Ridgecrawler HT02 265/70R18 116T a/s All Season Tire",
+   "cost": 0,
+   "secs": 6.63,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://crowdfused.com/product/blackhawk-ridgecrawler-ht02-265-70r18-116t-a-s-all-season-tire/?srsltid=AfmBOooQDellP9a5wLcky3GiLHm8vYKDJRjX1mBiDSSBWiqZ5-HfnSQh",
+   "codeLocation": "json_ld.gtin",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "460827726604",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "forceland vitality f22 165/50R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.8,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "461996427194",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "wanli wanli flash as028 245/65R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.32,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "990498681518",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "ovation tires 225/45R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.43,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "733569617791",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "lanvigator performax P285/65R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 9,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "877184004748",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "falken azenis pt722 a s 255/40R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.71,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "840139636523",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "fortune tormenta lmd fsr103 265/75R16",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "LT265/75R16E 123R Fortune Tormenta Lmd Fsr-103 Tl Bsw 10 9265030375 - Tire Factory Pasco and Richland",
+   "cost": 0,
+   "secs": 30.58,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.tirefactorytc.com/product/lt265-75r16e-123r-fortune-tormenta-lmd-fsr-103-tl-bsw-10-9265030375/?srsltid=AfmBOopbxetlbfg7FH_xyUNrBKxiKbdXwD5hVzfeXa-tLwKayX8VOHVy",
+   "codeLocation": "json_ld.gtin",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4981910865001",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "toyo open country h t 225/65R17",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.89,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "697662097136",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "dunlop graspic ds 3 185/60R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.09,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "887613517107",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "nexen nfera sur4 225/50R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 32.49,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "8997020617238",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "accelera x grip n 185/55R15",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "5M723 EP tyres Tyres 185 55 R 15 | AUTODOC price and review",
+   "cost": 0,
+   "secs": 49.65,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.autodoc.parts/ep-tyres/15795262",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "040232662461",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "americus rugged m t 235/80R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Americus Rugged M/T LT235/80R17 E/10PLY BSW (1 Tires) | eBay",
+   "cost": 0,
+   "secs": 25.13,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.ebay.com/itm/304393310611",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Americus Rugged M/T LT235/80R17 E/10PLY BSW (1 Tires) | eBay\" vs \"Tire LT 235/80R17 120/117Q Load E 10 Ply Americus Rugged M/T ...\""
+   ]
+  },
+  {
+   "code": "840156456005",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "arroyo tamarock r t 265/70R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Arroyo Tamarock R/T Tires 265/70-17",
+   "cost": 0,
+   "secs": 54.07,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.summitracing.com/parts/ayo-atrt51?srsltid=AfmBOoqKjDIVjcv4Bd9RrUwHBWhIgWjjkn1ohZrGr7RTk9UhqgzcselT",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Arroyo Tamarock R/T Tires 265/70-17\" vs \"Ven conotros para equipes tu juguetito y ala MEGA. VENTA DE ...\""
+   ]
+  },
+  {
+   "code": "5060330613580",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "atturo az850 315/35R21",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 43.9,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "no findings"
+   ]
+  },
+  {
+   "code": "086699969651",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich radial t a 245/60R14",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.2,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "8903094014750",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bkt mp 567 10/75R15.3",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 59.89,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "092971135485",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone blizzak lm 22 uni t 235/50R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "235/50R17 Bridgestone Blizzak LM-22 Uni-T",
+   "cost": 0,
+   "secs": 9.05,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://lakecityperformance.com/235-50r17-bridgestone-blizzak-lm-22-uni-t-146863?srsltid=AfmBOoqBLFocp3OyWSJ_bBuN5XFLPUrwZcxW1QjhvUKOK2r9m3Ik6EQE",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "092971323936",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone potenza sport 245/35R19",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.17,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "033259720450",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "carlstar tour max 205/50R10",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 38.13,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342132706",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental contact cst17 125/90R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.71,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342114207",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental crosscontact lx 275/70R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.84,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "029142714965",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "cooper zeon rs3 a 225/50R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.14,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "841623101220",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "delinte d8 d8 245/45R20",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "D8/D8+ - Tires Wheels Direct",
+   "cost": 0,
+   "secs": 9.49,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://tireswheelsdirect.com/product/d8-d8-2/?srsltid=AfmBOoqwTkGXYyEsN9ssNUF_k-Gv7cfuk3zSOyNv3OdLKCDNsU1TkB1u",
+   "codeLocation": "json_ld.sku",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"D8/D8+ - Tires Wheels Direct\" vs \"Delinte Desert Storm D8+ 245/45R20 103W XL - TireMart.com\""
+   ]
+  },
+  {
+   "code": "746573261515",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "doral doral sdl sport 30 185/70R14",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Doral Doral SDL-Sport All Season 185/70R14 88T Passenger Tire",
+   "cost": 0,
+   "secs": 27.3,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://crowdfused.com/product/doral-sdl-sport-all-season-185-70r14-88t-passenger-tire-2/?srsltid=AfmBOory8TpRLACYRG1_-asze9u5Vfdf6Z7sm5M9RJm_wRJMgqnHPBk9",
+   "codeLocation": "json_ld.gtin",
+   "rules": [
+    "snippet consensus: 2 hosts agree (suggestion-grade)",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4713959003720",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "federal couragia f x 275/45R19",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.06,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342070930",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "general exclaim 215/40R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Lake City Performance > 215/40R17 General Exclaim",
+   "cost": 0,
+   "secs": 8.5,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://lakecityperformance.com/215-40r17-general-exclaim-15472530000?srsltid=AfmBOoo1838qN7tvw8U62gA_8M24jIZR0fH02qHmS0i7R2oBCA0B21dk",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "844402072056",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "gladiator x comp hp 275/35R18",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Gladiator X Comp HP - 275/35ZR18 (26&quot;) 99Y All Terrain | 1951458357 &ndash; Wheels Below Retail",
+   "cost": 0,
+   "secs": 44.1,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.wheelsbelowretail.com/products/gladiator-x-comp-hp-275-35zr18-26-99y-all-terrain-1951458357?srsltid=AfmBOopBNYe7TBhvs-UZqyIihIJMbQY-Nfau2SKg6fRaF6vq45ZhQ0pf",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Gladiator X Comp HP - 275/35ZR18 (26\") 99Y All Terrain\" vs \"UPC Lookup for 8444020#####\""
+   ]
+  },
+  {
+   "code": "697662112860",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodyear eagle f1 asymmetric a s 245/40R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.31,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "697662076070",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodyear wrangler sr a 265/70R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 16.27,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "758823103063",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "milestar weatherguard as710 sport 245/45R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.73,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "746573219165",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "multi-mile supreme tour lsx csx 215/60R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.38,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "8859384901524",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "otani kc2000 205/60R15",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.06,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "054137061182",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli cinturato p7 all season plus 215/50R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.49,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "054137044055",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli pzero nero all season 275/35R20",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "1 Pirelli P Zero Nero All Season 275/35R20 102W (J) Tires 45000 Mile Warranty | eBay",
+   "cost": 0,
+   "secs": 24.76,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/314283820217",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4717784331249",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "presa ps01 185/65R15",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.89,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "8886459595418",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "radar dimax esport 1 215/60R17",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "RADAR® RACEIN0015 - DIMAX ESPORT 1 215/60R17 100V",
+   "cost": 0,
+   "secs": 42.15,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.carid.com/radar-tires/dimax-esport-1-215-60r17-3994688405.html?srsltid=AfmBOooIWLecMcOL5720FTyebBX_31tqnAywu_cogkCrRsuJUK8E0Hg6",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "769382907580",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "rbp semi steel st 225/75R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 18.5,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "6959655491678",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "rovelo rhp a68 185/60R14",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 42.09,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "no findings"
+   ]
+  },
+  {
+   "code": "746573232812",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "sumitomo htr enhance lx2 235/55R18",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "235/55R18 100V XL Sumitomo HTR Enhance LX2 Tire 2355518 235 55 18 | eBay",
+   "cost": 0,
+   "secs": 24.52,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/396361518021",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "778469007280",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "transeagle st radial all steel 225/75R15",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Tire 225/75R15 Transeagle ST Radial All Steel Trailer Load F 12 Ply | eBay",
+   "cost": 0,
+   "secs": 34.86,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.ca/itm/305182387003",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "086699543356",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "uniroyal power paw a s 225/40R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.83,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "6950306315770",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "wanli s 1087 245/30R24",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.74,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "721506561542",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "yokohama geolandar cv 4s g061 255/55R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 11.46,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  }
+ ]
+}

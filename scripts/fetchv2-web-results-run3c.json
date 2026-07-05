@@ -1,0 +1,60 @@
+{
+ "spent": 0,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "P108",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Ryobi 18V ONE+ LITHIUM+ 4.0Ah Battery",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "vendor code of 4 chars or less: too ambiguous for web identity, deferred to next ladder step"
+   ]
+  },
+  {
+   "code": "3330",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Bosch Premium FILTECH Engine Oil Filter 3330 (candidate label 'spark plug' CORRECTED: it is an oil filter)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "vendor code of 4 chars or less: too ambiguous for web identity, deferred to next ladder step"
+   ]
+  },
+  {
+   "code": "6619",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "NGK Iridium IX Spark Plug LFR6AIX-11 (stock no. 6619)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "vendor code of 4 chars or less: too ambiguous for web identity, deferred to next ladder step"
+   ]
+  }
+ ]
+}

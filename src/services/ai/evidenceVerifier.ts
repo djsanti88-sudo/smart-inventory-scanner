@@ -42,7 +42,7 @@ function numericVariants(code: string): string[] {
 // channel carries such an invalidation, the code's presence there must NOT count as strong evidence.
 const INVALIDATION_RE =
   /\bnot a valid\b|\binvalid (?:upc|ean|gtin|barcode|code|product)\b|\bdid you mean\b|\bisn'?t a valid\b|\bno such (?:upc|product|barcode)\b/i;
-function looksInvalidating(text: string): boolean {
+export function looksInvalidating(text: string): boolean {
   return INVALIDATION_RE.test(text || "");
 }
 
