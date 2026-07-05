@@ -102,6 +102,14 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
     return { ...cached, performance: { ...cached.performance, cacheHit: true, durationMs: now() - started } };
   }
 
+  // 2b) No-result receipt: the code was fully probed before and every door was empty. Owner rule:
+  // never auto-retry - the ladder handles the residue. Still counted (count-first contract).
+  const receipt = deps.cache?.getNoResult(normalized.primary);
+  if (receipt) {
+    rulesFired.push(`no-result receipt on file (${receipt}) - owner: no auto-retry, ladder handles it`);
+    return finish({ outcome: "unknown" });
+  }
+
   const findings: SourceFinding[] = [];
 
   // 3) Structured/free sources first (Open Food Facts, barcode DB APIs...). Keyed-by-barcode
@@ -282,5 +290,15 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
   });
 
   if (result.outcome === "verified") deps.cache?.saveVerified(normalized.primary, result);
+  // Write a PERMANENT receipt only for a COMPLETE empty probe: discovery actually ran, the time
+  // budget did not truncate it, and no identity or evidence of any kind was found.
+  if (
+    result.outcome === "unknown" &&
+    !earlyStopped &&
+    deps.discovery.length > 0 &&
+    findings.length === 0
+  ) {
+    deps.cache?.markNoResult(normalized.primary, `probed ${new Date().toISOString().slice(0, 10)}: all doors empty`);
+  }
   return result;
 }
