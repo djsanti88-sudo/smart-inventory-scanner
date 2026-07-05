@@ -17,6 +17,11 @@ describe("usableIdentityName shop-speak firewall", () => {
     expect(usableIdentityName("100/80 R17 52H, 52S, 52P Motorcycle tyres » Buy cheap Motorcycle tyres in online store", "4019238377620")).toBe(false);
   });
 
+  test("breadcrumb-arrow titles are category/nav pages, never identities (Yamaha fitment live flip)", () => {
+    expect(usableIdentityName("YAMAHA R15 tyres ➤ AUTODOC", "4019238377620")).toBe(false);
+    expect(usableIdentityName("Motorcycle tyres » Continental » ContiGO", "4019238377620")).toBe(false);
+  });
+
   test("real product titles containing 'Best' or 'Buy' inside the name still pass", () => {
     expect(usableIdentityName("Simply the Best Honey Mustard Dressing 12oz", "0000946801211")).toBe(true);
     expect(usableIdentityName("Best Foods Real Mayonnaise 30oz", "048001213487")).toBe(true);

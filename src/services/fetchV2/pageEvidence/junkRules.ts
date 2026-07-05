@@ -42,7 +42,7 @@ const GENERIC_NAME_RE = /^(nutrition facts?|ingredients?|products?|details?|spec
 // Store-nav, marketing, price-comparison, and download shapes are never product identities
 // (200-run live wrongs: "Jetzt günstig kaufen", "Compare prices in United States", "[PDF] ... Free Download").
 const NAV_NAME_RE =
-  /\bproduct details?\b|^my store\b|\bshop all\b|\bstore locator\b|\bcompare prices?\b|\bprice comparison\b|\bg(?:ü|u)nstig\b|\bkaufen\b|\bfree download\b|^\[?pdf\]?\b|\bsal(?:ī|i)dzin\w*\b|\bcenas\b|\bcompare precios?\b|\bcompre barato\b|\bprecios? bajos?\b|\bupc lookup\b|\bean lookup\b|\bbarcode lookup\b|\bitem\s*#\b|\bupc code\b|^model type\b|\bachetez\b|\bacheter\b|\ben ligne\b|\bhammerpreis\b|\bbei uns\b|\bbuy online\b|^buy\b|\bbuy cheap\b|\bin (?:an )?online store\b|\bat the best price\b|\beuro to us\b|\bexchange rates?\b|\bcurrency converter\b|\b(?:eur|usd|gbp|jpy) to (?:eur|usd|gbp|jpy)\b/i;
+  /\bproduct details?\b|^my store\b|\bshop all\b|\bstore locator\b|\bcompare prices?\b|\bprice comparison\b|\bg(?:ü|u)nstig\b|\bkaufen\b|\bfree download\b|^\[?pdf\]?\b|\bsal(?:ī|i)dzin\w*\b|\bcenas\b|\bcompare precios?\b|\bcompre barato\b|\bprecios? bajos?\b|\bupc lookup\b|\bean lookup\b|\bbarcode lookup\b|\bitem\s*#\b|\bupc code\b|^model type\b|\bachetez\b|\bacheter\b|\ben ligne\b|\bhammerpreis\b|\bbei uns\b|\bbuy online\b|^buy\b|\bbuy cheap\b|\bin (?:an )?online store\b|\bat the best price\b|[»➤]|\beuro to us\b|\bexchange rates?\b|\bcurrency converter\b|\b(?:eur|usd|gbp|jpy) to (?:eur|usd|gbp|jpy)\b/i;
 
 /** True when a name can serve as a product identity (not a code echo, nav label, or shop-speak). */
 export function usableIdentityName(name: string, code: string): boolean {
