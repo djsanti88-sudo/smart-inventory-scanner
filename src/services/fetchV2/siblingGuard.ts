@@ -16,7 +16,9 @@ export interface SiblingVerdict {
 // GLUED service prefix (ST225/75R15 trailer, LT285/70R17) whose letters defeat \b (forensic bug),
 // DECIMAL commercial rims (275/80R22.5), and a GLUED trailing load-range/speed-rating suffix
 // (245/35ZR19XL) that otherwise defeats the trailing \b (live row: Pirelli XL suffix).
-const TIRE_SIZE_RE = /(?:\b(?:ST|LT|P)?|(?<=[A-Za-z])(?:ST|LT|P))?(?<![0-9])\d{3}[/xX]\d{2}\s?Z?R\d{2}(?:\.\d)?(?:XL)?\b/gi;
+// Merchant feeds space out sizes ("225 /35 R20", DiscountTire live): the separator tolerates
+// optional spaces; sizesOf strips them so spaced and glued notations agree.
+const TIRE_SIZE_RE = /(?:\b(?:ST|LT|P)?|(?<=[A-Za-z])(?:ST|LT|P))?(?<![0-9])\d{3}\s?[/xX]\s?\d{2}\s?Z?R\d{2}(?:\.\d)?(?:XL)?\b/gi;
 const PACK_SIZE_RE = /\b\d+(?:\.\d+)?\s?(?:oz|fl ?oz|g|kg|ml|l|lb|lbs|ct|count|pk|pack)\b/gi;
 const NOISE_WORDS = new Set(["flavored", "flavor", "bag", "box", "the", "a", "of", "with", "and"]);
 
@@ -26,8 +28,11 @@ function canon(name: string): string {
   return (name ?? "")
     .toLowerCase()
     .replace(/([a-z])['’]([a-z])/g, "$1$2") // N'Fera == NFera (apostrophes glue, never split)
-    .replace(/\s*\|\s*[^|]{2,30}$/g, " ") // trailing "| site" suffix segment
-    .replace(/\s*[–—-]\s+[^\d|–—-]{2,30}$/g, " ") // trailing "- site" ONLY when digit-free (never eat sizes)
+    // Trailing "| site" / "- site" tails are stripped ONLY when digit-free (sizes live there:
+    // DiscountTire lists size variants after "|") AND short (<=2 words): a long dash suffix IS
+    // the product name in CARiD's "BRAND(R) SKU - PRODUCT NAME" format (both live, v2.3 batch 8).
+    .replace(/\s*\|\s*[^\d|]{2,30}$/g, " ")
+    .replace(/\s*[–—-]\s+(?=\S)([^\d|–—\s-]+(?:\s+[^\d|–—\s-]+)?(?:\.\w{2,4})?)\s*$/g, " ")
     .replace(/([a-z])\/([a-z0-9])/g, "$1$2") // A/T3W == AT3W, M/C == MC
     .replace(/(\d)(oz|g|kg|ml|l|lb|lbs|ct|pk)\b/g, "$1 $2")
     .replace(/[^\w./ ]+/g, " ")

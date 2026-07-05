@@ -65,6 +65,30 @@ describe("detectSiblingAmbiguity", () => {
     }
   });
 
+  test("a pipe suffix carrying a tire size is a VARIANT LIST, not a site tail (Toyo live flip, v2.3 batch 8)", () => {
+    // DiscountTire titles list size variants after "|"; stripping the pipe suffix deleted the very
+    // size that agreed with the other listing and the pair was called unrelated.
+    expect(identityRelation(
+      { name: "Toyo Tire Extensa HP II 225 /35 R20 90W XL BSW | 275 /35 R20 ...", brand: "" },
+      { name: "275/35R20 102W XL Toyo Extensa HPII - Evasive Motorsports", brand: "" },
+    )).toBe("agree");
+  });
+
+  test("a LONG dash suffix is the product name, not a marketplace tail (Cooper CARiD live flip, v2.3 batch 8)", () => {
+    // CARiD format is "BRAND(R) SKU - PRODUCT NAME": the digit-free dash strip ate the identity.
+    expect(identityRelation(
+      { name: "Cooper Discoverer Stronghold AT LT265/75R16 123/120S 10 BW ...", brand: "" },
+      { name: "COOPER TIRES® 170276047 - DISCOVERER STRONGHOLD AT ...", brand: "" },
+    )).not.toBe("unrelated");
+  });
+
+  test("short marketplace tails after dash/pipe are still stripped (no regression)", () => {
+    expect(identityRelation(
+      { name: "Pirelli Cinturato P7 245/40R19 98Y - Walmart.com", brand: "" },
+      { name: "Pirelli Cinturato P7 245/40R19", brand: "" },
+    )).toBe("agree");
+  });
+
   test("brand-family name forms are compatible, not a brand conflict (Grabill live flip, v2.3 batch 3)", () => {
     // One company, many brand-name forms ("Grabill Country" / "Grabill Country Meat(s)"). The old
     // exact-string brand gate returned "unrelated" before name containment could ever run.
