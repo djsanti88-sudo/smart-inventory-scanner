@@ -134,7 +134,13 @@ const patternDoorUrls = new Set<string>();
 async function fetchPage(url: string): Promise<{ ok: boolean; status: number; html: string }> {
   const direct = await directFetch(url);
   if (direct.ok && direct.html.length > 500) return direct;
-  if (fcKeys.length > 0 && isSafePublicUrl(url) && scrapesThisCode < 1 && !patternDoorUrls.has(url)) {
+  // Scrape-credit policy (1/code): a RATE-LIMITED vetted DB page outranks everything - go-upc
+  // answers nearly every known UPC, so a 429 there is the highest-yield claim on the credit
+  // (live: 9 tire identities lost to go-upc's hourly IP limit, v2.3 batch 8). Any other
+  // pattern-door failure never spends it - it stays reserved for bot-blocked discovery
+  // candidates (live: Blizzak DiscountTire, batch 6).
+  const vettedRateLimited = direct.status === 429 && PACED_HOST_RE.test(hostOf(url));
+  if (fcKeys.length > 0 && isSafePublicUrl(url) && scrapesThisCode < 1 && (vettedRateLimited || !patternDoorUrls.has(url))) {
     scrapesThisCode++;
     return fcScrapeHtml(url);
   }
