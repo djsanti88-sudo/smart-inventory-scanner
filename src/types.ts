@@ -490,7 +490,8 @@ export type CorroborationPath =
   | "corpus_exact_barcode"
   | "corpus_exact_part_number"
   | "internet_two_source_size"
-  | "non_public_trusted_source";
+  | "non_public_trusted_source"
+  | "gpt_self_report";
 
 export interface DecodeDecision {
   status: DecodeStatus;
