@@ -331,21 +331,80 @@ describe("no-result receipts in the pipeline (credit efficiency)", () => {
     expect(cache.getNoResult("054137090250")).toBeFalsy();
   });
 
-  test("pattern URLs are fetched FREE first; identity secured skips every paid search", async () => {
+  test("pattern URLs are fetched FREE first; identity secured skips PAID search (free corroboration may still run)", async () => {
     const C = "028400325042";
     const search = vi.fn(async () => []);
+    const paidSpy = vi.fn(async () => []);
     const html = `<html><head><title>Doritos Cool Ranch - GoUPC</title>
 <script type="application/ld+json">{"@type":"Product","name":"Doritos Cool Ranch Tortilla Chips 9.25 oz","brand":{"name":"Doritos"},"gtin13":"0028400325042"}</script></head><body>UPC ${C}</body></html>`;
     const fetchPage = vi.fn(async () => ({ ok: true, status: 200, html }));
     const r = await fetchV2(C, {
       fetchPage,
-      discovery: [{ name: "m", search }],
+      discovery: [{ name: "m", search }, { name: "firecrawl", search: paidSpy }],
       patternUrls: () => ["https://go-upc.example.com/search?q=" + C],
     });
     expect(["verified", "suggested"]).toContain(r.outcome);
     expect(r.product.name).toContain("Doritos");
-    expect(search).not.toHaveBeenCalled();
+    // The pattern door secures the identity at MEDIUM quality (go-upc is a "supporting" tier
+    // host), so under the economic rule the FREE provider MAY still run for corroboration - only
+    // the PAID escalation provider is guaranteed to be skipped (never pay to re-find what we hold).
+    expect(paidSpy).not.toHaveBeenCalled();
     expect(fetchPage).toHaveBeenCalledWith("https://go-upc.example.com/search?q=" + C);
+  });
+
+  test("a MEDIUM structured hit still lets the FREE provider corroborate into verified, without ever paying (economic rule)", async () => {
+    const C = "028400325042";
+    const paidSpy = vi.fn(async () => []);
+    const goUpcHtml = `<html><head><title>Doritos Cool Ranch - GoUPC</title>
+<script type="application/ld+json">{"@type":"Product","name":"Doritos Cool Ranch Tortilla Chips 9.25 oz","brand":{"name":"Doritos"},"gtin13":"0028400325042"}</script></head><body>UPC ${C}</body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async () => ({ ok: true, status: 200, html: goUpcHtml }),
+      discovery: [
+        { name: "brave", search: async () => [
+          { url: "https://go-upc.com/search?q=" + C, title: "Doritos Cool Ranch Tortilla Chips 9.25 oz", snippet: `UPC ${C}`, rank: 0 },
+        ] },
+        { name: "firecrawl", search: paidSpy },
+      ],
+      structured: [{
+        name: "openfoodfacts",
+        lookup: async () => ({
+          url: "https://world.openfoodfacts.org/product/0" + C,
+          name: "Doritos Cool Ranch Tortilla Chips 9.25 oz",
+          brand: "Doritos",
+          matchedBarcode: "0" + C,
+          quality: "medium",
+        }),
+      }],
+    });
+    expect(r.outcome).toBe("verified"); // free Brave corroboration upgraded the medium structured hit
+    expect(r.product.name).toContain("Doritos");
+    expect(paidSpy).not.toHaveBeenCalled(); // identity already held: never pay to re-find it
+  });
+
+  test("a MEDIUM structured hit + an EMPTY free search still blocks paid escalation (identity already held)", async () => {
+    const C = "028400325042";
+    const search = vi.fn(async () => []);
+    const paidSpy = vi.fn(async () => []);
+    const r = await fetchV2(C, {
+      fetchPage: vi.fn(async () => ({ ok: false, status: 404, html: "" })),
+      discovery: [
+        { name: "brave", search },
+        { name: "firecrawl", search: paidSpy },
+      ],
+      structured: [{
+        name: "openfoodfacts",
+        lookup: async () => ({
+          url: "https://world.openfoodfacts.org/product/0" + C,
+          name: "Doritos Cool Ranch Tortilla Chips 9.25 oz",
+          brand: "Doritos",
+          matchedBarcode: "0" + C,
+          quality: "medium",
+        }),
+      }],
+    });
+    expect(search).toHaveBeenCalled(); // free provider still runs for corroboration
+    expect(paidSpy).not.toHaveBeenCalled(); // but paid escalation is never spent on a held identity
+    expect(r.outcome).toBe("suggested"); // no corroboration found: medium alone does not verify
   });
 
   test("useless pattern pages fall through to normal discovery", async () => {
