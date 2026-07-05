@@ -18,7 +18,10 @@ function contextWindow(text: string, variant: string): string | null {
   const squashedIdx = (text ?? "").replace(/[\s-]/g, "").indexOf(variant);
   if (squashedIdx < 0) return null;
   // Map back approximately: search the raw text for the variant allowing separators.
-  const re = new RegExp(variant.split("").join("[\\s-]?"));
+  // Each character must be regex-escaped before joining - an unescaped variant containing
+  // metacharacters (+ * ? ( ) [ etc., seen live in messy scanned strings) throws a SyntaxError
+  // that propagates uncaught through proveAssociation/snippetFindings.
+  const re = new RegExp(variant.split("").map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s-]?"));
   const m = (text ?? "").match(re);
   if (!m || m.index === undefined) return null;
   return text.slice(Math.max(0, m.index - WINDOW), m.index + m[0].length + WINDOW);

@@ -42,12 +42,17 @@ export function snippetFindings(
     // assumeCarrying: results of a QUOTED exact-match query matched the code by the search
     // engine's own contract, even when the snippet hides it (canary-proven live 2026-07-04:
     // quoted searches for invented codes return zero results).
-    const matched = variants.find((v) => matchIn(hay, v)) ?? (opts?.assumeCarrying ? variants[0] : undefined);
+    const visible = variants.find((v) => matchIn(hay, v));
+    const matched = visible ?? (opts?.assumeCarrying ? variants[0] : undefined);
     if (!matched) continue;
     let host = "";
     try { host = new URL(c.url).hostname.toLowerCase(); } catch { continue; }
     const usable = usableIdentityName(c.title, code);
-    const labeled = hasBarcodeLabelContext(hay, matched) && !hasNegativeContext(hay, matched);
+    // Visible matches need a barcode-label context word nearby (bare numbers aren't evidence).
+    // Invisible matches only exist because the QUOTED exact-match query's own contract
+    // guarantees the string was in the document (canary-proven live: quoted searches for
+    // invented codes return zero results) - that contract itself counts as the label.
+    const labeled = visible ? hasBarcodeLabelContext(hay, matched) && !hasNegativeContext(hay, matched) : true;
     out.push({ url: c.url, host, name: usable ? cleanProductName(c.title) : "", matchedVariant: matched, labeled });
   }
   return out;

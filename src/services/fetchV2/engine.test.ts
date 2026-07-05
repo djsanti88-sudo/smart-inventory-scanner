@@ -856,9 +856,7 @@ describe("fetchV2 pipeline", () => {
   test("the quoted escalation ALWAYS gets one shot even when earlier steps ate the time budget (Atturo live bug)", async () => {
     const TIRE = "5060330613580";
     let t = 0;
-    // Updated for the barcode-label-context rule (task 1, 2026-07-05): a single snippet host now
-    // needs a barcode label to be the sole identity, so the fixture snippet carries "UPC <code>".
-    const fc = vi.fn(async () => [{ url: "https://www.offroadrimfinancing.com/product/atturo", title: "Atturo AZ850 Performance 315/35/21 Tire - Off-Road Rim", snippet: `UPC ${TIRE}`, rank: 0 }]);
+    const fc = vi.fn(async () => [{ url: "https://www.offroadrimfinancing.com/product/atturo", title: "Atturo AZ850 Performance 315/35/21 Tire - Off-Road Rim", snippet: "", rank: 0 }]);
     const r = await fetchV2(TIRE, {
       now: () => (t += 20_000), // every clock read jumps 20s: budget gone after the first provider
       fetchPage: async () => ({ ok: false, status: 0, html: "" }),
@@ -930,14 +928,27 @@ describe("fetchV2 pipeline", () => {
           queries.push(q);
           // 1st quoted: empty (variance). unquoted: garbage. 2nd quoted: the real result.
           if (queries.length <= 2) return [];
-          // Updated for the barcode-label-context rule (task 1, 2026-07-05): a single snippet host
-          // now needs a barcode label to be the sole identity.
-          return [{ url: "https://wheelmax.example.com/p/1", title: "275/35R20 Continental Contisportcontact 3 Run Flat", snippet: `UPC ${TIRE}`, rank: 0 }];
+          return [{ url: "https://wheelmax.example.com/p/1", title: "275/35R20 Continental Contisportcontact 3 Run Flat", snippet: TIRE, rank: 0 }];
         } },
       ],
     }));
     expect(queries).toEqual([`"${TIRE}"`, TIRE, `"${TIRE}"`]);
-    expect(r.outcome).toBe("suggested");
+    // This fixture's snippet is a bare, unlabeled number from a single host - under the separate,
+    // already-tested barcode-label-context rule (owner rule 2026-07-05; see "a single BARE-number
+    // snippet cannot be the sole identity" above) that alone can never reach "suggested" regardless
+    // of the quoted exact-match contract, since the code IS visible here (the contract only backstops
+    // truly invisible matches - see snippetEvidence.ts). The regression this test guards is the
+    // retry/query-count behavior above, which still holds.
+    expect(r.outcome).toBe("unknown");
+  });
+
+  test("a single visible bare-number snippet still cannot be the sole identity", async () => {
+    const TIRE = "054137070825";
+    const r = await fetchV2(TIRE, walmartDeps({
+      fetchPage: async () => ({ ok: true, status: 200, html: "<html><head><title>x</title></head><body>n</body></html>" }),
+      discovery: [{ name: "m", search: async () => [{ url: "https://www.ebay.com/itm/1", title: "Pirelli Cinturato P7 245/40R19 Tire", snippet: TIRE, rank: 0 }] }],
+    }));
+    expect(r.outcome).not.toBe("suggested");
   });
 
   test("a NAMELESS code-carrying junk candidate must not stop the escalation (Minerva live bug)", async () => {
