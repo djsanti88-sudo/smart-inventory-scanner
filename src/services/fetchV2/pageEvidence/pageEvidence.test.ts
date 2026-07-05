@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { evaluatePageJunk } from "./junkRules";
 import { extractProducts } from "./extract";
-import { proveAssociation } from "./association";
+import { hasBarcodeLabelContext, proveAssociation } from "./association";
 
 const CODE = "028400325042";
 
@@ -162,6 +162,11 @@ describe("proveAssociation", () => {
     const labeled = proveAssociation(["4981910515661"], [], "Specifications: UPC 4981910515661, made in Japan", "https://x.example.com/");
     expect(labeled.level).toBe("weak");
     expect(labeled.matchedField).toBe("page_text");
+  });
+
+  test("label-context helpers never throw on regex-special characters in the variant", () => {
+    expect(() => proveAssociation(["T432(119)%RU+1*"], [], "UPC T432(119)%RU+1* label", "https://x.example.com/")).not.toThrow();
+    expect(hasBarcodeLabelContext("UPC C++4981910515661?? here", "C++4981910515661??")).toBe(true);
   });
 
   test("negative context disqualifies a match even with digits present", () => {
