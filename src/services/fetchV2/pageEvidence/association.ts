@@ -7,6 +7,33 @@ import type { ExtractedProduct } from "./extract";
 
 export type AssociationLevel = "strong" | "weak" | "none";
 
+// A number is only a BARCODE when it sits in a barcode position. Label words within a small
+// window qualify it; ledger/listing/contact contexts disqualify it (owner rule 2026-07-05:
+// "not just anything that has that number").
+const LABEL_RE = /\b(upc|ean|gtin|barcode|c[oó]digo de barras|strichcode|code-barres)\b/i;
+const NEGATIVE_RE = /\b(mls|case no\.?|listing|order|invoice|phone|tel|zip|p\.?o\.?|item\s*#|sku\s*#|ref\.?)\b/i;
+const WINDOW = 24;
+
+function contextWindow(text: string, variant: string): string | null {
+  const squashedIdx = (text ?? "").replace(/[\s-]/g, "").indexOf(variant);
+  if (squashedIdx < 0) return null;
+  // Map back approximately: search the raw text for the variant allowing separators.
+  const re = new RegExp(variant.split("").join("[\\s-]?"));
+  const m = (text ?? "").match(re);
+  if (!m || m.index === undefined) return null;
+  return text.slice(Math.max(0, m.index - WINDOW), m.index + m[0].length + WINDOW);
+}
+
+export function hasBarcodeLabelContext(text: string, variant: string): boolean {
+  const w = contextWindow(text, variant);
+  return !!w && LABEL_RE.test(w);
+}
+
+export function hasNegativeContext(text: string, variant: string): boolean {
+  const w = contextWindow(text, variant);
+  return !!w && NEGATIVE_RE.test(w);
+}
+
 export interface AssociationProof {
   level: AssociationLevel;
   matchedVariant: string;
@@ -81,7 +108,7 @@ export function proveAssociation(
   // codes "matched" a pest-control kit and a court filing) - free-text ties need 10+ digits.
   for (const v of vs) {
     if (/^\d+$/.test(v) && v.length < 10) continue;
-    if (inText(v, pageText)) {
+    if (inText(v, pageText) && hasBarcodeLabelContext(pageText, v) && !hasNegativeContext(pageText, v)) {
       return { level: "weak", matchedVariant: v, matchedField: "page_text", product: ordered[0] ?? null };
     }
   }
