@@ -217,3 +217,102 @@ describe("structureProduct - descriptionText", () => {
     expect(r.descriptionText).toBe("");
   });
 });
+
+// -------------------------------------------------------------------------------------------
+// Revision-gate locking tests (Build 2 / structurer review): E1, E2, E3 (eval failure classes)
+// + R1-R5 (adversarial code review findings). Each test locks one concrete example from the
+// eval failures file / review findings so the underlying regex/lexicon/noise-list fix cannot
+// silently regress.
+// -------------------------------------------------------------------------------------------
+describe("E1 - tire service-prefix (ST/LT/P) must not absorb trailing letters of the model word", () => {
+  it('"Courser Quest 195/65R15" keeps the full word "Quest" (the "st" is not a service prefix)', () => {
+    const r = structureProduct("Mastercraft Courser Quest 195/65R15 91H", undefined, {
+      knownBrands: [...BRANDS, "Mastercraft"],
+    });
+    expect(r.sizeTag).toBe("1956515");
+    expect(r.model).toBe("Courser Quest");
+  });
+
+  it('"...HP 225/40R18" keeps the trailing "P" of "HP" (not absorbed as a P-service prefix)', () => {
+    const r = structureProduct("Dunlop Signature Hp 235/45R17", undefined, { knownBrands: [...BRANDS, "Dunlop"] });
+    expect(r.sizeTag).toBe("2354517");
+    expect(r.model).toBe("Signature Hp");
+  });
+});
+
+describe("E2 - brand lexicon: earliest match position wins, longest is only a tie-break", () => {
+  it('"Nokian Nordman 5" picks "Nokian" (earliest), not the longer sub-brand "Nordman"', () => {
+    const r = structureProduct("Nokian Nordman 5 205/55R16", undefined, { knownBrands: [...BRANDS, "Nokian", "Nordman"] });
+    expect(r.brand).toBe("Nokian");
+  });
+
+  it('"Ohtsu By Falken" picks "Ohtsu" (earliest), not the longer known brand "Falken"', () => {
+    const r = structureProduct("Ohtsu By Falken Fp8000 225/40R18", undefined, { knownBrands: [...BRANDS, "Ohtsu"] });
+    expect(r.brand).toBe("Ohtsu");
+  });
+});
+
+describe("E3 - MODEL_EDGE_NOISE / LOAD_INDEX_RE must not strip legitimate model tokens", () => {
+  it('BFGoodrich "Radial T A" keeps the full model (radial is not stripped when other tokens remain)', () => {
+    const r = structureProduct("Bfgoodrich Radial T A P225/70R14 98S", undefined, { knownBrands: [...BRANDS, "Bfgoodrich"] });
+    expect(r.sizeTag).toBe("2257014");
+    expect(r.model).toBe("Radial T A");
+  });
+
+  it('"Altimax 365AW" keeps "365AW" (load-index stripping only applies immediately after the size)', () => {
+    const r = structureProduct("General Altimax 365aw 215/45R17 87V", undefined, { knownBrands: [...BRANDS, "General"] });
+    expect(r.sizeTag).toBe("2154517");
+    expect(r.model).toBe("Altimax 365aw");
+  });
+});
+
+describe("R1 - tire-plausibility bounds reject non-tire slash/dash numerics", () => {
+  it('"16/9-32 inch Monitor Stand" is not tagged as a tire size', () => {
+    const r = structureProduct("Acme 16/9-32 inch Monitor Stand", undefined, { knownBrands: BRANDS });
+    expect(r.sizeTagKind).not.toBe("tire");
+  });
+
+  it('"12/5-14 Batch Code" is not tagged as a tire size', () => {
+    const r = structureProduct("Recipe Card 12/5-14 Batch Code", undefined, { knownBrands: BRANDS });
+    expect(r.sizeTagKind).not.toBe("tire");
+  });
+
+  it("still recognizes every Global Constraints notation example (no plausibility regression)", () => {
+    const cases: Array<[string, string]> = [
+      ["LT265/70R17", "2657017"],
+      ["265 /70 R17", "2657017"],
+      ["265x70R17", "2657017"],
+      ["245/35ZR19XL", "2453519"],
+      ["295/75R22.5", "29575225"],
+      ["37x12.50R20", "37125020"],
+      ["33x12.50-15LT", "33125015"],
+      ["25x8-12", "25812"],
+      ["100/80-17", "1008017"],
+      ["120/70ZR17", "1207017"],
+    ];
+    for (const [input, expected] of cases) {
+      expect(tireSizeTag(input)).toBe(expected);
+    }
+  });
+});
+
+describe("R2 - a second tire-size mention (multi-size listing) must not leak into the model", () => {
+  it('"...205/55R16 and 225/45R17 Tires" keeps sizeTag = first size only, model drops both', () => {
+    const r = structureProduct("Michelin Defender 205/55R16 and 225/45R17 Tires", undefined, { knownBrands: BRANDS });
+    expect(r.sizeTag).toBe("2055516");
+    expect(r.model).toBe("Defender");
+    expect(r.model).not.toMatch(/225|45|17/);
+  });
+});
+
+describe("R3 - an explicit junk brand arg is never trusted, even shaped like a real word", () => {
+  it('"amazon.com" as the explicit brand arg is treated as absent, falls through to the lexicon', () => {
+    const r = structureProduct("Falken Wildpeak AT3W 265/70R17", "amazon.com", { knownBrands: BRANDS });
+    expect(r.brand).toBe("Falken");
+  });
+
+  it('a pure code echo brand arg ("0123456789012") is treated as absent', () => {
+    const r = structureProduct("Falken Wildpeak AT3W 265/70R17", "0123456789012", { knownBrands: BRANDS });
+    expect(r.brand).toBe("Falken");
+  });
+});

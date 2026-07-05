@@ -45,13 +45,18 @@ function isJunkName(name: string): boolean {
   return false;
 }
 
-/** A brand string supplied by a caller can itself be shop-speak / a nav label - never trust it
- *  blindly. Reimplements the shape of junkRules.cleanBrand locally. */
+/** A brand string supplied by a caller can itself be shop-speak / a nav label / a host echo / a
+ *  bare code echo - never trust it blindly. Reimplements the shape of junkRules.cleanBrand
+ *  locally, and (R3) routes the arg through the SAME junk shapes as a full name so a junk brand
+ *  arg like "amazon.com" or a scanned barcode string is treated as absent, not as a real brand. */
 function isBrandJunk(brand: string): boolean {
   const b = (brand ?? "").trim();
   if (!b) return true;
   if (GENERIC_WHOLE_NAME_RE.test(b)) return true;
   if (SHOP_SPEAK_RE.test(b)) return true;
+  if (BREADCRUMB_RE.test(b)) return true;
+  if (HOST_ECHO_RE.test(b)) return true;
+  if (CODE_ECHO_RE.test(b)) return true;
   if (/^(my store|the store|shop|store)$/i.test(b)) return true;
   return false;
 }
@@ -62,19 +67,46 @@ function isBrandJunk(brand: string): boolean {
 // prefixes), decimal truck rims (22.5), flotation (37x12.50R20), ATV (25x8-12), motorcycle
 // (100/80-17). Output is the three numeric groups glued together with every "." dropped.
 // ---------------------------------------------------------------------------------------------
+// (E1) The service-prefix group requires a non-letter (or start-of-string) immediately before it,
+// via the inner negative lookbehind. Without this, the greedy `(?:ST|LT|P)` alternation would match
+// the trailing "st"/"t"/"p" of an adjacent MODEL word (e.g. "Courser Quest 195/65R15" -> the "st" of
+// "Quest" absorbed as a service prefix; "...Hp 225/40R18" -> the "p" of "Hp" absorbed), corrupting
+// the matched span (`raw`) that buildModel() later strips out of the model text. The digit/rim
+// groups themselves were already correct - only the extra absorbed letters leaked into `raw`.
 const TIRE_SIZE_RE =
-  /(?<![0-9])(?:(?:ST|LT|P)\s?)?(\d{2,3}(?:\.\d+)?)\s?[/xX]\s?(\d{1,3}(?:\.\d+)?)\s?(?:Z?R|-)\s?(\d{2}(?:\.\d)?)\s?(?:XL|LT|ST)?(?![0-9])/i;
+  /(?<![0-9])(?:(?<![A-Za-z])(?:ST|LT|P)\s?)?(\d{2,3}(?:\.\d+)?)\s?[/xX]\s?(\d{1,3}(?:\.\d+)?)\s?(Z?R|-)\s?(\d{2}(?:\.\d)?)\s?(?:XL|LT|ST)?(?![0-9])/i;
 
-export function tireSizeTag(text: string): string {
-  const m = TIRE_SIZE_RE.exec(text ?? "");
-  if (!m) return "";
-  return `${m[1]}${m[2]}${m[3]}`.replace(/\./g, "");
+// (R1) Plausibility bounds against generic non-tire slash/dash numerics (e.g. "16/9-32" on a
+// monitor stand, "12/5-14" as a recipe batch code). Scoped to the bare-hyphen separator only: the
+// full 76,173-row tire-knowledge corpus was checked and NEVER uses a bare "-" separator (only
+// "R"/"ZR"), while agricultural/OTR tires legitimately use widths/rims far outside passenger-tire
+// ranges under the "R" separator (e.g. "800/70R38"). Restricting the bounds check to "-" catches
+// the false-positive class without rejecting a single real "R"/"ZR" tire size in the corpus.
+// Bounds: standard width 25-445mm / aspect 20-95%, OR flotation diameter 22-44in / width 4-18in;
+// rim 8-30in (decimals like .5 allowed by the regex's rim group).
+function isPlausibleTireSize(first: number, second: number, rim: number, separator: string): boolean {
+  if (separator !== "-") return true;
+  const standard = first >= 25 && first <= 445 && second >= 20 && second <= 95;
+  const flotation = first >= 22 && first <= 44 && second >= 4 && second <= 18;
+  const rimOk = rim >= 8 && rim <= 30;
+  return (standard || flotation) && rimOk;
 }
 
 function tireSizeMatch(text: string): { tag: string; raw: string } | null {
-  const m = TIRE_SIZE_RE.exec(text ?? "");
-  if (!m) return null;
-  return { tag: `${m[1]}${m[2]}${m[3]}`.replace(/\./g, ""), raw: m[0] };
+  const re = new RegExp(TIRE_SIZE_RE.source, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text ?? "")) !== null) {
+    if (isPlausibleTireSize(parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[4]), m[3])) {
+      return { tag: `${m[1]}${m[2]}${m[4]}`.replace(/\./g, ""), raw: m[0] };
+    }
+    if (m.index === re.lastIndex) re.lastIndex++; // defensive: never loop forever on a zero-length match
+  }
+  return null;
+}
+
+export function tireSizeTag(text: string): string {
+  const m = tireSizeMatch(text);
+  return m ? m.tag : "";
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -112,6 +144,9 @@ const UNIT_KIND: Record<string, "weight" | "count" | "volume"> = {
   floz: "volume",
 };
 
+// (R5) PACK_UNIT_RE.exec (no "g" flag) always returns the leftmost match in the string, so when a
+// name could plausibly carry more than one non-tire size/quantity notation, the FIRST one to occur
+// textually wins - overlapping non-tire tags are resolved by textual order, not by unit priority.
 function packSizeMatch(text: string): { tag: string; kind: "weight" | "count" | "volume"; raw: string } | null {
   const m = PACK_UNIT_RE.exec(text ?? "");
   if (!m) return null;
@@ -151,13 +186,38 @@ function isCapitalizedWordShape(token: string): boolean {
   return /^[A-Z][a-zA-Z]*$/.test(token) && /[a-z]/.test(token);
 }
 
+// (R4) Compiling one RegExp per lexicon entry on every single structureProduct() call is wasteful
+// once this runs hot over thousands of rows (an offline eval or a bulk import) with the same
+// caller-supplied `knownBrands` array. Cache the compiled per-brand regexes keyed by the array's
+// own reference identity - callers that pass the same lexicon array repeatedly (the normal case:
+// one catalog/prefix-map lexicon built once, reused across every scan) get the compile cost once.
+const lexiconRegexCache = new WeakMap<string[], Array<{ brand: string; re: RegExp }>>();
+
+function compiledLexicon(knownBrands: string[]): Array<{ brand: string; re: RegExp }> {
+  const cached = lexiconRegexCache.get(knownBrands);
+  if (cached) return cached;
+  const compiled = knownBrands
+    .map((c) => (c ?? "").trim())
+    .filter(Boolean)
+    .map((c) => ({ brand: c, re: new RegExp(`\\b${escapeRegex(c)}\\b`, "i") }));
+  lexiconRegexCache.set(knownBrands, compiled);
+  return compiled;
+}
+
+// (E2) When multiple lexicon brands match the same text (a brand and its own sub-brand/family
+// brand co-occurring, e.g. "Nokian Nordman 5" or "Ohtsu By Falken"), the correct brand is
+// overwhelmingly the EARLIEST-occurring one in the text, not the longest string. Longest is only
+// used to break a tie when two candidates start at the exact same position.
 function lexiconBrandMatch(text: string, knownBrands: string[]): string {
   let best = "";
-  for (const candidate of knownBrands) {
-    const c = (candidate ?? "").trim();
-    if (!c) continue;
-    const re = new RegExp(`\\b${escapeRegex(c)}\\b`, "i");
-    if (re.test(text) && c.length > best.length) best = c;
+  let bestIndex = Infinity;
+  for (const { brand: c, re } of compiledLexicon(knownBrands)) {
+    const m = re.exec(text);
+    if (!m) continue;
+    if (m.index < bestIndex || (m.index === bestIndex && c.length > best.length)) {
+      best = c;
+      bestIndex = m.index;
+    }
   }
   return best;
 }
@@ -202,12 +262,30 @@ function stripMarketplaceNoise(raw: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+// (E3) "radial" is deliberately NOT in this generic set - see isEdgeNoise(), which only treats it
+// as noise when it is the ONLY remaining model content. Real tire model lines routinely use it as
+// an actual part of the name (BFGoodrich "Radial T/A", Thunderer "Radial R501").
 const MODEL_EDGE_NOISE = new Set([
   "tire", "tires", "tyre", "tyres", "new", "set", "pair", "pcs", "wheel", "wheels", "oem",
-  "radial", "the", "a", "of", "with", "and",
+  "the", "a", "of", "with", "and",
 ]);
 
 const LOAD_INDEX_RE = /^\d{2,3}[A-Za-z]{1,2}$/; // e.g. "102W", "94V" - tire load index/speed rating
+
+// (E3) Edge-noise stripping rules:
+// - A generic noise word is only stripped from an edge when it is not the ONLY remaining model
+//   content (never let stripping erase a token that would otherwise leave nothing to strip against).
+// - "radial" specifically is only treated as noise when it is the sole remaining token; whenever
+//   another token still exists, "radial" is real model content, not filler.
+// - A single uppercase "A" is never treated as the noise-word article "a" - tire fitment codes
+//   commonly end in an uppercase letter-pair like "T/A", "A/T", "M/S", and those must survive
+//   (only the lowercase, natural-language article "a" is stripped).
+function isEdgeNoise(token: string, remainingCount: number): boolean {
+  if (token === "A") return false;
+  const lower = token.toLowerCase();
+  if (lower === "radial") return remainingCount <= 1;
+  return MODEL_EDGE_NOISE.has(lower);
+}
 
 function buildModel(descriptionText: string, brand: string, size: SizeResult): string {
   let working = descriptionText;
@@ -216,15 +294,31 @@ function buildModel(descriptionText: string, brand: string, size: SizeResult): s
   }
   if (size.raw) {
     const idx = working.indexOf(size.raw);
-    if (idx >= 0) working = working.slice(0, idx) + " " + working.slice(idx + size.raw.length);
+    if (idx >= 0) {
+      let after = working.slice(idx + size.raw.length);
+      if (size.kind === "tire") {
+        // (E3) A load index / speed rating (e.g. "102W") always immediately follows the size in
+        // real tire naming - only strip it there. A token that merely LOOKS like a load index but
+        // sits elsewhere (e.g. "365AW" in "Altimax 365AW", which precedes the size) is real model
+        // content and must survive.
+        const loadMatch = /^\s*(\d{2,3}[A-Za-z]{1,2})\b/.exec(after);
+        if (loadMatch && LOAD_INDEX_RE.test(loadMatch[1])) {
+          after = after.slice(loadMatch[0].length);
+        }
+      }
+      working = working.slice(0, idx) + " " + after;
+    }
+    // (R2) A second (or later) tire-size mention in a multi-size listing must not leak into the
+    // model - sizeTag always reflects only the first match, so strip every remaining tire-size
+    // occurrence too.
+    if (size.kind === "tire") {
+      working = working.replace(new RegExp(TIRE_SIZE_RE.source, "gi"), " ");
+    }
   }
   working = working.replace(/\(\s*\)/g, " "); // stray empty parens left behind by a "(2 Pack)" removal
-  let tokens = working.split(/\s+/).filter(Boolean);
-  if (size.kind === "tire") {
-    tokens = tokens.filter((t) => !LOAD_INDEX_RE.test(t));
-  }
-  while (tokens.length && MODEL_EDGE_NOISE.has(tokens[0].toLowerCase())) tokens.shift();
-  while (tokens.length && MODEL_EDGE_NOISE.has(tokens[tokens.length - 1].toLowerCase())) tokens.pop();
+  const tokens = working.split(/\s+/).filter(Boolean);
+  while (tokens.length && isEdgeNoise(tokens[0], tokens.length)) tokens.shift();
+  while (tokens.length && isEdgeNoise(tokens[tokens.length - 1], tokens.length)) tokens.pop();
   return tokens.join(" ").trim();
 }
 
