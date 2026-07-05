@@ -89,6 +89,15 @@ describe("detectSiblingAmbiguity", () => {
     )).toBe("agree");
   });
 
+  test("motorcycle dash-notation sizes agree with R notation (ContiGO live flip, v2.3 batch 9)", () => {
+    // 100/80-17 IS 100/80R17: the dash is the universal motorcycle-tire separator. The fitment
+    // vehicle tokens (MBK X-Limit) must not drown the size+brand agreement.
+    expect(identityRelation(
+      { name: "MBK X-Limit Supermoto 50 Front Tyre 100/80-17 Continental ContiGo!", brand: "" },
+      { name: "Continental ContiGO 100/80R17 52P from Annan Tyres", brand: "" },
+    )).toBe("agree");
+  });
+
   test("brand-family name forms are compatible, not a brand conflict (Grabill live flip, v2.3 batch 3)", () => {
     // One company, many brand-name forms ("Grabill Country" / "Grabill Country Meat(s)"). The old
     // exact-string brand gate returned "unrelated" before name containment could ever run.
