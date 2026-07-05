@@ -31,10 +31,11 @@ describe("FinalCountTable role gating (Phase 6)", () => {
     delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER; // business / customer
     seed();
     render(<FinalCountTable />);
-    // product IS visible (Task 4 adds a Model column that falls back to the raw name when no
-    // structured model exists yet - this fixture predates structuring - so it can legitimately
-    // appear twice: once as the Product name, once as the Model fallback).
-    expect(screen.getAllByText("Test Widget").length).toBeGreaterThan(0);
+    // product IS visible. Task 4 review fix: the Model column shows the table's empty-cell "-"
+    // convention (not a duplicate of the raw name) for a row with no structuredModel yet - this
+    // fixture predates structuring - so "Test Widget" appears EXACTLY once (the Product column).
+    expect(screen.getAllByText("Test Widget").length).toBe(1);
+    expect(screen.getByTestId("model-p1").textContent).toBe("-");
     expect(screen.queryByText("Barcode")).toBeNull();
     expect(screen.queryByText("Other codes scanned")).toBeNull();
     expect(screen.queryAllByText(/111222333444/).length).toBe(0); // raw barcode not leaked

@@ -16,8 +16,11 @@ import type { InventoryCount, Product } from "@/types";
 function resolvedBrand(product: Product): string {
   return product.structuredBrand || product.brand;
 }
+// Task 4 review fix: the Model column shows the table's existing empty-cell convention ("-") for a
+// row with no structuredModel yet, rather than duplicating the full Product-column name. Filtering
+// by name still works via the description field (structuredDescription falls back to product.name).
 function resolvedModel(product: Product): string {
-  return product.structuredModel || product.name;
+  return product.structuredModel || "";
 }
 function resolvedSizeTag(product: Product): string {
   return product.sizeTag || plainTireSizeDigits(product.specsShort);
@@ -156,7 +159,7 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
       </td>
       <td className="px-4 py-3 font-medium text-zinc-800">{isPlatform ? product.name : customerDisplayName(product.name)}</td>
       <td className="px-4 py-3" data-testid={`brand-${product.id}`}>{resolvedBrand(product)}</td>
-      <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(product)}</td>
+      <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(product) || "-"}</td>
       <td className="px-4 py-3">{product.category}</td>
       <td className="px-4 py-3">{product.specsShort}</td>
       <td className="px-4 py-3 font-mono text-sm tabular-nums" data-testid={`size-${product.id}`}>

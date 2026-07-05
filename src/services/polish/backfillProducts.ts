@@ -4,7 +4,7 @@
 
 // NOTE: relative + explicit ".ts" extensions - see structuredFields.ts for why (this module is also
 // imported directly, standalone, by scripts/polish-backfill.mts under plain `node`).
-import { structuredFieldsFor } from "./structuredFields.ts";
+import { safeStructuredFieldsFor } from "./structuredFields.ts";
 import type { Product } from "../../types.ts";
 
 export interface BackfillResult {
@@ -27,7 +27,9 @@ export function backfillProducts(products: Product[]): BackfillResult {
       skippedHumanIds.push(p.id);
       return p;
     }
-    const patch = structuredFieldsFor(p.name, p.brand, p.structuredBy);
+    // safeStructuredFieldsFor (not structuredFieldsFor): a structurer throw on one bad row must
+    // never brick the whole backfill (persist hydration on real users' data, or this CLI's run).
+    const patch = safeStructuredFieldsFor(p.name, p.brand, p.structuredBy);
     const next: Product = { ...p, ...patch };
     const changed =
       next.structuredBrand !== p.structuredBrand ||

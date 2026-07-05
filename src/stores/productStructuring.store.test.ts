@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 
@@ -76,5 +76,51 @@ describe("scanStore - product structuring on create_new (Task 4)", () => {
     expect(afterLocationEdit.structuredBy).toBe("human");
     expect(afterLocationEdit.structuredBrand).toBe("Human Brand");
     expect(afterLocationEdit.location).toBe("Aisle 4");
+  });
+});
+
+describe("scanStore - structurer containment (Task 4 review fix)", () => {
+  it("a structurer throw on create_new never breaks scan flow - the product is still created, just unstructured", async () => {
+    vi.resetModules();
+    vi.doMock("@/services/polish/structurer", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("@/services/polish/structurer")>();
+      return {
+        ...actual,
+        structureProduct: () => {
+          throw new Error("structurer crashed on this name");
+        },
+      };
+    });
+
+    const { createTestScanStore: createStoreWithMock } = await import("@/stores/scanStore");
+    const { MockDb: MockDbWithMock } = await import("@/services/mockDb");
+
+    const store = createStoreWithMock({ db: new MockDbWithMock() });
+    store.getState().processScan("205551600099");
+    const reviewId = store.getState().needsReviewQueue.at(-1)!.id;
+
+    // Must not throw even though the structurer underneath is crashing.
+    expect(() =>
+      store.getState().resolveUnknown(reviewId, "create_new", {
+        applyToCount: true,
+        origin: "human",
+        newProduct: {
+          name: "Cooper Discoverer AT3 265/70R17",
+          brand: "Cooper",
+          category: "Tire",
+          primaryBarcode: "205551600099",
+        },
+      }),
+    ).not.toThrow();
+
+    const product = store.getState().products.find((p) => p.primaryBarcode === "205551600099");
+    expect(product, "product was still created despite the structurer throwing").toBeDefined();
+    expect(product?.name).toBe("Cooper Discoverer AT3 265/70R17");
+    // Unstructured: the containment wrapper returns an empty patch on throw.
+    expect(product?.structuredBrand).toBeUndefined();
+    expect(product?.structuredBy).toBeUndefined();
+
+    vi.doUnmock("@/services/polish/structurer");
+    vi.resetModules();
   });
 });

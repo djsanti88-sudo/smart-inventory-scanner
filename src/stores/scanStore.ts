@@ -63,7 +63,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { structuredFieldsFor } from "@/services/polish/structuredFields";
+import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
 
@@ -2835,8 +2835,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     if (np.category !== undefined) updates.category = np.category;
                   }
                   // Task 4: (re)structure only when the name/brand actually changed above; the guard
-                  // inside structuredFieldsFor never overwrites a row already stamped "human".
-                  Object.assign(updates, structuredFieldsFor(updates.name ?? p.name, updates.brand ?? p.brand, p.structuredBy));
+                  // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
+                  // the safe wrapper: a structurer throw must never break this scan flow (Task 4 review fix).
+                  Object.assign(updates, safeStructuredFieldsFor(updates.name ?? p.name, updates.brand ?? p.brand, p.structuredBy));
                   return { ...p, ...updates };
                 });
               }
@@ -2877,7 +2878,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               updatedBy: payload.origin === "human" ? "human" : orphan.updatedBy,
               // Task 4: structure the upgraded identity (deterministic only, never LLM on the hot
               // path). Guarded against clobbering a prior "human" stamp.
-              ...structuredFieldsFor(np.name ?? orphan.name, np.brand ?? orphan.brand, orphan.structuredBy),
+              ...safeStructuredFieldsFor(np.name ?? orphan.name, np.brand ?? orphan.brand, orphan.structuredBy),
             };
             products = products.map((p) => (p.id === provOrphanId ? upgraded : p));
             createdProduct = upgraded;
@@ -2924,7 +2925,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               createdBy: "human",
               updatedBy: "human",
               // Task 4: fresh mint - always deterministic-structure (no prior stamp to protect).
-              ...structuredFieldsFor(mintedName, mintedBrand),
+              ...safeStructuredFieldsFor(mintedName, mintedBrand),
             };
             products = [...products, newProduct];
             createdProduct = newProduct;
@@ -4025,51 +4026,57 @@ const appDeps: ScanStoreDeps = {
   persistName: "sis-scan-v1",
 };
 
+// v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
+// We cannot reliably tell poisoned from good learned data, so reset products/aliases to clean
+// verified seed and clear session/queues. User settings are preserved (merged with new
+// defaults). Use the in-app "Clear local cache" button for a full wipe including the mock DB.
+// v4 (Sec-4): the customer-data wipe of any legacy sensitive localStorage keys (aliases/catalog/
+// raw codes) is enforced by the role-aware `partialize` below on the first post-hydration write
+// (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
+// v5: auto-purge the poisoned duplicates (e.g. the ~235 "Manstel rivet kit" rows saved on the
+// non-matching code 745125495781) by resetting products/aliases to clean verified seed on next load.
+// v6 (Task 4 backfill): THIS APP HAS NO SERVER-SIDE PRODUCT JSON/DB IN LOCAL/MOCK MODE - products
+// live ONLY in this persisted browser state, so the "backfill" for real users runs here, at next
+// load, instead of a script touching a file. Unlike v3/v5, a version-5 install is NOT reset (its
+// products are real, not poisoned) - existing rows are kept and simply gain structured fields via
+// the same skip-human-stamped rule as scripts/polish-backfill.mts (see backfillProducts.ts, shared
+// by both). Only installs older than v5 still get the full poison-cleanup reset (unchanged), with
+// structuring applied to the resulting seed as a no-op convenience.
+//
+// Exported (Task 4 polish-review fix) so a unit test can call this directly with a v5 persisted-state
+// fixture and assert every field survives the migration untouched, without spinning up the full
+// zustand persist/localStorage machinery.
+export function scanStoreMigrate(persisted: unknown, version: number) {
+  const p = (persisted ?? {}) as Record<string, unknown>;
+  if (version < 5) {
+    const fresh = getSeed();
+    return {
+      ...p,
+      products: backfillProducts(fresh.products).products,
+      aliases: fresh.aliases,
+      scanFeed: [],
+      finalCounts: [],
+      needsReviewQueue: [],
+      pendingSyncQueue: [],
+      syncedScanEventIds: [],
+      settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
+    } as never;
+  }
+  const existingProducts = Array.isArray(p.products) ? (p.products as Product[]) : [];
+  return {
+    ...p,
+    products: backfillProducts(existingProducts).products,
+    settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
+  } as never;
+}
+
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
     version: 6,
     storage: createJSONStorage(() => localStorage),
     skipHydration: true,
-    // v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
-    // We cannot reliably tell poisoned from good learned data, so reset products/aliases to clean
-    // verified seed and clear session/queues. User settings are preserved (merged with new
-    // defaults). Use the in-app "Clear local cache" button for a full wipe including the mock DB.
-    // v4 (Sec-4): the customer-data wipe of any legacy sensitive localStorage keys (aliases/catalog/
-    // raw codes) is enforced by the role-aware `partialize` below on the first post-hydration write
-    // (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
-    // v5: auto-purge the poisoned duplicates (e.g. the ~235 "Manstel rivet kit" rows saved on the
-    // non-matching code 745125495781) by resetting products/aliases to clean verified seed on next load.
-    // v6 (Task 4 backfill): THIS APP HAS NO SERVER-SIDE PRODUCT JSON/DB IN LOCAL/MOCK MODE - products
-    // live ONLY in this persisted browser state, so the "backfill" for real users runs here, at next
-    // load, instead of a script touching a file. Unlike v3/v5, a version-5 install is NOT reset (its
-    // products are real, not poisoned) - existing rows are kept and simply gain structured fields via
-    // the same skip-human-stamped rule as scripts/polish-backfill.mts (see backfillProducts.ts, shared
-    // by both). Only installs older than v5 still get the full poison-cleanup reset (unchanged), with
-    // structuring applied to the resulting seed as a no-op convenience.
-    migrate: (persisted: unknown, version: number) => {
-      const p = (persisted ?? {}) as Record<string, unknown>;
-      if (version < 5) {
-        const fresh = getSeed();
-        return {
-          ...p,
-          products: backfillProducts(fresh.products).products,
-          aliases: fresh.aliases,
-          scanFeed: [],
-          finalCounts: [],
-          needsReviewQueue: [],
-          pendingSyncQueue: [],
-          syncedScanEventIds: [],
-          settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
-        } as never;
-      }
-      const existingProducts = Array.isArray(p.products) ? (p.products as Product[]) : [];
-      return {
-        ...p,
-        products: backfillProducts(existingProducts).products,
-        settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
-      } as never;
-    },
+    migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
     // code database (aliases / global catalog / shop overrides / barcodes / raw+clean+normalized codes /
     // decode traces). The level is computed from the signed-in uid (same source of truth as the UI), and
