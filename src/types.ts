@@ -122,6 +122,10 @@ export interface Product {
   // Who last produced the structured fields above. "human" is a PERMANENT lock: automatic
   // re-structuring (hot path AND the offline backfill) must skip a row stamped "human".
   structuredBy?: "deterministic" | "llm" | "human";
+  // The structurer's own confidence (0..1) in the split above. Stamped by structuredFieldsFor
+  // whenever it runs (deterministic pass); identifies rows eligible for the LLM backfill fallback
+  // (confidence < 0.6, see src/services/polish/backfillLlm.ts). Undefined for a row never structured.
+  structuredConfidence?: number;
   createdAt: string;
   updatedAt: string;
   createdBy: string;

@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { structuredFieldsFor } from "@/services/polish/structuredFields";
+import { describe, it, expect, vi } from "vitest";
+import { structuredFieldsFor, safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 
 describe("structuredFieldsFor", () => {
   it("structures a tire name deterministically and stamps structuredBy deterministic", () => {
@@ -28,5 +28,31 @@ describe("structuredFieldsFor", () => {
     expect(structuredFieldsFor("Michelin Defender 225/65R17", "Michelin", undefined).structuredBy).toBe(
       "deterministic",
     );
+  });
+
+  it("stamps structuredConfidence from the structurer's own confidence", () => {
+    const patch = structuredFieldsFor("Cooper Discoverer AT3 265/70R17", "Cooper");
+    expect(patch.structuredConfidence).toBe(0.9); // brand + size both found
+
+    const lowConfidence = structuredFieldsFor("Widget Cleaner Pro", "");
+    expect(lowConfidence.structuredConfidence).toBeLessThan(0.6); // no brand, no size
+  });
+});
+
+describe("safeStructuredFieldsFor", () => {
+  it("behaves exactly like structuredFieldsFor when nothing throws", () => {
+    const patch = safeStructuredFieldsFor("Cooper Discoverer AT3 265/70R17", "Cooper");
+    expect(patch.structuredBrand).toBe("Cooper");
+    expect(patch.structuredBy).toBe("deterministic");
+  });
+
+  it("never throws: a structurer crash returns an empty patch instead", async () => {
+    const structurerModule = await import("@/services/polish/structurer");
+    const spy = vi.spyOn(structurerModule, "structureProduct").mockImplementation(() => {
+      throw new Error("boom");
+    });
+    expect(() => safeStructuredFieldsFor("Anything", "Brand")).not.toThrow();
+    expect(safeStructuredFieldsFor("Anything", "Brand")).toEqual({});
+    spy.mockRestore();
   });
 });

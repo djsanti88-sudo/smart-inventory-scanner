@@ -12,8 +12,11 @@
 //   DEFINED but never constructed by any test or current caller (wiring is Task 4's concern);
 //   it reads GEMINI_API_KEY server-side only, at construction.
 
-import { sanitizeForAiLookup } from "@/services/sanitizer";
-import { tireSizeTag, type StructuredProduct } from "./structurer";
+// NOTE: relative + explicit ".ts" extensions (not the usual "@/" alias) - see structuredFields.ts
+// for why: this module is imported directly, standalone, by scripts/polish-backfill.mts's --llm
+// flag under plain `node` (no bundler), and the "@/" tsconfig path alias is bundler/vitest-only.
+import { sanitizeForAiLookup } from "../sanitizer.ts";
+import { tireSizeTag, type StructuredProduct } from "./structurer.ts";
 
 export interface LlmPolishDeps {
   provider: (prompt: string) => Promise<string>;

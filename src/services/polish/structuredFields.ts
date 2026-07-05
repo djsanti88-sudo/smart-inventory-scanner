@@ -13,7 +13,12 @@ import type { Product } from "../../types.ts";
 
 export type StructuredFieldsPatch = Pick<
   Product,
-  "structuredBrand" | "structuredModel" | "structuredDescription" | "sizeTag" | "structuredBy"
+  | "structuredBrand"
+  | "structuredModel"
+  | "structuredDescription"
+  | "sizeTag"
+  | "structuredBy"
+  | "structuredConfidence"
 >;
 
 /**
@@ -37,5 +42,31 @@ export function structuredFieldsFor(
     structuredDescription: s.descriptionText || undefined,
     sizeTag: s.sizeTag || undefined,
     structuredBy: "deterministic",
+    structuredConfidence: s.confidence,
   };
+}
+
+/**
+ * Containment wrapper (Task 4 review fix): identical to structuredFieldsFor but NEVER throws.
+ * A structurer bug on one bad product name must never break the scan flow (product create/update
+ * inside scanStore.ts) or brick persist hydration (the v5/v6 backfill migration runs the
+ * deterministic pass over every existing product on next load, via backfillProducts.ts). On any
+ * throw, this logs once and returns an empty patch so the caller falls back to the product's
+ * existing (unstructured) fields instead of failing the whole operation.
+ *
+ * This is the single containment point used by BOTH the 3 hot-path call sites in scanStore.ts AND
+ * backfillProducts.ts (which backs the scanStore migrate branch and scripts/polish-backfill.mts),
+ * so a per-row throw only drops structuring for that one row, never the whole batch.
+ */
+export function safeStructuredFieldsFor(
+  name: string,
+  brand: string,
+  previousStructuredBy?: Product["structuredBy"],
+): Partial<StructuredFieldsPatch> {
+  try {
+    return structuredFieldsFor(name, brand, previousStructuredBy);
+  } catch (err) {
+    console.error(`[structuredFieldsFor] threw for product name "${name}": ${String(err)}`);
+    return {};
+  }
 }
