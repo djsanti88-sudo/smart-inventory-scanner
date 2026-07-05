@@ -530,6 +530,26 @@ describe("snippetFindings", () => {
     expect(out).toHaveLength(1);
     expect(out[0].name).toBe("");
   });
+
+  test("snippet findings carry labeled=true only when a barcode label sits near the code", () => {
+    const out = snippetFindings([
+      cand("https://a.example.com/1", "Pirelli Cinturato P7 245/40R19", "UPC 054137070825 in stock"),
+      cand("https://b.example.com/2", "Pirelli Cinturato P7 245/40R19 Tire", "ships fast 054137070825"),
+    ], ["054137070825"], "054137070825");
+    expect(out.map((s) => s.labeled)).toEqual([true, false]);
+  });
+
+  test("a single BARE-number snippet cannot be the sole identity (labeled can)", async () => {
+    const TIRE = "054137070825";
+    const mk = (snippet: string) => walmartDeps({
+      fetchPage: async () => ({ ok: true, status: 200, html: "<html><head><title>x</title></head><body>n</body></html>" }),
+      discovery: [{ name: "m", search: async () => [{ url: "https://www.ebay.com/itm/1", title: "Pirelli Cinturato P7 245/40R19 Tire", snippet, rank: 0 }] }],
+    });
+    const bare = await fetchV2(TIRE, mk(TIRE));
+    expect(bare.outcome).not.toBe("suggested");
+    const labeled = await fetchV2(TIRE, mk(`UPC ${TIRE}`));
+    expect(labeled.outcome).toBe("suggested");
+  });
 });
 
 // ---------------------------------------------------------------------------- pipeline (fetchV2)
@@ -836,7 +856,9 @@ describe("fetchV2 pipeline", () => {
   test("the quoted escalation ALWAYS gets one shot even when earlier steps ate the time budget (Atturo live bug)", async () => {
     const TIRE = "5060330613580";
     let t = 0;
-    const fc = vi.fn(async () => [{ url: "https://www.offroadrimfinancing.com/product/atturo", title: "Atturo AZ850 Performance 315/35/21 Tire - Off-Road Rim", snippet: "", rank: 0 }]);
+    // Updated for the barcode-label-context rule (task 1, 2026-07-05): a single snippet host now
+    // needs a barcode label to be the sole identity, so the fixture snippet carries "UPC <code>".
+    const fc = vi.fn(async () => [{ url: "https://www.offroadrimfinancing.com/product/atturo", title: "Atturo AZ850 Performance 315/35/21 Tire - Off-Road Rim", snippet: `UPC ${TIRE}`, rank: 0 }]);
     const r = await fetchV2(TIRE, {
       now: () => (t += 20_000), // every clock read jumps 20s: budget gone after the first provider
       fetchPage: async () => ({ ok: false, status: 0, html: "" }),
@@ -908,7 +930,9 @@ describe("fetchV2 pipeline", () => {
           queries.push(q);
           // 1st quoted: empty (variance). unquoted: garbage. 2nd quoted: the real result.
           if (queries.length <= 2) return [];
-          return [{ url: "https://wheelmax.example.com/p/1", title: "275/35R20 Continental Contisportcontact 3 Run Flat", snippet: TIRE, rank: 0 }];
+          // Updated for the barcode-label-context rule (task 1, 2026-07-05): a single snippet host
+          // now needs a barcode label to be the sole identity.
+          return [{ url: "https://wheelmax.example.com/p/1", title: "275/35R20 Continental Contisportcontact 3 Run Flat", snippet: `UPC ${TIRE}`, rank: 0 }];
         } },
       ],
     }));

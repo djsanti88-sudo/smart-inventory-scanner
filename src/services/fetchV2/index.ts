@@ -296,6 +296,7 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
         junkReasons: [],
         quality: "weak",
         score: 20,
+        labeled: s.labeled,
       });
     }
   }

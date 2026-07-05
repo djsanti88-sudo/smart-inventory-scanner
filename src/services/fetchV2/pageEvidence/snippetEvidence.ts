@@ -4,6 +4,7 @@
 // exact digit-boundary match is ours. Identity comes only from titles that pass the name firewall.
 import { cleanProductName } from "@/services/ai/decode";
 import { usableIdentityName } from "./junkRules";
+import { hasBarcodeLabelContext, hasNegativeContext } from "./association";
 import type { DiscoveryCandidate } from "../sources/discovery";
 
 export interface SnippetFinding {
@@ -11,6 +12,7 @@ export interface SnippetFinding {
   host: string;
   name: string; // firewall-cleaned identity from the result title ("" if unusable)
   matchedVariant: string;
+  labeled: boolean; // true only when a barcode label (UPC/EAN/...) sits near the code
 }
 
 function matchIn(text: string, variant: string): boolean {
@@ -45,7 +47,8 @@ export function snippetFindings(
     let host = "";
     try { host = new URL(c.url).hostname.toLowerCase(); } catch { continue; }
     const usable = usableIdentityName(c.title, code);
-    out.push({ url: c.url, host, name: usable ? cleanProductName(c.title) : "", matchedVariant: matched });
+    const labeled = hasBarcodeLabelContext(hay, matched) && !hasNegativeContext(hay, matched);
+    out.push({ url: c.url, host, name: usable ? cleanProductName(c.title) : "", matchedVariant: matched, labeled });
   }
   return out;
 }

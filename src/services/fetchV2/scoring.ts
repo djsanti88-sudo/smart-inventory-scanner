@@ -15,6 +15,7 @@ export interface SourceFinding {
   junkReasons: string[];
   quality: "strong" | "medium" | "weak" | "rejected";
   score: number; // 0-100
+  labeled?: boolean; // snippet findings only: true when a barcode label sits near the code
 }
 
 const QUALITY_SCORE = { strong: 85, medium: 55, weak: 30, rejected: 0 } as const;
@@ -141,6 +142,22 @@ export function decideOutcome(identifier: FetchV2Identifier, findings: SourceFin
   }
 
   if (identified.length > 0) {
+    // Snippet-only identity (no page ever tied the code to a product) needs stronger corroboration
+    // than an ordinary weak page match: either a barcode label sat next to the code in the result
+    // text, or at least 2 distinct hosts independently carry the code and agree. A single BARE
+    // number in one search snippet is not evidence of anything (owner rule 2026-07-05).
+    const allSnippetOnly = identified.every((f) => f.association.matchedField === "search_snippets");
+    if (allSnippetOnly) {
+      const anyLabeled = identified.some((f) => f.labeled === true);
+      const hosts = new Set(identified.map((f) => hostOf(f.url)));
+      const pairwiseAgree = identified.every((a, i) =>
+        identified.every((b, j) => j <= i || hostOf(a.url) === hostOf(b.url) || identityRelation(ident(a), ident(b)) === "agree"),
+      );
+      if (!anyLabeled && !(hosts.size >= 2 && pairwiseAgree)) {
+        rules.push("snippet-only identity: no barcode label and fewer than 2 agreeing hosts - no identity");
+        return { outcome: "unknown", confidence: 0, winner: null, conflicts: [], rulesFired: rules };
+      }
+    }
     rules.push("usable identity without verification-grade proof");
     // Winner = the most informative candidate: proven code tie first, then source score, then the
     // richer name (live bug: first-inserted "CAMPBELL" beat the full soup name).

@@ -108,7 +108,10 @@ describe("proveAssociation", () => {
   });
 
   test("WEAK: code only somewhere in page text, no structured tie", () => {
-    const proof = proveAssociation(variants, [], `random blog mentioning ${CODE} once`, "https://blog.example.com/post");
+    // Updated for the barcode-label-context rule (task 1, 2026-07-05): a bare floating number is no
+    // longer evidence, so the fixture now carries a label ("UPC") to keep testing the intended
+    // behavior (weak page_text tie, no structured product record).
+    const proof = proveAssociation(variants, [], `random blog mentioning UPC ${CODE} once`, "https://blog.example.com/post");
     expect(proof.level).toBe("weak");
     expect(proof.matchedField).toBe("page_text");
   });
@@ -151,5 +154,20 @@ describe("proveAssociation", () => {
     const products = extractProducts(`<html><body><h1>Toyo Proxes R888R</h1><table><tr><th>UPC</th><td>4981910515661</td></tr></table></body></html>`);
     const proof = proveAssociation(["4981910515661"], products, "", "https://tires.example.com/product/toyo-r888r");
     expect(proof.level).toBe("strong");
+  });
+
+  test("page_text matches REQUIRE barcode-label context (bare numbers are not evidence)", () => {
+    const bare = proveAssociation(["4981910515661"], [], "our warehouse moved 4981910515661 boxes last year", "https://x.example.com/");
+    expect(bare.level).toBe("none");
+    const labeled = proveAssociation(["4981910515661"], [], "Specifications: UPC 4981910515661, made in Japan", "https://x.example.com/");
+    expect(labeled.level).toBe("weak");
+    expect(labeled.matchedField).toBe("page_text");
+  });
+
+  test("negative context disqualifies a match even with digits present", () => {
+    const p = proveAssociation(["4981910515661"], [], "MLS listing no. 4981910515661 - 3bd 2ba ranch", "https://mls.example.com/");
+    expect(p.level).toBe("none");
+    const p2 = proveAssociation(["4981910515661"], [], "invoice 4981910515661 due net 30", "https://acct.example.com/");
+    expect(p2.level).toBe("none");
   });
 });
