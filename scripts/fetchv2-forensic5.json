@@ -1,0 +1,96 @@
+{
+ "spent": 0.0083,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "092971262761",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "firestone firehawk as 215/50R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.17,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "690677301168",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodride st100 ST225/75R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.44,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "4981910884903",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "toyo eclipse 185/65R14",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.83,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "887613441402",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "nexen nfera au7 255/45R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.29,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "086699058874",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich dr454 275/80R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.57,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  }
+ ]
+}

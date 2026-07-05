@@ -32,8 +32,11 @@
 //    ("lay", "chips" are too generic to prove identity here). Forced to wrongVerified.
 import { readFileSync, writeFileSync } from "node:fs";
 
+// Optional --input=<path> grades a different results file in the same {spent, rows} shape
+// (e.g. the Fetch V2 web-only benchmark). Default stays the committed ladder run.
+const inputArg = process.argv.find((a) => a.startsWith("--input="));
 const { spent, rows } = JSON.parse(
-  readFileSync(new URL("./tmp-ladder-dryrun-results.json", import.meta.url), "utf8")
+  readFileSync(inputArg ? inputArg.slice("--input=".length) : new URL("./tmp-ladder-dryrun-results.json", import.meta.url), "utf8")
 );
 
 // Optional: dump a machine-readable summary for the PDF report builder, so the report never

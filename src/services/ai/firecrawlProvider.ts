@@ -120,9 +120,9 @@ export interface FirecrawlCheapResult {
   keyIndex: number; // which key (0-based, in rotation order) actually served the request
 }
 
-/** Reads FIRECRAWL_API_KEY_1..4 in order (skipping unset ones); falls back to legacy FIRECRAWL_API_KEY. */
+/** Reads FIRECRAWL_API_KEY_1..10 in order (skipping unset ones); falls back to legacy FIRECRAWL_API_KEY. */
 export function firecrawlKeysFromEnv(): string[] {
-  const numbered = [1, 2, 3, 4]
+  const numbered = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     .map((n) => process.env[`FIRECRAWL_API_KEY_${n}`])
     .filter((k): k is string => !!k && k.trim().length > 0);
   if (numbered.length > 0) return numbered;

@@ -1,0 +1,45 @@
+{
+  "generatedAt": "2026-07-04",
+  "fetchV2": {
+    "n": 150,
+    "verified": 2,
+    "verifiedCorrect": 2,
+    "verifiedWrong": [],
+    "suggested": 83,
+    "suggestedCorrect": 70,
+    "canaryVerified": 0,
+    "canarySuggested": 0,
+    "refused": 65,
+    "errors": 0,
+    "medianSecs": 3.03,
+    "totalCostUsd": 0,
+    "recallOnFindable": "72/133"
+  },
+  "geminiFlash35_claimsUnverified": {
+    "n": 84,
+    "offered": 71,
+    "correct": 40,
+    "wrong": 31,
+    "canaryOffered": 0,
+    "medianSecs": 4.19,
+    "totalCost": 1.0539
+  },
+  "gpt55_claimsUnverified": {
+    "n": 84,
+    "offered": 84,
+    "correct": 56,
+    "wrong": 28,
+    "canaryOffered": 0,
+    "medianSecs": 6.2,
+    "totalCost": 3.8814
+  },
+  "ladderPreFix": {
+    "n": 150,
+    "offered": 140,
+    "correct": 87,
+    "wrong": 53,
+    "canaryOffered": 10,
+    "medianSecs": 12.4,
+    "totalCost": 12.319
+  }
+}

@@ -1,0 +1,121 @@
+{
+ "spent": 0.0066,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "5420068601394",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "minerva transporter rf09 225/65R16",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.01,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": []
+  },
+  {
+   "code": "8886459507435",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "radar dimax r8 255/35R18",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.65,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": []
+  },
+  {
+   "code": "11793083",
+   "group": "retail",
+   "expected": "verified-ok",
+   "truth": "Autour du Riz Basmati indien blanc",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Autour du Riz Basmati indien blanc",
+   "cost": 0,
+   "secs": 6.15,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/11793083",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ],
+   "sources": []
+  },
+  {
+   "code": "8997020617238",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "accelera x grip n 185/55R15",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "",
+   "cost": 0,
+   "secs": 2.4,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://pneus.piecesauto24.com/185-55-r15",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "snippet conflict guard: code-carrying search results disagree: \"Pneus de voiture 185/55 R15 pour VW POLO - du pro du pneu Piecesauto24.com\" vs \"5M723 EP tyres Tyres 185 55 R 15 | AUTODOC price and review\""
+   ],
+   "sources": []
+  },
+  {
+   "code": "033259720450",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "carlstar tour max 205/50R10",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "2 New Carlstar Tour Max - 205/5010 Tires 2055010 205 50 10 | eBay",
+   "cost": 0,
+   "secs": 3.37,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/itm/383059081669",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ],
+   "sources": []
+  },
+  {
+   "code": "086699543356",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "uniroyal power paw a s 225/40R18",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Uniroyal Power Paw A/S 215 /40 R18 89Y XL BSW | 225 /40 R18 ...",
+   "cost": 0,
+   "secs": 2.35,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.discounttire.com/buy-tires/uniroyal-power-paw-a-s/p/129797/rearProduct/129794",
+   "codeLocation": "search_snippets",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ],
+   "sources": []
+  }
+ ]
+}
