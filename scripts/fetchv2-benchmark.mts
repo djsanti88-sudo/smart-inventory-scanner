@@ -114,11 +114,15 @@ async function fcScrapeHtml(url: string): Promise<{ ok: boolean; status: number;
 
 // Owner cap 2026-07-04: at most ONE paid scrape per code - if the best candidate's scrape does
 // not settle it, more scrapes rarely do. Reset by the main loop before each code.
+// The scrape is RESERVED for discovery candidates: the free pattern door runs first, and a
+// flaky DB page must never eat the credit the bot-blocked retailer page needs (live: the
+// Blizzak DiscountTire identity was lost because go-upc spent the scrape, v2.3 batch 6).
 let scrapesThisCode = 0;
+const patternDoorUrls = new Set<string>();
 async function fetchPage(url: string): Promise<{ ok: boolean; status: number; html: string }> {
   const direct = await directFetch(url);
   if (direct.ok && direct.html.length > 500) return direct;
-  if (fcKeys.length > 0 && isSafePublicUrl(url) && scrapesThisCode < 1) {
+  if (fcKeys.length > 0 && isSafePublicUrl(url) && scrapesThisCode < 1 && !patternDoorUrls.has(url)) {
     scrapesThisCode++;
     return fcScrapeHtml(url);
   }
@@ -215,7 +219,9 @@ async function main() {
     patternUrls: (variants) => {
       const code = variants.find((v) => /^\d{12,14}$/.test(v)) ?? variants[0];
       const all = selectBarcodeUrls(code); // already tiered by GTIN class
-      return all.slice(0, 4);
+      const doors = all.slice(0, 4);
+      for (const u of doors) patternDoorUrls.add(u); // scrape credit is never spent on these
+      return doors;
     },
   };
   let pool = fixture.codes;
