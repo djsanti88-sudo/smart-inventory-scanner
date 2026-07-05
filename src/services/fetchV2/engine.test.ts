@@ -330,6 +330,34 @@ describe("no-result receipts in the pipeline (credit efficiency)", () => {
     await fetchV2("054137090250", { cache, now: () => (t += 30_000), fetchPage: async () => ({ ok: false, status: 0, html: "" }), discovery: [{ name: "m", search: async () => [] }] }, { maxTotalMs: 25_000 });
     expect(cache.getNoResult("054137090250")).toBeFalsy();
   });
+
+  test("pattern URLs are fetched FREE first; identity secured skips every paid search", async () => {
+    const C = "028400325042";
+    const search = vi.fn(async () => []);
+    const html = `<html><head><title>Doritos Cool Ranch - GoUPC</title>
+<script type="application/ld+json">{"@type":"Product","name":"Doritos Cool Ranch Tortilla Chips 9.25 oz","brand":{"name":"Doritos"},"gtin13":"0028400325042"}</script></head><body>UPC ${C}</body></html>`;
+    const fetchPage = vi.fn(async () => ({ ok: true, status: 200, html }));
+    const r = await fetchV2(C, {
+      fetchPage,
+      discovery: [{ name: "m", search }],
+      patternUrls: () => ["https://go-upc.example.com/search?q=" + C],
+    });
+    expect(["verified", "suggested"]).toContain(r.outcome);
+    expect(r.product.name).toContain("Doritos");
+    expect(search).not.toHaveBeenCalled();
+    expect(fetchPage).toHaveBeenCalledWith("https://go-upc.example.com/search?q=" + C);
+  });
+
+  test("useless pattern pages fall through to normal discovery", async () => {
+    const C = "028400325042";
+    const search = vi.fn(async () => []);
+    await fetchV2(C, {
+      fetchPage: async () => ({ ok: false, status: 404, html: "" }),
+      discovery: [{ name: "m", search }],
+      patternUrls: () => ["https://go-upc.example.com/search?q=" + C],
+    });
+    expect(search).toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------- discovery providers
