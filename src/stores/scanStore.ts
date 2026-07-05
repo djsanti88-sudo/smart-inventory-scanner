@@ -164,6 +164,55 @@ export function decodeCorroborated(decision: { exactCodeEvidenceVerifiedByApp?: 
 }
 
 /**
+ * Bounded decode queue (Task 5): a rapid multi-scan burst must not fire unlimited concurrent
+ * `/api/ai-lookup` network calls. The public `liveDecode` action is a thin wrapper that ENQUEUES the
+ * real decode work (`runLiveDecodeOnce`) here; `drainDecodeQueue` runs at most MAX_CONCURRENT_DECODES
+ * tasks at a time, FIFO. Module-level (not per-store-instance) is intentional and harmless: review ids
+ * are globally unique per scan, and the queue always fully drains, so nothing leaks across store
+ * instances or tests. Counting/persistence NEVER waits on this queue - `ensureProvisionalCount` already
+ * ran SYNCHRONOUSLY at scan time, before `liveDecode` is ever invoked (see `processScan`), so a
+ * queued/delayed decode only delays the AI enrichment, never the count or the "Decoding..." badge.
+ */
+const MAX_CONCURRENT_DECODES = 2;
+const pendingDecodeIds: string[] = [];
+let activeDecodes = 0;
+const decodeTasks = new Map<string, { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void }>();
+// Dedupe: a reviewId already queued OR in flight resolves to the SAME promise instead of being queued
+// twice - a duplicate liveDecode call for a review already being decoded is a no-op, not a second fetch.
+const decodeTaskPromises = new Map<string, Promise<void>>();
+
+function drainDecodeQueue(): void {
+  while (activeDecodes < MAX_CONCURRENT_DECODES && pendingDecodeIds.length > 0) {
+    const reviewId = pendingDecodeIds.shift()!;
+    const task = decodeTasks.get(reviewId);
+    decodeTasks.delete(reviewId);
+    if (!task) continue;
+    activeDecodes++;
+    task
+      .run()
+      .then(task.resolve, task.reject)
+      .finally(() => {
+        activeDecodes--;
+        drainDecodeQueue();
+      });
+  }
+}
+
+function enqueueDecode(reviewId: string, run: () => Promise<void>): Promise<void> {
+  const existing = decodeTaskPromises.get(reviewId);
+  if (existing) return existing;
+  const promise = new Promise<void>((resolve, reject) => {
+    pendingDecodeIds.push(reviewId);
+    decodeTasks.set(reviewId, { run, resolve, reject });
+  });
+  decodeTaskPromises.set(reviewId, promise);
+  const cleanup = () => decodeTaskPromises.delete(reviewId);
+  promise.then(cleanup, cleanup);
+  drainDecodeQueue();
+  return promise;
+}
+
+/**
  * Phase-2 POISON GUARD core check (centralizes what used to be three copy-pasted blocks in
  * resolveUnknown). Returns true when a create_new is accepting the review's AI SUGGESTION (the new
  * product's normalized name equals the suggested name) AND the app could NOT back that suggestion with
@@ -336,7 +385,13 @@ export interface ScanState {
   setSimulateSyncFailure: (on: boolean) => void;
   updateSettings: (partial: Partial<Settings>) => void;
   lookupUnknown: (reviewId: string) => Promise<void>;
+  /** Public entry point: ENQUEUES the decode (see the module-level bounded decode queue) and resolves
+   *  once it actually runs. Never call `runLiveDecodeOnce` directly outside this queue - that would
+   *  bypass the MAX_CONCURRENT_DECODES bound a rapid scan burst relies on. */
   liveDecode: (reviewId: string) => Promise<void>;
+  /** The real decode work (network call + evidence gate + count/needs-review routing). Only ever
+   *  invoked FROM the `liveDecode` queue wrapper - see the module-level `enqueueDecode`/`drainDecodeQueue`. */
+  runLiveDecodeOnce: (reviewId: string) => Promise<void>;
   /** DECODE-EVERYTHING fallback: when the AI decode is SKIPPED (circuit breaker open / rate-limited / AI
    *  unavailable / offline / cap), still COUNT the scan as an UNVERIFIED, reviewable provisional row with a
    *  SAFE label (never fabricated manufacturer anatomy for non-GS1 codes; never an approved alias / verified
@@ -1689,7 +1744,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (autoGate.allowed) void get().liveDecode(reviewId);
       },
 
-      liveDecode: async (reviewId) => {
+      // Thin wrapper: enqueue the real work on the bounded decode queue (module-level, MAX_CONCURRENT_DECODES
+      // = 2) so a burst of unknown scans never fires unlimited concurrent /api/ai-lookup calls. Resolves once
+      // the queued task actually runs and completes. Counting/persistence never waits on this - see the
+      // queue doc comment above `decodeCorroborated`.
+      liveDecode: (reviewId) => enqueueDecode(reviewId, () => get().runLiveDecodeOnce(reviewId)),
+
+      runLiveDecodeOnce: async (reviewId) => {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
@@ -1835,31 +1896,86 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : { conflict: false, knownUpcs: [] as string[] };
           const reverseUpcConflictNote = shopRev.conflict ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0, 3).join(", ")}` : "";
 
+          // GPT LADDER TRUST TIERS (Task 5) - info_only detection. An info_only GPT outcome arrives in
+          // TWO shapes: (a) the FINAL computeDecode exit maps the ladder's info_only tier straight onto
+          // `decision`/`reasonText` (status "needs_review", reason/reasonText prefixed "background info
+          // only: ", result.productName forced empty, the guess text in result.guesses[0]); (b) the Plan D
+          // exit leaves its OWN (unrelated) floor result untouched and surfaces the guess ONLY in
+          // `data.debug.gptLadderInfoOnly`. EITHER shape must land in the owner-only `decodeNote` and must
+          // NEVER become a tappable candidate (hasSuggestion stays false, no suggested* fields) - a weak
+          // background guess is not evidence of a real product.
+          const INFO_ONLY_PREFIX = "background info only: ";
+          const routeReasonText = typeof data.reasonText === "string" ? data.reasonText : "";
+          const decisionReasonText = typeof decision?.reason === "string" ? decision.reason : "";
+          const finalExitInfoOnly =
+            decision?.status === "needs_review" &&
+            (routeReasonText.startsWith(INFO_ONLY_PREFIX) || decisionReasonText.startsWith(INFO_ONLY_PREFIX));
+          const planDInfoOnlyGuess =
+            typeof data.debug?.gptLadderInfoOnly === "string" ? data.debug.gptLadderInfoOnly : "";
+          const isGptInfoOnly = finalExitInfoOnly || Boolean(planDInfoOnlyGuess);
+          const finalExitGuessText = finalExitInfoOnly
+            ? best?.guesses?.[0] || routeReasonText || decisionReasonText
+            : "";
+          // Skip-reason transparency (cheap, owner-only): the route may append a
+          // {provider:"gpt-5.5-ladder", status:"skipped", errorCode} entry to providerStatuses whenever the
+          // paid rung did not run at all. Surface WHY in decodeNote regardless of tier.
+          const gptSkipEntry = Array.isArray(data.providerStatuses)
+            ? (data.providerStatuses as Array<{ provider?: string; status?: string; errorCode?: string }>).find(
+                (p) => p?.provider === "gpt-5.5-ladder" && p?.status === "skipped",
+              )
+            : undefined;
+          const gptSkipNote = gptSkipEntry?.errorCode ? `gpt-5.5-ladder skipped: ${gptSkipEntry.errorCode}` : "";
+          const decodeNoteParts = [finalExitGuessText, planDInfoOnlyGuess, gptSkipNote].filter(Boolean);
+          const decodeNoteUpdate = decodeNoteParts.length > 0 ? decodeNoteParts.join(" | ") : undefined;
+
+          // Suggested* candidate fields: EMPTY + hasSuggestion:false for an info_only outcome (either
+          // shape) - never populated from a background guess. Otherwise the existing, unchanged population.
+          const suggestionFields = isGptInfoOnly
+            ? {
+                suggestedProductName: "",
+                suggestedBrand: "",
+                suggestedCategory: "",
+                suggestedSpecsShort: "",
+                suggestedSpecsFull: "",
+                suggestedPrimarySku: "",
+                suggestedPrimaryBarcode: "",
+                suggestedGtin: "",
+                suggestedUpc: "",
+                suggestedEan: "",
+                suggestedImageUrl: "",
+                suggestedProductUrl: "",
+                suggestedAliases: [] as string[],
+                hasSuggestion: false,
+              }
+            : {
+                suggestedProductName: tireFields?.description || (best?.productName ?? ""),
+                suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
+                suggestedCategory: best?.category ?? "",
+                suggestedSpecsShort: tireFields?.size ?? best?.specsShort ?? "",
+                suggestedSpecsFull: best?.specsFull ?? "",
+                suggestedPrimarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
+                suggestedPrimaryBarcode: best?.primaryBarcode ?? "",
+                suggestedGtin: best?.gtin ?? "",
+                suggestedUpc: best?.upc ?? "",
+                suggestedEan: best?.ean ?? "",
+                suggestedImageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
+                suggestedProductUrl: best?.productUrl ?? "",
+                suggestedAliases: best?.aliases ?? [],
+                hasSuggestion: true,
+              };
+
           set((st) => ({
             needsReviewQueue: st.needsReviewQueue.map((r) =>
               r.id === reviewId
                 ? {
                     ...r,
-                    suggestedProductName: tireFields?.description || (best?.productName ?? ""),
-                    suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
-                    suggestedCategory: best?.category ?? "",
-                    suggestedSpecsShort: tireFields?.size ?? best?.specsShort ?? "",
-                    suggestedSpecsFull: best?.specsFull ?? "",
-                    suggestedPrimarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
-                    suggestedPrimaryBarcode: best?.primaryBarcode ?? "",
-                    suggestedGtin: best?.gtin ?? "",
-                    suggestedUpc: best?.upc ?? "",
-                    suggestedEan: best?.ean ?? "",
-                    suggestedImageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
-                    suggestedProductUrl: best?.productUrl ?? "",
-                    suggestedAliases: best?.aliases ?? [],
+                    ...suggestionFields,
                     sourceUrls: best?.sourceUrls ?? [],
                     verifiedFacts: best?.verifiedFacts ?? [],
                     guesses: best?.guesses ?? [],
                     reason: decision?.reason ?? "",
                     providerName,
                     confidence: decision?.confidence ?? 0,
-                    hasSuggestion: true,
                     decodeStatus: decision?.status ?? "needs_review",
                     evidenceStrength: decision?.evidenceStrength ?? "none",
                     exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
@@ -1868,6 +1984,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     prefixHint: (data.debug?.prefixHint as string) || "",
                     prefixConflictReason: (data.debug?.firewallReason as string) || "",
                     reverseUpcConflictNote,
+                    decodeNote: decodeNoteUpdate ?? r.decodeNote,
                   }
                 : r,
             ),
@@ -1944,13 +2061,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             result: best,
             brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
           });
-          const evidenceGatePassed =
+          // GPT LADDER TRUST TIER (Task 5, owner rule): a GPT self-report the app did NOT independently
+          // verify can still auto-count on its OWN, narrower branch - never by weakening the existing
+          // evidence-corroborated conjunction below. Both branches still require the shared data-completeness
+          // (tireOk) and context (contextConflict) gates; only the corroboration requirement differs.
+          const gptTrusted =
+            decision?.corroborationPath === "gpt_self_report" &&
             decision?.status === "verified" &&
-            decodeCorroborated(decision) &&
             (decision?.confidence ?? 0) >= 0.8 &&
             isUsableProductName(best?.productName ?? "") &&
             tireOk &&
             !contextConflict;
+          const evidenceGatePassed =
+            gptTrusted ||
+            (decision?.status === "verified" &&
+              decodeCorroborated(decision) &&
+              (decision?.confidence ?? 0) >= 0.8 &&
+              isUsableProductName(best?.productName ?? "") &&
+              tireOk &&
+              !contextConflict);
           if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
             // Origin decides the catalog write: exact app-confirmed evidence -> VERIFIED global catalog
             // entry; a trusted-but-non-exact AI product -> still counted + aliased, PENDING catalog
@@ -2468,13 +2597,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           result: best,
           brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
         });
-        const evidenceGatePassed =
+        // Same GPT ladder trust-tier extension as liveDecode's evidence gate (Task 5) - kept in sync so the
+        // two decode paths can never drift.
+        const gptTrusted =
+          decision.corroborationPath === "gpt_self_report" &&
           decision.status === "verified" &&
-          decodeCorroborated(decision) &&
           (decision.confidence ?? 0) >= 0.8 &&
           isUsableProductName(best?.productName ?? "") &&
           tireOk &&
           !contextConflict;
+        const evidenceGatePassed =
+          gptTrusted ||
+          (decision.status === "verified" &&
+            decodeCorroborated(decision) &&
+            (decision.confidence ?? 0) >= 0.8 &&
+            isUsableProductName(best?.productName ?? "") &&
+            tireOk &&
+            !contextConflict);
 
         if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
           // OPTION 3: non-public codes never write the global catalog ("auto_verify") - shop-local "ai" only.
