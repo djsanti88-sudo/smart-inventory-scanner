@@ -1046,4 +1046,30 @@ describe("fetchV2 pipeline", () => {
     });
     expect(r.outcome).toBe("suggested");
   });
+
+  test("pattern-door identity + one agreeing labeled snippet = verified pair", async () => {
+    const C = "028400325042";
+    const html = `<html><head><title>Doritos Cool Ranch 9.25oz - Go-UPC</title></head><body><h1>Doritos Cool Ranch Tortilla Chips 9.25 oz</h1><table><tr><th>UPC</th><td>${C}</td></tr></table></body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async (u: string) => u.includes("go-upc") ? { ok: true, status: 200, html } : { ok: false, status: 403, html: "" },
+      discovery: [{ name: "brave", search: async () => [
+        { url: "https://www.grocer.example.com/p/1", title: "Doritos Cool Ranch Tortilla Chips 9.25 oz", snippet: `UPC ${C}`, rank: 0 },
+      ] }],
+      patternUrls: () => ["https://go-upc.example.com/product/" + C],
+    });
+    expect(r.outcome).toBe("verified");
+  });
+
+  test("NON-vetted pattern-door identity + one agreeing labeled snippet = verified via corroboration (not the vetted-host fence)", async () => {
+    const C = "028400325042";
+    const html = `<html><head><title>Doritos Cool Ranch 9.25oz - Buycott</title></head><body><h1>Doritos Cool Ranch Tortilla Chips 9.25 oz</h1><table><tr><th>UPC</th><td>${C}</td></tr></table></body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async (u: string) => u.includes("buycott") ? { ok: true, status: 200, html } : { ok: false, status: 403, html: "" },
+      discovery: [{ name: "brave", search: async () => [
+        { url: "https://www.grocer.example.com/p/1", title: "Doritos Cool Ranch Tortilla Chips 9.25 oz", snippet: `UPC ${C}`, rank: 0 },
+      ] }],
+      patternUrls: () => ["https://buycott.example.com/upc/" + C],
+    });
+    expect(r.outcome).toBe("verified");
+  });
 });
