@@ -18,7 +18,8 @@ export interface SiblingVerdict {
 // (245/35ZR19XL) that otherwise defeats the trailing \b (live row: Pirelli XL suffix).
 // Merchant feeds space out sizes ("225 /35 R20", DiscountTire live): the separator tolerates
 // optional spaces; sizesOf strips them so spaced and glued notations agree.
-const TIRE_SIZE_RE = /(?:\b(?:ST|LT|P)?|(?<=[A-Za-z])(?:ST|LT|P))?(?<![0-9])\d{3}\s?[/xX]\s?\d{2}\s?Z?R\d{2}(?:\.\d)?(?:XL)?\b/gi;
+// Motorcycle tires write the rim with a dash ("100/80-17" == 100/80R17, live ContiGO row).
+const TIRE_SIZE_RE = /(?:\b(?:ST|LT|P)?|(?<=[A-Za-z])(?:ST|LT|P))?(?<![0-9])\d{3}\s?[/xX]\s?\d{2}\s?(?:Z?R|-)\s?\d{2}(?:\.\d)?(?:XL)?\b/gi;
 const PACK_SIZE_RE = /\b\d+(?:\.\d+)?\s?(?:oz|fl ?oz|g|kg|ml|l|lb|lbs|ct|count|pk|pack)\b/gi;
 const NOISE_WORDS = new Set(["flavored", "flavor", "bag", "box", "the", "a", "of", "with", "and"]);
 
@@ -48,7 +49,7 @@ function sizesOf(name: string): string[] {
   // Strip a glued trailing XL FIRST (before the x/X separator swap) so "245/35ZR19XL" normalizes
   // to 245/35R19 instead of the XL's own "X" being mistaken for the width/aspect separator.
   const tire = (c.toUpperCase().match(TIRE_SIZE_RE) ?? []).map((t) =>
-    t.replace(/XL$/, "").replace(/^(?:ST|LT|P)/, "").replace(/[xX]/, "/").replace(/ZR/, "R"),
+    t.replace(/XL$/, "").replace(/^(?:ST|LT|P)/, "").replace(/[xX]/, "/").replace(/ZR/, "R").replace(/\s?-\s?/, "R"),
   );
   const pack = c.match(PACK_SIZE_RE) ?? [];
   return [...tire.map((t) => t.replace(/\s/g, "").toUpperCase()), ...pack.map((p) => p.replace(/\s/g, ""))];
