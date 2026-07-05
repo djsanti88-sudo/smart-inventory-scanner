@@ -148,9 +148,11 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
   if (needsDiscovery && deps.discovery.length > 0) {
     let candidates: DiscoveryCandidate[] = [];
     let exactMatchCandidates: DiscoveryCandidate[] = [];
-    // Every candidate TITLE the FREE provider (index 0) returned, captured before any filtering -
-    // this is the free-agreement fence for the vetted single-source verify rule (scoring.ts).
-    const freeTitles: string[] = [];
+    // Every candidate the FREE provider (index 0) returned (title + host), captured before any
+    // filtering - this is the free-agreement fence for the vetted single-source verify rule
+    // (scoring.ts). Host is kept so a finding can never fence itself with its OWN page's title
+    // (review finding: brave returning the same vetted URL would trivially self-agree).
+    const freeTitles: Array<{ title: string; host: string }> = [];
 
     const junkUrls = new Set<string>();
     const processPage = async (cand: DiscoveryCandidate): Promise<SourceFinding | null> => {
@@ -235,7 +237,7 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
       const query = i === 0 ? normalized.primary : `"${normalized.primary}"`;
       const got = await provider.search(query);
       sourcesChecked.push(`discovery:${provider.name}`);
-      if (i === 0) freeTitles.push(...got.map((g) => g.title));
+      if (i === 0) freeTitles.push(...got.map((g) => { let h = ""; try { h = new URL(g.url).hostname; } catch { /* keep "" */ } return { title: g.title, host: h }; }));
       const fresh = got.filter((g) => !candidates.some((c) => c.url === g.url));
       candidates = [...candidates, ...fresh];
       if (i > 0) exactMatchCandidates = [...exactMatchCandidates, ...fresh];
@@ -313,8 +315,10 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
     // existing path anyway).
     for (const f of findings) {
       if (f.association.level === "strong" && (f.product?.name ?? "").trim()) {
+        let fHost = "";
+        try { fHost = new URL(f.url).hostname; } catch { /* keep "" */ }
         f.freeAgree = freeTitles.some(
-          (t) => identityRelation({ name: t, brand: "" }, { name: f.product!.name, brand: f.product!.brand ?? "" }) === "agree",
+          (t) => t.host !== fHost && identityRelation({ name: t.title, brand: "" }, { name: f.product!.name, brand: f.product!.brand ?? "" }) === "agree",
         );
       }
     }

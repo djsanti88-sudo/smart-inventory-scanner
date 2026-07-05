@@ -1018,6 +1018,21 @@ describe("fetchV2 pipeline", () => {
     expect(r.evidence.finalConfidence).toBeCloseTo(0.8, 2);
   });
 
+  test("SELF-agreement never satisfies the fence: brave returning the vetted page itself does not verify", async () => {
+    const C = "092971135485";
+    const html = `<html><head><title>Westlake SU318 275/65R17 - Go-UPC</title></head><body>
+<h1>Westlake SU318 All Season 275/65R17</h1><table><tr><th>UPC</th><td>${C}</td></tr></table></body></html>`;
+    const r = await fetchV2(C, {
+      fetchPage: async (u: string) => u.includes("go-upc") ? { ok: true, status: 200, html } : { ok: false, status: 403, html: "" },
+      discovery: [{ name: "brave", search: async () => [
+        // brave independently surfaces the SAME vetted page - its title must not fence itself
+        { url: "https://go-upc.example.com/product/" + C, title: "Westlake SU318 All Season 275/65R17 - Go-UPC", snippet: "", rank: 0 },
+      ] }],
+      patternUrls: () => ["https://go-upc.example.com/product/" + C],
+    });
+    expect(r.outcome).toBe("suggested");
+  });
+
   test("vetted host WITHOUT free agreement stays suggested (recycled-code fence, pre-tested live)", async () => {
     const C = "092971135485";
     const html = `<html><head><title>Westlake SU318 275/65R17 - Go-UPC</title></head><body>
