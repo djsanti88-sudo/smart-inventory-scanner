@@ -27,6 +27,17 @@ function matchIn(text: string, variant: string): boolean {
   return new RegExp(`(?<![A-Z0-9])${variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Z0-9])`, "i").test(raw);
 }
 
+// Spam aggregators title their pages with the SHOP name ("Ashome" on agvp.ashome.shop). A short
+// title whose every token is a label of its own host is the store, not the product - it stays
+// code-carrying evidence but must never vote as an identity (live flip: Grabill, v2.3 batch 3).
+const HOST_NOISE = new Set(["www", "com", "net", "org", "shop", "store", "online", "info", "html"]);
+function titleEchoesHost(title: string, host: string): boolean {
+  const labels = new Set(host.toLowerCase().split(/[.-]/).filter((l) => l.length > 2 && !HOST_NOISE.has(l)));
+  if (labels.size === 0) return false;
+  const toks = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter((t) => t.length > 1);
+  return toks.length > 0 && toks.length <= 3 && toks.every((t) => labels.has(t) || labels.has(t.replace(/s$/, "")));
+}
+
 export function snippetFindings(
   candidates: DiscoveryCandidate[],
   variants: string[],
@@ -47,7 +58,7 @@ export function snippetFindings(
     if (!matched) continue;
     let host = "";
     try { host = new URL(c.url).hostname.toLowerCase(); } catch { continue; }
-    const usable = usableIdentityName(c.title, code);
+    const usable = usableIdentityName(c.title, code) && !titleEchoesHost(c.title, host);
     // Visible matches need a barcode-label context word nearby (bare numbers aren't evidence).
     // Invisible matches only exist because the QUOTED exact-match query's own contract
     // guarantees the string was in the document (canary-proven live: quoted searches for

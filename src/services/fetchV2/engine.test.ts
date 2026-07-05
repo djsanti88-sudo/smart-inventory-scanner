@@ -590,6 +590,25 @@ describe("snippetFindings", () => {
     expect(out[0].name).toBe("");
   });
 
+  test("a title that only echoes its own host label is evidence without identity (Ashome live flip)", () => {
+    // Spam aggregators title their pages with the SHOP name; "Ashome" from agvp.ashome.shop voted
+    // "unrelated" in the snippet-conflict guard and demoted a correct Grabill verify (v2.3 batch 3).
+    const out = snippetFindings([
+      cand("https://agvp.ashome.shop/grabill-country-meats.html", "Ashome", "grabill beef chunks UPC 054137070825"),
+      cand("https://shop.wilsons-warehouse.co.uk/p/1", "Wilsons Warehouse", "EAN 054137070825 in stock"),
+    ], variants, "054137070825");
+    expect(out).toHaveLength(2);
+    expect(out[0].name).toBe("");
+    expect(out[1].name).toBe("");
+  });
+
+  test("a real product title on a shop whose domain shares a brand word keeps its identity", () => {
+    const out = snippetFindings([
+      cand("https://www.pirelli.com/tires/p7", "Pirelli Cinturato P7 245/40R19 Tire", "UPC 054137070825"),
+    ], variants, "054137070825");
+    expect(out[0].name).toContain("Cinturato");
+  });
+
   test("snippet findings carry labeled=true only when a barcode label sits near the code", () => {
     const out = snippetFindings([
       cand("https://a.example.com/1", "Pirelli Cinturato P7 245/40R19", "UPC 054137070825 in stock"),
