@@ -331,6 +331,18 @@ describe("no-result receipts in the pipeline (credit efficiency)", () => {
     expect(cache.getNoResult("054137090250")).toBeFalsy();
   });
 
+  test("junk-only findings still produce a receipt (live: dead codes always gather junk)", async () => {
+    const cache = new FetchV2Cache();
+    await fetchV2("4981910884903", {
+      cache,
+      fetchPage: async () => ({ ok: false, status: 404, html: "" }),
+      discovery: [{ name: "m", search: async () => [
+        { url: "https://meros.example.io/0498191", title: "Search For: 4981910884903", snippet: "4981910884903", rank: 0 },
+      ] }],
+    });
+    expect(cache.getNoResult("4981910884903")).toBeTruthy();
+  });
+
   test("pattern URLs are fetched FREE first; identity secured skips PAID search (free corroboration may still run)", async () => {
     const C = "028400325042";
     const search = vi.fn(async () => []);
@@ -548,6 +560,7 @@ describe("fetchV2 pipeline", () => {
     expect(r.evidence.winningSourceUrl).toContain("walmart");
     expect(r.countBehavior.productAssignmentAllowed).toBe(true);
     expect(r.countBehavior.mustPersistScan).toBe(true);
+    expect(r.sourcesChecked.length).toBeGreaterThan(0);
   });
 
   test("URL scans are unsupported: counted, grouped, no discovery calls made", async () => {

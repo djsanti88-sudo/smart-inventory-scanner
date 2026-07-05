@@ -75,6 +75,7 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
       rawValue: raw,
       identifier,
       normalizedValues: normalized,
+      sourcesChecked,
       ...partial,
       performance: {
         durationMs: now() - started,
@@ -330,7 +331,7 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
     result.outcome === "unknown" &&
     !earlyStopped &&
     deps.discovery.length > 0 &&
-    findings.length === 0
+    findings.every((f) => f.junkRejected || !(f.product?.name ?? "").trim())
   ) {
     deps.cache?.markNoResult(normalized.primary, `probed ${new Date().toISOString().slice(0, 10)}: all doors empty`);
   }
