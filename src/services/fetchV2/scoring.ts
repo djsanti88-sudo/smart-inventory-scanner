@@ -46,8 +46,13 @@ export interface OutcomeDecision {
   rulesFired: string[];
 }
 
-function hostOf(url: string): string {
-  try { return new URL(url).hostname; } catch { return url; }
+export function hostOf(url: string): string {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return h.startsWith("www.") ? h.slice(4) : h;
+  } catch {
+    return url;
+  }
 }
 
 export function decideOutcome(identifier: FetchV2Identifier, findings: SourceFinding[], mode: FetchV2Mode): OutcomeDecision {
@@ -82,6 +87,26 @@ export function decideOutcome(identifier: FetchV2Identifier, findings: SourceFin
         const reason = `recycled/conflicting code: unrelated products both claim it: "${strongAssoc[i].product!.name}" vs "${strongAssoc[j].product!.name}"`;
         rules.push("conflict guard: " + reason);
         return { outcome: "needs_review", confidence: 0.4, winner, conflicts: [reason], rulesFired: rules };
+      }
+    }
+  }
+
+  // --- Search-index (snippet) conflict scan runs BEFORE any verify path -------------------------
+  // Merchant feeds carry the barcode in result titles/snippets even when pages do not. Findings
+  // tagged "search_snippets" are exact-code-carrying results. This scan must run before the
+  // public-barcode verify block below: a door+snippet corroboration pair can otherwise return
+  // "verified" while a third, disagreeing labeled snippet elsewhere in the findings never gets
+  // checked (recycled-code case). Any unrelated identity among code-carrying snippets is a
+  // conflict (recycled code) -> needs_review, regardless of what else agrees.
+  const snips = valid.filter((f) => f.association.matchedField === "search_snippets" && (f.product?.name ?? "").trim());
+  if (snips.length >= 2) {
+    for (let i = 0; i < snips.length; i++) {
+      for (let j = i + 1; j < snips.length; j++) {
+        if (identityRelation(ident(snips[i]), ident(snips[j])) === "unrelated") {
+          const reason = `code-carrying search results disagree: "${snips[i].product!.name}" vs "${snips[j].product!.name}"`;
+          rules.push("snippet conflict guard: " + reason);
+          return { outcome: "needs_review", confidence: 0.4, winner, conflicts: [reason], rulesFired: rules };
+        }
       }
     }
   }
@@ -155,21 +180,9 @@ export function decideOutcome(identifier: FetchV2Identifier, findings: SourceFin
   }
 
   // --- Search-index (snippet) consensus: owner-approved verify tier 2026-07-04 -----------------
-  // Merchant feeds carry the barcode in result titles/snippets even when pages do not. Findings
-  // tagged "search_snippets" are exact-code-carrying results. Rules: any unrelated identity among
-  // them = conflict (recycled code) -> needs_review; 3+ DISTINCT hosts all agreeing -> verified.
-  const snips = valid.filter((f) => f.association.matchedField === "search_snippets" && (f.product?.name ?? "").trim());
-  if (snips.length >= 2) {
-    for (let i = 0; i < snips.length; i++) {
-      for (let j = i + 1; j < snips.length; j++) {
-        if (identityRelation(ident(snips[i]), ident(snips[j])) === "unrelated") {
-          const reason = `code-carrying search results disagree: "${snips[i].product!.name}" vs "${snips[j].product!.name}"`;
-          rules.push("snippet conflict guard: " + reason);
-          return { outcome: "needs_review", confidence: 0.4, winner, conflicts: [reason], rulesFired: rules };
-        }
-      }
-    }
-  }
+  // Merchant feeds carry the barcode in result titles/snippets even when pages do not. The conflict
+  // scan for these findings runs earlier (before the public-barcode verify block above); this is
+  // the consensus half only: 3+ DISTINCT hosts all agreeing -> verified.
   if (identifier.isPublicBarcode && identifier.checkDigitValid !== false && snips.length > 0) {
     const byHost = new Map<string, SourceFinding>();
     for (const s of snips) if (!byHost.has(hostOf(s.url))) byHost.set(hostOf(s.url), s);
