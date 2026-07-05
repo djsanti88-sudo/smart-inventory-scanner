@@ -88,8 +88,24 @@ export function checkAndIncrementDaily(
   }
   state.count++;
   memDaily = state;
+  // Merge-write, not overwrite: this file is shared with other local-first guards (e.g. the GPT
+  // ladder dollar guard below keeps its own `gptLadderUsd:<dateKey>` top-level key in the same
+  // JSON document when a caller points both guards at the same file). A blind
+  // `writeFileSync(file, JSON.stringify(state))` here would clobber those other keys on every
+  // daily-counter increment. Read-modify-write instead: read whatever is on disk, tolerate a
+  // corrupt or missing file by starting from {}, then only touch this guard's own `date`/`count`
+  // keys.
+  let onDisk: Record<string, unknown> = {};
   try {
-    fs.writeFileSync(file, JSON.stringify(state));
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (parsed && typeof parsed === "object") onDisk = parsed as Record<string, unknown>;
+  } catch {
+    // no file yet / unreadable -> start fresh, do not lose other guards' keys we can't read anyway
+  }
+  onDisk.date = state.date;
+  onDisk.count = state.count;
+  try {
+    fs.writeFileSync(file, JSON.stringify(onDisk));
   } catch {
     // best-effort persistence; in-memory still enforces within this process
   }
@@ -118,6 +134,21 @@ function gptLadderKey(dateKey: string): string {
 }
 
 /**
+ * Dedicated storage file for the GPT ladder dollar guard. Deliberately its OWN file (not
+ * counterFile()'s `.ai-lookup-usage.json`), same directory-resolution pattern (env override,
+ * else path.resolve of a dotfile in cwd). This guard used to piggyback on the daily-counter file
+ * via an additive top-level key, but `checkAndIncrementDaily` writes that file with a plain
+ * `JSON.stringify(state)` on every call once its in-memory state is warm - that overwrite
+ * silently clobbered this guard's key on disk on essentially every decode request. A dedicated
+ * file removes the shared-file hazard entirely; `checkAndIncrementDaily`'s write path is also
+ * hardened to merge instead of overwrite as defense in depth for any caller that still points
+ * both guards at the same file (e.g. via opts.file in tests).
+ */
+function gptLadderFile(): string {
+  return process.env.AI_LOOKUP_GPT_LADDER_FILE || path.resolve(".gpt-ladder-usage.json");
+}
+
+/**
  * Daily DOLLAR guard for the paid GPT ladder rung. Same local-first pattern as
  * checkAndIncrementDaily (in-memory per process + best-effort JSON file persistence, same
  * serverless caveats: per-instance memory, possibly read-only FS on Vercel). The FILE is the
@@ -129,7 +160,7 @@ export function checkGptLadderBudget(
 ): { allowed: boolean; spentUsd: number; capUsd: number } {
   const capUsd = opts.capUsd ?? Number(process.env.GPT_LADDER_DAILY_USD ?? 3);
   const worstCaseUsd = opts.worstCaseUsd ?? 0.39;
-  const file = opts.file ?? counterFile();
+  const file = opts.file ?? gptLadderFile();
   const date = opts.dateKey ?? todayKey();
   const key = gptLadderKey(date);
 
@@ -149,16 +180,20 @@ export function checkGptLadderBudget(
 
 /**
  * Records actual GPT ladder spend for the day. Best-effort JSON persistence under
- * `gptLadderUsd:<dateKey>` in the same counter file as the daily call cap; extends rather than
- * forks that file's read/write pattern.
+ * `gptLadderUsd:<dateKey>` in this guard's own dedicated file (see gptLadderFile()) - kept
+ * separate from the daily call-cap counter file so the two guards' writes can never clobber
+ * each other.
  */
 export function recordGptLadderSpend(usd: number, opts: { file?: string; dateKey?: string } = {}): void {
-  const file = opts.file ?? counterFile();
+  const file = opts.file ?? gptLadderFile();
   const date = opts.dateKey ?? todayKey();
   const key = gptLadderKey(date);
 
   const existing = checkGptLadderBudget({ file, dateKey: date, capUsd: Infinity, worstCaseUsd: 0 });
-  const spentUsd = Math.round((existing.spentUsd + usd) * 100) / 100;
+  // Round to a TENTH OF A CENT (4 decimal places), not whole cents. A searchless GPT call can
+  // cost as little as ~$0.003; rounding to 2 decimals would zero it out and permanently undercount
+  // real spend against the daily dollar cap. Cost-truth rule: never undercount actual spend.
+  const spentUsd = Math.round((existing.spentUsd + usd) * 10000) / 10000;
   memGptLadder.set(key, { date, spentUsd });
 
   let all: Record<string, unknown> = {};
