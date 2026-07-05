@@ -1,0 +1,146 @@
+{
+ "spent": 0.0116,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "092971262761",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "firestone firehawk as 215/50R17",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Firestone 215/50R17 Firehawk AS 95V XL Tire",
+   "cost": 0,
+   "secs": 4.2,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://go-upc.com/search?q=092971262761",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "free pattern-URL door secured the identity - paid search skipped (free corroboration may still run)",
+    "usable identity without verification-grade proof"
+   ],
+   "sources": [
+    "structured:openfoodfacts",
+    "https://go-upc.com/search?q=092971262761",
+    "discovery:brave",
+    "https://vacanteen.va.gov/VACANTEEN/Firestone-Pricing-Guide-2026.pdf",
+    "https://www.ebay.com/itm/304653410699",
+    "https://amazon.com/Firestone-Firehawk-Performance-Radial-Tire/dp/B01HTPR2YK"
+   ]
+  },
+  {
+   "code": "690677301168",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodride st100 ST225/75R15",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Goodride St100 St225/75r15 117/112m",
+   "cost": 0,
+   "secs": 2.8,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://go-upc.com/search?q=690677301168",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "free pattern-URL door secured the identity - paid search skipped (free corroboration may still run)",
+    "usable identity without verification-grade proof"
+   ],
+   "sources": [
+    "structured:openfoodfacts",
+    "https://go-upc.com/search?q=690677301168",
+    "discovery:brave",
+    "https://www.ebay.com/itm/303464639768",
+    "https://www.ebay.com/itm/383657397001",
+    "https://www.dutyfreeglobal.com/products/xtrathrust-54-cfm-safety-air-gun-with-12in-aluminum-extensio/200875469/"
+   ]
+  },
+  {
+   "code": "4981910884903",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "toyo eclipse 185/65R14",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.78,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": [
+    "structured:openfoodfacts",
+    "https://www.ean-search.org/?q=4981910884903",
+    "https://eandata.com/feed/?v=3&keycode=&mode=json&find=4981910884903",
+    "discovery:brave",
+    "discovery:firecrawl",
+    "discovery:firecrawl:unquoted",
+    "discovery:firecrawl:quoted-retry",
+    "https://www.midwayusa.com/ltd/product?pid=916277&srsltid=AfmBOop7c0aO-9G-4f3-pDiABObSoTJAhKVji2Zvn142ZjM1N3FL0ncs",
+    "https://www.hobbydigi.com/en_us/catalog/product/view/id/46609",
+    "https://www.mscdirect.com/product/details/41808841"
+   ]
+  },
+  {
+   "code": "086699058874",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich dr454 275/80R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.48,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": [
+    "structured:openfoodfacts",
+    "https://go-upc.com/search?q=086699058874",
+    "https://www.upcitemdb.com/upc/086699058874",
+    "discovery:brave",
+    "discovery:firecrawl",
+    "https://meros.io/0866990",
+    "https://www.target.com/p/ashley-shower-curtain-gray/-/A-78294653",
+    "https://www.characterstation.com/eshop/en/funko-pop-preorder/22376-figur-funko-pop-glow-in-the-dark-one-piece-trafalgar-law-with-blue-anesthesia-chase-limited-edition-geneva-store-switzerland-0889698849753.html"
+   ]
+  },
+  {
+   "code": "092971144814",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone r280 295/75R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.29,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": [
+    "structured:openfoodfacts",
+    "https://go-upc.com/search?q=092971144814",
+    "https://www.upcitemdb.com/upc/092971144814",
+    "discovery:brave",
+    "discovery:firecrawl",
+    "https://meros.io/0929711",
+    "https://www.ebay.com/p/630561515",
+    "https://meros.io/0928521"
+   ]
+  }
+ ]
+}
