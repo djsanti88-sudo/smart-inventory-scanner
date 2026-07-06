@@ -83,9 +83,12 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // focus retained across async decode
   expect(postHits).toBeGreaterThan(0); // AI WAS called automatically
 
-  // Suggested (weak url_only evidence) -> EVIDENCE GATE: NOT auto-counted; routed to Needs Review.
+  // Suggested (weak url_only evidence) -> EVIDENCE GATE blocks a VERIFIED auto-add, but the
+  // "scan N = count N" invariant (Plan A/Plan C, see docs/superpowers/plans/2026-07-01-plan-c-verified-suggested.md
+  // and the DECODE-EVERYTHING provisional-count block in scanStore.ts) still provisionally counts the
+  // scan as an unverified row while the review stays open (checked below via review-row-111111111119).
   await scan(page, "111111111119");
-  await expect(page.getByTestId("final-count-body")).not.toContainText("Maybe Energy Bar");
+  await expect(page.getByTestId("final-count-body")).toContainText("Maybe Energy Bar");
 
   // Conflict: providers disagree -> NOT auto-added, stays in Needs Review. Plan C, Task 1
   // collapses the conflict label into the single "Suggested" state (non-blocking label).
