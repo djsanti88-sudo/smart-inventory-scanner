@@ -21,7 +21,8 @@ export interface PersistedDecode {
   kind: "result" | "no_result_receipt";
   payload: string; // JSON string of the route's cached decode response
   /** Diagnostic-only, never read back for decision logic: decision.status ("verified"/"suggested") for a
-   *  "result" entry, or the ladder-exhaustion reason ("gpt_none"/"gpt_info_only") for a
+   *  "result" entry, or the ladder-exhaustion reason ("gpt_none"; historical rows may carry
+   *  "gpt_info_only" from before that tier was deleted, owner order 2026-07-06) for a
    *  "no_result_receipt" entry. Disambiguated from `sourceTier` below, which is result-only and answers
    *  a different question ("which stage paid for this"), not "what did the ladder decide". */
   tier: string;
