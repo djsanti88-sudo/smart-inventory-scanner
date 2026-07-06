@@ -29,6 +29,32 @@ describe("gptTierFor", () => {
 });
 
 describe("gptFromScratch", () => {
+  test("default abort cap is 17 seconds (owner-set 2026-07-05, raised from 10s: 15/26 live calls aborted at 10s)", async () => {
+    let abortedAt = -1;
+    let elapsed = 0;
+    const f = ((_u: string, init: RequestInit) =>
+      new Promise((_res, rej) => {
+        init.signal?.addEventListener("abort", () => {
+          abortedAt = elapsed;
+          rej(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        });
+      })) as unknown as typeof fetch;
+    vi.useFakeTimers();
+    try {
+      const p = gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f });
+      elapsed = 16_900;
+      await vi.advanceTimersByTimeAsync(16_900);
+      expect(abortedAt, "must NOT abort before 17s (a 10s cap would have fired here)").toBe(-1);
+      elapsed = 17_100;
+      await vi.advanceTimersByTimeAsync(200); // 17_100ms: the 17s cap must have fired
+      const r = await p;
+      expect(r.aborted).toBe(true);
+      expect(r.usdActual).toBe(0.39);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("sends the exact 21/21 config and parses a strong answer to verified", async () => {
     const f = okFetch(respBody(MODEL_JSON));
     const r = await gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f });
