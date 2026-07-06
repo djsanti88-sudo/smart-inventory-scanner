@@ -2,6 +2,13 @@
 // This module NEVER calls fetch/OpenAI itself (that is gptFromScratch.ts) and NEVER reads env
 // (that is aiSpendGuard.ts / the route). It only decides (a) whether the rung should run at all,
 // and (b) how to translate a GptFromScratchResult into the route's existing decision/result shape.
+//
+// REBUILT 2026-07-06 per owner order ("no hints, no questioning their answers, no hardcoded
+// rules"): the wrapper that second-guessed GPT is DELETED. Gone: the short-code (<10 digit)
+// verified->suggested downgrade, the prefix-firewall tier cap (capTierForFirewall), and the
+// info_only tier that buried weak guesses with an emptied productName. GPT's answer maps
+// straight through: verified auto-counts (owner rule: exactCodeFound + confidence >= 0.8),
+// everything else with a productName is a visible suggestion for human review.
 import { emptyResult } from "@/services/ai/provider";
 import { isVendorLabel } from "@/services/codeTypeDetector";
 import type { AiLookupResult, CrossCheckResult, DecodeDecision } from "@/types";
@@ -58,6 +65,7 @@ export function shouldRunGptRung(i: GptRungInput): { run: boolean; skipReason: s
 }
 
 const GPT_LADDER_REASON = "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)";
+const GPT_LADDER_SUGGEST_REASON = "gpt-5.5 from-scratch: best guess shown as returned (owner trust rule)";
 
 function crossCheckSingleProvider(confidence: number): CrossCheckResult {
   return {
@@ -82,21 +90,13 @@ function identifierFieldsFrom(gtin: string): { gtin: string; upc: string; ean: s
 }
 
 /**
- * Map a GptFromScratchResult onto the route's existing decision/result payload shape.
- * Returns null when tier is "none" (nothing usable to apply - the ladder ends at Needs Review
- * with whatever reason the earlier rungs already set).
+ * Map a GptFromScratchResult onto the route's existing decision/result payload shape,
+ * EXACTLY as returned (owner rule): verified auto-counts, anything else with a productName is
+ * a plain visible suggestion. Returns null only when tier is "none" (no product name at all -
+ * the ladder ends at Needs Review with whatever reason the earlier rungs already set).
  */
 export function gptResultToDecodePayload(r: GptFromScratchResult, code: string): GptRungDecodePayload | null {
   if (r.tier === "none") return null;
-
-  // Short codes (under 10 digits, the EAN-8 class) are recycled across national numbering
-  // ranges: GPT finds A product carrying those digits, not THE product. Live proof 2026-07-05
-  // produced two wrong identities on exactly this class - they can never auto-count. Same
-  // 10-digit floor the fetchV2 snippet fence uses.
-  const digits = (code ?? "").replace(/\D/g, "");
-  const tier = r.tier === "verified" && digits.length < 10 ? "suggested" : r.tier;
-  const shortCodeNote = tier !== r.tier ? " | short code (under 10 digits): recycled-range risk, auto-count blocked" : "";
-  r = tier === r.tier ? r : { ...r, tier };
 
   const ids = identifierFieldsFrom(r.gtin);
   const result: AiLookupResult = {
@@ -128,55 +128,14 @@ export function gptResultToDecodePayload(r: GptFromScratchResult, code: string):
     return { result, decision, reasonText: "" };
   }
 
-  if (r.tier === "suggested") {
-    const decision: DecodeDecision = {
-      status: "suggested",
-      confidence: r.confidence,
-      reason: GPT_LADDER_REASON + shortCodeNote,
-      evidenceStrength: "none",
-      exactCodeEvidenceVerifiedByApp: false,
-      crossCheck: crossCheckSingleProvider(r.confidence),
-    };
-    return { result: { ...result, needsHumanReview: true }, decision, reasonText: "" };
-  }
-
-  // tier === "info_only": background info, never auto-count-worthy. CACHE-SAFETY CONTRACT (decode.ts's
-  // documented invariant: "needs_review is reserved for no provider produced a product" - the route's
-  // withDecodeCache decides a PERMANENT vs a short-TTL retryable cache entry from `isUsableProductName`
-  // on `result.productName`): this result must NOT carry a usable productName, or a weak GPT guess would
-  // be cached FOREVER and the code could never re-decode. The guess text instead goes into `guesses`
-  // (Task 5 / the scan store reads it from there, or from reasonText, into decodeNote) and productName
-  // is forced empty here.
-  const guessText = r.basis ? `background info: ${r.productName} - ${r.basis}` : `background info: ${r.productName}`;
-  const reasonText = `background info only: ${r.basis || r.productName}`;
-  const infoOnlyResult: AiLookupResult = { ...result, productName: "", guesses: [guessText] };
+  // Everything else with a productName is a suggestion, shown exactly as GPT returned it.
   const decision: DecodeDecision = {
-    status: "needs_review",
+    status: "suggested",
     confidence: r.confidence,
-    reason: reasonText,
+    reason: GPT_LADDER_SUGGEST_REASON,
     evidenceStrength: "none",
     exactCodeEvidenceVerifiedByApp: false,
     crossCheck: crossCheckSingleProvider(r.confidence),
   };
-  return { result: infoOnlyResult, decision, reasonText };
-}
-
-/**
- * The catalog-derived brand-prefix firewall still gates AUTO-COUNT even for a GPT self-report:
- * a "verified" payload whose brand conflicts with the barcode's known prefix owner is downgraded to
- * "suggested" (never silently dropped - the human still sees the lead, just not auto-counted).
- * Never upgrades anything; a no-conflict or already-non-verified payload passes through unchanged.
- */
-export function capTierForFirewall(payload: GptRungDecodePayload | null, conflict: boolean): GptRungDecodePayload | null {
-  if (!payload || !conflict || payload.decision.status !== "verified") return payload;
-  return {
-    ...payload,
-    result: { ...payload.result, needsHumanReview: true },
-    decision: {
-      ...payload.decision,
-      status: "suggested",
-      reason: `${payload.decision.reason} | prefix-firewall conflict: auto-count blocked`,
-      corroborationPath: undefined,
-    },
-  };
+  return { result, decision, reasonText: "" };
 }

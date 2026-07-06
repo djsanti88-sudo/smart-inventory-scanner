@@ -1917,58 +1917,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : { conflict: false, knownUpcs: [] as string[] };
           const reverseUpcConflictNote = shopRev.conflict ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0, 3).join(", ")}` : "";
 
-          // GPT LADDER TRUST TIERS (Task 5) - info_only detection. An info_only GPT outcome arrives in
-          // TWO shapes: (a) the FINAL computeDecode exit maps the ladder's info_only tier straight onto
-          // `decision`/`reasonText` (status "needs_review", reason/reasonText prefixed "background info
-          // only: ", result.productName forced empty, the guess text in result.guesses[0]); (b) the Plan D
-          // exit leaves its OWN (unrelated) floor result untouched and surfaces the guess ONLY in
-          // `data.debug.gptLadderInfoOnly`. EITHER shape must land in the owner-only `decodeNote` and must
-          // NEVER become a tappable candidate (hasSuggestion stays false, no suggested* fields) - a weak
-          // background guess is not evidence of a real product.
-          const INFO_ONLY_PREFIX = "background info only: ";
-          const routeReasonText = typeof data.reasonText === "string" ? data.reasonText : "";
-          const decisionReasonText = typeof decision?.reason === "string" ? decision.reason : "";
-          const finalExitInfoOnly =
-            decision?.status === "needs_review" &&
-            (routeReasonText.startsWith(INFO_ONLY_PREFIX) || decisionReasonText.startsWith(INFO_ONLY_PREFIX));
-          const planDInfoOnlyGuess =
-            typeof data.debug?.gptLadderInfoOnly === "string" ? data.debug.gptLadderInfoOnly : "";
-          const isGptInfoOnly = finalExitInfoOnly || Boolean(planDInfoOnlyGuess);
-          const finalExitGuessText = finalExitInfoOnly
-            ? best?.guesses?.[0] || routeReasonText || decisionReasonText
-            : "";
-          // Skip-reason transparency (cheap, owner-only): the route may append a
-          // {provider:"gpt-5.5-ladder", status:"skipped", errorCode} entry to providerStatuses whenever the
-          // paid rung did not run at all. Surface WHY in decodeNote regardless of tier.
+          // GPT LADDER (owner order 2026-07-06): the info_only tier is DELETED - every GPT answer
+          // with a productName now arrives as a normal verified/suggested result and populates the
+          // candidate fields like any other suggestion. Only the skip-reason transparency remains:
+          // the route may append a {provider:"gpt-5.5-ladder", status:"skipped", errorCode} entry to
+          // providerStatuses whenever the paid rung did not run at all. Surface WHY in decodeNote.
           const gptSkipEntry = Array.isArray(data.providerStatuses)
             ? (data.providerStatuses as Array<{ provider?: string; status?: string; errorCode?: string }>).find(
                 (p) => p?.provider === "gpt-5.5-ladder" && p?.status === "skipped",
               )
             : undefined;
           const gptSkipNote = gptSkipEntry?.errorCode ? `gpt-5.5-ladder skipped: ${gptSkipEntry.errorCode}` : "";
-          const decodeNoteParts = [finalExitGuessText, planDInfoOnlyGuess, gptSkipNote].filter(Boolean);
-          const decodeNoteUpdate = decodeNoteParts.length > 0 ? decodeNoteParts.join(" | ") : undefined;
+          const decodeNoteUpdate = gptSkipNote || undefined;
 
-          // Suggested* candidate fields: EMPTY + hasSuggestion:false for an info_only outcome (either
-          // shape) - never populated from a background guess. Otherwise the existing, unchanged population.
-          const suggestionFields = isGptInfoOnly
-            ? {
-                suggestedProductName: "",
-                suggestedBrand: "",
-                suggestedCategory: "",
-                suggestedSpecsShort: "",
-                suggestedSpecsFull: "",
-                suggestedPrimarySku: "",
-                suggestedPrimaryBarcode: "",
-                suggestedGtin: "",
-                suggestedUpc: "",
-                suggestedEan: "",
-                suggestedImageUrl: "",
-                suggestedProductUrl: "",
-                suggestedAliases: [] as string[],
-                hasSuggestion: false,
-              }
-            : {
+          const suggestionFields = {
                 suggestedProductName: tireFields?.description || (best?.productName ?? ""),
                 suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
                 suggestedCategory: best?.category ?? "",

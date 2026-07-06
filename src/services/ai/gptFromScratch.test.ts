@@ -17,19 +17,19 @@ const okFetch = (body: unknown) =>
   vi.fn(async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch;
 
 describe("gptTierFor", () => {
-  test("trust tiers follow the owner gate exactly", () => {
+  test("trust tiers follow the owner gate exactly (probe parity 2026-07-06: every non-verified answer is a suggestion)", () => {
     expect(gptTierFor(true, 0.8)).toBe("verified");
     expect(gptTierFor(true, 0.92)).toBe("verified");
     expect(gptTierFor(false, 0.92)).toBe("suggested");   // no exactCodeFound -> never verified
     expect(gptTierFor(true, 0.79)).toBe("suggested");
     expect(gptTierFor(false, 0.5)).toBe("suggested");
-    expect(gptTierFor(false, 0.49)).toBe("info_only");
-    expect(gptTierFor(true, 0.3)).toBe("info_only");
+    expect(gptTierFor(false, 0.49)).toBe("suggested");   // info_only deleted - weak guesses are shown
+    expect(gptTierFor(true, 0.3)).toBe("suggested");
   });
 });
 
 describe("gptFromScratch", () => {
-  test("default abort cap is 17 seconds (owner-set 2026-07-05, raised from 10s: 15/26 live calls aborted at 10s)", async () => {
+  test("default abort cap is 35 seconds (owner-set 2026-07-06; exhaustion band tops out ~28s)", async () => {
     let abortedAt = -1;
     let elapsed = 0;
     const f = ((_u: string, init: RequestInit) =>
@@ -42,11 +42,11 @@ describe("gptFromScratch", () => {
     vi.useFakeTimers();
     try {
       const p = gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f });
-      elapsed = 16_900;
-      await vi.advanceTimersByTimeAsync(16_900);
-      expect(abortedAt, "must NOT abort before 17s (a 10s cap would have fired here)").toBe(-1);
-      elapsed = 17_100;
-      await vi.advanceTimersByTimeAsync(200); // 17_100ms: the 17s cap must have fired
+      elapsed = 34_900;
+      await vi.advanceTimersByTimeAsync(34_900);
+      expect(abortedAt, "must NOT abort before 35s (a shorter cap would have fired here)").toBe(-1);
+      elapsed = 35_100;
+      await vi.advanceTimersByTimeAsync(200); // 35_100ms: the 35s cap must have fired
       const r = await p;
       expect(r.aborted).toBe(true);
       expect(r.usdActual).toBe(0.39);
@@ -67,15 +67,15 @@ describe("gptFromScratch", () => {
     expect(body.tools).toEqual([{ type: "web_search", search_context_size: "low" }]);
     expect(body.reasoning).toEqual({ effort: "low" });
     expect(body.max_output_tokens).toBe(6000);
-    expect(body.max_tool_calls).toBe(6);
+    expect(body.max_tool_calls).toBe(5); // the owner-set probe cap, server-enforced by OpenAI
     expect(body.input).toContain("848983006257");
     expect(body.input).toContain("exactCodeFound");
   });
 
-  test("weak best-guess maps to info_only and keeps the guess text", async () => {
+  test("weak best-guess maps to suggested and keeps the guess text (info_only deleted 2026-07-06)", async () => {
     const f = okFetch(respBody({ ...MODEL_JSON, confidence: 0.3, exactCodeFound: false }));
     const r = await gptFromScratch("049000000000", { apiKey: "k", fetchImpl: f });
-    expect(r.tier).toBe("info_only");
+    expect(r.tier).toBe("suggested");
     expect(r.productName).toContain("Wildpeak");
   });
 
@@ -94,7 +94,7 @@ describe("gptFromScratch", () => {
     expect(r.usdWorstCase).toBe(0.39);
   });
 
-  test("10s abort: fetch rejecting with AbortError -> aborted true, usdActual = worst case", async () => {
+  test("abort: fetch rejecting with AbortError -> aborted true, usdActual = worst case", async () => {
     const f = vi.fn(async (_u: string, init: RequestInit) => {
       return await new Promise((_res, rej) => {
         init.signal?.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" })));

@@ -228,67 +228,28 @@ describe("GPT ladder trust tiers - suggested tier flows through unchanged", () =
   });
 });
 
-describe("GPT ladder trust tiers - info_only (background info, never a candidate)", () => {
-  it("final-exit shape: decodeNote carries the guess, hasSuggestion false, no suggested* fields", async () => {
+describe("GPT ladder - weak guesses are normal candidates (info_only deleted, owner order 2026-07-06)", () => {
+  it("a 0.3-confidence GPT best-guess populates the suggested* candidate fields like any suggestion", async () => {
     const store = aiOnStore();
     const review = openReview(store, "GPTI0001");
     const RESP = {
       providerNames: ["gpt-5.5-ladder"],
       results: [
         gptResult({
-          productName: "", // forced empty per the cache-safety contract
+          productName: "Goodyear (best guess, low confidence)",
           brand: "Goodyear",
           confidence: 0.3,
-          guesses: ["background info: Goodyear (best guess, low confidence) - barcode prefix suggests Goodyear family"],
-          needsHumanReview: true,
-        }),
-      ],
-      decision: {
-        status: "needs_review",
-        confidence: 0.3,
-        reason: "background info only: Goodyear (best guess, low confidence)",
-        evidenceStrength: "none",
-        exactCodeEvidenceVerifiedByApp: false,
-        crossCheck: crossCheckSingleProvider(0.3),
-      },
-      reasonText: "background info only: Goodyear (best guess, low confidence)",
-    };
-    const { restore } = stub(RESP);
-    try {
-      await store.getState().liveDecode(review.id);
-    } finally {
-      restore();
-    }
-
-    const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
-    expect(r.hasSuggestion).toBe(false);
-    expect(r.suggestedProductName).toBe("");
-    expect(r.suggestedBrand).toBe("");
-    expect(r.decodeNote).toContain("Goodyear");
-  });
-
-  it("Plan D exit shape: guess lives ONLY in debug.gptLadderInfoOnly - same decodeNote/no-candidate treatment", async () => {
-    const store = aiOnStore();
-    const review = openReview(store, "GPTI0002");
-    const RESP = {
-      providerNames: ["parallel:barcodedb"],
-      results: [
-        gptResult({
-          productName: "Unidentified item (barcode GPTI0002)", // the Plan D floor's OWN result, untouched
-          confidence: 0.5,
+          guesses: ["barcode prefix suggests Goodyear family"],
           needsHumanReview: true,
         }),
       ],
       decision: {
         status: "suggested",
-        confidence: 0.5,
-        reason: "Unverified parallel barcodedb (suggestion/floor) - not auto-counted",
+        confidence: 0.3,
+        reason: "gpt-5.5 from-scratch: best guess shown as returned (owner trust rule)",
         evidenceStrength: "none",
         exactCodeEvidenceVerifiedByApp: false,
-        crossCheck: crossCheckSingleProvider(0.5),
-      },
-      debug: {
-        gptLadderInfoOnly: "background info: Goodyear (best guess, low confidence) - barcode prefix suggests Goodyear family",
+        crossCheck: crossCheckSingleProvider(0.3),
       },
     };
     const { restore } = stub(RESP);
@@ -299,9 +260,11 @@ describe("GPT ladder trust tiers - info_only (background info, never a candidate
     }
 
     const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
-    expect(r.hasSuggestion).toBe(false);
-    expect(r.suggestedProductName).toBe("");
-    expect(r.decodeNote).toContain("Goodyear");
+    expect(r.status).toBe("open");
+    expect(r.hasSuggestion).toBe(true);
+    expect(r.suggestedProductName).toBe("Goodyear (best guess, low confidence)");
+    expect(r.suggestedBrand).toBe("Goodyear");
+    expect(r.confidence).toBe(0.3);
   });
 
   it("skip-reason transparency: a skipped gpt-5.5-ladder providerStatus entry is appended to decodeNote", async () => {

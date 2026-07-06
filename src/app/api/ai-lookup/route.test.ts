@@ -235,28 +235,36 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(json.decision.status).not.toBe("verified");
     const spend = JSON.parse(fs.readFileSync(tmpGptLadderFile, "utf8"));
     expect(spend[gptLadderTodayKey()].spentUsd).toBe(0.39);
+
+    // TRANSIENT-FAILURE GUARD (found live 2026-07-06): a failed rung call is NOT genuine ladder
+    // exhaustion - it must NOT write a permanent no_result_receipt (that froze the code forever on
+    // one OpenAI hiccup), and the failure must be visible as a surfaced skip, never silent.
+    expect(json.debug.gptLadderSkipReason).toBe("gpt_call_failed");
+    expect(
+      json.providerStatuses.some(
+        (s: { provider: string; status: string; errorCode?: string }) =>
+          s.provider === "gpt-5.5-ladder" && s.status === "skipped" && s.errorCode === "gpt_call_failed",
+      ),
+    ).toBe(true);
+    const stored = fs.existsSync(tmpDecodeCacheFile) ? JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8")) : {};
+    expect(stored["11122903"], "a transient rung failure must stay retryable - no permanent receipt").toBeUndefined();
   }, 40000);
 
-  // IMPORTANT 1 lock (updated for Task 4): an info_only ladder outcome must NEVER be cached in L1 as a
-  // false SUCCESS (decode.ts's invariant: "needs_review is reserved for no provider produced a
-  // product" - L1's hasUsable() correctly sees the empty productName and applies the short miss TTL,
-  // proven by `firstJson.debug.cached === false` immediately after the L1 TTL is fast-forwarded past).
-  // Task 4 deliberately adds a SEPARATE, INTENTIONAL layer on top: info_only is genuine ladder
-  // exhaustion (the paid rung ran and found nothing auto-count-worthy), so L2 persists it as a
-  // PERMANENT no_result_receipt (owner rule: no auto-retry) - proven by the second POST short-
-  // circuiting on the receipt with NO new ladder call once L1's short TTL has lapsed. forceRetry
-  // remains the explicit escape hatch, proven by the third POST.
-  it("an info_only GPT ladder outcome never poisons L1 as a false success, but becomes a permanent L2 receipt (forceRetry still escapes it)", async () => {
+  // PROBE PARITY (owner order 2026-07-06, supersedes the old info_only contract): a weak GPT best
+  // guess is a NORMAL suggestion now - the productName is shown, the decision is "suggested", and it
+  // is cached like any other ladder success (kind "result", sourceTier "gpt_ladder"). A repeat scan
+  // must be served from cache with ZERO new ladder calls; forceRetry remains the explicit escape hatch.
+  it("a weak GPT best-guess resolves as a visible suggestion, caches as a result, and never re-bills on repeat scans", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     process.env.OPENAI_API_KEY = "test-openai-key";
-    const infoOnlyBody = responsesBody({
+    const weakGuessBody = responsesBody({
       brand: "Goodyear", productName: "Goodyear (best guess, low confidence)", specs: "", gtin: "",
       confidence: 0.3, exactCodeFound: false, basis: "barcode prefix suggests Goodyear family", sourceUrls: [],
     });
     fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
       if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
-        return new Response(JSON.stringify(infoOnlyBody), { status: 200, headers: { "content-type": "application/json" } });
+        return new Response(JSON.stringify(weakGuessBody), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     });
@@ -268,32 +276,32 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect(first.status).toBe(200);
     const firstJson = await first.json();
-    expect(firstJson.decision.status).toBe("needs_review");
+    expect(firstJson.decision.status).toBe("suggested");
+    expect(firstJson.results[0].productName).toBe("Goodyear (best guess, low confidence)");
     expect(firstJson.debug.cached).toBe(false);
     const ladderCallsBefore = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
     expect(ladderCallsBefore).toBeGreaterThan(0);
     const storedAfterFirst = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    expect(storedAfterFirst[code].kind).toBe("no_result_receipt");
-    expect(storedAfterFirst[code].tier).toBe("gpt_info_only");
+    expect(storedAfterFirst[code].kind).toBe("result");
+    expect(storedAfterFirst[code].tier).toBe("suggested");
+    expect(storedAfterFirst[code].sourceTier).toBe("gpt_ladder");
 
-    // Fast-forward past the (default 10-minute) L1 miss TTL so L1 alone would recompute - proving any
-    // short-circuit on the second call comes from the L2 receipt, not a stale L1 entry.
+    // Fast-forward past the (default 10-minute) L1 miss TTL - a cached RESULT must still short-circuit
+    // (from L1's long success TTL or the L2 persisted result), with zero new paid calls.
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => t0 + 700_000);
     try {
       const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
       expect(second.status).toBe(200);
       const secondJson = await second.json();
-      expect(secondJson.decision.status).toBe("needs_review");
-      expect(secondJson.debug.persistedCacheHit).toBe(true);
-      expect(secondJson.debug.persistedKind).toBe("no_result_receipt");
-      const ladderCallsAfterReceipt = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
-      expect(ladderCallsAfterReceipt, "a receipted code must make ZERO new ladder calls").toBe(ladderCallsBefore);
+      expect(secondJson.decision.status).toBe("suggested");
+      const ladderCallsAfterCache = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
+      expect(ladderCallsAfterCache, "a cached suggested result must make ZERO new ladder calls").toBe(ladderCallsBefore);
 
-      // The owner's explicit escape hatch still works: forceRetry bypasses the receipt and recomputes.
+      // The owner's explicit escape hatch still works: forceRetry bypasses the cache and recomputes.
       const third = await POST(makeRequest({ cleanCode: code, mode: "decode", forceRetry: true }));
       expect(third.status).toBe(200);
       const ladderCallsAfterForceRetry = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
-      expect(ladderCallsAfterForceRetry, "forceRetry must genuinely re-call the ladder").toBeGreaterThan(ladderCallsAfterReceipt);
+      expect(ladderCallsAfterForceRetry, "forceRetry must genuinely re-call the ladder").toBeGreaterThan(ladderCallsAfterCache);
     } finally {
       nowSpy.mockRestore();
     }
@@ -390,9 +398,15 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   it("Task 4: a genuinely exhausted code (GPT ran, tier none) gets a permanent receipt; a later POST short-circuits with ZERO provider calls and ZERO daily-slot burn", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     process.env.OPENAI_API_KEY = "test-openai-key";
+    // Genuine exhaustion = GPT ANSWERED and honestly found nothing (empty productName). An HTTP
+    // failure is no longer exhaustion (transient-failure guard 2026-07-06) - it stays retryable.
+    const emptyAnswer = responsesBody({
+      brand: "", productName: "", specs: "", gtin: "",
+      confidence: 0, exactCodeFound: false, basis: "no match found anywhere", sourceUrls: [],
+    });
     fetchSpy = vi.fn(async (url: string) => {
       if (String(url).includes("api.openai.com/v1/responses")) {
-        return new Response("Internal Server Error", { status: 500 }); // ladder runs, ends tier "none"
+        return new Response(JSON.stringify(emptyAnswer), { status: 200, headers: { "content-type": "application/json" } }); // ladder runs, ends tier "none"
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     });
@@ -433,12 +447,17 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       brand: "Acme", productName: "Acme Retry Widget", specs: "", gtin: "",
       confidence: 0.9, exactCodeFound: true, basis: "exact code found on a real page", sourceUrls: [],
     });
+    const exhaustedBody = responsesBody({
+      brand: "", productName: "", specs: "", gtin: "",
+      confidence: 0, exactCodeFound: false, basis: "no match found anywhere", sourceUrls: [],
+    });
     fetchSpy = vi.fn(async (url: string) => {
       if (String(url).includes("api.openai.com/v1/responses")) {
         openaiCallCount++;
-        // First (genuine) call: exhausted (500 -> tier none). forceRetry call: returns a verified hit,
-        // proving the provider genuinely re-ran rather than replaying anything cached.
-        if (openaiCallCount === 1) return new Response("Internal Server Error", { status: 500 });
+        // First (genuine) call: exhausted (GPT answered with an empty productName -> tier none; an
+        // HTTP failure would now be a transient skip, not a receipt). forceRetry call: returns a
+        // verified hit, proving the provider genuinely re-ran rather than replaying anything cached.
+        if (openaiCallCount === 1) return new Response(JSON.stringify(exhaustedBody), { status: 200, headers: { "content-type": "application/json" } });
         return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });

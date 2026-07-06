@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { shouldRunGptRung, gptResultToDecodePayload, capTierForFirewall } from "./gptLadderRung";
+import { shouldRunGptRung, gptResultToDecodePayload } from "./gptLadderRung";
 import type { GptFromScratchResult } from "./gptFromScratch";
 import { GPT_LADDER_WORST_CASE_USD } from "./gptFromScratch";
 
@@ -120,18 +120,17 @@ function gptResult(overrides: Partial<GptFromScratchResult>): GptFromScratchResu
 }
 
 describe("gptResultToDecodePayload", () => {
-  test("short codes (under 10 digits, EAN-8 class) can never auto-count: verified is capped at suggested (live proof: 2 wrong EAN-8 identities)", () => {
-    // 8-digit codes are recycled across national numbering ranges - the same digits map to
-    // different products in different countries. GPT finds A product, not THE product.
+  test("PROBE PARITY (owner order 2026-07-06): a verified answer passes through even on a short code - no downgrade wrapper", () => {
+    // The old short-code (<10 digit) verified->suggested cap was deleted with the rest of the
+    // wrapper: GPT's answer is taken exactly as returned.
     const r = gptResult({
       tier: "verified", brand: "Qbake", productName: "Qbake Arabic Bread Brown",
       confidence: 0.86, exactCodeFound: true, gtin: "10011126",
     });
     const payload = gptResultToDecodePayload(r, "10011126");
     expect(payload).not.toBeNull();
-    expect(payload!.decision.status).toBe("suggested");
-    expect(payload!.decision.reason).toContain("short code");
-    expect(payload!.result.needsHumanReview).toBe(true);
+    expect(payload!.decision.status).toBe("verified");
+    expect(payload!.result.needsHumanReview).toBe(false);
   });
 
   test("tier none maps to null (nothing to apply)", () => {
@@ -171,43 +170,20 @@ describe("gptResultToDecodePayload", () => {
     expect(payload.result.needsHumanReview).toBe(true);
   });
 
-  test("tier info_only maps to needs_review with a 'background info only:' prefixed reasonText", () => {
+  test("PROBE PARITY (owner order 2026-07-06): a weak best-guess is a normal suggested payload - the name is shown, never buried", () => {
+    // The old info_only tier (productName emptied, guess demoted to background text) is deleted:
+    // a 0.3-confidence guess IS the suggestion, exactly as the probe displayed it.
     const r = gptResult({
-      tier: "info_only", brand: "Goodyear", productName: "Goodyear (best guess, low confidence)",
+      tier: "suggested", brand: "Goodyear", productName: "Goodyear (best guess, low confidence)",
       confidence: 0.3, exactCodeFound: false, basis: "barcode prefix suggests Goodyear family",
     });
     const payload = gptResultToDecodePayload(r, "049000028904")!;
-    expect(payload.decision.status).toBe("needs_review");
+    expect(payload.decision.status).toBe("suggested");
+    expect(payload.result.productName).toBe("Goodyear (best guess, low confidence)");
     expect(payload.result.needsHumanReview).toBe(true);
     expect(payload.result.confidence).toBe(0.3);
-    expect(payload.reasonText.startsWith("background info only: ")).toBe(true);
-  });
-
-  // CACHE-SAFETY CONTRACT (IMPORTANT 1): decode.ts documents "needs_review is reserved for no provider
-  // produced a product" - the route's withDecodeCache decides PERMANENT-vs-retryable from
-  // isUsableProductName(result.productName). An info_only tier is exactly a weak GPT guess: it must
-  // NEVER carry a usable productName (or that guess gets cached FOREVER and the code can never
-  // re-decode). The guess text must still reach the human via `guesses` instead.
-  test("tier info_only: productName is EMPTY (never poisons the decode cache) and the guess lives in `guesses`", () => {
-    const r = gptResult({
-      tier: "info_only", brand: "Goodyear", productName: "Goodyear (best guess, low confidence)",
-      confidence: 0.3, exactCodeFound: false, basis: "barcode prefix suggests Goodyear family",
-    });
-    const payload = gptResultToDecodePayload(r, "049000028904")!;
-    expect(payload.result.productName).toBe("");
-    expect(payload.result.guesses.length).toBeGreaterThan(0);
-    expect(payload.result.guesses.some((g) => g.includes("Goodyear (best guess, low confidence)"))).toBe(true);
-    expect(payload.result.guesses.some((g) => g.includes("barcode prefix suggests Goodyear family"))).toBe(true);
-  });
-
-  test("tier info_only with no basis: productName still empty, guess still carries the productName text", () => {
-    const r = gptResult({
-      tier: "info_only", brand: "Goodyear", productName: "Goodyear (best guess, low confidence)",
-      confidence: 0.3, exactCodeFound: false, basis: "",
-    });
-    const payload = gptResultToDecodePayload(r, "049000028904")!;
-    expect(payload.result.productName).toBe("");
-    expect(payload.result.guesses).toEqual(["background info: Goodyear (best guess, low confidence)"]);
+    expect(payload.result.guesses).toEqual(["barcode prefix suggests Goodyear family"]);
+    expect(payload.reasonText).toBe("");
   });
 
   test("gtin/upc/ean identifier fields are populated only for a 12-14 digit gtin", () => {
@@ -227,34 +203,5 @@ describe("gptResultToDecodePayload", () => {
   });
 });
 
-describe("capTierForFirewall", () => {
-  test("downgrades a verified payload to suggested when the prefix firewall conflicts", () => {
-    const r = gptResult({
-      tier: "verified", brand: "Falken", productName: "Falken Wildpeak", confidence: 0.9, exactCodeFound: true,
-    });
-    const payload = gptResultToDecodePayload(r, "848983006257")!;
-    const capped = capTierForFirewall(payload, true)!;
-    expect(capped.decision.status).toBe("suggested");
-    expect(capped.decision.corroborationPath).toBeUndefined();
-    expect(capped.decision.reason).toContain("prefix-firewall conflict: auto-count blocked");
-    expect(capped.result.needsHumanReview).toBe(true);
-  });
-
-  test("never upgrades - a non-conflicting verified payload passes through unchanged", () => {
-    const r = gptResult({ tier: "verified", brand: "Falken", productName: "Falken Wildpeak", confidence: 0.9, exactCodeFound: true });
-    const payload = gptResultToDecodePayload(r, "848983006257")!;
-    const capped = capTierForFirewall(payload, false);
-    expect(capped).toEqual(payload);
-  });
-
-  test("a conflict on an already-suggested or needs_review payload is a no-op (nothing to downgrade)", () => {
-    const r = gptResult({ tier: "suggested", brand: "Michelin", productName: "Michelin Defender", confidence: 0.6 });
-    const payload = gptResultToDecodePayload(r, "049000028904")!;
-    const capped = capTierForFirewall(payload, true);
-    expect(capped).toEqual(payload);
-  });
-
-  test("null payload passes through unchanged", () => {
-    expect(capTierForFirewall(null, true)).toBeNull();
-  });
-});
+// capTierForFirewall was DELETED (owner order 2026-07-06, "no questioning their answers"):
+// GPT's verified self-report is no longer downgraded by the prefix firewall.

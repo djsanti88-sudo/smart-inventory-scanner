@@ -1,12 +1,17 @@
-// GPT-5.5 "search from scratch" - the paid END of the decode ladder (owner spec 2026-07-05).
-// Input is the CODE ONLY (no handoff evidence). The answer is TRUSTED per the owner's rule;
-// tiers come from GPT's OWN self-report. This module is pure: fetch injected, no env reads.
+// GPT-5.5 "search from scratch" - the paid END of the decode ladder (owner spec 2026-07-05,
+// rebuilt 2026-07-06 to PROBE PARITY per owner order: raw code in, GPT's answer taken as
+// returned, no wrapper rules on top). Input is the CODE ONLY (no handoff evidence). The answer
+// is TRUSTED per the owner's rule; tiers come from GPT's OWN self-report and nothing else:
+//   verified  = exactCodeFound && confidence >= 0.8 (owner auto-count rule)
+//   suggested = any other answer with a productName (shown as-is, human approves)
+//   none      = no product name / error / abort
+// This module is pure: fetch injected, no env reads.
 const IN_USD_PER_M = 5.0;
 const OUT_USD_PER_M = 30.0;
 const USD_PER_SEARCH = 0.01;
 export const GPT_LADDER_WORST_CASE_USD = 0.39 as const;
 
-export type GptTier = "verified" | "suggested" | "info_only" | "none";
+export type GptTier = "verified" | "suggested" | "none";
 
 export interface GptFromScratchResult {
   tier: GptTier;
@@ -28,8 +33,9 @@ export interface GptFromScratchResult {
 
 export function gptTierFor(exactCodeFound: boolean, confidence: number): GptTier {
   if (exactCodeFound && confidence >= 0.8) return "verified";
-  if (confidence >= 0.5) return "suggested";
-  return "info_only";
+  // Owner rule (2026-07-06): every other answer IS the suggestion, exactly as the probe showed
+  // it - no info_only demotion, no burying weak guesses.
+  return "suggested";
 }
 
 const promptFor = (code: string) =>
@@ -51,9 +57,10 @@ export async function gptFromScratch(
   deps: { apiKey: string; fetchImpl?: typeof fetch; now?: () => number; timeoutMs?: number },
 ): Promise<GptFromScratchResult> {
   const f = deps.fetchImpl ?? fetch;
-  // 17s cap (owner-set 2026-07-05, raised from 10s): the live proof showed 15/26 hard codes
-  // aborting at 10s, each billed at worst case for zero answers - hard codes ARE the ladder's job.
-  const timeoutMs = deps.timeoutMs ?? 17_000;
+  // 35s cap (owner-set 2026-07-06, raised from 18s): the exhaustion band on unfindable codes runs
+  // 12-28s live (probe max 27.0s, our control max 27.8s) - 35s lets every call finish and ANSWER
+  // (the prompt's always-answer property), which also bills actuals instead of worst case.
+  const timeoutMs = deps.timeoutMs ?? 35_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let data: {
@@ -71,7 +78,8 @@ export async function gptFromScratch(
         tools: [{ type: "web_search", search_context_size: "low" }],
         reasoning: { effort: "low" },
         max_output_tokens: 6000,
-        max_tool_calls: 6,
+        // 5 = the owner-set cap from the 21/21 probe (server-enforced by OpenAI).
+        max_tool_calls: 5,
       }),
       signal: controller.signal,
     });

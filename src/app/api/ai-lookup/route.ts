@@ -32,7 +32,7 @@ import { runSizeRace } from "@/services/ai/sizeRace";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall, getGptLadderStatus } from "@/services/security/aiSpendGuard";
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
-import { shouldRunGptRung, gptResultToDecodePayload, capTierForFirewall } from "@/services/ai/gptLadderRung";
+import { shouldRunGptRung, gptResultToDecodePayload } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
@@ -57,6 +57,13 @@ const GEMINI_FAST_MODEL = process.env.GEMINI_FAST_MODEL || "gemini-flash-latest"
 const OPENAI_FAST_MODEL = process.env.OPENAI_FAST_MODEL || "gpt-5-mini";
 const GEMINI_DECODE_MODEL = process.env.GEMINI_DECODE_MODEL || "gemini-2.5-pro"; // pro escalation
 const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro escalation
+
+// OWNER ORDER 2026-07-06 ("remove Gemini for now"): Gemini is OUT of the decode path. Forensics
+// proved Gemini 3 grounding bills every executed search query with NO cap control and the queries
+// are invisible client-side ($6 real vs $0.53 computed, see LESSONS_LEARNED L11) - the gpt-5.5
+// ladder rung (capped, fully meterable) is the only paid decode engine. This gates the Gemini
+// fast/escalation providers AND the Plan D flash-lite grounding arm. Flip to false to restore.
+const GEMINI_DECODE_DISABLED = true;
 
 // Server-side AI endpoint. Keys live in env and never reach the client. Two modes:
 //   - "lookup": single-provider suggestion (back-compat).
@@ -197,7 +204,7 @@ function decodeProviders(pro = false): AiProvider[] {
   // OWNER BASELINE (v1): Gemini Flash runs the FAST first pass ALONE - the loved 1-2s decode. ChatGPT
   // (OpenAI) is NOT run in parallel; it is the ESCALATION (escalationProviders) called ONLY when Gemini's
   // fast pass finds nothing. The pro path (proRecheck correction) still uses both strongest models.
-  if (process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: pro ? GEMINI_DECODE_MODEL : GEMINI_FAST_MODEL }));
+  if (!GEMINI_DECODE_DISABLED && process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: pro ? GEMINI_DECODE_MODEL : GEMINI_FAST_MODEL }));
   if (pro && process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: OPENAI_DECODE_MODEL }));
   if (chain.length === 0) chain.push(mockProvider);
   return chain;
@@ -211,7 +218,7 @@ function escalationProviders(): AiProvider[] {
   if (e2eMode()) return [mockProvider];
   const chain: AiProvider[] = [];
   if (process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: OPENAI_FAST_MODEL }));
-  if (process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: GEMINI_FAST_MODEL }));
+  if (!GEMINI_DECODE_DISABLED && process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: GEMINI_FAST_MODEL }));
   if (chain.length === 0) chain.push(mockProvider);
   return chain;
 }
@@ -456,12 +463,10 @@ export async function POST(request: Request) {
     // still checks codeType -> api key -> (lazily) the daily dollar budget. A blown synchronous
     // decode budget (run.timedOut) also skips - never stack a paid ~10s call on an already-exhausted
     // request. Every live call records spend (success, error, or abort).
+    // Owner order 2026-07-06 ("no questioning their answers"): GPT's payload passes through with
+    // NO firewall tier cap - capTierForFirewall is deleted along with the info_only tier.
     const maybeGptLadder = async (opts: {
       priorStatus: string;
-      // Firewall conflict for capTierForFirewall, resolved per exit: the final exit passes the
-      // request-tracked combined-firewall value; the Plan D exit derives the catalog brand-prefix
-      // sanity from the GPT payload's own brand (no combined firewall was evaluated on that path).
-      conflictOf: (brand: string) => boolean;
       timedOut?: boolean;
     }): Promise<{ payload: ReturnType<typeof gptResultToDecodePayload>; skipReason?: string; surfaceSkip: boolean }> => {
       if (opts.priorStatus === "verified" || opts.priorStatus === "suggested") {
@@ -471,8 +476,7 @@ export async function POST(request: Request) {
         // Deterministic Playwright hook ONLY (zero network): lets E2E prove the rung's decision/UI
         // wiring without a live OpenAI call. Ignored when the request carries no mockGptLadder fixture.
         const mock = normalizeMockGptLadder(body.mockGptLadder);
-        const raw = mock ? gptResultToDecodePayload(mock, code) : null;
-        return { payload: raw ? capTierForFirewall(raw, opts.conflictOf(raw.result.brand)) : null, surfaceSkip: false };
+        return { payload: mock ? gptResultToDecodePayload(mock, code) : null, surfaceSkip: false };
       }
       if (opts.timedOut) {
         // The synchronous decode budget is already blown - never stack a paid ~10s call on top.
@@ -493,8 +497,15 @@ export async function POST(request: Request) {
       const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY! });
       recordGptLadderSpend(r.usdActual); // ALWAYS - success, error, or abort; never skip this.
       recordGptLadderCall(); // Task 6: Settings spend panel + GET status "calls today" counter.
-      const raw = gptResultToDecodePayload(r, code);
-      return { payload: raw ? capTierForFirewall(raw, opts.conflictOf(raw.result.brand)) : null, surfaceSkip: false };
+      // TRANSIENT-FAILURE GUARD (found live 2026-07-06): an aborted/HTTP-failed/garbled rung call is
+      // NOT genuine exhaustion - the model never actually answered. Without this, one OpenAI hiccup
+      // wrote a PERMANENT no_result_receipt and froze the code forever. Only a real answer with an
+      // empty productName ("empty productName") counts as genuinely probed-and-empty; every other
+      // "none" is surfaced as a skip (visible in providerStatuses) and stays retryable.
+      if (r.tier === "none" && (r.aborted || (r.error && r.error !== "empty productName"))) {
+        return { payload: null, skipReason: r.aborted ? "gpt_aborted_at_cap" : "gpt_call_failed", surfaceSkip: true };
+      }
+      return { payload: gptResultToDecodePayload(r, code), surfaceSkip: false };
     };
     // providerStatuses entry for a surfaced ladder skip - matches the firecrawl skip pattern; the skip
     // reason travels in errorCode (ProviderStatus's "safe code only" field; there is no detail field).
@@ -508,8 +519,9 @@ export async function POST(request: Request) {
     // Task 4: classify whether a ladder outcome represents GENUINE exhaustion (worth a permanent
     // no_result_receipt) vs a TRANSIENT skip that must stay retryable on the next scan. Genuine
     // exhaustion is exactly: the GPT rung actually ran and returned tier "none" (payload null, no skip
-    // reason - the rung was never short-circuited) or "info_only" (payload present but never auto-count
-    // worthy). Every other skip is transient and must NOT create a receipt.
+    // reason - the rung was never short-circuited). (The old info_only tier is deleted per owner order
+    // 2026-07-06; every GPT answer with a productName now resolves as verified or suggested.)
+    // Every other skip is transient and must NOT create a receipt.
     // DOCTRINE CORRECTION (review, supersedes Task 4's original "budget_exceeded is eligible" rule): a
     // receipt certifies "the ladder was fully probed and every door came back empty." A code blocked by
     // the ladder's OWN dollar budget was NEVER probed at all - it is exactly as unresolved as a missing
@@ -519,10 +531,9 @@ export async function POST(request: Request) {
     // "budget_exceeded" therefore now falls into the same transient/not-eligible bucket as no_api_key,
     // non_public_code_type, e2e_mode, and request_budget_exhausted (all `ladder.surfaceSkip === true`).
     const classifyReceipt = (ladder: { payload: ReturnType<typeof gptResultToDecodePayload>; skipReason?: string; surfaceSkip: boolean }): { eligible: boolean; reason?: string } => {
-      if (ladder.payload && (ladder.payload.decision.status === "verified" || ladder.payload.decision.status === "suggested")) {
-        return { eligible: false }; // resolved by the ladder itself
+      if (ladder.payload) {
+        return { eligible: false }; // resolved by the ladder itself (verified or suggested)
       }
-      if (ladder.payload) return { eligible: true, reason: "gpt_info_only" }; // ran, tier info_only
       if (ladder.surfaceSkip) return { eligible: false }; // transient: no key / non-public / e2e / request budget exhausted / OWN dollar budget exhausted
       if (!ladder.skipReason) return { eligible: true, reason: "gpt_none" }; // ran, tier none
       return { eligible: false }; // prior_status_already_decided (resolved before the ladder ran)
@@ -599,7 +610,9 @@ export async function POST(request: Request) {
         const fast = await resolveUnknownFast(code, {
           lookupBarcodeDb: (c) => lookupBarcodeDb(c),
           retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
-          groundIdentify: (c, opts) => groundIdentify(c, opts),
+          // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
+          // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.
+          groundIdentify: (c, opts) => (GEMINI_DECODE_DISABLED ? Promise.resolve(null) : groundIdentify(c, opts)),
           verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
           firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
           searchIdentify: (c) => searchIdentifyByBarcode(c),
@@ -630,25 +643,20 @@ export async function POST(request: Request) {
           let pdReasonCode = verifiedWin ? "ok" : floorReasonCode;
           let pdReasonText = floorReasonText;
           let gptLadderSkipReason: string | undefined;
-          let gptLadderInfoOnly: string | undefined;
 
           // GPT-5.5 LADDER RUNG (Task 3b): Plan D is TERMINAL for public barcodes - its generic
           // "Unidentified item" floor still ends unresolved (needs_review), so the paid rung must run
-          // HERE or it can never see a real upc/ean/gtin. A verified/suggested GPT identity REPLACES
-          // the unresolved floor; an info_only guess leaves the floor result EXACTLY as-is (its floor
-          // productName keeps today's caching semantics) and only surfaces the background info in
-          // debug. A verified/suggested Plan D outcome skips the rung entirely (not surfaced).
-          const ladder = await maybeGptLadder({ priorStatus: decision.status, conflictOf: (b) => prefixBrandConflict(code, b) });
-          if (ladder.payload && (ladder.payload.decision.status === "verified" || ladder.payload.decision.status === "suggested")) {
+          // HERE or it can never see a real upc/ean/gtin. A GPT identity (verified or suggested)
+          // REPLACES the unresolved floor, exactly as returned (owner order 2026-07-06: no firewall
+          // cap, no info_only burial). A verified/suggested Plan D outcome skips the rung (not surfaced).
+          const ladder = await maybeGptLadder({ priorStatus: decision.status });
+          if (ladder.payload) {
             pdResults = [ladder.payload.result, ...pdResults];
             pdEvidences = [gptLadderEvidenceStub(), ...pdEvidences];
             pdProviderNames = [...pdProviderNames, "gpt-5.5-ladder"];
             decision = ladder.payload.decision;
             pdReasonCode = "gpt_ladder";
             pdReasonText = ladder.payload.reasonText;
-          } else if (ladder.payload) {
-            // info_only: keep Plan D's result untouched; the guess is debug-only here (Task 3b rule).
-            gptLadderInfoOnly = ladder.payload.result.guesses[0] ?? ladder.payload.reasonText;
           } else if (ladder.surfaceSkip) {
             gptLadderSkipReason = ladder.skipReason;
             pdProviderStatuses = [...pdProviderStatuses, gptLadderSkipEntry(ladder.skipReason!)];
@@ -667,7 +675,7 @@ export async function POST(request: Request) {
             timedOut: false,
             // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
             // debug instead of consensus quietly degrading to the two correlated DB votes.
-            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled || pdReasonCode === "gpt_ladder", pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus, gptLadderSkipReason, gptLadderInfoOnly },
+            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled || pdReasonCode === "gpt_ladder", pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus, gptLadderSkipReason },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
@@ -707,7 +715,9 @@ export async function POST(request: Request) {
       // set ONLY from this app-computed race result - NEVER from any provider's self-claim.
       const [run, groundedForRace] = await Promise.all([
         runDecode({ code, codeType, confidenceThreshold: threshold, providers, enrich, budgetMs, trustedHosts: TRUSTED_HOSTS }),
-        e2eMode() ? Promise.resolve(null) : groundedSpecFind({ code, codeType, anchorBrand }).catch(() => null),
+        // groundedSpecFind is Gemini google_search grounding - gated off with the rest of Gemini
+        // (owner order 2026-07-06); null degrades the size race to Arm B only, its documented miss.
+        e2eMode() || GEMINI_DECODE_DISABLED ? Promise.resolve(null) : groundedSpecFind({ code, codeType, anchorBrand }).catch(() => null),
       ]);
 
       let results = run.results;
@@ -879,21 +889,20 @@ export async function POST(request: Request) {
         recordLearnedPrefix(code, results[0]!.brand, results[0]?.category);
       }
 
-      // GPT-5.5 LADDER RUNG (owner spec 2026-07-05): the paid END of the decode ladder. Runs ONLY
-      // when nothing above already verified or suggested a product - it never runs in parallel with,
-      // and never overrides, an earlier win. Every call (success, error, or abort) records its spend
-      // via recordGptLadderSpend so the daily dollar guard can never be silently bypassed by a
-      // provider failure (usdActual carries the worst-case reservation on abort/HTTP failure). The
-      // catalog-derived brand-prefix firewall still gates auto-count: a firewall conflict downgrades
-      // an otherwise-verified GPT self-report to suggested (capTierForFirewall), same as every other
-      // rung on this ladder.
+      // GPT-5.5 LADDER RUNG (owner spec 2026-07-05, probe-parity rebuild 2026-07-06): the paid END
+      // of the decode ladder. Runs ONLY when nothing above already verified or suggested a product -
+      // it never runs in parallel with, and never overrides, an earlier win. Every call (success,
+      // error, or abort) records its spend via recordGptLadderSpend so the daily dollar guard can
+      // never be silently bypassed by a provider failure (usdActual carries the worst-case
+      // reservation on abort/HTTP failure). Owner order 2026-07-06: the answer passes through
+      // exactly as returned - no firewall downgrade, no short-code cap, no info_only burial.
       // Task 3b: same shared helper as the Plan D exit above. `run.timedOut` additionally skips the
       // paid rung here (the synchronous decode budget is already blown; skip reason surfaced as
       // "request_budget_exhausted"). The e2e mockGptLadder fixture path lives inside the helper.
       // Surfaced in `debug` below, and (except the happy-path "a prior rung already decided" case)
       // also pushed to providerStatuses - a paid rung must never skip silently.
       let gptLadderSkipReason: string | undefined;
-      const ladder = await maybeGptLadder({ priorStatus: decision.status, conflictOf: () => brandPrefixConflict, timedOut: run.timedOut });
+      const ladder = await maybeGptLadder({ priorStatus: decision.status, timedOut: run.timedOut });
       const gptLadderPayload = ladder.payload;
       if (!gptLadderPayload) {
         gptLadderSkipReason = ladder.skipReason;
