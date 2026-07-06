@@ -55,14 +55,17 @@ export default function ScanPage() {
   const expandSecondary = process.env.NEXT_PUBLIC_E2E_AUTH_BYPASS === "1";
   const autoDecodeOn = settings.aiLookupEnabled && aiStatus.autoDecodeOnScan && aiStatus.liveEnabled && hasKey && !aiStatus.emergencyStop;
 
-  // CATEGORY FEATURE HIDDEN (owner request): scanning is category-agnostic for now. The dropdown +
-  // the "wrong category" warning are hidden (code kept), and scanContext is forced to "any" so a scan
-  // is NEVER routed to review for not matching a category. Set SHOW_CATEGORY = true (and remove the
-  // force-effect) to restore the Tires / Not-specialized selector.
+  // CATEGORY SELECTOR HIDDEN (owner request, aeb3218 2026-06-25): the dropdown + the "wrong category"
+  // warning banner are hidden on this page (code kept - set SHOW_CATEGORY = true to restore them).
+  // scanContext itself is NO LONGER force-reset to "any" here: that force-effect silently neutered the
+  // documented tire-context auto-count firewall (CLAUDE.md "Master Baseline v1" guardrail #2 - a
+  // non-tire result while scanning in Tire context must hard-block auto-count) for every scan, and it
+  // made the still-visible Settings > "Scan category" control a dead no-op (it looked functional but
+  // was silently overwritten back to "any" the instant /scan re-rendered). scanContext now simply
+  // follows settings.scanContext (default "tire" per DEFAULT_SETTINGS, or whatever the shop chose on
+  // Settings). Root-caused during the scan-category e2e triage (see
+  // .superpowers/sdd/scan-category-triage-report.md).
   const SHOW_CATEGORY = false;
-  useEffect(() => {
-    if (settings.scanContext !== "any") updateSettings({ scanContext: "any" });
-  }, [settings.scanContext, updateSettings]);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">

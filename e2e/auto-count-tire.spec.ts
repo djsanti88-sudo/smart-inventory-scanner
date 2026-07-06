@@ -55,7 +55,9 @@ test("corroborated tire auto-counts on live scan; poison stays in Needs Review",
   await page.goto("/settings");
   await page.getByTestId("setting-ai-enabled").check();
   await page.goto("/scan");
-  await expect(page.getByTestId("scan-category")).toHaveValue("tire"); // default tire context
+  // NOTE: the category selector is hidden (SHOW_CATEGORY = false in scan/page.tsx, owner request
+  // aeb3218 2026-06-25) - scanning is category-agnostic now, so there is no "scan-category" control
+  // to assert on. See CLAUDE.md "Aggressive Auto Decode Mode".
   await expect(page.getByTestId("auto-decode-status")).toContainText("On");
 
   // 1. Scan the corroborated tire -> AUTO-COUNTS (no manual approval), columns filled.
@@ -68,13 +70,20 @@ test("corroborated tire auto-counts on live scan; poison stays in Needs Review",
   await expect(row.locator("td").nth(5)).toContainText("LT245/75R16 120R"); // specs
   await page.screenshot({ path: `${PROOF}/auto-count-tire-01-counted.png`, fullPage: true });
 
-  // 2. Scan the poison -> firewall blocks it: NOT counted, no rivet identity anywhere on the page.
+  // 2. Scan the poison -> the context-conflict firewall blocks the VERIFIED/auto-verify path (owner
+  //    rule "decode-everything", e81d716 2026-07-01: provisional counting is never blocked, so the
+  //    rivet kit still shows up as its own provisional row - it just never becomes a verified,
+  //    permanently-aliased identity, and the tire row's own count is untouched).
   await scan(page, "745125495781");
-  await expect(page.getByTestId("final-count-body")).not.toContainText(/manstel|rivet/i);
-  await expect(page.locator('[data-testid^="count-row-"]', { hasText: "Discoverer" })).toHaveCount(1); // only the tire
+  await expect(page.locator('[data-testid^="count-row-"]', { hasText: "Discoverer" })).toHaveCount(1); // tire count unaffected
+  const poisonRow = page.locator('[data-testid^="count-row-"]', { hasText: "Manstel" });
+  await expect(poisonRow).toBeVisible();
+  await expect(poisonRow.locator("td").nth(0)).toHaveText("1");
 
-  // 3. The poison sits in Needs Review (routed, never auto-counted).
+  // 3. The poison sits in Needs Review (routed, never auto-verified/permanently aliased).
   await page.goto("/review");
-  await expect(page.getByTestId("review-row-745125495781")).toBeVisible();
+  const poisonReview = page.getByTestId("review-row-745125495781");
+  await expect(poisonReview).toBeVisible();
+  await expect(poisonReview).toContainText(/category conflict/i);
   await page.screenshot({ path: `${PROOF}/auto-count-tire-02-poison-review.png`, fullPage: true });
 });

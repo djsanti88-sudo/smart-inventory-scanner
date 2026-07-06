@@ -7,7 +7,12 @@ export default defineConfig({
   testDir: "./e2e",
   // The Firebase-backed specs live in e2e/firebase-phase2 and run via playwright.firebase.config.ts
   // (real Firebase backend + emulator). Keep them OUT of the mock run so the 11 mock specs stay isolated.
-  testIgnore: ["**/firebase-phase2/**", "**/human-bots/**"],
+  // household-decode-test.spec.ts hardcodes a live external URL (a real Vercel preview deployment) and
+  // waits on real AI decode latency - it never uses this config's localhost/IS_E2E mock webServer at
+  // all. It is a manual live-probe script, not part of the automated mocked suite (TEST SAFETY:
+  // automated tests never call live providers - see CLAUDE.md "Aggressive Auto Decode Mode" +
+  // MANUAL_LIVE_TEST.md). Excluded here so `npx playwright test` never depends on network/live-AI state.
+  testIgnore: ["**/firebase-phase2/**", "**/human-bots/**", "**/household-decode-test.spec.ts"],
   fullyParallel: false,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],

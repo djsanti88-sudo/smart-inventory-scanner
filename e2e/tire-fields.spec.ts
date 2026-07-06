@@ -68,7 +68,9 @@ test("decoded tire fills Size / Brand / Part number with a clean description", a
   await page.goto("/settings");
   await page.getByTestId("setting-ai-enabled").check();
   await page.goto("/scan");
-  await expect(page.getByTestId("scan-category")).toHaveValue("tire"); // default Tires
+  // NOTE: the category selector is hidden (SHOW_CATEGORY = false in scan/page.tsx, owner request
+  // aeb3218 2026-06-25) - scanning is category-agnostic now, so there is no "scan-category" control
+  // to assert on. See CLAUDE.md "Aggressive Auto Decode Mode".
   await expect(page.getByTestId("auto-decode-status")).toContainText("On");
 
   // Tire A: messy blob decodes + auto-counts with STRUCTURED columns.
@@ -79,8 +81,12 @@ test("decoded tire fills Size / Brand / Part number with a clean description", a
   await expect(rowA.locator("td").nth(1)).not.toContainText("235/65R18"); // size NOT dumped in the name cell
   await expect(rowA.locator("td").nth(2)).toContainText("Michelin"); // brand
   // Column index +1 vs pre-Task-4: a Model column was inserted between Brand and Category.
+  // Column index +1 again (fc2188a, 2026-07-01, predates this test's last update): a plain-digits
+  // "Size" column was inserted between Specs and Part number (Image column dropped elsewhere, net
+  // column count unchanged - see FinalCountTable.tsx header order).
   await expect(rowA.locator("td").nth(5)).toContainText("235/65R18 104H"); // size in Specs
-  await expect(rowA.locator("td").nth(6)).toContainText("MICH-99812"); // part number
+  await expect(rowA.locator("td").nth(6)).toContainText("2356518"); // plain-digits Size column
+  await expect(rowA.locator("td").nth(7)).toContainText("MICH-99812"); // part number
 
   // Tire B: real tire, NO SKU -> Part number blank ("-"), not fabricated.
   await scan(page, "036625112233");
@@ -88,7 +94,7 @@ test("decoded tire fills Size / Brand / Part number with a clean description", a
   await expect(rowB).toBeVisible();
   await expect(rowB.locator("td").nth(2)).toContainText("Falken");
   await expect(rowB.locator("td").nth(5)).toContainText("275/55R20 113T");
-  await expect(rowB.locator("td").nth(6)).toHaveText("-"); // blank, NOT an invented part number
+  await expect(rowB.locator("td").nth(7)).toHaveText("-"); // blank, NOT an invented part number
 
   await page.screenshot({ path: `${PROOF}/tire-fields.png`, fullPage: true });
 });
