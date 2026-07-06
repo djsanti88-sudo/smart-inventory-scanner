@@ -446,12 +446,14 @@ export interface ScanState {
       selectedAliasCodes?: string[];
     },
   ) => void;
-  /** Build 3: batch-approve the Suggested pile. Chunks `reviewIds` (25/commit) and calls the EXACT same
-   *  path as the single-row "Approve suggestion" button (resolveUnknown "create_new", applyToCount: true,
-   *  origin: "human", newProduct built from the review's suggested* fields, selectedAliasCodes = every
-   *  discovered identifier) for each id - no new approval semantics, idempotency is resolveUnknown's own
-   *  open-status guard. A row that throws, has no open suggestion, or is already resolved/ignored is
-   *  recorded and the loop continues; it never aborts the rest of the batch. */
+  /** Build 3: batch-approve the Suggested pile. Groups `reviewIds` into slices of 25 (readability/per-row
+   *  containment only - no per-chunk commit, no state isolation between chunks, one synchronous pass) and
+   *  calls the EXACT same path as the single-row "Approve suggestion" button (resolveUnknown "create_new",
+   *  applyToCount: true, NO origin field, newProduct built from the review's suggested* fields,
+   *  selectedAliasCodes = every discovered identifier) for each id - no new approval semantics, no change
+   *  to the trust/poison-guard rules, idempotency is resolveUnknown's own open-status guard. A row that
+   *  throws, has no open suggestion, or is already resolved/ignored is recorded and the loop continues; it
+   *  never aborts the rest of the batch. */
   batchApprove: (reviewIds: string[]) => { approved: string[]; failed: Array<{ id: string; reason: string }> };
   /** Evaluate (without committing) whether linking a review's code to a product looks like a mistake. */
   evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
@@ -3275,6 +3277,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       batchApprove: (reviewIds) => {
         const approved: string[] = [];
         const failed: Array<{ id: string; reason: string }> = [];
+        // CHUNK_SIZE is cosmetic bookkeeping only: it slices reviewIds into readable groups for the code
+        // below and gives per-row containment inside a bounded slice (a throw is still caught per-row by
+        // the inner try/catch, chunk or no chunk). It does NOT commit or yield per chunk - there is no
+        // intermediate `set()`/persist between chunks and no `await`/tick boundary, so the whole loop
+        // (all chunks) runs in one synchronous pass and one synchronous state update per row, exactly as
+        // if CHUNK_SIZE were reviewIds.length. It provides no state isolation between chunks and no
+        // resumability if the tab closes mid-loop.
         const CHUNK_SIZE = 25;
 
         for (let i = 0; i < reviewIds.length; i += CHUNK_SIZE) {
@@ -3296,9 +3305,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               }
 
               const discovered = buildDiscoveredIdentifiers(review);
+              // TRUST RULE (Build 3 review Finding 1): do NOT pass origin: "human" here. That value disables
+              // the weak-guess poison guard at the two provisional-reuse branches in resolveUnknown
+              // (`isWeakGuess(review, np) && payload.origin !== "human"`), which exists to stop an
+              // evidence-less AI suggestion from becoming a verified product/approved alias. The single-row
+              // "Approve suggestion" button (NeedsReviewTable.tsx) passes NO origin - batch approval must call
+              // resolveUnknown with the IDENTICAL payload shape so the poison guard applies exactly the same
+              // way whether a suggestion is approved one at a time or in bulk.
               get().resolveUnknown(reviewId, "create_new", {
                 applyToCount: true,
-                origin: "human",
                 newProduct: {
                   name: review.suggestedProductName,
                   brand: review.suggestedBrand,
