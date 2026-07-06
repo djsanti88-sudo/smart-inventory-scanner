@@ -24,7 +24,7 @@ owner's rule, with production-grade cost protection.
    `web_search` with `search_context_size: "low"`, reasoning effort low,
    `max_output_tokens: 6000`, **`max_tool_calls: 6`** (owner raised from 5), prompt v2
    (always-best-guess JSON contract: brand/productName/specs/gtin/confidence/exactCodeFound/
-   basis/sourceUrls), **10s AbortController cap**.
+   basis/sourceUrls), **17s abort cap (owner raised from 10s, 2026-07-05)**.
 4. **Cost truth:** a timed-out/aborted call is budgeted at FULL worst case
    (~30K in + 6K out tokens + 6 x $0.01 searches ~= $0.10/code). The daily cap counts worst case
    per attempt, not observed usage. Wallet reports say "computed floor $X; true spend = OpenAI
@@ -52,7 +52,7 @@ Observed probe average ~$0.05-0.09/call.
   imports. Builds prompt v2, parses/validates the JSON reply (bad JSON -> contained error ->
   needs_review), maps to the outcome tiers above.
 - Final rung in `computeDecode`: runs ONLY when every prior rung produced neither verified nor
-  suggested; key server-side; 10s abort; kill switch + daily counters gate it; IS_E2E forces mock.
+  suggested; key server-side; 17s abort (owner-raised from 10s); kill switch + daily counters gate it; IS_E2E forces mock.
 - New daily DOLLAR guard for this rung (env `GPT_LADDER_DAILY_USD`, default 3.00) counted at
   actuals alongside the existing call-count cap.
 - Scan store integration: fires after fetchV2 returns empty; feed row shows

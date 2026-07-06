@@ -51,7 +51,9 @@ export async function gptFromScratch(
   deps: { apiKey: string; fetchImpl?: typeof fetch; now?: () => number; timeoutMs?: number },
 ): Promise<GptFromScratchResult> {
   const f = deps.fetchImpl ?? fetch;
-  const timeoutMs = deps.timeoutMs ?? 10_000;
+  // 17s cap (owner-set 2026-07-05, raised from 10s): the live proof showed 15/26 hard codes
+  // aborting at 10s, each billed at worst case for zero answers - hard codes ARE the ladder's job.
+  const timeoutMs = deps.timeoutMs ?? 17_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let data: {
