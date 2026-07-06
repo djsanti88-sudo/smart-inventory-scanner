@@ -169,7 +169,7 @@ export function SuggestedApprovalPanel() {
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <span data-testid="suggested-source-count">{r.sourceUrls?.length ?? 0}</span>
-                      {winningSource && (
+                      {winningSource ? (
                         <>
                           {" "}
                           <a
@@ -181,6 +181,16 @@ export function SuggestedApprovalPanel() {
                             view source
                           </a>
                         </>
+                      ) : (
+                        // Finding 3 (Build 3 review): a row with zero sourceUrls carries no evidence at all.
+                        // Flag it visibly so a bulk approver can spot and skip it instead of approving an
+                        // evidence-free row along with the rest.
+                        <span
+                          data-testid={`suggested-no-sources-${r.cleanCode}`}
+                          className="ml-1 font-medium text-amber-700"
+                        >
+                          No sources
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3">

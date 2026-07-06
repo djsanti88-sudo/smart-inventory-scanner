@@ -164,4 +164,108 @@ describe("scanStore - batchApprove (Build 3: batch-approve for the Suggested pil
     expect(review.suggestedProductName).toBe("Suggested Widget 1"); // kept as background info, not wiped
     expect(store.getState().products.some((p) => p.name === "Suggested Widget 1")).toBe(false);
   });
+
+  it("a STRONG (real-evidence) suggestion still approves fully via batch: verified true, provisional false (unchanged behavior)", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const id = suggestedReview(store, "STRONGGUESS1", 1); // helper sets a brand + one sourceUrl (real evidence)
+
+    const result = store.getState().batchApprove([id]);
+
+    expect(result.approved).toEqual([id]);
+    const product = store.getState().products.find((p) => p.name === "Suggested Widget 1");
+    expect(product, "product should be created").toBeTruthy();
+    expect(product!.verified).toBe(true);
+    expect(product!.provisional).toBe(false);
+  });
+});
+
+/** Build 3 review Finding 1 (HIGH, trust rule violation): batchApprove passed `origin: "human"` to
+ *  resolveUnknown, which DISABLES the weak-guess poison guard at the two provisional-reuse branches
+ *  (`isWeakGuessReuse = isWeakGuess(review, np) && payload.origin !== "human"`), while the single-approve
+ *  button (NeedsReviewTable "Approve suggestion") passes NO origin and keeps the guard active. A
+ *  zero-evidence AI suggestion (empty brand, no gtin/upc/ean, no sourceUrls) must NOT become a verified
+ *  product / approved alias just because it went through the batch path instead of the single button.
+ *  Spec invariant: "Trust rules do NOT change" between single-approve and batch-approve. */
+describe("scanStore - batchApprove trust rule parity (Build 3 review Finding 1)", () => {
+  /** Seed an OPEN "suggested" review with an evidence-less AI guess: hasSuggestion true, a product name,
+   *  but NO brand, NO gtin/upc/ean, and NO sourceUrls - isWeakGuess(review, np) is true when a create_new
+   *  accepts this exact suggested name, so the poison guard must fire regardless of caller. */
+  function weakSuggestedReview(store: ReturnType<typeof createTestScanStore>, code: string, n: number) {
+    store.getState().processScan(code);
+    const id = store.getState().needsReviewQueue.find((r) => r.cleanCode === clean(code) && r.status === "open")!.id;
+    store.setState((s) => ({
+      needsReviewQueue: s.needsReviewQueue.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              hasSuggestion: true,
+              decodeStatus: "suggested" as const,
+              suggestedProductName: `Weak Guess ${n}`,
+              suggestedBrand: "", // no brand -> no real evidence
+              suggestedCategory: "",
+              suggestedSpecsShort: "",
+              suggestedPrimarySku: "",
+              suggestedPrimaryBarcode: r.cleanCode,
+              suggestedGtin: "",
+              suggestedUpc: "",
+              suggestedEan: "",
+              suggestedImageUrl: "",
+              suggestedProductUrl: "",
+              sourceUrls: [], // no sourceUrls -> no real evidence
+              confidence: 0.4,
+            }
+          : r,
+      ),
+    }));
+    return id;
+  }
+
+  it("batchApprove on a zero-evidence suggestion keeps the poison guard active: product stays unverified/provisional, exactly like the single-approve button", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const id = weakSuggestedReview(store, "WEAKGUESS1", 1);
+
+    const result = store.getState().batchApprove([id]);
+
+    // resolveUnknown still resolves the review either way (matches single-approve: the poison guard
+    // blocks trust, not resolution) - the row leaves "open" and is reported approved.
+    expect(result.approved).toEqual([id]);
+    const product = store.getState().products.find((p) => p.name === "Weak Guess 1");
+    expect(product, "the provisional placeholder should still exist, upgraded in place").toBeTruthy();
+    // TRUST RULE: batchApprove must NOT pass origin: "human" to resolveUnknown. That clause exists only
+    // to let a human who typed their OWN product identity confirm a provisional; batch approval accepts
+    // the AI's suggestion verbatim, so it must be held to the exact same evidence bar as one-at-a-time.
+    expect(product!.verified, "must stay unverified - same as clicking Approve suggestion once").toBe(false);
+    expect(product!.provisional, "must stay provisional - same as clicking Approve suggestion once").toBe(true);
+  });
+
+  it("single-approve parity baseline: resolveUnknown with the exact NeedsReviewTable button payload (no origin) on the same weak suggestion also stays provisional", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const id = weakSuggestedReview(store, "WEAKGUESS2", 2);
+    const review = store.getState().needsReviewQueue.find((r) => r.id === id)!;
+
+    // Exactly the NeedsReviewTable "Approve suggestion" button payload (src/components/NeedsReviewTable.tsx)
+    // - no `origin` field at all.
+    store.getState().resolveUnknown(id, "create_new", {
+      applyToCount: true,
+      newProduct: {
+        name: review.suggestedProductName,
+        brand: review.suggestedBrand,
+        category: review.suggestedCategory,
+        specsShort: review.suggestedSpecsShort,
+        primarySku: review.suggestedPrimarySku,
+        primaryBarcode: review.suggestedPrimaryBarcode || review.cleanCode,
+        gtin: review.suggestedGtin,
+        upc: review.suggestedUpc,
+        ean: review.suggestedEan,
+        imageUrl: review.suggestedImageUrl,
+        productUrl: review.suggestedProductUrl,
+      },
+      selectedAliasCodes: [],
+    });
+
+    const product = store.getState().products.find((p) => p.name === "Weak Guess 2");
+    expect(product, "the provisional placeholder should still exist, upgraded in place").toBeTruthy();
+    expect(product!.verified).toBe(false);
+    expect(product!.provisional).toBe(true);
+  });
 });
