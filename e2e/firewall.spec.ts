@@ -57,14 +57,21 @@ test("firewall: poisoned non-tire result in Tire context does not auto-count and
 
   await scan(page, CODE);
 
-  // The poisoned rivet kit must NOT increment Final Count.
-  await expect(page.getByTestId("final-count-body")).not.toContainText("Manstel");
-  await expect(page.getByTestId("final-count-body")).not.toContainText("Rivet");
-
-  // It routes to Needs Review with a safe category-conflict reason.
-  await page.goto("/review");
-  const row = page.getByTestId(`review-row-${CODE}`);
+  // Owner rule "decode-everything, scan N = count N" (e81d716, 2026-07-01, predates this test's last
+  // update): NOTHING blocks provisional counting, not even a category/brand conflict - the poisoned
+  // rivet kit DOES show up in Final Count (qty 1) so the physical scan is never lost. The firewall's
+  // real job is to stop it from becoming a VERIFIED, permanent, no-review identity: it must stay a
+  // provisional/unverified row and the review must stay open with the safe category-conflict reason
+  // (never silently resolved, never re-scanned deterministically as "Manstel").
+  const row = page.locator('[data-testid^="count-row-"]', { hasText: "Manstel" });
   await expect(row).toBeVisible();
-  await expect(row).toContainText(/category conflict/i);
+  await expect(row.locator("td").nth(0)).toHaveText("1");
+
+  // It routes to Needs Review with a safe category-conflict reason and stays OPEN (not resolved).
+  await page.goto("/review");
+  const reviewRow = page.getByTestId(`review-row-${CODE}`);
+  await expect(reviewRow).toBeVisible();
+  await expect(reviewRow).toContainText(/category conflict/i);
+  await expect(reviewRow).toContainText(/needs review/i);
   await page.screenshot({ path: `${PROOF}/firewall-01-review.png`, fullPage: true });
 });

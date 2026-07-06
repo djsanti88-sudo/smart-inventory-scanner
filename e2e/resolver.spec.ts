@@ -52,8 +52,13 @@ test("resolver never maps codes to wrong products; human approval makes them det
   await scan(page, "078742051451");
   await scan(page, "X004DY7YUT");
 
-  // None of them were counted (no wrong product rows at all).
-  await expect(page.getByTestId("final-count-body")).toContainText("No counts yet.");
+  // Owner rule "decode-everything, scan N = count N" (e81d716/3669383, 2026-07-01, predates this
+  // test's last update): with NO AI at all (no keys), each scan still provisionally counts as a safe
+  // "Unidentified item" / prefix-floor placeholder - never the WRONG resolved identity. The three rows
+  // below are exactly the "Unidentified item" / brand-only-unconfirmed placeholders, never "Laird" or
+  // "Leviton" (the wrong products the old poisoned source once resolved to).
+  await expect(page.getByTestId("final-count-body")).toContainText("Unidentified item");
+  await expect(page.getByTestId("final-count-body").locator("tr")).toHaveCount(3);
   // The page must NOT contain the wrong product identities anywhere.
   await expect(page.locator("body")).not.toContainText("Laird");
   await expect(page.locator("body")).not.toContainText("Leviton");
@@ -71,7 +76,10 @@ test("resolver never maps codes to wrong products; human approval makes them det
   const row = page.getByTestId("review-row-855724007602");
   await row.getByLabel("link to product").selectOption({ label: "Coca-Cola 12 pack 12 oz cans" });
   await row.getByTestId("link-existing").click();
-  await expect(row).toContainText("Resolved");
+  // Owner rule (fc2188a, 2026-07-01, predates this test's last update): Needs Review hides items that
+  // are already resolved AND synced, so nothing lingers once it is truly done. The row disappears from
+  // the queue entirely rather than staying visible with a "Resolved" badge.
+  await expect(row).toHaveCount(0);
   await page.screenshot({ path: `${PROOF}/resolver-03-approved.png`, fullPage: true });
 
   // Re-scan the approved code: now it is deterministic Known and counts (no AI involved).
