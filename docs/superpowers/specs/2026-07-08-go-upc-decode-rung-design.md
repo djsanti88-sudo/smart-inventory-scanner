@@ -1,7 +1,8 @@
-# Go-UPC Decode Rung — Design (v2)
+# Go-UPC Decode Rung — Design (v3)
 
-Date: 2026-07-08 (v2, same day: updated after reading the full Go-UPC docs and pricing)
-Status: v2 pending owner review
+Date: 2026-07-08 (v2: updated after reading the full Go-UPC docs and pricing;
+v3: added identity-merge / multi-barcode-per-product rules)
+Status: v3 pending owner review
 Supersedes: the 2026-07-05 owner-locked "ungrounded Gemini first" ladder rule.
 Gemini is REMOVED from the decode ladder by owner decision (this session).
 
@@ -35,6 +36,19 @@ This is the target architecture for barcode decoding in the actual program.
 5. Go-UPC spend: **no app-side cap**. The 5,000/mo plan quota is the only limit.
    Usage is still counted locally for observability.
 6. Go-UPC misses are **negative-cached for 30 days** so rescans do not re-bill.
+7. Multi-barcode products (identity-merge, owner-selected 2026-07-08): when a decode
+   resolves a NEW code to a product that already exists in the catalog:
+   - **Exact canonical-GTIN match** (the decode result carries the same normalized
+     barcode an existing product already has): AUTO-LINK — the new code is saved as
+     an alias on the existing product and the scan counts against it. No duplicate
+     product row is ever created. Deterministic, no human needed.
+   - **Fuzzy identity match** (same normalized brand + high name similarity, but no
+     shared barcode): SUGGESTION — a one-tap "link to existing product?" item in
+     Needs Review. Never auto-merged, because near-identical variants (same tire in
+     a different size, 32 oz vs 64 oz) must not silently combine counts.
+   - Result: scanning a product's UPC and its vendor SKU label yields ONE product
+     row counted twice, not two rows — after at most one human tap for non-GTIN
+     links, permanent via the alias table thereafter.
 
 ## Go-UPC API contract (read from https://go-upc.com/docs, 2026-07-08)
 
@@ -98,6 +112,12 @@ scan
   harvested Go-UPC fields: name, brand, description, imageUrl, category, specs.
 - Every corpus row saved by this pipeline carries `source: "go-upc" | "gpt" | "human"`
   so bad data can later be traced and purged by origin.
+- **Identity-merge on corpus save**: before creating a product row from any decode
+  result, look up existing products by canonical GTIN (Go-UPC returns `product.upc`
+  / `product.ean`; GPT results carry their reported barcode). Exact GTIN match ->
+  attach the scanned code as a new alias on the existing product and count there
+  (never a duplicate row). No GTIN match but same normalized brand + high name
+  similarity -> "link to existing product?" suggestion in Needs Review.
 
 ## Error handling
 
@@ -137,6 +157,10 @@ scan
     triggers GPT, inferred hit routes to Needs Review AND does not call GPT,
     code-type gate skips vendor labels, negative cache prevents second call,
     transient failures are not negative-cached
+  - identity-merge: decode result whose GTIN matches an existing product attaches
+    an alias and increments that product (no duplicate row); fuzzy brand+name match
+    produces a link suggestion, never an auto-merge; scanning UPC then SKU of the
+    same product ends at quantity 2 on one row
   - keySafety: `GO_UPC_API_KEY` never readable client-side
 - E2E (Playwright, `page.route` mock, `IS_E2E=1`): unknown code -> Go-UPC-decoded
   product auto-counted on the feed; inferred -> Needs Review with suggestion;
