@@ -23,6 +23,20 @@ afterEach(() => {
   delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER;
 });
 
+describe("NeedsReviewTable - Barcode column visible to all roles (Task 4)", () => {
+  it("shows a Barcode column header and the code text for a non-platformOwner role", () => {
+    delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER;
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "bc1", cleanCode: "086699998538", status: "open", syncStatus: "pending" }),
+      ],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.getByText("Barcode")).not.toBeNull();
+    expect(screen.getByText("086699998538")).not.toBeNull();
+  });
+});
+
 describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
   it("hides an item that is resolved AND synced, keeps open items", () => {
     useScanStore.setState({
