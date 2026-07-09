@@ -1,18 +1,18 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // firebase-admin + better-sqlite3 use native deps + dynamic requires; keep them external so Vercel
-  // loads them from node_modules at runtime. firebase-admin/auth jwks-rsa -> jose(ESM) `require()` is
-  // fixed via patch-package (patches/jwks-rsa+4.0.1.patch).
-  serverExternalPackages: ["firebase-admin", "better-sqlite3"],
+  // Native-dep / dynamic-require packages must stay external so Vercel loads them from node_modules
+  // at runtime instead of bundling them (which breaks their runtime resolution):
+  //   - firebase-admin: native deps; jwks-rsa->jose(ESM) `require()` fixed via patch-package.
+  //   - better-sqlite3: native module (local-dev SQLite only).
+  //   - @libsql/client: the Turso driver (dynamic import in retailKnowledgeIndex.getTursoClient).
+  //     Without this it failed to load on Vercel, so BOTH the retail and tire corpora silently fell
+  //     through to paid AI (2026-07-09). External-izing it makes the Turso corpus lookups work.
+  serverExternalPackages: ["firebase-admin", "better-sqlite3", "@libsql/client"],
 
-  // The gzipped SQLite knowledge DB (knowledge.generated.db.gz) is gitignored and is NOT deployed
-  // to Vercel, so getKnowledgeDb() always returns null in production. Ship the committed tire JSON
-  // (barcodeIndex/partNumberIndex) instead so the in-memory JSON fallback in tireKnowledgeIndex.ts
-  // has its data file in the function bundle.
-  outputFileTracingIncludes: {
-    "/api/ai-lookup": ["./src/server/tire-knowledge/tireKnowledge.generated.json"],
-  },
+  // NOTE: the tire corpus is now served from Turso (table `tires`) like retail, so we no longer
+  // bundle the 68MB tireKnowledge.generated.json into the function (it is .vercelignored). The old
+  // outputFileTracingIncludes for that JSON was removed with the move to Turso.
 };
 
 export default nextConfig;
