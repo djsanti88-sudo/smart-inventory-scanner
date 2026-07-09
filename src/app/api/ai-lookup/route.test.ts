@@ -806,6 +806,54 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
   });
 
+  // Task 8: the status endpoint must tell the truth about the decode ladder. Gemini is permanently
+  // OUT of decode (corpus -> Go-UPC -> Fetch V2 -> GPT only); geminiConfigured/geminiEnabled/
+  // geminiModel stay in the response (Settings + refreshAiStatus read them, removal would silently
+  // disable autoDecode), but new honest fields make the real ladder order and Gemini's non-role
+  // explicit so the Settings UI can stop implying Gemini participates in decode.
+  describe("GET status: decode ladder truth (Task 8)", () => {
+    const mkGet = () => new Request("http://localhost/api/ai-lookup", { headers: { "x-forwarded-for": "8.8.8.8" } });
+
+    it("reports the real decode ladder order: corpus, go_upc, fetch_v2, gpt", async () => {
+      const res = await GET(mkGet());
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.decodeLadder).toEqual(["corpus", "go_upc", "fetch_v2", "gpt"]);
+    });
+
+    it("reports geminiUsedForDecode: false (Gemini is enrichment only, never decode)", async () => {
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.geminiUsedForDecode).toBe(false);
+    });
+
+    it("still reports geminiUsedForDecode: false even when GEMINI_API_KEY is configured", async () => {
+      process.env.GEMINI_API_KEY = "test-gemini-key";
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.geminiUsedForDecode).toBe(false);
+    });
+
+    it("keeps existing fields intact alongside the new ones (no removal/rename)", async () => {
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(typeof json.geminiEnabled).toBe("boolean");
+      expect(typeof json.geminiConfigured).toBe("boolean");
+      expect(typeof json.geminiModel).toBe("string");
+      expect(typeof json.openaiConfigured).toBe("boolean");
+      // Task 1's daily counter must already be present and not duplicated by this task.
+      expect(json.daily).toBeDefined();
+      expect(typeof json.daily.used).toBe("number");
+      expect(typeof json.daily.limit).toBe("number");
+    });
+
+    it("GET remains side-effect-free: repeated GETs do not move the daily counter", async () => {
+      const first = await (await GET(mkGet())).json();
+      const second = await (await GET(mkGet())).json();
+      expect(second.daily.used).toBe(first.daily.used);
+    });
+  });
+
   // --- Task T8b: Plan D's non-verified floor/suggestion must NOT be terminal for public barcodes ----
   // CONFIRMED BUG (live proof T19 + code read): Plan D's generic "Unidentified item" floor was returned
   // immediately for every public barcode, so the spec-v6 ladder (Go-UPC -> Fetch V2 -> GPT-5.5) was
