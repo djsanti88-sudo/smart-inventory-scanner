@@ -239,6 +239,22 @@ function isWeakGuess(review: UnknownCodeReview, np: Partial<Product>): boolean {
   return acceptingSuggestion && !suggestionHasRealEvidence;
 }
 
+/**
+ * The exact SAME safe, non-hallucinated placeholder label `ensureProvisionalCount` mints for an
+ * unresolved code ("Unidentified item (barcode/code CODE)", or a prefix-floor brand guess when the GS1
+ * prefix maps to a known brand). Pure function of the code alone, so it can be recomputed later purely
+ * from `review.cleanCode` - used as a reload-resilient fallback to re-identify a scan's own provisional
+ * placeholder product when its `provisional` flag and identifier fields (primaryBarcode/gtin/upc/ean/
+ * primarySku) were stripped by the customer-role localStorage split (buildPersistedScanState /
+ * CUSTOMER_SAFE_PRODUCT_FIELDS never persists those product-identity fields to a customer's disk).
+ */
+function provisionalPlaceholderName(code: string): string {
+  const ct = detectCodeType(code);
+  const struct = decodeBarcodeStructure(code, ct);
+  const floor = prefixFloorName(code, ct);
+  return floor ? floor.name : struct.checkDigitValid ? `Unidentified item (barcode ${code})` : `Unidentified item (code ${code})`;
+}
+
 // The local optimistic session store. Known scans update this store immediately - the UI never
 // waits on a server round-trip. Sync to the (mock) backend happens AFTER the user sees feedback,
 // using idempotency keys so a retry can never double-count.
@@ -2360,18 +2376,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         );
         if (existing) return;
         // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
-        // anatomy here (no decode response). checkDigitValid only tags whether it is a structurally-valid
-        // public barcode vs any other code; either way the label is non-hallucinated.
-        // PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a known brand, in which case the
-        // row states the brand with confidence and flags the product unconfirmed - see prefixFloorName.
+        // anatomy here (no decode response). PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a
+        // known brand, in which case the row states the brand with confidence and flags the product
+        // unconfirmed - see prefixFloorName. Label text comes from the shared provisionalPlaceholderName
+        // helper so resolveUnknown's reload-resilient provOrphanId fallback can reconstruct the identical
+        // name purely from the code, even after the customer persist split strips this row's identity fields.
         const ct = detectCodeType(code);
-        const struct = decodeBarcodeStructure(code, ct);
         const floor = prefixFloorName(code, ct);
-        const fbName = floor
-          ? floor.name
-          : struct.checkDigitValid
-            ? `Unidentified item (barcode ${code})`
-            : `Unidentified item (code ${code})`;
+        const fbName = provisionalPlaceholderName(code);
         const provId = `prod-${idFactory()}`;
         const provProduct: Product = {
           id: provId, businessId: st0.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
@@ -2706,7 +2718,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku]
                 .map((c) => (c ?? "").trim())
                 .includes(review.cleanCode),
-          )?.id ?? null;
+          )?.id ??
+          // RELOAD-RESILIENT FALLBACK (count-correctness fix): a customer's localStorage persist strips a
+          // product's `provisional` flag AND its identifier fields (primaryBarcode/gtin/upc/ean/primarySku -
+          // CUSTOMER_SAFE_PRODUCT_FIELDS never persists them; see scanPersist.ts / sensitiveFields.ts). After
+          // a real reload, the strict match above can never find the scan's own provisional placeholder
+          // again, so resolving the review used to fall through to the generic dedup/mint branches, leaving
+          // the placeholder's count permanently orphaned instead of merged into the resolved product. The
+          // placeholder's auto-generated NAME is a pure function of the code alone (provisionalPlaceholderName,
+          // shared with ensureProvisionalCount) and survives the persist split, so it is a safe, reload-
+          // resilient way to re-identify the SAME row - scoped to a product that is still actively counted
+          // (never a markWrong'd/archived row) and exactly matches the label this code's own placeholder
+          // would have been given.
+          state.products.find(
+            (p) =>
+              countedIdsForOrphan.has(p.id) &&
+              p.status !== "archived" &&
+              p.name === provisionalPlaceholderName(review.cleanCode),
+          )?.id ??
+          null;
         let removeOrphanId: string | null = null;
         let orphanTransferTargetId: string | null = null;
 
