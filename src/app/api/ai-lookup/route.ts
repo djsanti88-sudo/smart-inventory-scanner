@@ -1,4 +1,4 @@
-import type { AiLookupResult, EvidenceResult } from "@/types";
+import type { AiLookupResult, EvidenceResult, DecodeDecision } from "@/types";
 import { type AiProvider, emptyResult } from "@/services/ai/provider";
 import { mockProvider } from "@/services/ai/mockProvider";
 import { createGeminiProvider } from "@/services/ai/geminiProvider";
@@ -6,52 +6,42 @@ import { createOpenAiProvider } from "@/services/ai/openaiProvider";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { formatGs1Hint } from "@/services/gs1Prefixes";
-import { enrichWithPageFetch } from "@/services/ai/pageFetch";
-import { runDecode, type DecodeProvider, type ProviderStatus } from "@/services/ai/decodeOrchestrator";
-import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
+import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
 import { decideDecode, isUsableProductName } from "@/services/ai/decode";
-import { discoverViaFirecrawl, firecrawlScrapeCheap, searchIdentifyByBarcode } from "@/services/ai/firecrawlProvider";
+import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { prefixFloorName } from "@/services/catalog/prefixFloor";
-import { filterSafeUrls } from "@/services/ai/urlSafety";
-import { shouldRunFallback, decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
-import { raceFinders, type Finder } from "@/services/ai/fallbackRunner";
+import { decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
-import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
-import { lookupPrefix, recordLearnedPrefix, candidateKnownPrefixes } from "@/services/catalog/prefixIndex";
+import { lookupPrefix, candidateKnownPrefixes } from "@/services/catalog/prefixIndex";
 import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
-import { isLearnablePrefix } from "@/services/catalog/prefixLearning";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { groundedSpecFind } from "@/services/ai/groundedSpecFinder";
-import { runSizeRace } from "@/services/ai/sizeRace";
-import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall, getGptLadderStatus } from "@/services/security/aiSpendGuard";
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
 import { shouldRunGptRung, gptResultToDecodePayload } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
 import { goUpcUsage } from "@/server/upc/goUpcUsage";
 import { fileLadderStorage } from "@/server/upc/storage";
+import { goUpcRung, makeDefaultPrefixLookup } from "@/server/upc/GoUpcProvider";
+import { goUpcLookup } from "@/services/upc/goUpcClient";
+import { GoUpcGate } from "@/services/upc/goUpcThrottle";
+import tirePrefixMap from "@/services/catalog/tirePrefixMap.generated.json";
+import { fetchV2, type FetchV2Deps, type FetchedPage } from "@/services/fetchV2/index";
+import { FetchV2Cache } from "@/services/fetchV2/cache";
+import { braveProvider, firecrawlSearchProvider, type DiscoveryProvider, type MinimalFetch } from "@/services/fetchV2/sources/discovery";
+import { brocadeLookup } from "@/services/fetchV2/sources/brocade";
+import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
+import { isSafePublicUrl } from "@/services/ai/urlSafety";
+import { runLadder, buildLadderRungs, type RungOutcome } from "@/server/upc/ladder";
 
-// Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
-// parallel fallback. Each value is env-overridable.
-// Background deep fallback (mode "decode-deep" ONLY) caps. Owner cost rule: keep the whole deep search
-// <= ~15s (was 30s) so it can't run away on tokens. The synchronous live scan NEVER runs this fallback.
-const FALLBACK_AI_TIMEOUT_MS = Number(process.env.FALLBACK_AI_TIMEOUT_MS || 12_000); // grounded AI re-run
-const FALLBACK_HARD_CAP_MS = Number(process.env.FALLBACK_HARD_CAP_MS || 15_000); // whole-fallback ceiling
-const FALLBACK_PAGE_TIMEOUT_MS = Number(process.env.FALLBACK_PAGE_TIMEOUT_MS || 10_000);
-const FIRECRAWL_MAX_SCRAPE = Number(process.env.FIRECRAWL_MAX_SCRAPE || 6);
-// Firecrawl open-web fallback is OFF by default: it currently errors instantly (wasting a reserved
-// credit + a finder slot); we lean on free Gemini grounding instead. Set ENABLE_FIRECRAWL=1 to re-enable.
-const FIRECRAWL_ENABLED = process.env.ENABLE_FIRECRAWL === "1";
-
-// Owner cost rule: the SYNCHRONOUS live decode (what the user waits on every scan) defaults to an 8s
-// budget and is clamped to a hard 8s ceiling (clampDecodeBudgetMs / DECODE_BUDGET_MAX_MS).
-const DECODE_BUDGET_MS = Number(process.env.DECODE_BUDGET_MS || 8_000);
+// NOTE (spec v6): the legacy deep-fallback budget constants (FALLBACK_*, FIRECRAWL_MAX_SCRAPE,
+// FIRECRAWL_ENABLED) and the synchronous DECODE_BUDGET_MS clamp were removed with the legacy
+// Gemini/OpenAI fast-path + deep-fallback stage. Fetch V2 owns its own time budget (FETCHV2_MAX_TOTAL_MS).
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env.
@@ -66,6 +56,22 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 // ladder rung (capped, fully meterable) is the only paid decode engine. This gates the Gemini
 // fast/escalation providers AND the Plan D flash-lite grounding arm. Flip to false to restore.
 const GEMINI_DECODE_DISABLED = true;
+
+// MODULE-LEVEL Go-UPC gate: ONE instance per server process so the 2 req/s throttle + in-flight
+// dedup span every request (a per-request gate would let concurrent scans of the same code each
+// spend a lookup). Pure + framework-free; safe as a singleton (no env, no fs).
+const goUpcGate = new GoUpcGate();
+// Prefix owner lookup for the Go-UPC brand firewall: tire prefix map first, then the general derived
+// single-brand map (inside makeDefaultPrefixLookup). Absence never blocks a hit.
+const goUpcPrefixLookup = makeDefaultPrefixLookup(tirePrefixMap as Record<string, string>);
+
+// Fetch V2 verified-result cache, one per server process (in-memory; a durable layer is a later
+// decision). Reused across scans so a repeated code never re-crawls the web within an instance.
+const fetchV2Cache = new FetchV2Cache();
+
+const FETCHV2_MAX_SOURCES = Number(process.env.FETCHV2_MAX_SOURCES || 3);
+const FETCHV2_MAX_TOTAL_MS = Number(process.env.FETCHV2_MAX_TOTAL_MS || 25_000);
+const FETCHV2_PAGE_TIMEOUT_MS = Number(process.env.FETCHV2_PAGE_TIMEOUT_MS || 8_000);
 
 // Server-side AI endpoint. Keys live in env and never reach the client. Two modes:
 //   - "lookup": single-provider suggestion (back-compat).
@@ -109,28 +115,9 @@ function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, 
 
 export const dynamic = "force-dynamic";
 
-// url-only evidence (the exact code appears ONLY in a source URL, never confirmed in page text) is
-// trusted ONLY from these authoritative GS1 registries. Deliberately NOT expanded to crowd barcode DBs
-// (upcitemdb / go-upc / barcodespider / barcodelookup): those build the URL FROM the scanned code
-// (/upc/<code>, /search?q=<code>) and serve a page for ANY code - even unregistered/not-found ones - so
-// "the code is in the URL" there carries ZERO evidentiary value and would make every scan look "verified",
-// defeating the evidence gate. Trust for those hosts must come from fetched_source instead: the app opens
-// the candidate page, confirms the exact code in the REAL page text, and rejects "product not found" pages
-// (see enrichWithPageFetch + looksLikeNotFound). gs1.org/gtin.info only return a page when a GTIN is
-// actually registered, so url_only from them is sound.
-// OPTION 3 (owner): trusted hosts where a url_only match (the exact code appears in the URL) counts as
-// app-verified. GS1 registries + the major barcode databases + the big online retailers - per owner "Gemini
-// found the code on Amazon = that's all it takes for Sam's/Walmart/an online retailer". A url_only match
-// from ANY OTHER host stays weak (-> Suggested, not Verified). The brand-prefix firewall + 0.8 + the
-// non-public setting still gate every auto-count, so a wrong host can never alone force a count.
-const TRUSTED_HOSTS = [
-  "gs1.org", "gtin.info",
-  // barcode databases
-  "go-upc.com", "upcitemdb.com", "barcodelookup.com", "barcodespider.com", "eandata.com", "ean-search.org", "buycott.com",
-  // major online retailers
-  "amazon.com", "walmart.com", "samsclub.com", "target.com", "costco.com", "bestbuy.com", "homedepot.com",
-  "lowes.com", "kroger.com", "ebay.com", "chewy.com", "wayfair.com",
-];
+// NOTE (spec v6): TRUSTED_HOSTS (the url_only trust allowlist for the legacy runDecode orchestrator)
+// was removed with that stage. Fetch V2 owns its own source scoring/junk gates; Go-UPC is a
+// deterministic keyed API (not url_only). Restore here if a future rung needs a url_only allowlist.
 
 function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
@@ -201,47 +188,47 @@ function lookupChain(primary: string): AiProvider[] {
   return chain;
 }
 
-function decodeProviders(pro = false): AiProvider[] {
-  if (e2eMode()) return [mockProvider];
-  const chain: AiProvider[] = [];
-  // OWNER BASELINE (v1): Gemini Flash runs the FAST first pass ALONE - the loved 1-2s decode. ChatGPT
-  // (OpenAI) is NOT run in parallel; it is the ESCALATION (escalationProviders) called ONLY when Gemini's
-  // fast pass finds nothing. The pro path (proRecheck correction) still uses both strongest models.
-  if (!GEMINI_DECODE_DISABLED && process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: pro ? GEMINI_DECODE_MODEL : GEMINI_FAST_MODEL }));
-  if (pro && process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: OPENAI_DECODE_MODEL }));
-  if (chain.length === 0) chain.push(mockProvider);
-  return chain;
+// NOTE (spec v6, 2026-07-08): the legacy decode-path provider builders (decodeProviders /
+// escalationProviders) and the page-reader factory (pageReader) are DELETED. The decode ladder is
+// now Go-UPC -> Fetch V2 -> GPT-5.5 (see the POST handler); Gemini is out of decode entirely. The
+// legacy `lookup` mode still uses createGeminiProvider via selectProvider/lookupChain (back-compat).
+
+// ---- Fetch V2 rung wiring (server-side) ----------------------------------------------------------
+
+// A lean safe page fetcher for the Fetch V2 rung: SSRF-guarded (isSafePublicUrl), timed out, and
+// size-bounded. Any failure resolves to a not-ok page (never throws into the scan). Mirrors the
+// benchmark's directFetch, minus the host-cooldown bookkeeping (the FetchV2Cache marks bad URLs).
+const FETCHV2_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+async function fetchV2Page(url: string): Promise<FetchedPage> {
+  if (!isSafePublicUrl(url)) return { ok: false, status: 0, html: "" };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCHV2_PAGE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": FETCHV2_UA, Accept: "text/html" },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    if (!res.ok) return { ok: false, status: res.status, html: "" };
+    const html = (await res.text()).slice(0, 400_000);
+    return { ok: true, status: res.status, html };
+  } catch {
+    return { ok: false, status: 0, html: "" };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-// ESCALATION pass: runs ONLY when the Gemini fast pass found no usable product (the ~1-2/20 Gemini
-// whiffs). ChatGPT mini first (owner-chosen GPT-5 mini fallback), then a Gemini retry in the longer
-// window. A single verified hit here auto-counts under the same any-source rule. Sequential, not parallel:
-// a normal Gemini hit never spends an OpenAI call.
-function escalationProviders(): AiProvider[] {
-  if (e2eMode()) return [mockProvider];
-  const chain: AiProvider[] = [];
-  if (process.env.OPENAI_API_KEY) chain.push(createOpenAiProvider({ model: OPENAI_FAST_MODEL }));
-  if (!GEMINI_DECODE_DISABLED && process.env.GEMINI_API_KEY) chain.push(createGeminiProvider({ model: GEMINI_FAST_MODEL }));
-  if (chain.length === 0) chain.push(mockProvider);
-  return chain;
-}
-
-// Reading fetched page text is easy work - use a FAST model so a decode isn't minutes long.
-const OPENAI_READ_MODEL = process.env.OPENAI_READ_MODEL || "gpt-5-mini";
-
-/** Read fetched page text with a model (no web search - it just reads the text we hand it). */
-function pageReader(): ((pageText: string, code: string) => Promise<Partial<AiLookupResult>>) | undefined {
-  if (e2eMode()) return undefined;
-  const provider = process.env.OPENAI_API_KEY
-    ? createOpenAiProvider({ model: OPENAI_READ_MODEL, disableSearch: true, label: "openai:read" })
-    : process.env.GEMINI_API_KEY
-      ? createGeminiProvider({ model: GEMINI_FAST_MODEL, disableSearch: true, label: "gemini:read" })
-      : null;
-  if (!provider) return undefined;
-  return async (pageText: string, code: string, signal?: AbortSignal) => {
-    const ctx = `Text fetched from product/barcode pages for code ${code}:\n${pageText.slice(0, 16000)}`;
-    return provider.lookup({ rawCodeSanitized: code, cleanCodeSanitized: code, contextSanitized: ctx }, signal);
-  };
+/** Build the Fetch V2 discovery providers from configured keys. Brave + Firecrawl only WHEN keyed;
+ *  a code with no discovery keys still runs the free structured + pattern-URL doors. */
+function fetchV2Discovery(): DiscoveryProvider[] {
+  const providers: DiscoveryProvider[] = [];
+  const braveKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (braveKey) providers.push(braveProvider({ apiKey: braveKey, fetchImpl: fetch as unknown as MinimalFetch }));
+  const fcKeys = firecrawlKeysFromEnv();
+  if (fcKeys.length > 0) providers.push(firecrawlSearchProvider({ apiKeys: fcKeys, fetchImpl: fetch as unknown as MinimalFetch }));
+  return providers;
 }
 
 // GET reports which keys/flags are configured. NO secrets are returned (booleans + names only),
@@ -403,16 +390,9 @@ export async function POST(request: Request) {
   }
 
   if (isDecodeMode) {
-    // Task 4/5: the tire hot path issues NO synchronous deep/Firecrawl call. The deep path stays
-    // reachable for the client: it sends mode "decode-deep" (or "decode" with deep:true) to opt INTO
-    // the existing multi-stage deep/Firecrawl orchestration and SKIP the tire hot path below.
-    const deepRequested = body.mode === "decode-deep" || body.deep === true;
     const threshold = body.confidenceThreshold ?? 0.8;
     // Option 3 (owner): non-public codes auto-verify from a single trusted source unless explicitly disabled.
     const allowNonPublicAutoCount = body.autoCountNonPublicWithEvidence !== false;
-    // The budget may be owner-configured and arrives from the client - clamp it server-side so a
-    // client can never request an abusive (e.g. 10-minute) decode. Falls back to the env default.
-    const budgetMs = clampDecodeBudgetMs(body.budgetMs, DECODE_BUDGET_MS);
 
     // L2 PERSISTENT DECODE CACHE (Task 4): consulted on an L1 miss, BEFORE the daily cap check below -
     // same guard window as the existing L1 peek, so a persisted "result" OR a permanent
@@ -464,7 +444,6 @@ export async function POST(request: Request) {
       }
     }
 
-    const reader = pageReader();
     const firecrawlKey = process.env.FIRECRAWL_API_KEY;
 
     // GPT-5.5 LADDER RUNG, SHARED HELPER (Task 3b): the paid END of the decode ladder must be
@@ -695,274 +674,245 @@ export async function POST(request: Request) {
         }
       }
 
-      // PREFIX detection for tire scan context (used by the AI decode path below for brand hints
-      // and tire-specific decideDecode). The corpus check above already handles exact barcode hits
-      // instantly — corpus misses fall through to the AI decode with the normal 8s budget.
-      const prefixMatch = lookupTirePrefix(code);
-      const anchorBrand = prefixMatch ? (prefixMatch.brands.find((b) => b.weight === "strong")?.brand ?? null) : null;
-      const isTireScan = !!prefixMatch;
+      // ===== DECODE LADDER (spec v6): Go-UPC -> Fetch V2 -> GPT-5.5 =====================================
+      // Replaces the legacy Gemini/OpenAI fast-path + deep-fallback stage entirely. Gemini is REMOVED
+      // from decode (owner order 2026-07-06). Order + short-circuit are owned by runLadder (pure): the
+      // first rung that SETTLES (verified OR a suggestion) stops the ladder; a miss/unavailable records
+      // its reason and falls through. Non-GTIN codes skip the Go-UPC rung (gate in buildLadderRungs).
+      //
+      // Every settled rung produces a self-contained decode payload (results/evidences/providerNames/
+      // providerStatuses/decision/reasonCode/reasonText) so the response assembly below is uniform.
+      type LadderPayload = {
+        results: AiLookupResult[];
+        evidences: EvidenceResult[];
+        providerNames: string[];
+        providerStatuses: ProviderStatus[];
+        decision: DecodeDecision;
+        reasonCode: string;
+        reasonText: string;
+      };
 
-      // FAST PATH - CONCURRENT, HARD ~13s BUDGET. Providers + page-fetch race under one budget signal.
-      // On timeout the orchestrator aborts everything and returns Needs Review (never a partial).
-      const baseProviders = decodeProviders(body.proRecheck === true); // fast = Gemini only; pro = both strongest
-      const providers: DecodeProvider[] = baseProviders.map((p) => ({
-        name: p.name,
-        lookup: (signal) => p.lookup(req, signal),
-      }));
-      // Escalation providers (ChatGPT mini first) - used ONLY by the on-miss Stage-2 finder below, so a
-      // normal Gemini hit never calls OpenAI. proRecheck keeps its strongest-model set.
-      const escBase = body.proRecheck === true ? baseProviders : escalationProviders();
-      const escProviders: DecodeProvider[] = escBase.map((p) => ({
-        name: p.name,
-        lookup: (signal) => p.lookup(req, signal),
-      }));
-      // Phase 9: enable PATH-2 corroboration (page-fetch + one independent model read agree) for tire
-      // scans, so an accurate tire whose grounded providers lost the race can still auto-count safely.
-      const corroborate = body.scanContext === "tire";
-      const enrich = e2eMode()
-        ? undefined
-        : (signal: AbortSignal) => enrichWithPageFetch({ code, codeType, extract: reader, signal, corroborate });
+      // Accumulated across rungs so the final debug/receipt logic can read them.
+      type GptLadderOutcome = { payload: ReturnType<typeof gptResultToDecodePayload>; skipReason?: string; surfaceSkip: boolean };
+      let gptLadderResult: GptLadderOutcome | null = null;
+      // Read helper (function boundary defeats TS control-flow over-narrowing: gptLadderResult is
+      // assigned inside the runGpt closure, which CFA cannot see from the synchronous read site).
+      const gptSkipReason = (): string | undefined => {
+        const g = gptLadderResult;
+        return g && !g.payload ? g.skipReason : undefined;
+      };
+      const ladderProviderStatuses: ProviderStatus[] = [];
 
-      // SIZE RACE (PATH 3 setup): run groundedSpecFind (Arm A) concurrently with runDecode (which
-      // internally runs enrichWithPageFetch as Arm B). Neither arm is the other - these are genuinely
-      // different Internet roads (grounded Gemini search vs barcode-DB page fetch). sizeAgreement is
-      // set ONLY from this app-computed race result - NEVER from any provider's self-claim.
-      const [run, groundedForRace] = await Promise.all([
-        runDecode({ code, codeType, confidenceThreshold: threshold, providers, enrich, budgetMs, trustedHosts: TRUSTED_HOSTS }),
-        // groundedSpecFind is Gemini google_search grounding - gated off with the rest of Gemini
-        // (owner order 2026-07-06); null degrades the size race to Arm B only, its documented miss.
-        e2eMode() || GEMINI_DECODE_DISABLED ? Promise.resolve(null) : groundedSpecFind({ code, codeType, anchorBrand }).catch(() => null),
-      ]);
-
-      let results = run.results;
-      let evidences = run.evidences;
-      let providerNames = run.providerNames;
-      let providerStatuses = run.providerStatuses;
-
-      // ESCALATION ON FAST-PATH FAILURE: when Gemini (the only fast-path provider) returns a hard
-      // error (rate_limited, error) with zero usable results, immediately run the escalation
-      // providers (OpenAI) within the same live request. This preserves the baseline rule "a normal
-      // Gemini hit never spends an OpenAI call" while ensuring a dead Gemini (spending cap, outage)
-      // doesn't send every scan to Needs Review with no suggestion.
-      // Escalation triggers when the fast path produced ZERO usable results: either all providers
-      // hard-failed (rate_limited/error), OR the budget timed out before any provider found a product.
-      // This ensures a dead/slow Gemini always falls through to OpenAI instead of silently routing
-      // to Needs Review with no suggestion.
-      const hasUsableResult = results.some((r) => isUsableProductName(r.productName));
-      const fastPathFailed = !hasUsableResult
-        && providerStatuses.length > 0
-        && providerStatuses.every((s) => s.status !== "ok" || !s.identityFound);
-      if (fastPathFailed && !e2eMode()) {
-        // The escalation budget is INDEPENDENT of the fast-path budget. When the fast path's only
-        // provider (Gemini) is dead, we give OpenAI a fresh 20s window — not the leftover from the
-        // 8s clamp. This is the only path where a live scan can exceed 8s; it only fires when the
-        // primary provider hard-failed (spending cap, outage), never on a normal slow decode.
-        const ESCALATION_BUDGET_MS = Number(process.env.ESCALATION_BUDGET_MS || 20_000);
-        const escRun = await runDecode({
-          code, codeType, confidenceThreshold: threshold,
-          providers: escProviders,
-          enrich: enrich ? (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, corroborate }) : undefined,
-          budgetMs: ESCALATION_BUDGET_MS,
-          providerTimeoutMs: ESCALATION_BUDGET_MS - 2_000, // give each provider nearly the full budget
-          trustedHosts: TRUSTED_HOSTS,
+      // ---- Rung 1: Go-UPC (GTIN codes only; gated in buildLadderRungs) --------------------------------
+      const runGoUpc = async (): Promise<RungOutcome> => {
+        // E2E MOCK MODE: live rungs are bypassed exactly like the legacy [mockProvider] path - E2E
+        // resolves only via the GPT rung's zero-network mockGptLadder fixture (or falls to Needs Review).
+        if (e2eMode()) return { settled: false, reason: "Go-UPC skipped (E2E mock mode)" };
+        const r = await goUpcRung(code, {
+          apiKey: process.env.GO_UPC_API_KEY,
+          client: (c, d) => goUpcLookup(c, d),
+          gate: goUpcGate,
+          usage: goUpcUsage(fileLadderStorage(process.cwd())),
+          storage: fileLadderStorage(process.cwd()),
+          prefixLookup: goUpcPrefixLookup,
         });
-        results = [...results, ...escRun.results];
-        evidences = [...evidences, ...escRun.evidences];
-        providerNames = [...providerNames, ...escRun.providerNames];
-        providerStatuses = [...providerStatuses, ...escRun.providerStatuses.map((s) => ({ ...s, provider: `esc:${s.provider}` }))];
-      }
-
-      // Arm A: grounded search size (from groundedSpecFind run concurrently above).
-      const armASize = tireSizeToken(groundedForRace?.result ?? null) || "";
-      // Arm B: page-fetch size - the page-fetch path (enrichWithPageFetch) sets fetchedSourceText on
-      // the result it produces; look for that first, then fall back to the first available result.
-      const pageFetchResult = results.find((r) => r.fetchedSourceText) ?? results[0] ?? null;
-      const armBSize = tireSizeToken(pageFetchResult) || "";
-      const sizeRace = await runSizeRace({
-        armAGetSize: async () => armASize,
-        armBGetSize: async () => armBSize,
-      });
-      // Set sizeAgreement on the first result (the one decideDecode reads as `a`). This is the app's
-      // computation - it is NEVER copied from a provider field. Provider self-claims are untrusted.
-      if (results.length > 0) results[0] = { ...results[0], sizeAgreement: sizeRace.sizeAgreement };
-
-      // Re-decide with the business scan context + scanned code so a deterministically-corroborated tire
-      // (strong brand-prefix family + full specs + app-verified exact code) can auto-count even from a
-      // single provider. Same inputs as the orchestrator otherwise; pure + cheap.
-      const fw0 = evalCombinedFirewall(code, results[0], evidences);
-      let prefixHint = fw0.hint;
-      let firewallReason = fw0.reason;
-      let brandPrefixAdvisory = fw0.brandPrefixAdvisory; // Plan C: advisory-only, non-blocking (reported, never blocks)
-      let brandPrefixConflict = fw0.conflict; // tracked across the fallback winner below - the GPT ladder rung at the end needs the LATEST value
-      let decision = decideDecode({ codeType, results, evidences, confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict, allowNonPublicAutoCount });
-      let fallbackFound = false;
-      let coverageMissed = false;
-      let firecrawlCreditsEstimated = 0; // best-effort, for benchmark/cost tracking (0 if Firecrawl never ran)
-      let firecrawlCandidates = 0;
-
-      const hasProduct = () => results.some((r) => isUsableProductName(r.productName));
-      // Owner cost rule: the SYNCHRONOUS live decode NEVER runs the deep Stage-2 fallback (that was the
-      // 30s hang + the token bleed). It runs ONLY for an explicit background "decode-deep" request.
-      const eligibleForFallback = deepRequested && shouldRunFallback({ hasProduct: hasProduct(), timedOut: run.timedOut, decisionStatus: decision.status, e2e: e2eMode() });
-
-      // STAGE 2 - DEEP, PARALLEL fallback. Runs ONLY when the fast path found no usable product (so a
-      // normal successful scan adds ZERO extra calls). Gemini grounded + OpenAI mini (deep 25s budget)
-      // and Firecrawl (6 safe candidates, parallel scrapes) RACE; the first VERIFIED + usable product
-      // wins and the losers are aborted. A hard cap bounds the whole thing (no 60s+ chains).
-      if (eligibleForFallback) {
-        const citedFromFast = filterSafeUrls(results.flatMap((r) => r.sourceUrls ?? []), 4);
-        const finders: Finder[] = [];
-
-        // Finder A: deep grounded AI re-run. Reuses the orchestrator (gemini + openai + page-fetch run
-        // concurrently) with a longer per-provider timeout and VERIFIED-only early-exit, then reads any
-        // URLs the deeper providers cited (the fast pass's providers had timed out before citing any).
-        if (reader) {
-          finders.push({
-            name: "ai-deep",
-            run: async (signal) => {
-              const deep = await runDecode({
-                code, codeType, confidenceThreshold: threshold, providers: escProviders,
-                enrich: (s) => enrichWithPageFetch({ code, codeType, extract: reader, signal: s, extraUrls: citedFromFast, corroborate }),
-                budgetMs: FALLBACK_AI_TIMEOUT_MS + 5_000,
-                providerTimeoutMs: FALLBACK_AI_TIMEOUT_MS,
-                pageTimeoutMs: FALLBACK_PAGE_TIMEOUT_MS,
-                trustedHosts: TRUSTED_HOSTS,
-                requireVerifiedEarlyExit: true,
-              });
-              providerStatuses = [...providerStatuses, ...deep.providerStatuses.map((s) => ({ ...s, provider: `deep:${s.provider}` }))];
-              const i = deep.results.findIndex((r, idx) => isUsableProductName(r.productName) && deep.evidences[idx]?.verified);
-              if (i >= 0) return { result: deep.results[i], evidence: deep.evidences[i], providerName: deep.providerNames[i] ?? "ai-deep" };
-              const freshCited = filterSafeUrls(deep.results.flatMap((r) => r.sourceUrls ?? []), 4).filter((u) => !citedFromFast.includes(u));
-              if (freshCited.length && !signal.aborted) {
-                const fb = await enrichWithPageFetch({ code, codeType, extraUrls: freshCited, extract: reader, signal, corroborate });
-                if (fb.result && isUsableProductName(fb.result.productName) && fb.evidence.verified) {
-                  return { result: fb.result, evidence: fb.evidence, providerName: "ai-cited-deep" };
-                }
-              }
-              return null;
-            },
-          });
+        ladderProviderStatuses.push({
+          provider: "go-upc",
+          status: r.path === "goupc_exact" || r.path === "goupc_inferred" || r.path === "goupc_prefix_conflict" ? "ok" : "skipped",
+          latencyMs: 0,
+          sourceUrlsReturned: 0,
+          exactCodeFound: r.path === "goupc_exact",
+          identityFound: !!r.results?.length,
+          errorCode: r.path === "goupc_unavailable" || r.path === "goupc_miss" ? r.reason : undefined,
+        });
+        if (r.path === "goupc_exact" && r.decision) {
+          return {
+            settled: true,
+            reason: r.reason,
+            payload: {
+              results: r.results ?? [],
+              evidences: [{ verified: true, strength: "fetched_source", matchedCode: code, matchedSources: ["go-upc"], reason: "Go-UPC exact barcode match" }],
+              providerNames: ["go-upc"],
+              providerStatuses: [...ladderProviderStatuses],
+              decision: r.decision,
+              reasonCode: "ok",
+              reasonText: "",
+            } satisfies LadderPayload,
+          };
         }
-
-        // Finder B: Firecrawl open-web discovery (6 safe candidates, scraped in PARALLEL). OFF by default
-        // (set ENABLE_FIRECRAWL=1) - it currently errors instantly and wastes a reserved credit.
-        if (FIRECRAWL_ENABLED && firecrawlKey) {
-          const key = firecrawlKey;
-          finders.push({
-            name: "firecrawl",
-            run: async (signal) => {
-              // RESERVE worst-case credits up front so the fallback hard-cap can never hide Firecrawl
-              // spend from the cost guard (safe to over-count; refined down to actual after it returns).
-              firecrawlCreditsEstimated = 1 + FIRECRAWL_MAX_SCRAPE;
-              firecrawlCandidates = FIRECRAWL_MAX_SCRAPE;
-              const disc = await discoverViaFirecrawl(code, codeType, { apiKey: key, signal }, { maxScrape: FIRECRAWL_MAX_SCRAPE });
-              providerStatuses = [...providerStatuses, { provider: "firecrawl", status: disc.status, latencyMs: disc.latencyMs, sourceUrlsReturned: disc.searchCount, exactCodeFound: !!disc.result, identityFound: !!disc.result }];
-              firecrawlCandidates = disc.searchCount;
-              // Actual credits if the API reported them, else estimate 1 search + 1 per candidate opened.
-              firecrawlCreditsEstimated = disc.creditsUsed > 0 ? disc.creditsUsed : 1 + disc.searchCount;
-              if (disc.coverageMissed) coverageMissed = true;
-              if (disc.result) return { result: disc.result, evidence: disc.evidence, providerName: "firecrawl" };
-              return null;
-            },
-          });
-        } else {
-          providerStatuses = [...providerStatuses, { provider: "firecrawl", status: "skipped", latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false }];
+        if ((r.path === "goupc_inferred" || r.path === "goupc_prefix_conflict") && r.decision) {
+          return {
+            settled: true,
+            reason: r.reason,
+            payload: {
+              results: r.results ?? [],
+              evidences: [{ verified: false, strength: "snippet", matchedCode: code, matchedSources: ["go-upc"], reason: r.reason }],
+              providerNames: ["go-upc"],
+              providerStatuses: [...ladderProviderStatuses],
+              decision: r.decision,
+              reasonCode: "needs_review",
+              reasonText: r.reason,
+            } satisfies LadderPayload,
+          };
         }
+        // goupc_miss / goupc_unavailable: fall through, reason recorded.
+        return { settled: false, reason: r.reason };
+      };
 
-        if (finders.length > 0) {
-          const outcome = await raceFinders(finders, { hardCapMs: FALLBACK_HARD_CAP_MS });
-          if (outcome.hit) {
-            // Apply the same app-computed sizeAgreement from the race to the fallback winner before
-            // decideDecode so PATH 3 (internetTwoSourceSize) is available here too. sizeAgreement is
-            // ONLY set from the race result - never from any provider field.
-            const winnerWithSize = { ...outcome.hit.result, sizeAgreement: sizeRace.sizeAgreement };
-            results = [winnerWithSize, ...results];
-            evidences = [outcome.hit.evidence, ...evidences];
-            providerNames = [outcome.hit.providerName, ...providerNames];
-            fallbackFound = true;
-            // Decide on the WINNER alone so leftover fast-path noise can't manufacture a false conflict.
-            const fwW = evalCombinedFirewall(code, winnerWithSize, [outcome.hit.evidence]);
-            prefixHint = fwW.hint;
-            firewallReason = fwW.reason;
-            brandPrefixAdvisory = fwW.brandPrefixAdvisory;
-            brandPrefixConflict = fwW.conflict;
-            decision = decideDecode({ codeType, results: [winnerWithSize], evidences: [outcome.hit.evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict, allowNonPublicAutoCount });
-          }
+      // ---- Rung 2: Fetch V2 (web evidence engine; balanced, 3 sources, 25s cap) -----------------------
+      const runFetchV2 = async (): Promise<RungOutcome> => {
+        // E2E MOCK MODE: no live web crawl (see runGoUpc note); fall straight through to the GPT rung.
+        if (e2eMode()) return { settled: false, reason: "Fetch V2 skipped (E2E mock mode)" };
+        const deps: FetchV2Deps = {
+          fetchPage: fetchV2Page,
+          discovery: fetchV2Discovery(), // Brave + Firecrawl only when keyed
+          structured: [{ name: "brocade", lookup: (variants) => brocadeLookup(variants) }],
+          cache: fetchV2Cache,
+          patternUrls: (variants) => {
+            const c = variants.find((v) => /^\d{12,14}$/.test(v)) ?? variants[0];
+            return selectBarcodeUrls(c).slice(0, 4);
+          },
+        };
+        let fv2;
+        try {
+          fv2 = await fetchV2(code, deps, { mode: "balanced", maxSourcesPerCode: FETCHV2_MAX_SOURCES, maxTotalMs: FETCHV2_MAX_TOTAL_MS });
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : "error";
+          ladderProviderStatuses.push({ provider: "fetchv2", status: "error", latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false, errorCode: "fetchv2_error" });
+          return { settled: false, reason: `Fetch V2 error: ${detail}` };
         }
+        const identity = [fv2.product.brand, fv2.product.name].filter(Boolean).join(" ").trim();
+        const settledOutcome = fv2.outcome === "verified" || fv2.outcome === "suggested" || fv2.outcome === "needs_review";
+        ladderProviderStatuses.push({
+          provider: "fetchv2",
+          status: settledOutcome ? "ok" : "skipped",
+          latencyMs: Math.round(fv2.performance.durationMs),
+          sourceUrlsReturned: fv2.sourcesChecked.length,
+          exactCodeFound: fv2.evidence.exactCodeFound,
+          identityFound: !!identity,
+          errorCode: settledOutcome ? undefined : fv2.outcome,
+        });
+        if (!settledOutcome || !identity) {
+          return { settled: false, reason: `Fetch V2 ${fv2.outcome} (no usable identity) -> fall through` };
+        }
+        const verified = fv2.outcome === "verified";
+        const result: AiLookupResult = {
+          ...emptyResult(),
+          productName: fv2.product.name,
+          brand: fv2.product.brand,
+          category: fv2.product.category,
+          specsShort: fv2.product.size || "",
+          primaryBarcode: code,
+          imageUrl: fv2.product.imageUrl || "",
+          confidence: verified ? Math.max(0.9, fv2.evidence.finalConfidence) : Math.min(fv2.evidence.finalConfidence || 0.5, 0.6),
+          sourceUrls: fv2.evidence.winningSourceUrl ? [fv2.evidence.winningSourceUrl] : [],
+          verifiedFacts: verified ? ["Fetch V2 exact barcode evidence"] : [],
+          needsHumanReview: !verified,
+        };
+        const evidence: EvidenceResult = verified
+          ? { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: [fv2.evidence.winningSourceUrl || "fetchv2"], reason: "Fetch V2 app-verified exact code on page" }
+          : { verified: false, strength: "snippet", matchedCode: "", matchedSources: [], reason: `Fetch V2 ${fv2.outcome} (unverified) - human review` };
+        const fw = evalCombinedFirewall(code, result, [evidence]);
+        const decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: fw.conflict, allowNonPublicAutoCount });
+        return {
+          settled: true,
+          reason: `Fetch V2 ${fv2.outcome}`,
+          payload: {
+            results: [result],
+            evidences: [evidence],
+            providerNames: ["fetchv2"],
+            providerStatuses: [...ladderProviderStatuses],
+            decision,
+            reasonCode: verified ? "ok" : "needs_review",
+            reasonText: verified ? "" : (REASON_TEXT["needs_review"] ?? ""),
+          } satisfies LadderPayload,
+        };
+      };
+
+      // ---- Rung 3: GPT-5.5 (paid END of the ladder; reuses maybeGptLadder) ----------------------------
+      const runGpt = async (): Promise<RungOutcome> => {
+        const ladder = await maybeGptLadder({ priorStatus: "needs_review", timedOut: false });
+        gptLadderResult = ladder;
+        if (ladder.payload) {
+          return {
+            settled: true,
+            reason: "gpt-5.5 ladder answered",
+            payload: {
+              results: [ladder.payload.result],
+              evidences: [gptLadderEvidenceStub()],
+              providerNames: ["gpt-5.5-ladder"],
+              providerStatuses: ladder.surfaceSkip ? [...ladderProviderStatuses, gptLadderSkipEntry(ladder.skipReason!)] : [...ladderProviderStatuses],
+              decision: ladder.payload.decision,
+              reasonCode: "gpt_ladder",
+              reasonText: ladder.payload.reasonText,
+            } satisfies LadderPayload,
+          };
+        }
+        if (ladder.surfaceSkip) ladderProviderStatuses.push(gptLadderSkipEntry(ladder.skipReason!));
+        return { settled: false, reason: ladder.skipReason ? `gpt-5.5 skipped: ${ladder.skipReason}` : "gpt-5.5 tier none (no product)" };
+      };
+
+      const rungs = buildLadderRungs(code, { runGoUpc, runFetchV2, runGpt });
+      const ladderRun = await runLadder(code, rungs);
+      const win = ladderRun.outcome?.payload as LadderPayload | undefined;
+
+      // receiptState: only a GPT rung that genuinely ran + came back empty earns a permanent receipt.
+      receiptState = gptLadderResult ? classifyReceipt(gptLadderResult) : { eligible: false };
+
+      // Assemble the response. A settled rung supplies its payload verbatim; an all-miss ladder emits a
+      // needs_review decision whose reason lists every rung that came back empty (owner: never silent).
+      if (win) {
+        return {
+          mode: "decode" as const,
+          providerNames: win.providerNames,
+          results: win.results,
+          evidences: win.evidences,
+          providerStatuses: win.providerStatuses,
+          decision: win.decision,
+          reasonCode: win.reasonCode,
+          reasonText: win.reasonText,
+          timedOut: false,
+          debug: {
+            providersAttempted: win.providerNames,
+            evidenceStrengths: win.evidences.map((e) => e.strength),
+            sourceCounts: win.results.map((r) => (r.sourceUrls ?? []).length),
+            corroborationPath: win.decision.corroborationPath ?? ladderRun.settledBy,
+            ladderPath: ladderRun.settledBy,
+            ladderReasons: ladderRun.reasons,
+            aiCalled: ladderRun.settledBy === "gpt",
+            pageFetched: ladderRun.settledBy === "fetchv2",
+            cached: false,
+            gptLadderSkipReason: gptSkipReason(),
+            retailLookup: retailLookupStatus,
+          },
+          sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+        };
       }
 
-      let reasonCode = decodeReasonCode({ hasProduct: hasProduct(), fallbackFound, timedOut: run.timedOut, decisionStatus: decision.status, statuses: providerStatuses, firecrawlKey: !!firecrawlKey, coverageMissed });
-      let reasonText = REASON_TEXT[reasonCode] ?? "";
-      // Never surface the generic "no provider returned a usable product": prefer the honest reason.
-      if (decision.status !== "verified" && reasonText) decision = { ...decision, reason: reasonText };
-
-      // SELF-LEARNING FLYWHEEL: a genuinely verified decode (app-verified exact code, conf >= 0.90, public
-      // barcode, real brand) teaches the prefix map so future scans + the firewall get smarter, for $0.
-      // In-memory + server-side; gated by isLearnablePrefix; LEARNED is the lowest-precedence prefix tier.
-      if (isLearnablePrefix({ status: decision.status, confidence: decision.confidence, exactCodeEvidenceVerifiedByApp: decision.exactCodeEvidenceVerifiedByApp, codeType, brand: results[0]?.brand })) {
-        recordLearnedPrefix(code, results[0]!.brand, results[0]?.category);
-      }
-
-      // GPT-5.5 LADDER RUNG (owner spec 2026-07-05, probe-parity rebuild 2026-07-06): the paid END
-      // of the decode ladder. Runs ONLY when nothing above already verified or suggested a product -
-      // it never runs in parallel with, and never overrides, an earlier win. Every call (success,
-      // error, or abort) records its spend via recordGptLadderSpend so the daily dollar guard can
-      // never be silently bypassed by a provider failure (usdActual carries the worst-case
-      // reservation on abort/HTTP failure). Owner order 2026-07-06: the answer passes through
-      // exactly as returned - no firewall downgrade, no short-code cap, no info_only burial.
-      // Task 3b: same shared helper as the Plan D exit above. `run.timedOut` additionally skips the
-      // paid rung here (the synchronous decode budget is already blown; skip reason surfaced as
-      // "request_budget_exhausted"). The e2e mockGptLadder fixture path lives inside the helper.
-      // Surfaced in `debug` below, and (except the happy-path "a prior rung already decided" case)
-      // also pushed to providerStatuses - a paid rung must never skip silently.
-      let gptLadderSkipReason: string | undefined;
-      const ladder = await maybeGptLadder({ priorStatus: decision.status, timedOut: run.timedOut });
-      const gptLadderPayload = ladder.payload;
-      if (!gptLadderPayload) {
-        gptLadderSkipReason = ladder.skipReason;
-        if (ladder.surfaceSkip) providerStatuses = [...providerStatuses, gptLadderSkipEntry(ladder.skipReason!)];
-      }
-      if (gptLadderPayload) {
-        results = [gptLadderPayload.result, ...results];
-        evidences = [gptLadderEvidenceStub(), ...evidences];
-        providerNames = [...providerNames, "gpt-5.5-ladder"];
-        decision = gptLadderPayload.decision;
-        reasonCode = "gpt_ladder";
-        reasonText = gptLadderPayload.reasonText;
-      }
-      receiptState = classifyReceipt(ladder);
-
+      // ALL RUNGS MISSED -> Needs Review with the accumulated per-rung reasons.
+      const allMissReason = `No rung resolved the code. ${ladderRun.reasons.map((r) => `${r.rung}: ${r.reason}`).join("; ")}`;
+      const nrDecision = decideDecode({ codeType, results: [], evidences: [], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false, allowNonPublicAutoCount });
       return {
         mode: "decode" as const,
-        providerNames,
-        results,
-        evidences,
-        providerStatuses,
-        decision,
-        reasonCode,
-        reasonText,
-        timedOut: run.timedOut,
+        providerNames: ladderRun.reasons.map((r) => r.rung),
+        results: [],
+        evidences: [],
+        providerStatuses: ladderProviderStatuses,
+        decision: { ...nrDecision, reason: allMissReason },
+        reasonCode: "no_result",
+        reasonText: allMissReason,
+        timedOut: false,
         debug: {
-          providersAttempted: providerNames,
-          evidenceStrengths: evidences.map((e) => e.strength),
-          sourceCounts: results.map((r) => (r.sourceUrls ?? []).length),
-          geminiSearchGrounding: process.env.ENABLE_GEMINI_SEARCH_GROUNDING !== "false",
-          openaiWebSearch: process.env.ENABLE_OPENAI_WEB_SEARCH !== "false",
-          baseModels: [GEMINI_FAST_MODEL, OPENAI_FAST_MODEL],
-          latencyMs: run.latencyMs,
-          timedOut: run.timedOut,
-          budgetMs,
-          reasonCode,
-          fallbackFound,
-          coverageMissed,
-          firecrawlCreditsEstimated,
-          firecrawlCandidates,
-          gptLadderSkipReason, // undefined when the rung ran or wasn't needed (a prior rung already decided)
+          providersAttempted: ladderRun.reasons.map((r) => r.rung),
+          evidenceStrengths: [],
+          sourceCounts: [],
+          ladderPath: "none",
+          ladderReasons: ladderRun.reasons,
+          aiCalled: ladderRun.reasons.some((r) => r.rung === "gpt"),
+          pageFetched: ladderRun.reasons.some((r) => r.rung === "fetchv2"),
           cached: false,
-          prefixHint, // platformOwner-only: brand the barcode prefix maps to (recall/transparency)
-          firewallReason, // platformOwner-only: why a prefix/UPC conflict routed this to review (if any)
-          brandPrefixAdvisory, // Plan C: catalog brand-prefix mismatch is ADVISORY (reported, never blocks)
-          retailLookup: retailLookupStatus, // "turso_error" (broken connection) vs "turso_miss"/"unavailable" (genuine miss/not configured) — makes a swallowed Turso failure visible instead of silently falling through to this AI path
+          gptLadderSkipReason: gptSkipReason(),
+          retailLookup: retailLookupStatus,
         },
         sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
       };
