@@ -1,5 +1,5 @@
 {
-  "_comment": "150-code ground-truthed dry-run fixture (Task 5). 9 groups. expected: verified-ok=should auto-count the truth product; suggest-only=should surface a candidate but never auto-count; must-refuse=should not verify. Truth verified per group via WebSearch/WebFetch + repo sources; see .superpowers/sdd/task-5-report.md. FNSKU note: only ~3 real FNSKU->product pairs are publicly obtainable (repo corpus); rows 5-7 are honestly-labeled representative FBA-label codes (no fabricated product identity) - truth is not grader-critical for suggest-only. Candidate answer-sheet corrections applied: tire 086699294739 Michelin Pilot Sport 4 SUV (not Pilot Alpin); Muenster 0075925304151 brand corrected.",
+  "_comment": "150-code ground-truthed dry-run fixture (Task 5). 9 groups. expected: verified-ok=should auto-count the truth product; suggest-only=should surface a candidate but never auto-count; must-refuse=should not verify. Truth verified per group via WebSearch/WebFetch + repo sources; see .superpowers/sdd/task-5-report.md. FNSKU note: only ~3 real FNSKU->product pairs are publicly obtainable (repo corpus); rows 5-7 are honestly-labeled representative FBA-label codes (no fabricated product identity) - truth is not grader-critical for suggest-only. Candidate answer-sheet corrections applied: tire 086699294739 Michelin Pilot Sport 4 SUV (not Pilot Alpin); Muenster 0075925304151 brand corrected. 2026-07-08: 4 Frito-Lay truth rows corrected against upcitemdb/SmartLabel/OpenFoodFacts evidence (scripts/tmp-goupc-benchmark-report.md).",
   "generatedAt": "2026-07-04",
   "codes": [
     {
@@ -77,7 +77,7 @@
     {
       "code": "0028400199247",
       "codeType": "ean",
-      "truth": "Lay's Kettle Cooked Potato Chips",
+      "truth": "Doritos Flamin' Hot Nacho Tortilla Chips 9.75 oz",
       "expected": "verified-ok",
       "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
       "group": "owner"
@@ -93,7 +93,7 @@
     {
       "code": "00028400076388",
       "codeType": "gtin14",
-      "truth": "Doritos Cool Ranch Tortilla Chips",
+      "truth": "Lay's Kettle Cooked Potato Chips Original Party Size",
       "expected": "verified-ok",
       "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
       "group": "owner"
@@ -117,7 +117,7 @@
     {
       "code": "00028400160131",
       "codeType": "gtin14",
-      "truth": "Munchies Cheese Fix Snack Mix",
+      "truth": "Lay's Potato Chips Barbecue 9.5 oz",
       "expected": "verified-ok",
       "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
       "group": "owner"
@@ -125,7 +125,7 @@
     {
       "code": "00028400028141",
       "codeType": "gtin14",
-      "truth": "Lay's Barbecue Potato Chips",
+      "truth": "Munchies Cheese Fix Snack Mix",
       "expected": "verified-ok",
       "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
       "group": "owner"

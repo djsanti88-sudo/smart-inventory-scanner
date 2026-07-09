@@ -114,3 +114,18 @@ No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migr
 | 6 | Half-Supabase/half-Firebase runtime | Med | Was a risk | Supabase removed from runtime (src grep clean) + deps removed + archived; single backend | Fixed |
 | 7 | Accidental cloud writes / secrets | High | Low | Emulator-first demo project; no cloud project/deploy; no service account; .env* git-ignored | Mitigated |
 | 8 | Windows emulator port conflicts | Low | Low | Auth 9099 / Firestore 8080 / UI 4001 (outside WinNAT excluded ranges) | Mitigated |
+
+## Live AI probe billing (2026-07-05)
+
+| # | Risk | Sev | Likelihood | Mitigation | Status |
+|---|------|-----|-----------|------------|--------|
+| 1 | Provider bills components invisible in the API response (Gemini grounding queries fired during thinking; only cited ones appear in `webSearchQueries`) -> real spend ~11x computed ($6 vs $0.53) | High | Confirmed | LESSONS_LEARNED L11 + CLAUDE.md cost-truth rule: worst-case reserve for unmeterable units (~$0.28/grounded Gemini call), reconcile with provider console after EVERY live run before quoting spend | Mitigated (process) |
+| 2 | Gemini grounding has no max-query cap; unattended runs on hard codes can silently burn budget | High | High on hard codes | Prefer OpenAI `max_tool_calls` for capped tool use; never point Gemini grounding at hard/unfindable code batches unattended; owner-set Google spend cap stays ON as backstop | Open (inherent) |
+| 3 | Client-side timeout aborts recorded as $0 while server still bills | Med | Confirmed | Count aborted calls at worst case in budget guards | Mitigated (process) |
+
+## Tire-corpus data quality (2026-07-08, Go-UPC benchmark)
+
+| # | Risk | Sev | Likelihood | Mitigation | Approval | Status |
+|---|------|-----|-----------|------------|----------|--------|
+| 1 | Corpus row 086699294739 named `pilot_alpin_sport_4_suv` but external evidence + fixture correction say Michelin Pilot Sport 4 SUV (wrong model name would mis-grade/mislabel) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | — | Open |
+| 2 | Corpus row 8859305548272 size 265/75R16 vs Go-UPC 245/75R16 (size mismatch) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | — | Open |
