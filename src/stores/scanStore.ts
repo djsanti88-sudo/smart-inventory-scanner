@@ -2309,15 +2309,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // a SAFE label and the scanned code - never a fabricated product identity, never an approved alias,
           // never a verified product. The review STAYS OPEN so a retry can identify it.
           const code = review.cleanCode;
-          const struct = decodeBarcodeStructure(code, codeType);
           // PREFIX FLOOR (Plan C Task 3): a failed decode must not leave a bare "Unidentified item"
-          // when the GS1 prefix maps to a known brand - see prefixFloorName.
+          // when the GS1 prefix maps to a known brand - see prefixFloorName. Label text comes from the
+          // shared provisionalPlaceholderName helper (same one ensureProvisionalCount uses) so this
+          // mint can never drift from what resolveUnknown's reload-resilient fallback expects to match.
           const floor = prefixFloorName(code, codeType);
-          const fbName = floor
-            ? floor.name
-            : struct.checkDigitValid
-              ? `Unidentified item (barcode ${code})`
-              : `Unidentified item (code ${code})`;
+          const fbName = provisionalPlaceholderName(code);
           const cur = get();
           const countedIds = new Set(cur.finalCounts.map((c) => c.productId));
           let provId = cur.products.find(
