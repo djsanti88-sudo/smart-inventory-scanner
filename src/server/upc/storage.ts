@@ -43,12 +43,19 @@ export interface DecodeArchiveEntry {
   fetchedAt: string;
 }
 
+/**
+ * Async on every method: the Turso adapter (Task 21) is a network client, so the interface is
+ * honestly async everywhere rather than faking sync via a hidden write-queue / read-through cache
+ * (that would be a data-race risk across concurrent function instances). The file adapter's fs
+ * calls stay synchronous internally; they are simply wrapped in an `async` function, which resolves
+ * immediately and costs nothing extra in practice.
+ */
 export interface LadderStorage {
-  readUsage(): UsageState;
-  writeUsage(s: UsageState): void;
-  readMissCache(key: string): MissEntry | null;
-  writeMissCache(key: string, e: MissEntry): void;
-  appendArchive(entry: DecodeArchiveEntry): void;
+  readUsage(): Promise<UsageState>;
+  writeUsage(s: UsageState): Promise<void>;
+  readMissCache(key: string): Promise<MissEntry | null>;
+  writeMissCache(key: string, e: MissEntry): Promise<void>;
+  appendArchive(entry: DecodeArchiveEntry): Promise<void>;
 }
 
 const USAGE_FILE = ".go-upc-usage.json";
@@ -91,32 +98,206 @@ export function fileLadderStorage(dir: string): LadderStorage {
   }
 
   return {
-    readUsage(): UsageState {
+    async readUsage(): Promise<UsageState> {
       return readJson<UsageState>(usagePath, { month: currentMonth(), used: 0 });
     },
 
-    writeUsage(s: UsageState): void {
+    async writeUsage(s: UsageState): Promise<void> {
       ensureDir(dir);
       writeJson(usagePath, s);
     },
 
-    readMissCache(key: string): MissEntry | null {
+    async readMissCache(key: string): Promise<MissEntry | null> {
       const map = readJson<Record<string, MissEntry>>(missPath, {});
       return map[key] ?? null;
     },
 
-    writeMissCache(key: string, e: MissEntry): void {
+    async writeMissCache(key: string, e: MissEntry): Promise<void> {
       ensureDir(dir);
       const map = readJson<Record<string, MissEntry>>(missPath, {});
       map[key] = e;
       writeJson(missPath, map);
     },
 
-    appendArchive(entry: DecodeArchiveEntry): void {
+    async appendArchive(entry: DecodeArchiveEntry): Promise<void> {
       ensureDir(archiveDir);
       const month = entry.fetchedAt.slice(0, 7); // YYYY-MM from fetchedAt
       const monthFile = join(archiveDir, `${month}.jsonl`);
       appendFileSync(monthFile, JSON.stringify(entry) + "\n", "utf8");
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Turso adapter (Task 21) -- production. Mirrors retailKnowledgeIndex.ts's Turso
+// detection/client pattern: TURSO_DATABASE_URL + TURSO_AUTH_TOKEN, lazy @libsql/client
+// import, memoized client. Tables are created (CREATE TABLE IF NOT EXISTS) on first use
+// per client instance so a fresh Turso DB self-provisions without a separate migration step.
+// ---------------------------------------------------------------------------
+
+/** Minimal shape of the `@libsql/client` client actually used here (same seam as retailKnowledgeIndex's TursoClient). */
+export type TursoClientLike = {
+  execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }>;
+};
+
+const TABLE_USAGE = "goupc_usage";
+const TABLE_MISS_CACHE = "goupc_miss_cache";
+const TABLE_ARCHIVE = "decode_archive";
+
+/**
+ * Turso-backed LadderStorage over an injected client (never constructs its own connection --
+ * callers/tests inject the client so unit tests never touch a live database).
+ *  - goupc_usage: one row per month, upserted (`month` PK, `used` counter).
+ *  - goupc_miss_cache: one row per canonical GTIN, upserted (`canonical` PK, `missed_at`, `ttl_days`).
+ *  - decode_archive: append-only INSERT, never UPDATE/DELETE (purge-proof evidence trail).
+ * `CREATE TABLE IF NOT EXISTS` runs once per adapter instance (memoized), lazily on first call.
+ */
+export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
+  let ensured: Promise<void> | null = null;
+
+  async function ensureTables(): Promise<void> {
+    if (!ensured) {
+      ensured = (async () => {
+        await client.execute({
+          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_USAGE} (month TEXT PRIMARY KEY, used INTEGER NOT NULL)`,
+          args: [],
+        });
+        await client.execute({
+          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_MISS_CACHE} (canonical TEXT PRIMARY KEY, missed_at TEXT NOT NULL, ttl_days INTEGER NOT NULL)`,
+          args: [],
+        });
+        await client.execute({
+          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_ARCHIVE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            canonical_gtin TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            http_status INTEGER,
+            raw TEXT NOT NULL,
+            source_urls TEXT,
+            fetched_at TEXT NOT NULL
+          )`,
+          args: [],
+        });
+      })();
+    }
+    return ensured;
+  }
+
+  return {
+    async readUsage(): Promise<UsageState> {
+      await ensureTables();
+      const result = await client.execute({
+        sql: `SELECT month, used FROM ${TABLE_USAGE} ORDER BY month DESC LIMIT 1`,
+        args: [],
+      });
+      if (result.rows.length === 0) {
+        return { month: currentMonth(), used: 0 };
+      }
+      const row = result.rows[0];
+      return { month: row.month as string, used: Number(row.used) };
+    },
+
+    async writeUsage(s: UsageState): Promise<void> {
+      await ensureTables();
+      await client.execute({
+        sql: `INSERT INTO ${TABLE_USAGE} (month, used) VALUES (?, ?)
+              ON CONFLICT(month) DO UPDATE SET used = excluded.used`,
+        args: [s.month, s.used],
+      });
+    },
+
+    async readMissCache(key: string): Promise<MissEntry | null> {
+      await ensureTables();
+      const result = await client.execute({
+        sql: `SELECT canonical, missed_at, ttl_days FROM ${TABLE_MISS_CACHE} WHERE canonical = ?`,
+        args: [key],
+      });
+      if (result.rows.length === 0) return null;
+      const row = result.rows[0];
+      return {
+        canonical: row.canonical as string,
+        missedAt: row.missed_at as string,
+        ttlDays: Number(row.ttl_days),
+      };
+    },
+
+    async writeMissCache(key: string, e: MissEntry): Promise<void> {
+      await ensureTables();
+      await client.execute({
+        sql: `INSERT INTO ${TABLE_MISS_CACHE} (canonical, missed_at, ttl_days) VALUES (?, ?, ?)
+              ON CONFLICT(canonical) DO UPDATE SET missed_at = excluded.missed_at, ttl_days = excluded.ttl_days`,
+        args: [key, e.missedAt, e.ttlDays],
+      });
+    },
+
+    async appendArchive(entry: DecodeArchiveEntry): Promise<void> {
+      await ensureTables();
+      // Append-only: plain INSERT, no upsert/update/delete -- purge-proof evidence trail.
+      await client.execute({
+        sql: `INSERT INTO ${TABLE_ARCHIVE} (code, canonical_gtin, provider, http_status, raw, source_urls, fetched_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          entry.code,
+          entry.canonicalGtin,
+          entry.provider,
+          entry.httpStatus ?? null,
+          JSON.stringify(entry.raw),
+          entry.sourceUrls ? JSON.stringify(entry.sourceUrls) : null,
+          entry.fetchedAt,
+        ],
+      });
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Selector: mirrors retailKnowledgeIndex.ts's getTursoClient detection exactly --
+// TURSO_DATABASE_URL + TURSO_AUTH_TOKEN both set -> Turso; otherwise the file adapter.
+// A Turso client-construction failure falls back to the file adapter (loud warn, never throws),
+// same fail-open posture as the retail knowledge index.
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
+
+let _cachedTursoStorage: LadderStorage | null = null;
+let _cachedTursoUnavailable = false;
+
+async function getTursoLadderStorage(): Promise<LadderStorage | null> {
+  if (_cachedTursoUnavailable) return null;
+  if (_cachedTursoStorage) return _cachedTursoStorage;
+  const url = process.env.TURSO_DATABASE_URL;
+  const token = process.env.TURSO_AUTH_TOKEN;
+  if (!url || !token) {
+    _cachedTursoUnavailable = true;
+    return null;
+  }
+  try {
+    const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
+    const client = createClient({ url, authToken: token }) as TursoClientLike;
+    _cachedTursoStorage = tursoLadderStorage(client);
+    console.log("[ladderStorage] Turso client connected:", url);
+    return _cachedTursoStorage;
+  } catch (e) {
+    console.warn("[ladderStorage] Failed to create Turso client, falling back to file storage:", (e as Error).message);
+    _cachedTursoUnavailable = true;
+    return null;
+  }
+}
+
+/**
+ * Select the LadderStorage backend: Turso when TURSO_DATABASE_URL + TURSO_AUTH_TOKEN are set
+ * (production), else the file adapter rooted at `dir` (default `process.cwd()`; local dev + preview).
+ */
+export async function ladderStorage(dir: string = process.cwd()): Promise<LadderStorage> {
+  const turso = await getTursoLadderStorage();
+  if (turso) return turso;
+  return fileLadderStorage(dir);
+}
+
+/** For tests: reset the memoized Turso client/selector state so each test re-detects env vars. */
+export function __resetLadderStorageSelectorForTests(): void {
+  _cachedTursoStorage = null;
+  _cachedTursoUnavailable = false;
 }

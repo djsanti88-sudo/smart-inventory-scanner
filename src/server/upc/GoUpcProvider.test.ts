@@ -35,14 +35,18 @@ function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage 
   return {
     archives,
     missWrites,
-    readUsage: () => usage,
-    writeUsage: (s) => Object.assign(usage, s),
-    readMissCache: (key) => miss[key] ?? null,
-    writeMissCache: (key, e) => {
+    readUsage: async () => usage,
+    writeUsage: async (s) => {
+      Object.assign(usage, s);
+    },
+    readMissCache: async (key) => miss[key] ?? null,
+    writeMissCache: async (key, e) => {
       miss[key] = e;
       missWrites.push({ key, entry: e });
     },
-    appendArchive: (entry) => archives.push(entry),
+    appendArchive: async (entry) => {
+      archives.push(entry);
+    },
   };
 }
 
@@ -53,11 +57,11 @@ function usageGate(allowed = true): GoUpcUsage & { records: number } {
     get records() {
       return records;
     },
-    canSpend: () =>
+    canSpend: async () =>
       allowed
         ? { allowed: true, used: 0, limit: 4800, warn: false }
         : { allowed: false, used: 4800, limit: 4800, warn: true, reason: "cap" },
-    record: () => {
+    record: async () => {
       records += 1;
     },
   } as GoUpcUsage & { records: number };
