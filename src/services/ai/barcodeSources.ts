@@ -14,6 +14,7 @@ export interface BarcodeSource {
 
 export const BARCODE_SOURCES: BarcodeSource[] = [
   { host: "go-upc.com", tiers: ["us", "case", "generic"], url: (raw) => `https://go-upc.com/search?q=${encodeURIComponent(raw)}` },
+  { host: "meros.io", tiers: ["us", "generic"], url: (raw) => `https://meros.io/${encodeURIComponent(raw)}` },
   { host: "upcitemdb.com", tiers: ["us", "case", "generic"], url: (raw) => `https://www.upcitemdb.com/upc/${encodeURIComponent(raw)}` },
   { host: "barcodelookup.com", tiers: ["us", "generic"], url: (raw) => `https://www.barcodelookup.com/${encodeURIComponent(raw)}` },
   { host: "buycott.com", tiers: ["us"], url: (raw) => `https://www.buycott.com/upc/${encodeURIComponent(raw)}` },
