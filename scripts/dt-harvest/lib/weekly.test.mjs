@@ -151,6 +151,66 @@ describe("buildWeeklyReport", () => {
     const { markdown } = buildWeeklyReport(baseInputs);
     expect(markdown.toLowerCase()).toContain("anomal");
   });
+
+  // Review finding (CRITICAL): a run-batch.mjs crash (non-zero exit) with no fresh
+  // telemetry-weekly.json and no stop-report must NOT read as a clean "0 new rows" run.
+  // Before the fix, weekly.mjs had no way to tell buildWeeklyReport this happened, so a
+  // batch crash silently produced a "0 new urls"-shaped clean report and exit 0.
+  it("flags anomalies when the batch failed (non-zero exit) even with no telemetry and no stop-report", () => {
+    const inputs = {
+      date: "2026-07-08",
+      newUrlCount: 42,
+      batch: null, // no telemetry-weekly.json was written because the batch crashed
+      applyRan: false,
+      applyResult: null,
+      hardStopFired: false,
+      batchFailed: true,
+    };
+    const { markdown, anomalies } = buildWeeklyReport(inputs);
+    expect(anomalies).toBe(true);
+    expect(markdown.toLowerCase()).toContain("batch");
+  });
+
+  it("does not flag a batch-failed anomaly when batchFailed is false (normal clean run)", () => {
+    const inputs = {
+      date: "2026-07-08",
+      newUrlCount: 0,
+      batch: null,
+      applyRan: false,
+      applyResult: null,
+      hardStopFired: false,
+      batchFailed: false,
+    };
+    const { anomalies } = buildWeeklyReport(inputs);
+    expect(anomalies).toBe(false);
+  });
+
+  it("still flags anomalies for a failed batch even when partial telemetry exists", () => {
+    const inputs = { ...baseInputs, batchFailed: true };
+    const { anomalies, markdown } = buildWeeklyReport(inputs);
+    expect(anomalies).toBe(true);
+    expect(markdown.toLowerCase()).toContain("batch");
+  });
+
+  // Review finding (IMPORTANT): apply.mjs exiting 0 but producing unparseable stdout
+  // (parseApplyOutput returns null fields) must not be coerced into fake zeros ("apply
+  // added nothing"). It must surface as its own anomaly and show "unparsed" in the report.
+  it("flags anomalies and shows 'unparsed' when apply ran successfully but output could not be parsed", () => {
+    const inputs = {
+      ...baseInputs,
+      applyRan: true,
+      applyResult: { added: null, skipped: null, spotCheck: null, unparsed: true },
+    };
+    const { markdown, anomalies } = buildWeeklyReport(inputs);
+    expect(anomalies).toBe(true);
+    expect(markdown.toLowerCase()).toContain("unparsed");
+    expect(markdown).not.toMatch(/Rows added: 0/);
+  });
+
+  it("does not flag an unparsed-apply anomaly when apply output parsed normally", () => {
+    const { anomalies } = buildWeeklyReport(baseInputs);
+    expect(anomalies).toBe(false);
+  });
 });
 
 describe("parseApplyOutput", () => {

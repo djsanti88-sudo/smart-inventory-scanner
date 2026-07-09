@@ -71,7 +71,12 @@ function todayStamp(now = new Date()) {
   return now.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
-/** Find every state/done*.json file (done.json plus any worker-suffixed done-*.json). */
+/**
+ * Find every state/done*.json file (done.json plus any worker-suffixed done-*.json).
+ * Intentionally includes this job's own done-weekly.json from a prior run (if present) -
+ * a url this weekly job already harvested last time must count as done this time too,
+ * same as any other worker's done map.
+ */
 async function findAllDoneFiles() {
   if (!existsSync(STATE_DIR)) return [];
   const entries = await readdir(STATE_DIR);
@@ -139,6 +144,7 @@ async function main() {
 
   let batchTelemetry = null;
   let hardStopFired = false;
+  let batchFailed = false;
   let applyRan = false;
   let applyResult = null;
 
@@ -162,6 +168,7 @@ async function main() {
     ]);
     if (batchExit !== 0) {
       console.error(`[weekly] run-batch.mjs exited ${batchExit} - continuing to report, but flagging as an anomaly.`);
+      batchFailed = true;
     }
 
     batchTelemetry = await readJsonSafe(TELEMETRY_WEEKLY_FILE, null);
@@ -183,6 +190,13 @@ async function main() {
         skipped: parsed.skipped ?? 0,
         spotCheck: parsed.spotCheck ?? { passed: 0, failed: 1 },
       };
+    } else if (parsed.added === null && parsed.skipped === null && parsed.spotCheck === null) {
+      // apply.mjs exited 0 (it believes it succeeded) but its stdout did not match any
+      // of the expected report lines. Coercing this into added:0/skipped:0 would read as
+      // "apply ran and added nothing" when the truth is "we don't know what apply did" -
+      // flag it as its own anomaly instead of guessing zeros (review finding, IMPORTANT).
+      console.error("[weekly] apply.mjs exited 0 but its stdout could not be parsed - flagging as an anomaly (wording drift?).");
+      applyResult = { added: null, skipped: null, spotCheck: null, unparsed: true };
     } else {
       applyResult = {
         added: parsed.added ?? 0,
@@ -203,6 +217,7 @@ async function main() {
     applyRan,
     applyResult,
     hardStopFired,
+    batchFailed,
   });
 
   const reportFile = path.join(STATE_DIR, `weekly-report-${runDate}.md`);

@@ -71,6 +71,10 @@ export function parseApplyOutput(stdout) {
  *   - error rate (batch.error / (ok+blocked+error)) > 0.10 (10%)
  *   - applyResult.spotCheck.failed > 0
  *   - hardStopFired is true
+ *   - batchFailed is true (run-batch.mjs exited non-zero - this must never read as a
+ *     clean "0 new rows" run just because there is no fresh telemetry to report)
+ *   - applyResult.unparsed is true (apply.mjs exited 0 but its stdout could not be
+ *     parsed - this must never be coerced into fake "added: 0" zeros)
  *
  * `batch` and `applyResult` may be null (zero-new-urls run: nothing was fetched or
  * applied) - this never throws and never counts as an anomaly on its own.
@@ -80,8 +84,9 @@ export function parseApplyOutput(stdout) {
  * @param {number} inputs.newUrlCount - count of new urls found by newUrls().
  * @param {{ok:number, blocked:number, error:number, rows:number, guardRejected:number, blockRate:number} | null} inputs.batch
  * @param {boolean} inputs.applyRan - whether apply.mjs was actually run.
- * @param {{added:number, skipped:number, spotCheck:{passed:number, failed:number}} | null} inputs.applyResult
+ * @param {{added:number|null, skipped:number|null, spotCheck:{passed:number, failed:number}|null, unparsed?:boolean} | null} inputs.applyResult
  * @param {boolean} inputs.hardStopFired - whether run-batch.mjs's block-rate hard stop fired.
+ * @param {boolean} [inputs.batchFailed] - whether run-batch.mjs exited non-zero this run.
  * @returns {{ markdown: string, anomalies: boolean }}
  */
 export function buildWeeklyReport(inputs) {
@@ -92,6 +97,7 @@ export function buildWeeklyReport(inputs) {
     applyRan = false,
     applyResult = null,
     hardStopFired = false,
+    batchFailed = false,
   } = inputs || {};
 
   const anomalyNotes = [];
@@ -111,6 +117,12 @@ export function buildWeeklyReport(inputs) {
   }
   if (hardStopFired) {
     anomalyNotes.push("The block-rate hard stop fired during this run's batch - crawl stopped early, see the stop-report for details.");
+  }
+  if (batchFailed) {
+    anomalyNotes.push("run-batch.mjs exited non-zero this run - treat any 'rows/pages' numbers below as incomplete or stale, not a clean 0-new-rows run.");
+  }
+  if (applyResult && applyResult.unparsed) {
+    anomalyNotes.push("apply.mjs exited 0 but its stdout could not be parsed (wording drift?) - added/skipped/spot-check counts below are unparsed, not verified zeros.");
   }
 
   const anomalies = anomalyNotes.length > 0;
@@ -137,10 +149,12 @@ export function buildWeeklyReport(inputs) {
   lines.push("");
   lines.push("## Apply");
   if (applyRan && applyResult) {
-    lines.push(`- Rows added: ${applyResult.added}`);
-    lines.push(`- Rows skipped: ${applyResult.skipped}`);
+    lines.push(`- Rows added: ${applyResult.unparsed ? "unparsed" : applyResult.added}`);
+    lines.push(`- Rows skipped: ${applyResult.unparsed ? "unparsed" : applyResult.skipped}`);
     if (applyResult.spotCheck) {
       lines.push(`- Spot-check: ${applyResult.spotCheck.passed} passed, ${applyResult.spotCheck.failed} failed`);
+    } else if (applyResult.unparsed) {
+      lines.push("- Spot-check: unparsed (apply.mjs output could not be parsed)");
     }
   } else {
     lines.push("- Skipped: the batch produced no new rows (or there were no new urls), so apply.mjs was not run.");
