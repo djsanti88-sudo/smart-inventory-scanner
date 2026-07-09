@@ -84,8 +84,10 @@ test("decoded tire fills Size / Brand / Part number with a clean description", a
   // Column index +1 again (fc2188a, 2026-07-01, predates this test's last update): a plain-digits
   // "Size" column was inserted between Specs and Part number (Image column dropped elsewhere, net
   // column count unchanged - see FinalCountTable.tsx header order).
+  // c4174f2 (2026-07-09): the Size cell now shows the canonical size ("235/65R18"), not the
+  // digit-mash - the digit-mash moved to the cell's title attribute instead. Column index unchanged.
   await expect(rowA.locator("td").nth(5)).toContainText("235/65R18 104H"); // size in Specs
-  await expect(rowA.locator("td").nth(6)).toContainText("2356518"); // plain-digits Size column
+  await expect(rowA.locator("td").nth(6)).toContainText("235/65R18"); // canonical Size column
   await expect(rowA.locator("td").nth(7)).toContainText("MICH-99812"); // part number
 
   // Tire B: real tire, NO SKU -> Part number blank ("-"), not fabricated.
