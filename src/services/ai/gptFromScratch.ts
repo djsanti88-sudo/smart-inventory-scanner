@@ -3,8 +3,8 @@
 // returned, no wrapper rules on top). Input is the CODE ONLY (no handoff evidence). The answer
 // is TRUSTED per the owner's rule; tiers come from GPT's OWN self-report and nothing else:
 //   verified  = exactCodeFound && confidence >= 0.8 (owner auto-count rule)
-//   suggested = any other answer with a productName (shown as-is, human approves)
-//   none      = no product name / error / abort
+//   suggested = any other answer with a non-empty productName (shown as-is, human approves)
+//   none      = empty productName (honest-empty) / error / abort
 // This module is pure: fetch injected, no env reads.
 const IN_USD_PER_M = 5.0;
 const OUT_USD_PER_M = 30.0;
@@ -17,6 +17,7 @@ export interface GptFromScratchResult {
   tier: GptTier;
   brand: string;
   productName: string;
+  category: string;
   specs: string;
   gtin: string;
   confidence: number;
@@ -31,22 +32,36 @@ export interface GptFromScratchResult {
   raw?: unknown;
 }
 
-export function gptTierFor(exactCodeFound: boolean, confidence: number): GptTier {
+export function gptTierFor(exactCodeFound: boolean, confidence: number, productName = ""): GptTier {
+  // Honest-empty (prompt v3, owner order 2026-07-08): an empty productName is "no evidence-based
+  // guess" - it is never a suggestion, always tier none, regardless of exactCodeFound/confidence.
+  if (!productName.trim()) return "none";
   if (exactCodeFound && confidence >= 0.8) return "verified";
-  // Owner rule (2026-07-06): every other answer IS the suggestion, exactly as the probe showed
-  // it - no info_only demotion, no burying weak guesses.
+  // Owner rule (2026-07-06): every other answer WITH a productName IS the suggestion, exactly as
+  // the probe showed it - no info_only demotion, no burying weak guesses.
   return "suggested";
 }
 
 const promptFor = (code: string) =>
-  `Identify the product for barcode ${code}. Search the web. Return JSON only: {"brand":"","productName":"","specs":"","gtin":"","confidence":0.0,"exactCodeFound":false,"basis":"","sourceUrls":[]}. If you find this exact code in a real page, set exactCodeFound true and confidence to match the evidence. If you cannot, STILL return your single best guess from partial matches, barcode prefix ownership, or similar listings - set exactCodeFound false, confidence 0.4 or less, and say why in basis. Keep it brief. Never leave productName empty if you have any plausible guess.`;
+  `Identify the product for barcode ${code}. Search the web. Return JSON only: ` +
+  `{"brand":"","productName":"","category":"","specs":"","gtin":"","confidence":0.0,` +
+  `"exactCodeFound":false,"basis":"","sourceUrls":[]}. ` +
+  `If you find this exact code on a real page, set exactCodeFound true, copy the product ` +
+  `identity EXACTLY as the page states it (brand, full product name, size/variant), and set ` +
+  `confidence to match the evidence. If you cannot find the exact code, you may give ONE best ` +
+  `guess ONLY when concrete evidence points to a specific product (prefix ownership, near-identical ` +
+  `listings, partial code matches) - set exactCodeFound false, confidence 0.4 or less, name the ` +
+  `category, and cite the evidence in basis. If you have no evidence-based guess, return an empty ` +
+  `productName and say in basis what you searched and why nothing qualified. Never invent a product. ` +
+  `Always fill category with the product type you believe the barcode belongs to, even when ` +
+  `productName is empty. Keep it brief.`;
 
 const str = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
 const clamp01 = (n: unknown) => { const x = Number(n); return Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0; };
 
 function none(partial: Partial<GptFromScratchResult>): GptFromScratchResult {
   return {
-    tier: "none", brand: "", productName: "", specs: "", gtin: "", confidence: 0,
+    tier: "none", brand: "", productName: "", category: "", specs: "", gtin: "", confidence: 0,
     exactCodeFound: false, basis: "", sourceUrls: [], searches: 0,
     usdActual: 0, usdWorstCase: GPT_LADDER_WORST_CASE_USD, aborted: false, ...partial,
   };
@@ -115,12 +130,16 @@ export async function gptFromScratch(
   const exactCodeFound = parsed.exactCodeFound === true;
   const confidence = clamp01(parsed.confidence);
   const productName = str(parsed.productName).trim();
-  if (!productName) return none({ searches, usdActual, error: "empty productName", raw: parsed });
+  const category = str(parsed.category).trim();
+  // Honest-empty (prompt v3): an empty productName is a deliberate "no evidence-based guess", NOT an
+  // error. Keep the category so the UI can still label what the barcode probably is.
+  if (!productName) return none({ searches, usdActual, category, error: "empty productName", raw: parsed });
 
   return {
-    tier: gptTierFor(exactCodeFound, confidence),
+    tier: gptTierFor(exactCodeFound, confidence, productName),
     brand: str(parsed.brand).trim(),
     productName,
+    category,
     specs: str(parsed.specs).trim(),
     gtin: str(parsed.gtin).replace(/\D/g, ""),
     confidence,

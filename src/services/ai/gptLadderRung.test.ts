@@ -105,6 +105,7 @@ function gptResult(overrides: Partial<GptFromScratchResult>): GptFromScratchResu
     tier: "none",
     brand: "",
     productName: "",
+    category: "",
     specs: "",
     gtin: "",
     confidence: 0,
@@ -184,6 +185,15 @@ describe("gptResultToDecodePayload", () => {
     expect(payload.result.confidence).toBe(0.3);
     expect(payload.result.guesses).toEqual(["barcode prefix suggests Goodyear family"]);
     expect(payload.reasonText).toBe("");
+  });
+
+  test("category threads through into the emitted suggestion result (prompt v3)", () => {
+    const r = gptResult({
+      tier: "suggested", brand: "Toyo", productName: "Toyo Open Country A/T III",
+      category: "Tires", confidence: 0.6, exactCodeFound: false, basis: "prefix match",
+    });
+    const payload = gptResultToDecodePayload(r, "049000028904")!;
+    expect(payload.result.category).toBe("Tires");
   });
 
   test("gtin/upc/ean identifier fields are populated only for a 12-14 digit gtin", () => {

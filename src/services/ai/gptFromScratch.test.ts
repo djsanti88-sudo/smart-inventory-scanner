@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { gptFromScratch, gptTierFor } from "./gptFromScratch";
 
 const MODEL_JSON = {
-  brand: "Falken", productName: "Falken Wildpeak A/T3W 265/70R17", specs: "265/70R17 115T",
+  brand: "Falken", productName: "Falken Wildpeak A/T3W 265/70R17", category: "Tires", specs: "265/70R17 115T",
   gtin: "848983006257", confidence: 0.92, exactCodeFound: true,
   basis: "exact code on tirerack product page", sourceUrls: ["https://www.tirerack.com/x"],
 };
@@ -17,14 +17,21 @@ const okFetch = (body: unknown) =>
   vi.fn(async () => ({ ok: true, status: 200, json: async () => body })) as unknown as typeof fetch;
 
 describe("gptTierFor", () => {
-  test("trust tiers follow the owner gate exactly (probe parity 2026-07-06: every non-verified answer is a suggestion)", () => {
-    expect(gptTierFor(true, 0.8)).toBe("verified");
-    expect(gptTierFor(true, 0.92)).toBe("verified");
-    expect(gptTierFor(false, 0.92)).toBe("suggested");   // no exactCodeFound -> never verified
-    expect(gptTierFor(true, 0.79)).toBe("suggested");
-    expect(gptTierFor(false, 0.5)).toBe("suggested");
-    expect(gptTierFor(false, 0.49)).toBe("suggested");   // info_only deleted - weak guesses are shown
-    expect(gptTierFor(true, 0.3)).toBe("suggested");
+  test("trust tiers follow the owner gate exactly (probe parity 2026-07-06: every non-verified answer with a name is a suggestion)", () => {
+    expect(gptTierFor(true, 0.8, "X")).toBe("verified");
+    expect(gptTierFor(true, 0.92, "X")).toBe("verified");
+    expect(gptTierFor(false, 0.92, "X")).toBe("suggested");   // no exactCodeFound -> never verified
+    expect(gptTierFor(true, 0.79, "X")).toBe("suggested");
+    expect(gptTierFor(false, 0.5, "X")).toBe("suggested");
+    expect(gptTierFor(false, 0.49, "X")).toBe("suggested");   // info_only deleted - weak guesses are shown
+    expect(gptTierFor(true, 0.3, "X")).toBe("suggested");
+  });
+
+  test("honest-empty (prompt v3 2026-07-08): an empty productName is tier none, never suggested, whatever the flags say", () => {
+    expect(gptTierFor(false, 0.4, "")).toBe("none");
+    expect(gptTierFor(false, 0.4)).toBe("none");        // default arg is empty
+    expect(gptTierFor(true, 0.95, "")).toBe("none");    // even a "verified"-looking answer with no name is none
+    expect(gptTierFor(true, 0.95, "   ")).toBe("none"); // whitespace-only is still empty
   });
 });
 
@@ -70,6 +77,27 @@ describe("gptFromScratch", () => {
     expect(body.max_tool_calls).toBe(5); // the owner-set probe cap, server-enforced by OpenAI
     expect(body.input).toContain("848983006257");
     expect(body.input).toContain("exactCodeFound");
+    expect(r.category).toBe("Tires"); // parser reads the new category field
+  });
+
+  test("prompt v3 forbids invented products and drops the always-answer clause", async () => {
+    const f = okFetch(respBody(MODEL_JSON));
+    await gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f });
+    const body = JSON.parse((f as any).mock.calls[0][1].body);
+    expect(body.input).toContain("Never invent a product");
+    expect(body.input).not.toContain("Never leave productName empty");
+    expect(body.input).toContain("category"); // category is part of the JSON contract now
+  });
+
+  test("honest-empty: an empty productName is tier none (not a suggestion), category still surfaced", async () => {
+    const f = okFetch(respBody({
+      brand: "", productName: "", category: "music CD", confidence: 0,
+      exactCodeFound: false, basis: "searched go-upc/tirerack, no listing carried this code",
+    }));
+    const r = await gptFromScratch("049000000000", { apiKey: "k", fetchImpl: f });
+    expect(r.tier).toBe("none");
+    expect(r.productName).toBe("");
+    expect(r.category).toBe("music CD"); // UI can label the weak barcode even with no product
   });
 
   test("weak best-guess maps to suggested and keeps the guess text (info_only deleted 2026-07-06)", async () => {
