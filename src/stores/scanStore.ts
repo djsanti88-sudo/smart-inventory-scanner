@@ -1769,7 +1769,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // Cache into in-memory catalog so repeat scans are instant (no second cloud round-trip).
             set((s) => ({ catalog: [...s.catalog, entry!] }));
             get().recordFeedback("found_from_catalog", { code: review.cleanCode });
-            get().markFeedRowVerified(review.cleanCode, "Matched from global catalog - no AI used.");
             get().resolveUnknown(reviewId, "create_new", {
               applyToCount: true,
               origin: "catalog",
@@ -1783,6 +1782,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 source: "catalog",
               },
             });
+            // BUG FIX (verified-shows-Unidentified): only stamp the feed badge "Verified match" when
+            // resolveUnknown ACTUALLY resolved this review. resolveUnknown can silently no-op and leave
+            // the review "open" - a fuzzy identity-merge suggest_link (two different products sharing a
+            // name/brand), or a dedup conflict (matchedIds.size > 1) - in which case the row's REAL
+            // product/name never changed (still the provisional placeholder) and forcing the badge to
+            // "verified" here would lie about the row's status (the exact owner-reported bug: "Verified
+            // match" + "Unidentified item" on the same row). Only mark verified once the review is
+            // actually "resolved".
+            if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
+              get().markFeedRowVerified(review.cleanCode, "Matched from global catalog - no AI used.");
+            }
             return;
           }
           // Firewall conflict: fall through to AI below (same as a miss).
@@ -2013,12 +2023,27 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             ),
             // Update the originating scan-feed row(s) from "Decoding..." / provisional "suggested" (the row
             // may already have been counted synchronously by ensureProvisionalCount) to the REAL fast-decode
-            // outcome (needs_review / suggested / conflict / verified). Never downgrade a row already flipped
-            // to "verified" by the auto-verify pass.
+            // outcome (needs_review / suggested / conflict). Never downgrade a row already flipped to
+            // "verified" by the auto-verify pass.
+            //
+            // BUG FIX (verified-shows-Unidentified, burst report): a provider's raw decision.status
+            // "verified" is NEVER written to the feed badge here. "Verified match" must mean the APP's own
+            // auto-count gate (below) actually resolved this scan to a real product - a raw "verified"
+            // decision can still fail to auto-count (weak/no evidence, context conflict, tireOk false) or
+            // resolveUnknown can still no-op (fuzzy identity-merge suggest_link, dedup conflict), in which
+            // case the row must keep showing its honest pending state, not a "Verified match" lie over the
+            // unresolved "Unidentified item" placeholder. Only `markFeedRowVerified` - now called ONLY
+            // after resolveUnknown actually resolves the review - is allowed to write "verified" here.
             scanFeed: st.scanFeed.map((e) =>
               e.cleanCode === review.cleanCode &&
               (e.decodeStatus === "decoding" || e.decodeStatus === "needs_review" || e.decodeStatus === "suggested")
-                ? { ...e, decodeStatus: (decision?.status ?? "needs_review") as ScanEvent["decodeStatus"], reason: decision?.reason ?? e.reason }
+                ? {
+                    ...e,
+                    decodeStatus: (decision?.status === "verified"
+                      ? "suggested"
+                      : (decision?.status ?? "needs_review")) as ScanEvent["decodeStatus"],
+                    reason: decision?.reason ?? e.reason,
+                  }
                 : e,
             ),
             aiLookupLogs: [mkLog("success", providerName, decision?.confidence ?? 0, recordSuccess()), ...st.aiLookupLogs],
@@ -2143,7 +2168,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // TASK 3: the scan was counted synchronously, so its feed row is already "known" (which
             // resolveUnknown's resolved-row remap skips). Flip that row's badge to "verified" so the feed
             // shows the auto-verified decode instead of the stale "suggested" placeholder badge.
-            get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "");
+            //
+            // BUG FIX (verified-shows-Unidentified, burst report): resolveUnknown can silently no-op and
+            // leave the review "open" instead of "resolved" - most commonly the identity-merge fuzzy
+            // suggest_link path (two different products/codes with a very similar name+brand, e.g. the
+            // SAME tire model in different sizes scanned back-to-back) or a dedup conflict
+            // (matchedIds.size > 1). In either case the row's product/name is UNCHANGED (still the
+            // provisional "Unidentified item" placeholder) and the review is left open for a human
+            // decision - forcing the badge to "verified" here would show "Verified match" over an
+            // unresolved placeholder name, exactly the owner-reported burst bug. Only mark the row
+            // verified when resolveUnknown actually resolved it.
+            if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
+              get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "");
+            }
           } else {
             // DECODE-EVERYTHING provisional count: EVERY scan that reached decode gets counted, even if
             // the AI returned a weak/empty product or no product at all. Owner rule: scan 10 = count 10.
@@ -2682,10 +2719,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (origin === "auto_verify") {
             get().recordFeedback("auto_verified_catalog_entry", { code: review.cleanCode, meta: { score: plan.score, tier: plan.sourceTier } });
           }
-          // Flip the scan-feed badge to verified BEFORE resolveUnknown re-scans (it would otherwise stay
-          // on the suggested/needs_review badge the fast pass left). The row may be "known" (counted
-          // synchronously) - markFeedRowVerified flips it regardless, as long as it is not already resolved.
-          get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
           get().resolveUnknown(reviewId, "create_new", {
             applyToCount: true,
             origin,
@@ -2702,6 +2735,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 : undefined,
             newProduct,
           });
+          // Flip the scan-feed badge to verified AFTER resolveUnknown, and ONLY when it actually resolved
+          // the review (status "resolved"). The row may be "known" (counted synchronously) - markFeedRowVerified
+          // flips it regardless of that, as long as it is not already resolved. BUG FIX (verified-shows-
+          // Unidentified): resolveUnknown can silently no-op (fuzzy identity-merge suggest_link, or a dedup
+          // conflict) and leave the review "open" with the placeholder product untouched - marking the row
+          // "verified" in that case would show "Verified match" over the unresolved placeholder name.
+          if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
+            get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
+          }
         } else if (contextConflict) {
           // FALSE-AUTO-COUNT BACKSTOP: a "verified" deep decode that contradicts the tire context (poison)
           // must NOT count. Keep it open with the safe conflict reason; the human relinks. Never weaken.
