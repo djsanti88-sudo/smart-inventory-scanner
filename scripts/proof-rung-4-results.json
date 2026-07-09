@@ -1,0 +1,11 @@
+{
+  "mode": "dry-run",
+  "at": "2026-07-09T04:50:43.510Z",
+  "hardCapUsd": 1.5,
+  "worstCasePerCallUsd": 0.39,
+  "maxCallsUnderCap": 3,
+  "junkGate": 0,
+  "plannedSampleSize": 10,
+  "guardMathValid": false,
+  "note": "Zero network calls, zero OpenAI $ spent. Input codes are 'rung 3's still-unresolved tail' -- do not exist until rung 3 runs live. Awaiting controller authorization for --live."
+}
