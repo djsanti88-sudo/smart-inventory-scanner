@@ -325,6 +325,12 @@ export async function GET(request: Request) {
     // Task 1 (v2 daily cap): exposes the SAME atomic, storage-backed counter the route gates and
     // the paid-rung charge site use - a read-only peek, never incremented by this GET.
     daily: { used: dailyUsed, limit: dailyLimit },
+    // Task 8: the real decode ladder order (MASTER BASELINE v1) so Settings can stop implying
+    // Gemini participates in decode. Gemini fields above (geminiEnabled/geminiConfigured/
+    // geminiModel) are kept as-is - Settings and refreshAiStatus still read them - but decode
+    // itself never calls Gemini; it is corpus -> Go-UPC -> Fetch V2 -> GPT only.
+    decodeLadder: ["corpus", "go_upc", "fetch_v2", "gpt"],
+    geminiUsedForDecode: false,
   });
 }
 

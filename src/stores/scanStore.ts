@@ -1600,6 +1600,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 mode: typeof d.mode === "string" ? d.mode : s.aiStatus.mode,
                 dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
                 missingKeys: Array.isArray(d.missingKeys) ? d.missingKeys : s.aiStatus.missingKeys,
+                // Task 8: honest decode-ladder fields. Gemini stays in geminiConfigured/geminiEnabled
+                // above (still read by the autoDecode gate below); these two only describe the real
+                // ladder order and confirm Gemini is never called during decode.
+                decodeLadder: Array.isArray(d.decodeLadder) ? d.decodeLadder : s.aiStatus.decodeLadder,
+                geminiUsedForDecode: Boolean(d.geminiUsedForDecode),
                 gptLadder:
                   d.gptLadder && typeof d.gptLadder === "object"
                     ? {

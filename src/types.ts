@@ -517,6 +517,13 @@ export interface AiStatus {
     callsToday: number;
     enabled: boolean;
   };
+  /** Task 8: the real decode ladder order (MASTER BASELINE v1). Gemini is never in it - decode is
+   *  corpus -> Go-UPC -> Fetch V2 -> GPT only. Optional because it is a newer server field; a stale
+   *  GET response without it is still valid. */
+  decodeLadder?: string[];
+  /** Task 8: always false. Gemini fields above (geminiEnabled/geminiConfigured/geminiModel) stay for
+   *  Settings + refreshAiStatus's gate, but Gemini is permanently out of decode (enrichment only). */
+  geminiUsedForDecode?: boolean;
 }
 
 /** Which approved corroboration path produced a "verified" decode (for honest reporting). */

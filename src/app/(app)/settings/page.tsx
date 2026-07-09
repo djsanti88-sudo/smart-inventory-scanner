@@ -7,6 +7,7 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 import { GptLadderPanel } from "@/components/GptLadderPanel";
+import { GeminiStatusRow } from "@/components/GeminiStatusRow";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -144,9 +145,10 @@ export default function SettingsPage() {
           <span className="text-sm">{aiStatus.autoDecodeOnScan ? "On" : "Off"}</span>
         </Row>
         <Row label="Fast AI lookup">
-          <span className={`text-sm ${aiStatus.geminiConfigured ? "text-green-700" : "text-red-700"}`} data-testid="gemini-status">
-            {aiStatus.geminiConfigured ? "Connected (key configured)" : "Not connected (key missing)"}
-          </span>
+          <GeminiStatusRow
+            geminiConfigured={aiStatus.geminiConfigured}
+            geminiUsedForDecode={aiStatus.geminiUsedForDecode}
+          />
         </Row>
         <Row label="Backup AI lookup">
           <span className={`text-sm ${aiStatus.openaiConfigured ? "text-green-700" : "text-red-700"}`} data-testid="openai-status">
