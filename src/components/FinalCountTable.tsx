@@ -5,7 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { SyncBadge } from "@/components/badges";
-import { plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
+import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { filterProducts } from "@/services/polish/filterProducts";
 import type { InventoryCount, Product } from "@/types";
@@ -24,6 +24,15 @@ function resolvedModel(product: Product): string {
 }
 function resolvedSizeTag(product: Product): string {
   return product.sizeTag || plainTireSizeDigits(product.specsShort);
+}
+// Task 6: the Size cell shows the canonical, human-readable size ("245/70R16") instead of the
+// digit-mash ("2457016") the Specs column already spells out in full. Falls back to the raw
+// sizeTag when specsShort has no parseable tire size (e.g. legacy rows, non-tire products), and
+// finally to "-" so the cell never renders blank or throws. The digit form still exists via
+// resolvedSizeTag() for the filter box and moves to the cell's title tooltip (some owners search
+// tires by the plain sidewall digits).
+function resolvedSizeDisplay(product: Product): string {
+  return matchTireSize(product.specsShort)?.canonical.split(" ")[0] ?? product.sizeTag ?? "-";
 }
 
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). Raw codes (barcode +
@@ -162,8 +171,12 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
       <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(product) || "-"}</td>
       <td className="px-4 py-3">{product.category}</td>
       <td className="px-4 py-3">{product.specsShort}</td>
-      <td className="px-4 py-3 font-mono text-sm tabular-nums" data-testid={`size-${product.id}`}>
-        {resolvedSizeTag(product) || "-"}
+      <td
+        className="px-4 py-3 font-mono text-sm tabular-nums"
+        data-testid={`size-${product.id}`}
+        title={resolvedSizeTag(product) || undefined}
+      >
+        {resolvedSizeDisplay(product) || "-"}
       </td>
       <td className="px-4 py-3 font-mono text-sm">
         <div>{product.primarySku || "-"}</div>
