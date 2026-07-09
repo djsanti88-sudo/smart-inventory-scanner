@@ -86,15 +86,30 @@ async function findAllDoneFiles() {
     .map((f) => path.join(STATE_DIR, f));
 }
 
-/** Run a child node script to completion, streaming its stdout/stderr through the parent's. */
-function runNodeScript(scriptPath, args) {
+/**
+ * Run a child node script to completion, streaming its stdout/stderr through the parent's.
+ *
+ * Exit-code resolution (review finding, CRITICAL): Node's "exit" event fires with
+ * `(code, signal)`. When a child is killed by a signal (e.g. SIGKILL/SIGTERM), `code` is
+ * `null` AND `signal` is set - `code ?? 0` would silently fabricate a successful exit 0
+ * for a killed process. A signal-killed child is never a success, so `signal` truthy
+ * always resolves to failure (1), regardless of `code`. An unexplained null `code` with
+ * no signal (should not normally happen, but defensively) also defaults to failure (1),
+ * never success - only an explicit `code === 0` counts as success.
+ *
+ * `onSpawn` (test-only hook) is invoked with the live ChildProcess right after spawn, so
+ * tests can call `child.kill("SIGKILL")` at a deterministic point without weekly.mjs's
+ * own CLI flow ever passing it - default callers omit it entirely.
+ */
+export function runNodeScript(scriptPath, args, { onSpawn } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath, ...args], {
       cwd: process.cwd(),
       stdio: "inherit",
     });
+    if (typeof onSpawn === "function") onSpawn(child);
     child.on("error", reject);
-    child.on("exit", (code) => resolve(code ?? 0));
+    child.on("exit", (code, signal) => resolve(signal ? 1 : (code ?? 1)));
   });
 }
 
@@ -104,20 +119,25 @@ function runNodeScript(scriptPath, args) {
  * Used only for apply.mjs, whose real added/skipped/spot-check numbers live in its
  * printed report (no machine-readable output file - see lib/weekly.mjs's
  * parseApplyOutput doc comment).
+ *
+ * Same signal-aware exit resolution as runNodeScript (see its doc comment): a
+ * signal-killed child never resolves as success, and an unexplained null code without a
+ * signal defaults to failure, never a fabricated 0. Same test-only `onSpawn` hook too.
  */
-function runNodeScriptCapture(scriptPath, args) {
+export function runNodeScriptCapture(scriptPath, args, { onSpawn } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [scriptPath, ...args], {
       cwd: process.cwd(),
       stdio: ["inherit", "pipe", "inherit"],
     });
+    if (typeof onSpawn === "function") onSpawn(child);
     let stdout = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
       process.stdout.write(chunk);
     });
     child.on("error", reject);
-    child.on("exit", (code) => resolve({ code: code ?? 0, stdout }));
+    child.on("exit", (code, signal) => resolve({ code: signal ? 1 : (code ?? 1), stdout }));
   });
 }
 
@@ -232,7 +252,16 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("weekly.mjs failed:", err);
-  process.exitCode = 1;
-});
+// Only auto-run when executed directly (`node weekly.mjs`), never when imported - the
+// signal-kill exit test below imports this module solely for `runNodeScript`/
+// `runNodeScriptCapture` and must not trigger a live discover/batch/apply run as a
+// side effect of that import. Uses the portable argv-comparison check (rather than
+// `import.meta.main`, a newer Node-only field) so it also transforms cleanly under the
+// project's Vite/esbuild-based Vitest pipeline.
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMainModule) {
+  main().catch((err) => {
+    console.error("weekly.mjs failed:", err);
+    process.exitCode = 1;
+  });
+}
