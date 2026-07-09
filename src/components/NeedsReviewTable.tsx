@@ -124,7 +124,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
     <tr className="border-t border-zinc-100 align-top hover:bg-zinc-50" data-testid={`review-row-${review.cleanCode}`}>
       {isPlatform && <td className="px-4 py-3 font-mono text-sm">{review.rawCode}</td>}
       {isPlatform && <td className="px-4 py-3 font-mono text-sm">{review.cleanCode}</td>}
-      <td className="px-4 py-3 font-mono text-sm">{review.cleanCode || review.rawCode || "-"}</td>
+      <td className="px-4 py-3 font-mono text-sm" data-testid="review-barcode">{review.cleanCode || review.rawCode || "-"}</td>
       <td className="max-w-48 px-4 py-3 text-sm text-zinc-700" data-testid="review-reason">
         {review.reason || "Unknown code."}
         {typeof review.autoVerifyScore === "number" && (
