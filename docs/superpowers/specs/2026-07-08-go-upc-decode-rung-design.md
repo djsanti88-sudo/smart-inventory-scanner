@@ -93,6 +93,11 @@ When the scanned code is NOT a UPC/EAN/GTIN (fails check-digit/format, or
    2026-07-05: 57 verified vs 34 baseline, zero wrong, pennies per code), then
    GPT-5.5 grounded ONLY if Fetch V2 finds nothing usable** (owner-selected order,
    2026-07-08). Results pass the existing evidence gate either way.
+   - NEW pattern door (owner order, 2026-07-08): add **meros.io** to the vetted
+     barcode-database page list in `src/services/ai/barcodeSources.ts`. It is a
+     free web UPC database with NO public API, so it is a Fetch V2 door, not a
+     ladder rung: fetch the code's lookup page, and the evidence verifier must
+     find the exact code on the page like every other door. No key, no cost.
 5. Identity-merge then applies: if the answer carries a GTIN matching an existing
    product, the SKU auto-links as an alias to that product (this is exactly the
    "UPC scanned earlier, SKU scanned now" case). Fuzzy match -> one-tap link
