@@ -57,9 +57,14 @@ function gptResult(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("GPT ladder trust tiers - verified auto-count", () => {
-  it("gpt_self_report verified at confidence 0.9 auto-counts once (product created, counted, alias written), idempotent on double-apply", async () => {
+  // NOTE: this code MUST be a public-barcode shape (upc_a/ean_13/gtin_14). The gpt_self_report trust
+  // tier is ONLY theoretically falsifiable (GPT claims to have found the exact code on a real page) for
+  // a real public barcode - a vendor/SKU/part-number code has no public page to have been "found" on, so
+  // trusting a bare self-report for those shapes is exactly the T20 code-1225 hallucination-auto-count
+  // hole (see .superpowers/sdd/task-1225-report.md). A 12-digit numeric code is upc_a.
+  it("gpt_self_report verified at confidence 0.9 on a PUBLIC BARCODE (upc_a) auto-counts once (product created, counted, alias written), idempotent on double-apply", async () => {
     const store = aiOnStore();
-    const review = openReview(store, "GPTV0001");
+    const review = openReview(store, "012345678905");
     const RESP = {
       providerNames: ["gpt-5.5-ladder"],
       results: [
@@ -96,7 +101,7 @@ describe("GPT ladder trust tiers - verified auto-count", () => {
     const product = store.getState().products.find((p) => p.name === "Falken Wildpeak A/T3W 265/70R17");
     expect(product).toBeDefined();
     expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
-    const alias = store.getState().aliases.find((a) => a.cleanCode === "GPTV0001");
+    const alias = store.getState().aliases.find((a) => a.cleanCode === "012345678905");
     expect(alias).toBeDefined();
     expect(alias!.approved).toBe(true);
 
@@ -105,7 +110,7 @@ describe("GPT ladder trust tiers - verified auto-count", () => {
     // via the approved alias (no second AI call) and only add ONE more unit.
     const { spy: spy2, restore: restore2 } = stub(RESP);
     try {
-      store.getState().processScan("GPTV0001");
+      store.getState().processScan("012345678905");
     } finally {
       restore2();
     }
@@ -113,9 +118,133 @@ describe("GPT ladder trust tiers - verified auto-count", () => {
     expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(2);
   });
 
-  it("gpt_self_report verified but confidence 0.79 does NOT auto-count (blocked, provisional/unverified only)", async () => {
+  // T20 code-1225 regression: a NON-public-barcode-shaped code (numeric_sku, 4 digits) can NEVER auto-count
+  // off a bare gpt_self_report, even at high self-reported confidence with a plausible-looking product name.
+  // GPT cannot have "found" a 4-digit vendor part number on a real public page - a self-report here is
+  // intrinsically unverifiable and must be capped to a provisional/suggested candidate, never verified.
+  it("gpt_self_report verified at confidence 0.9 on a NUMERIC_SKU code (vendor part number, e.g. 1225) does NOT auto-count - routes to provisional/needs review", async () => {
     const store = aiOnStore();
-    const review = openReview(store, "GPTV0002");
+    const review = openReview(store, "1225");
+    const RESP = {
+      providerNames: ["gpt-5.5-ladder"],
+      results: [
+        gptResult({
+          productName: "Spitz Vorosafonya Cranberry Juice", // fabricated identity, mirrors the live T20 failure
+          brand: "Spitz",
+          confidence: 0.9,
+          guesses: ["exact code self-reported"],
+          needsHumanReview: false,
+        }),
+      ],
+      decision: {
+        status: "verified",
+        confidence: 0.9,
+        reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
+        evidenceStrength: "none",
+        exactCodeEvidenceVerifiedByApp: false,
+        corroborationPath: "gpt_self_report",
+        crossCheck: crossCheckSingleProvider(0.9),
+      },
+    };
+    const { restore } = stub(RESP);
+    try {
+      await store.getState().liveDecode(review.id);
+    } finally {
+      restore();
+    }
+
+    const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
+    expect(r.status).toBe("open"); // never auto-resolved on a non-public code shape
+    const product = store.getState().products.find((p) => p.primaryBarcode === "1225");
+    // A provisional count may still exist (DECODE-EVERYTHING rule), but it must never be verified/approved.
+    if (product) {
+      expect(product.verified).toBe(false);
+    }
+    const alias = store.getState().aliases.find((a) => a.cleanCode === "1225" && a.approved === true);
+    expect(alias).toBeUndefined();
+  });
+
+  // Same hole, alpha_sku shape (a Moen-style vendor part number, letters+digits).
+  it("gpt_self_report verified at confidence 0.95 on an ALPHA_SKU vendor part number does NOT auto-count", async () => {
+    const store = aiOnStore();
+    const review = openReview(store, "GP1043211");
+    const RESP = {
+      providerNames: ["gpt-5.5-ladder"],
+      results: [
+        gptResult({
+          productName: "Fabricated Vendor Product Name",
+          brand: "SomeBrand",
+          confidence: 0.95,
+          guesses: ["exact code self-reported"],
+          needsHumanReview: false,
+        }),
+      ],
+      decision: {
+        status: "verified",
+        confidence: 0.95,
+        reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
+        evidenceStrength: "none",
+        exactCodeEvidenceVerifiedByApp: false,
+        corroborationPath: "gpt_self_report",
+        crossCheck: crossCheckSingleProvider(0.95),
+      },
+    };
+    const { restore } = stub(RESP);
+    try {
+      await store.getState().liveDecode(review.id);
+    } finally {
+      restore();
+    }
+
+    const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
+    expect(r.status).toBe("open");
+    const alias = store.getState().aliases.find((a) => a.cleanCode === "GP1043211" && a.approved === true);
+    expect(alias).toBeUndefined();
+  });
+
+  // Regression guard: a corpus/Go-UPC style app-verified result on a public barcode must still auto-count.
+  // This is untouched by the fix - exactCodeEvidenceVerifiedByApp true is real app verification, not a
+  // self-report, and decodeCorroborated() already covers this path independent of gptTrusted.
+  it("app-verified exact code on a public barcode (upc_a) still auto-counts (legitimate corpus/Go-UPC path unchanged)", async () => {
+    const store = aiOnStore();
+    const review = openReview(store, "078742222222");
+    const RESP = {
+      providerNames: ["corpus"],
+      results: [
+        gptResult({
+          productName: "Moen Faucet Cartridge 1225",
+          brand: "Moen",
+          confidence: 0.95,
+          needsHumanReview: false,
+        }),
+      ],
+      decision: {
+        status: "verified",
+        confidence: 0.95,
+        reason: "corpus: app-verified exact code match",
+        evidenceStrength: "fetched_source",
+        exactCodeEvidenceVerifiedByApp: true,
+        corroborationPath: "exact_code_evidence",
+        crossCheck: crossCheckSingleProvider(0.95),
+      },
+    };
+    const { restore } = stub(RESP);
+    try {
+      await store.getState().liveDecode(review.id);
+    } finally {
+      restore();
+    }
+
+    const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
+    expect(r.status).toBe("resolved");
+    const product = store.getState().products.find((p) => p.name === "Moen Faucet Cartridge 1225");
+    expect(product).toBeDefined();
+    expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
+  });
+
+  it("gpt_self_report verified but confidence 0.79 on a public barcode does NOT auto-count (confidence gate, isolated from the shape gate)", async () => {
+    const store = aiOnStore();
+    const review = openReview(store, "036000291452");
     const RESP = {
       providerNames: ["gpt-5.5-ladder"],
       results: [
@@ -145,11 +274,11 @@ describe("GPT ladder trust tiers - verified auto-count", () => {
 
     const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
     expect(r.status).toBe("open"); // never auto-resolved
-    const product = store.getState().products.find((p) => p.primaryBarcode === "GPTV0002");
+    const product = store.getState().products.find((p) => p.primaryBarcode === "036000291452");
     expect(product).toBeDefined();
     expect(product!.verified).toBe(false);
     expect(product!.provisional).toBe(true);
-    const alias = store.getState().aliases.find((a) => a.cleanCode === "GPTV0002" && a.approved === true);
+    const alias = store.getState().aliases.find((a) => a.cleanCode === "036000291452" && a.approved === true);
     expect(alias).toBeUndefined();
   });
 
@@ -467,7 +596,7 @@ describe("Bounded decode queue (burst-safe)", () => {
 describe("Direct idempotency lock (liveDecode re-entry on an already-resolved review)", () => {
   it("calling liveDecode twice for the SAME review is a no-op the second time (open-status guard, not the rescan/alias path)", async () => {
     const store = aiOnStore();
-    const review = openReview(store, "GPTIDEM01");
+    const review = openReview(store, "614141000418");
     const RESP = {
       providerNames: ["gpt-5.5-ladder"],
       results: [
@@ -512,7 +641,7 @@ describe("Direct idempotency lock (liveDecode re-entry on an already-resolved re
       expect(spy).toHaveBeenCalledTimes(1); // fetch NOT called a second time
       expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1); // unchanged
       expect(store.getState().products.filter((p) => p.name === "Continental TerrainContact 235/65R18")).toHaveLength(1); // no duplicate product
-      expect(store.getState().aliases.filter((a) => a.cleanCode === "GPTIDEM01")).toHaveLength(1); // no duplicate alias
+      expect(store.getState().aliases.filter((a) => a.cleanCode === "614141000418")).toHaveLength(1); // no duplicate alias
     } finally {
       restore();
     }

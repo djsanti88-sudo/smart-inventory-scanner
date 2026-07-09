@@ -2049,7 +2049,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // verify can still auto-count on its OWN, narrower branch - never by weakening the existing
           // evidence-corroborated conjunction below. Both branches still require the shared data-completeness
           // (tireOk) and context (contextConflict) gates; only the corroboration requirement differs.
+          // T20/code-1225 FIX: a bare self-report is only theoretically falsifiable for a real public
+          // barcode (GPT claims to have found the exact code on a real page). A vendor/SKU/part-number
+          // code (numeric_sku/alpha_sku/vendor_label/messy) has no public page to have been "found" on,
+          // so self-report trust must NEVER auto-count those shapes - see
+          // .superpowers/sdd/task-1225-report.md. This does not touch decodeCorroborated()'s conjunction.
+          const isPublicBarcodeShapeForGptTrust = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
           const gptTrusted =
+            isPublicBarcodeShapeForGptTrust &&
             decision?.corroborationPath === "gpt_self_report" &&
             decision?.status === "verified" &&
             (decision?.confidence ?? 0) >= 0.8 &&
@@ -2583,7 +2590,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         });
         // Same GPT ladder trust-tier extension as liveDecode's evidence gate (Task 5) - kept in sync so the
         // two decode paths can never drift.
+        // T20/code-1225 FIX: same public-barcode-shape requirement as liveDecode's gptTrusted (see there
+        // for the full rationale) - kept in sync so the two decode paths can never drift apart again.
+        const isPublicBarcodeShapeForGptTrust = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
         const gptTrusted =
+          isPublicBarcodeShapeForGptTrust &&
           decision.corroborationPath === "gpt_self_report" &&
           decision.status === "verified" &&
           (decision.confidence ?? 0) >= 0.8 &&
