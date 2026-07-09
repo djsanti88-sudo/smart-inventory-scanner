@@ -33,7 +33,7 @@ describe("NeedsReviewTable - Barcode column visible to all roles (Task 4)", () =
     });
     render(<NeedsReviewTable />);
     expect(screen.getByText("Barcode")).not.toBeNull();
-    expect(screen.getByText("086699998538")).not.toBeNull();
+    expect(screen.getByTestId("review-barcode")).toHaveTextContent("086699998538");
   });
 });
 
