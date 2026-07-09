@@ -145,3 +145,82 @@ Cumulative across the full Task 20 dispatch (all attempts combined, reconciled f
 - 3 of 4 run attempts required a fix before completing (server-boot timeout, exhausted daily call-volume guard, and a mid-run server crash/circuit-breaker gap) -- none of these touched real spend; all are documented above and fixed in the committed script (`scripts/proof-full-ladder.mjs`) for future reruns.
 - The Task-2 raw decode archive (FetchV2/GPT-5.5 raw response capture) described in the plan does not exist as a standalone module; only the Go-UPC rung's `appendArchive` call (backed by the Turso `decode_archive` table) is wired today.
 - No corpus-growth anomalies: all 40 Group B/C codes remained absent from both corpora at run time, matching the selection-time check exactly.
+
+## Task 20 GRADED verdict
+
+Graded by claude-sonnet-5 directly (owner order: mechanical grading by a lower-tier model, no escalation to opus), offline over the recorded, unmodified `scripts/proof-full-ladder-results.json` (60 codes). Full per-code grades: `scripts/proof-full-ladder-graded.json`. Detailed working notes: `.superpowers/sdd/task-T20GRADE-report.md`.
+
+### Headline: the 1225 defect is CONFIRMED and CLOSED
+
+Code `1225` (a 4-digit vendor part number, truth = Moen One-Handle Faucet Replacement Cartridge) was auto-verified (`status:"verified"`, `corroborationPath:"gpt_self_report"`) with a completely fabricated identity ("Spitz Vörösáfonya 50%-os gyümölcskészítmény 5kg" — a Hungarian cranberry preparation). This is graded a **CONFIRMED real defect**: a wrong-identity auto-count is the single worst outcome this ladder can produce (permanently and silently mis-teaching an alias).
+
+Root cause (`.superpowers/sdd/task-1225-report.md`): `src/stores/scanStore.ts`'s `gptTrusted` branch (in both `liveDecode` and `backgroundVerifyDeep`) auto-counted any `corroborationPath === "gpt_self_report"` + `status === "verified"` + `confidence >= 0.8` result with **no check on the scanned code's shape** — a bare GPT self-report is only theoretically falsifiable for a real public barcode; a vendor/SKU/part-number code has no public page to have been "found" on, so trusting it is unverifiable by construction.
+
+**Fix verified as applied and correct.** Commit `5d810d46b7b3a8957851b4c0c2860430b54c7aa6` (already on `feat/decode-ladder-goupc`, 3 commits before HEAD at grading time) adds `isPublicBarcodeShapeForGptTrust = codeType in [upc_a, ean_13, gtin_14]` as the first required conjunct of `gptTrusted` in both functions. Read directly from the diff (`git show 5d810d4`) and confirmed against `src/services/codeTypeDetector.ts`: `"1225"` is 4 digits, classified `numeric_sku` (not `upc_a`/`ean_13`/`gtin_14`), so it now **fails** the new gate. Re-applying the fixed gate offline to this row: **`1225` would now settle at `needs_review`, not auto-count.** TDD evidence in `task-1225-fix-report.md` independently confirms this (12/12 tests green, including a red-before/green-after pair for exactly this code and a regression guard proving legitimate `upc_a` self-report auto-counts are unaffected).
+
+### Blast radius: all 7 `gpt_self_report` codes change outcome under the fix
+
+Every row with `corroborationPath: "gpt_self_report"` in the 60-code run reached `verified`/auto-count status through the identical ungated path — `1225` is simply the one case where the self-report happened to be wrong instead of accidentally correct:
+
+| Code | codeType shape | Pre-fix status | Identity this run | Post-fix outcome |
+|---|---|---|---|---|
+| `28034300` | numeric_sku (8-digit) | verified (auto-count) | correct (Falken Wildpeak A/T3W) | needs_review |
+| `DCB205` | alpha_sku | verified (auto-count) | correct (DeWalt battery) | needs_review |
+| `BL1850B` | alpha_sku | verified (auto-count) | correct (Makita battery) | needs_review |
+| `PH7317` | alpha_sku | verified (auto-count) | correct (FRAM oil filter) | needs_review |
+| `K060841` | alpha_sku | verified (auto-count) | correct (Gates belt) | needs_review |
+| **`1225`** | numeric_sku | **verified (auto-count)** | **WRONG (fabricated)** | **needs_review** |
+| `GP1043211` | alpha_sku | verified (auto-count) | correct (Kohler sprayhead) | needs_review |
+
+6 of 7 "got lucky" this run (correct answer despite an unverifiable, ungated trust path); `1225` proves the path was never actually safe. The fix demotes all 7 to `needs_review` uniformly — a deliberate, symmetric trade of a small recall cost (6 previously-correct auto-counts become suggestions requiring human approval) for closing the entire hallucination-auto-count hole for this code-shape class. This is the correct trade per CLAUDE.md's resolver-trust rule ("Unknown is ACCEPTABLE. Prefer Needs Review over a wrong guess").
+
+### Adjudication of every disagreement and tail-rung answer
+
+5 mechanically-flagged mismatch/refusal candidates from the run's own T20 report, adjudicated individually:
+
+1. **`051596320812`** (Home Depot bucket -> "Ryobi stick vacuum... Facebook" via `fetchv2`, `status:"suggested"`): **acceptable suggestion, not a defect.** Wrong identity, but never auto-counted (stayed suggested); a Fetch V2 search-result-title ranking bug (repeat of a known 2026-07-08 issue), not an auto-count safety failure.
+2. **`749000000015`** (must-refuse canary -> "Unidentified item (barcode ...)" placeholder, `status:"needs_review"`): **acceptable outcome, UX nit only.** Correctly did not auto-count and attached no fabricated product identity — a generic floor placeholder after a 23.7s search timeout is a labeling/latency concern, not a safety defect.
+3. **`749000000022`** (must-refuse canary -> "M23 Signal panel connector housing" via `gpt`, `status:"suggested"`, corroborationPath `"gpt"` not `"gpt_self_report"`): **true hallucination-quality defect, but not an auto-count defect.** GPT fabricated a plausible industrial part for a code that should have zero web hits, but it settled `suggested`, never `verified` — a human must approve it. This is a *different* code path from `1225`'s (`gpt` vs `gpt_self_report`) and the 1225 fix does not touch it; flagged as a separate follow-up (tightening GPT's no-evidence refusal behavior), not part of this defect's blast radius.
+4. **`2710800`** (Pirelli tire -> "Mediterranean Style Meatloaf Mix" via `gpt`, `status:"suggested"`): **true hallucination-quality defect, not an auto-count defect.** Total identity-family swap (tire to food), but stayed `suggested` (corroborationPath `"gpt"`, never reached `"gpt_self_report"`/`"verified"`), so it never auto-counted. Same category as #3 — a prompt/evidence-quality issue for a separate future fix, correctly firewalled from counting by the status gate that already exists.
+5. **`1225`**: **CONFIRMED defect, now fixed** — see headline above.
+
+Net: of 5 flagged candidates, **1 was a confirmed, now-fixed auto-count safety defect** (`1225`); **2 were real GPT hallucinations that the existing status gate already correctly prevented from auto-counting** (`749000000022`, `2710800`); **1 was a UX/labeling nit with no wrong identity attached** (`749000000015`); **1 was a search-ranking noise issue, also never auto-counted** (`051596320812`). No grading-artifact-only disagreements were found — every flagged row had a real, gradable outcome.
+
+### Waterfall + accuracy tables
+
+**Settled-by-stage per group (all 60 codes, $ = corpus/free, others per waterfall above):**
+
+| Group | n | Settled-by breakdown | Status breakdown |
+|---|---|---|---|
+| A (corpus tires) | 20 | `corpus_exact_barcode` 20 | verified 20 |
+| B (retail, absent from corpora) | 20 | `goupc` 7, `single_source` 4, `fetchv2` 2, `none` 7 | verified 5, suggested 2, needs_review 13 |
+| C (hard tail, absent from corpora) | 20 | `gpt` 9, `none` 6, `goupc` 3, `corpus_exact_part_number` 1, `parallel_floor` 1 | verified 7, suggested 3, needs_review 10 |
+
+**Auto-count precision — THE headline safety number:**
+
+| | Total auto-counted (`status=verified`) | Correct | Wrong | Precision |
+|---|---|---|---|---|
+| **Pre-fix** | 32 | 31 | 1 (`1225`) | **96.9%** |
+| **Post-fix** | 25 | 25 | 0 | **100%** |
+
+(32 pre-fix = 20 Group A corpus hits + 5 Group B single-source/Go-UPC exact hits + 7 Group C `gpt_self_report` hits. Post-fix, all 7 `gpt_self_report` hits demote to `needs_review`, leaving 25 auto-counts, all correct.)
+
+**Tail-rung accuracy (Go-UPC / Fetch V2 / GPT, identity-vs-truth where truth exists):**
+
+| Rung | n | Correct identity/outcome | Wrong identity | Note |
+|---|---|---|---|---|
+| Go-UPC | 10 | 10 | 0 | 7 in Group B + 3 in Group C, all family-correct suggestions or exact-match auto-counts. |
+| Fetch V2 | 3 | 2 | 1 | LEGO code correct (suggested); Home Depot bucket code wrong (suggested, search-noise). |
+| GPT | 9 | 6 | 3 | 3/9 hallucinated a wrong identity (`749000000022`, `2710800`, `1225`); only `1225` crossed into auto-count — that hole is now closed. |
+
+**Recall (measurable subset):** of the 12 Group B/C codes with a real available truth string that produced no identity at all (`needs_review`, empty productName — mostly ASIN/FNSKU codes correctly gated as `non_public_code_type` before ever reaching GPT), 8 are pure recall misses with zero wrong-guess risk (`B00FLYWNYQ`, `B00006JSUA`, `B09B8V1LZ3`, `0399226907`, `B00006IFHD`, `B004U3Y8OM`, `B00IJ0ALYS`, `51348`) — consistent with the "prefer Needs Review over a wrong guess" rule, not a defect.
+
+**Zero-wrong-after-fix assertion: CONFIRMED.** With commit `5d810d46b7b3a8957851b4c0c2860430b54c7aa6` applied, 0 of the 60 codes in this run would auto-count a wrong identity (down from 1 pre-fix). All other identity mismatches in the run (`749000000022`, `2710800`, `051596320812`) were already correctly firewalled from auto-counting by the existing `status !== "verified"` gate, independent of this fix.
+
+### Spend reconciliation (computed floor; true spend = provider consoles)
+
+- **Go-UPC**: Turso `goupc_usage` counter delta **12 lookups** this task (2 -> 14, month 2026-07). Cap 38 remaining before this task; well inside budget. True spend = Go-UPC provider console.
+- **GPT-5.5**: file-backed daily ledger (`.gpt-ladder-usage.json`) shows **$1.1309 total, 13 calls** for 2026-07-09 (daily cap $3, never exceeded; route's own server-side guard is the backstop). True spend = OpenAI provider console.
+- **Firecrawl**: no per-call credit metering exposed by the route; worst-case ceiling reserved was **≤100 credits** for the run (cap 400, conservative 5-credits/code reservation; actual spend materially lower since most codes settled via corpus/Go-UPC/refusal before any Firecrawl call). True spend = Firecrawl provider console.
+- **This grading pass**: $0 — offline grading only, over the already-recorded JSON. No live provider calls were made to produce this verdict.
+- **Wallet line**: "computed floor: Go-UPC 12 lookups, Firecrawl ≤100 credits worst-case reserved, GPT $1.13 (persisted actuals); true spend = provider consoles (Go-UPC / Firecrawl / OpenAI)."
