@@ -14,10 +14,10 @@ const SITEMAP_INDEX = `<?xml version="1.0" encoding="UTF-8"?>
 const CHILD_SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://www.discounttire.com/tires/michelin/defender-t-h-p123456</loc>
+    <loc>https://www.discounttire.com/buy-tires/michelin-defender-t-h/p/123456</loc>
   </url>
   <url>
-    <loc>https://www.discounttire.com/tires/goodyear/eagle-sport-p654321</loc>
+    <loc>https://www.discounttire.com/buy-tires/goodyear-eagle-sport/p/654321</loc>
   </url>
   <url>
     <loc>https://www.discounttire.com/store-locator/az/phoenix</loc>
@@ -42,8 +42,8 @@ describe("parseSitemapXml", () => {
   it("extracts urls from a child sitemap (product + non-product locs)", () => {
     const urls = parseSitemapXml(CHILD_SITEMAP);
     expect(urls).toEqual([
-      "https://www.discounttire.com/tires/michelin/defender-t-h-p123456",
-      "https://www.discounttire.com/tires/goodyear/eagle-sport-p654321",
+      "https://www.discounttire.com/buy-tires/michelin-defender-t-h/p/123456",
+      "https://www.discounttire.com/buy-tires/goodyear-eagle-sport/p/654321",
       "https://www.discounttire.com/store-locator/az/phoenix",
       "https://www.discounttire.com/tires-101/how-to-read-a-tire",
       "https://www.discounttire.com/about-us",
@@ -67,17 +67,19 @@ describe("parseSitemapXml", () => {
 });
 
 describe("filterTireProductUrls", () => {
-  it("keeps only tire product pages and drops store/article/category pages", () => {
+  it("keeps only tire product pages and drops store/article/wheel/family pages", () => {
     const urls = [
-      "https://www.discounttire.com/tires/michelin/defender-t-h-p123456",
-      "https://www.discounttire.com/tires/goodyear/eagle-sport-p654321",
+      "https://www.discounttire.com/buy-tires/michelin-defender-t-h/p/123456",
+      "https://www.discounttire.com/buy-tires/goodyear-eagle-sport/p/654321",
+      "https://www.discounttire.com/buy-tires/uniroyal-tiger-paw-awp-ii",
+      "https://www.discounttire.com/buy-wheels/touren-tr70/p/146884",
       "https://www.discounttire.com/store-locator/az/phoenix",
       "https://www.discounttire.com/tires-101/how-to-read-a-tire",
       "https://www.discounttire.com/about-us",
     ];
     expect(filterTireProductUrls(urls)).toEqual([
-      "https://www.discounttire.com/tires/michelin/defender-t-h-p123456",
-      "https://www.discounttire.com/tires/goodyear/eagle-sport-p654321",
+      "https://www.discounttire.com/buy-tires/michelin-defender-t-h/p/123456",
+      "https://www.discounttire.com/buy-tires/goodyear-eagle-sport/p/654321",
     ]);
   });
 

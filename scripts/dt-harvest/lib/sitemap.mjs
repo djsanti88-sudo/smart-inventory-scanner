@@ -36,11 +36,14 @@ function decodeXmlEntities(str) {
     .replace(/&apos;/g, "'");
 }
 
-// Discount Tire product page urls live under /tires/<brand>/<model-slug> and end
-// in a part-number style suffix (e.g. -p123456). Non-product pages we must drop:
-// store locator, "tires-101" article/guide content, generic marketing pages, etc.
-const PRODUCT_PATH_PATTERN = /\/tires\/[^/]+\/[^/]+-p\d+/i;
-const NON_PRODUCT_SEGMENTS = ["/store-locator", "/tires-101", "/about-us"];
+// Real Discount Tire tire-product urls (verified live 2026-07-08 from
+// sitemaps.discounttire.com/sitemap_full_product.xml):
+//   https://www.discounttire.com/buy-tires/<model-slug>/p/<digits>
+// Wheels live under /buy-wheels/ and are excluded (tire corpus only). Slug-only
+// family pages without /p/<id> (e.g. /buy-tires/uniroyal-tiger-paw-awp-ii) are
+// excluded too - only the per-product /p/ pages carry a specific GTIN.
+const PRODUCT_PATH_PATTERN = /^https:\/\/www\.discounttire\.com\/buy-tires\/[^/]+\/p\/\d+\/?$/i;
+const NON_PRODUCT_SEGMENTS = ["/store-locator", "/tires-101", "/about-us", "/buy-wheels/"];
 
 /**
  * Keep only urls that look like individual tire product pages; drop store,
