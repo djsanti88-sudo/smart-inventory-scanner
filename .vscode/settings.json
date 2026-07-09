@@ -1,0 +1,33 @@
+{
+  // High-churn dirs written every 1-2s by the dt-harvest crawl fleet and agent
+  // tooling. Without these excludes the VS Code file watcher + git extension
+  // rescan on every write, which freezes the renderer ("window is not
+  // responding") during long harvest/agent sessions (seen 2026-07-09).
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.next/**": true,
+    "**/scripts/dt-harvest/state/**": true,
+    "**/.superpowers/**": true,
+    "**/e2e/proof/**": true,
+    "**/test-results/**": true,
+    "**/playwright-report/**": true,
+    "**/data/**": true,
+    "**/.serena/**": true,
+    "**/*.jsonl": true,
+    "**/.ai-lookup-usage.json": true,
+    "**/.gpt-ladder-usage.json": true,
+    "**/.go-upc-usage.json": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/scripts/dt-harvest/state": true,
+    "**/test-results": true,
+    "**/playwright-report": true,
+    "**/data": true
+  },
+  "git.autorefresh": false,
+  "typescript.tsserver.watchOptions": {
+    "excludeDirectories": ["**/node_modules", "**/.next", "**/scripts/dt-harvest/state", "**/data"]
+  }
+}
