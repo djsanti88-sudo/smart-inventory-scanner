@@ -38,12 +38,24 @@ test("DataIntegrityBot: increment correctness, refresh persistence, unknown -> N
   const persisted = await page.getByTestId("final-count-body").locator("tr", { hasText: "Coca-Cola" }).count();
   checks.push({ check: "count persists after refresh", pass: persisted > 0, detail: `coke rows after reload=${persisted}` });
 
-  // 3. An unknown code goes to Needs Review (never auto-resolved). Read the most-recent feed row
-  //    (top; feed prepends) by STATUS, since the raw code column is hidden from customer roles.
+  // 3. An unknown code goes to Needs Review and is never auto-resolved to a real product identity
+  //    (Plan A "every scan counts" still gives it its own provisional "Unidentified item" count row -
+  //    that is intended, current behavior, not a bug: see countAlways.store.test.ts). Read the
+  //    most-recent feed row (top; feed prepends). Its DecodeStatusBadge label reads "Suggested"
+  //    (Plan C Task 1, 2026-07-01: needs_review/conflict/suggested are intentionally collapsed to one
+  //    non-alarming customer-facing label - see src/components/badges.tsx). The label change is
+  //    cosmetic; the property this check actually cares about - the code was never matched to an
+  //    existing NAMED product (no wrong identity) - is asserted directly below instead of via wording.
   await scan(page, "999000111222");
   const feedRow = page.getByTestId("scan-feed-body").locator("tr").first();
   const feedText = (await feedRow.innerText()).toLowerCase();
-  checks.push({ check: "unknown code -> Needs Review (not auto-resolved)", pass: /needs review|not recognised/.test(feedText), detail: feedText.slice(0, 80) });
+  const notAutoResolved = !/counted/.test(feedText) && /suggested|needs review|not recognised/.test(feedText);
+  checks.push({ check: "unknown code -> Needs Review (not auto-resolved)", pass: notAutoResolved, detail: feedText.slice(0, 80) });
+  // It gets its OWN provisional "Unidentified item" row (never merges into Coca-Cola or any other
+  // real product's count row - that would be a wrong-identity bug).
+  const cokeRowAfter = page.getByTestId("final-count-body").locator("tr", { hasText: "Coca-Cola" }).first();
+  const cokeQtyAfter = (await cokeRowAfter.innerText()).trim().split(/\s+/)[0];
+  checks.push({ check: "unknown code never merges into an existing named product's count", pass: cokeQtyAfter === "2", detail: `Coca-Cola qty after unknown scan=${cokeQtyAfter}` });
   await page.screenshot({ path: `${PROOF}/02-unknown.png`, fullPage: true });
 
   const allPass = checks.every((c) => c.pass);

@@ -11,9 +11,14 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { SessionLockControl } from "@/components/SessionLockControl";
 import { SessionsList } from "@/components/SessionsList";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { planScanBatch } from "./planScan";
+import { resolveRawScan } from "@/services/resolver";
 
 export default function ScanPage() {
   const processScan = useScanStore((s) => s.processScan);
+  const products = useScanStore((s) => s.products);
+  const aliases = useScanStore((s) => s.aliases);
+  const businessId = useScanStore((s) => s.businessId);
   const startSession = useScanStore((s) => s.startSession);
   const finishSession = useScanStore((s) => s.finishSession);
   const clearSession = useScanStore((s) => s.clearSession);
@@ -31,12 +36,18 @@ export default function ScanPage() {
   // BULK SCAN: paste/type several codes separated by spaces or newlines and each becomes its OWN row
   // (one processScan per code). A single hardware-scanned barcode contains no whitespace, so normal
   // one-at-a-time scanning is unchanged. Returns the LAST result so the success panel reflects it.
+  //
+  // A whitespace-containing string is NOT automatically a multi-code paste: some single codes in this
+  // domain legitimately contain an internal space (e.g. a tire part number printed "2881 6861" - one
+  // of several separator shapes the resolver already treats as equivalent, see scanCleaner's
+  // buildNormalizedCandidates). planScanBatch tries the whole trimmed string as ONE code first (via
+  // the same deterministic resolver processScan uses) and only falls back to splitting into N scans
+  // when the whole string does not resolve as a single known code.
   const handleScan = (raw: string) => {
-    const codes = raw
-      .split(/\s+/)
-      .map((c) => c.trim())
-      .filter(Boolean);
-    if (codes.length <= 1) return processScan(raw);
+    const resolvesAsSingleCode = (code: string) => resolveRawScan(code, products, aliases, businessId).resolverStatus === "known";
+    const codes = planScanBatch(raw, resolvesAsSingleCode);
+    if (codes.length === 0) return processScan(raw);
+    if (codes.length === 1) return processScan(codes[0]);
     let last = null as ReturnType<typeof processScan>;
     for (const code of codes) last = processScan(code);
     return last;
