@@ -103,6 +103,7 @@ export function gptResultToDecodePayload(r: GptFromScratchResult, code: string):
     ...emptyResult(),
     productName: r.productName,
     brand: r.brand,
+    category: r.category,
     specsShort: r.specs,
     primaryBarcode: code,
     gtin: ids.gtin,
