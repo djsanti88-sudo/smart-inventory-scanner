@@ -8,6 +8,7 @@
 // Copy rule: no em dash or en dash, plain punctuation only.
 export function GeminiStatusRow({
   geminiConfigured,
+  geminiUsedForDecode,
 }: {
   geminiConfigured: boolean;
   geminiUsedForDecode?: boolean;
@@ -17,7 +18,9 @@ export function GeminiStatusRow({
       className={`text-sm ${geminiConfigured ? "text-green-700" : "text-red-700"}`}
       data-testid="gemini-status"
     >
-      Gemini: not used for decode (enrichment only). {geminiConfigured ? "key configured." : "key missing."}
+      {geminiUsedForDecode === true
+        ? `Gemini: ${geminiConfigured ? "key configured." : "key missing."}`
+        : `Gemini: not used for decode (enrichment only). ${geminiConfigured ? "key configured." : "key missing."}`}
     </span>
   );
 }
