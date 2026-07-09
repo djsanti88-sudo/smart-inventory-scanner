@@ -55,6 +55,10 @@ export const CUSTOMER_SAFE_REVIEW_FIELDS = [
   "suggestedProductName", "suggestedBrand", "suggestedCategory", "suggestedSpecsShort", "suggestedImageUrl",
   "reason", "blockingReasons", "hasSuggestion", "decodeStatus", "status",
   "createdAt", "resolvedAt", "resolvedBy", "resolutionAction", "syncStatus", "idempotencyKey",
+  // STABLE-ID FIX: a LOCAL product id (not a barcode/gtin/reusable code), safe to persist - lets
+  // resolveUnknown re-link this review's own provisional placeholder by id after a customer reload
+  // instead of by reconstructed name (which collides when two codes share a prefix-floor brand).
+  "provisionalProductId",
 ] as const;
 
 // A customer's OWN scan-feed event survives reload as an activity log (Product, Qty after, Status, Reason,

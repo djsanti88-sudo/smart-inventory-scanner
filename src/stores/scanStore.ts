@@ -1312,6 +1312,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // never against the suspect/poisoned matched product - and keep the review open so a human confirms
           // the real identity. ensureProvisionalCount is idempotent, so this never double-counts.
           get().ensureProvisionalCount(cleaned.cleanCode, conflictText);
+          // STABLE-ID FIX: the placeholder now exists (minted just above); stamp its id onto this review
+          // (new or pre-existing open one) so resolveUnknown can re-link by id after a customer reload
+          // instead of by reconstructed name (see provisionalProductId doc comment in types.ts).
+          const conflictPlaceholder = get().products.find(
+            (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === cleaned.cleanCode,
+          );
+          if (conflictPlaceholder) {
+            set((s) => ({
+              needsReviewQueue: s.needsReviewQueue.map((r) =>
+                r.cleanCode === cleaned.cleanCode && r.status === "open" && !r.provisionalProductId
+                  ? { ...r, provisionalProductId: conflictPlaceholder.id }
+                  : r,
+              ),
+            }));
+          }
           get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
           return event;
         }
@@ -1352,6 +1367,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         get().ensureProvisionalCount(cleaned.cleanCode, resolution.reason);
 
         if (!existingOpen) {
+          // STABLE-ID FIX: ensureProvisionalCount just ran synchronously above, so this code's placeholder
+          // product (if one was minted) already exists in state. Capture its id now so resolveUnknown can
+          // re-link this review to it by id later, even after a customer reload strips the placeholder's
+          // `provisional` flag and identifier fields (see provisionalProductId doc comment in types.ts).
+          const mintedPlaceholder = get().products.find(
+            (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === cleaned.cleanCode,
+          );
           const review: UnknownCodeReview = {
             id: idFactory(),
             businessId,
@@ -1391,6 +1413,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             resolutionAction: null,
             syncStatus: "pending",
             idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"),
+            provisionalProductId: mintedPlaceholder?.id ?? null,
           };
           set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
           enqueueAndSync([
@@ -2221,6 +2244,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 }));
               }
             }
+            // STABLE-ID FIX: the decode-everything block just above minted/reused this code's provisional
+            // placeholder. Look its id up fresh (it is scoped inside the block above) so resolveUnknown can
+            // re-link by id after a customer reload, instead of by reconstructed name.
+            const provIdForReview = get().products.find(
+              (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === review.cleanCode,
+            )?.id;
             // Needs Review: keep it in the queue, show the score + why; write a PENDING catalog
             // candidate when the name is usable so the catalog still accumulates knowledge.
             get().recordFeedback("catalog_candidate_blocked", { code: review.cleanCode, meta: { score: plan.score } });
@@ -2262,7 +2291,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : st.lastCategoryWarning,
               needsReviewQueue: st.needsReviewQueue.map((r) =>
                 r.id === reviewId
-                  ? { ...r, autoVerifyScore: plan.score, blockingReasons: plan.blockingReasons, reason: reviewReason }
+                  ? {
+                      ...r,
+                      autoVerifyScore: plan.score,
+                      blockingReasons: plan.blockingReasons,
+                      reason: reviewReason,
+                      provisionalProductId: r.provisionalProductId ?? provIdForReview ?? null,
+                    }
                   : r,
               ),
               // Never leave a "Verified AI Decode + Unknown" feed row: if the decode said "verified" but
@@ -2344,7 +2379,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           set((st) => ({
             finalCounts: countsF,
             needsReviewQueue: st.needsReviewQueue.map((r) =>
-              r.id === reviewId ? { ...r, decodeStatus: "needs_review", reason: failReason, suggestedProductName: r.suggestedProductName || fbName } : r,
+              r.id === reviewId
+                ? {
+                    ...r,
+                    decodeStatus: "needs_review",
+                    reason: failReason,
+                    suggestedProductName: r.suggestedProductName || fbName,
+                    // STABLE-ID FIX: capture the placeholder id (freshly minted above, or reused if one
+                    // already existed) so resolveUnknown can re-link by id after a customer reload.
+                    provisionalProductId: r.provisionalProductId ?? provId ?? null,
+                  }
+                : r,
             ),
             scanFeed: st.scanFeed.map((ev) =>
               evF && ev.id === evF.id
@@ -2401,7 +2446,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           finalCounts: counts,
           needsReviewQueue: st.needsReviewQueue.map((r) =>
             r.cleanCode === code && r.status === "open"
-              ? { ...r, decodeStatus: "needs_review", reason: r.reason || reason, suggestedProductName: r.suggestedProductName || fbName }
+              ? {
+                  ...r,
+                  decodeStatus: "needs_review",
+                  reason: r.reason || reason,
+                  suggestedProductName: r.suggestedProductName || fbName,
+                  // STABLE-ID FIX: this placeholder (provId, minted just above) belongs to THIS review's
+                  // code. Stamp its id so resolveUnknown can re-link by id after a customer reload, instead
+                  // of by reconstructed name (see provisionalProductId doc comment in types.ts). Only set
+                  // when not already stamped (idempotent; never clobber a value set earlier).
+                  provisionalProductId: r.provisionalProductId ?? provId,
+                }
               : r,
           ),
           scanFeed: st.scanFeed.map((e) =>
@@ -2706,7 +2761,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // never leaves a duplicate product row. `provOrphanId` is that placeholder for THIS review's code;
         // `removeOrphanId` / `orphanTransferTargetId` drive the merge at commit time.
         const countedIdsForOrphan = new Set(state.finalCounts.map((c) => c.productId));
+        // STABLE-ID FIX (kills the prefix-floor placeholder-name collision, task-STABLEID): try the review's
+        // OWN stable `provisionalProductId` FIRST - captured at review-creation/mint time (see the doc
+        // comment on the field in types.ts) and reload-resilient because it is a local product id, never a
+        // barcode/gtin (safe to persist to a customer's disk; survives the customer persist split). This is
+        // bulletproof against name collisions: a prefix-floor placeholder name is BRAND-ONLY
+        // ("<Brand> / product unconfirmed", not code-specific), so two different unresolved codes sharing a
+        // GS1-prefix brand mint the IDENTICAL name - the old name-based fallback below could then attribute
+        // one code's count to the OTHER code's review. A plain id has no such collision.
+        const stableOrphanId =
+          review.provisionalProductId &&
+          state.products.find(
+            (p) => p.id === review.provisionalProductId && countedIdsForOrphan.has(p.id) && p.status !== "archived",
+          )?.id;
         const provOrphanId =
+          stableOrphanId ??
           state.products.find(
             (p) =>
               p.provisional === true &&
@@ -2716,17 +2785,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 .map((c) => (c ?? "").trim())
                 .includes(review.cleanCode),
           )?.id ??
-          // RELOAD-RESILIENT FALLBACK (count-correctness fix): a customer's localStorage persist strips a
-          // product's `provisional` flag AND its identifier fields (primaryBarcode/gtin/upc/ean/primarySku -
-          // CUSTOMER_SAFE_PRODUCT_FIELDS never persists them; see scanPersist.ts / sensitiveFields.ts). After
-          // a real reload, the strict match above can never find the scan's own provisional placeholder
-          // again, so resolving the review used to fall through to the generic dedup/mint branches, leaving
-          // the placeholder's count permanently orphaned instead of merged into the resolved product. The
-          // placeholder's auto-generated NAME is a pure function of the code alone (provisionalPlaceholderName,
-          // shared with ensureProvisionalCount) and survives the persist split, so it is a safe, reload-
-          // resilient way to re-identify the SAME row - scoped to a product that is still actively counted
-          // (never a markWrong'd/archived row) and exactly matches the label this code's own placeholder
-          // would have been given.
+          // BACKWARD-COMPAT NAME FALLBACK: only reached when the review has no usable `provisionalProductId`
+          // (a review persisted/created before this field existed) AND the strict identifier match above
+          // found nothing. A customer's localStorage persist strips a product's `provisional` flag AND its
+          // identifier fields (primaryBarcode/gtin/upc/ean/primarySku - CUSTOMER_SAFE_PRODUCT_FIELDS never
+          // persists them; see scanPersist.ts / sensitiveFields.ts), so for an OLD review minted before the
+          // stable id existed, this reconstructed-name match is the only way left to re-identify the scan's
+          // own placeholder after a reload. Known limitation (accepted, low-likelihood, non-blocking per
+          // task-FINALREVIEW-report.md): a prefix-floor name is brand-only, so this fallback can still
+          // collide for two OLD reviews sharing a prefix-floor brand - closed for every review going forward
+          // by the stable id above.
           state.products.find(
             (p) =>
               countedIdsForOrphan.has(p.id) &&
