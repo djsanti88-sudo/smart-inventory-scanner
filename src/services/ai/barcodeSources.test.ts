@@ -27,6 +27,9 @@ describe("selectBarcodeUrls", () => {
     const urls = selectBarcodeUrls("10019320009355").join(" ");
     expect(urls).toMatch(/go-upc\.com|upcitemdb\.com|openfoodfacts\.org/);
   });
+  it("includes the meros.io page door for a US UPC", () => {
+    expect(selectBarcodeUrls("848983006257")).toContain("https://meros.io/848983006257");
+  });
   it("returns [] for empty code", () => expect(selectBarcodeUrls("")).toEqual([]));
   it("every source in the pool has a host and at least one tier", () => {
     for (const s of BARCODE_SOURCES) {
