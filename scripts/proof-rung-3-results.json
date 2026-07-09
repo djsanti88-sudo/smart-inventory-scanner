@@ -1,0 +1,35 @@
+{
+  "mode": "dry-run",
+  "at": "2026-07-09T04:50:43.383Z",
+  "inputValidation": {
+    "misses": 74,
+    "resolvedCodes": 13,
+    "stillUnresolved": 61,
+    "reconciled": true
+  },
+  "sample": [
+    "812561025343",
+    "054137043287",
+    "4981910884903",
+    "086699058874",
+    "092971144814",
+    "746573269979",
+    "051342084333",
+    "842925103042",
+    "450862674947",
+    "8904239718519",
+    "461996427194",
+    "990498681518",
+    "733569617791",
+    "877184004748",
+    "697662097136",
+    "051342114207",
+    "746573219165",
+    "8859384901524",
+    "4717784331249",
+    "6959655491678"
+  ],
+  "sampleSize": 20,
+  "baselineRate": 0.17567567567567569,
+  "note": "Zero network calls, zero Firecrawl credits spent. Awaiting controller authorization for --live (owner-gated: T19 dispatch scope is rungs 1-2 live only)."
+}

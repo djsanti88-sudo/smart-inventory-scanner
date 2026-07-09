@@ -1,0 +1,1041 @@
+{
+  "startedAt": "2026-07-09T04:49:41.105Z",
+  "port": 3105,
+  "rows": [
+    {
+      "code": "4981910747772",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 260,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "toyo gsi5 225/45R18 95T",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "714770671628",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 65,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "radar renegade_a_t_pro LT275/65R20",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "697662062363",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 74,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "dunlop sp_sport_2050 225/50R17 94W",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "848983002648",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 56,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "falken azenis_pt722_a_s 275/35R19 100Y",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "054137071723",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 55,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "pirelli scorpion_verde 235/55R18 100V",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "8808956342456",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 72,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "kumho solus_ta91 235/40R19 96W",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "6938628200486",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 58,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "constancy ly688_ 205/55R16 91V",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "715459361755",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 84,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "hankook kinergy_gt_h436 195/65R15",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "841623117887",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 54,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "delinte aw5 205/50R17 93W",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "054137038030",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 69,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "pirelli winter_210_sottozero_ii 205/55R16 91H",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "4981910796350",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 67,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "toyo extensa_hp_ii 205/55R16 94V",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "6419440375472",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 53,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "nokian hakkapeliitta_lt3 LT235/85R16",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "051342134946",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 59,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "continental contiwintercontact_ts_830_p 215/60R16 99H",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "086699059796",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 53,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "uniroyal tiger_paw_touring_a_s 185/60R15 84H",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "841623123666",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 52,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "delinte dx-10_bandit_a_t 325/60R20 126/123S",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "769382906675",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 55,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "buckshot buckshot_at 265/75R16 123/120Q",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "844402048662",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 56,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "advanta svt_02 LT265/75R16 123Q",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "697662157793",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 210,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "goodyear eagle_f1_asymmetric_5 275/30R20 97Y",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "051342223473",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 57,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "continental crosscontact_lx_sport 235/65R17 104H",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "051342153480",
+      "group": "tire",
+      "httpStatus": 200,
+      "wallMs": 51,
+      "routeLatencyMs": 0,
+      "corroborationPath": "corpus_exact_barcode",
+      "ladderPath": null,
+      "status": "verified",
+      "productName": "continental procontact_tx 215/55R17 94H",
+      "retailLookup": null,
+      "providerStatuses": [
+        {
+          "provider": "tire-corpus",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": null
+    },
+    {
+      "code": "3155700000199",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 271,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Huile De Pépins De Raisin",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "3572174879555",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 996,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Pizza Orientale",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "5712876663221",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 999,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Granola Med Mørk Chokolade og blåbær",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "3700600309707",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 1000,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Crème de vinaigre Balsamique de Modène IGP soja",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "3660349790214",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 999,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Grande tranche a la farine complete",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "0885773043023",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 3258,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Cherry Tomatoes",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "3770006106538",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2300,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Haricots blancs cuits surgelés",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "8437010931352",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2230,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Mojo verde",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "52454615",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 60,
+      "routeLatencyMs": 0,
+      "corroborationPath": null,
+      "ladderPath": "none",
+      "status": "needs_review",
+      "productName": null,
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "go-upc",
+          "status": "skipped",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "Go-UPC key not configured"
+        },
+        {
+          "provider": "fetchv2",
+          "status": "skipped",
+          "latencyMs": 2,
+          "sourceUrlsReturned": 1,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "unknown"
+        },
+        {
+          "provider": "gpt-5.5-ladder",
+          "status": "skipped",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "no_api_key"
+        }
+      ],
+      "resolvedLocally": false,
+      "usedLiveUpcitemdbVote": false,
+      "gapNote": "code IS in the local retail corpus (sqlite_hit) but codeType did not qualify for the free-tier resolver (isPublicBarcode gates on upc_a/ean_13/gtin_14 only -- e.g. EAN-8 falls through to the paid ladder, all-skipped here since keys are blanked)"
+    },
+    {
+      "code": "4304218429636",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2188,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Graved Lachs",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "2470420003833",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2260,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Gambetto di prosciutto crudo",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "3245678893418",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2261,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Foodkeeper",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "9641996040413",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2264,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Micazol 400 Vag supp",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "8435266012139",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2272,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Comprimidos de mentalité sin azucar",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "3263852920217",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2284,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Stick croc",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "5063334015749",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2251,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Fizzy Bottle Mix",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "6009612470151",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2260,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "aQuelle Marula",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "7709240136694",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2262,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Helado de brownie",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "9000159198796",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2253,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "kellys",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    },
+    {
+      "code": "3352396100145",
+      "group": "retail",
+      "httpStatus": 200,
+      "wallMs": 2259,
+      "routeLatencyMs": 0,
+      "corroborationPath": "parallel_retail_db",
+      "ladderPath": null,
+      "status": "suggested",
+      "productName": "Pistache coques grillées",
+      "retailLookup": "sqlite_hit",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        }
+      ],
+      "resolvedLocally": true,
+      "usedLiveUpcitemdbVote": true,
+      "gapNote": null
+    }
+  ],
+  "summary": {
+    "total": 40,
+    "resolvedLocally": 39,
+    "assertion40of40": false,
+    "p50WallMs": 260,
+    "p50RouteReportedMs": null,
+    "liveExternalCallsNote": "19 of 20 retail rows went through resolveUnknownFast's free-tier consensus, which concurrently queries the free keyless UPCitemdb trial endpoint (api.upcitemdb.com) as one vote alongside the local retail-DB hit. That is a live external network call with $0 cost and no API key -- honestly not \"corpus only,\" even though the identity that won came from the local corpus. Tire codes never take this path (resolveExactBarcode short-circuits before it).",
+    "gate5msNote": "route does not report its own wall time for corpus hits (latencyMs:0 by design); p50 here is measured wall time from the proof script, which includes HTTP + Next.js routing overhead on top of the corpus lookup itself. A 4-worker crawler fleet runs concurrently in this checkout per the task brief -- if p50 exceeds 5ms, that reflects HTTP/process overhead and host load, not corpus query cost.",
+    "gapsFound": 1,
+    "gapDetail": [
+      {
+        "code": "52454615",
+        "note": "code IS in the local retail corpus (sqlite_hit) but codeType did not qualify for the free-tier resolver (isPublicBarcode gates on upc_a/ean_13/gtin_14 only -- e.g. EAN-8 falls through to the paid ladder, all-skipped here since keys are blanked)"
+      }
+    ]
+  }
+}
