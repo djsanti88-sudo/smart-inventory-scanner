@@ -43,8 +43,12 @@ This is the target architecture for barcode decoding in the actual program.
 ## Decisions (owner-selected)
 
 1. Ladder order: **local DB/corpus -> Go-UPC -> GPT-5.5 (grounded)**. No Gemini rung.
-2. Go-UPC EXACT hit (`inferred: false`): **auto-counts with NO app-side checks**.
-   Alias saved permanently.
+2. Go-UPC EXACT hit (`inferred: false`): **auto-counts after ONE guard** (owner
+   decision 2026-07-08 evening, supersedes the earlier "no checks": live data showed
+   1 of 126 hits flat-wrong, and the guard catches exactly that class): the
+   catalog-derived **brand-prefix firewall** — if the barcode prefix's known owner
+   conflicts with Go-UPC's brand, the hit routes to Needs Review instead of
+   counting. No other checks. Alias saved permanently on counted hits.
 3. Go-UPC INFERRED hit (`inferred: true`, Go-UPC reconstructed missing digits — the
    answer is for a code that is not exactly what was scanned): **suggestion only** —
    routed to Needs Review with the product attached, never auto-counted. This is the
