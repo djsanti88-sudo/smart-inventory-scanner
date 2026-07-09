@@ -31,6 +31,18 @@ describe("prettifyProductName", () => {
     expect(prettifyProductName("eagle_sport_all-season")).toBe("Eagle Sport All-Season");
   });
 
+  it("title-cases a hyphen part with a long digit suffix, not wholesale-uppercase (regression)", () => {
+    expect(prettifyProductName("wrangler_all-season2")).toBe("Wrangler All-Season2");
+  });
+
+  it("uppercases a short digit-containing hyphen part as a model code", () => {
+    expect(prettifyProductName("terrain_g2")).toBe("Terrain G2");
+  });
+
+  it("title-cases a long digit-suffixed word outside a hyphen (regression)", () => {
+    expect(prettifyProductName("season2_touring")).toBe("Season2 Touring");
+  });
+
   it("passes through an already-clean input unchanged (no underscore + has uppercase)", () => {
     expect(prettifyProductName("Michelin Premier A/S 215/60R16 95H")).toBe("Michelin Premier A/S 215/60R16 95H");
   });

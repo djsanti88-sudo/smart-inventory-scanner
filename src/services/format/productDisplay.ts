@@ -18,10 +18,13 @@ const LETTER_PAIRS: Record<string, string> = {
   "m,s": "M/S",
 };
 
-// "Digit-led" per the brief covers tokens like "cs5" (alphanumeric model codes that mix letters and
-// digits) - these are uppercased wholesale rather than title-cased.
-function isDigitLed(token: string): boolean {
-  return /\d/.test(token);
+// Short alphanumeric model codes like "cs5" or "g2" (letters+digits, length <= 4) are uppercased
+// wholesale. Longer digit-containing words like "season2" are real words with a trailing digit, not
+// model codes, so they get Title Case instead.
+const MAX_MODEL_CODE_LENGTH = 4;
+
+function isShortModelCode(part: string): boolean {
+  return /\d/.test(part) && part.length <= MAX_MODEL_CODE_LENGTH;
 }
 
 function titleCaseWord(word: string): string {
@@ -29,19 +32,30 @@ function titleCaseWord(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
 }
 
-// Hyphenated tokens ("all-season") get each hyphen-separated part title-cased independently.
+// Formats a single hyphen-part (or a whole non-hyphenated token): known TOKEN_MAP entries win, then
+// short digit-containing model codes uppercase wholesale, everything else is Title Case.
+function formatPart(part: string): string {
+  const lower = part.toLowerCase();
+  if (TOKEN_MAP[lower]) return TOKEN_MAP[lower];
+  if (isShortModelCode(lower)) return lower.toUpperCase();
+  return titleCaseWord(part);
+}
+
+// Hyphenated tokens ("all-season2") split on "-" FIRST, then each part is cased independently via
+// formatPart - this keeps long digit-suffixed words ("season2") from being swept into the wholesale
+// model-code uppercase rule meant for short codes ("g2", "cs5").
 function titleCaseToken(token: string): string {
   if (token.includes("-")) {
-    return token.split("-").map(titleCaseWord).join("-");
+    return token.split("-").map(formatPart).join("-");
   }
   return titleCaseWord(token);
 }
 
 function formatToken(token: string): string {
-  const lower = token.toLowerCase();
-  if (TOKEN_MAP[lower]) return TOKEN_MAP[lower];
-  if (isDigitLed(lower)) return lower.toUpperCase();
-  return titleCaseToken(token);
+  if (token.includes("-")) {
+    return titleCaseToken(token);
+  }
+  return formatPart(token);
 }
 
 // Merge grouped letter-pair tokens left to right BEFORE per-token casing, then map/title-case the rest.
