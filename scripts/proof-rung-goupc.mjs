@@ -147,7 +147,19 @@ async function main() {
     console.log(`using externally-provided server at ${BASE_URL}`);
   }
 
-  const results = { startedAt: new Date().toISOString(), port: PORT, goUpcUsageBefore: before, rows: [] };
+  // GPT-actuals baseline via the route's own telemetry (spentTodayUsd from recordGptLadderSpend):
+  // with the T8b fix, a known-good code whose Plan D floors AND Go-UPC misses AND FetchV2 misses can
+  // reach the paid GPT rung, so this rung's wallet line must capture any GPT actuals too.
+  async function gptActuals() {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ai-lookup`, { method: "GET" });
+      const j = await res.json();
+      return { spentTodayUsd: j?.gptLadder?.spentTodayUsd ?? null, callsToday: j?.gptLadder?.callsToday ?? null };
+    } catch { return { spentTodayUsd: null, callsToday: null }; }
+  }
+  const gptBefore = await gptActuals();
+
+  const results = { startedAt: new Date().toISOString(), port: PORT, goUpcUsageBefore: before, gptActualsBefore: gptBefore, rows: [] };
 
   async function decodeOne(code, extra) {
     const t0 = Date.now();
@@ -156,18 +168,30 @@ async function main() {
       const res = await fetch(`${BASE_URL}/api/ai-lookup`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rawCode: code, cleanCode: code, mode: "decode" }),
+        // forceRetry: bypass L1/L2 decode caches so this is a genuinely fresh compute through the
+        // FIXED ladder (commit 6a800c4), not a replay of a pre-fix cached payload.
+        body: JSON.stringify({ rawCode: code, cleanCode: code, mode: "decode", forceRetry: true }),
       });
       row.httpStatus = res.status;
       row.wallMs = Date.now() - t0;
       const json = await res.json();
       row.corroborationPath = json?.debug?.corroborationPath ?? null;
+      row.ladderPath = json?.debug?.ladderPath ?? null;
+      row.ladderReasons = json?.debug?.ladderReasons ?? null;
       row.status = json?.decision?.status ?? null;
       row.productName = json?.decision?.result?.productName ?? json?.results?.[0]?.productName ?? null;
       row.reasonCode = json?.reasonCode ?? null;
       row.reasonText = json?.reasonText ?? null;
       row.providerStatuses = json?.providerStatuses ?? null;
       row.debug = json?.debug ?? null;
+      // Which stage actually settled this code: a ladder rung name (goupc/fetchv2/gpt), or the Plan D
+      // parallel_* path when Plan D's verified win stayed terminal, or "plan_d_floor_fallback" when the
+      // ladder all-missed and the stashed floor answered.
+      row.settledBy = row.ladderPath && row.ladderPath !== "none"
+        ? row.ladderPath
+        : row.ladderPath === "none"
+          ? (row.corroborationPath?.startsWith("parallel_") ? "plan_d_floor_fallback" : "none")
+          : (row.corroborationPath ?? null);
     } catch (e) {
       row.error = String(e?.message ?? e).slice(0, 300);
       row.wallMs = Date.now() - t0;
@@ -175,18 +199,16 @@ async function main() {
     return row;
   }
 
-  console.log("\n--- Group A: 10 known-good GTIN codes (real Go-UPC lookups expected) ---");
+  console.log("\n--- Group A: 10 known-good GTIN codes (Go-UPC reachable via the fixed ladder) ---");
   for (const { code, truth } of KNOWN_GOOD_GTIN) {
     const row = await decodeOne(code, { group: "known_good_gtin", truth });
-    // Classify hit/miss/inferred from the ladder's reported path + decision.
-    const path_ = row.debug?.corroborationPath ?? row.debug?.ladderSettledBy ?? null;
     row.classification =
       row.status === "verified" ? "hit_exact"
       : row.status === "suggested" ? "hit_inferred_or_suggestion"
       : row.status === "needs_review" ? "miss_or_needs_review"
       : "unknown";
     results.rows.push(row);
-    console.log(`[known-good] ${code} -> status=${row.status} path=${path_} name="${row.productName ?? ""}" (${row.wallMs}ms)`);
+    console.log(`[known-good] ${code} -> status=${row.status} settledBy=${row.settledBy} name="${row.productName ?? ""}" (${row.wallMs}ms)`);
     await new Promise((r) => setTimeout(r, 600)); // stay under the 2/s throttle
   }
 
@@ -198,9 +220,13 @@ async function main() {
   }
 
   const after = await readGoUpcUsageCounter(envLocal);
+  const gptAfter = await gptActuals();
   console.log(`\nGo-UPC usage counter AFTER (backend=${after.backend}): month=${after.month} used=${after.used}`);
   const delta = (after.month === before.month) ? after.used - before.used : after.used; // month rollover: treat as fresh count
+  const gptSpentThisRun = (gptAfter.spentTodayUsd ?? 0) - (gptBefore.spentTodayUsd ?? 0);
   results.goUpcUsageAfter = after;
+  results.gptActualsAfter = gptAfter;
+  results.gptSpentThisRunUsd = Math.round(gptSpentThisRun * 10000) / 10000;
   results.usageDelta = delta;
   results.deltaWithinCap = delta <= 10;
   results.gtinCallsMade = KNOWN_GOOD_GTIN.length;
@@ -208,20 +234,29 @@ async function main() {
   const hits = results.rows.filter((r) => r.group === "known_good_gtin" && r.classification === "hit_exact").length;
   const suggested = results.rows.filter((r) => r.group === "known_good_gtin" && r.classification === "hit_inferred_or_suggestion").length;
   const misses = results.rows.filter((r) => r.group === "known_good_gtin" && r.classification === "miss_or_needs_review").length;
+  const stageCounts = {};
+  for (const r of results.rows.filter((x) => x.group === "known_good_gtin")) {
+    const k = r.settledBy ?? "unknown";
+    stageCounts[k] = (stageCounts[k] ?? 0) + 1;
+  }
   results.summary = {
     knownGoodHits: hits,
     knownGoodSuggestedOrInferred: suggested,
     knownGoodMisses: misses,
+    settledByStage: stageCounts,
     nonGtinCount: NON_GTIN.length,
     nonGtinGatedProof: `usage delta ${delta} reflects ONLY the ${KNOWN_GOOD_GTIN.length} GTIN calls (non-GTIN calls never reach the client, so they contribute 0 to the counter)`,
   };
 
   writeFileSync(OUT, JSON.stringify(results, null, 2));
   console.log(`\nwrote ${OUT.pathname}`);
+  console.log(`settled-by stages (known-good): ${JSON.stringify(stageCounts)}`);
   console.log(`counter delta: ${delta} (cap <=10 for the GTIN group; must be <=15 total for the whole rung-2 dispatch): within cap = ${results.deltaWithinCap}`);
+  console.log(`GPT actuals this run: $${results.gptSpentThisRunUsd} (route-recorded)`);
   console.log("true spend = Go-UPC console (this script's counter reconciliation is a computed floor, not a substitute for the provider's own usage dashboard)");
 
-  const section = `\n## Rung 2 (Go-UPC, <= 15 lookups)\n\n- Server: local dev on port ${PORT}, REAL .env.local keys (Go-UPC quota genuinely spent).\n- Go-UPC usage counter (backend: ${after.backend}) BEFORE: month=${before.month} used=${before.used}. AFTER: month=${after.month} used=${after.used}. Delta: ${delta} (must be <= 10 for the 10-code known-good group; whole-dispatch cap 15).\n- Known-good GTIN group (10 codes, not in local corpus): ${hits} hit_exact, ${suggested} suggested/inferred, ${misses} miss/needs_review.\n- Non-GTIN group (5 ASIN-shaped codes): all 5 gated BEFORE the Go-UPC client by \`buildLadderRungs()\` (isGtinShaped && isValidCheckDigit) -- the counter delta reflects ONLY the 10 GTIN calls, proving the quota-protection gate holds.\n- Reconciliation: computed floor from this script's counter read; true spend = Go-UPC provider console.\n- Raw: \`scripts/proof-rung-2-results.json\`.\n`;
+  const stageLines = Object.entries(stageCounts).map(([k, v]) => `  - ${k}: ${v}`).join("\n");
+  const section = `\n## Rung 2 RE-RUN (Go-UPC via the FIXED ladder, commit 6a800c4) -- LIVE, real keys\n\n- Server: local dev on port ${PORT}, REAL .env.local keys, full fixed ladder (Plan D verified wins terminal; floor/suggestion yields to Go-UPC -> FetchV2 -> GPT). forceRetry on every call (no cache replays).\n- Go-UPC usage counter (backend: ${after.backend}) BEFORE: month=${before.month} used=${before.used}. AFTER: month=${after.month} used=${after.used}. Delta: ${delta} (cap <= 10 for the 10-code group; 15 for the rung).\n- Known-good GTIN group (10 codes, not in local corpus): ${hits} verified, ${suggested} suggested, ${misses} miss/needs_review. Settled by stage:\n${stageLines}\n- Non-GTIN group (5 ASIN-shaped codes): gated BEFORE the Go-UPC client by \`buildLadderRungs()\` -- counter delta reflects only GTIN-shaped calls.\n- GPT actuals this run (route-recorded telemetry): $${results.gptSpentThisRunUsd} (before: $${gptBefore.spentTodayUsd ?? "?"}, after: $${gptAfter.spentTodayUsd ?? "?"} today).\n- Wallet: computed floor = ${delta} Go-UPC lookups + $${results.gptSpentThisRunUsd} GPT + any Plan D/FetchV2 Firecrawl credits (not individually metered by the route); true spend = provider consoles (Go-UPC / OpenAI / Firecrawl).\n- Pre-fix baseline preserved at \`scripts/proof-rung-2-results.pre-fix.json\` (delta 0, ladder unreachable).\n- Raw: \`scripts/proof-rung-2-results.json\`.\n`;
   appendFileSync(REPORT, section);
   console.log(`appended Rung 2 section to ${REPORT.pathname}`);
 

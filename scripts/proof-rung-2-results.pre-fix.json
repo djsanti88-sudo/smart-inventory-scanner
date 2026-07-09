@@ -1,14 +1,10 @@
 {
-  "startedAt": "2026-07-09T05:23:32.134Z",
+  "startedAt": "2026-07-09T04:43:35.632Z",
   "port": 3106,
   "goUpcUsageBefore": {
     "backend": "turso",
     "month": "2026-07",
     "used": 0
-  },
-  "gptActualsBefore": {
-    "spentTodayUsd": 0,
-    "callsToday": 0
   },
   "rows": [
     {
@@ -16,22 +12,11 @@
       "group": "known_good_gtin",
       "truth": "Home Depot 5 Gal Orange Homer Bucket / 05GLHD2",
       "httpStatus": 200,
-      "wallMs": 9703,
-      "corroborationPath": "fetchv2",
-      "ladderPath": "fetchv2",
-      "ladderReasons": [
-        {
-          "rung": "goupc",
-          "reason": "Go-UPC miss (negative-cached 30d) -> fall through"
-        },
-        {
-          "rung": "fetchv2",
-          "reason": "Fetch V2 needs_review"
-        }
-      ],
+      "wallMs": 5392,
+      "corroborationPath": "parallel_floor",
       "status": "suggested",
-      "productName": "Ryobi stick vacuum clearance deal found - Facebook",
-      "reasonCode": "needs_review",
+      "productName": "United Solutions / product unconfirmed",
+      "reasonCode": "ok",
       "reasonText": "",
       "providerStatuses": [
         {
@@ -41,54 +26,25 @@
           "sourceUrlsReturned": 0,
           "exactCodeFound": false,
           "identityFound": true
-        },
-        {
-          "provider": "go-upc",
-          "status": "skipped",
-          "latencyMs": 0,
-          "sourceUrlsReturned": 0,
-          "exactCodeFound": false,
-          "identityFound": false,
-          "errorCode": "Go-UPC miss (negative-cached 30d) -> fall through"
-        },
-        {
-          "provider": "fetchv2",
-          "status": "ok",
-          "latencyMs": 4567,
-          "sourceUrlsReturned": 8,
-          "exactCodeFound": true,
-          "identityFound": true
         }
       ],
       "debug": {
         "providersAttempted": [
-          "parallel:floor",
-          "fetchv2"
+          "parallel:floor"
         ],
         "evidenceStrengths": [
-          "snippet"
+          "none"
         ],
         "sourceCounts": [
-          1
+          0
         ],
-        "corroborationPath": "fetchv2",
-        "ladderPath": "fetchv2",
-        "ladderReasons": [
-          {
-            "rung": "goupc",
-            "reason": "Go-UPC miss (negative-cached 30d) -> fall through"
-          },
-          {
-            "rung": "fetchv2",
-            "reason": "Fetch V2 needs_review"
-          }
-        ],
+        "corroborationPath": "parallel_floor",
         "aiCalled": false,
-        "pageFetched": true,
+        "pageFetched": false,
         "cached": false,
+        "groundingStatus": "idle",
         "retailLookup": "turso_miss"
       },
-      "settledBy": "fetchv2",
       "classification": "hit_inferred_or_suggestion"
     },
     {
@@ -96,10 +52,8 @@
       "group": "known_good_gtin",
       "truth": "Member's Mark Purified Water 500ml / 16.9 oz",
       "httpStatus": 200,
-      "wallMs": 899,
+      "wallMs": 1173,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "PURIFIED WATER – Member's Mark – 40 pk. 16.9oz",
       "reasonCode": "ok",
@@ -131,7 +85,6 @@
         "groundingStatus": "idle",
         "retailLookup": "sqlite_hit"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -139,30 +92,15 @@
       "group": "known_good_gtin",
       "truth": "Member's Mark Purified Water 40 Pack / 16.9 oz",
       "httpStatus": 200,
-      "wallMs": 31767,
+      "wallMs": 2146,
       "corroborationPath": "single_source",
-      "ladderPath": "goupc",
-      "ladderReasons": [
-        {
-          "rung": "goupc",
-          "reason": "Go-UPC exact barcode match -> verified auto-count candidate"
-        }
-      ],
       "status": "verified",
-      "productName": "Member's Mark Purified Water 40 Pack / 16.9 Oz",
+      "productName": "Member's Mark Purified Water 40 pack / 16.9 oz.",
       "reasonCode": "ok",
       "reasonText": "",
       "providerStatuses": [
         {
           "provider": "parallel:barcode_db",
-          "status": "ok",
-          "latencyMs": 0,
-          "sourceUrlsReturned": 0,
-          "exactCodeFound": false,
-          "identityFound": true
-        },
-        {
-          "provider": "go-upc",
           "status": "ok",
           "latencyMs": 0,
           "sourceUrlsReturned": 0,
@@ -172,8 +110,7 @@
       ],
       "debug": {
         "providersAttempted": [
-          "parallel:barcode_db",
-          "go-upc"
+          "parallel:barcode_db"
         ],
         "evidenceStrengths": [
           "fetched_source"
@@ -182,19 +119,12 @@
           0
         ],
         "corroborationPath": "single_source",
-        "ladderPath": "goupc",
-        "ladderReasons": [
-          {
-            "rung": "goupc",
-            "reason": "Go-UPC exact barcode match -> verified auto-count candidate"
-          }
-        ],
         "aiCalled": true,
         "pageFetched": false,
         "cached": false,
+        "groundingStatus": "idle",
         "retailLookup": "turso_miss"
       },
-      "settledBy": "goupc",
       "classification": "hit_exact"
     },
     {
@@ -202,10 +132,8 @@
       "group": "known_good_gtin",
       "truth": "Ferrero Rocher Valentine's Fine Hazelnut Chocolate Hearts, 2.6 oz",
       "httpStatus": 200,
-      "wallMs": 641,
+      "wallMs": 1129,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "Ferrero Rocher Valentine's Fine Hazelnut Chocolate Hearts - 2.6oz",
       "reasonCode": "ok",
@@ -237,7 +165,6 @@
         "groundingStatus": "idle",
         "retailLookup": "turso_miss"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -245,10 +172,8 @@
       "group": "known_good_gtin",
       "truth": "Nabisco Oreo / club pack sandwich cookies",
       "httpStatus": 200,
-      "wallMs": 1665,
+      "wallMs": 2973,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "Club sandwich cookies",
       "reasonCode": "ok",
@@ -280,7 +205,6 @@
         "groundingStatus": "idle",
         "retailLookup": "sqlite_hit"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -288,10 +212,8 @@
       "group": "known_good_gtin",
       "truth": "Oreo King Cone ice cream cone 7.5 oz",
       "httpStatus": 200,
-      "wallMs": 1659,
+      "wallMs": 2296,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "Oreo ice cream cone",
       "reasonCode": "ok",
@@ -323,7 +245,6 @@
         "groundingStatus": "idle",
         "retailLookup": "sqlite_hit"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -331,10 +252,8 @@
       "group": "known_good_gtin",
       "truth": "Doritos Cool Ranch tortilla chips (Frito-Lay)",
       "httpStatus": 200,
-      "wallMs": 1887,
+      "wallMs": 2837,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "Cool ranch Doritos",
       "reasonCode": "ok",
@@ -366,7 +285,6 @@
         "groundingStatus": "idle",
         "retailLookup": "sqlite_hit"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -374,10 +292,8 @@
       "group": "known_good_gtin",
       "truth": "Cheerios Veggie Blends Blueberry Banana",
       "httpStatus": 200,
-      "wallMs": 1646,
+      "wallMs": 2948,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "Cheerios Veggie Blends Blueberry Banana",
       "reasonCode": "ok",
@@ -409,7 +325,6 @@
         "groundingStatus": "idle",
         "retailLookup": "sqlite_hit"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -417,10 +332,8 @@
       "group": "known_good_gtin",
       "truth": "Kirkland Signature Protein Bar, Energy Variety Pack (20 ct)",
       "httpStatus": 200,
-      "wallMs": 1618,
+      "wallMs": 3201,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "Kirkland Signature Protein bar energy variety pack, 20 Count - eBay",
       "reasonCode": "ok",
@@ -452,7 +365,6 @@
         "groundingStatus": "idle",
         "retailLookup": "sqlite_hit"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -460,10 +372,8 @@
       "group": "known_good_gtin",
       "truth": "Trader Joe's Everything But The Bagel Sesame Seasoning Blend 2.3oz",
       "httpStatus": 200,
-      "wallMs": 2010,
+      "wallMs": 3563,
       "corroborationPath": "single_source",
-      "ladderPath": null,
-      "ladderReasons": null,
       "status": "verified",
       "productName": "Trader Joe's Everything but the Bagel Sesame Sierra Leone",
       "reasonCode": "ok",
@@ -495,7 +405,6 @@
         "groundingStatus": "idle",
         "retailLookup": "turso_miss"
       },
-      "settledBy": "single_source",
       "classification": "hit_exact"
     },
     {
@@ -503,19 +412,8 @@
       "group": "non_gtin",
       "kind": "asin",
       "httpStatus": 200,
-      "wallMs": 4306,
+      "wallMs": 5539,
       "corroborationPath": null,
-      "ladderPath": "none",
-      "ladderReasons": [
-        {
-          "rung": "fetchv2",
-          "reason": "Fetch V2 unknown (no usable identity) -> fall through"
-        },
-        {
-          "rung": "gpt",
-          "reason": "gpt-5.5 skipped: non_public_code_type"
-        }
-      ],
       "status": "needs_review",
       "productName": null,
       "reasonCode": "no_result",
@@ -524,7 +422,7 @@
         {
           "provider": "fetchv2",
           "status": "skipped",
-          "latencyMs": 4253,
+          "latencyMs": 5176,
           "sourceUrlsReturned": 6,
           "exactCodeFound": true,
           "identityFound": false,
@@ -563,27 +461,15 @@
         "cached": false,
         "gptLadderSkipReason": "non_public_code_type",
         "retailLookup": "turso_miss"
-      },
-      "settledBy": "none"
+      }
     },
     {
       "code": "B00006JSUA",
       "group": "non_gtin",
       "kind": "asin",
       "httpStatus": 200,
-      "wallMs": 3586,
+      "wallMs": 5940,
       "corroborationPath": null,
-      "ladderPath": "none",
-      "ladderReasons": [
-        {
-          "rung": "fetchv2",
-          "reason": "Fetch V2 rejected (no usable identity) -> fall through"
-        },
-        {
-          "rung": "gpt",
-          "reason": "gpt-5.5 skipped: non_public_code_type"
-        }
-      ],
       "status": "needs_review",
       "productName": null,
       "reasonCode": "no_result",
@@ -592,7 +478,7 @@
         {
           "provider": "fetchv2",
           "status": "skipped",
-          "latencyMs": 3394,
+          "latencyMs": 5576,
           "sourceUrlsReturned": 6,
           "exactCodeFound": false,
           "identityFound": false,
@@ -631,27 +517,15 @@
         "cached": false,
         "gptLadderSkipReason": "non_public_code_type",
         "retailLookup": "turso_miss"
-      },
-      "settledBy": "none"
+      }
     },
     {
       "code": "B09B8V1LZ3",
       "group": "non_gtin",
       "kind": "asin",
       "httpStatus": 200,
-      "wallMs": 3441,
+      "wallMs": 5837,
       "corroborationPath": null,
-      "ladderPath": "none",
-      "ladderReasons": [
-        {
-          "rung": "fetchv2",
-          "reason": "Fetch V2 unknown (no usable identity) -> fall through"
-        },
-        {
-          "rung": "gpt",
-          "reason": "gpt-5.5 skipped: non_public_code_type"
-        }
-      ],
       "status": "needs_review",
       "productName": null,
       "reasonCode": "no_result",
@@ -660,7 +534,7 @@
         {
           "provider": "fetchv2",
           "status": "skipped",
-          "latencyMs": 3355,
+          "latencyMs": 5335,
           "sourceUrlsReturned": 6,
           "exactCodeFound": false,
           "identityFound": false,
@@ -699,27 +573,15 @@
         "cached": false,
         "gptLadderSkipReason": "non_public_code_type",
         "retailLookup": "turso_miss"
-      },
-      "settledBy": "none"
+      }
     },
     {
       "code": "B00006IFHD",
       "group": "non_gtin",
       "kind": "asin",
       "httpStatus": 200,
-      "wallMs": 2104,
+      "wallMs": 3944,
       "corroborationPath": null,
-      "ladderPath": "none",
-      "ladderReasons": [
-        {
-          "rung": "fetchv2",
-          "reason": "Fetch V2 unknown (no usable identity) -> fall through"
-        },
-        {
-          "rung": "gpt",
-          "reason": "gpt-5.5 skipped: non_public_code_type"
-        }
-      ],
       "status": "needs_review",
       "productName": null,
       "reasonCode": "no_result",
@@ -728,7 +590,7 @@
         {
           "provider": "fetchv2",
           "status": "skipped",
-          "latencyMs": 2048,
+          "latencyMs": 3366,
           "sourceUrlsReturned": 6,
           "exactCodeFound": false,
           "identityFound": false,
@@ -767,23 +629,15 @@
         "cached": false,
         "gptLadderSkipReason": "non_public_code_type",
         "retailLookup": "turso_miss"
-      },
-      "settledBy": "none"
+      }
     },
     {
       "code": "B00NHQF6MG",
       "group": "non_gtin",
       "kind": "asin",
       "httpStatus": 200,
-      "wallMs": 4176,
+      "wallMs": 5521,
       "corroborationPath": "fetchv2",
-      "ladderPath": "fetchv2",
-      "ladderReasons": [
-        {
-          "rung": "fetchv2",
-          "reason": "Fetch V2 suggested"
-        }
-      ],
       "status": "suggested",
       "productName": "LEGO Classic Large Creative Brick Box 10698",
       "reasonCode": "needs_review",
@@ -792,7 +646,7 @@
         {
           "provider": "fetchv2",
           "status": "ok",
-          "latencyMs": 4080,
+          "latencyMs": 4892,
           "sourceUrlsReturned": 6,
           "exactCodeFound": true,
           "identityFound": true
@@ -820,33 +674,22 @@
         "pageFetched": true,
         "cached": false,
         "retailLookup": "turso_miss"
-      },
-      "settledBy": "fetchv2"
+      }
     }
   ],
   "goUpcUsageAfter": {
     "backend": "turso",
     "month": "2026-07",
-    "used": 2
+    "used": 0
   },
-  "gptActualsAfter": {
-    "spentTodayUsd": 0,
-    "callsToday": 0
-  },
-  "gptSpentThisRunUsd": 0,
-  "usageDelta": 2,
+  "usageDelta": 0,
   "deltaWithinCap": true,
   "gtinCallsMade": 10,
   "summary": {
     "knownGoodHits": 9,
     "knownGoodSuggestedOrInferred": 1,
     "knownGoodMisses": 0,
-    "settledByStage": {
-      "fetchv2": 1,
-      "single_source": 8,
-      "goupc": 1
-    },
     "nonGtinCount": 5,
-    "nonGtinGatedProof": "usage delta 2 reflects ONLY the 10 GTIN calls (non-GTIN calls never reach the client, so they contribute 0 to the counter)"
+    "nonGtinGatedProof": "usage delta 0 reflects ONLY the 10 GTIN calls (non-GTIN calls never reach the client, so they contribute 0 to the counter)"
   }
 }

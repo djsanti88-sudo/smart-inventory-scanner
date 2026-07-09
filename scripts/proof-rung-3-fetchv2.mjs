@@ -128,7 +128,22 @@ async function main() {
     process.exit(1);
   }
 
-  // ---- LIVE PATH (owner-gated; not executed in this dispatch) ----
+  // ---- LIVE PATH (authorized by the controller 2026-07-09, phase 2) ------------------------------
+  // RUNG ISOLATION VIA KEYS (still the real route, per the integrity rule): the server runs with the
+  // real Firecrawl/Brave/Turso keys but GO_UPC_API_KEY and OPENAI_API_KEY BLANKED:
+  //   - Go-UPC blanked: every sample code is an already-proven Go-UPC miss (the goupc-200 benchmark),
+  //     so letting the goupc rung run would spend ~20 quota lookups re-proving known misses and eat
+  //     half the 40-lookup phase cap for zero information. The rung skips loudly ("key not configured").
+  //   - OpenAI blanked: this rung's budget is Firecrawl-only (<= CREDIT_BUDGET). Without this, every
+  //     Fetch V2 miss would fall through to the paid GPT rung and spend rung-4's budget here.
+  // Plan D still runs first for these 12/13-digit public barcodes (it is part of the real route) and
+  // can spend Firecrawl credits (search + scrape); that spend is counted in the worst-case reservation.
+  const CREDIT_BUDGET = 150;
+  // Worst-case Firecrawl credits per code through this server: Plan D /search (1) + Plan D cheap
+  // scrape (1) + Fetch V2 firecrawl-search discovery (1). fetchPage is a plain fetch ($0); brocade,
+  // pattern URLs, and Brave discovery are not Firecrawl credits.
+  const WORST_CASE_CREDITS_PER_CODE = 3;
+
   const envLocal = loadEnvLocal();
   if (!envLocal.FIRECRAWL_API_KEY_1 && !envLocal.FIRECRAWL_API_KEY) {
     console.error("no Firecrawl key configured -- cannot run --live");
@@ -136,29 +151,103 @@ async function main() {
   }
   let child = null;
   if (!EXTERNAL_BASE) {
-    const env = { ...process.env, ...envLocal, PORT: String(PORT), NEXT_PUBLIC_FIREBASE_BACKEND: "0", NEXT_PUBLIC_E2E_AUTH_BYPASS: "1" };
+    const env = {
+      ...process.env, ...envLocal,
+      GO_UPC_API_KEY: "",   // rung isolation: proven misses, don't re-spend quota
+      OPENAI_API_KEY: "",   // rung isolation: zero GPT spend in rung 3
+      PORT: String(PORT), NEXT_PUBLIC_FIREBASE_BACKEND: "0", NEXT_PUBLIC_E2E_AUTH_BYPASS: "1",
+    };
     child = spawn("npx", ["next", "dev", "-p", String(PORT)], { env, stdio: ["ignore", "pipe", "pipe"], shell: true });
+    child.stdout.on("data", () => {});
+    child.stderr.on("data", () => {});
     const up = await waitForServer(BASE_URL, 90_000);
     if (!up) { console.error("dev server did not come up"); killServerTree(child); process.exit(1); }
+    console.log(`dev server up on ${PORT} (GO_UPC + OPENAI blanked; Firecrawl/Brave real).`);
   }
 
-  const results = { startedAt: new Date().toISOString(), sample, rows: [] };
-  let resolvedNow = 0, wrong = 0;
-  for (const code of sample) {
-    const t0 = Date.now();
-    const res = await fetch(`${BASE_URL}/api/ai-lookup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rawCode: code, cleanCode: code, mode: "decode" }) });
-    const json = await res.json();
-    const truth = truthByCode.get(code);
-    const row = { code, wallMs: Date.now() - t0, status: json?.decision?.status, productName: json?.decision?.result?.productName ?? json?.results?.[0]?.productName, priorTruth: truth?.truth, priorOutcome: truth?.outcome };
-    if (row.status === "verified" || row.status === "suggested") resolvedNow++;
-    results.rows.push(row);
-    console.log(`[fetchv2] ${code} -> ${row.status} | ${row.productName ?? ""}`);
+  // Conservative automatic grade vs corpus truth: shared distinctive tokens (len>=3, not generic).
+  const GENERIC = new Set(["tire", "tires", "the", "and", "with", "for", "size", "pack", "count", "oz", "ounce"]);
+  const toks = (s) => new Set(String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((t) => t.length >= 3 && !GENERIC.has(t)));
+  function gradeVsTruth(productName, truth) {
+    if (!productName) return "no_answer";
+    if (!truth) return "no_truth_available";
+    const a = toks(productName), b = toks(truth);
+    let shared = 0;
+    for (const t of a) if (b.has(t)) shared++;
+    if (shared >= 2) return "match";
+    if (shared === 1) return "partial_needs_manual";
+    return "mismatch_candidate"; // candidate WRONG identity - flagged for manual adjudication
   }
-  results.summary = { sampleSize: sample.length, resolvedNow, rateNow: resolvedNow / sample.length, baselineRate: BASELINE_RATE, beatsBaseline: resolvedNow / sample.length > BASELINE_RATE, wrong };
+
+  const results = { startedAt: new Date().toISOString(), port: PORT, isolation: "GO_UPC_API_KEY + OPENAI_API_KEY blanked (real route, rung isolation)", creditBudget: CREDIT_BUDGET, worstCaseCreditsPerCode: WORST_CASE_CREDITS_PER_CODE, sample, rows: [] };
+  let resolvedNow = 0, fetchv2Settled = 0, mismatchCandidates = 0, attempted = 0, skippedByBudget = 0;
+  let reservedCredits = 0;
+
+  for (const code of sample) {
+    if (reservedCredits + WORST_CASE_CREDITS_PER_CODE > CREDIT_BUDGET) {
+      skippedByBudget++;
+      console.log(`[budget] ${code} skipped: reserved ${reservedCredits} + ${WORST_CASE_CREDITS_PER_CODE} would exceed ${CREDIT_BUDGET} credits`);
+      continue;
+    }
+    reservedCredits += WORST_CASE_CREDITS_PER_CODE;
+    attempted++;
+    const t0 = Date.now();
+    let row = { code };
+    try {
+      const res = await fetch(`${BASE_URL}/api/ai-lookup`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rawCode: code, cleanCode: code, mode: "decode", forceRetry: true }),
+      });
+      const json = await res.json();
+      const truth = truthByCode.get(code);
+      row.wallMs = Date.now() - t0;
+      row.httpStatus = res.status;
+      row.status = json?.decision?.status ?? null;
+      row.productName = json?.decision?.result?.productName ?? json?.results?.[0]?.productName ?? null;
+      row.ladderPath = json?.debug?.ladderPath ?? null;
+      row.corroborationPath = json?.debug?.corroborationPath ?? null;
+      row.settledBy = row.ladderPath && row.ladderPath !== "none" ? row.ladderPath : (row.corroborationPath ?? "none");
+      row.ladderReasons = json?.debug?.ladderReasons ?? null;
+      row.priorTruth = truth?.truth ?? null;
+      row.priorOutcome = truth?.outcome ?? null;
+      row.grade = (row.status === "verified" || row.status === "suggested") ? gradeVsTruth(row.productName, truth?.truth) : "unresolved";
+      if (row.status === "verified" || row.status === "suggested") resolvedNow++;
+      if (row.settledBy === "fetchv2") fetchv2Settled++;
+      if (row.grade === "mismatch_candidate") mismatchCandidates++;
+    } catch (e) {
+      row.error = String(e?.message ?? e).slice(0, 300);
+      row.wallMs = Date.now() - t0;
+      row.grade = "error";
+    }
+    results.rows.push(row);
+    console.log(`[rung3] ${code} -> ${row.status ?? "ERR"} settledBy=${row.settledBy ?? "?"} grade=${row.grade} | ${(row.productName ?? row.error ?? "").slice(0, 70)} (${row.wallMs}ms)`);
+  }
+
+  const rateNow = attempted ? resolvedNow / attempted : 0;
+  results.summary = {
+    sampleSize: sample.length,
+    attempted,
+    skippedByBudget,
+    resolvedNow,
+    fetchv2Settled,
+    rateNow,
+    baselineRate: BASELINE_RATE,
+    beatsBaseline: rateNow > BASELINE_RATE,
+    mismatchCandidates,
+    zeroWrongGate: mismatchCandidates === 0 ? "PASS (0 mismatch candidates; partials flagged for manual adjudication, see rows)" : `REVIEW NEEDED: ${mismatchCandidates} mismatch candidate(s) vs corpus truth`,
+    creditsWorstCaseReserved: reservedCredits,
+    walletLine: `computed worst-case Firecrawl ceiling ${reservedCredits} credits (${attempted} codes x ${WORST_CASE_CREDITS_PER_CODE}); true spend = Firecrawl console`,
+  };
   writeFileSync(OUT, JSON.stringify(results, null, 2));
-  const section = `\n## Rung 3 (Fetch V2, HARD SET ONLY) -- LIVE\n\n- Sample: ${sample.length} codes from the 61-code still-unresolved pool.\n- Resolved: ${resolvedNow}/${sample.length} (${(results.summary.rateNow * 100).toFixed(1)}%) vs baseline ${(BASELINE_RATE * 100).toFixed(1)}%. Beats baseline: ${results.summary.beatsBaseline}.\n- Raw: \`scripts/proof-rung-3-results.json\`.\n`;
+  console.log(`\nwrote ${OUT.pathname}`);
+  console.log(`resolved ${resolvedNow}/${attempted} (${(rateNow * 100).toFixed(1)}%) vs baseline ${(BASELINE_RATE * 100).toFixed(1)}%; fetchv2-settled ${fetchv2Settled}; mismatch candidates ${mismatchCandidates}`);
+  console.log(results.summary.walletLine);
+
+  const section = `\n## Rung 3 (Fetch V2, HARD SET ONLY) -- LIVE (phase 2)\n\n- Sample: ${attempted}/${sample.length} codes attempted from the 61-code still-unresolved pool (${skippedByBudget} skipped by the ${CREDIT_BUDGET}-credit budget guard).\n- Rung isolation (real route): GO_UPC_API_KEY blanked (all sample codes are already-proven Go-UPC misses; re-spending ~${sample.length} quota lookups proves nothing) and OPENAI_API_KEY blanked (zero GPT spend this rung). Plan D + Fetch V2 run exactly as wired.\n- Resolved: ${resolvedNow}/${attempted} (${(rateNow * 100).toFixed(1)}%) vs 17.6% baseline -> beats baseline: ${results.summary.beatsBaseline}. Settled by fetchv2 rung specifically: ${fetchv2Settled}.\n- Zero-wrong gate: ${results.summary.zeroWrongGate}.\n- Wallet: ${results.summary.walletLine}.\n- Raw: \`scripts/proof-rung-3-results.json\`.\n`;
   appendFileSync(REPORT, section);
-  if (child) killServerTree(child);
+  console.log(`appended Rung 3 (live) section to ${REPORT.pathname}`);
+  if (child) { console.log("shutting down dev server..."); killServerTree(child); await new Promise((r) => setTimeout(r, 1000)); }
 }
 
 main().catch((e) => { console.error(e); process.exitCode = 1; });

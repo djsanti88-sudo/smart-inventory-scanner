@@ -7,5 +7,12 @@
   "junkGate": 0,
   "plannedSampleSize": 10,
   "guardMathValid": false,
-  "note": "Zero network calls, zero OpenAI $ spent. Input codes are 'rung 3's still-unresolved tail' -- do not exist until rung 3 runs live. Awaiting controller authorization for --live."
+  "note": "Zero network calls, zero OpenAI $ spent. Input codes are 'rung 3's still-unresolved tail' -- do not exist until rung 3 runs live. Awaiting controller authorization for --live.",
+  "livePhase2": {
+    "at": "2026-07-09T05:28:26.849Z",
+    "status": "not_executable_empty_input_set",
+    "reason": "Rung 4 input = codes rung 3 still cannot resolve. Rung 3 resolved 20/20 via the corpus rung (all 61 pool codes are in knowledge.generated.db and settle at corpus_exact_barcode through the real route), so the input set is empty. No GPT call made.",
+    "gptSpendUsd": 0,
+    "walletLine": "computed floor $0.00 (route-recorded actuals unchanged); true spend = OpenAI console"
+  }
 }
