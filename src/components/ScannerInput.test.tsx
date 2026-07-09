@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ScannerInput } from "@/components/ScannerInput";
+import { useScanStore } from "@/stores/scanStore";
 import type { ScanEvent } from "@/types";
 
 afterEach(cleanup);
@@ -87,6 +88,66 @@ describe("ScannerInput buffer", () => {
       expect(onScan).not.toHaveBeenCalled();
       vi.advanceTimersByTime(60);
       expect(onScan).toHaveBeenCalledWith("ABC12345");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("ScannerInput status line reset to Ready", () => {
+  afterEach(() => {
+    useScanStore.setState({ scanFeed: [] });
+  });
+
+  it("resets to 'Ready to scan.' 5s after the feed entry reaches a terminal decodeStatus", async () => {
+    vi.useFakeTimers();
+    try {
+      const decodingEvent: ScanEvent = { ...fakeEvent("UNKNOWN1"), status: "needs_review", decodeStatus: "decoding" };
+      useScanStore.setState({ scanFeed: [decodingEvent] });
+      const onScan = vi.fn(() => decodingEvent);
+      render(<ScannerInput onScan={onScan} submitMode="enter" />);
+      const input = screen.getByTestId("scanner-input");
+
+      fireEvent.change(input, { target: { value: "UNKNOWN1" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(screen.queryByText("Ready to scan.")).toBeNull();
+
+      // Decode settles to a terminal state on the live feed entry.
+      act(() => {
+        useScanStore.setState({
+          scanFeed: [{ ...decodingEvent, decodeStatus: "verified" }],
+        });
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(screen.getByText("Ready to scan.")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT reset while decodeStatus stays 'decoding', even after 5s", async () => {
+    vi.useFakeTimers();
+    try {
+      const decodingEvent: ScanEvent = { ...fakeEvent("UNKNOWN2"), status: "needs_review", decodeStatus: "decoding" };
+      useScanStore.setState({ scanFeed: [decodingEvent] });
+      const onScan = vi.fn(() => decodingEvent);
+      render(<ScannerInput onScan={onScan} submitMode="enter" />);
+      const input = screen.getByTestId("scanner-input");
+
+      fireEvent.change(input, { target: { value: "UNKNOWN2" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(screen.queryByText("Ready to scan.")).toBeNull();
+      expect(screen.getByText("Looking up this product... Check the feed below in a moment.")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
