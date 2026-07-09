@@ -213,13 +213,13 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
   }
 
   // Negative cache: a genuine miss within the 30-day TTL short-circuits without spending a lookup.
-  const cached = deps.storage.readMissCache(canonical);
+  const cached = await deps.storage.readMissCache(canonical);
   if (cached && !isMissExpired(cached, now())) {
     return { path: "goupc_miss", reason: "Go-UPC negative cache hit (within 30d TTL)" };
   }
 
   // Spend gate: hard-stop at the monthly cap BEFORE any billed call.
-  const spend = deps.usage.canSpend();
+  const spend = await deps.usage.canSpend();
   if (!spend.allowed) {
     return { path: "goupc_unavailable", reason: "Go-UPC monthly cap reached" };
   }
@@ -230,8 +230,8 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
 
   switch (outcome.kind) {
     case "hit": {
-      deps.usage.record();
-      maybeArchive(deps.storage, code, canonical, outcome.raw, now(), archiveEvery);
+      await deps.usage.record();
+      await maybeArchive(deps.storage, code, canonical, outcome.raw, now(), archiveEvery);
 
       if (outcome.inferred) {
         // Inferred (not an exact match) -> suggestion only. No negative cache (it was a soft hit).
@@ -267,8 +267,8 @@ export async function goUpcRung(code: string, deps: GoUpcRungDeps): Promise<GoUp
     case "miss": {
       // Genuine not-in-DB: negative-cache it for 30 days, then fall through to the next rung.
       const record: MissEntry = { canonical, missedAt: now().toISOString(), ttlDays: MISS_TTL_DAYS };
-      deps.usage.record();
-      deps.storage.writeMissCache(canonical, record);
+      await deps.usage.record();
+      await deps.storage.writeMissCache(canonical, record);
       return { path: "goupc_miss", reason: "Go-UPC miss (negative-cached 30d) -> fall through" };
     }
 
@@ -295,14 +295,14 @@ function isMissExpired(entry: MissEntry, at: Date): boolean {
   return ageMs > entry.ttlDays * 24 * 60 * 60 * 1000;
 }
 
-function maybeArchive(
+async function maybeArchive(
   storage: LadderStorage,
   code: string,
   canonical: string,
   raw: unknown,
   at: Date,
   every: number,
-): void {
+): Promise<void> {
   archiveCounter += 1;
   if (archiveCounter % every !== 0) return;
   const entry: DecodeArchiveEntry = {
@@ -312,7 +312,7 @@ function maybeArchive(
     raw,
     fetchedAt: at.toISOString(),
   };
-  storage.appendArchive(entry);
+  await storage.appendArchive(entry);
 }
 
 /** Test-only: reset the archive-every counter so archive tests are deterministic. */

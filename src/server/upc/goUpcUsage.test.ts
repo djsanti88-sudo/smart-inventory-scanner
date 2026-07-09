@@ -23,54 +23,54 @@ describe("goUpcUsage", () => {
     dir = freshDir();
   });
 
-  it("fresh file: allowed with used 0", () => {
+  it("fresh file: allowed with used 0", async () => {
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-    const gate = usage.canSpend();
+    const gate = await usage.canSpend();
     expect(gate.allowed).toBe(true);
     expect(gate.used).toBe(0);
     expect(gate.limit).toBe(4800);
     expect(gate.warn).toBe(false);
   });
 
-  it("record() three times increments used to 3", () => {
+  it("record() three times increments used to 3", async () => {
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-    usage.record();
-    usage.record();
-    usage.record();
-    expect(usage.canSpend().used).toBe(3);
+    await usage.record();
+    await usage.record();
+    await usage.record();
+    expect((await usage.canSpend()).used).toBe(3);
     // persisted: a fresh gate over the same dir sees 3
     const reread = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-    expect(reread.canSpend().used).toBe(3);
+    expect((await reread.canSpend()).used).toBe(3);
   });
 
-  it("used at the limit (4800) blocks with a cap reason", () => {
-    fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4800 });
+  it("used at the limit (4800) blocks with a cap reason", async () => {
+    await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4800 });
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-    const gate = usage.canSpend();
+    const gate = await usage.canSpend();
     expect(gate.allowed).toBe(false);
     expect(gate.reason).toContain("Go-UPC monthly cap reached");
     expect(gate.used).toBe(4800);
   });
 
-  it("used at 4001 warns but is still allowed", () => {
-    fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4001 });
+  it("used at 4001 warns but is still allowed", async () => {
+    await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4001 });
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-    const gate = usage.canSpend();
+    const gate = await usage.canSpend();
     expect(gate.allowed).toBe(true);
     expect(gate.warn).toBe(true);
   });
 
-  it("a stored month different from the current month resets used to 0 (rollover)", () => {
+  it("a stored month different from the current month resets used to 0 (rollover)", async () => {
     // June is stored at the cap; the injected now is July -> treat used as 0.
-    fileLadderStorage(dir).writeUsage({ month: "2026-06", used: 4800 });
+    await fileLadderStorage(dir).writeUsage({ month: "2026-06", used: 4800 });
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-    const gate = usage.canSpend();
+    const gate = await usage.canSpend();
     expect(gate.used).toBe(0);
     expect(gate.allowed).toBe(true);
     expect(gate.warn).toBe(false);
     // recording after rollover writes the CURRENT month, from 0
-    usage.record();
-    const persisted = fileLadderStorage(dir).readUsage();
+    await usage.record();
+    const persisted = await fileLadderStorage(dir).readUsage();
     expect(persisted).toEqual({ month: "2026-07", used: 1 });
   });
 
@@ -85,10 +85,10 @@ describe("goUpcUsage", () => {
       else process.env.GO_UPC_MONTHLY_LIMIT = saved;
     });
 
-    it("respects GO_UPC_MONTHLY_LIMIT=10", () => {
-      fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 10 });
+    it("respects GO_UPC_MONTHLY_LIMIT=10", async () => {
+      await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 10 });
       const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-      const gate = usage.canSpend();
+      const gate = await usage.canSpend();
       expect(gate.limit).toBe(10);
       expect(gate.allowed).toBe(false);
       expect(gate.reason).toContain("Go-UPC monthly cap reached");

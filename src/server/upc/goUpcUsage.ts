@@ -26,8 +26,8 @@ export interface GoUpcSpendGate {
 }
 
 export interface GoUpcUsage {
-  canSpend(): GoUpcSpendGate;
-  record(): void;
+  canSpend(): Promise<GoUpcSpendGate>;
+  record(): Promise<void>;
 }
 
 /** `YYYY-MM` month key from a Date. */
@@ -56,15 +56,15 @@ export function goUpcUsage(
   const limit = resolveLimit(opts?.limit);
 
   /** Effective used count for the current month (0 after a rollover). */
-  function currentUsed(month: string): number {
-    const stored = storage.readUsage();
+  async function currentUsed(month: string): Promise<number> {
+    const stored = await storage.readUsage();
     return stored.month === month ? stored.used : 0;
   }
 
   return {
-    canSpend(): GoUpcSpendGate {
+    async canSpend(): Promise<GoUpcSpendGate> {
       const month = monthKey(now());
-      const used = currentUsed(month);
+      const used = await currentUsed(month);
       const allowed = used < limit;
       const warn = used >= WARN_AT;
       return {
@@ -78,10 +78,10 @@ export function goUpcUsage(
       };
     },
 
-    record(): void {
+    async record(): Promise<void> {
       const month = monthKey(now());
-      const used = currentUsed(month);
-      storage.writeUsage({ month, used: used + 1 });
+      const used = await currentUsed(month);
+      await storage.writeUsage({ month, used: used + 1 });
     },
   };
 }

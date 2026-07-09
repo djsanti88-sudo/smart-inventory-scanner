@@ -26,7 +26,7 @@ import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } 
 import { shouldRunGptRung, gptResultToDecodePayload } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
 import { goUpcUsage } from "@/server/upc/goUpcUsage";
-import { fileLadderStorage } from "@/server/upc/storage";
+import { ladderStorage } from "@/server/upc/storage";
 import { goUpcRung, makeDefaultPrefixLookup } from "@/server/upc/GoUpcProvider";
 import { goUpcLookup } from "@/services/upc/goUpcClient";
 import { GoUpcGate } from "@/services/upc/goUpcThrottle";
@@ -265,9 +265,10 @@ export async function GET(request: Request) {
   const gptLadderStatus = getGptLadderStatus({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD });
   // Task 16: Go-UPC monthly quota visibility for the Settings panel. canSpend() only READS the usage
   // counter (no record()), so this GET spends nothing. Booleans + numbers ONLY - never the key value.
-  // File-backed usage lives next to .ai-lookup-usage.json (process.cwd()); Turso adapter swaps in later.
+  // ladderStorage() selects Turso in production (TURSO_DATABASE_URL/TURSO_AUTH_TOKEN set), else the
+  // file adapter next to .go-upc-usage.json (process.cwd()) for local dev + preview.
   const goUpcConfigured = Boolean(process.env.GO_UPC_API_KEY);
-  const goUpcSpend = goUpcUsage(fileLadderStorage(process.cwd())).canSpend();
+  const goUpcSpend = await goUpcUsage(await ladderStorage()).canSpend();
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
     autoDecodeOnScan: process.env.ENABLE_AUTO_DECODE_ON_SCAN !== "false",
@@ -708,12 +709,13 @@ export async function POST(request: Request) {
         // E2E MOCK MODE: live rungs are bypassed exactly like the legacy [mockProvider] path - E2E
         // resolves only via the GPT rung's zero-network mockGptLadder fixture (or falls to Needs Review).
         if (e2eMode()) return { settled: false, reason: "Go-UPC skipped (E2E mock mode)" };
+        const ladderStore = await ladderStorage();
         const r = await goUpcRung(code, {
           apiKey: process.env.GO_UPC_API_KEY,
           client: (c, d) => goUpcLookup(c, d),
           gate: goUpcGate,
-          usage: goUpcUsage(fileLadderStorage(process.cwd())),
-          storage: fileLadderStorage(process.cwd()),
+          usage: goUpcUsage(ladderStore),
+          storage: ladderStore,
           prefixLookup: goUpcPrefixLookup,
         });
         ladderProviderStatuses.push({
