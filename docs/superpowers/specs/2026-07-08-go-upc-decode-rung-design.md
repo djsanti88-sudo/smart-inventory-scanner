@@ -1,9 +1,11 @@
-# Go-UPC Decode Rung — Design (v4)
+# Go-UPC Decode Rung — Design (v5)
 
 Date: 2026-07-08 (v2: real API contract from live docs; v3: identity-merge for
 multi-barcode products; v4: owner fixes — count-first hard rule, monthly hard stop,
-server-side throttle, provenance quarantine, non-GTIN code path)
-Status: v4 pending owner review
+server-side throttle, provenance quarantine, non-GTIN code path; v5: no proactive
+alias discovery, Fetch V2 first for unknown SKUs, tenant trust boundary, live
+smoke-test evidence)
+Status: v5 pending owner review
 Supersedes: the 2026-07-05 owner-locked "ungrounded Gemini first" ladder rule.
 Gemini is REMOVED from the decode ladder by owner decision (this session).
 
@@ -71,23 +73,58 @@ This is the target architecture for barcode decoding in the actual program.
 
 ## Non-GTIN codes (SKU / internal part number / vendor label) — the path
 
+HARD RULE — NO PROACTIVE ALIAS DISCOVERY (owner order, 2026-07-08): decoding a UPC
+NEVER triggers a background search for that product's SKUs, part numbers, or other
+aliases. Aliases are learned LAZILY — only when a code is actually scanned — or by
+an optional future batch job run deliberately against the database source (out of
+scope for this build). Per-scan reverse lookup would burn paid tokens for links
+nobody may ever scan.
+
 When the scanned code is NOT a UPC/EAN/GTIN (fails check-digit/format, or
 `detectCodeType` says vendor_label / X00 / FNSKU / ASIN / internal):
 
 1. Count-first still applies: raw row persisted immediately.
 2. Go-UPC is SKIPPED (it only knows GTINs; a lookup would be a guaranteed wasted
-   quota unit).
+   quota unit — verified live, see "Validated by smoke test" below).
 3. Alias table is checked first as always — if a human ever linked this SKU before,
    it resolves instantly and deterministically. This is the steady-state: each SKU
    costs at most ONE resolution ever.
-4. Otherwise the code goes to the GPT-5.5 grounded rung (manufacturer part numbers
-   and SKUs are often searchable). Its result passes the existing evidence gate.
-5. Identity-merge then applies: if GPT's answer carries a GTIN matching an existing
+4. Otherwise: **Fetch V2 first (Brave + Firecrawl, trusted-door engine — proven
+   2026-07-05: 57 verified vs 34 baseline, zero wrong, pennies per code), then
+   GPT-5.5 grounded ONLY if Fetch V2 finds nothing usable** (owner-selected order,
+   2026-07-08). Results pass the existing evidence gate either way.
+5. Identity-merge then applies: if the answer carries a GTIN matching an existing
    product, the SKU auto-links as an alias to that product (this is exactly the
    "UPC scanned earlier, SKU scanned now" case). Fuzzy match -> one-tap link
    suggestion.
-6. If GPT finds nothing usable: Needs Review with the raw row; human resolution
-   permanently teaches the alias.
+6. If nothing usable from either engine: Needs Review with the raw row; human
+   resolution permanently teaches the alias.
+
+### Validated by smoke test (live, 2026-07-08, $0 — public website, no API quota)
+
+Five non-GTIN codes (FNSKU `X004DY7YUT`, MPNs `DCB205` / `FL-820-S` / `K060841`,
+vendor label `ZQX-99417-B`) all returned **HTTP 400** from Go-UPC — it refuses to
+even attempt non-GTIN input. Control code `848983006257` (real UPC) decoded
+correctly as "Falken Wildpeak A/T3W 265/70R17 115T Tire". Conclusions: (a) the
+code-type gate loses nothing and saves quota; (b) a slipped-through SKU cannot
+poison results (400, not a wrong answer); (c) first positive tire-coverage signal —
+Go-UPC resolved an owner Falken tire barcode with full size/load specs.
+
+## Tenant trust boundary (owner order, 2026-07-08)
+
+Human links are trusted COMPLETELY — but only within the tenant that made them.
+
+- Every human approval (resolveUnknown, alias link, "link to existing product" tap)
+  writes ONLY into that customer's own tenant-scoped data (`businessId`-scoped
+  aliases, products, counts). Full trust applies there: it counts, it is permanent,
+  it is deterministic on every future scan in that tenant.
+- Human links NEVER write to the global catalog / master truth-source database
+  (the 4M+ product catalog). A malicious or careless customer can therefore poison
+  only their own inventory, never the shared source every tenant reads from.
+- The global catalog is writable ONLY by the platform owner and the verified
+  pipeline (Go-UPC exact hits, evidence-gated decodes) under the platform owner's
+  control. Promotion of a tenant-taught alias into the global catalog, if ever
+  wanted, is a deliberate platform-owner action — never automatic.
 
 ## Go-UPC API contract (read from https://go-upc.com/docs, 2026-07-08)
 
@@ -241,6 +278,9 @@ In EVERY row above, the scan itself was already persisted at STEP 0.
 
 ## Out of scope
 
+- Batch alias discovery job (bulk-resolving SKUs/part numbers from the database
+  source with Fetch V2/Brave in deliberate offline batches) — possible future
+  project, explicitly NOT triggered per-scan.
 - Any change to the GPT-5.5 rung internals (owner has a replacement planned).
 - Re-adding Gemini anywhere in decode.
 - Backfilling the corpus by bulk Go-UPC export (Go-UPC docs mention bulk lookup but
