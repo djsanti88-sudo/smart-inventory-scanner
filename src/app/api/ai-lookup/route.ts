@@ -34,6 +34,8 @@ import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptL
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
 import { shouldRunGptRung, gptResultToDecodePayload } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
+import { goUpcUsage } from "@/server/upc/goUpcUsage";
+import { fileLadderStorage } from "@/server/upc/storage";
 
 // Separate budgets (owner rule): the fast path stays fast; only a hard-failed barcode gets the deep,
 // parallel fallback. Each value is env-overridable.
@@ -274,6 +276,11 @@ export async function GET(request: Request) {
   // Task 6: read-only GPT ladder spend/call status for the Settings panel. getGptLadderStatus makes
   // no writes and spends nothing (it composes checkGptLadderBudget's peek + the call-count peek).
   const gptLadderStatus = getGptLadderStatus({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD });
+  // Task 16: Go-UPC monthly quota visibility for the Settings panel. canSpend() only READS the usage
+  // counter (no record()), so this GET spends nothing. Booleans + numbers ONLY - never the key value.
+  // File-backed usage lives next to .ai-lookup-usage.json (process.cwd()); Turso adapter swaps in later.
+  const goUpcConfigured = Boolean(process.env.GO_UPC_API_KEY);
+  const goUpcSpend = goUpcUsage(fileLadderStorage(process.cwd())).canSpend();
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
     autoDecodeOnScan: process.env.ENABLE_AUTO_DECODE_ON_SCAN !== "false",
@@ -300,6 +307,12 @@ export async function GET(request: Request) {
       capUsd: gptLadderStatus.capUsd,
       callsToday: gptLadderStatus.calls,
       enabled: openaiConfigured && gptLadderStatus.allowed,
+    },
+    goUpc: {
+      configured: goUpcConfigured,
+      used: goUpcSpend.used,
+      limit: goUpcSpend.limit,
+      warn: goUpcSpend.warn,
     },
   });
 }

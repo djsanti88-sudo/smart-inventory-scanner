@@ -28,7 +28,7 @@ const AI_PROVIDER_HOSTS = ["generativelanguage.googleapis.com", "api.openai.com"
 
 describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "AI_LOOKUP_GET_RATE_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_LADDER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "GPT_LADDER_DAILY_USD"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "AI_LOOKUP_GET_RATE_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_LADDER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "GPT_LADDER_DAILY_USD", "GO_UPC_API_KEY", "GO_UPC_MONTHLY_LIMIT"];
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
   let tmpGptLadderFile: string;
@@ -47,6 +47,8 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     delete process.env.AI_LOOKUP_KILL_SWITCH;
     delete process.env.TURSO_DATABASE_URL;
     delete process.env.TURSO_AUTH_TOKEN;
+    delete process.env.GO_UPC_API_KEY;
+    delete process.env.GO_UPC_MONTHLY_LIMIT;
     tmpCounter = path.join(os.tmpdir(), `ai-usage-route-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
     process.env.AI_LOOKUP_COUNTER_FILE = tmpCounter;
     tmpGptLadderFile = path.join(os.tmpdir(), `gpt-ladder-usage-route-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
@@ -692,6 +694,47 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       const res = await GET(mkGet());
       const json = await res.json();
       expect(json.gptLadder.enabled).toBe(false);
+    });
+  });
+
+  // Task 16: GET /api/ai-lookup exposes the Go-UPC monthly quota (used/limit/warn) + configured flag for
+  // the Settings panel. Booleans + numbers ONLY - the key value must NEVER be in the response.
+  describe("GET status: goUpc quota visibility", () => {
+    const mkGet = () => new Request("http://localhost/api/ai-lookup", { headers: { "x-forwarded-for": "6.6.6.6" } });
+
+    it("returns goUpc with the right shape (configured boolean, used/limit numbers, warn boolean)", async () => {
+      const res = await GET(mkGet());
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.goUpc).toBeDefined();
+      expect(typeof json.goUpc.configured).toBe("boolean");
+      expect(typeof json.goUpc.used).toBe("number");
+      expect(typeof json.goUpc.limit).toBe("number");
+      expect(typeof json.goUpc.warn).toBe("boolean");
+    });
+
+    it("configured is false when GO_UPC_API_KEY is unset", async () => {
+      // beforeEach already deletes GO_UPC_API_KEY.
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.goUpc.configured).toBe(false);
+    });
+
+    it("configured is true when GO_UPC_API_KEY is set, and the key value never appears in the response", async () => {
+      const secret = "go-upc-secret-key-DO-NOT-LEAK-abc123";
+      process.env.GO_UPC_API_KEY = secret;
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.goUpc.configured).toBe(true);
+      // The entire serialized response must contain NO key material.
+      expect(JSON.stringify(json)).not.toContain(secret);
+    });
+
+    it("respects GO_UPC_MONTHLY_LIMIT env for the reported limit", async () => {
+      process.env.GO_UPC_MONTHLY_LIMIT = "10";
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.goUpc.limit).toBe(10);
     });
   });
 });
