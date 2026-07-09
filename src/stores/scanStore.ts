@@ -57,6 +57,7 @@ import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/ba
 import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
+import { findIdentityMerge } from "@/services/catalog/identityMerge";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
@@ -2740,6 +2741,45 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             else if (blobContainsCodeToken(p.name, identityCodes)) matchedIds.add(p.id);
           }
           if (provOrphanId) matchedIds.delete(provOrphanId); // never let the placeholder count as an owner
+
+          // IDENTITY-MERGE (decode ladder Task 9): when the deterministic dedup above finds NO owner, still
+          // check whether this decoded identity is the SAME countable product as one already in the shop, by
+          // canonical GTIN (auto_link) or a fuzzy brand+name match (suggest_link). This links two DIFFERENT
+          // scannable codes that resolve to the same product across encodings, so a second scan increments
+          // the existing row instead of minting a duplicate. Only consider real (active, non-placeholder)
+          // products; the scan's own provisional placeholder is excluded so it is never matched to itself.
+          if (matchedIds.size === 0) {
+            const mergeCandidates = state.products.filter(
+              (p) => p.status !== "archived" && p.id !== provOrphanId && p.provisional !== true,
+            );
+            const merge = findIdentityMerge(mergeCandidates, {
+              gtin: np.gtin ?? null,
+              upc: np.upc ?? null,
+              ean: np.ean ?? null,
+              brand: np.brand ?? null,
+              name: np.name ?? null,
+            });
+            if (merge.kind === "auto_link") {
+              // Same product across encodings -> reuse its row (the size===1 path below adds the alias +
+              // counts). Never a duplicate.
+              matchedIds.add(merge.productId);
+              emitAudit({ entityType: "Product", entityId: merge.productId, action: "identity_merge_auto_link", metadata: { code: review.cleanCode } });
+            } else if (merge.kind === "suggest_link") {
+              // Fuzzy match (brand+name, or a plus-generation / tire-size difference) -> NEVER auto-link.
+              // Attach the candidate to the review as a one-tap "link to existing product?" suggestion and
+              // keep it OPEN. The scan already counted provisionally (scan N = count N); this only refuses to
+              // guess the merge. The review keeps its existing provisional placeholder + count untouched.
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, suggestedLinkProductId: merge.productId, decodeStatus: "suggested" as const }
+                    : r,
+                ),
+              }));
+              emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "identity_merge_suggest_link", metadata: { code: review.cleanCode, productId: merge.productId } });
+              return; // stop: do NOT mint a product; wait for the human to confirm the link
+            }
+          }
 
           if (matchedIds.size > 1) {
             // MORE THAN ONE existing product owns this identity -> never guess; keep it in Needs Review
