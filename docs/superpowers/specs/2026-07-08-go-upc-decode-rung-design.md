@@ -155,6 +155,24 @@ Human links are trusted COMPLETELY — but only within the tenant that made them
   control. Promotion of a tenant-taught alias into the global catalog, if ever
   wanted, is a deliberate platform-owner action — never automatic.
 
+## GPT prompt review (owner order, 2026-07-08 — decide at build time, no change yet)
+
+The GPT-5.5 rung currently uses the owner-locked probe-parity v2 prompt (verbatim in
+`src/services/ai/gptFromScratch.ts`): raw code only, no hints, answer as returned.
+The live 200-tire ladder test exposed one weak clause: **"Never leave productName
+empty if you have any plausible guess"** made GPT return junk suggestions on
+unfindable tire codes (a music CD, a chemical compound, a toy — none can auto-count,
+but they pollute Needs Review). At build time the owner decides ONE of:
+1. Keep best-guess-always exactly as probed (junk suggestions accepted as the cost
+   of maximum recall).
+2. Allow an honest empty answer: same prompt minus the never-empty clause, so an
+   unfindable code arrives in Needs Review clean instead of with a misleading guess.
+3. Keep best-guess-always but require GPT to state the product CATEGORY it believes
+   the guess belongs to, so the UI can show "guess (music CD?)" as an obvious
+   out-of-category flag - still no app-side second-guessing of the answer itself.
+The no-hints / no-questioning / no-layered-rules AI Model Rules stay untouched in
+all three options. Evidence gate and tiers are unchanged either way.
+
 ## Go-UPC API contract (read from https://go-upc.com/docs, 2026-07-08)
 
 - Endpoint: `GET https://go-upc.com/api/v1/code/:code`
