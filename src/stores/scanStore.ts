@@ -97,6 +97,22 @@ export interface ProductDeleteBackup {
   deletedAt: string;
 }
 
+/**
+ * Task 2 (honest daily-cap copy): thrown by decodeOnce when /api/ai-lookup returns 429 with
+ * reasonCode "daily_cap" (the server-side daily AI spend cap, not a self-inflicted rate limit).
+ * This is a genuinely different failure than a transient rate limit - there is NO automatic
+ * decode-on-cap-reset queue anywhere in the app (verified: only the sync retry queue and the
+ * manual "Retry live decode" button exist), so the caught reason must not retry and must not
+ * promise a retry that will never happen.
+ */
+export class DailyCapReachedError extends Error {
+  readonly reasonCode = "daily_cap" as const;
+  constructor(message = "Daily AI lookup cap reached") {
+    super(message);
+    this.name = "DailyCapReachedError";
+  }
+}
+
 const DEFAULT_AI_STATUS: AiStatus = {
   liveEnabled: true,
   autoDecodeOnScan: true,
@@ -1916,8 +1932,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
               }),
             });
-            // 429 = self-inflicted rate limit (costs $0). Single retry with backoff, respecting Retry-After.
+            // 429 has two distinct causes that must NOT be treated the same:
+            //  - daily_cap: the server-side daily AI spend cap is reached. There is no automatic
+            //    decode-on-cap-reset queue anywhere in the app, so retrying now is pointless (it will
+            //    just 429 again) - fail fast with an honest reason instead of burning a wait.
+            //  - anything else: a self-inflicted rate limit (costs $0). Keep the single retry with
+            //    backoff, respecting Retry-After, exactly as before.
             if (res.status === 429) {
+              const body = await res.json().catch(() => ({}) as { reasonCode?: string });
+              if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError();
               const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
               await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
               const retry = await fetch("/api/ai-lookup", {
@@ -2373,9 +2396,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
-          const failReason = `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${
-            e instanceof Error ? e.message : ""
-          }`.trim();
+          // Task 2: a daily_cap 429 gets its own honest, non-retry-promising copy - there is no
+          // automatic decode-on-cap-reset queue, so telling the user to just wait would be false.
+          // Every other failure (network / self-inflicted rate limit / provider error) keeps the
+          // existing generic copy unchanged.
+          const failReason =
+            e instanceof DailyCapReachedError
+              ? "Daily AI lookup cap reached. This scan is saved and counted as unverified. Retry after the cap resets."
+              : `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${
+                  e instanceof Error ? e.message : ""
+                }`.trim();
           // DECODE-EVERYTHING (owner): a FAILED decode (timeout / 429 rate-limit / provider error / AI down)
           // must NOT leave the scan blank. We still COUNT it as an UNVERIFIED, reviewable provisional row with
           // a SAFE label and the scanned code - never a fabricated product identity, never an approved alias,
