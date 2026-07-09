@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -150,7 +150,7 @@ describe("fileLadderStorage", () => {
       store.writeUsage({ month: "2026-07", used: 5 });
       const usageFile = join(dir, ".go-upc-usage.json");
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      require("node:fs").writeFileSync(usageFile, "{ not json", "utf8");
+      writeFileSync(usageFile, "{ not json", "utf8");
       const s = fileLadderStorage(dir).readUsage();
       expect(s.used).toBe(0);
       warn.mockRestore();
