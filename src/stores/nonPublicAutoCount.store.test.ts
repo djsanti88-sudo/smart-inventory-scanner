@@ -136,7 +136,7 @@ describe("Option 3 - non-public auto-count (owner: 'found it on Amazon = enough'
 
   it("PHASE 2: human approval CONFIRMS a provisional (verified + approved alias) with NO double-count; next scan is Known", async () => {
     const store = aiOnStore();
-    let restore = stub(WEAK_NONPUBLIC);
+    const restore = stub(WEAK_NONPUBLIC);
     try {
       store.getState().processScan(FNSKU);
       await vi.waitFor(() => expect(store.getState().finalCounts.length).toBe(1));

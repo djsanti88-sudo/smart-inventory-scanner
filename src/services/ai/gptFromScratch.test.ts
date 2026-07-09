@@ -69,7 +69,7 @@ describe("gptFromScratch", () => {
     expect(r.productName).toContain("Wildpeak");
     expect(r.searches).toBe(2);
     expect(r.usdActual).toBeCloseTo((3000 / 1e6) * 5 + (900 / 1e6) * 30 + 0.02, 5);
-    const body = JSON.parse((f as any).mock.calls[0][1].body);
+    const body = JSON.parse(vi.mocked(f).mock.calls[0][1]!.body as string);
     expect(body.model).toBe("gpt-5.5");
     expect(body.tools).toEqual([{ type: "web_search", search_context_size: "low" }]);
     expect(body.reasoning).toEqual({ effort: "low" });
@@ -83,7 +83,7 @@ describe("gptFromScratch", () => {
   test("prompt v3 forbids invented products and drops the always-answer clause", async () => {
     const f = okFetch(respBody(MODEL_JSON));
     await gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f });
-    const body = JSON.parse((f as any).mock.calls[0][1].body);
+    const body = JSON.parse(vi.mocked(f).mock.calls[0][1]!.body as string);
     expect(body.input).toContain("Never invent a product");
     expect(body.input).not.toContain("Never leave productName empty");
     expect(body.input).toContain("category"); // category is part of the JSON contract now
