@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { structureProduct, tireSizeTag } from "./structurer";
+import { structureProduct, structureGoUpcProduct, tireSizeTag } from "./structurer";
+import type { GoUpcProduct } from "@/services/upc/goUpcClient";
 
 // Owner-locked lexicon for brand-detection tests (Task 1 brief: DI via ctx.knownBrands).
 const BRANDS = ["Toyo", "Michelin", "Falken", "Continental", "Pirelli", "Goodyear"];
@@ -314,5 +315,58 @@ describe("R3 - an explicit junk brand arg is never trusted, even shaped like a r
   it('a pure code echo brand arg ("0123456789012") is treated as absent', () => {
     const r = structureProduct("Falken Wildpeak AT3W 265/70R17", "0123456789012", { knownBrands: BRANDS });
     expect(r.brand).toBe("Falken");
+  });
+});
+
+// -------------------------------------------------------------------------------------------
+// Task 10 (decode-ladder-goupc): structureGoUpcProduct harvests a raw Go-UPC product. Fixture is
+// the Falken tire from today's live Go-UPC run - reuses the tireSpecs.ts size/load-speed extraction
+// (no new regex) and stamps "go-upc" provenance.
+// -------------------------------------------------------------------------------------------
+describe("structureGoUpcProduct - harvests Go-UPC fields (specs, image, category, provenance)", () => {
+  const falken: GoUpcProduct = {
+    name: "Falken Wildpeak A/T3W 265/70R17 115T Tire",
+    brand: "Falken",
+    description: "All-terrain light truck and SUV tire.",
+    imageUrl: "https://go-upc.s3.amazonaws.com/images/falken-wildpeak.jpg",
+    category: "Vehicle Parts & Accessories",
+    specs: [
+      ["Tire Size", "265/70R17"],
+      ["Load Index", "115"],
+      ["Speed Rating", "T"],
+    ],
+  };
+
+  it("maps brand, tire size, load/speed, imageUrl, category, and go-upc provenance", () => {
+    const r = structureGoUpcProduct(falken);
+    expect(r.brand).toBe("Falken");
+    expect(r.tireSize).toBe("265/70R17");
+    expect(r.loadSpeed).toBe("115T");
+    expect(r.imageUrl).toBe("https://go-upc.s3.amazonaws.com/images/falken-wildpeak.jpg");
+    expect(r.category).toBe("tires"); // "Vehicle Parts & Accessories" -> internal tire category
+    expect(r.source).toBe("go-upc");
+  });
+
+  it("also produces the deterministic name parse (model + glued sizeTag)", () => {
+    const r = structureGoUpcProduct(falken);
+    expect(r.model).toContain("Wildpeak");
+    expect(r.sizeTag).toBe("2657017");
+    expect(r.sizeTagKind).toBe("tire");
+  });
+
+  it("passes an unrecognized category through lowercased, never inventing tire fields", () => {
+    const grocery: GoUpcProduct = {
+      name: "Acme Trail Mix 12oz",
+      brand: "Acme",
+      description: "",
+      imageUrl: "",
+      category: "Grocery & Gourmet Food",
+      specs: [],
+    };
+    const r = structureGoUpcProduct(grocery);
+    expect(r.category).toBe("grocery & gourmet food");
+    expect(r.tireSize).toBe("");
+    expect(r.loadSpeed).toBe("");
+    expect(r.source).toBe("go-upc");
   });
 });
