@@ -253,6 +253,11 @@ export interface UnknownCodeReview {
   prefixConflictReason?: string;
   // platformOwner-only: the proposed product already exists in the shop's catalog under a different code.
   reverseUpcConflictNote?: string;
+  // Identity-merge (decode ladder Task 9) suggest_link: a decode that fuzzily matches an existing product
+  // (same brand + name similarity, or a plus-generation / tire-size difference on a GTIN match) attaches
+  // that product id here so the UI can offer a one-tap "link to existing product?" instead of a duplicate.
+  // A suggestion only - it never auto-links or counts. Cleared when the review is resolved.
+  suggestedLinkProductId?: string;
   // Confidence-based auto-verify outcome (when a decode was scored but did NOT auto-save).
   autoVerifyScore?: number;
   blockingReasons?: string[];
