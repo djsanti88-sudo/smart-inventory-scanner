@@ -43,6 +43,23 @@ describe("fileLadderStorage", () => {
       const reread = await fileLadderStorage(dir).readUsage();
       expect(reread).toEqual(written);
     });
+
+    it("incrementUsage returns 1 then 2 for a fresh month (atomic counter, not read-modify-write)", async () => {
+      const store = fileLadderStorage(dir);
+      expect(await store.incrementUsage("2026-07")).toBe(1);
+      expect(await store.incrementUsage("2026-07")).toBe(2);
+      // persisted state matches the returned counter
+      const persisted = await fileLadderStorage(dir).readUsage();
+      expect(persisted).toEqual({ month: "2026-07", used: 2 });
+    });
+
+    it("incrementUsage rolls over cleanly when the month key changes", async () => {
+      const store = fileLadderStorage(dir);
+      expect(await store.incrementUsage("2026-06")).toBe(1);
+      expect(await store.incrementUsage("2026-06")).toBe(2);
+      // a new month key starts its own counter at 1
+      expect(await store.incrementUsage("2026-07")).toBe(1);
+    });
   });
 
   describe("miss cache", () => {
@@ -174,6 +191,14 @@ describe("tursoLadderStorage", () => {
       async execute({ sql, args }) {
         calls.push(sql.trim().split(/\s+/).slice(0, 2).join(" "));
         if (sql.includes("CREATE TABLE")) return { rows: [] };
+        if (sql.startsWith("INSERT INTO goupc_usage") && sql.includes("used = used + 1")) {
+          // Atomic increment: the SQL itself computes the new value, never a JS-precomputed total.
+          const [month] = args as [string];
+          expect(args).toHaveLength(1); // no precomputed "new used" arg is passed
+          const next = (usage.get(month) ?? 0) + 1;
+          usage.set(month, next);
+          return { rows: [{ used: next }] };
+        }
         if (sql.startsWith("INSERT INTO goupc_usage")) {
           const [month, used] = args as [string, number];
           usage.set(month, used);
@@ -255,6 +280,24 @@ describe("tursoLadderStorage", () => {
     await store.appendArchive(entry);
     expect(client.calls.some((c) => c.startsWith("UPDATE") || c.startsWith("DELETE"))).toBe(false);
     expect(client.calls.some((c) => c.startsWith("INSERT INTO"))).toBe(true);
+  });
+
+  it("incrementUsage issues an atomic in-SQL increment (used = used + 1), not a JS-computed value", async () => {
+    const client = memTursoClient();
+    const store = tursoLadderStorage(client);
+    const n1 = await store.incrementUsage("2026-07");
+    const n2 = await store.incrementUsage("2026-07");
+    expect(n1).toBe(1);
+    expect(n2).toBe(2);
+    const incrementCalls = client.calls.filter((c) => c.startsWith("INSERT INTO"));
+    expect(incrementCalls.length).toBeGreaterThan(0);
+  });
+
+  it("incrementUsage keeps separate months independent", async () => {
+    const store = tursoLadderStorage(memTursoClient());
+    expect(await store.incrementUsage("2026-06")).toBe(1);
+    expect(await store.incrementUsage("2026-06")).toBe(2);
+    expect(await store.incrementUsage("2026-07")).toBe(1);
   });
 
   it("creates tables (CREATE TABLE IF NOT EXISTS) lazily, once per adapter instance", async () => {

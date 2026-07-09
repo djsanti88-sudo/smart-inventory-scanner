@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,6 +72,21 @@ describe("goUpcUsage", () => {
     await usage.record();
     const persisted = await fileLadderStorage(dir).readUsage();
     expect(persisted).toEqual({ month: "2026-07", used: 1 });
+  });
+
+  it("record() calls storage.incrementUsage, never readUsage/writeUsage (atomic, race-free increment)", async () => {
+    const storage = fileLadderStorage(dir);
+    const incrementUsage = vi.spyOn(storage, "incrementUsage");
+    const readUsage = vi.spyOn(storage, "readUsage");
+    const writeUsage = vi.spyOn(storage, "writeUsage");
+    const usage = goUpcUsage(storage, { now: AT_JULY });
+
+    await usage.record();
+
+    expect(incrementUsage).toHaveBeenCalledTimes(1);
+    expect(incrementUsage).toHaveBeenCalledWith("2026-07");
+    expect(readUsage).not.toHaveBeenCalled();
+    expect(writeUsage).not.toHaveBeenCalled();
   });
 
   describe("GO_UPC_MONTHLY_LIMIT env override", () => {
