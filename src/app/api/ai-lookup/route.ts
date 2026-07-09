@@ -165,6 +165,7 @@ function normalizeMockGptLadder(raw: Partial<GptFromScratchResult> | undefined):
   return {
     tier: raw.tier ?? "none",
     brand: raw.brand ?? "",
+    category: raw.category ?? "",
     productName: raw.productName ?? "",
     specs: raw.specs ?? "",
     gtin: raw.gtin ?? "",
