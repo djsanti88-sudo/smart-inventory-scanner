@@ -39,6 +39,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { guardRow } from "./lib/merge.mjs";
 import { jsonlLinesToRows, toCorpusRow } from "./lib/applyTransform.mjs";
+import { readTursoCredsFromEnvFile, upsertNewTiresToTurso } from "./lib/tursoUpsert.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = process.cwd();
@@ -47,14 +48,16 @@ const CORPUS_JSON_PATH = join(ROOT, "src", "server", "tire-knowledge", "tireKnow
 const BRAND_PREFIX_MAP_PATH = join(ROOT, "src", "services", "catalog", "brandPrefixMap.json");
 const STATE_DIR = join(__dirname, "state");
 const DEFAULT_GLOB_PREFIX = "harvested"; // matches state/harvested.jsonl and state/harvested*.jsonl
+const ENV_LOCAL_PATH = join(ROOT, ".env.local");
 
 // ---------------------------------------------------------------------------
 // CLI args
 // ---------------------------------------------------------------------------
 function parseArgs(argv) {
-  const args = { dryRun: false, input: null };
+  const args = { dryRun: false, input: null, noTurso: false };
   for (const raw of argv) {
     if (raw === "--dry-run") args.dryRun = true;
+    else if (raw === "--no-turso") args.noTurso = true;
     else if (raw.startsWith("--input=")) args.input = raw.slice("--input=".length);
   }
   return args;
@@ -361,7 +364,41 @@ async function main() {
     console.error(`\n[dt-harvest apply] FAILED: ${failed} spot-checked barcode(s) did not round-trip correctly.`);
     process.exit(1);
   }
+
+  await maybeUpsertToTurso(newlyAdded, args.noTurso);
+
   console.log("\n[dt-harvest apply] Done.");
+}
+
+// ---------------------------------------------------------------------------
+// Turso upsert (additive): grow the corpus in Turso without a redeploy. Gated on
+// TURSO_DATABASE_URL being present in .env.local and --no-turso not being passed. Errors here are
+// logged as a warning and swallowed — the local corpus apply (JSON + SQLite rebuild + spot-check)
+// has already succeeded by the time this runs and must not be undone by a Turso-side problem.
+// Only ever writes `tires` / `tire_part_numbers` — never retail / decode_cache / goupc_* tables.
+// ---------------------------------------------------------------------------
+async function maybeUpsertToTurso(newlyAdded, noTurso) {
+  if (noTurso) {
+    console.log("\n[dt-harvest apply] --no-turso: skipping Turso upsert.");
+    return;
+  }
+  if (newlyAdded.size === 0) {
+    return;
+  }
+
+  const creds = readTursoCredsFromEnvFile(readFileSync, ENV_LOCAL_PATH);
+  if (!creds) {
+    console.log("\n[dt-harvest apply] No TURSO_DATABASE_URL in .env.local: skipping Turso upsert (local corpus apply already succeeded).");
+    return;
+  }
+
+  console.log(`\n[dt-harvest apply] Upserting ${newlyAdded.size} newly-added tire row(s) to Turso...`);
+  try {
+    const { tiresWritten, partNumbersWritten } = await upsertNewTiresToTurso({ newlyAdded, creds });
+    console.log(`[dt-harvest apply] Turso upsert done: ${tiresWritten} tires row(s), ${partNumbersWritten} tire_part_numbers row(s).`);
+  } catch (e) {
+    console.warn(`[dt-harvest apply] WARNING: Turso upsert failed (local corpus apply already succeeded, continuing): ${e?.message || e}`);
+  }
 }
 
 main().catch((e) => {
