@@ -49,16 +49,36 @@ export function LiveScanFeed() {
             ) : (
               scanFeed.map((e) => {
                 const product = getProduct(e.matchedProductId);
-                // PHASE 1 (Suggested display): for a scan that did NOT count (no matched product), surface the
-                // decoded SUGGESTION from its Needs Review item so the row shows the product name instead of
-                // "-". This is read-only display: the row still reads "Suggested", Qty stays "-", and nothing
-                // is counted, aliased, or verified here.
-                const suggestion = product
-                  ? undefined
-                  : needsReviewQueue.find((r) => r.cleanCode === e.cleanCode && r.suggestedProductName);
-                const displayName = product?.name ?? suggestion?.suggestedProductName ?? "-";
-                const displaySku = product?.primarySku || suggestion?.suggestedPrimarySku || "-";
-                const isSuggestionOnly = !product && !!suggestion?.suggestedProductName;
+                // TASK 3 FIX (feed stuck on "Unidentified item"): ensureProvisionalCount ALWAYS mints a
+                // provisional placeholder Product synchronously at scan time, before decode finishes, so
+                // `product` is truthy even when there is no real identity yet. A naive `product ? undefined
+                // : suggestion` check therefore skipped the suggestion lookup forever. Now the suggestion
+                // lookup also runs when the matched product is still `provisional` (not yet a real,
+                // human-confirmed identity), so the feed shows the best-known name as soon as decode has one.
+                const suggestion = (!product || product.provisional)
+                  ? needsReviewQueue.find((r) => r.cleanCode === e.cleanCode && r.suggestedProductName)
+                  : undefined;
+                // Display priority: a real (non-provisional) product name wins outright. Otherwise prefer the
+                // decoded suggestion's name over the safe-but-uninformative provisional placeholder name, and
+                // fall back to the placeholder, then "-", if no suggestion exists yet.
+                const displayName =
+                  (product && !product.provisional ? product.name : undefined) ??
+                  suggestion?.suggestedProductName ??
+                  product?.name ??
+                  "-";
+                const displaySku =
+                  (product && !product.provisional ? product.primarySku : undefined) ||
+                  suggestion?.suggestedPrimarySku ||
+                  product?.primarySku ||
+                  "-";
+                // Trust rule: an unconfirmed identity must stay visually distinct from a Verified match.
+                // confidence >= 0.8 -> neutral gray "unconfirmed"; confidence < 0.8 -> amber "(suggested)".
+                // Never render a suggestion with no tag at all.
+                const suggestionTag = suggestion
+                  ? suggestion.confidence >= 0.8
+                    ? "unconfirmed"
+                    : "(suggested)"
+                  : null;
                 return (
                   <tr key={e.id} className="animate-[row-appear_200ms_ease-out] border-t border-zinc-100 hover:bg-zinc-50">
                     <td className="px-4 py-3 text-sm text-zinc-600">
@@ -73,7 +93,11 @@ export function LiveScanFeed() {
                     )}
                     <td className="px-4 py-3" data-testid={`feed-product-${e.id}`}>
                       {displayName}
-                      {isSuggestionOnly ? <span className="ml-1 text-xs text-amber-700">(suggested)</span> : null}
+                      {suggestionTag === "unconfirmed" ? (
+                        <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+                      ) : suggestionTag === "(suggested)" ? (
+                        <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 font-mono text-sm" data-testid={`feed-part-number-${e.id}`}>
                       {displaySku}
