@@ -64,7 +64,7 @@ function lookupSqlite(code: string): RetailLookupResult | null {
 // ---------------------------------------------------------------------------
 // Path 2: Turso remote DB (production on Vercel)
 // ---------------------------------------------------------------------------
-type TursoClient = { execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
+export type TursoClient = { execute: (stmt: { sql: string; args: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
 let _tursoClient: TursoClient | null | "unavailable" = null;
 
 /** Outcome of the most recent lookupRetailBarcode(Async) call, for observability. Distinguishes a
@@ -82,7 +82,12 @@ export function getLastRetailLookupStatus(): RetailLookupStatus {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
 
-async function getTursoClient(): Promise<TursoClient | null> {
+// Exported so other server-side knowledge indexes (e.g. tire-knowledge) reuse the SAME Turso
+// connection-caching + env-detection pattern instead of a second divergent implementation.
+// NOTE: the module-level cache below is shared with retail's own lookups; tire-knowledge calls
+// this from a different module scope, so it gets its own independent cache slot (fine — both
+// point at the same Turso DB/creds, and each caller wants its own tiny cache lifecycle for tests).
+export async function getTursoClient(): Promise<TursoClient | null> {
   if (_tursoClient === "unavailable") return null;
   if (_tursoClient) return _tursoClient;
   const url = process.env.TURSO_DATABASE_URL;

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getKnowledgeDb } from "@/server/knowledgeDb";
+import { getTursoClient as getRetailTursoClient, type TursoClient } from "@/server/retail-knowledge/retailKnowledgeIndex";
 
 // SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
 // The `server-only` import makes this a BUILD ERROR if imported from a client component.
@@ -90,22 +91,110 @@ function getStmtPartNumber() {
   } catch { return null; }
 }
 
-/** EXACT trusted barcode lookup. Returns the corpus row or null. Never near-matches. */
+// ---------------------------------------------------------------------------
+// Turso remote DB (production on Vercel, where the SQLite file is not bundled).
+// Reuses the SAME connection-caching + env-detection helper as retail-knowledge so there is only
+// one Turso-connection pattern in the codebase.
+// ---------------------------------------------------------------------------
+
+let _tursoClient: TursoClient | null = null;
+let _tursoClientPromise: Promise<TursoClient | null> | null = null;
+
+async function getTireTursoClient(): Promise<TursoClient | null> {
+  if (_tursoClient) return _tursoClient;
+  if (!_tursoClientPromise) _tursoClientPromise = getRetailTursoClient();
+  const client = await _tursoClientPromise;
+  if (client) _tursoClient = client;
+  return client;
+}
+
+/** Map a raw Turso row (plain object) to the typed TireKnowledgeRow shape, coercing source_count. */
+function rowFromTurso(row: Record<string, unknown>): TireKnowledgeRow {
+  return {
+    canonical_product_uid: (row.canonical_product_uid as string) ?? "",
+    brand: (row.brand as string) ?? "",
+    brand_normalized: (row.brand_normalized as string) ?? "",
+    model: (row.model as string) ?? "",
+    model_normalized: (row.model_normalized as string) ?? "",
+    size: (row.size as string) ?? "",
+    raw_size_text: (row.raw_size_text as string) ?? "",
+    load_index: (row.load_index as string) ?? "",
+    speed_rating: (row.speed_rating as string) ?? "",
+    load_range: (row.load_range as string) ?? "",
+    type: (row.type as string) ?? "",
+    season: (row.season as string) ?? "",
+    manufacturer_part_number: (row.manufacturer_part_number as string) ?? "",
+    barcode: (row.barcode as string) ?? "",
+    barcode_type: (row.barcode_type as string) ?? "",
+    confidence: (row.confidence as string) ?? "",
+    current_status: (row.current_status as string) ?? "",
+    usable_for: (row.usable_for as string) ?? "",
+    field_completeness_score: (row.field_completeness_score as string) ?? "",
+    missing_fields: (row.missing_fields as string) ?? "",
+    source_count: Number(row.source_count ?? 0),
+  };
+}
+
+/** Turso barcode lookup. Fail-safe: any error (missing creds, network) returns null, never throws. */
+async function lookupBarcodeTurso(key: string): Promise<TireKnowledgeRow | null> {
+  try {
+    const client = await getTireTursoClient();
+    if (!client) return null;
+    const result = await client.execute({ sql: "SELECT * FROM tires WHERE barcode = ?", args: [key] });
+    if (result.rows.length === 0) return null;
+    return rowFromTurso(result.rows[0]);
+  } catch (e) {
+    console.warn("[tire-knowledge] Turso barcode lookup failed:", (e as Error).message);
+    return null;
+  }
+}
+
+/** Turso part-number lookup: two-step (normalized_part_number -> canonical_product_uid -> tires row).
+ *  Fail-safe: any error returns null, never throws. */
+async function lookupPartNumberTurso(key: string): Promise<TireKnowledgeRow | null> {
+  try {
+    const client = await getTireTursoClient();
+    if (!client) return null;
+    const partResult = await client.execute({
+      sql: "SELECT canonical_product_uid FROM tire_part_numbers WHERE normalized_part_number = ?",
+      args: [key],
+    });
+    if (partResult.rows.length === 0) return null;
+    const uid = partResult.rows[0].canonical_product_uid as string;
+    if (!uid) return null;
+    const tireResult = await client.execute({
+      sql: "SELECT * FROM tires WHERE canonical_product_uid = ? LIMIT 1",
+      args: [uid],
+    });
+    if (tireResult.rows.length === 0) return null;
+    return rowFromTurso(tireResult.rows[0]);
+  } catch (e) {
+    console.warn("[tire-knowledge] Turso part-number lookup failed:", (e as Error).message);
+    return null;
+  }
+}
+
+/** EXACT trusted barcode lookup. Order: local SQLite (fast, dev) -> Turso (Vercel) -> in-memory JSON
+ *  (last-ditch dev fallback; the file is .vercelignored so it never exists on Vercel). Never near-matches. */
 export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeRow | null> {
   const key = normBarcodeKey(code);
   if (!key) return null;
   const stmt = getStmtBarcode();
   if (stmt) return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
+  const tursoRow = await lookupBarcodeTurso(key);
+  if (tursoRow) return tursoRow;
   const idx = getJsonIndex();
   return idx ? (idx.barcodeIndex[key] ?? null) : null;
 }
 
-/** EXACT trusted manufacturer-part-number lookup. Returns the corpus row or null. */
+/** EXACT trusted manufacturer-part-number lookup. Same SQLite -> Turso -> JSON order as barcode lookup. */
 export async function lookupByExactPartNumber(partNumber: string): Promise<TireKnowledgeRow | null> {
   const key = normPartKey(partNumber);
   if (!key) return null;
   const stmt = getStmtPartNumber();
   if (stmt) return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
+  const tursoRow = await lookupPartNumberTurso(key);
+  if (tursoRow) return tursoRow;
   const idx = getJsonIndex();
   if (!idx) return null;
   const uid = idx.partNumberIndex[key];
@@ -125,4 +214,6 @@ export function __resetTireKnowledgeCacheForTests(): void {
   _stmtPartNumber = null;
   _jsonIndex = null;
   _uidToRow = null;
+  _tursoClient = null;
+  _tursoClientPromise = null;
 }
