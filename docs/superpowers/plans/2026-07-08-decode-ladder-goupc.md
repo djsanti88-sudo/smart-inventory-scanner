@@ -12,7 +12,10 @@
 
 - HARD RULE 0 count-first: scan event persisted + feed row visible BEFORE any lookup; decode only upgrades identity asynchronously; total rung failure still leaves the raw row + Needs Review entry.
 - Ladder order: resolver/aliases -> decode cache/corpora -> [GTIN gate] -> Go-UPC -> Fetch V2 -> GPT-5.5 -> Needs Review. Gemini is REMOVED from decode.
-- Go-UPC: Bearer header only; server-side only (`GO_UPC_API_KEY`); 2 req/s throttle + in-flight dedup; monthly HARD STOP `GO_UPC_MONTHLY_LIMIT` (default 4800), soft warn 4000; misses negative-cached 30 days keyed by canonical GTIN; exact hit (`inferred:false`) auto-counts with NO checks; `inferred:true` -> suggestion only.
+- Go-UPC: Bearer header only; server-side only (`GO_UPC_API_KEY`); 2 req/s throttle + in-flight dedup; monthly HARD STOP `GO_UPC_MONTHLY_LIMIT` (default 4800), soft warn 4000; misses negative-cached 30 days keyed by canonical GTIN; exact hit (`inferred:false`) auto-counts after the brand-prefix firewall ONLY (prefix-owner conflict -> Needs Review; owner decision 2026-07-08 evening); `inferred:true` -> suggestion only.
+- GTIN-14 semantics: a GTIN-14 with indicator digit >= 1 is a CASE PACK — `canonicalGtin` must NEVER collapse it into the unit GTIN (only leading-ZERO padding is equivalence). Case and unit are different countable products.
+- Storage: usage counter, negative cache, and archive go through a storage interface — file-backed adapter now (local + preview), Turso adapter is the LAST task before any production promotion (which already requires owner sign-off).
+- Tire identity-merge: when BOTH sides state a tire size, auto-link additionally requires size agreement; size disagreement forces suggest_link even on GTIN match anomalies.
 - GPT-5.5 full model (`gpt-5.5`), probe-parity call shape, evidence gate unchanged (verified = exactCodeFound && confidence >= 0.8); AI Model Rules: raw code only, NO hints, NO app-side questioning of answers, no layered rules.
 - Identity-merge: exact canonical-GTIN match auto-links alias to existing product; fuzzy brand+name NEVER auto-merges (plus-generation trap: R8 vs R8+), always a one-tap suggestion.
 - Raw archive: every paid 200 archived complete (raw JSON + source URLs + retrieval metadata); archive survives corpus purges; images stored as URLs only.
@@ -65,6 +68,10 @@ import { canonicalGtin, gtinVariants, isValidCheckDigit, isGtinShaped } from "./
 describe("gtin utilities", () => {
   it("canonicalizes UPC-A and its zero-padded EAN-13 to the SAME key", () => {
     expect(canonicalGtin("036000291452")).toBe(canonicalGtin("0036000291452"));
+  });
+  it("NEVER collapses a case-pack GTIN-14 (indicator >= 1) into the unit GTIN", () => {
+    // 10016000507255 is the CASE of unit 016000507255 - different countable products
+    expect(canonicalGtin("10016000507255")).not.toBe(canonicalGtin("016000507255"));
   });
   it("returns null for non-GTIN input", () => {
     expect(canonicalGtin("DCB205")).toBeNull();
@@ -142,6 +149,22 @@ export function gtinVariants(code: string): string[] {
 
 - [ ] **Step 4: Run test to verify it passes** — `npx vitest run src/services/upc/gtin.test.ts` -> PASS. If the canonical test fails on edge lengths, simplify `canonicalGtin` to `stripped` (leading-zeros removed) and update the test to assert equality of the two encodings only — equality is the contract, not the exact string.
 - [ ] **Step 5: Commit** — `git add src/services/upc && git commit -m "feat(upc): gtin canonical form, variants, check digit"`
+
+### Task 2a: Storage interface (dev file / prod Turso seam)
+
+**Files:** Create `src/server/upc/storage.ts`, test `src/server/upc/storage.test.ts`
+
+**Interfaces:**
+- Produces: `interface LadderStorage { readUsage(): UsageState; writeUsage(s: UsageState): void; readMissCache(key: string): MissEntry | null; writeMissCache(key: string, e: MissEntry): void; appendArchive(entry: DecodeArchiveEntry): void }` and `fileLadderStorage(dir: string): LadderStorage`. Tasks 2, 5, and 7 consume ONLY this interface — never fs directly — so the Turso adapter (Task 21) swaps in without touching rung logic. Vercel production MUST NOT ship on the file adapter (file writes are ephemeral there — the "Knowledge DB dead on Vercel" lesson).
+
+- [ ] **Step 1: Failing test** — file adapter round-trips usage state, miss-cache entries with TTL fields, and archive appends into a temp dir.
+- [ ] **Step 2-5:** implement, pass, commit — `feat(upc): ladder storage interface + file adapter (Turso adapter reserved for pre-prod task)`
+
+### Task 21 (LAST, pre-production gate): Turso storage adapter
+
+**Files:** Create `src/server/upc/tursoStorage.ts` (+test with mocked Turso client)
+
+- [ ] Implements `LadderStorage` on Turso tables (`goupc_usage`, `goupc_miss_cache`, `decode_archive`); selected automatically when `TURSO_DATABASE_URL` is set (same detection as `retailKnowledgeIndex.ts`). Mocked-client unit tests mirror Task 2a's. This task is REQUIRED before any production promotion; production promotion itself stays owner-gated.
 
 ### Task 2: Raw decode archive (server)
 
@@ -230,7 +253,7 @@ export async function goUpcLookup(code: string, deps: { apiKey: string; fetchImp
 - Consumes: Tasks 1-5 + `appendDecodeArchive` (Task 2) + decode cache store for the 30-day negative cache (`src/server/decodeCacheStore.ts` — follow `TireKnowledgeProvider.ts` for the result/decision shapes).
 - Produces: `goUpcRung(code: string, deps): Promise<GoUpcRungResult>` where `GoUpcRungResult = { path: "goupc_exact"|"goupc_inferred"|"goupc_miss"|"goupc_unavailable"; decision?: DecodeDecision; results?: AiLookupResult[]; reason: string }`. Shapes: exact hit -> decision `status:"verified"` with `exactCodeEvidenceVerifiedByApp:true`, `verifiedFacts:["Go-UPC exact barcode match"]`, provider name `"go-upc"` (mirror `TireKnowledgeProvider.toResult`); inferred -> `status:"needs_review"` with the product attached as suggestion; miss -> negative-cache write (TTL 30d, canonical GTIN key); quota/auth/missing-key -> `goupc_unavailable` with the exact reason string from the spec's error table.
 
-- [ ] **Step 1: Failing tests** (all deps injected/mocked): exact hit maps to verified decision + archive appended + usage recorded; inferred -> needs_review suggestion + archived + NO negative cache; miss -> negative cache written with 30d TTL + falls through; second call on cached miss does NOT invoke client (spy) within TTL; expired TTL calls again; `canSpend().allowed=false` -> `goupc_unavailable`, client NEVER called, reason "Go-UPC monthly cap reached"; 429 -> reason "Go-UPC quota exhausted"; transient -> fall-through, NOT negative-cached; missing key -> skipped with reason; non-GTIN input (`isGtinShaped` false or bad check digit) -> `goupc_miss` with reason "not a GTIN / failed check digit", client never called.
+- [ ] **Step 1: Failing tests** (all deps injected/mocked): exact hit maps to verified decision + archive appended + usage recorded; exact hit whose brand CONFLICTS with the catalog-derived prefix map (inject a `prefixLookup` dep; e.g. prefix 092971 owned by Bridgestone family, Go-UPC says Westlake) -> `path:"goupc_prefix_conflict"`, needs_review suggestion, NEVER verified (regression for the one live error found 2026-07-08); exact hit with unknown prefix (not in map) -> verified normally (absence of prefix data never blocks); inferred -> needs_review suggestion + archived + NO negative cache; miss -> negative cache written with 30d TTL + falls through; second call on cached miss does NOT invoke client (spy) within TTL; expired TTL calls again; `canSpend().allowed=false` -> `goupc_unavailable`, client NEVER called, reason "Go-UPC monthly cap reached"; 429 -> reason "Go-UPC quota exhausted"; transient -> fall-through, NOT negative-cached; missing key -> skipped with reason; non-GTIN input (`isGtinShaped` false or bad check digit) -> `goupc_miss` with reason "not a GTIN / failed check digit", client never called.
 - [ ] **Step 2:** FAIL  - [ ] **Step 3: Implement** (thin composition; every branch returns an explicit `reason` — never silent)  - [ ] **Step 4: PASS**  - [ ] **Step 5: Commit** — `feat(upc): Go-UPC rung (exact auto-verify, inferred suggest, 30d miss cache, loud fallbacks)`
 
 ---
@@ -257,7 +280,7 @@ export async function goUpcLookup(code: string, deps: { apiKey: string; fetchImp
 - Produces: `findIdentityMerge(existing: Product[], decoded: { gtin?: string|null; brand?: string; name?: string }): { kind: "auto_link"; productId: string } | { kind: "suggest_link"; productId: string } | { kind: "none" }` — auto_link ONLY on canonical-GTIN equality; suggest_link on normalized-brand equality + name similarity >= 0.75 (token Jaccard) BUT ONLY when neither name contains a "+"/generation marker difference (e.g. `r8` vs `r8+`, `hdr` vs `hdr+` -> suggest, never auto — encode this exact case as a test).
 - Store: applying a decode result runs identity-merge first; auto_link attaches the scanned code as a new alias on the existing product and increments it (never a duplicate row); suggest_link raises a Needs Review "link to existing product?" item.
 
-- [ ] **Step 1: Failing tests** — identityMerge unit: gtin equal (across encodings, via `canonicalGtin`) -> auto_link; same brand + "dimax r8" vs "dimax r8+" -> suggest_link never auto; different brands -> none. Store test: scan UPC -> decode-applied product created qty 1; scan SKU whose decode carries the same GTIN -> SAME row qty 2 + 2 aliases (assert product count unchanged). Count-first test: stub every ladder API to reject -> raw feed row + Needs Review entry still exist and survive a persist/rehydrate cycle.
+- [ ] **Step 1: Failing tests** — identityMerge unit: gtin equal (across encodings, via `canonicalGtin`) -> auto_link; same brand + "dimax r8" vs "dimax r8+" -> suggest_link never auto; different brands -> none; TIRE rule: when BOTH sides carry a parsed size, auto_link additionally requires size equality ("265/70R17" vs "265/70R17" links; "265/70R17" vs "245/70R17" -> suggest_link even with matching brand+model). Store test: scan UPC -> decode-applied product created qty 1; scan SKU whose decode carries the same GTIN -> SAME row qty 2 + 2 aliases (assert product count unchanged). Count-first test: stub every ladder API to reject -> raw feed row + Needs Review entry still exist and survive a persist/rehydrate cycle.
 - [ ] **Step 2:** FAIL  - [ ] **Step 3: Implement**  - [ ] **Step 4: PASS**  - [ ] **Step 5: Commit** — `feat(catalog): identity-merge (gtin auto-link, fuzzy suggests, plus-generation guard) + count-first regression`
 
 ### Task 10: Structurer harvest of Go-UPC fields
@@ -359,6 +382,13 @@ Context for the engineer: the catalog-derived prefix map lives in `src/services/
   4. All-providers-dead mock (route 500s) -> raw row persists in Needs Review after reload (count-first proof); screenshot `countfirst-survives.png`.
 - [ ] **Step 2:** `npm run test:e2e -- goupc-ladder` -> PASS with screenshots in `e2e/proof/`.
 - [ ] **Step 3: Commit** — `test(e2e): Go-UPC ladder proof (exact, inferred, cap, count-first)`
+
+### Task 17b: Server-only boundary test (archive/usage never client-exposed)
+
+**Files:** Create `src/server/upc/importBoundary.test.ts`
+
+- [ ] **Step 1:** Copy the pattern from `src/server/tire-knowledge/importBoundary.test.ts`: walk `src/`, fail if any "use client" file, client component, or Zustand store imports `@/server/upc` or `@/server/decodeArchive`. Also assert no API route returns raw archive entries or the alias/barcode corpus to non-platform-owner callers (grep route handlers for the modules; the only consumer is the decode POST path).
+- [ ] **Step 2:** PASS  - [ ] **Step 3: Commit** — `test(security): upc/archive modules are server-only, never customer-exportable`
 
 ### Task 18: Bot gate
 
