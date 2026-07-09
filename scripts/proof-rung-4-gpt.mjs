@@ -74,7 +74,7 @@ async function waitForServer(baseUrl, timeoutMs = 90_000) {
 
 async function main() {
   const maxCalls = maxCallsUnderCap(HARD_CAP, WORST_CASE_PER_CALL);
-  console.log(`worst-case reserve: $${WORST_CASE_PER_CALL}/call, hard cap $${HARD_CAP} -> max ${maxCalls} calls before the guard trips`);
+  if (DRY_RUN) console.log(`worst-case reserve: $${WORST_CASE_PER_CALL}/call, hard cap $${HARD_CAP} -> max ${maxCalls} calls before the guard trips`);
   console.log(`junk-guess gate: <= ${JUNK_GATE} (v2 baseline: 3 junk in 7)`);
 
   if (DRY_RUN) {
@@ -106,45 +106,126 @@ async function main() {
     process.exit(1);
   }
   if (!CODES.length) { console.error("--codes= required for --live"); process.exit(1); }
-  if (CODES.length > maxCalls) {
-    console.error(`${CODES.length} codes requested but the guard only allows ${maxCalls} calls under the $${HARD_CAP} cap. Trim the list.`);
-    process.exit(1);
-  }
 
-  // ---- LIVE PATH (owner-gated; not executed in this dispatch) ----
+  // ---- LIVE PATH (authorized by the controller 2026-07-09, phase 2) ------------------------------
+  // BUDGET RESOLUTION (controller decision): check-before-spend WITH ACTUALS, against the PHASE cap.
+  // Before each call: actualSpentThisRun + $0.39 (worst case ONE call) <= $3.00. Actuals come from the
+  // route's own telemetry (GET /api/ai-lookup -> gptLadder.spentTodayUsd, fed by recordGptLadderSpend
+  // with each call's real usdActual). Low actuals let all 10 codes run; high actuals stop early.
+  // The route ALSO enforces its own identical server-side daily guard (GPT_LADDER_DAILY_USD=3 default),
+  // so this client-side guard is redundant defense, not the only wall.
+  const PHASE_CAP = 3.0;
+  // RUNG ISOLATION VIA KEYS (still the real route): real OPENAI_API_KEY; GO_UPC_API_KEY, all
+  // FIRECRAWL keys, and BRAVE blanked so the goupc rung skips (these codes are proven misses) and
+  // Fetch V2 runs free doors only (no credits) before falling through to the GPT rung under test.
   const envLocal = loadEnvLocal();
   if (!envLocal.OPENAI_API_KEY) { console.error("no OPENAI_API_KEY configured"); process.exit(1); }
   let child = null;
   if (!EXTERNAL_BASE) {
-    const env = { ...process.env, ...envLocal, PORT: String(PORT), NEXT_PUBLIC_FIREBASE_BACKEND: "0", NEXT_PUBLIC_E2E_AUTH_BYPASS: "1" };
+    const env = {
+      ...process.env, ...envLocal,
+      GO_UPC_API_KEY: "",
+      FIRECRAWL_API_KEY: "",
+      FIRECRAWL_API_KEY_1: "", FIRECRAWL_API_KEY_2: "", FIRECRAWL_API_KEY_3: "", FIRECRAWL_API_KEY_4: "",
+      FIRECRAWL_API_KEY_5: "", FIRECRAWL_API_KEY_6: "", FIRECRAWL_API_KEY_7: "", FIRECRAWL_API_KEY_8: "",
+      FIRECRAWL_API_KEY_9: "", FIRECRAWL_API_KEY_10: "",
+      BRAVE_SEARCH_API_KEY: "",
+      PORT: String(PORT), NEXT_PUBLIC_FIREBASE_BACKEND: "0", NEXT_PUBLIC_E2E_AUTH_BYPASS: "1",
+    };
     child = spawn("npx", ["next", "dev", "-p", String(PORT)], { env, stdio: ["ignore", "pipe", "pipe"], shell: true });
+    child.stdout.on("data", () => {});
+    child.stderr.on("data", () => {});
     const up = await waitForServer(BASE_URL, 90_000);
     if (!up) { console.error("dev server did not come up"); killServerTree(child); process.exit(1); }
+    console.log(`dev server up on ${PORT} (OPENAI real; GO_UPC/FIRECRAWL/BRAVE blanked).`);
   }
 
-  let spent = 0;
-  const results = { startedAt: new Date().toISOString(), rows: [] };
-  let junkCount = 0;
-  for (const code of CODES) {
-    if (spent + WORST_CASE_PER_CALL > HARD_CAP) {
-      console.log(`HARD CAP: $${spent.toFixed(2)} spent + $${WORST_CASE_PER_CALL} worst case > $${HARD_CAP}. Stopping.`);
-      break;
-    }
-    const t0 = Date.now();
-    const res = await fetch(`${BASE_URL}/api/ai-lookup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rawCode: code, cleanCode: code, mode: "decode" }) });
-    const json = await res.json();
-    spent += WORST_CASE_PER_CALL; // computed floor; true spend = OpenAI console (cost-truth rule)
-    const productName = json?.decision?.result?.productName ?? json?.results?.[0]?.productName ?? "";
-    const row = { code, wallMs: Date.now() - t0, status: json?.decision?.status, productName };
-    results.rows.push(row);
-    console.log(`[gpt] ${code} -> ${row.status} | ${productName || "(empty)"} | computed floor $${spent.toFixed(2)}`);
+  async function gptActuals() {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ai-lookup`, { method: "GET" });
+      const j = await res.json();
+      return { spentTodayUsd: Number(j?.gptLadder?.spentTodayUsd ?? 0), callsToday: j?.gptLadder?.callsToday ?? null };
+    } catch { return { spentTodayUsd: null, callsToday: null }; }
   }
-  results.summary = { computedFloorUsd: spent, junkCount, junkGatePassed: junkCount <= JUNK_GATE };
+  const baseline = await gptActuals();
+  if (baseline.spentTodayUsd === null) { console.error("cannot read gptLadder actuals telemetry"); if (child) killServerTree(child); process.exit(1); }
+  console.log(`GPT actuals baseline (today, route-recorded): $${baseline.spentTodayUsd.toFixed(4)}; phase cap for this run: $${PHASE_CAP}`);
+
+  const results = { startedAt: new Date().toISOString(), port: PORT, isolation: "OPENAI real; GO_UPC + FIRECRAWL(1-10, legacy) + BRAVE blanked (real route, rung isolation)", phaseCapUsd: PHASE_CAP, worstCasePerCallUsd: WORST_CASE_PER_CALL, gptActualsBaseline: baseline, rows: [] };
+  let attempted = 0, skippedByBudget = 0, junkCandidates = 0, honestEmpty = 0, answered = 0;
+
+  for (const code of CODES) {
+    const now = await gptActuals();
+    const actualSpentThisRun = (now.spentTodayUsd ?? 0) - baseline.spentTodayUsd;
+    if (actualSpentThisRun + WORST_CASE_PER_CALL > PHASE_CAP) {
+      skippedByBudget++;
+      console.log(`[budget] ${code} skipped: actuals $${actualSpentThisRun.toFixed(4)} + $${WORST_CASE_PER_CALL} worst case > $${PHASE_CAP}`);
+      continue;
+    }
+    attempted++;
+    const t0 = Date.now();
+    let row = { code, actualsBeforeCallUsd: Math.round(actualSpentThisRun * 10000) / 10000 };
+    try {
+      const res = await fetch(`${BASE_URL}/api/ai-lookup`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rawCode: code, cleanCode: code, mode: "decode", forceRetry: true }),
+      });
+      const json = await res.json();
+      row.wallMs = Date.now() - t0;
+      row.httpStatus = res.status;
+      row.status = json?.decision?.status ?? null;
+      row.productName = json?.decision?.result?.productName ?? json?.results?.[0]?.productName ?? "";
+      row.category = json?.results?.[0]?.category ?? "";
+      row.ladderPath = json?.debug?.ladderPath ?? null;
+      row.corroborationPath = json?.debug?.corroborationPath ?? null;
+      row.settledBy = row.ladderPath && row.ladderPath !== "none" ? row.ladderPath : (row.corroborationPath ?? "none");
+      row.ladderReasons = json?.debug?.ladderReasons ?? null;
+      row.gptSkipReason = json?.debug?.gptLadderSkipReason ?? null;
+      // Junk-guess classification (auto, conservative): only rows the GPT rung actually settled count.
+      // honest-empty = the rung ran but returned no product (allowed). A non-empty GPT answer is graded
+      // by the caller vs corpus truth (these are double-miss codes; corpus truth lives in the rung-3
+      // results' priorTruth) - the JSON keeps everything needed for that adjudication.
+      if (row.settledBy === "gpt") {
+        if (row.productName) answered++;
+        else honestEmpty++;
+      } else if (!row.productName) {
+        honestEmpty++;
+      }
+    } catch (e) {
+      row.error = String(e?.message ?? e).slice(0, 300);
+      row.wallMs = Date.now() - t0;
+    }
+    const afterCall = await gptActuals();
+    row.actualsAfterCallUsd = Math.round(((afterCall.spentTodayUsd ?? 0) - baseline.spentTodayUsd) * 10000) / 10000;
+    row.callCostUsd = Math.round((row.actualsAfterCallUsd - row.actualsBeforeCallUsd) * 10000) / 10000;
+    results.rows.push(row);
+    console.log(`[rung4] ${code} -> ${row.status ?? "ERR"} settledBy=${row.settledBy ?? "?"} | ${(row.productName || row.gptSkipReason || row.error || "(empty)").slice(0, 60)} | call $${row.callCostUsd} | run $${row.actualsAfterCallUsd}`);
+  }
+
+  const final = await gptActuals();
+  const totalActualUsd = Math.round(((final.spentTodayUsd ?? 0) - baseline.spentTodayUsd) * 10000) / 10000;
+  results.summary = {
+    codesRequested: CODES.length,
+    attempted,
+    skippedByBudget,
+    answered,
+    honestEmpty,
+    junkCandidates,
+    junkGate: JUNK_GATE,
+    junkGateNote: "junk vs honest-empty vs correct requires adjudication vs corpus truth (rows carry productName/category/status); auto-count of clear junk left to the grading pass",
+    totalActualUsd,
+    walletLine: `computed floor $${totalActualUsd} (route-recorded actuals); true spend = OpenAI console`,
+  };
   writeFileSync(OUT, JSON.stringify(results, null, 2));
-  console.log(`\ntotal computed floor $${spent.toFixed(2)}; true spend = OpenAI console`);
-  const section = `\n## Rung 4 (GPT-5.5 v3 prompt, HARD SET ONLY) -- LIVE\n\n- Codes run: ${results.rows.length}. Computed floor spend: $${spent.toFixed(2)} (true spend = OpenAI console).\n- Junk-guess gate (<= ${JUNK_GATE}): manual/grading-agent review needed to classify junk vs honest-empty vs correct.\n- Raw: \`scripts/proof-rung-4-results.json\`.\n`;
+  console.log(`\nwrote ${OUT.pathname}`);
+  console.log(`attempted ${attempted}/${CODES.length} (${skippedByBudget} skipped by budget); answered ${answered}, honest-empty ${honestEmpty}`);
+  console.log(results.summary.walletLine);
+
+  const section = `\n## Rung 4 (GPT-5.5 v3 prompt, HARD SET ONLY) -- LIVE (phase 2)\n\n- Budget resolution (controller decision): check-before-spend with ACTUALS -- before each call, route-recorded actuals this run + $${WORST_CASE_PER_CALL} worst case must stay <= $${PHASE_CAP} (phase GPT cap). The route also enforces its own identical server-side daily guard (GPT_LADDER_DAILY_USD default $3).\n- Attempted: ${attempted}/${CODES.length} codes (${skippedByBudget} skipped by budget).\n- Rung isolation (real route): OPENAI real; GO_UPC + all FIRECRAWL keys + BRAVE blanked, so goupc skips and Fetch V2 runs free doors only before the GPT rung under test.\n- Outcomes: ${answered} answered, ${honestEmpty} honest-empty (allowed). Junk-guess gate (<= ${JUNK_GATE}): requires adjudication vs corpus truth -- per-row productName/category/status recorded for the grading pass.\n- Wallet: ${results.summary.walletLine}.\n- Raw: \`scripts/proof-rung-4-results.json\`.\n`;
   appendFileSync(REPORT, section);
-  if (child) killServerTree(child);
+  console.log(`appended Rung 4 (live) section to ${REPORT.pathname}`);
+  if (child) { console.log("shutting down dev server..."); killServerTree(child); await new Promise((r) => setTimeout(r, 1000)); }
 }
 
 main().catch((e) => { console.error(e); process.exitCode = 1; });
