@@ -136,6 +136,87 @@ function splitNameIntoSpecs(name, brand) {
  * @returns {TireRow | null}
  */
 export function parseTireFromHtml(html, sourceUrl, now = () => new Date().toISOString()) {
+  return parseTireFromHtmlImpl(html, sourceUrl, now);
+}
+
+/**
+ * Parse the page's own productByCode GraphQL node (data.product.byCode, captured by
+ * fetchProductPage from the page's natural traffic) into a normalized TireRow.
+ *
+ * This is the PRIMARY live path (verified live 2026-07-08): Discount Tire's JSON-LD
+ * Product block carries NO gtin - the barcode and full specs only exist in this
+ * GraphQL response. Field map from a live capture:
+ *   gtin "092971302481", brand "Bridgestone", name "Alenza AS Ultra",
+ *   tireCrossSection "235" / tireAspectRatio "55" / tireWheelRimDiameter "18",
+ *   loadIndex "100", loadIndexWithRatingKey "100V", loadRange "SL",
+ *   manufacturerAID "004494" (part number), images[0].url,
+ *   description "235/55R18 100V B BRI ALENZ ASULT", productType "Tire".
+ *
+ * Untrusted data: fields are copied/normalized only, never obeyed.
+ *
+ * @param {object} byCode - the data.product.byCode node
+ * @param {string} sourceUrl
+ * @param {() => string} [now]
+ * @returns {TireRow | null}
+ */
+export function parseTireFromProductByCode(byCode, sourceUrl, now = () => new Date().toISOString()) {
+  if (!byCode || typeof byCode !== "object") return null;
+  if (byCode.productType !== undefined && String(byCode.productType).toLowerCase() !== "tire") return null;
+
+  const gtin = String(byCode.gtin ?? "").trim();
+  if (!gtin) return null;
+
+  const brand = String(byCode.brand ?? "").trim();
+  const model = String(byCode.name ?? "").trim();
+
+  // Prefer the explicit structured size parts; fall back to the size regex over
+  // the size/description strings (e.g. "235  /55   R18   100V SL BSW").
+  let size = "";
+  const cross = String(byCode.tireCrossSection ?? "").trim();
+  const ratio = String(byCode.tireAspectRatio ?? "").trim();
+  const rim = String(byCode.tireWheelRimDiameter ?? "").trim();
+  if (cross && ratio && rim) {
+    size = `${cross}/${ratio}R${rim}`.toUpperCase();
+  } else {
+    for (const text of [byCode.size, byCode.description]) {
+      const src = String(text ?? "").replace(/\s+/g, " ");
+      const m = src.match(METRIC_SIZE) || src.match(COMMERCIAL_SIZE);
+      if (m) {
+        size = m[0].replace(/\s+/g, "").replace(/(\d{2})-(\d{2})$/, "$1R$2").toUpperCase();
+        break;
+      }
+    }
+  }
+
+  let loadIndex = String(byCode.loadIndex ?? "").trim();
+  let speedRating = "";
+  const liKey = String(byCode.loadIndexWithRatingKey ?? "").trim().toUpperCase();
+  const liMatch = liKey.match(/^(\d{2,3}(?:\/\d{2,3})?)([A-Z])$/);
+  if (liMatch) {
+    if (!loadIndex) loadIndex = liMatch[1];
+    speedRating = liMatch[2];
+  }
+
+  const imageUrl =
+    Array.isArray(byCode.images) && byCode.images[0] && typeof byCode.images[0].url === "string"
+      ? byCode.images[0].url
+      : "";
+
+  return {
+    gtin,
+    brand,
+    model,
+    size,
+    loadIndex,
+    speedRating,
+    partNumber: String(byCode.manufacturerAID ?? "").trim(),
+    imageUrl,
+    sourceUrl: String(sourceUrl ?? ""),
+    fetchedAt: now(),
+  };
+}
+
+function parseTireFromHtmlImpl(html, sourceUrl, now) {
   const blocks = extractJsonLdBlocks(String(html ?? ""));
   for (const block of blocks) {
     const parsed = safeParseJson(block);

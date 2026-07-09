@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 // Discount Tire harvest: Task 5 Step 1 - resumable batch driver.
 //
 // Usage:
@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { selectUrls, hostAllowed } from "./lib/batch.mjs";
 import { fetchProductPage, BlockRateStop } from "./fetchPage.mjs";
-import { parseTireFromHtml } from "./lib/parseProduct.mjs";
+import { parseTireFromHtml, parseTireFromProductByCode } from "./lib/parseProduct.mjs";
 import { guardRow } from "./lib/merge.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -191,7 +191,11 @@ async function main() {
 
       if (result.status === "ok") {
         telemetry.ok += 1;
-        const row = parseTireFromHtml(result.html, url);
+        // Primary: the captured productByCode GraphQL node (carries gtin + full
+        // specs); fall back to JSON-LD only if it was not captured.
+        const row = result.productJson
+          ? parseTireFromProductByCode(result.productJson, url)
+          : parseTireFromHtml(result.html, url);
         if (!row || !row.gtin) {
           telemetry.parse_miss += 1;
           console.log(`[${i + 1}/${selected.length}] ok, parse_miss: ${url}`);

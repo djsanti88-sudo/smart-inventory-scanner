@@ -65,3 +65,25 @@ describe("BlockRateStop", () => {
     expect(stop.shouldStop()).toBe(true);
   });
 });
+
+// --- extractProductByCode (pure part of the productByCode capture path) ---
+
+import { extractProductByCode } from "./fetchPage.mjs";
+
+describe("extractProductByCode", () => {
+  it("returns the data.product.byCode node from a valid GraphQL body", () => {
+    const body = JSON.stringify({ data: { product: { byCode: { gtin: "092971302481", brand: "Bridgestone" } } } });
+    expect(extractProductByCode(body)).toEqual({ gtin: "092971302481", brand: "Bridgestone" });
+  });
+
+  it("returns null for malformed JSON without throwing", () => {
+    expect(extractProductByCode("{not json")).toBeNull();
+  });
+
+  it("returns null when the node is absent or not an object", () => {
+    expect(extractProductByCode(JSON.stringify({ data: { product: {} } }))).toBeNull();
+    expect(extractProductByCode(JSON.stringify({ data: { product: { byCode: "x" } } }))).toBeNull();
+    expect(extractProductByCode("")).toBeNull();
+    expect(extractProductByCode(undefined)).toBeNull();
+  });
+});
