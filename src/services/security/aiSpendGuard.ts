@@ -62,6 +62,55 @@ function todayKey(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
+// ---------------------------------------------------------------------------
+// Daily cap v2: atomic, storage-backed. Replaces the per-process JSON-file counter above
+// (checkAndIncrementDaily/dailyUsage), which was per-instance on Vercel (racy across concurrent
+// function instances) and - the live bug - incremented even on a REJECTED request, hitting
+// 232/200 while only ~27 genuine paid provider calls happened.
+//
+// readDailyUsed is a pure READ (used by both route gates and the GET status endpoint - never
+// writes, so a blocked/rejected request can never inflate the counter). chargeDailySlot is the
+// ONLY write, and it delegates to storage.increment - an atomic in-storage counter (in-SQL
+// `used = used + 1` on Turso, exclusive-lock file update locally; see LadderStorage.increment in
+// src/server/upc/storage.ts) so concurrent serverless instances can never lose an increment to a
+// race. Callers MUST call chargeDailySlot exactly once, at the first paid provider call of a
+// request (never at the route gate) - see route.ts's LAZY DAILY CAP GATE.
+
+const DAILY_KEY_PREFIX = "ai_daily_cap:";
+
+/** Minimal storage surface chargeDailySlot/readDailyUsed need: get/set for reads, an atomic increment for the write. */
+export type DailyCapStorage = {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  increment(key: string): Promise<number>;
+};
+
+/**
+ * Read-only peek at today's (or `dateKey`'s) daily-cap usage. Makes NO writes - safe to call from
+ * a route gate on every request (including ones that will be rejected for other reasons) and from
+ * the GET status endpoint, without ever inflating the counter.
+ */
+export async function readDailyUsed(storage: DailyCapStorage, dateKey: string = todayKey()): Promise<number> {
+  const raw = await storage.get(DAILY_KEY_PREFIX + dateKey);
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/**
+ * Atomically charge one daily-cap slot. Call this ONLY at the moment the first paid provider call
+ * of a request actually starts (Go-UPC lookup, paid Fetch V2 stage, or the GPT ladder rung -
+ * whichever runs first) - never at the route gate, and never more than once per request (a
+ * `charged` flag at the call site prevents a later rung in the same request from charging again).
+ */
+export async function chargeDailySlot(
+  storage: DailyCapStorage,
+  opts: { limit?: number; dateKey?: string } = {},
+): Promise<{ used: number; limit: number }> {
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+  const used = await storage.increment(DAILY_KEY_PREFIX + (opts.dateKey ?? todayKey()));
+  return { used, limit };
+}
+
 /**
  * Hard daily cap. Increments and persists the day's count; once the limit is reached it returns
  * allowed:false so the caller makes ZERO provider calls. Resets automatically on a new date.

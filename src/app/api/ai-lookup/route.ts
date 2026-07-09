@@ -21,7 +21,7 @@ import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefix, candidateKnownPrefixes } from "@/services/catalog/prefixIndex";
 import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall, getGptLadderStatus } from "@/services/security/aiSpendGuard";
+import { killSwitchOn, checkRateLimit, readDailyUsed, chargeDailySlot, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall, getGptLadderStatus } from "@/services/security/aiSpendGuard";
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
 import { shouldRunGptRung, gptResultToDecodePayload } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
@@ -285,6 +285,10 @@ export async function GET(request: Request) {
   // file adapter next to .go-upc-usage.json (process.cwd()) for local dev + preview.
   const goUpcConfigured = Boolean(process.env.GO_UPC_API_KEY);
   const goUpcSpend = await goUpcUsage(await ladderStorage()).canSpend();
+  // Task 1 (v2 daily cap): read-only peek at today's atomic, storage-backed usage - makes NO writes
+  // (readDailyUsed never increments), so this GET never inflates the counter it is reporting on.
+  const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+  const dailyUsed = await readDailyUsed(await ladderStorage());
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
     autoDecodeOnScan: process.env.ENABLE_AUTO_DECODE_ON_SCAN !== "false",
@@ -303,7 +307,7 @@ export async function GET(request: Request) {
     pageFetchAndRead: true,
     premiumFallback: process.env.ENABLE_PREMIUM_MODEL_FALLBACK !== "false",
     mode: process.env.AI_LOOKUP_MODE || "aggressive",
-    dailyLimit: Number(process.env.AI_LOOKUP_DAILY_LIMIT || 200),
+    dailyLimit: dailyLimit,
     missingKeys,
     e2e: e2eMode(),
     gptLadder: {
@@ -318,6 +322,9 @@ export async function GET(request: Request) {
       limit: goUpcSpend.limit,
       warn: goUpcSpend.warn,
     },
+    // Task 1 (v2 daily cap): exposes the SAME atomic, storage-backed counter the route gates and
+    // the paid-rung charge site use - a read-only peek, never incremented by this GET.
+    daily: { used: dailyUsed, limit: dailyLimit },
   });
 }
 
@@ -394,16 +401,24 @@ export async function POST(request: Request) {
   // their own cap check below (after the decode-cache peek) so a zero-spend cached repeat scan never
   // consumes a cap slot - checking here for decode too would double-count every decode POST (each scan
   // burned 2 slots; regression tests in route.test.ts). Skipped under E2E mock mode (no real spend).
+  //
+  // v2 (Task 1): READ-ONLY gate. The legacy 'lookup' mode has no separate ladder - the single paid
+  // provider call happens right after this block (see "lookup mode" below) - so this IS the first (and
+  // only) paid rung for that mode, and chargeDailySlot fires here, once, only when the gate passes. A
+  // request that is blocked here never charges (the old counter's bug: it incremented on rejects too).
   const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
   const forceRetry = body.forceRetry === true;
   if (!e2eMode() && !isDecodeMode) {
-    const cap = checkAndIncrementDaily();
-    if (!cap.allowed) {
+    const ladderStore = await ladderStorage();
+    const used = await readDailyUsed(ladderStore);
+    const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+    if (used >= limit) {
       return Response.json(
-        { error: `Daily AI lookup cap reached (${cap.used}/${cap.limit}). No AI call made.`, reasonCode: "daily_cap" },
+        { error: `Daily AI lookup cap reached (${used}/${limit}). No AI call made.`, reasonCode: "daily_cap" },
         { status: 429 }
       );
     }
+    await chargeDailySlot(ladderStore, { limit });
   }
 
   if (isDecodeMode) {
@@ -895,9 +910,17 @@ export async function POST(request: Request) {
       // spend money (Go-UPC / Fetch V2 / GPT-5.5), so it is the correct - and only - place to charge a
       // cap slot. forceRetry always reaches here too (its whole purpose is to force a fresh paid compute).
       // Skipped under E2E mock mode (no real spend; the rungs below are already E2E-inert regardless).
+      //
+      // v2 (Task 1): READ-ONLY check first (never writes on a block), THEN a single atomic charge -
+      // exactly once per request, right before runLadder() starts (Go-UPC for GTIN-shaped codes, else
+      // Fetch V2 - whichever rung actually runs first for this code). No rung below individually
+      // charges, so Fetch V2/GPT running after a Go-UPC miss can never double-charge this request.
       if (!e2eMode()) {
-        const cap = checkAndIncrementDaily();
-        if (!cap.allowed) throw new DailyCapExceededError(cap.used, cap.limit);
+        const ladderStore = await ladderStorage();
+        const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+        const used = await readDailyUsed(ladderStore);
+        if (used >= limit) throw new DailyCapExceededError(used, limit);
+        await chargeDailySlot(ladderStore, { limit });
       }
 
       const rungs = buildLadderRungs(code, { runGoUpc, runFetchV2, runGpt });

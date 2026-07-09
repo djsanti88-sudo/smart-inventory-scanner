@@ -23,9 +23,17 @@ vi.mock("@/server/upc/storage", async (importOriginal) => {
 });
 
 import { POST, GET } from "@/app/api/ai-lookup/route";
-import { __resetForTest, dailyUsage, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
+
+// v2 daily cap (Task 1): the counter now lives in ladderStorage() (mocked above to a per-process tmp
+// dir), not the old AI_LOOKUP_COUNTER_FILE. Reads today's usage through the SAME storage the route
+// itself reads/writes, so these assertions prove the real atomic counter, not a parallel one.
+async function dailyUsedNow(): Promise<number> {
+  return readDailyUsed(await ladderStorage());
+}
 
 // Route-level wallet-protection smoke tests for /api/ai-lookup (6937cf3). They run with NO API keys and a
 // fully STUBBED global.fetch, so NO live provider call and NO real network can occur. The guards run only
@@ -48,11 +56,20 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   let tmpCounter: string;
   let tmpGptLadderFile: string;
   let tmpDecodeCacheFile: string;
+  // The mocked ladderStorage() (see the vi.mock above) resolves to a FIXED per-process tmp dir, shared
+  // across every test in this file - unlike tmpCounter/tmpGptLadderFile/tmpDecodeCacheFile, it cannot be
+  // re-randomized per test (the vi.mock factory captures the dir once, at mock-setup time). The v2 daily
+  // cap counter (Task 1) now lives inside that shared dir's generic kv file, keyed by TODAY's real date -
+  // so without a per-test wipe, every test in this suite would accumulate onto the SAME counter. Deleting
+  // just the kv file (not the whole dir) leaves the Go-UPC usage/miss-cache files other tests may exercise
+  // untouched.
+  const ladderKvFile = () => path.join(os.tmpdir(), `ladder-storage-route-test-${process.pid}`, ".ladder-kv.json");
 
   beforeEach(() => {
     __resetForTest();
     __resetDecodeCacheStoreForTest();
     clearDecodeCache();
+    try { fs.unlinkSync(ladderKvFile()); } catch {}
     for (const k of keys) saved[k] = process.env[k];
     // Guards ACTIVE (not E2E) + NO provider keys (so providers fall back to the local mock).
     delete process.env.IS_E2E;
@@ -134,10 +151,10 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   // hit - see decode-corpus.test.ts "a corpus hit does NOT increment the daily-cap counter").
   it("a genuine-unknown (paid-path) decode DOES increment the daily-cap counter by exactly one", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-    const before = dailyUsage({ file: tmpCounter }).count;
+    const before = (await dailyUsedNow());
     const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
     expect(res.status).toBe(200);
-    const after = dailyUsage({ file: tmpCounter }).count;
+    const after = (await dailyUsedNow());
     expect(after).toBe(before + 1);
   }, 20000);
 
@@ -181,7 +198,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     const res = await POST(makeRequest({ cleanCode: "111000222444", mode: "decode" }));
     expect(res.status).toBe(200);
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    expect((await dailyUsedNow())).toBe(1);
   }, 20000);
 
   // Regression (same run): the cap was consumed BEFORE the decode cache was read, so a zero-spend
@@ -195,7 +212,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(repeat.status, "cached repeat must not be blocked by the cap").toBe(200);
     const json = await repeat.json();
     expect(json.debug?.cached).toBe(true);
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    expect((await dailyUsedNow())).toBe(1);
   }, 40000);
 
   // --- GPT-5.5 ladder rung wiring (route-level; Task 3 review fixes + Task 3b) -------------------
@@ -470,7 +487,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(first.status).toBe(200);
     const firstJson = await first.json();
     expect(firstJson.decision.status).toBe("needs_review");
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    expect((await dailyUsedNow())).toBe(1);
 
     // The receipt landed in the L2 store (file-fallback mode here).
     const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
@@ -488,7 +505,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
     const ladderCallsAfter = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
     expect(ladderCallsAfter, "the receipted code must make ZERO new provider calls").toBe(ladderCallsBefore);
-    expect(dailyUsage({ file: tmpCounter }).count, "a receipted repeat must not burn a daily slot").toBe(1);
+    expect((await dailyUsedNow()), "a receipted repeat must not burn a daily slot").toBe(1);
   }, 60000);
 
   it("Task 4: forceRetry bypasses AND overwrites a permanent receipt, re-running providers and burning a fresh daily slot", async () => {
@@ -521,7 +538,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect((await first.json()).decision.status).toBe("needs_review");
     const storedAfterFirst = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
     expect(storedAfterFirst[code].kind).toBe("no_result_receipt");
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    expect((await dailyUsedNow())).toBe(1);
 
     clearDecodeCache();
     // Without forceRetry, this would short-circuit on the receipt with zero calls (proven above) -
@@ -532,7 +549,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(retriedJson.decision.status).toBe("verified");
     expect(retriedJson.providerNames).toContain("gpt-5.5-ladder");
     expect(openaiCallCount, "forceRetry must genuinely re-call the provider").toBe(2);
-    expect(dailyUsage({ file: tmpCounter }).count, "a genuine forceRetry recompute burns its own slot").toBe(2);
+    expect((await dailyUsedNow()), "a genuine forceRetry recompute burns its own slot").toBe(2);
 
     // The overwrite is durable: the receipt is now a "result" entry.
     const storedAfterRetry = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
@@ -547,7 +564,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(thirdJson.debug.persistedCacheHit).toBe(true);
     expect(thirdJson.debug.persistedKind).toBe("result");
     expect(openaiCallCount, "the replayed verified result must make no new provider call").toBe(2);
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(2);
+    expect((await dailyUsedNow())).toBe(2);
   }, 60000);
 
   it("Task 4: a verified GPT-ladder outcome persists as a permanent result; a later POST replays it with ZERO provider calls", async () => {
@@ -574,7 +591,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(stored[code].kind).toBe("result");
     // IMPORTANT 3 (review): a GPT-ladder result must record which PAID stage produced it.
     expect(stored[code].sourceTier).toBe("gpt_ladder");
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    expect((await dailyUsedNow())).toBe(1);
 
     const ladderCallsBefore = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
     clearDecodeCache();
@@ -586,7 +603,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(secondJson.debug.persistedCacheHit).toBe(true);
     const ladderCallsAfter = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
     expect(ladderCallsAfter).toBe(ladderCallsBefore);
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    expect((await dailyUsedNow())).toBe(1);
   }, 60000);
 
   it("Task 4: E2E mode never reads or writes the persistent decode cache", async () => {
@@ -634,7 +651,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const firstJson = await first.json();
     expect(firstJson.decision.status).not.toBe("verified");
     expect(openaiCallCount, "sanity: the ladder genuinely ran once on the first POST").toBe(1);
-    expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    expect((await dailyUsedNow())).toBe(1);
 
     // Deliberately NO clearDecodeCache() here: L1's short-TTL miss entry for `code` is still warm.
     const retried = await POST(makeRequest({ cleanCode: code, mode: "decode", forceRetry: true }));
@@ -642,7 +659,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const retriedJson = await retried.json();
     expect(retriedJson.decision.status, "forceRetry must genuinely bypass the warm L1 entry").toBe("verified");
     expect(openaiCallCount, "forceRetry must genuinely re-call the provider despite warm L1").toBe(2);
-    expect(dailyUsage({ file: tmpCounter }).count, "forceRetry must burn its own daily-cap slot, even with a warm L1 entry").toBe(2);
+    expect((await dailyUsedNow()), "forceRetry must burn its own daily-cap slot, even with a warm L1 entry").toBe(2);
   }, 60000);
 
   // CRITICAL 2 lock (doctrine correction): a code blocked by the GPT ladder's OWN dollar budget was
@@ -899,7 +916,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       const res = await POST(makeRequest({ cleanCode: "111000222889", mode: "decode" }));
       expect(res.status).toBe(200);
-      expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+      expect((await dailyUsedNow())).toBe(1);
     }, 20000);
 
     it("(e) a subsequent identical request is served from cache with ZERO new daily-cap slots burned", async () => {
@@ -907,12 +924,12 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       const code = "111000222890";
       const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
       expect(first.status).toBe(200);
-      expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+      expect((await dailyUsedNow())).toBe(1);
       const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
       expect(second.status).toBe(200);
       const secondJson = await second.json();
       expect(secondJson.debug.cached).toBe(true);
-      expect(dailyUsage({ file: tmpCounter }).count, "a cached repeat must not burn a second daily slot").toBe(1);
+      expect((await dailyUsedNow()), "a cached repeat must not burn a second daily slot").toBe(1);
     }, 20000);
   });
 });
