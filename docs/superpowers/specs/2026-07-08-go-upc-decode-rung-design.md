@@ -1,11 +1,11 @@
-# Go-UPC Decode Rung — Design (v5)
+# Go-UPC Decode Rung — Design (v6)
 
 Date: 2026-07-08 (v2: real API contract from live docs; v3: identity-merge for
 multi-barcode products; v4: owner fixes — count-first hard rule, monthly hard stop,
 server-side throttle, provenance quarantine, non-GTIN code path; v5: no proactive
 alias discovery, Fetch V2 first for unknown SKUs, tenant trust boundary, live
-smoke-test evidence)
-Status: v5 pending owner review
+smoke-test evidence; v6: raw response archive — collect everything)
+Status: v6 pending owner review
 Supersedes: the 2026-07-05 owner-locked "ungrounded Gemini first" ladder rule.
 Gemini is REMOVED from the decode ladder by owner decision (this session).
 
@@ -109,6 +109,30 @@ correctly as "Falken Wildpeak A/T3W 265/70R17 115T Tire". Conclusions: (a) the
 code-type gate loses nothing and saves quota; (b) a slipped-through SKU cannot
 poison results (400, not a wrong answer); (c) first positive tire-coverage signal —
 Go-UPC resolved an owner Falken tire barcode with full size/load specs.
+
+## Raw response archive — collect everything (owner order, 2026-07-08)
+
+Every paid answer is archived COMPLETE and RAW, server-side, even though the UI
+keeps showing only the basic rows it shows today.
+
+- Go-UPC: the full untouched JSON response (name, brand, description, imageUrl,
+  barcodeUrl, category + categoryPath, ALL specs key-values, ingredients, upc/ean,
+  codeType, inferred) plus retrieval metadata: scanned code, canonical GTIN,
+  endpoint, HTTP status, fetchedAt timestamp.
+- Fetch V2 / GPT-5.5: same principle — full raw provider output plus every source
+  URL the answer cited or fetched (Fetch V2 already carries sources; they are
+  archived, not discarded after the evidence gate).
+- Storage: an archive table/collection keyed by canonical code + provider +
+  fetchedAt, separate from the normalized corpus row (raw-and-normalized pattern,
+  which is already project doctrine for AI results). The normalized corpus row
+  references its archive entry.
+- The UI renders NOTHING new from this yet — basic rows stay as they are. The
+  archive exists so that (a) a future, better structurer can be re-run over every
+  answer ever paid for WITHOUT re-billing a single lookup or token; (b) images
+  (imageUrl) and source URLs are already on hand the day the UI wants them;
+  (c) disputes ("why did it call this a Falken?") are answerable from evidence.
+- Images are archived as URLs only (no downloading/re-hosting — no new fetch
+  surface, consistent with Out of scope).
 
 ## Tenant trust boundary (owner order, 2026-07-08)
 
@@ -265,6 +289,9 @@ In EVERY row above, the scan itself was already persisted at STEP 0.
     same product ends at quantity 2 on one row
   - purge script: dry-run lists by source, purge removes only that source,
     revalidate re-queues without data loss
+  - archive: every 200 response writes a complete raw archive entry with retrieval
+    metadata; the normalized corpus row references it; archive survives purge of
+    the normalized row (evidence is never destroyed by a quarantine action)
   - keySafety: `GO_UPC_API_KEY` never readable client-side
 - E2E (Playwright, `page.route` mock, `IS_E2E=1`): unknown code -> Go-UPC-decoded
   product auto-counted on the feed; inferred -> Needs Review with suggestion;
