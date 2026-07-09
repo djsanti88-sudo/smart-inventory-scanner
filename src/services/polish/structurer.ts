@@ -3,10 +3,17 @@
 // size tag (every tire notation) or a weight/count/volume tag. AI/LLM never runs here - this is
 // the $0 deterministic pass; low-confidence rows are handed to a later LLM-fallback task.
 //
+// Task 10 (decode-ladder-goupc): structureGoUpcProduct() harvests a raw Go-UPC product into the
+// same normalized shape, reusing the battle-tested tire-size + load/speed extraction from
+// tireSpecs.ts (never a new regex) and stamping "go-upc" provenance.
+//
 // The junk-gate and brand-cleanliness SHAPES below intentionally mirror
 // src/services/fetchV2/pageEvidence/junkRules.ts (NAV_NAME_RE / GENERIC_NAME_RE) and the tire-size
 // regex mirrors src/services/fetchV2/siblingGuard.ts's battle-tested TIRE_SIZE_RE. Both are
 // reimplemented locally (not imported) so this service stays independent of fetchV2.
+
+import type { GoUpcProduct } from "@/services/upc/goUpcClient";
+import { tireSizeToken, tireLoadSpeedToken } from "@/services/ai/tireSpecs";
 
 export interface StructuredProduct {
   brand: string; // "" when unknown - NEVER guessed from noise
@@ -358,5 +365,80 @@ export function structureProduct(name: string, brand?: string, ctx?: StructurerC
     sizeTag: size.tag,
     sizeTagKind: size.kind,
     confidence,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Go-UPC field harvest (Task 10). A raw Go-UPC product carries structured fields the plain
+// name-only structurer never sees: an explicit brand, an image URL, a broad category, and a
+// specs pair list. This maps those into a normalized product that ALSO carries the deterministic
+// name parse (brand/model/size) so the identity-merge + auto-count gates downstream get a full
+// tire identity when one is present, plus the enrichment (image/category) and "go-upc" provenance.
+// ---------------------------------------------------------------------------------------------
+
+/** Normalized product harvested from a Go-UPC (or similar structured) source. Superset of the
+ *  name-only StructuredProduct with the extra structured fields + provenance. */
+export interface NormalizedGoUpcProduct {
+  brand: string; // explicit Go-UPC brand when present, else parsed from the name
+  model: string; // deterministic name parse (brand/size/noise removed)
+  descriptionText: string; // cleaned display name
+  category: string; // mapped product category (see mapGoUpcCategory)
+  tireSize: string; // "265/70R17" style token, or "" when not a tire
+  loadSpeed: string; // "115T" style load index + speed rating, or ""
+  sizeTag: string; // glued digits / weight / count / volume tag (StructuredProduct.sizeTag)
+  sizeTagKind: StructuredProduct["sizeTagKind"];
+  imageUrl: string; // passed through verbatim from Go-UPC
+  source: "go-upc"; // provenance stamp
+  confidence: number;
+}
+
+// Go-UPC uses broad marketplace-style category strings ("Vehicle Parts & Accessories"). Map the
+// ones we care about to our internal category so tire parsing / gates behave the same as a scan
+// tagged { category: "tires" }. Unrecognized categories pass through lowercased+trimmed unchanged
+// (never invented). Kept tiny and deterministic - no network, no AI.
+const GOUPC_CATEGORY_MAP: Array<{ match: RegExp; category: string }> = [
+  { match: /vehicle parts|tire|tyre|automotive/i, category: "tires" },
+];
+
+export function mapGoUpcCategory(raw: string): string {
+  const c = (raw ?? "").trim();
+  if (!c) return "";
+  for (const { match, category } of GOUPC_CATEGORY_MAP) {
+    if (match.test(c)) return category;
+  }
+  return c.toLowerCase();
+}
+
+export function structureGoUpcProduct(
+  product: GoUpcProduct,
+  ctx?: StructurerContext,
+): NormalizedGoUpcProduct {
+  const name = (product?.name ?? "").trim();
+  const category = mapGoUpcCategory(product?.category ?? "");
+  // Feed the mapped category into the name parse so a Go-UPC "Vehicle Parts" tire parses under the
+  // same tire rules the rest of the ladder uses. The explicit Go-UPC brand is passed as the brand
+  // arg (isBrandJunk still guards it, so a junk brand string is ignored, not trusted).
+  const base = structureProduct(name, product?.brand, {
+    knownBrands: ctx?.knownBrands,
+    category: category || ctx?.category,
+  });
+
+  // Reuse the battle-tested tire-size + load/speed extraction from tireSpecs.ts - never a new regex.
+  const identity = { productName: name, brand: product?.brand ?? "" };
+  const tireSize = tireSizeToken(identity);
+  const loadSpeed = tireLoadSpeedToken(identity);
+
+  return {
+    brand: base.brand,
+    model: base.model,
+    descriptionText: base.descriptionText,
+    category,
+    tireSize,
+    loadSpeed,
+    sizeTag: base.sizeTag,
+    sizeTagKind: base.sizeTagKind,
+    imageUrl: (product?.imageUrl ?? "").trim(),
+    source: "go-upc",
+    confidence: base.confidence,
   };
 }

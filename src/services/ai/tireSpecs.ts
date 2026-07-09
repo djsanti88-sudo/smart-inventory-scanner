@@ -54,6 +54,15 @@ export function tireSizeToken(r: IdentityText | null | undefined): string {
   return m[0].replace(/\s+/g, "").replace(/(\d{2})-(\d{2})$/, "$1R$2").toUpperCase();
 }
 
+/** The tire load index + speed rating token (e.g. "115T", "94V", "111/110T"), spaces removed + uppercased,
+ *  or "" if none. Read AFTER the size is removed so the size's own "R" is never mistaken for a speed letter -
+ *  same removal order hasRequiredTireSpecs() uses. Reuses the existing LOAD_SPEED regex (no new pattern). */
+export function tireLoadSpeedToken(r: IdentityText | null | undefined): string {
+  const t = haystack(r).replace(METRIC_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
+  const m = t.match(LOAD_SPEED);
+  return m ? m[0].replace(/\s+/g, "").toUpperCase() : "";
+}
+
 /**
  * Infer a tire brand from a product NAME when the structured brand field is empty. Barcode-DB page titles
  * (e.g. "Cooper Discoverer A/T3 ... 245/75R16") carry the brand in the name but not in a separate field,
