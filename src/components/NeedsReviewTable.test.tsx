@@ -37,6 +37,17 @@ describe("NeedsReviewTable - Barcode column visible to all roles (Task 4)", () =
   });
 });
 
+describe("NeedsReviewTable - prettifies product dropdown labels (Task 5)", () => {
+  it("shows a Title Case option label for a corpus-slug product name", () => {
+    useScanStore.setState({
+      needsReviewQueue: [review({ id: "pd1", cleanCode: "086699998600", status: "open", syncStatus: "pending" })],
+      products: [{ id: "prod-slug", name: "wrangler_workhorse_at" } as unknown as import("@/types").Product],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.getByRole("option", { name: "Wrangler Workhorse AT" })).toBeInTheDocument();
+  });
+});
+
 describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
   it("hides an item that is resolved AND synced, keeps open items", () => {
     useScanStore.setState({

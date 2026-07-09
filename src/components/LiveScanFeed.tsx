@@ -3,6 +3,7 @@
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
+import { prettifyProductName } from "@/services/format/productDisplay";
 
 // Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail. Raw/clean
 // codes AND the internal match type are platformOwner-only; customers see the product name + part number
@@ -61,11 +62,12 @@ export function LiveScanFeed() {
                 // Display priority: a real (non-provisional) product name wins outright. Otherwise prefer the
                 // decoded suggestion's name over the safe-but-uninformative provisional placeholder name, and
                 // fall back to the placeholder, then "-", if no suggestion exists yet.
-                const displayName =
+                const displayName = prettifyProductName(
                   (product && !product.provisional ? product.name : undefined) ??
-                  suggestion?.suggestedProductName ??
-                  product?.name ??
-                  "-";
+                    suggestion?.suggestedProductName ??
+                    product?.name ??
+                    "-",
+                );
                 const displaySku =
                   (product && !product.provisional ? product.primarySku : undefined) ||
                   suggestion?.suggestedPrimarySku ||

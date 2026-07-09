@@ -116,6 +116,22 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
     expect(screen.queryByText(/unconfirmed/i)).not.toBeInTheDocument();
   });
 
+  it("prettifies a corpus slug product name (Task 5)", () => {
+    const event = {
+      id: "ev5", rawCode: "078742051987", cleanCode: "078742051987", matchedProductId: "p5", matchType: "barcode",
+      status: "known", quantityAfterScan: 1, decodeStatus: "verified", reason: "", syncStatus: "synced", createdAt: Date.now(),
+    } as unknown as ScanEvent;
+    useScanStore.setState({
+      scanFeed: [event], needsReviewQueue: [], finalCounts: [],
+      products: [{ id: "p5", name: "wrangler_workhorse_at", primarySku: "", provisional: false } as unknown as Product],
+    });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByText("Wrangler Workhorse AT")).toBeInTheDocument();
+    expect(screen.queryByText("wrangler_workhorse_at")).not.toBeInTheDocument();
+  });
+
   it("shows a dash when neither a real product nor a suggestion exists", () => {
     const event = {
       id: "ev4", rawCode: "999", cleanCode: "999", matchedProductId: null, matchType: "unknown",
