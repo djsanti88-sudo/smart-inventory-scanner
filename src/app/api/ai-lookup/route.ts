@@ -43,6 +43,22 @@ import { runLadder, buildLadderRungs, type RungOutcome } from "@/server/upc/ladd
 // FIRECRAWL_ENABLED) and the synchronous DECODE_BUDGET_MS clamp were removed with the legacy
 // Gemini/OpenAI fast-path + deep-fallback stage. Fetch V2 owns its own time budget (FETCHV2_MAX_TOTAL_MS).
 
+/**
+ * Thrown from inside computeDecode() the instant the daily spend cap blocks the PAID ladder (Go-UPC /
+ * Fetch V2 / GPT-5.5). Every free stage (L1/L2 cache, tire-corpus, retail-corpus, Plan D's verified win)
+ * runs and returns BEFORE this can ever be thrown, so a $0 resolution is never blocked and never sees
+ * this. Caught once, right outside the withDecodeCache() call in the POST handler, and turned into the
+ * same 429 daily_cap response the route has always returned for a cap-blocked request. Thrown (not
+ * returned) because computeDecode's return type is a settled DecodePayload - a distinct "blocked" arm
+ * would leak the cap's HTTP-shaped concern into every downstream consumer of that type for no benefit.
+ */
+class DailyCapExceededError extends Error {
+  constructor(public readonly used: number, public readonly limit: number) {
+    super(`Daily AI lookup cap reached (${used}/${limit}). No AI call made.`);
+    this.name = "DailyCapExceededError";
+  }
+}
+
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env.
 const GEMINI_FAST_MODEL = process.env.GEMINI_FAST_MODEL || "gemini-flash-latest";
@@ -406,25 +422,17 @@ export async function POST(request: Request) {
       persistedHit = await getPersistedDecode(code);
     }
 
-    // Hard server-side daily spend cap (auth DEFERRED). Checked AFTER both cache peeks: a cached
-    // repeat scan (L1 or L2) makes ZERO provider calls, so it must not consume a cap slot nor be
-    // blocked once the cap trips (the cap bounds genuine compute runs, not free repeats). The per-IP
-    // rate limit above still throttles floods of cached hits. Skipped under E2E mock mode (no real spend).
-    // CRITICAL FIX (review): forceRetry ALWAYS burns a slot, even with a warm L1 entry. Before this fix
-    // the condition only looked at getDecodeCache(code)/persistedHit, but withDecodeCache below is called
-    // with { forceRefresh: forceRetry } which bypasses L1 UNCONDITIONALLY - so a forceRetry with a warm L1
-    // entry recomputed (real provider calls) while burning ZERO daily-cap slots. forceRetry must count as
-    // "genuinely going to compute" regardless of cache state.
-    if (!e2eMode() && (forceRetry || (getDecodeCache(code) === undefined && !persistedHit))) {
-      const cap = checkAndIncrementDaily();
-      if (!cap.allowed) {
-        return Response.json(
-          { error: `Daily AI lookup cap reached (${cap.used}/${cap.limit}). No AI call made.`, reasonCode: "daily_cap" },
-          { status: 429 }
-        );
-      }
-    }
-
+    // Hard server-side daily spend cap (auth DEFERRED): the cap must bound ONLY genuine PAID work (the
+    // Go-UPC / Fetch V2 / GPT-5.5 ladder rungs), NEVER a $0 resolution. It used to be checked HERE, before
+    // computeDecode() ran - but computeDecode's FREE stages (tire-corpus exact hit, retail-corpus exact
+    // hit, Plan D's verified win) run INSIDE computeDecode, after this point. Checking the cap here meant a
+    // free corpus/retail hit had ALREADY consumed (and could be BLOCKED by) a cap slot before it ever got a
+    // chance to resolve for $0 - a burst of free tire-corpus scans could exhaust the cap and 429 every
+    // subsequent $0 corpus hit for the rest of the day. Fixed: the cap is now checked LAZILY, immediately
+    // before the paid ladder itself runs (the "LAZY DAILY CAP GATE" just above `buildLadderRungs` further
+    // down in computeDecode) - free resolution always completes first and is NEVER blocked or counted, no
+    // matter the cap state.
+    //
     // A persisted hit short-circuits with ZERO provider work: a "result" replays the prior
     // verified/suggested decode; a "no_result_receipt" replays the prior unresolved shape so the
     // ladder is never re-run for a code it has already exhausted (owner rule: no auto-retry - only
@@ -881,6 +889,17 @@ export async function POST(request: Request) {
         return { settled: false, reason: ladder.skipReason ? `gpt-5.5 skipped: ${ladder.skipReason}` : "gpt-5.5 tier none (no product)" };
       };
 
+      // LAZY DAILY CAP GATE (fix): every FREE stage above (L1/L2 cache peek, tire-corpus, retail-corpus,
+      // Plan D's verified win) has already run and returned by this point if it had anything to offer -
+      // none of them can reach here. This is the FIRST point where computeDecode is genuinely about to
+      // spend money (Go-UPC / Fetch V2 / GPT-5.5), so it is the correct - and only - place to charge a
+      // cap slot. forceRetry always reaches here too (its whole purpose is to force a fresh paid compute).
+      // Skipped under E2E mock mode (no real spend; the rungs below are already E2E-inert regardless).
+      if (!e2eMode()) {
+        const cap = checkAndIncrementDaily();
+        if (!cap.allowed) throw new DailyCapExceededError(cap.used, cap.limit);
+      }
+
       const rungs = buildLadderRungs(code, { runGoUpc, runFetchV2, runGpt });
       const ladderRun = await runLadder(code, rungs);
       const win = ladderRun.outcome?.payload as LadderPayload | undefined;
@@ -975,9 +994,27 @@ export async function POST(request: Request) {
     };
 
     const hasUsable = (p: Awaited<ReturnType<typeof computeDecode>>) => p.results.some((r) => isUsableProductName(r.productName));
-    const { value: payload, cached } = e2eMode()
-      ? { value: await computeDecode(), cached: false }
-      : await withDecodeCache(code, hasUsable, computeDecode, { forceRefresh: forceRetry });
+    let payload: Awaited<ReturnType<typeof computeDecode>>;
+    let cached: boolean;
+    try {
+      const outcome = e2eMode()
+        ? { value: await computeDecode(), cached: false }
+        : await withDecodeCache(code, hasUsable, computeDecode, { forceRefresh: forceRetry });
+      payload = outcome.value;
+      cached = outcome.cached;
+    } catch (e) {
+      // Daily cap blocked the paid ladder (see DailyCapExceededError above): every free stage already
+      // ran and found nothing, so this is a genuine paid-work block, not a free-hit false block. Nothing
+      // was cached (the throw happens before withDecodeCache's setDecodeCache call) - the next request
+      // for this code retries from scratch, which is correct once the cap resets.
+      if (e instanceof DailyCapExceededError) {
+        return Response.json(
+          { error: e.message, reasonCode: "daily_cap" },
+          { status: 429 }
+        );
+      }
+      throw e;
+    }
 
     // L2 WRITE-THROUGH (Task 4; IMPORTANT 3 review fix): only on a genuinely fresh compute
     // (cached === false) - a repeat served straight from L1 must never re-persist. Never touches the
