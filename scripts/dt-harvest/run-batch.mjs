@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 // Discount Tire harvest: Task 5 Step 1 - resumable batch driver.
 //
 // Usage:
@@ -84,11 +84,35 @@ async function readJsonSafe(filePath, fallback) {
   }
 }
 
-/** Write JSON atomically-ish: write to a temp file then rename over the target. */
+/**
+ * Write JSON atomically-ish: write to a temp file then rename over the target.
+ * On Windows the rename intermittently throws EPERM/EBUSY when the destination is
+ * momentarily locked by Defender/indexing (killed worker w2 at page 272 on
+ * 2026-07-09) - retry with backoff, then fall back to a direct write rather than
+ * crash the whole crawl over a telemetry file.
+ */
 async function writeJsonAtomic(filePath, data) {
   const tmpPath = `${filePath}.tmp-${process.pid}`;
-  await writeFile(tmpPath, JSON.stringify(data, null, 2));
-  await rename(tmpPath, filePath);
+  const json = JSON.stringify(data, null, 2);
+  await writeFile(tmpPath, json);
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await rename(tmpPath, filePath);
+      return;
+    } catch (err) {
+      if (err?.code !== "EPERM" && err?.code !== "EBUSY" && err?.code !== "EACCES") throw err;
+      await sleep(100 * attempt);
+    }
+  }
+  // Last resort: non-atomic direct write (a torn read on next resume is recoverable;
+  // a dead worker is worse).
+  await writeFile(filePath, json);
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(tmpPath);
+  } catch {
+    /* stray tmp file is harmless */
+  }
 }
 
 function sleep(ms) {
