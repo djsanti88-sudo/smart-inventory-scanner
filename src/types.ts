@@ -274,6 +274,17 @@ export interface UnknownCodeReview {
   correctionRecheckMissingKeys?: string[];
   // Phase 7: set when this review was reopened by Mark wrong -> the re-decode escalates to the stronger model.
   reopenedFromWrong?: boolean;
+  // STABLE-ID FIX (kills prefix-floor placeholder-name collision): the id of the provisional
+  // "Unidentified item" / prefix-floor placeholder Product that THIS review's own scan minted via
+  // ensureProvisionalCount, captured at review-creation time (the placeholder already exists by then -
+  // ensureProvisionalCount runs synchronously before the review is created). resolveUnknown's
+  // reload-resilient provOrphanId lookup matches on THIS id first (bulletproof - a local product id,
+  // never a barcode/gtin, so it is safe to persist to a customer's disk). The old name-based fallback
+  // (provisionalPlaceholderName match) is kept ONLY for reviews created before this field existed,
+  // because a prefix-floor name is brand-only ("<Brand> / product unconfirmed") and NOT code-specific -
+  // two different unresolved codes sharing a GS1-prefix brand mint the identical name, so the name match
+  // can attribute one code's count to the other's review. A plain local id has no such collision.
+  provisionalProductId?: string | null;
 }
 
 export type ResolutionAction =
