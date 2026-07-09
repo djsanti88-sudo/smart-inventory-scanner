@@ -42,4 +42,12 @@ describe("GeminiStatusRow", () => {
     const text = screen.getByTestId("gemini-status").textContent ?? "";
     expect(text).not.toMatch(/[–—]/);
   });
+
+  it("drops the not-used-for-decode sentence and shows plain status when geminiUsedForDecode is true", () => {
+    render(<GeminiStatusRow geminiConfigured={true} geminiUsedForDecode={true} />);
+    const el = screen.getByTestId("gemini-status");
+    expect(el.textContent).not.toContain("not used for decode");
+    expect(el.textContent).toContain("Gemini:");
+    expect(el.textContent).toContain("key configured");
+  });
 });
