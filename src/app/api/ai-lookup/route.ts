@@ -537,10 +537,29 @@ export async function POST(request: Request) {
     // outside computeDecode (per-request, not per-process) so it reflects THIS request's outcome only.
     let receiptState: { eligible: boolean; reason?: string } = { eligible: false };
 
+    // Explicit return shape for computeDecode (TASK T8b: needed as an annotation because the Plan D
+    // stash inside computeDecode's own body must reference computeDecode's return type - TS7023/TS2502
+    // otherwise, since a bare arrow function's return type can't be inferred while still being used
+    // inside its own body). debug is intentionally loose (Record<string, unknown>): each exit adds a
+    // different set of optional diagnostic fields (groundingStatus, ladderPath, ladderReasons, etc.).
+    interface DecodePayload {
+      mode: "decode";
+      providerNames: string[];
+      results: AiLookupResult[];
+      evidences: EvidenceResult[];
+      providerStatuses: ProviderStatus[];
+      decision: DecodeDecision;
+      reasonCode: string;
+      reasonText: string;
+      timedOut: boolean;
+      debug: Record<string, unknown>;
+      sanitizedInput: { rawCodeSanitized: string; cleanCodeSanitized: string };
+    }
+
     // The expensive decode (fast path + deep fallback) is cached by code: once a barcode resolves to a
     // real product, a repeat scan in this server returns instantly with NO AI/Firecrawl spend. Only a
     // SUCCESS (a usable product) is cached - a failure stays retryable. Skipped under E2E (mock-only).
-    const computeDecode = async () => {
+    const computeDecode = async (): Promise<DecodePayload> => {
       // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST: an EXACT trusted-corpus barcode (or, for SKU-shaped
       // codes, an exact part number) resolves with NO AI call and NO page fetch. A miss returns null and the
       // existing AI/page-fetch path below runs unchanged. The corpus is GROUNDING - the downstream store
@@ -587,19 +606,24 @@ export async function POST(request: Request) {
       }
 
       // PLAN D - GROUNDING-FIRST FAST RESOLVER (flash-lite grounding -> fetch-verify -> barcode-DB fallback).
-      // Runs AFTER the free corpus/retail misses and BEFORE the legacy Gemini/OpenAI fast path. One flash-lite
+      // Runs AFTER the free corpus/retail misses and BEFORE the spec-v6 decode ladder. One flash-lite
       // grounding call names the product; the APP fetch-verifies the exact code on a candidate page before
       // marking Verified, falling back to the barcode-DB leg, Firecrawl, and the prefix floor on a miss.
       // Gated to PUBLIC barcodes (upc/ean/gtin): a SKU/vendor label must never auto-verify from grounding
       // (semantic firewall - those still route through the legacy path -> Needs Review).
       //
-      // TERMINAL for public barcodes (Fix 2, 2026-07-01): whenever the resolver returns ANY result - a
-      // VERIFIED win OR the prefix floor / an unverified grounding suggestion - computeDecode RETURNS it
-      // and NEVER runs the expensive legacy Gemini/OpenAI fast path (the real money-pit). A verified win
-      // auto-counts (like a corpus hit); a floor/suggestion returns as Suggested/Needs Review with NO
-      // legacy AI call at all. Only a null return (non-public code, or no floor) falls through to legacy.
-      // Never runs under E2E (mock-only).
+      // TASK T8b FIX (2026-07-08): a VERIFIED Plan D win is still TERMINAL - it is a genuine free-tier
+      // resolution (like a corpus hit) and returns immediately with NO ladder run, exactly as before.
+      // But Plan D's non-verified outcome (the generic "<Brand>/Unidentified item" prefix floor, or an
+      // unverified grounding suggestion) is NOT an answer - it was wrongly treated as terminal, which made
+      // the spec-v6 ladder (Go-UPC -> Fetch V2 -> GPT-5.5) UNREACHABLE for every public barcode (live proof
+      // T19: 10/10 known-good GTINs terminated at the floor, Go-UPC usage delta 0). The floor/suggestion is
+      // now STASHED and the ladder runs; the ladder's own settled result wins, and the stash is the
+      // fallback ONLY if every ladder rung misses. Never runs under E2E (mock-only).
       const isPublicBarcode = codeType === "upc_a" || codeType === "ean_13" || codeType === "gtin_14";
+      let planDStash: DecodePayload | null = null;
+      let planDProviderStatusForStash: ProviderStatus | null = null;
+      let planDAiCalled = false;
       if (!e2eMode() && isPublicBarcode) {
         const fast = await resolveUnknownFast(code, {
           lookupBarcodeDb: (c) => lookupBarcodeDb(c),
@@ -630,46 +654,49 @@ export async function POST(request: Request) {
           const floorReasonText = verifiedWin ? "" : (REASON_TEXT[floorReasonCode] ?? "");
           if (decision.status !== "verified" && floorReasonText) decision = { ...decision, reason: floorReasonText };
 
-          let pdResults: AiLookupResult[] = [result];
-          let pdEvidences: EvidenceResult[] = [evidence];
-          let pdProviderNames = [`parallel:${fast.source}`];
-          let pdProviderStatuses: ProviderStatus[] = [{ provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: verifiedWin, identityFound: isUsableProductName(fast.name) }];
-          let pdReasonCode = verifiedWin ? "ok" : floorReasonCode;
-          let pdReasonText = floorReasonText;
-          let gptLadderSkipReason: string | undefined;
+          const pdResults: AiLookupResult[] = [result];
+          const pdEvidences: EvidenceResult[] = [evidence];
+          const pdProviderNames = [`parallel:${fast.source}`];
+          const pdProviderStatus: ProviderStatus = { provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: verifiedWin, identityFound: isUsableProductName(fast.name) };
+          const pdReasonCode = verifiedWin ? "ok" : floorReasonCode;
+          const pdReasonText = floorReasonText;
 
-          // GPT-5.5 LADDER RUNG (Task 3b): Plan D is TERMINAL for public barcodes - its generic
-          // "Unidentified item" floor still ends unresolved (needs_review), so the paid rung must run
-          // HERE or it can never see a real upc/ean/gtin. A GPT identity (verified or suggested)
-          // REPLACES the unresolved floor, exactly as returned (owner order 2026-07-06: no firewall
-          // cap, no info_only burial). A verified/suggested Plan D outcome skips the rung (not surfaced).
-          const ladder = await maybeGptLadder({ priorStatus: decision.status });
-          if (ladder.payload) {
-            pdResults = [ladder.payload.result, ...pdResults];
-            pdEvidences = [gptLadderEvidenceStub(), ...pdEvidences];
-            pdProviderNames = [...pdProviderNames, "gpt-5.5-ladder"];
-            decision = ladder.payload.decision;
-            pdReasonCode = "gpt_ladder";
-            pdReasonText = ladder.payload.reasonText;
-          } else if (ladder.surfaceSkip) {
-            gptLadderSkipReason = ladder.skipReason;
-            pdProviderStatuses = [...pdProviderStatuses, gptLadderSkipEntry(ladder.skipReason!)];
+          if (verifiedWin) {
+            // Verified win is a genuine free-tier resolution - terminal, exactly like a corpus hit.
+            // The ladder never runs and no paid spend occurs.
+            return {
+              mode: "decode" as const,
+              providerNames: pdProviderNames,
+              results: pdResults,
+              evidences: pdEvidences,
+              providerStatuses: [pdProviderStatus],
+              decision,
+              reasonCode: pdReasonCode,
+              reasonText: pdReasonText,
+              timedOut: false,
+              // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
+              // debug instead of consensus quietly degrading to the two correlated DB votes.
+              debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
+              sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+            };
           }
-          receiptState = classifyReceipt(ladder);
 
-          return {
+          // Non-verified (floor/suggestion): STASH the payload and fall through into the spec-v6 ladder
+          // below. This is what makes Go-UPC/Fetch V2/GPT-5.5 reachable for public barcodes at all - the
+          // stash is only used if every ladder rung misses (see the all-miss fallback further down).
+          planDAiCalled = fast.aiCalled;
+          planDProviderStatusForStash = pdProviderStatus;
+          planDStash = {
             mode: "decode" as const,
             providerNames: pdProviderNames,
             results: pdResults,
             evidences: pdEvidences,
-            providerStatuses: pdProviderStatuses,
+            providerStatuses: [pdProviderStatus],
             decision,
             reasonCode: pdReasonCode,
             reasonText: pdReasonText,
             timedOut: false,
-            // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
-            // debug instead of consensus quietly degrading to the two correlated DB votes.
-            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled || pdReasonCode === "gpt_ladder", pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus, gptLadderSkipReason },
+            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
             sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
           };
         }
@@ -861,27 +888,29 @@ export async function POST(request: Request) {
       // receiptState: only a GPT rung that genuinely ran + came back empty earns a permanent receipt.
       receiptState = gptLadderResult ? classifyReceipt(gptLadderResult) : { eligible: false };
 
-      // Assemble the response. A settled rung supplies its payload verbatim; an all-miss ladder emits a
-      // needs_review decision whose reason lists every rung that came back empty (owner: never silent).
+      // Assemble the response. A settled rung supplies its payload verbatim; an all-miss ladder falls back
+      // to the stashed Plan D floor/suggestion (TASK T8b) so the user experience for a genuinely
+      // unfindable code is unchanged; a Plan D stash always records its own attempt in providerStatuses so
+      // debug shows both what Plan D found AND what the ladder did with it.
       if (win) {
         return {
           mode: "decode" as const,
-          providerNames: win.providerNames,
+          providerNames: planDStash ? [...planDStash.providerNames, ...win.providerNames] : win.providerNames,
           results: win.results,
           evidences: win.evidences,
-          providerStatuses: win.providerStatuses,
+          providerStatuses: planDProviderStatusForStash ? [planDProviderStatusForStash, ...win.providerStatuses] : win.providerStatuses,
           decision: win.decision,
           reasonCode: win.reasonCode,
           reasonText: win.reasonText,
           timedOut: false,
           debug: {
-            providersAttempted: win.providerNames,
+            providersAttempted: planDStash ? [...planDStash.providerNames, ...win.providerNames] : win.providerNames,
             evidenceStrengths: win.evidences.map((e) => e.strength),
             sourceCounts: win.results.map((r) => (r.sourceUrls ?? []).length),
             corroborationPath: win.decision.corroborationPath ?? ladderRun.settledBy,
             ladderPath: ladderRun.settledBy,
             ladderReasons: ladderRun.reasons,
-            aiCalled: ladderRun.settledBy === "gpt",
+            aiCalled: planDAiCalled || ladderRun.settledBy === "gpt",
             pageFetched: ladderRun.settledBy === "fetchv2",
             cached: false,
             gptLadderSkipReason: gptSkipReason(),
@@ -891,8 +920,33 @@ export async function POST(request: Request) {
         };
       }
 
-      // ALL RUNGS MISSED -> Needs Review with the accumulated per-rung reasons.
+      // ALL RUNGS MISSED. If Plan D had already stashed a floor/suggestion, fall back to it exactly as
+      // before the T8b fix (unchanged user experience for a genuinely unfindable public barcode), merging
+      // the ladder's per-rung miss reasons into the reason text/providerStatuses/debug so nothing is
+      // silent. Otherwise (non-public code, or Plan D itself found nothing to stash) emit the plain
+      // needs_review whose reason lists every rung that came back empty (owner: never silent).
       const allMissReason = `No rung resolved the code. ${ladderRun.reasons.map((r) => `${r.rung}: ${r.reason}`).join("; ")}`;
+      if (planDStash) {
+        const mergedReasonText = `${planDStash.reasonText || planDStash.decision.reason || "Unresolved"}. ${allMissReason}`;
+        return {
+          ...planDStash,
+          reasonText: mergedReasonText,
+          decision: { ...planDStash.decision, reason: mergedReasonText },
+          providerStatuses: [...planDStash.providerStatuses, ...ladderProviderStatuses],
+          timedOut: false,
+          debug: {
+            ...planDStash.debug,
+            ladderPath: "none",
+            ladderReasons: ladderRun.reasons,
+            aiCalled: planDAiCalled || ladderRun.reasons.some((r) => r.rung === "gpt"),
+            pageFetched: ladderRun.reasons.some((r) => r.rung === "fetchv2"),
+            cached: false,
+            gptLadderSkipReason: gptSkipReason(),
+            retailLookup: retailLookupStatus,
+          },
+          sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+        };
+      }
       const nrDecision = decideDecode({ codeType, results: [], evidences: [], confidenceThreshold: threshold, code, scanContext: body.scanContext, brandPrefixConflict: false, allowNonPublicAutoCount });
       return {
         mode: "decode" as const,

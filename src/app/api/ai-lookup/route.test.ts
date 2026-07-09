@@ -7,6 +7,21 @@ import fs from "node:fs";
 // The route imports server-only modules (groundedSpecFinder). Stub the marker so it can load in vitest.
 vi.mock("server-only", () => ({}));
 
+// TASK T8b: route.ts calls `ladderStorage()` (no dir arg) which defaults to `process.cwd()` - the REAL
+// repo root. A Go-UPC rung that genuinely hits writes a usage counter via that storage, which would
+// pollute the actual repo working tree on every test run. Redirect ladderStorage() at a per-process tmp
+// dir instead (fileLadderStorage itself is untouched/real - only the directory changes).
+vi.mock("@/server/upc/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/upc/storage")>();
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-route-test-${process.pid}`);
+  return {
+    ...actual,
+    ladderStorage: async () => actual.fileLadderStorage(tmpLadderDir),
+  };
+});
+
 import { POST, GET } from "@/app/api/ai-lookup/route";
 import { __resetForTest, dailyUsage, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
@@ -736,5 +751,132 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       const json = await res.json();
       expect(json.goUpc.limit).toBe(10);
     });
+  });
+
+  // --- Task T8b: Plan D's non-verified floor/suggestion must NOT be terminal for public barcodes ----
+  // CONFIRMED BUG (live proof T19 + code read): Plan D's generic "Unidentified item" floor was returned
+  // immediately for every public barcode, so the spec-v6 ladder (Go-UPC -> Fetch V2 -> GPT-5.5) was
+  // UNREACHABLE for exactly the codes it was built for (10/10 known-good GTINs terminated at the floor,
+  // Go-UPC usage delta 0). The fix: stash Plan D's non-verified payload and run the ladder; the ladder's
+  // settled result wins, and the stash is the fallback ONLY on an all-miss ladder.
+  describe("Task T8b: Plan D floor yields to the spec-v6 ladder for public barcodes", () => {
+    // A real 12-digit UPC-A (valid GS1 check digit) whose 7-digit prefix maps to nothing in the catalog
+    // prefix index (same family as the pre-existing Task 3b test codes) - corpus/retail/Plan D all miss
+    // and Plan D ends at the generic unresolved floor, the exact scenario the fix must catch.
+    const UNKNOWN_PREFIX_UPC = "111000222887";
+
+    it("(a) Plan D floor-only -> the Go-UPC rung is genuinely invoked, and a Go-UPC verified result is the response", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-go-upc-key";
+      const goUpcHitBody = {
+        product: { name: "Acme Go-UPC Widget", brand: "Acme", description: "", imageUrl: "", category: "", specs: [] },
+        inferred: false,
+      };
+      fetchSpy = vi.fn(async (url: string) => {
+        if (String(url).includes("go-upc.com/api/v1/code/")) {
+          return new Response(JSON.stringify(goUpcHitBody), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      });
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+      const res = await POST(makeRequest({ cleanCode: UNKNOWN_PREFIX_UPC, mode: "decode" }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // Go-UPC was genuinely called (spy proof), not just skipped/gated.
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("go-upc.com/api/v1/code/"))).toBe(true);
+      // The ladder's Go-UPC rung answer WINS the response, replacing Plan D's floor.
+      expect(json.decision.status).toBe("verified");
+      expect(json.results[0].productName).toBe("Acme Go-UPC Widget");
+      expect(json.providerNames).toContain("go-upc");
+      // Plan D's own attempt is still recorded (debug transparency), not silently dropped.
+      expect(json.providerNames).toContain("parallel:floor");
+      expect(json.debug.ladderPath).toBe("goupc");
+    }, 20000);
+
+    it("(b) Plan D verified win -> no ladder rung is invoked; the Plan D payload is returned as-is", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-go-upc-key";
+      process.env.FIRECRAWL_API_KEY = "test-firecrawl-key";
+      const code = "111000222891";
+      // Drive Plan D to a GENUINE verified (cross-checked) win: UPCitemdb names the product, and the
+      // Firecrawl /search tiebreaker independently confirms a barcode-carrying snippet with an AGREEING
+      // name (>=2 shared distinctive tokens: "acme" + "widget") - the two-source consensus resolveUnknownFast
+      // requires before it will mark verified:true.
+      fetchSpy = vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes("api.upcitemdb.com/prod/trial/lookup")) {
+          return new Response(
+            JSON.stringify({ items: [{ title: "Acme Widget Pro 500", brand: "Acme", offers: [{ link: "https://example.com/acme-widget" }] }] }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (u.includes("api.firecrawl.dev/v2/search")) {
+          return new Response(
+            JSON.stringify({ data: { web: [{ url: "https://example.com/p", title: "Acme Widget Pro 500", description: `barcode ${code}` }] } }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      });
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+      const res = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // Sanity: Plan D genuinely verified (proves this isn't accidentally hitting the floor path).
+      expect(json.decision.status).toBe("verified");
+      expect(json.providerNames[0]).toMatch(/^parallel:/);
+      expect(json.results[0].productName).toBe("Acme Widget Pro 500");
+      // No ladder rung ran: Go-UPC (keyed, would be called if reached) was never contacted.
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("go-upc.com/api/v1/code/"))).toBe(false);
+      expect(json.providerNames).not.toContain("go-upc");
+      expect(json.providerNames).not.toContain("fetchv2");
+      expect(json.providerNames).not.toContain("gpt-5.5-ladder");
+      expect(json.debug.ladderPath).toBeUndefined();
+    }, 20000);
+
+    it("(c) Plan D floor + ladder all-miss -> response equals the floor payload, reasons list every rung's miss", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      // beforeEach already deletes GO_UPC_API_KEY/OPENAI_API_KEY/FIRECRAWL_API_KEY and stubs fetch to
+      // return "{}" for everything - Go-UPC is unavailable (no key), Fetch V2 finds no sources (no
+      // discovery keys), and GPT is skipped (no key): every rung misses.
+      const res = await POST(makeRequest({ cleanCode: "111000222888", mode: "decode" }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+
+      // The floor payload (Plan D's own unresolved result) is exactly what came back.
+      expect(json.providerNames).toContain("parallel:floor");
+      expect(json.results[0].productName).toBe("Unidentified item (barcode 111000222888)");
+      expect(json.decision.status).toBe("needs_review");
+      // Every rung's miss reason is listed (never silent about why the ladder didn't help).
+      expect(json.debug.ladderReasons).toBeDefined();
+      const rungNames = (json.debug.ladderReasons as Array<{ rung: string; reason: string }>).map((r) => r.rung);
+      expect(rungNames).toContain("fetchv2");
+      expect(rungNames).toContain("gpt");
+      expect(json.reasonText).toMatch(/No rung resolved the code/);
+    }, 20000);
+
+    it("(d) daily-cap counter is incremented EXACTLY once for a Plan-D-floor + all-miss-ladder request", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const res = await POST(makeRequest({ cleanCode: "111000222889", mode: "decode" }));
+      expect(res.status).toBe(200);
+      expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+    }, 20000);
+
+    it("(e) a subsequent identical request is served from cache with ZERO new daily-cap slots burned", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const code = "111000222890";
+      const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
+      expect(first.status).toBe(200);
+      expect(dailyUsage({ file: tmpCounter }).count).toBe(1);
+      const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
+      expect(second.status).toBe(200);
+      const secondJson = await second.json();
+      expect(secondJson.debug.cached).toBe(true);
+      expect(dailyUsage({ file: tmpCounter }).count, "a cached repeat must not burn a second daily slot").toBe(1);
+    }, 20000);
   });
 });
