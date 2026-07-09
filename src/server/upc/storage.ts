@@ -53,6 +53,15 @@ export interface DecodeArchiveEntry {
 export interface LadderStorage {
   readUsage(): Promise<UsageState>;
   writeUsage(s: UsageState): Promise<void>;
+  /**
+   * Atomically increment the usage counter for `month` and return the NEW total.
+   * This is the counter that enforces the Go-UPC monthly spend cap, so it must never be a
+   * JS-side read-modify-write: two concurrent serverless instances doing readUsage() then
+   * writeUsage(used+1) can both read the same `used`, and one increment is silently lost,
+   * which means the cap can be overrun. Implementations must perform the increment as a
+   * single atomic operation (in-SQL `used = used + 1` for Turso).
+   */
+  incrementUsage(month: string): Promise<number>;
   readMissCache(key: string): Promise<MissEntry | null>;
   writeMissCache(key: string, e: MissEntry): Promise<void>;
   appendArchive(entry: DecodeArchiveEntry): Promise<void>;
@@ -105,6 +114,16 @@ export function fileLadderStorage(dir: string): LadderStorage {
     async writeUsage(s: UsageState): Promise<void> {
       ensureDir(dir);
       writeJson(usagePath, s);
+    },
+
+    async incrementUsage(month: string): Promise<number> {
+      // Single-process file adapter: a plain read-modify-write is safe here (no concurrent
+      // instances share this file the way serverless Turso callers do).
+      ensureDir(dir);
+      const current = readJson<UsageState>(usagePath, { month, used: 0 });
+      const used = current.month === month ? current.used + 1 : 1;
+      writeJson(usagePath, { month, used });
+      return used;
     },
 
     async readMissCache(key: string): Promise<MissEntry | null> {
@@ -205,6 +224,20 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
               ON CONFLICT(month) DO UPDATE SET used = excluded.used`,
         args: [s.month, s.used],
       });
+    },
+
+    async incrementUsage(month: string): Promise<number> {
+      await ensureTables();
+      // Atomic in-SQL increment: `used = used + 1` is computed BY THE DATABASE, never by
+      // reading the current value in JS first. This is what makes concurrent serverless
+      // instances safe -- the monthly Go-UPC spend cap can never lose an increment to a race.
+      const result = await client.execute({
+        sql: `INSERT INTO ${TABLE_USAGE} (month, used) VALUES (?, 1)
+              ON CONFLICT(month) DO UPDATE SET used = used + 1
+              RETURNING used`,
+        args: [month],
+      });
+      return Number(result.rows[0].used);
     },
 
     async readMissCache(key: string): Promise<MissEntry | null> {

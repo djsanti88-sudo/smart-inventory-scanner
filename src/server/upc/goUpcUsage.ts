@@ -80,8 +80,9 @@ export function goUpcUsage(
 
     async record(): Promise<void> {
       const month = monthKey(now());
-      const used = await currentUsed(month);
-      await storage.writeUsage({ month, used: used + 1 });
+      // Atomic increment (never read-then-write): this counter enforces the monthly Go-UPC
+      // spend cap, so two concurrent serverless instances must not be able to lose a count.
+      await storage.incrementUsage(month);
     },
   };
 }

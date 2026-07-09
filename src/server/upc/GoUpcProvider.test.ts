@@ -39,6 +39,11 @@ function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage 
     writeUsage: async (s) => {
       Object.assign(usage, s);
     },
+    incrementUsage: async (month) => {
+      const used = usage.month === month ? usage.used + 1 : 1;
+      Object.assign(usage, { month, used });
+      return used;
+    },
     readMissCache: async (key) => miss[key] ?? null,
     writeMissCache: async (key, e) => {
       miss[key] = e;
