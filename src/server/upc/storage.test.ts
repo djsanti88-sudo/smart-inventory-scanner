@@ -177,6 +177,43 @@ describe("fileLadderStorage", () => {
       warn.mockRestore();
     });
   });
+
+  // Generic get/set/increment: backs the daily AI-lookup spend cap (aiSpendGuard's
+  // chargeDailySlot/readDailyUsed) over an arbitrary string key, independent of the Go-UPC
+  // usage/miss/archive stores above.
+  describe("generic kv (get/set/increment)", () => {
+    it("get returns null for an unknown key", async () => {
+      const store = fileLadderStorage(dir);
+      expect(await store.get("ai_daily_cap:2026-07-09")).toBeNull();
+    });
+
+    it("set then get round-trips", async () => {
+      const store = fileLadderStorage(dir);
+      await store.set("ai_daily_cap:2026-07-09", "5");
+      expect(await fileLadderStorage(dir).get("ai_daily_cap:2026-07-09")).toBe("5");
+    });
+
+    it("increment returns 1 then 2 for a fresh key (atomic counter, not read-modify-write)", async () => {
+      const store = fileLadderStorage(dir);
+      expect(await store.increment("ai_daily_cap:2026-07-09")).toBe(1);
+      expect(await store.increment("ai_daily_cap:2026-07-09")).toBe(2);
+      expect(await fileLadderStorage(dir).get("ai_daily_cap:2026-07-09")).toBe("2");
+    });
+
+    it("keeps keys independent (a Go-UPC usage write does not leak into the kv store or vice versa)", async () => {
+      const store = fileLadderStorage(dir);
+      await store.writeUsage({ month: "2026-07", used: 99 });
+      await store.increment("ai_daily_cap:2026-07-09");
+      expect(await store.readUsage()).toEqual({ month: "2026-07", used: 99 });
+      expect(await store.get("ai_daily_cap:2026-07-09")).toBe("1");
+    });
+
+    it("50 parallel increments land on exactly 50 (atomicity contract, real fs adapter)", async () => {
+      const store = fileLadderStorage(dir);
+      await Promise.all(Array.from({ length: 50 }, () => store.increment("concurrent-key")));
+      expect(await store.get("concurrent-key")).toBe("50");
+    });
+  });
 });
 
 describe("tursoLadderStorage", () => {
@@ -185,12 +222,30 @@ describe("tursoLadderStorage", () => {
     const usage = new Map<string, number>();
     const miss = new Map<string, { canonical: string; missed_at: string; ttl_days: number }>();
     const archive: Record<string, unknown>[] = [];
+    const kv = new Map<string, number>();
     const calls: string[] = [];
     return {
       calls,
       async execute({ sql, args }) {
         calls.push(sql.trim().split(/\s+/).slice(0, 2).join(" "));
         if (sql.includes("CREATE TABLE")) return { rows: [] };
+        if (sql.startsWith("INSERT INTO ladder_kv") && sql.includes("CAST(value AS INTEGER) + 1")) {
+          // Atomic increment: the SQL itself computes the new value, never a JS-precomputed total.
+          const [key] = args as [string];
+          expect(args).toHaveLength(1); // no precomputed "new value" arg is passed
+          const next = (kv.get(key) ?? 0) + 1;
+          kv.set(key, next);
+          return { rows: [{ value: next }] };
+        }
+        if (sql.startsWith("INSERT INTO ladder_kv")) {
+          const [key, value] = args as [string, string];
+          kv.set(key, Number(value));
+          return { rows: [] };
+        }
+        if (sql.startsWith("SELECT value FROM ladder_kv")) {
+          const [key] = args as [string];
+          return kv.has(key) ? { rows: [{ value: String(kv.get(key)) }] } : { rows: [] };
+        }
         if (sql.startsWith("INSERT INTO goupc_usage") && sql.includes("used = used + 1")) {
           // Atomic increment: the SQL itself computes the new value, never a JS-precomputed total.
           const [month] = args as [string];
@@ -306,8 +361,43 @@ describe("tursoLadderStorage", () => {
     await store.readUsage();
     await store.readUsage();
     const createCalls = client.calls.filter((c) => c.startsWith("CREATE TABLE"));
-    // 3 tables created on the FIRST call only; the second readUsage must not re-issue them.
-    expect(createCalls).toHaveLength(3);
+    // 4 tables (usage, miss cache, archive, generic kv) created on the FIRST call only; the second
+    // readUsage must not re-issue them.
+    expect(createCalls).toHaveLength(4);
+  });
+
+  describe("generic kv (get/set/increment)", () => {
+    it("get returns null for an unknown key", async () => {
+      const store = tursoLadderStorage(memTursoClient());
+      expect(await store.get("ai_daily_cap:2026-07-09")).toBeNull();
+    });
+
+    it("set then get round-trips via upsert", async () => {
+      const store = tursoLadderStorage(memTursoClient());
+      await store.set("ai_daily_cap:2026-07-09", "5");
+      expect(await store.get("ai_daily_cap:2026-07-09")).toBe("5");
+      // upsert: writing the same key again updates in place, not a duplicate row
+      await store.set("ai_daily_cap:2026-07-09", "6");
+      expect(await store.get("ai_daily_cap:2026-07-09")).toBe("6");
+    });
+
+    it("increment issues an atomic in-SQL increment (CAST(value AS INTEGER) + 1), not a JS-computed value", async () => {
+      const client = memTursoClient();
+      const store = tursoLadderStorage(client);
+      const n1 = await store.increment("ai_daily_cap:2026-07-09");
+      const n2 = await store.increment("ai_daily_cap:2026-07-09");
+      expect(n1).toBe(1);
+      expect(n2).toBe(2);
+      const incrementCalls = client.calls.filter((c) => c.startsWith("INSERT INTO"));
+      expect(incrementCalls.length).toBeGreaterThan(0);
+    });
+
+    it("keeps separate keys independent", async () => {
+      const store = tursoLadderStorage(memTursoClient());
+      expect(await store.increment("ai_daily_cap:2026-07-08")).toBe(1);
+      expect(await store.increment("ai_daily_cap:2026-07-08")).toBe(2);
+      expect(await store.increment("ai_daily_cap:2026-07-09")).toBe(1);
+    });
   });
 });
 

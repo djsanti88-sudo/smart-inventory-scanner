@@ -24,16 +24,37 @@ vi.mock("@/server/knowledgeDb", () => ({
 // The route imports server-only modules (groundedSpecFinder). Stub the marker so it can load in vitest.
 vi.mock("server-only", () => ({}));
 
+// v2 daily cap (Task 1): route.ts now reads/writes the cap counter through ladderStorage(). This file
+// does NOT set TURSO_DATABASE_URL, so an unmocked ladderStorage() would default to the file adapter
+// rooted at process.cwd() - the REAL repo root - and pollute the working tree on every test run (same
+// hazard route.test.ts's existing mock guards against). Redirect at a per-process tmp dir instead.
+vi.mock("@/server/upc/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/upc/storage")>();
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-decode-corpus-test-${process.pid}`);
+  return {
+    ...actual,
+    ladderStorage: async () => actual.fileLadderStorage(tmpLadderDir),
+  };
+});
+
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
 import { POST } from "@/app/api/ai-lookup/route";
-import { __resetForTest, dailyUsage } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
 import { __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
+
+/** Reads today's daily-cap usage through the SAME (mocked, tmp-dir) ladderStorage() the route uses. */
+async function dailyUsedNow(): Promise<number> {
+  return readDailyUsed(await ladderStorage());
+}
 
 // A barcode confirmed present in the committed barcodeIndex (see tireKnowledge.generated.json /
 // tireKnowledgeIndex.jsonfallback.test.ts).
@@ -53,6 +74,9 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
   let tmpDecodeCacheFile: string;
+  // Same fixed-per-process shared mocked ladderStorage() dir as route.test.ts - wipe the v2 daily-cap
+  // kv file per test so tests in this file don't accumulate onto the same TODAY-dated counter key.
+  const ladderKvFile = () => path.join(os.tmpdir(), `ladder-storage-decode-corpus-test-${process.pid}`, ".ladder-kv.json");
 
   beforeEach(() => {
     __resetForTest();
@@ -63,6 +87,7 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
     // an earlier test in this file stays warm in L1 and every later POST for that same code short-circuits
     // via the (correct) L1-cache cap bypass - masking whether the CORPUS lookup itself bypasses the cap.
     clearDecodeCache();
+    try { fs.unlinkSync(ladderKvFile()); } catch {}
     for (const k of keys) saved[k] = process.env[k];
     // Real (non-E2E) code path so the corpus check in computeDecode() actually runs: the E2E branch
     // (`IS_E2E=1`) short-circuits straight to the mock provider and SKIPS the corpus check entirely, which
@@ -146,10 +171,10 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
   // counter should read the SAME before and after the decode.
   it("a corpus hit does NOT increment the daily-cap counter", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-    const before = dailyUsage({ file: tmpCounter }).count;
+    const before = await dailyUsedNow();
     const res = await POST(makeDecodeRequest(KNOWN_TIRE_BARCODE));
     expect(res.status).toBe(200);
-    const after = dailyUsage({ file: tmpCounter }).count;
+    const after = await dailyUsedNow();
     expect(after).toBe(before);
   }, 20000);
 });

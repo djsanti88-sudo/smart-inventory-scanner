@@ -32,6 +32,7 @@ function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage 
   const miss: Record<string, MissEntry> = { ...(seed?.miss ?? {}) };
   const archives: DecodeArchiveEntry[] = [];
   const missWrites: Array<{ key: string; entry: MissEntry }> = [];
+  const kv = new Map<string, string>();
   return {
     archives,
     missWrites,
@@ -51,6 +52,15 @@ function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage 
     },
     appendArchive: async (entry) => {
       archives.push(entry);
+    },
+    get: async (key) => kv.get(key) ?? null,
+    set: async (key, value) => {
+      kv.set(key, value);
+    },
+    increment: async (key) => {
+      const n = Number(kv.get(key) ?? "0") + 1;
+      kv.set(key, String(n));
+      return n;
     },
   };
 }

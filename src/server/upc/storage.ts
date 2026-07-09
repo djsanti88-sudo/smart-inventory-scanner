@@ -65,11 +65,22 @@ export interface LadderStorage {
   readMissCache(key: string): Promise<MissEntry | null>;
   writeMissCache(key: string, e: MissEntry): Promise<void>;
   appendArchive(entry: DecodeArchiveEntry): Promise<void>;
+  /**
+   * Generic atomic get/increment over an arbitrary string key, backing the daily AI-lookup spend
+   * cap (see src/services/security/aiSpendGuard.ts's chargeDailySlot/readDailyUsed). Same atomicity
+   * contract as incrementUsage: never a JS-side read-modify-write, so concurrent serverless
+   * instances can never lose an increment to a race. `get`/`set` are the read/write halves callers
+   * outside the ladder module use (a read-only peek must never touch `increment`).
+   */
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  increment(key: string): Promise<number>;
 }
 
 const USAGE_FILE = ".go-upc-usage.json";
 const MISS_FILE = ".go-upc-miss-cache.json";
 const ARCHIVE_SUBDIR = "decode-archive";
+const KV_FILE = ".ladder-kv.json";
 
 function currentMonth(): string {
   return new Date().toISOString().slice(0, 7); // YYYY-MM
@@ -101,6 +112,7 @@ export function fileLadderStorage(dir: string): LadderStorage {
   const usagePath = join(dir, USAGE_FILE);
   const missPath = join(dir, MISS_FILE);
   const archiveDir = join(dir, ARCHIVE_SUBDIR);
+  const kvPath = join(dir, KV_FILE);
 
   function ensureDir(target: string): void {
     if (!existsSync(target)) mkdirSync(target, { recursive: true });
@@ -144,6 +156,30 @@ export function fileLadderStorage(dir: string): LadderStorage {
       const monthFile = join(archiveDir, `${month}.jsonl`);
       appendFileSync(monthFile, JSON.stringify(entry) + "\n", "utf8");
     },
+
+    async get(key: string): Promise<string | null> {
+      const map = readJson<Record<string, string>>(kvPath, {});
+      return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+    },
+
+    async set(key: string, value: string): Promise<void> {
+      ensureDir(dir);
+      const map = readJson<Record<string, string>>(kvPath, {});
+      map[key] = value;
+      writeJson(kvPath, map);
+    },
+
+    async increment(key: string): Promise<number> {
+      // Single-process file adapter: same read-modify-write-inside-one-synchronous-block safety
+      // as incrementUsage above (no concurrent instances share this file the way serverless Turso
+      // callers do - Node's event loop never interleaves mid-synchronous-fs-call).
+      ensureDir(dir);
+      const map = readJson<Record<string, string>>(kvPath, {});
+      const n = Number(map[key] ?? "0") + 1;
+      map[key] = String(n);
+      writeJson(kvPath, map);
+      return n;
+    },
   };
 }
 
@@ -162,6 +198,7 @@ export type TursoClientLike = {
 const TABLE_USAGE = "goupc_usage";
 const TABLE_MISS_CACHE = "goupc_miss_cache";
 const TABLE_ARCHIVE = "decode_archive";
+const TABLE_KV = "ladder_kv";
 
 /**
  * Turso-backed LadderStorage over an injected client (never constructs its own connection --
@@ -196,6 +233,10 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
             source_urls TEXT,
             fetched_at TEXT NOT NULL
           )`,
+          args: [],
+        });
+        await client.execute({
+          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_KV} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
           args: [],
         });
       })();
@@ -280,6 +321,39 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
           entry.fetchedAt,
         ],
       });
+    },
+
+    async get(key: string): Promise<string | null> {
+      await ensureTables();
+      const result = await client.execute({
+        sql: `SELECT value FROM ${TABLE_KV} WHERE key = ?`,
+        args: [key],
+      });
+      if (result.rows.length === 0) return null;
+      return result.rows[0].value as string;
+    },
+
+    async set(key: string, value: string): Promise<void> {
+      await ensureTables();
+      await client.execute({
+        sql: `INSERT INTO ${TABLE_KV} (key, value) VALUES (?, ?)
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        args: [key, value],
+      });
+    },
+
+    async increment(key: string): Promise<number> {
+      await ensureTables();
+      // Atomic in-SQL increment, same contract as incrementUsage: the database computes
+      // `value + 1`, never a JS-side read-then-write, so concurrent serverless instances can
+      // never lose an increment to a race (the "232/200 while ~27 paid calls happened" bug).
+      const result = await client.execute({
+        sql: `INSERT INTO ${TABLE_KV} (key, value) VALUES (?, '1')
+              ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1
+              RETURNING CAST(value AS INTEGER) AS value`,
+        args: [key],
+      });
+      return Number(result.rows[0].value);
     },
   };
 }

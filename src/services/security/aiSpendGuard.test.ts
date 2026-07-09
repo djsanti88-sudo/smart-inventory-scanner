@@ -2,7 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, dailyUsage, __resetForTest } from "./aiSpendGuard";
+import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, dailyUsage, readDailyUsed, chargeDailySlot, __resetForTest } from "./aiSpendGuard";
+
+/** In-memory StorageLike stub matching the ladder storage's minimal get/set/increment surface. */
+function memStorage() {
+  const m = new Map<string, string>();
+  return {
+    async get(k: string) { return m.get(k) ?? null; },
+    async set(k: string, v: string) { m.set(k, v); },
+    async increment(k: string) { const n = Number(m.get(k) ?? "0") + 1; m.set(k, String(n)); return n; },
+  };
+}
 
 describe("aiSpendGuard", () => {
   let tmpFile: string;
@@ -110,6 +120,59 @@ describe("aiSpendGuard", () => {
       checkAndIncrementDaily({ ...o, limit: 10 });
       expect(dailyUsage(o).count).toBe(1);
       expect(dailyUsage(o).count).toBe(1); // peek does not increment
+    });
+  });
+
+  // v2 (hardened): atomic, storage-backed daily cap. readDailyUsed is a pure read (gates + GET);
+  // chargeDailySlot is the ONLY write, and it must be called exactly once per genuine paid rung -
+  // never at the route gate, never twice per request (the "232/200 while ~27 paid calls happened"
+  // bug: the old counter incremented on rejected requests too).
+  describe("daily cap v2 (atomic, storage-backed)", () => {
+    it("read-only check never writes", async () => {
+      const s = memStorage();
+      expect(await readDailyUsed(s, "2026-07-09")).toBe(0);
+      expect(await readDailyUsed(s, "2026-07-09")).toBe(0); // still 0 - no phantom increments
+    });
+
+    it("charge increments exactly once per call", async () => {
+      const s = memStorage();
+      const r1 = await chargeDailySlot(s, { limit: 200, dateKey: "2026-07-09" });
+      const r2 = await chargeDailySlot(s, { limit: 200, dateKey: "2026-07-09" });
+      expect(r1.used).toBe(1);
+      expect(r2.used).toBe(2);
+      expect(r1.limit).toBe(200);
+      expect(r2.limit).toBe(200);
+    });
+
+    it("20 concurrent charges land on exactly 20 (atomicity contract)", async () => {
+      const s = memStorage();
+      await Promise.all(Array.from({ length: 20 }, () => chargeDailySlot(s, { limit: 200, dateKey: "2026-07-09" })));
+      expect(await readDailyUsed(s, "2026-07-09")).toBe(20);
+    });
+
+    it("resets on a new date key", async () => {
+      const s = memStorage();
+      await chargeDailySlot(s, { limit: 5, dateKey: "2026-07-08" });
+      expect(await readDailyUsed(s, "2026-07-09")).toBe(0);
+    });
+
+    it("readDailyUsed defaults to today's date key when none is passed", async () => {
+      const s = memStorage();
+      await chargeDailySlot(s); // defaults to today
+      expect(await readDailyUsed(s)).toBe(1);
+    });
+
+    it("chargeDailySlot defaults limit from AI_LOOKUP_DAILY_LIMIT (blank env -> 200, not 0)", async () => {
+      const prev = process.env.AI_LOOKUP_DAILY_LIMIT;
+      process.env.AI_LOOKUP_DAILY_LIMIT = "";
+      try {
+        const s = memStorage();
+        const r = await chargeDailySlot(s, { dateKey: "2026-07-09" });
+        expect(r.limit).toBe(200);
+      } finally {
+        if (prev === undefined) delete process.env.AI_LOOKUP_DAILY_LIMIT;
+        else process.env.AI_LOOKUP_DAILY_LIMIT = prev;
+      }
     });
   });
 });
