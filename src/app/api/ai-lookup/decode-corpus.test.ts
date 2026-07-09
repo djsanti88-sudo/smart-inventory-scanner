@@ -30,9 +30,10 @@ import path from "node:path";
 import fs from "node:fs";
 
 import { POST } from "@/app/api/ai-lookup/route";
-import { __resetForTest } from "@/services/security/aiSpendGuard";
+import { __resetForTest, dailyUsage } from "@/services/security/aiSpendGuard";
 import { __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
+import { clearDecodeCache } from "@/services/ai/decodeCache";
 
 // A barcode confirmed present in the committed barcodeIndex (see tireKnowledge.generated.json /
 // tireKnowledgeIndex.jsonfallback.test.ts).
@@ -57,6 +58,11 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
     __resetForTest();
     __resetDecodeCacheStoreForTest();
     __resetTireKnowledgeCacheForTests();
+    // L1 in-memory decode cache (route.ts's withDecodeCache) is a MODULE-LEVEL singleton, not reset by
+    // __resetDecodeCacheStoreForTest (that's the L2 persistent store). Without this, a code resolved by
+    // an earlier test in this file stays warm in L1 and every later POST for that same code short-circuits
+    // via the (correct) L1-cache cap bypass - masking whether the CORPUS lookup itself bypasses the cap.
+    clearDecodeCache();
     for (const k of keys) saved[k] = process.env[k];
     // Real (non-E2E) code path so the corpus check in computeDecode() actually runs: the E2E branch
     // (`IS_E2E=1`) short-circuits straight to the mock provider and SKIPS the corpus check entirely, which
@@ -118,6 +124,34 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
     expect(json.providerNames).not.toEqual(["tire-corpus"]);
     expect(json.debug?.corroborationPath).not.toBe("corpus_exact_barcode");
   }, 20000);
+
+  // Daily-cap-vs-free-resolution fix: the cap must bound only PAID work (Go-UPC/Fetch V2/GPT-5.5), never
+  // a $0 corpus/cache hit. Before the fix the cap was checked BEFORE computeDecode() ran the corpus
+  // lookup, so an exhausted cap (limit 0) 429'd even a code the corpus could answer for free.
+  it("a corpus hit STILL resolves (verified, aiCalled:false) even when the daily cap is fully exhausted (limit 0)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted
+    const res = await POST(makeDecodeRequest(KNOWN_TIRE_BARCODE));
+    expect(res.status).not.toBe(429);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.decision.status).toBe("verified");
+    expect(json.providerNames).toEqual(["tire-corpus"]);
+    expect(json.debug.aiCalled).toBe(false);
+    expect(json.reasonCode).not.toBe("daily_cap");
+    // No provider/network call at all - a free corpus hit never touches fetch.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  }, 20000);
+
+  // A corpus/free hit must not consume a cap slot at all (not just "not be blocked by" one) - the
+  // counter should read the SAME before and after the decode.
+  it("a corpus hit does NOT increment the daily-cap counter", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const before = dailyUsage({ file: tmpCounter }).count;
+    const res = await POST(makeDecodeRequest(KNOWN_TIRE_BARCODE));
+    expect(res.status).toBe(200);
+    const after = dailyUsage({ file: tmpCounter }).count;
+    expect(after).toBe(before);
+  }, 20000);
 });
 
 // FIX 2 (2026-07-01): the parallel resolver is TERMINAL for public barcodes. A public-barcode miss that
@@ -135,6 +169,11 @@ describe("/api/ai-lookup decode: parallel resolver is TERMINAL for public barcod
     __resetForTest();
     __resetDecodeCacheStoreForTest();
     __resetTireKnowledgeCacheForTests();
+    // L1 in-memory decode cache (route.ts's withDecodeCache) is a MODULE-LEVEL singleton, not reset by
+    // __resetDecodeCacheStoreForTest (that's the L2 persistent store). Without this, a code resolved by
+    // an earlier test in this file stays warm in L1 and every later POST for that same code short-circuits
+    // via the (correct) L1-cache cap bypass - masking whether the CORPUS lookup itself bypasses the cap.
+    clearDecodeCache();
     for (const k of keys) saved[k] = process.env[k];
     delete process.env.IS_E2E;
     delete process.env.GEMINI_API_KEY; // no keys: grounding leg + legacy Gemini/OpenAI are all inert

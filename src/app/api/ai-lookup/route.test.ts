@@ -97,13 +97,49 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("daily spend cap blocks with 429 daily_cap and makes ZERO provider/network calls", async () => {
+  // "111000222333" is a genuine-unknown 12-digit UPC (not in the tire corpus or the retail index - see
+  // decode-corpus.test.ts) that MUST reach a paid ladder rung to resolve. With the cap exhausted (limit
+  // 0) the cap must still bound this paid path: blocked BEFORE any PAID rung runs. Note: Plan D's own
+  // FREE structured-DB door (UPCitemdb trial lookup) still runs before the cap gate - it is a free
+  // consensus vote, not paid work - so this asserts no PAID provider host was contacted, not zero fetch
+  // calls (see hitAnAiProvider below; a stricter "zero fetch" assertion lives in decode-corpus.test.ts's
+  // corpus-hit case, which never reaches Plan D's network door at all).
+  it("daily spend cap blocks a genuine-unknown (paid-path) code with 429 daily_cap and makes ZERO paid provider calls", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap
     const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
     expect(res.status).toBe(429);
     expect((await res.json()).reasonCode).toBe("daily_cap");
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(hitAnAiProvider(), "no Gemini/OpenAI host may be contacted once the cap is exhausted").toBe(false);
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("go-upc.com")), "Go-UPC must not be contacted once the cap is exhausted").toBe(false);
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("firecrawl.dev")), "Firecrawl must not be contacted once the cap is exhausted").toBe(false);
   });
+
+  // Same code/cap as above, but asserting the DECODE-MODE specific contract: the paid ladder (Go-UPC /
+  // Fetch V2 / GPT-5.5) never runs a rung once the cap is exhausted - the route must not fall through to
+  // a needs_review payload that silently skipped every rung without saying why.
+  it("with the cap exhausted, a genuine-unknown code is blocked from the paid ladder (no rung executes)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
+    expect(res.status).toBe(429);
+    const json = await res.json();
+    expect(json.reasonCode).toBe("daily_cap");
+    expect(String(json.error || json.reasonText || "")).toMatch(/cap/i);
+    // No paid rung (Go-UPC / Fetch V2's paid discovery / GPT-5.5) was ever reached.
+    expect(json.providerNames ?? []).not.toContain("go-upc");
+    expect(json.providerNames ?? []).not.toContain("fetchv2");
+    expect(json.providerNames ?? []).not.toContain("gpt-5.5-ladder");
+  });
+
+  // The counter DOES increment once a request genuinely reaches paid work (as opposed to a free corpus
+  // hit - see decode-corpus.test.ts "a corpus hit does NOT increment the daily-cap counter").
+  it("a genuine-unknown (paid-path) decode DOES increment the daily-cap counter by exactly one", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const before = dailyUsage({ file: tmpCounter }).count;
+    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
+    expect(res.status).toBe(200);
+    const after = dailyUsage({ file: tmpCounter }).count;
+    expect(after).toBe(before + 1);
+  }, 20000);
 
   it("legacy 'lookup' mode is ALSO bound by the daily cap (no bypass)", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap
