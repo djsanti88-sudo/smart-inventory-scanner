@@ -2,6 +2,7 @@ import "server-only";
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
 import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
@@ -25,11 +26,15 @@ const CONF: Record<string, number> = { verified_2src: 0.97, verified_1src_strong
 
 function toResult(row: TireKnowledgeRow): AiLookupResult {
   const specs = [row.size, [row.load_index, row.speed_rating].filter(Boolean).join("")].filter(Boolean).join(" ").trim();
-  const name = [row.brand, row.model, specs].filter(Boolean).join(" ").trim();
+  // DISPLAY-ONLY prettify: the corpus stores model slugs ("wrangler_workhorse_at") and lowercase
+  // brands. Prettify here (new decode result construction), never rewrite the stored corpus row.
+  const brand = prettifyBrand(row.brand);
+  const model = prettifyProductName(row.model);
+  const name = [brand, model, specs].filter(Boolean).join(" ").trim();
   return {
     ...emptyResult(),
     productName: name,
-    brand: row.brand,
+    brand,
     category: "Tire",
     specsShort: specs,
     specsFull: row.raw_size_text || specs,

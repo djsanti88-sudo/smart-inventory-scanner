@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
+import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { SyncBadge } from "@/components/badges";
 import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
@@ -14,13 +15,13 @@ import type { InventoryCount, Product } from "@/types";
 // the deterministic-structurer fields and falling back to the existing product.brand/name/specsShort
 // so older (pre-structuring) products still render sensibly.
 function resolvedBrand(product: Product): string {
-  return product.structuredBrand || product.brand;
+  return prettifyBrand(product.structuredBrand || product.brand);
 }
 // Task 4 review fix: the Model column shows the table's existing empty-cell convention ("-") for a
 // row with no structuredModel yet, rather than duplicating the full Product-column name. Filtering
 // by name still works via the description field (structuredDescription falls back to product.name).
 function resolvedModel(product: Product): string {
-  return product.structuredModel || "";
+  return product.structuredModel ? prettifyProductName(product.structuredModel) : "";
 }
 function resolvedSizeTag(product: Product): string {
   return product.sizeTag || plainTireSizeDigits(product.specsShort);
@@ -166,7 +167,7 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
       <td className="px-4 py-3 text-lg font-semibold tabular-nums" data-testid={`qty-${product.id}`}>
         {count.quantity}
       </td>
-      <td className="px-4 py-3 font-medium text-zinc-800">{isPlatform ? product.name : customerDisplayName(product.name)}</td>
+      <td className="px-4 py-3 font-medium text-zinc-800">{prettifyProductName(isPlatform ? product.name : customerDisplayName(product.name))}</td>
       <td className="px-4 py-3" data-testid={`brand-${product.id}`}>{resolvedBrand(product)}</td>
       <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(product) || "-"}</td>
       <td className="px-4 py-3">{product.category}</td>

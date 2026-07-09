@@ -5,6 +5,7 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
+import { prettifyProductName } from "@/services/format/productDisplay";
 import type { UnknownCodeReview } from "@/types";
 
 // Shows the decode pipeline outcome. Two visible states only: "Verified" (app-confirmed) and
@@ -347,7 +348,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             >
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {prettifyProductName(p.name)}
                 </option>
               ))}
             </select>

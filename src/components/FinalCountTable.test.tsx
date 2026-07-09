@@ -111,6 +111,24 @@ describe("FinalCountTable Brand/Model/Size columns + digits filter (Build 2 Task
   });
 });
 
+describe("FinalCountTable prettifies slug names and lowercase brands (Task 5)", () => {
+  it("renders a Title Case product name, brand, and model from corpus-style slug/lowercase data", () => {
+    process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
+    const tire: Product = {
+      ...product, id: "p8", name: "wrangler_workhorse_at", brand: "goodyear",
+      structuredBrand: "goodyear", structuredModel: "wrangler_workhorse_at",
+    };
+    const tcount: InventoryCount = { ...count, id: "c8", productId: "p8" };
+    useScanStore.setState({ products: [tire], finalCounts: [tcount] });
+    render(<FinalCountTable />);
+
+    expect(screen.getAllByText("Wrangler Workhorse AT").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("brand-p8").textContent).toBe("Goodyear");
+    expect(screen.getByTestId("model-p8").textContent).toBe("Wrangler Workhorse AT");
+    expect(screen.queryByText("wrangler_workhorse_at")).not.toBeInTheDocument();
+  });
+});
+
 describe("FinalCountTable Size column shows canonical size (Task 6)", () => {
   it("renders the canonical size from specsShort, not the digit-mash, and keeps the digit form as a title tooltip", () => {
     process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
