@@ -16,6 +16,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { parseSitemapXml, filterTireProductUrls } from "./lib/sitemap.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,16 +26,21 @@ const PATTERNS_FILE = path.join(STATE_DIR, "url-patterns.json");
 
 const ROBOTS_URL = "https://www.discounttire.com/robots.txt";
 const FALLBACK_SITEMAP_URL = "https://www.discounttire.com/sitemap.xml";
-const ALLOWED_HOSTS = new Set(["discounttire.com", "www.discounttire.com"]);
 const MAX_CHILD_SITEMAPS = 30;
 const FETCH_TIMEOUT_MS = 15000;
 const POLITE_DELAY_MS = 500;
 
+// Sitemap fetches may hit any *.discounttire.com host: the live sitemap index on
+// www.discounttire.com points its child sitemaps at cdn.discounttire.com
+// (verified 2026-07-08). Product-PAGE fetches in run-batch.mjs stay locked to
+// www.discounttire.com via lib/batch.mjs hostAllowed - this wider rule is for
+// sitemap XML only, per the plan's "exactly discounttire.com (+ its sitemap host)".
 function isAllowedSitemapUrl(url) {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
-    return ALLOWED_HOSTS.has(parsed.hostname.toLowerCase());
+    const host = parsed.hostname.toLowerCase();
+    return host === "discounttire.com" || host.endsWith(".discounttire.com");
   } catch {
     return false;
   }
@@ -44,14 +50,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Fetch a url as text with a hard timeout. Returns "" on any failure (never throws). */
+/**
+ * Fetch a url as text with a hard timeout, transparently gunzipping .gz sitemap
+ * files (DT serves e.g. sitemaps_full_product.0000.xml.gz as a gzip FILE, not
+ * Content-Encoding, so fetch will not decompress it for us). Detects gzip by the
+ * 0x1f8b magic bytes rather than trusting the url suffix. Returns "" on any
+ * failure (never throws).
+ */
 async function fetchTextSafe(url, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) return "";
-    return await res.text();
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+      return gunzipSync(buf).toString("utf8");
+    }
+    return buf.toString("utf8");
   } catch {
     return "";
   } finally {
@@ -119,31 +135,37 @@ async function main() {
     console.log(`Found ${sitemapUrls.length} sitemap url(s) in robots.txt`);
   }
 
+  // Walk EVERY allowlisted sitemap from robots.txt (DT lists 6+ on
+  // sitemaps.discounttire.com; the product catalog lives in
+  // sitemap_full_product.xml, not the first entry), expanding one level of
+  // sitemap-index indirection per entry.
   const allUrls = [];
-  const rootSitemapUrl = sitemapUrls[0];
-  console.log(`Fetching root sitemap: ${rootSitemapUrl}`);
-  const rootXml = await fetchTextSafe(rootSitemapUrl);
-  const rootLocs = parseSitemapXml(rootXml);
+  for (const sitemapUrl of sitemapUrls) {
+    console.log(`Fetching sitemap: ${sitemapUrl}`);
+    const xml = await fetchTextSafe(sitemapUrl);
+    const locs = parseSitemapXml(xml);
 
-  if (isSitemapIndex(rootXml)) {
-    const childSitemapUrls = rootLocs.filter(isAllowedSitemapUrl).slice(0, MAX_CHILD_SITEMAPS);
-    const refusedCount = rootLocs.filter((u) => !isAllowedSitemapUrl(u)).length;
-    if (refusedCount > 0) {
-      console.log(`Refused ${refusedCount} child sitemap url(s) outside the discounttire.com host allowlist.`);
-    }
-    console.log(`Sitemap index detected: ${childSitemapUrls.length} child sitemap(s) to fetch (capped at ${MAX_CHILD_SITEMAPS}).`);
+    if (isSitemapIndex(xml)) {
+      const childSitemapUrls = locs.filter(isAllowedSitemapUrl).slice(0, MAX_CHILD_SITEMAPS);
+      const refusedCount = locs.filter((u) => !isAllowedSitemapUrl(u)).length;
+      if (refusedCount > 0) {
+        console.log(`  Refused ${refusedCount} child sitemap url(s) outside the discounttire.com host allowlist.`);
+      }
+      console.log(`  Index: ${childSitemapUrls.length} child sitemap(s) to fetch (capped at ${MAX_CHILD_SITEMAPS}).`);
 
-    for (let i = 0; i < childSitemapUrls.length; i++) {
-      const childUrl = childSitemapUrls[i];
-      console.log(`  [${i + 1}/${childSitemapUrls.length}] ${childUrl}`);
-      const childXml = await fetchTextSafe(childUrl);
-      const childLocs = parseSitemapXml(childXml);
-      allUrls.push(...childLocs);
-      if (i < childSitemapUrls.length - 1) await sleep(POLITE_DELAY_MS);
+      for (let i = 0; i < childSitemapUrls.length; i++) {
+        const childUrl = childSitemapUrls[i];
+        const childXml = await fetchTextSafe(childUrl);
+        const childLocs = parseSitemapXml(childXml);
+        console.log(`  [${i + 1}/${childSitemapUrls.length}] ${childUrl} -> ${childLocs.length} urls`);
+        allUrls.push(...childLocs);
+        await sleep(POLITE_DELAY_MS);
+      }
+    } else {
+      console.log(`  Urlset: ${locs.length} urls.`);
+      allUrls.push(...locs);
     }
-  } else {
-    console.log("Root sitemap is a urlset (not an index) - using its urls directly.");
-    allUrls.push(...rootLocs);
+    await sleep(POLITE_DELAY_MS);
   }
 
   const totalDiscovered = allUrls.length;
