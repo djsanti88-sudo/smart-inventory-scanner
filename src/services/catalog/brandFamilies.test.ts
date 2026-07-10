@@ -18,9 +18,16 @@ describe("sameBrandFamily (curated same-company groups)", () => {
     expect(sameBrandFamily("firestone", "dayton")).toBe(true);
   });
 
-  it("Goodyear family covers Kelly and Dunlop", () => {
+  it("Goodyear family covers Kelly", () => {
     expect(sameBrandFamily("Goodyear", "Kelly")).toBe(true);
-    expect(sameBrandFamily("goodyear", "Dunlop")).toBe(true);
+  });
+
+  it("Dunlop is deliberately unfamilied (2025 Sumitomo trademark repurchase from Goodyear)", () => {
+    // Sumitomo Rubber Industries bought back the Dunlop trademark for NA/Europe/Oceania in a deal
+    // that closed May 2025. Ownership is mid-transition (Goodyear-era stock still on shelves), so
+    // Dunlop must not be grouped with either owner - a real conflict must reach Needs Review.
+    expect(sameBrandFamily("Dunlop", "Goodyear")).toBe(false);
+    expect(sameBrandFamily("Dunlop", "Sumitomo")).toBe(false);
   });
 
   it("Argus and Advanta are the same house family", () => {

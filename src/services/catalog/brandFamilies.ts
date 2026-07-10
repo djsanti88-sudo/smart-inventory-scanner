@@ -10,15 +10,26 @@
 //
 // Pure, no imports. Each line carries the evidence for WHY those brands are one company.
 
+// Dunlop is deliberately in NO family below. Goodyear held the Dunlop tire trademark for North
+// America/Europe/Oceania for decades, but Sumitomo Rubber Industries REPURCHASED that trademark
+// in a deal that closed May 2025 - Dunlop-branded product today is Sumitomo's, while pre-2025
+// shelf stock (still legitimately in circulation) is Goodyear-era. Because ownership is
+// mid-transition and a brand can only live in ONE group here, grouping "dunlop" with EITHER
+// goodyear OR sumitomo risks suppressing a real conflict for the other owner's stock. Leaving it
+// unfamilied routes any Dunlop-branded result on a known prefix to Needs Review instead of an
+// auto-pass - "wrong product identity is FAILURE, unknown is ACCEPTABLE" (see CLAUDE.md Resolver
+// Trust Rules). Revisit only with dated evidence the transition-era stock has fully cycled out.
+
 /** Curated same-company groups. Only add a group with a verifiable same-company relationship. */
 const FAMILIES: readonly string[][] = [
   // Bridgestone Americas owns Firestone (acquired 1988) and Dayton (Bridgestone's associate/value line).
   // Corpus prefix 0929711 carries all three (bridgestone 1684, firestone 68, dayton 53 rows).
   ["bridgestone", "firestone", "dayton"],
-  // Goodyear owns Kelly (Kelly-Springfield subsidiary), the Dunlop tire trademark for North America,
-  // and since 2021 Cooper Tire & Rubber including Cooper's house brands Mastercraft, Roadmaster and
-  // Mickey Thompson.
-  ["goodyear", "kelly", "dunlop", "cooper", "mastercraft", "roadmaster", "mickey thompson"],
+  // Goodyear owns Kelly (Kelly-Springfield subsidiary) and, since 2021, Cooper Tire & Rubber
+  // including Cooper's house brands Mastercraft, Roadmaster and Mickey Thompson. Dunlop is
+  // deliberately EXCLUDED here - see the standalone comment above the FAMILIES table (2025
+  // Sumitomo trademark repurchase; transition-era stock spans both owners).
+  ["goodyear", "kelly", "cooper", "mastercraft", "roadmaster", "mickey thompson"],
   // The Carlstar Group is the parent; Carlisle is its flagship tire/wheel retail brand. This is the
   // exact false-positive pair from the offline eval (prefixes 0709640 / 0332592).
   ["carlstar", "carlisle"],
@@ -26,8 +37,10 @@ const FAMILIES: readonly string[][] = [
   // Trading / same house brand family); the corpus keys them to shared prefixes.
   ["argus", "advanta"],
   // Michelin North America owns BFGoodrich (acquired via Uniroyal Goodrich, 1990) and the Uniroyal
-  // tire brand in North America. GS1 prefix 086699 carries Michelin, BFGoodrich and Uniroyal product
-  // (live false-conflict: Go-UPC "Michelin" vs prefix owner "bfgoodrich" on 086699998538, 2026-07-10).
+  // tire brand in NORTH AMERICA ONLY (Continental owns the Uniroyal trademark in Europe); this
+  // table serves the NA-market corpus, so NA Uniroyal GTINs legitimately share Michelin-family
+  // prefixes. GS1 prefix 086699 carries Michelin, BFGoodrich and Uniroyal product (live
+  // false-conflict: Go-UPC "Michelin" vs prefix owner "bfgoodrich" on 086699998538, 2026-07-10).
   ["michelin", "bfgoodrich", "uniroyal"],
   // Continental AG owns General Tire (acquired 1987, marketed as "General" in North America).
   ["continental", "general"],
