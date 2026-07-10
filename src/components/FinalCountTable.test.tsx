@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
 import { FinalCountTable } from "@/components/FinalCountTable";
-import type { InventoryCount, Product } from "@/types";
+import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
 const product: Product = {
   id: "p1", businessId: "b", name: "Test Widget", brand: "Acme", category: "Tools",
@@ -183,5 +183,135 @@ describe("FinalCountTable Size column shows canonical size (Task 6)", () => {
     fireEvent.change(screen.getByTestId("polish-filter"), { target: { value: "205" } });
     expect(screen.queryByTestId("count-row-p6")).not.toBeNull();
     expect(screen.queryByTestId("count-row-p7")).toBeNull();
+  });
+});
+
+// Owner order 2026-07-10: "your counts" needs a Status column so a shop owner can tell a Verified
+// match from a Suggested (unconfirmed) or Needs review row without opening Needs Review separately,
+// and provisional rows should show whatever identity info exists (mirrors LiveScanFeed's render-time
+// needsReviewQueue lookup + unconfirmed/(suggested) tag convention) instead of a bare placeholder.
+function provisionalProduct(id: string, overrides: Partial<Product> = {}): Product {
+  return {
+    ...product,
+    id,
+    name: `Unidentified item (barcode ${overrides.primaryBarcode ?? "999000111222"})`,
+    brand: "",
+    verified: false,
+    provisional: true,
+    confidence: 0,
+    primaryBarcode: "999000111222",
+    ...overrides,
+  };
+}
+
+function suggestionReview(overrides: Partial<UnknownCodeReview> = {}): UnknownCodeReview {
+  return {
+    id: "rv1",
+    cleanCode: "999000111222",
+    suggestedProductName: "Michelin Defender LTX M/S",
+    suggestedBrand: "Michelin",
+    suggestedPrimarySku: "",
+    confidence: 0.7,
+    status: "open",
+    ...overrides,
+  } as unknown as UnknownCodeReview;
+}
+
+describe("FinalCountTable Status column + suggested-identity display (owner order 2026-07-10)", () => {
+  it("shows a Status column with the Verified badge for a verified product row", () => {
+    seed(); // seeded `product` has verified: true
+    render(<FinalCountTable />);
+    expect(screen.queryByText("Status")).not.toBeNull();
+    const row = screen.getByTestId("count-row-p1");
+    expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Verified match");
+  });
+
+  it("provisional product with an open low-confidence suggestion shows the suggested name, (suggested) tag, brand, and Suggested badge", () => {
+    const prov = provisionalProduct("pProv1");
+    const provCount: InventoryCount = { ...count, id: "cProv1", productId: "pProv1" };
+    const review = suggestionReview({
+      cleanCode: "999000111222",
+      suggestedProductName: "Michelin Defender LTX M/S",
+      suggestedBrand: "Michelin",
+      confidence: 0.7,
+    });
+    useScanStore.setState({ products: [prov], finalCounts: [provCount], needsReviewQueue: [review] });
+    render(<FinalCountTable />);
+
+    const row = screen.getByTestId("count-row-pProv1");
+    expect(row.textContent).toMatch(/Michelin Defender LTX/);
+    expect(row.textContent).toMatch(/\(suggested\)/);
+    expect(screen.getByTestId("brand-pProv1").textContent).toBe("Michelin");
+    expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Suggested");
+  });
+
+  it("provisional product whose identity was auto-applied shows its own name/brand, the unconfirmed tag, and a Suggested badge", () => {
+    const prov: Product = {
+      ...product,
+      id: "pProv2",
+      name: "Michelin Defender LTX M/S",
+      brand: "Michelin",
+      verified: false,
+      provisional: true,
+      confidence: 0.9,
+      primaryBarcode: "999000111333",
+    };
+    const provCount: InventoryCount = { ...count, id: "cProv2", productId: "pProv2" };
+    const review = suggestionReview({
+      id: "rv2",
+      cleanCode: "999000111333",
+      provisionalProductId: "pProv2",
+      suggestedProductName: "Michelin Defender LTX M/S",
+      suggestedBrand: "Michelin",
+      confidence: 0.9,
+      status: "resolved",
+    });
+    useScanStore.setState({ products: [prov], finalCounts: [provCount], needsReviewQueue: [review] });
+    render(<FinalCountTable />);
+
+    const row = screen.getByTestId("count-row-pProv2");
+    expect(row.textContent).toMatch(/Michelin Defender LTX/);
+    expect(row.textContent).toMatch(/unconfirmed/);
+    expect(row.textContent).not.toMatch(/\(suggested\)/);
+    expect(screen.getByTestId("brand-pProv2").textContent).toBe("Michelin");
+    expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Suggested");
+  });
+
+  it("provisional product with no suggestion anywhere shows the needs_review badge and keeps the placeholder name", () => {
+    const prov = provisionalProduct("pProv3", { primaryBarcode: "999000111444" });
+    const provCount: InventoryCount = { ...count, id: "cProv3", productId: "pProv3" };
+    useScanStore.setState({ products: [prov], finalCounts: [provCount], needsReviewQueue: [] });
+    render(<FinalCountTable />);
+
+    const row = screen.getByTestId("count-row-pProv3");
+    expect(row.textContent).toMatch(/Unidentified item/);
+    expect(row.querySelector('[data-testid="decode-row-status"]')?.textContent).toBe("Suggested");
+  });
+
+  it("provisional product with a full suggested identity fills Brand, Category, Specs, Size, and Part number through the suggestion (owner refinement: no all-dashes row when a suggestion exists)", () => {
+    const prov = provisionalProduct("pProv4", { primaryBarcode: "999000111555" });
+    const provCount: InventoryCount = { ...count, id: "cProv4", productId: "pProv4" };
+    const review = suggestionReview({
+      id: "rv4",
+      cleanCode: "999000111555",
+      suggestedProductName: "Goodyear Wrangler AT 265/70R17",
+      suggestedBrand: "Goodyear",
+      suggestedCategory: "Tires",
+      suggestedSpecsShort: "265/70R17 115T",
+      suggestedPrimarySku: "GY-WRNGLR-2657017",
+      confidence: 0.65,
+    });
+    useScanStore.setState({ products: [prov], finalCounts: [provCount], needsReviewQueue: [review] });
+    render(<FinalCountTable />);
+
+    const row = screen.getByTestId("count-row-pProv4");
+    expect(screen.getByTestId("brand-pProv4").textContent).toBe("Goodyear");
+    expect(row.textContent).toMatch(/Tires/);
+    expect(row.textContent).toMatch(/265\/70R17/);
+    expect(screen.getByTestId("size-pProv4").textContent?.trim()).toBe("265/70R17");
+    expect(row.textContent).toMatch(/GY-WRNGLR-2657017/);
+    // None of the suggestion-mappable cells fall back to a bare "-" when a suggestion exists.
+    expect(screen.getByTestId("brand-pProv4").textContent).not.toBe("-");
+    expect(screen.getByTestId("size-pProv4").textContent?.trim()).not.toBe("-");
   });
 });
