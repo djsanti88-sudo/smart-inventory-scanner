@@ -287,7 +287,7 @@ export async function GET(request: Request) {
   const goUpcSpend = await goUpcUsage(await ladderStorage()).canSpend();
   // Task 1 (v2 daily cap): read-only peek at today's atomic, storage-backed usage - makes NO writes
   // (readDailyUsed never increments), so this GET never inflates the counter it is reporting on.
-  const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+  const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
   const dailyUsed = await readDailyUsed(await ladderStorage());
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
@@ -417,7 +417,7 @@ export async function POST(request: Request) {
   if (!e2eMode() && !isDecodeMode) {
     const ladderStore = await ladderStorage();
     const used = await readDailyUsed(ladderStore);
-    const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+    const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
     if (used >= limit) {
       return Response.json(
         { error: `Daily AI lookup cap reached (${used}/${limit}). No AI call made.`, reasonCode: "daily_cap" },
@@ -923,7 +923,7 @@ export async function POST(request: Request) {
       // charges, so Fetch V2/GPT running after a Go-UPC miss can never double-charge this request.
       if (!e2eMode()) {
         const ladderStore = await ladderStorage();
-        const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+        const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
         const used = await readDailyUsed(ladderStore);
         if (used >= limit) throw new DailyCapExceededError(used, limit);
         await chargeDailySlot(ladderStore, { limit });

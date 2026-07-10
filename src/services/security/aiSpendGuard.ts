@@ -106,7 +106,7 @@ export async function chargeDailySlot(
   storage: DailyCapStorage,
   opts: { limit?: number; dateKey?: string } = {},
 ): Promise<{ used: number; limit: number }> {
-  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
   const used = await storage.increment(DAILY_KEY_PREFIX + (opts.dateKey ?? todayKey()));
   return { used, limit };
 }
@@ -118,7 +118,7 @@ export async function chargeDailySlot(
 export function checkAndIncrementDaily(
   opts: { limit?: number; file?: string; dateKey?: string } = {}
 ): { allowed: boolean; used: number; limit: number } {
-  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 200);
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
   const file = opts.file ?? counterFile();
   const date = opts.dateKey ?? todayKey();
   let state: DailyState | null = memDaily;
