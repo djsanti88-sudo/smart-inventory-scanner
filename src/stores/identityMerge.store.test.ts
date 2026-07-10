@@ -86,4 +86,88 @@ describe("scanStore identity-merge on decode apply", () => {
     // And no SECOND real (non-provisional) product was minted from the fuzzy decode.
     expect(store.getState().products.filter((p) => p.brand === "Zephyra" && !p.provisional)).toHaveLength(1);
   });
+
+  it("same-model-different-size verified decode mints a NEW product instead of a suggest_link review (2026-07-10 burst defect)", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+
+    // Seed an existing counted product (size lives in specsShort, the corpus shape - name is a slug).
+    store.getState().processScan("333333333330");
+    const rSeed = store.getState().needsReviewQueue.find((r) => r.cleanCode === "333333333330" && r.status === "open")!.id;
+    store.getState().resolveUnknown(rSeed, "create_new", {
+      applyToCount: true,
+      origin: "ai",
+      newProduct: {
+        name: "wrangler_steadfast_ht",
+        brand: "goodyear",
+        category: "Tire",
+        specsShort: "265/45R20 105V",
+        primaryBarcode: "333333333330",
+      },
+    });
+    const seeded = store.getState().products.find((p) => p.primaryBarcode === "333333333330")!;
+    expect(seeded, "seeded product exists").toBeDefined();
+
+    // Resolve an unknown for a DIFFERENT size of the SAME model (no shared GTIN).
+    const SCANNED_CODE = "444444444437";
+    store.getState().processScan(SCANNED_CODE);
+    const r2 = store.getState().needsReviewQueue.find((r) => r.cleanCode === SCANNED_CODE && r.status === "open")!.id;
+    store.getState().resolveUnknown(r2, "create_new", {
+      applyToCount: true,
+      origin: "ai",
+      newProduct: {
+        name: "wrangler_steadfast_ht",
+        brand: "goodyear",
+        category: "Tire",
+        specsShort: "255/55R20 110V",
+      },
+    });
+
+    const st = store.getState();
+    const steadfasts = st.products.filter((p) => p.name === "wrangler_steadfast_ht");
+    expect(steadfasts.length, "two different sizes = two distinct products").toBe(2);
+    const review = st.needsReviewQueue.find((r) => r.cleanCode === SCANNED_CODE)!;
+    expect(review.status, "resolved, not left open with a link suggestion").toBe("resolved");
+    expect(review.suggestedLinkProductId).toBeUndefined();
+  });
+
+  it("same-model SAME-size still becomes a suggest_link review (dedup protection intact)", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+
+    store.getState().processScan("555555555534");
+    const rSeed = store.getState().needsReviewQueue.find((r) => r.cleanCode === "555555555534" && r.status === "open")!.id;
+    store.getState().resolveUnknown(rSeed, "create_new", {
+      applyToCount: true,
+      origin: "ai",
+      newProduct: {
+        name: "wrangler_steadfast_ht",
+        brand: "goodyear",
+        category: "Tire",
+        specsShort: "265/45R20 105V",
+        primaryBarcode: "555555555534",
+      },
+    });
+    const seeded = store.getState().products.find((p) => p.primaryBarcode === "555555555534")!;
+    expect(seeded, "seeded product exists").toBeDefined();
+
+    // Resolve an unknown for the SAME model, SAME size, different code (no shared GTIN).
+    const SCANNED_CODE = "666666666631";
+    store.getState().processScan(SCANNED_CODE);
+    const r2 = store.getState().needsReviewQueue.find((r) => r.cleanCode === SCANNED_CODE && r.status === "open")!.id;
+    store.getState().resolveUnknown(r2, "create_new", {
+      applyToCount: true,
+      origin: "ai",
+      newProduct: {
+        name: "wrangler_steadfast_ht",
+        brand: "goodyear",
+        category: "Tire",
+        specsShort: "265/45R20 105V",
+      },
+    });
+
+    const st = store.getState();
+    const review = st.needsReviewQueue.find((r) => r.cleanCode === SCANNED_CODE)!;
+    expect(review.status, "suggest-link keeps the review open for the human").toBe("open");
+    expect(review.suggestedLinkProductId, "existing product attached as a link suggestion").toBe(seeded.id);
+    expect(st.products.filter((p) => p.name === "wrangler_steadfast_ht"), "no second product minted").toHaveLength(1);
+  });
 });
