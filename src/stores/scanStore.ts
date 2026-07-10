@@ -2941,6 +2941,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               ean: np.ean ?? null,
               brand: np.brand ?? null,
               name: np.name ?? null,
+              specsShort: np.specsShort ?? null,
+              specsFull: np.specsFull ?? null,
             });
             if (merge.kind === "auto_link") {
               // Same product across encodings -> reuse its row (the size===1 path below adds the alias +
