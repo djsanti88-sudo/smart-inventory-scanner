@@ -15,15 +15,28 @@ const FAMILIES: readonly string[][] = [
   // Bridgestone Americas owns Firestone (acquired 1988) and Dayton (Bridgestone's associate/value line).
   // Corpus prefix 0929711 carries all three (bridgestone 1684, firestone 68, dayton 53 rows).
   ["bridgestone", "firestone", "dayton"],
-  // Goodyear owns Kelly (Kelly-Springfield, a Goodyear subsidiary) and Dunlop tire brand (Goodyear
-  // owns the Dunlop tire trademark for North America).
-  ["goodyear", "kelly", "dunlop"],
+  // Goodyear owns Kelly (Kelly-Springfield subsidiary), the Dunlop tire trademark for North America,
+  // and since 2021 Cooper Tire & Rubber including Cooper's house brands Mastercraft, Roadmaster and
+  // Mickey Thompson.
+  ["goodyear", "kelly", "dunlop", "cooper", "mastercraft", "roadmaster", "mickey thompson"],
   // The Carlstar Group is the parent; Carlisle is its flagship tire/wheel retail brand. This is the
   // exact false-positive pair from the offline eval (prefixes 0709640 / 0332592).
   ["carlstar", "carlisle"],
   // Argus and Advanta are both value tire brands marketed by the same distributor (American Omni
   // Trading / same house brand family); the corpus keys them to shared prefixes.
   ["argus", "advanta"],
+  // Michelin North America owns BFGoodrich (acquired via Uniroyal Goodrich, 1990) and the Uniroyal
+  // tire brand in North America. GS1 prefix 086699 carries Michelin, BFGoodrich and Uniroyal product
+  // (live false-conflict: Go-UPC "Michelin" vs prefix owner "bfgoodrich" on 086699998538, 2026-07-10).
+  ["michelin", "bfgoodrich", "uniroyal"],
+  // Continental AG owns General Tire (acquired 1987, marketed as "General" in North America).
+  ["continental", "general"],
+  // Toyo Tire Corporation owns Nitto (Nitto Tire is Toyo's subsidiary brand).
+  ["toyo", "nitto"],
+  // Sumitomo Rubber Industries owns Falken and Ohtsu.
+  ["sumitomo", "falken", "ohtsu"],
+  // Hankook owns Laufenn (its value line).
+  ["hankook", "laufenn"],
 ];
 
 /** Same brand-normalization as the firewall so lookups line up (lowercase, strip punctuation + noise). */

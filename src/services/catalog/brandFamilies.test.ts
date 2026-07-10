@@ -44,3 +44,34 @@ describe("sameBrandFamily (curated same-company groups)", () => {
     expect(sameBrandFamily("", "")).toBe(false);
   });
 });
+
+describe("michelin family (086699998538 false-conflict class)", () => {
+  it("treats Michelin and BFGoodrich as the same company", () => {
+    expect(sameBrandFamily("Michelin", "bfgoodrich")).toBe(true);
+    expect(sameBrandFamily("BFGoodrich Tires", "michelin")).toBe(true);
+  });
+  it("treats Michelin and Uniroyal as the same company", () => {
+    expect(sameBrandFamily("Uniroyal", "Michelin")).toBe(true);
+  });
+  it("does NOT relate Michelin to Goodyear or Bridgestone", () => {
+    expect(sameBrandFamily("Michelin", "Goodyear")).toBe(false);
+    expect(sameBrandFamily("bfgoodrich", "Bridgestone")).toBe(false);
+  });
+});
+
+describe("other evidenced corporate families", () => {
+  it("Continental owns General Tire", () => {
+    expect(sameBrandFamily("General", "Continental")).toBe(true);
+  });
+  it("Goodyear owns Cooper (2021) and Cooper's house brands", () => {
+    expect(sameBrandFamily("Cooper", "Goodyear")).toBe(true);
+    expect(sameBrandFamily("Mastercraft", "goodyear")).toBe(true);
+  });
+  it("Toyo owns Nitto", () => {
+    expect(sameBrandFamily("Nitto", "Toyo")).toBe(true);
+  });
+  it("unrelated pairs still never match", () => {
+    expect(sameBrandFamily("Cooper", "Michelin")).toBe(false);
+    expect(sameBrandFamily("Nitto", "Hankook")).toBe(false);
+  });
+});
