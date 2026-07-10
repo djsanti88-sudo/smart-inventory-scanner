@@ -184,6 +184,44 @@ export function decodeCorroborated(decision: { exactCodeEvidenceVerifiedByApp?: 
 }
 
 /**
+ * AUTO-SUGGEST-APPLY gate (owner order 2026-07-10), shared by liveDecode + backgroundVerifyDeep so the
+ * rule cannot drift between the two paths. Any decode that did NOT clear the full auto-count gate
+ * (evidenceGatePassed above) can still skip Needs Review and have its identity applied straight onto the
+ * counted provisional row - AS A SUGGESTION, never verified - when confidence >= 0.8, OR the decode is
+ * app-verified exact (status "verified" + exactCodeEvidenceVerifiedByApp true, the Go-UPC exact class).
+ * Still requires a usable name and no scan-context conflict; the master switch (autoAddDecodedProducts)
+ * is checked by the caller. This never weakens or duplicates the full evidence gate - it only decides
+ * whether a decode that landed short of it may still avoid sitting in Needs Review.
+ *
+ * TRUST FIREWALL (do not remove): the confidence>=0.8 clause is INTENTIONALLY restricted to
+ * status !== "verified" (i.e. "suggested"/"needs_review" decodes, which never claimed independent
+ * verification). A raw decision.confidence on a "verified" decode is the PROVIDER'S self-reported
+ * number and is not itself proof - the app's own evidence check (exactCodeEvidenceVerifiedByApp) is
+ * the only thing that may promote a "verified" decode here, exactly like the full evidence gate above.
+ * Without this restriction, a bare gpt_self_report or two-AI-agreement "verified" decode on a
+ * non-public-barcode-shape code (e.g. a 4-digit vendor SKU) at confidence 0.9 would auto-apply a
+ * fabricated identity as a "suggestion" - the exact T20/code-1225 failure class this app's firewalls
+ * exist to prevent (see scanStore.gptLadder.test.ts). A wrong identity shown on the counted row is
+ * still a wrong identity; "only a suggestion" is not an exemption from that rule.
+ */
+function autoSuggestApplyOk(params: {
+  autoAddOn: boolean;
+  contextConflict: unknown;
+  productName: string;
+  confidence: number;
+  status: string | undefined;
+  exactCodeEvidenceVerifiedByApp: boolean;
+}): boolean {
+  return (
+    params.autoAddOn &&
+    !params.contextConflict &&
+    isUsableProductName(params.productName) &&
+    ((params.confidence >= 0.8 && params.status !== "verified") ||
+      (params.status === "verified" && params.exactCodeEvidenceVerifiedByApp === true))
+  );
+}
+
+/**
  * Bounded decode queue (Task 5): a rapid multi-scan burst must not fire unlimited concurrent
  * `/api/ai-lookup` network calls. The public `liveDecode` action is a thin wrapper that ENQUEUES the
  * real decode work (`runLiveDecodeOnce`) here; `drainDecodeQueue` runs at most MAX_CONCURRENT_DECODES
@@ -2378,6 +2416,32 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : st.scanFeed,
             }));
 
+            // AUTO-SUGGEST-APPLY (owner order 2026-07-10): this decode did NOT clear the full auto-count
+            // gate above, but it may still be high-trust enough to skip Needs Review entirely. The
+            // identity was ALREADY applied onto the provisional row in place a few lines up (the
+            // hasUsableName enrich branch runs regardless of this gate) - the only thing left is to close
+            // the review instead of leaving it open, when confidence >= 0.8 OR this is an app-verified
+            // exact decode (Go-UPC exact class: status "verified" + exactCodeEvidenceVerifiedByApp true).
+            // TRUST RULES: no alias is created here, the product stays provisional:true/verified:false,
+            // and the feed badge stays "suggested" (never "verified") - markFeedRowVerified is not called.
+            const autoSuggestApplied = autoSuggestApplyOk({
+              autoAddOn,
+              contextConflict,
+              productName: best?.productName ?? "",
+              confidence: decision?.confidence ?? 0,
+              status: decision?.status,
+              exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
+            });
+            if (autoSuggestApplied) {
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                    : r,
+                ),
+              }));
+            }
+
             // Tasks 5+6: CLIENT-ORCHESTRATED BACKGROUND VERIFY. The fast hot path (mode:"decode") did
             // NOT auto-count this scan (the else branch ran -> not verified-and-clean). For a TIRE scan
             // that is still open, fire ONE background `mode:"decode-deep"` request WITH scanContext
@@ -2389,11 +2453,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // identity in tire context): re-fetching would just re-confirm the poison and the firewall
             // would block the count anyway, so we keep it in human review instead of spending a fetch.
             // The tire trigger reads BOTH the scan context (tire) and the decoded identity, so a clearly
-            // non-tire decode in tire context does not escalate.
+            // non-tire decode in tire context does not escalate. Also skip when this decode was just
+            // auto-suggest-applied above: the review is already closed, so a deep re-check would find
+            // status !== "open" and no-op anyway (idempotency guard) - skip the wasted network call.
             const tireScan =
               (s.scanContext ?? "any") === "tire" && (isTireContext(best) || lookupTirePrefix(review.cleanCode) !== null);
             const fastWasVerified = decision?.status === "verified";
-            if (tireScan && !fastWasVerified && !contextConflict) {
+            if (tireScan && !fastWasVerified && !contextConflict && !autoSuggestApplied) {
               // Fire-and-forget: it must NEVER block the scan UI or throw into this flow. The action
               // self-guards on the review still being open (idempotent against a late/duplicate response).
               void get().backgroundVerifyDeep(reviewId);
@@ -2791,9 +2857,63 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               r.id === reviewId && r.status === "open" ? { ...r, reason: conflictReason(contextConflict) } : r,
             ),
           }));
+        } else {
+          // AUTO-SUGGEST-APPLY (owner order 2026-07-10, kept in sync with the same gate in liveDecode):
+          // a verified deep decode that missed the full auto-count gate above (e.g. tireOk failed) can
+          // still skip Needs Review as a SUGGESTION when confidence >= 0.8, OR this is an app-verified
+          // exact decode (Go-UPC exact class). Apply the identity onto the existing provisional row IN
+          // PLACE - product stays provisional:true/verified:false - and close the review. TRUST RULES:
+          // no alias created, markFeedRowVerified never called, feed badge stays "suggested".
+          const autoSuggestApplied = autoSuggestApplyOk({
+            autoAddOn,
+            contextConflict,
+            productName: best?.productName ?? "",
+            confidence: decision.confidence ?? 0,
+            status: decision.status,
+            exactCodeEvidenceVerifiedByApp: Boolean(decision.exactCodeEvidenceVerifiedByApp),
+          });
+          if (autoSuggestApplied) {
+            const provId =
+              review.provisionalProductId ??
+              get().products.find((p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === review.cleanCode)?.id;
+            if (provId) {
+              set((st) => ({
+                products: st.products.map((p) =>
+                  p.id === provId
+                    ? {
+                        ...p,
+                        name: tireFields?.description || cleanName || p.name,
+                        brand: tireFields?.brand ?? best?.brand ?? p.brand,
+                        category: best?.category ?? p.category,
+                        specsShort: tireFields?.size ?? best?.specsShort ?? p.specsShort,
+                        specsFull: best?.specsFull ?? p.specsFull,
+                        primarySku: p.primarySku || (tireFields?.partNumber ?? best?.primarySku ?? ""),
+                        gtin: p.gtin || (best?.gtin ?? ""),
+                        upc: p.upc || (best?.upc ?? ""),
+                        ean: p.ean || (best?.ean ?? ""),
+                        imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? p.imageUrl) : p.imageUrl,
+                        productUrl: best?.productUrl || p.productUrl,
+                        confidence: decision.confidence ?? p.confidence,
+                        updatedAt: now(),
+                        updatedBy: "ai",
+                      }
+                    : p,
+                ),
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                    : r,
+                ),
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.decodeStatus !== "verified" ? { ...e, decodeStatus: "suggested" as const } : e,
+                ),
+              }));
+            }
+          }
+          // else: verified-but-gate-blocked-for-another-reason (e.g. autoAdd off, incomplete specs, or no
+          // usable name/confidence < 0.8 and not app-verified-exact). The fast pass already left an
+          // accurate review row; we leave it for the human (never count a blocked result).
         }
-        // else: verified-but-gate-blocked-for-another-reason (e.g. autoAdd off, incomplete specs). The fast
-        // pass already left an accurate review row; we leave it for the human (never count a blocked result).
       },
 
       resolveUnknown: (reviewId, action, payload) => {

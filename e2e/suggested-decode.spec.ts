@@ -6,8 +6,11 @@ import { test, expect, type Page, type Route } from "./fixtures";
 //   1. Show the suggested identity on the scan feed (not the "Unidentified item" placeholder).
 //   2. Tag it with the neutral "unconfirmed" label (never the amber "(suggested)" tag, which is
 //      reserved for confidence < 0.8 - see LiveScanFeed.tsx's suggestionTag logic).
-//   3. Surface the scanned barcode in the new Barcode column on /review
-//      ([data-testid="review-barcode"], NeedsReviewTable.tsx).
+//   3. OWNER ORDER 2026-07-10: any decode with confidence >= 0.8 must no longer sit in Needs
+//      Review at all - the identity auto-applies onto the counted row and the review auto-closes
+//      (scanStore.ts autoSuggestApplyOk). The review therefore disappears from /review (it is
+//      resolved + synced, filtered out by NeedsReviewTable's `status === "open" ||
+//      syncStatus !== "synced"` visible-rows filter) and the Review nav badge excludes it.
 // All provider traffic is mocked via page.route; the Playwright webServer runs IS_E2E=1
 // (mock-only), so no live Gemini/OpenAI calls are made.
 
@@ -63,7 +66,7 @@ async function scan(page: Page, code: string) {
   await input.press("Enter");
 }
 
-test("suggested decode (confidence 0.92) shows identity + unconfirmed tag; review shows barcode column", async ({ page }) => {
+test("suggested decode (confidence 0.92) shows identity + unconfirmed tag; review auto-closes (owner order 2026-07-10)", async ({ page }) => {
   await page.route("**/api/ai-lookup", async (route: Route) => {
     const req = route.request();
     if (req.method() === "GET") return route.fulfill({ json: STATUS });
@@ -93,9 +96,13 @@ test("suggested decode (confidence 0.92) shows identity + unconfirmed tag; revie
 
   await page.screenshot({ path: `${PROOF}/suggested-decode.png`, fullPage: true });
 
-  // Review page: the new Barcode column carries the scanned code.
+  // OWNER ORDER 2026-07-10: confidence 0.92 (>= 0.8) auto-applies the identity and auto-closes the
+  // review instead of leaving it open - the Review nav link shows no red open-count badge (Nav.tsx
+  // filters status === "open"), and the row disappears from /review entirely (NeedsReviewTable only
+  // shows status === "open" || syncStatus !== "synced").
+  const reviewNavLink = page.getByRole("link", { name: "Review" });
+  await expect(reviewNavLink.locator("span")).toHaveCount(0);
   await page.goto("/review");
-  const barcodeCell = page.getByTestId("review-barcode").filter({ hasText: CODE });
-  await expect(barcodeCell).toHaveCount(1);
-  await expect(barcodeCell).toContainText(CODE);
+  const row = page.getByTestId(`review-row-${CODE}`);
+  await expect(row).toHaveCount(0);
 });
