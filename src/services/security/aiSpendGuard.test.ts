@@ -101,14 +101,15 @@ describe("aiSpendGuard", () => {
       expect(checkAndIncrementDaily({ limit: 1, file, dateKey: "2026-06-29" }).allowed).toBe(true);
     });
 
-    it("treats an empty AI_LOOKUP_DAILY_LIMIT env as the default 200, not 0 (regression: blank env -> 0 cap blocked ALL decode)", () => {
+    it("treats an empty AI_LOOKUP_DAILY_LIMIT env as the default 500, not 0 (regression: blank env -> 0 cap blocked ALL decode)", () => {
       const prev = process.env.AI_LOOKUP_DAILY_LIMIT;
       process.env.AI_LOOKUP_DAILY_LIMIT = ""; // the production failure: var present but blank
       try {
-        // No explicit opts.limit -> reads env -> blank must fall back to 200 -> ALLOWED, not blocked at 0/0.
+        // No explicit opts.limit -> reads env -> blank must fall back to the default (500 per owner
+        // order 2026-07-10, raised from 200) -> ALLOWED, not blocked at 0/0.
         const r = checkAndIncrementDaily({ file: tmpFile, dateKey: "2026-06-28" });
         expect(r.allowed).toBe(true);
-        expect(r.limit).toBe(200);
+        expect(r.limit).toBe(500);
       } finally {
         if (prev === undefined) delete process.env.AI_LOOKUP_DAILY_LIMIT;
         else process.env.AI_LOOKUP_DAILY_LIMIT = prev;
@@ -162,13 +163,13 @@ describe("aiSpendGuard", () => {
       expect(await readDailyUsed(s)).toBe(1);
     });
 
-    it("chargeDailySlot defaults limit from AI_LOOKUP_DAILY_LIMIT (blank env -> 200, not 0)", async () => {
+    it("chargeDailySlot defaults limit from AI_LOOKUP_DAILY_LIMIT (blank env -> 500 default, not 0)", async () => {
       const prev = process.env.AI_LOOKUP_DAILY_LIMIT;
       process.env.AI_LOOKUP_DAILY_LIMIT = "";
       try {
         const s = memStorage();
         const r = await chargeDailySlot(s, { dateKey: "2026-07-09" });
-        expect(r.limit).toBe(200);
+        expect(r.limit).toBe(500);
       } finally {
         if (prev === undefined) delete process.env.AI_LOOKUP_DAILY_LIMIT;
         else process.env.AI_LOOKUP_DAILY_LIMIT = prev;
