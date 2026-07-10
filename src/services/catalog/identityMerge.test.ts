@@ -89,3 +89,64 @@ describe("findIdentityMerge", () => {
     expect(r).toEqual({ kind: "auto_link", productId: "exact" });
   });
 });
+
+describe("size-aware fuzzy merge (2026-07-10 same-model-different-size collapse)", () => {
+  // Corpus products have SLUG names with no size; the size lives in specsShort ("245/70R16 107T").
+  const existingSteadfast = {
+    id: "p1",
+    brand: "goodyear",
+    name: "wrangler_steadfast_ht",
+    specsShort: "265/45R20 105V",
+    specsFull: "265/45R20 105V SL BSW",
+  };
+
+  it("same brand + identical slug name but DIFFERENT size -> none (mint a new product, no suggestion)", () => {
+    const r = findIdentityMerge([existingSteadfast], {
+      brand: "goodyear",
+      name: "wrangler_steadfast_ht",
+      specsShort: "255/55R20 110V",
+    });
+    expect(r.kind).toBe("none");
+  });
+
+  it("same brand + identical slug name and SAME size -> still suggest_link (possible real duplicate)", () => {
+    const r = findIdentityMerge([existingSteadfast], {
+      brand: "goodyear",
+      name: "wrangler_steadfast_ht",
+      specsShort: "265/45R20 105V",
+    });
+    expect(r).toEqual({ kind: "suggest_link", productId: "p1" });
+  });
+
+  it("size known on only ONE side -> unchanged: suggest_link (cannot prove distinct)", () => {
+    const r = findIdentityMerge([existingSteadfast], {
+      brand: "goodyear",
+      name: "wrangler_steadfast_ht",
+    });
+    expect(r).toEqual({ kind: "suggest_link", productId: "p1" });
+  });
+
+  it("GTIN equality with size disagreement is unchanged: suggest_link, never auto", () => {
+    const r = findIdentityMerge(
+      [{ ...existingSteadfast, gtin: "0697662155102" }],
+      { gtin: "697662155102", brand: "goodyear", name: "wrangler_steadfast_ht", specsShort: "255/55R20 110V" },
+    );
+    expect(r).toEqual({ kind: "suggest_link", productId: "p1" });
+  });
+
+  it("size in specsFull (not specsShort) also counts", () => {
+    const r = findIdentityMerge(
+      [{ id: "p2", brand: "michelin", name: "pilot_mxm4", specsFull: "P245/45R19 98V" }],
+      { brand: "michelin", name: "pilot_mxm4", specsFull: "P235/45R18 94V" },
+    );
+    expect(r.kind).toBe("none");
+  });
+
+  it("size embedded in the NAME still works (pre-existing behavior preserved)", () => {
+    const r = findIdentityMerge(
+      [{ id: "p3", brand: "goodyear", name: "Eagle Touring 225/55R19 99V" }],
+      { brand: "goodyear", name: "Eagle Touring 245/45R20 103V" },
+    );
+    expect(r.kind).toBe("none");
+  });
+});

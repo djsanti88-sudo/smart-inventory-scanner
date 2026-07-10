@@ -9,8 +9,10 @@
 //              suggestion, NEVER an auto-merge. The plus-generation trap (R8 vs R8+, HDR vs HDR+) is a
 //              real DIFFERENT product, so any model token that differs only by a trailing "+" forces
 //              suggest and can never auto-link.
-//   TIRE rule  when BOTH sides carry a parseable tire size, auto_link ADDITIONALLY requires size equality;
-//              size disagreement forces suggest_link even on a brand+model match (or a GTIN anomaly).
+//   TIRE rule  when BOTH sides carry a parseable tire size (from name OR specsShort/specsFull),
+//              auto_link ADDITIONALLY requires size equality; on the GTIN path a size disagreement
+//              downgrades to suggest_link (GTIN anomaly), and on the FUZZY path a size disagreement
+//              means DIFFERENT products: no suggestion at all (same model, another size).
 //   none  otherwise.
 
 import { canonicalGtin } from "@/services/upc/gtin";
@@ -26,6 +28,9 @@ export interface IdentityCandidate {
   brand?: string | null;
   name?: string | null;
   productName?: string | null;
+  /** Size usually lives here, NOT in the name (corpus names are slugs like "wrangler_steadfast_ht"). */
+  specsShort?: string | null;
+  specsFull?: string | null;
 }
 
 export interface DecodedIdentity {
@@ -35,6 +40,8 @@ export interface DecodedIdentity {
   brand?: string | null;
   name?: string | null;
   productName?: string | null;
+  specsShort?: string | null;
+  specsFull?: string | null;
 }
 
 export type IdentityMergeResult =
@@ -93,6 +100,13 @@ function nameOf(c: IdentityCandidate | DecodedIdentity): string {
   return (c.name ?? c.productName ?? "").toString();
 }
 
+/** Canonical tire size for a candidate, parsed from its name AND its specs fields (corpus product
+ *  names are slugs with no size - the size lives in specsShort/specsFull). "" when none found. */
+function sizeOf(c: (IdentityCandidate | DecodedIdentity) & { specsShort?: string | null; specsFull?: string | null }): string {
+  const text = [nameOf(c), c.specsShort ?? "", c.specsFull ?? ""].join(" ");
+  return tireSizeToken({ productName: text, brand: c.brand ?? undefined });
+}
+
 /** First canonical GTIN found among a candidate's identity codes (gtin/upc/ean/primaryBarcode), or null. */
 function canonicalOf(c: { gtin?: string | null; upc?: string | null; ean?: string | null; primaryBarcode?: string | null }): string | null {
   for (const raw of [c.gtin, c.upc, c.ean, c.primaryBarcode]) {
@@ -111,7 +125,7 @@ function canonicalOf(c: { gtin?: string | null; upc?: string | null; ean?: strin
  */
 export function findIdentityMerge(existing: IdentityCandidate[], decoded: DecodedIdentity): IdentityMergeResult {
   const decodedCanon = canonicalOf(decoded);
-  const decodedTireSize = tireSizeToken({ productName: nameOf(decoded), brand: decoded.brand ?? undefined });
+  const decodedTireSize = sizeOf(decoded);
   const decodedBrand = normBrand(decoded.brand);
   const decodedTokens = nameTokens(nameOf(decoded));
 
@@ -120,7 +134,7 @@ export function findIdentityMerge(existing: IdentityCandidate[], decoded: Decode
   for (const p of existing) {
     if (!p?.id) continue;
 
-    const existingTireSize = tireSizeToken({ productName: nameOf(p), brand: p.brand ?? undefined });
+    const existingTireSize = sizeOf(p);
     // TIRE rule: if BOTH sides carry a parseable size, they must agree for an auto_link. A disagreement
     // downgrades even a GTIN match to a suggestion (the plan's "GTIN match anomalies" clause).
     const bothHaveTireSize = !!decodedTireSize && !!existingTireSize;
@@ -137,10 +151,14 @@ export function findIdentityMerge(existing: IdentityCandidate[], decoded: Decode
 
     // 2) Fuzzy: same normalized brand + name Jaccard >= 0.75 -> suggest_link (never auto).
     if (decodedBrand && normBrand(p.brand) === decodedBrand) {
+      // SIZE-DISTINCT rule (2026-07-10): when BOTH sides carry a derivable tire size and the sizes
+      // DIFFER, they are DIFFERENT countable products (same model, another size) - do not suggest a
+      // link at all. Without this, a same-brand burst collapses every additional size of a model into
+      // Needs Review ("Unidentified item"), which is exactly the 59/100 defect proven on the preview.
+      if (bothHaveTireSize && !tireSizeAgrees) continue;
       const existingTokens = nameTokens(nameOf(p));
       const sim = jaccard(decodedTokens, existingTokens);
       const plusDiff = plusGenerationDiff(decodedTokens, existingTokens);
-      // Tire size disagreement also forces suggest-or-none (never auto); it never blocks a fuzzy suggest.
       if (sim >= 0.75 || plusDiff) {
         // plusDiff (R8 vs R8+) always routes to suggest, never auto - even at Jaccard 1.0 with "+" stripped.
         suggestion ??= { kind: "suggest_link", productId: p.id };
