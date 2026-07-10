@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe("FinalCountTable role gating (Phase 6)", () => {
-  it("hides Barcode + Other codes scanned (and the raw codes) from a business/customer role", () => {
+  it("shows the product's own scanned Barcode to every role; alias DB stays platformOwner-only (owner order 2026-07-10)", () => {
     delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER; // business / customer
     seed();
     render(<FinalCountTable />);
@@ -36,9 +36,12 @@ describe("FinalCountTable role gating (Phase 6)", () => {
     // fixture predates structuring - so "Test Widget" appears EXACTLY once (the Product column).
     expect(screen.getAllByText("Test Widget").length).toBe(1);
     expect(screen.getByTestId("model-p1").textContent).toBe("-");
-    expect(screen.queryByText("Barcode")).toBeNull();
+    // Owner order 2026-07-10: the code the shop scanned is THEIR data - the Barcode column is
+    // visible to all roles (same rule the feed already applies to its Barcode column).
+    expect(screen.queryByText("Barcode")).not.toBeNull();
+    expect(screen.queryAllByText(/111222333444/).length).toBeGreaterThan(0);
+    // The alias DATABASE (other codes mapped to the product) remains platformOwner-only.
     expect(screen.queryByText("Other codes scanned")).toBeNull();
-    expect(screen.queryAllByText(/111222333444/).length).toBe(0); // raw barcode not leaked
     expect(screen.queryAllByText(/ALT-CODE-9/).length).toBe(0); // alias DB not leaked
     // Mark wrong (destructive alias repair) is platformOwner-only
     expect(screen.queryByTestId("mark-wrong-p1")).toBeNull();

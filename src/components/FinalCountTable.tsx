@@ -98,7 +98,10 @@ export function FinalCountTable() {
               <th scope="col" className="px-4 py-3">Specs</th>
               <th scope="col" className="px-4 py-3">Size</th>
               <th scope="col" className="px-4 py-3">{isPlatform ? "SKU" : "Part number"}</th>
-              {isPlatform && <th scope="col" className="px-4 py-3">Barcode</th>}
+              {/* Owner order 2026-07-10: the code the shop scanned is THEIR data - visible to all
+                  roles (same rule the feed applies to its Barcode column). The alias DB column
+                  below stays platformOwner-only. */}
+              <th scope="col" className="px-4 py-3">Barcode</th>
               {isPlatform && <th scope="col" className="px-4 py-3">Other codes scanned</th>}
               <th scope="col" className="px-4 py-3">Location</th>
               <th scope="col" className="px-4 py-3">Last scanned</th>
@@ -109,7 +112,7 @@ export function FinalCountTable() {
           <tbody data-testid="final-count-body">
             {visibleRows.length === 0 ? (
               <tr>
-                <td colSpan={isPlatform ? 14 : 12} className="px-4 py-6 text-center text-base text-zinc-600">
+                <td colSpan={isPlatform ? 14 : 13} className="px-4 py-6 text-center text-base text-zinc-600">
                   {rows.length === 0
                     ? "No counts yet. Scan a barcode to start counting your inventory."
                     : "No products match this filter."}
@@ -198,7 +201,7 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
           </div>
         )}
       </td>
-      {isPlatform && <td className="px-4 py-3 font-mono text-sm">{product.primaryBarcode || "-"}</td>}
+      <td className="px-4 py-3 font-mono text-sm" data-testid={`count-barcode-${product.id}`}>{product.primaryBarcode || "-"}</td>
       {isPlatform && <td className="px-4 py-3 font-mono text-sm text-zinc-600">{count.aliasesSeen.join(", ")}</td>}
       <td className="px-4 py-3">{product.location || "-"}</td>
       <td className="px-4 py-3 text-sm text-zinc-600">

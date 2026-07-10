@@ -3,7 +3,7 @@
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
-import { prettifyProductName } from "@/services/format/productDisplay";
+import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 
 // Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail. Raw/clean
 // codes AND the internal match type are platformOwner-only; customers see the product name + part number
@@ -15,8 +15,8 @@ export function LiveScanFeed() {
   const isPlatform = useIsPlatformOwner();
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
-  // platformOwner-only. Customer columns: Time, Barcode, Product, SKU, Qty, Status, Reason, Sync = 8.
-  const colSpan = isPlatform ? 10 : 8;
+  // platformOwner-only. Customer columns: Time, Barcode, Brand, Product, SKU, Qty, Status, Reason, Sync = 9.
+  const colSpan = isPlatform ? 11 : 9;
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -32,6 +32,7 @@ export function LiveScanFeed() {
               {isPlatform && <th scope="col" className="px-4 py-3">Raw code</th>}
               <th scope="col" className="px-4 py-3">Barcode</th>
               {isPlatform && <th scope="col" className="px-4 py-3">Match</th>}
+              <th scope="col" className="px-4 py-3">Brand</th>
               <th scope="col" className="px-4 py-3">Product</th>
               <th scope="col" className="px-4 py-3">{isPlatform ? "SKU" : "Part number"}</th>
               <th scope="col" className="px-4 py-3">Qty on hand</th>
@@ -81,6 +82,14 @@ export function LiveScanFeed() {
                     ? "unconfirmed"
                     : "(suggested)"
                   : null;
+                // Same display priority as the name: real product brand wins, then the decode
+                // suggestion's brand, then whatever the provisional placeholder carries.
+                const displayBrand = prettifyBrand(
+                  (product && !product.provisional ? product.structuredBrand || product.brand : undefined) ||
+                    suggestion?.suggestedBrand ||
+                    product?.brand ||
+                    "",
+                );
                 return (
                   <tr key={e.id} className="animate-[row-appear_200ms_ease-out] border-t border-zinc-100 hover:bg-zinc-50">
                     <td className="px-4 py-3 text-sm text-zinc-600">
@@ -93,6 +102,7 @@ export function LiveScanFeed() {
                         <MatchBadge type={e.matchType} />
                       </td>
                     )}
+                    <td className="px-4 py-3" data-testid={`feed-brand-${e.id}`}>{displayBrand || "-"}</td>
                     <td className="px-4 py-3" data-testid={`feed-product-${e.id}`}>
                       {displayName}
                       {suggestionTag === "unconfirmed" ? (
