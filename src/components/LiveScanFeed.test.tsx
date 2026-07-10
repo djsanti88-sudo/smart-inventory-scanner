@@ -144,3 +144,39 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
     expect(screen.getByTestId("feed-product-ev4").textContent?.trim()).toBe("-");
   });
 });
+
+// Owner order 2026-07-10: a scanned tire's BRAND must be visible on the feed, matching the counts
+// table's prettifyBrand treatment. Real product brand wins; a still-provisional row falls back to the
+// decode suggestion's brand.
+describe("LiveScanFeed - Brand column (owner order 2026-07-10)", () => {
+  it("shows the matched product's brand for a verified tire scan", () => {
+    const code = "697662155102";
+    const tire = {
+      ...provisionalProduct("prod9", code),
+      name: "wrangler_steadfast_ht",
+      brand: "goodyear",
+      provisional: false,
+      verified: true,
+    } as unknown as Product;
+    useScanStore.setState({ scanFeed: [baseEvent(code, "prod9")], needsReviewQueue: [], products: [tire], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByText("Brand")).toBeInTheDocument();
+    expect(screen.getByTestId("feed-brand-ev1").textContent).toBe("Goodyear");
+  });
+
+  it("falls back to the decode suggestion's brand while the product is still provisional", () => {
+    const code = "086699998538";
+    useScanStore.setState({
+      scanFeed: [baseEvent(code, "prod1")],
+      needsReviewQueue: [suggestionReview(code, 0.9)],
+      products: [provisionalProduct("prod1", code)],
+      finalCounts: [],
+    });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByTestId("feed-brand-ev1").textContent).toBe("Michelin");
+  });
+});
