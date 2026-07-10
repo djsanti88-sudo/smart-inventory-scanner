@@ -295,6 +295,17 @@ describe("evaluatePrefix (smart firewall)", () => {
   it("known owner + matching brand -> no conflict", () => {
     expect(evaluatePrefix(BRIDGESTONE_PREFIX, "Bridgestone", { prefixLookup: () => "bridgestone" }).conflict).toBe(false);
   });
+
+  it("does not conflict when Go-UPC brand is a corporate sibling of the prefix owner (Michelin on bfgoodrich prefix)", () => {
+    const v = evaluatePrefix("086699998538", "Michelin", { prefixLookup: () => "bfgoodrich" });
+    expect(v.owner).toBe("bfgoodrich");
+    expect(v.conflict).toBe(false);
+  });
+
+  it("still conflicts when the brand is NOT in the owner's family", () => {
+    const v = evaluatePrefix("086699998538", "Goodyear", { prefixLookup: () => "bfgoodrich" });
+    expect(v.conflict).toBe(true);
+  });
 });
 
 describe("makeDefaultPrefixLookup", () => {
