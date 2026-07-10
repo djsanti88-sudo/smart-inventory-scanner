@@ -88,7 +88,12 @@ test("batch-approve: select all suggested rows, approve once, all counts land; r
   // All 6 scans land + eventually settle to the "Suggested" decode badge (weak evidence -> never
   // auto-counted -> stays open in Needs Review with a suggestion attached).
   await expect(page.getByTestId("scan-feed-body").locator("tr")).toHaveCount(CODES.length);
-  await expect(page.getByTestId("decode-row-status").filter({ hasText: "Suggested" })).toHaveCount(CODES.length, {
+  // Owner order 2026-07-10: "Your counts" now has its own Status column reusing the same
+  // decode-row-status testid, so this locator must be scoped to the scan feed body - otherwise it
+  // also picks up the counts table's badges on the same page and the count doubles.
+  await expect(
+    page.getByTestId("scan-feed-body").getByTestId("decode-row-status").filter({ hasText: "Suggested" }),
+  ).toHaveCount(CODES.length, {
     timeout: 20_000,
   });
 
