@@ -1,7 +1,9 @@
-# Decoder Architecture (v1.0.0)
+# Decoder Architecture (v2.0.0 - decode ladder era)
 
 How an unknown scanned code becomes (or does not become) a counted product. Deterministic code owns
-truth; AI only suggests, and only a human approves. Quick map for a new session or developer.
+truth; AI only suggests; counting happens only through human approval or the app-verified auto-count
+gate. Quick map for a new session or developer. (v1.0.0 described the concurrent two-provider
+orchestrator; v2 replaced it with the cost-ordered ladder below. Sections 3-9 carry over.)
 
 ## 1. Deterministic-first resolution
 - Known scans are instant and deterministic. The resolver (`src/services/resolver.ts`) returns `known`
@@ -10,14 +12,25 @@ truth; AI only suggests, and only a human approves. Quick map for a new session 
   scans increment quantity, never create duplicate product rows.
 - Unknown / vendor-label / conflicting codes route to the Needs Review queue, never a guess.
 
-## 2. Live AI decode (unknown codes only)
-- Up to two fast providers (Gemini flash + OpenAI mini) run concurrently WITH a page-fetch enrichment
-  under one hard time budget (`decodeOrchestrator.ts`). On timeout, all work is aborted and the code
-  routes to Needs Review (never a partial product).
+## 2. Decode ladder (unknown codes only) - `src/server/upc/ladder.ts`
+- An unknown code walks ORDERED RUNGS, cheapest first; the FIRST settled rung (verified OR a
+  suggestion) STOPS the ladder, so a later rung is never paid for when an earlier one answered:
+  0. Local tire corpus / decode cache (Turso + local SQLite) - free, ~143ms.
+  1. `goupc` - Go-UPC API; the rung is added ONLY for a real GTIN shape with a valid GS1 check digit
+     (the gate lives at the caller, `buildLadderRungs`, so `runLadder` stays shape-agnostic).
+  2. `fetchv2` - trusted-door open-web discovery.
+  3. `gpt` - GPT-5.5 ladder end.
+- Every rung that ran records its reason (miss / unavailable / transient); the route surfaces the
+  full reason chain, so a Needs Review row always says honestly why each rung failed.
+- GEMINI IS NOT USED FOR DECODE (grounding bills every executed search with no cap control; see
+  LESSONS_LEARNED L11). Settings labels it "not used for decode".
+- The daily AI cap charges ONLY paid rungs, exactly once, inside the rung, after the free
+  corpus/cache peek (L12). Corpus/cache hits are free and never consume cap slots.
 - The model's own `exactCodeEvidence` claim is never trusted. The app independently verifies the exact
   code in real evidence via `EvidenceVerifier` (strength ladder: none < url_only < snippet <
   grounding_chunk < fetched_source; url_only trusted only from an allowlisted host).
-- `CrossCheckEngine` compares two providers structurally: agree | conflict | single_provider | weak.
+- `CrossCheckEngine` still compares sources structurally when more than one answered:
+  agree | conflict | single_provider | weak.
 
 ## 3. Verified-only early exit (W1)
 - `runDecode` early-exits ONLY when `decideDecode` returns `verified`. A usable product NAME alone is
@@ -25,8 +38,18 @@ truth; AI only suggests, and only a human approves. Quick map for a new session 
 - `decideDecode` returns `verified` only for a public barcode (upc_a / ean_13 / gtin_14) with strong
   app-verified evidence, provider agreement (or single provider), non-empty identity, and confidence
   at or above the threshold. Otherwise suggested / needs_review; provider disagreement is conflict.
-- A "Verified AI Decode" is still a SUGGESTION; it auto-counts only if the owner opts into
-  `autoAcceptVerifiedDecodes` (default OFF) and the evidence-scoring gate (`planAutoVerify`) passes.
+- A "Verified AI Decode" AUTO-COUNTS by default: the master gate `autoAddDecodedProducts` defaults
+  true (scanStore.ts) and requires status verified + app-verified exact code + confidence >= 0.8 +
+  (for tires) full specs + a public barcode shape + no firewall/brand-prefix conflict. Set it false
+  for manual-review-everything mode. High-trust SUGGESTIONS (>= 0.8 or app-verified exact) auto-apply
+  to the counted row; lower-confidence identities display with a "(suggested)" tag and stay
+  review-first. (`autoAcceptVerifiedDecodes` is declared but DEAD - it gates nothing; do not rely on it.)
+- Identity merge is SIZE-AWARE (`src/services/catalog/identityMerge.ts`): tire size is derived from
+  `specsShort`/`specsFull` (corpus names are slugs that never carry sizes), so same-model-DIFFERENT-SIZE
+  decodes mint distinct products instead of collapsing into review suggestions.
+- Brand-prefix sanity uses evidenced corporate families (`brandFamilies.ts`): Michelin owns
+  BFGoodrich/Uniroyal-NA, Continental owns General, Goodyear owns Cooper - a company's own brands on a
+  shared GS1 prefix never false-conflict, while unrelated brands still block the verify path.
 
 ## 4. Token-waste cap (W4)
 - `MAX_AI_SNIPPET_CHARS = 1500` (`snippetCap.ts`) caps each AI-bound snippet / grounding chunk in
