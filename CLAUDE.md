@@ -41,8 +41,9 @@ retail, restaurant supplies, medical supplies, and any physical inventory.
 - Use plain code for: scanner input, buffering, code cleaning, alias matching, counting,
   CSV export, hover preview, login, DB updates, tests, session state, table rendering,
   optimistic state, pending sync queue, retry, idempotency.
-- Use cheap AI (mock locally; Gemini Flash-Lite primary / OpenAI fallback stubs) ONLY for
-  unknown-code lookup and enrichment. AI never does final inventory math.
+- Use paid AI (mock locally; the GPT rung of the decode ladder) ONLY for unknown-code lookup and
+  enrichment, and only after the free corpus/cache and cheaper rungs miss. Gemini is NOT used for
+  decode. AI never does final inventory math.
 
 ## Aggressive Auto Decode Mode
 - An unknown scan AUTOMATICALLY runs the live decode pipeline when `settings.aiLookupEnabled` is on,
@@ -55,21 +56,36 @@ retail, restaurant supplies, medical supplies, and any physical inventory.
 - Key availability is learned from `GET /api/ai-lookup` (booleans + missing key NAMES only, no
   secrets). Keys are read server-side only; client code must never read `process.env.*_API_KEY`
   (enforced by `src/services/keySafety.test.ts`).
-- Per scan limit: Gemini x2, OpenAI x2, premium x1, verifier x1. Premium fallback escalates once on
-  weak/conflict when `ENABLE_PREMIUM_MODEL_FALLBACK=true`.
+- The daily AI cap (default 500, `AI_LOOKUP_DAILY_LIMIT` overrides) charges ONLY paid rungs, exactly
+  once per genuine compute, INSIDE the paid rung, after the free corpus/cache peek (see
+  LESSONS_LEARNED L12 - never charge on two paths of one request). Corpus/cache hits are free.
+- Cap/429 blocks surface their honest reason on the scan row, never a generic "Unidentified item".
 - Automated tests never call live providers (mock fetch / `page.route`; webServer `IS_E2E=1`).
   Manual live test only: see MANUAL_LIVE_TEST.md.
 
 ## Evidence Verification + Cross-Check Rules (live AI decode)
-- MASTER BASELINE v1 (owner-locked; SUPERSEDES the older two-provider / trusted-source decode rules):
-  decode is GEMINI-FIRST then CHATGPT, SEQUENTIAL. Gemini Flash runs the fast pass ALONE; OpenAI GPT-5
-  mini (`OPENAI_FAST_MODEL`) is the ESCALATION, called ONLY when Gemini's fast pass finds NO usable
-  product (never in parallel - a normal Gemini hit spends no OpenAI call). A SINGLE source (Gemini or the
-  escalation) that confirms the EXACT code in strong app-verified evidence AUTO-COUNTS at confidence
-  >= 0.8 - no second provider, no trusted-host requirement. Two guardrails still hold: (1) catalog-derived
-  brand sanity - `prefixBrandConflict` (`src/services/catalog/brandPrefixGeneral.ts`, map generated from
-  the global catalog) blocks a wrong brand for the barcode across ALL product types; (2) the store
-  auto-count gate (tire specs + scan-context). Only a code BOTH Gemini and ChatGPT fail -> Needs Review.
+- LADDER BASELINE v2 (owner-approved 2026-07-08, built on `feat/decode-ladder-goupc`; SUPERSEDES
+  MASTER BASELINE v1's Gemini-first sequential rule): decode is a COST-ORDERED LADDER
+  (`src/server/upc/ladder.ts`). Rung order for an unknown code: (0) local tire corpus / decode cache
+  (Turso + SQLite, free) -> (1) `goupc` (Go-UPC API, added ONLY for a real GTIN shape with a valid
+  GS1 check digit) -> (2) `fetchv2` (trusted-door discovery) -> (3) `gpt` (GPT-5.5). The FIRST
+  settled rung (verified OR suggestion) STOPS the ladder - never pay for a rung when an earlier one
+  answered. Every rung that ran records its reason; the route surfaces them. GEMINI IS PERMANENTLY
+  OUT OF DECODE (grounding bills every executed search with no cap control; L11) - Settings labels
+  it "not used for decode". A single source that confirms the EXACT code in strong app-verified
+  evidence AUTO-COUNTS at confidence >= 0.8. Guardrails that hold on every path: (1) catalog-derived
+  brand sanity - `prefixBrandConflict` (`src/services/catalog/brandPrefixGeneral.ts`) blocks a wrong
+  brand for the barcode, with `sameBrandFamily` (`brandFamilies.ts`) clearing evidence-backed
+  corporate families (Michelin/BFGoodrich/Uniroyal-NA, Continental/General, Goodyear/Cooper) so a
+  company's own brands never false-conflict on shared prefixes; (2) the store auto-count gate (tire
+  specs + scan-context + public-barcode shape). All rungs miss -> Needs Review with honest reasons.
+- Identity merge is SIZE-AWARE (`src/services/catalog/identityMerge.ts`): tire size comes from the
+  product `specsShort`/`specsFull` fields (corpus names are slugs and never carry sizes);
+  same-model-DIFFERENT-SIZE decodes mint distinct products instead of collapsing into review
+  suggestions. scanStore passes decoded specs into the merge.
+- High-trust suggestions (confidence >= 0.8 or app-verified exact code) AUTO-APPLY to the counted
+  row; lower-confidence identities still display on the feed with a "(suggested)" tag and stay
+  review-first (owner decisions 2026-07-09).
 - The model may CLAIM exactCodeEvidence, but the APP verifies it independently. `exactCodeEvidence`
   from a provider is NEVER used to decide truth - only `EvidenceVerifier` output is.
 - `EvidenceVerifier` (`src/services/ai/evidenceVerifier.ts`) checks whether the exact (normalized)
@@ -195,3 +211,12 @@ export, catalog, alias, product-resolution, and customer-facing changes. Unit te
 See `docs/REVISION_GATE.md`, `docs/QA_BOTS.md`, `docs/AGENT_BOT_ROLES.md`. Run the relevant `npm run qa:bots:*`
 (or `qa:revision`); for live-account resolution changes also run `qa:bots:live`. Do not claim a resolution
 or data-protection fix works unless a browser bot proved it through the real UI with a screenshot.
+
+
+# Full Tool Arsenal Rule (owner order, 2026-07-04)
+
+On EVERY task, proactively use the full arsenal of available tools - skills (TDD,
+systematic-debugging, brainstorming), subagents and workflows, browser or Playwright
+proof, MCP tools, memory, offline replays - whatever best fits the task. Never default
+to minimal bare-hands work. Local operations need no permission; the risky gates stay:
+deploy, git push, paid/live API calls, real data, publishing.

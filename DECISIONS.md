@@ -267,3 +267,46 @@ Why each choice was made. Newest decisions at the bottom of each section.
 - **Admin SDK server-only**; client never imports it; keySafety enforces it. E2E bypass reused unchanged
   (production-impossible).
 - **Roles owner|admin|counter|viewer** per the owner's model.
+
+## Decode ladder v2: cost-ordered rungs, Gemini out of decode (2026-07-08)
+- **Ordered rungs, first settled answer stops the ladder** (`src/server/upc/ladder.ts`): local tire
+  corpus / decode cache (free) -> `goupc` -> `fetchv2` -> `gpt` (GPT-5.5). Owner rule: never pay for
+  a rung when an earlier one already answered. Every rung that ran records its reason, surfaced in
+  the decode payload and Settings.
+- **Go-UPC is GTIN-gated at the caller**: the rung is only added for a real GTIN shape with a valid
+  GS1 check digit, so `runLadder` stays shape-agnostic and vendor/internal codes never hit the paid API.
+- **Gemini is permanently out of decode.** Grounding billed every EXECUTED search query (~$14/1k)
+  while `webSearchQueries` reported only cited ones (~100x undercount, see LESSONS_LEARNED L11), and
+  it has no tool-call cap. Settings explicitly labels Gemini "not used for decode".
+- **Daily cap charges paid rungs only** (`2dcf714`): corpus/cache hits are free; the counter is an
+  atomic storage-backed increment charged INSIDE the paid rung (one charge per genuine compute -
+  fixes the route-level double-billing and cap-before-cache-read classes). Default raised 200 -> 500
+  (owner authorized 2026-07-10); `AI_LOOKUP_DAILY_LIMIT` still overrides.
+- **Cap-blocked scans are honest**: a 429/cap block shows its real reason, never "Unidentified item"
+  masquerading as a resolver miss (an all-`other`/~10ms mass-scan pattern means cap exhaustion).
+
+## Size-aware identity merge + evidenced brand families (2026-07-10)
+- **Why:** on a 100-code preview run the server verified 99/100 but the UI counted only 40 - every
+  additional SIZE of an already-seen tire model collapsed into a fuzzy "link to existing product?"
+  suggestion, and `086699998538` fired a false prefix conflict (Go-UPC said "Michelin", prefix owner
+  "bfgoodrich" - the same company).
+- **Sizes live in specs, not names.** Corpus product names are slugs (`wrangler_steadfast_ht`), so the
+  name-parse tire rule never fires. `findIdentityMerge` now derives size from `specsShort`/`specsFull`;
+  size-distinct fuzzy matches MINT NEW PRODUCTS instead of queueing review suggestions. scanStore
+  passes the decoded specs into the merge (`1782c11`).
+- **Brand families are evidence-backed corporate ownership**, not lookalike names: Michelin owns
+  BFGoodrich + Uniroyal (NA), Continental owns General, Goodyear owns Cooper; Dunlop unfamilied after
+  the 2025 Sumitomo trademark purchase. `sameBrandFamily` feeds `evaluatePrefix` so shared GS1
+  prefixes inside one company never conflict. (Prefix->company is many-to-one: one company owns many
+  prefixes across many countries.)
+- **Never weaken a real-conflict path:** unrelated brands (Michelin vs Goodyear) still conflict.
+
+## Suggested-identity display + high-trust auto-apply (2026-07-09)
+- **Show the candidate, decouple it from counting.** Suggested identities render on the scan feed and
+  Your counts with a "(suggested)" tag only when confidence is genuinely low (< 0.8). Counting stays
+  gated: high-trust suggestions (>= 0.8 or app-verified exact code) auto-apply to the COUNTED row
+  (`c232b5d`); everything else remains review-first. Rationale: a review row showing "92%" was a
+  VERIFIED decode a store safety gate had held - the UI just never said so; now the reason + barcode
+  are visible (Needs Review barcode column, Status column on Your counts).
+- **Corpus slug names are prettified at display time** (digit model-code rule bounded to short
+  tokens; hyphen parts cased individually) - stored identity is unchanged.
