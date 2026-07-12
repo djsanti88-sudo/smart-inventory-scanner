@@ -87,7 +87,8 @@ the expensive path a one-time cost per code. Proven: 2nd live call returned in 7
 its access permissions." That is NOT a port-in-use error - Windows WinNAT/Hyper-V reserves port ranges
 (`netsh interface ipv4 show excludedportrange protocol=tcp`), and the default Supabase 542xx ports fell
 inside them. Fix: remap all ports in `supabase/config.toml` to 553xx (above every excluded range). Check
-the excluded ranges first rather than guessing.
+the excluded ranges first rather than guessing. (The Supabase stack now lives in
+`archive/supabase-foundation/`; the WinNAT lesson applies to ANY local service ports.)
 
 ## L7 - This CLI gates `gen types` behind a token even for local (2026-06-14)
 
@@ -118,3 +119,50 @@ Two test files using the same projectId (+ singleProjectMode) and running in par
 `clearFirestore()` calls race, producing intermittent "evaluation error"/denials. Fix: a unique
 `projectId` per test file in `initializeTestEnvironment` (and drop `singleProjectMode`) so each file gets
 an isolated emulator namespace. Deterministic and parallel-safe.
+
+---
+
+## L11 - Never compute live-API spend from response metadata; unmeterable units get worst-case reserves (2026-07-05)
+
+Gemini 3 grounding billed ~$6 while the response metadata computed $0.53. Gemini bills EVERY executed
+search query ($14/1K) but `webSearchQueries` lists only CITED queries (~3 reported vs ~394 billed) - a
+~100x undercount. The rules now (also in the global CLAUDE.md cost-truth rule):
+1. Before the FIRST live run on any provider/feature, read the pricing page for per-use fees billed
+   outside token counts and verify each billed unit is observable in the response. Not observable =
+   UNMETERABLE: budget guards reserve the documented WORST CASE per call, not the observed average.
+2. Prefer providers with enforceable tool-call caps (OpenAI `max_tool_calls`). Gemini grounding has NO
+   cap control - never run it unattended on hard/unfindable inputs. (This is why Gemini is permanently
+   out of the decode ladder.)
+3. A client-aborted or timed-out call is still billed server-side - count it at worst case.
+4. Reconcile every live run against the provider's billing console BEFORE quoting spend: report
+   "computed floor $X; true spend = provider console".
+
+---
+
+## L12 - Charge a usage cap exactly once, inside the paid compute; fast 429s poison mass-scan results (2026-07-09)
+
+`checkAndIncrementDaily` is a side-effecting check: calling it on two paths of one request double-billed
+the daily cap, and charging it BEFORE the decode-cache peek made cached zero-spend repeats burn slots.
+The counter showed 232/200 when only ~27 paid computes had happened, and every subsequent scan returned
+a fast 429 the UI displayed as "Unidentified item". Rules:
+1. Exactly ONE cap charge per genuine paid compute, applied INSIDE the paid rung, AFTER the free
+   corpus/cache peek. Free hits are never charged.
+2. In a mass-scan harness, an all-`other`/~10ms result pattern means CAP EXHAUSTION, not a resolver
+   failure - check the counter before concluding anything about decode quality.
+3. Cap blocks must surface their honest reason in the UI, never a generic unknown label.
+
+---
+
+## L13 - Server truth can be 99% right while the UI shows 40%; prove through the real UI (2026-07-10)
+
+On a 100-code preview run the SERVER verified 99/100, but the UI counted only 40: every additional size
+of an already-verified tire model collapsed into a fuzzy "link to existing product?" review suggestion
+(sizes live in `specs*` fields, not in slug product names), plus one false brand-prefix conflict between
+Michelin and its own subsidiary BFGoodrich. Neither defect is visible in unit tests or server logs -
+only the browser bot run caught them. Rules:
+1. The UI proof gate (qa bots / Playwright through the real preview) is NOT optional for
+   resolution-path changes; unit green + server logs are insufficient.
+2. When merging identities, ask what field actually distinguishes real-world variants (size, pack
+   count) and whether that field even appears in the name being compared.
+3. Corporate brand families (one company, many brands, many GS1 prefixes) must be modeled from
+   evidence, or the firewall rejects a company's own products.

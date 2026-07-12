@@ -1,11 +1,33 @@
 # Testing and Proof
 
+_Last updated 2026-07-12 (branch `feat/decode-ladder-goupc`). Sections below accumulate newest-last;
+older sections describe the coverage that existed when written._
+
 ## Commands
-- `npm run test` — run all Vitest unit suites once (services + store).
-- `npm run test:watch` — Vitest watch mode.
-- `npx playwright install chromium` — one-time, before the first E2E run.
-- `npm run test:e2e` — Playwright E2E (auto-starts dev server on port 3100, writes proof to e2e/proof/).
-- `npm run dev` — manual run (http://localhost:3000, or `npm run dev -- --port 3100`).
+- `npm run test` - run all Vitest unit suites once (services + store).
+- `npm run test:watch` - Vitest watch mode.
+- `npx playwright install chromium` - one-time, before the first E2E run.
+- `npm run test:e2e` - Playwright E2E (auto-starts dev server on port 3100, writes proof to e2e/proof/).
+- `npm run qa:bots:*` / `npm run qa:revision` - human-bot browser proof suites (see docs/QA_BOTS.md,
+  docs/REVISION_GATE.md). REQUIRED before handoff for scanner/inventory/role/export/catalog/alias/
+  resolution/customer-facing changes; `qa:bots:live` for live-account resolution changes.
+- `npm run test:firebase` - tenant-isolation + repo proof against the Firebase emulator.
+- `npm run dev` - manual run (http://localhost:3000, or `npm run dev -- --port 3100`).
+
+## Current state (2026-07-12)
+- Unit suite green at each reviewed commit on the branch; tsc + eslint clean. Known flake:
+  `cloudDrainRace.store.test.ts` is timing-flaky under FULL parallel vitest load only (passes isolated).
+- Decode ladder coverage lives in `src/server/upc/` (`ladder.test.ts`, `GoUpcProvider.test.ts`,
+  `goUpcUsage.test.ts`, `storage.test.ts`, `importBoundary.test.ts`): rung order, first-settled-stops,
+  GTIN gating, paid-rung-only cap charging, reason recording.
+- Size-merge + brand families: `src/services/catalog/identityMerge`/`brandFamilies` tests prove
+  size-distinct products mint (never collapse into review) and evidenced corporate families
+  (Michelin/BFGoodrich/Uniroyal, Continental/General, Goodyear/Cooper) clear the prefix firewall while
+  unrelated brands still conflict.
+- UI proof baseline (owner-loved, 2026-07-10): 100 owner codes through the real preview UI on
+  `inventory-5tk3c3vxf` = 100/100 verified / 0 review / 98s. Never regress this run.
+- Test safety unchanged: automated tests NEVER call live providers (mock fetch / `page.route`;
+  Playwright webServer runs `IS_E2E=1`). Live decode only via MANUAL_LIVE_TEST.md with owner approval.
 
 ## Unit test coverage (pure services + store)
 - cleanScanCode / buildNormalizedCandidates (incl. `T432119%RU1%`, `2881-6861`, `28816861`)
@@ -217,7 +239,11 @@ needs-review shows honest reason, not-found shows product_not_found_after_search
 
 Gate run (2026-06-14): vitest 313/313, tsc clean, eslint clean, next build success, playwright 11/11.
 
-## Launch MVP Phase 1: Supabase foundation (2026-06-14)
+## Launch MVP Phase 1: Supabase foundation (2026-06-14) - ARCHIVED
+
+> ⚠ review: the Supabase foundation was replaced by Firebase and archived to
+> `archive/supabase-foundation/`. The integration test files below no longer exist in `src/`;
+> this section is kept as the historical record of that proof run.
 
 Unit (run in `npm test`, no Docker needed):
 - `src/services/auth/authBypass.test.ts`: the E2E auth bypass is FALSE in production even with all flags

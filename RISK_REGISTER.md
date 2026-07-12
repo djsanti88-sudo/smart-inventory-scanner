@@ -129,3 +129,13 @@ No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migr
 |---|------|-----|-----------|------------|----------|--------|
 | 1 | Corpus row 086699294739 named `pilot_alpin_sport_4_suv` but external evidence + fixture correction say Michelin Pilot Sport 4 SUV (wrong model name would mis-grade/mislabel) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | — | Open |
 | 2 | Corpus row 8859305548272 size 265/75R16 vs Go-UPC 245/75R16 (size mismatch) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | — | Open |
+
+## Current open risks (2026-07-12, branch `feat/decode-ladder-goupc`)
+
+| # | Risk | Sev | Likelihood | Mitigation | Approval | Status |
+|---|------|-----|-----------|------------|----------|--------|
+| 1 | 163 local-only commits (whole ladder + size-merge era) could be lost to disk/OS failure; nothing is pushed | High | Low | Push/PR when the owner gives the word (push is owner-gated by standing rule); local git history intact; loved-baseline preview deployment preserves the build output | Owner word needed to push | Open |
+| 2 | Production still runs the pre-ladder build (master auto-deploy disabled in vercel.json); customers do not have the proven fixes | Med | Certain until promoted | Go-live checklist: owner sign-off + production env keys + `vercel promote`; preview `inventory-5tk3c3vxf` is the validated candidate | Owner sign-off | Open |
+| 3 | T9 paid backfill (16 missing tire codes) hits paid rungs | Low | Gated | Script is review-first with strict upsert criteria (`83d3d62`); runs only on explicit owner approval | Owner | Gated |
+| 4 | Preview is open access (no login); anyone with the URL can scan/see data | Med | Low | Owner decision "no login, no shop selection for now"; role/data-protection foundation deferred (docs/HOTFIX_FOLLOWUPS.md); revisit before real customer data | Owner accepted | Accepted |
+| 5 | Working tree carries ~60 uncommitted tmp scripts/screenshots that could get accidentally committed | Low | Med | This docs pass leaves them untracked; sweep `scripts/tmp-*` + root PNGs into ignore/cleanup before the next commit batch | — | Open |
