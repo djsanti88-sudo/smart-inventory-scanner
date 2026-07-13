@@ -256,3 +256,75 @@ archive-only policy. No files deleted. No push performed.
 
 **All gates green. Task complete.**
 
+## Task 1.2 - root artifact sweep
+
+Branch: `feat/decode-ladder-goupc`. Purpose: clear proof-screenshot and report clutter out of
+the repo root (archive-only, nothing deleted from disk), untrack runtime AI-cap counter JSONs,
+extend `.gitignore` for root-level PNGs and the firestore emulator log, and relocate untracked
+stray files. No files deleted. No push performed.
+
+### Step 1: `git mv` tracked root artifacts into `docs/archive/proof-images/`
+- Created `docs/archive/proof-images/` and `docs/archive/strays/`.
+- `git mv` on all 11 tracked root `*.png` files (confirmed via `git ls-files '*.png' | grep -v '/'`
+  so tracked PNGs living in `deploy-proof/` and `proof-archive/` subfolders were correctly left
+  alone): `candidate-local-scan-healthy.png`, `cleanup-review-report-rendered.png`,
+  `multi-scan-decode-count-proof.png`, `phase1-x004-suggestion-on-scan-row.png`,
+  `phase2-full-matrix-water-nutella-x004.png`, `phase2-x004-provisional-count-qty2.png`,
+  `post-fix-water-nutella-autocount.png`, `runtime-matrix-5-codes.png`,
+  `water-code-shows-velvet-torch-poison.png`, `water-decoded-and-counted.png`,
+  `x004-decoded-suggestion-in-review.png`.
+- `git mv` on the 4 other tracked root artifacts: `cleanup-review-report.html`,
+  `cleanup-review-summary.json`, `competitor-analysis.html`, `LIVE_SMOKE_OUTPUT.txt`.
+- Plain `mv` (untracked, verified individually with `git ls-files <name>` returning empty first)
+  on 6 untracked root PNGs into the same archive folder: `owner-100-ui-feed-final.png`,
+  `owner-100-ui-review-page.png`, `owner-preview-stale-state-429.png`,
+  `preview-scan-proof-final.png`, `preview-scan-proof.png`, `review-page-no-barcode.png`.
+- Created `docs/archive/proof-images/README.md` (what these are, June-July 2026 proof
+  screenshots + generated reports, moved 2026-07-12, safe to delete on owner order).
+
+### Step 2: untrack runtime AI-cap counters
+- Command: `git rm --cached .ai-lookup-usage.json .gpt-ladder-usage.json`
+- Result: `fatal: pathspec '.ai-lookup-usage.json' did not match any files` - both files exist on
+  disk but were never tracked in git (the `.gitignore` rule added them before they were ever
+  committed). Confirmed with `git ls-files -c .ai-lookup-usage.json .gpt-ladder-usage.json`
+  (empty output) and `git log --all --oneline -- .ai-lookup-usage.json .gpt-ladder-usage.json`
+  (no history). No action needed; the "untrack" acceptance criterion is already satisfied.
+
+### Step 3: extend `.gitignore`
+- Appended to `.gitignore`: `/*.png` (root-scoped only) and `/firestore-debug.log`, under a new
+  comment block dated for this task.
+- Verified `/*.png` is root-scoped, not recursive: `touch test-root-ignore-check.png` then
+  `git check-ignore -v test-root-ignore-check.png` -> matched `.gitignore:125:/*.png`. Then
+  confirmed tracked subfolder PNGs are unaffected: `git check-ignore -v deploy-proof/01-scan.png`
+  -> exit code 1 (not ignored, correctly still tracked). Removed the throwaway test file.
+- `firestore-debug.log` was already covered indirectly by the pre-existing `*-debug.log` glob
+  (line 49); the new `/firestore-debug.log` line is an explicit, root-scoped restatement per the
+  brief. The file itself stays on disk at root (untracked, was already untracked, now ignored).
+
+### Step 4: move untracked strays
+- Plain `mv` (no `git mv` needed, untracked) of `auth` and `auth-wal` (both 0-byte Turso/SQLite
+  WAL artifacts, already covered by a pre-existing `.gitignore` rule but still physically present
+  at root) into `docs/archive/strays/`.
+- Located the mangled scratchpad file with `ls -1 | grep -i gptladder` (its leading `C:` prefix
+  contains a private-use-area glyph from a Windows path that doesn't round-trip through the
+  shell) and moved it by capturing the exact byte-for-byte name via command substitution:
+  `mv "$(ls -1 | grep -i gptladder)" docs/archive/strays/`. Verified removal from root
+  (`ls -1 | grep -i gptladder` -> no match) and confirmed it was never tracked (`git ls-files |
+  grep -i gptladder` only matches legitimate `src/` GPT-ladder source files, not this stray).
+
+### Files explicitly left untouched (per brief)
+`tire_prefixes_*.csv` (living data), `build-report-pdf.mjs` (living script), all `.md` files,
+`firestore.rules`, `firebase.json`.
+
+### Verification
+| Check | Command | Result |
+|---|---|---|
+| No PNGs left at root | `ls *.png 2>/dev/null \| wc -l` | `0` |
+| Renames recorded | `git status --porcelain \| grep -c "^R"` | `15` (11 PNGs + 4 other tracked files) |
+| Runtime counters not tracked | `git ls-files .ai-lookup-usage.json .gpt-ladder-usage.json \| wc -l` | `0` |
+| `.gitignore` lines present | `grep -n "^/\*\.png$\|^/firestore-debug.log$" .gitignore` | both present |
+| Root-scoped ignore works | `git check-ignore -v test-root-ignore-check.png` | matched, then subfolder PNG confirmed NOT ignored |
+| Strays moved | `ls docs/archive/strays/` | `auth`, `auth-wal`, mangled `...gptladder_base.ts` |
+
+**All verification gates passed. Task complete.**
+
