@@ -124,3 +124,7 @@ src/server/tire-knowledge/tireKnowledge.generated.json.bak-*
 # are regenerated/transient; archived copies live in docs/archive/proof-images/.
 /*.png
 /firestore-debug.log
+
+# Stray untracked scratch files archived on disk only (never git-tracked) - keep the
+# directory out of git so future strays land here without needing an explicit rm --cached.
+docs/archive/strays/
