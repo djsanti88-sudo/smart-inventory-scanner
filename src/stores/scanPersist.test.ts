@@ -52,6 +52,7 @@ function makeState(): PersistableScanState {
     catalog: [{ id: "cat1", primaryBarcode: "0123456789012", gtin: "00123456789012" }],
     shopOverrides: [{ id: "so1", cleanCode: "555" }],
     feedbackEvents: [{ id: "f1", code: "2881-6861" }],
+    countSnapshots: [],
   };
 }
 
