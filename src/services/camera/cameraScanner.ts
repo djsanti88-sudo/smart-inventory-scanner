@@ -71,7 +71,18 @@ export function createCameraScanner(video: HTMLVideoElement, onDetect: (raw: str
   return {
     async start() {
       stopped = false;
-      detector = await loadDetector();
+      try {
+        detector = await loadDetector();
+      } catch (err) {
+        // Detector failed to load (native absent AND the dynamic polyfill import rejected - e.g.
+        // offline or a chunk 404). Reset internal state so this scanner instance is left in a safe,
+        // stoppable state, then re-reject with a normal Error so the caller sees a rejection it can
+        // catch (never swallowed).
+        stopped = true;
+        detector = null;
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Camera barcode detector failed to load: ${message}`);
+      }
       if (stopped) return;
       rafHandle = requestAnimationFrame(() => {
         void tick();

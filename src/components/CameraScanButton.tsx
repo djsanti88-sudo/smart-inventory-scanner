@@ -15,7 +15,7 @@ export interface CameraScanButtonProps {
   refocusTargetId?: string;
 }
 
-type CameraState = "idle" | "opening" | "streaming" | "denied" | "unavailable";
+type CameraState = "idle" | "opening" | "streaming" | "denied" | "unavailable" | "start-failed";
 
 export function CameraScanButton({ onScan, refocusTargetId = "scanner-input" }: CameraScanButtonProps) {
   const [state, setState] = useState<CameraState>("idle");
@@ -87,7 +87,19 @@ export function CameraScanButton({ onScan, refocusTargetId = "scanner-input" }: 
       closeOverlay();
     });
     scannerRef.current = scanner;
-    void scanner.start();
+    let cancelled = false;
+    scanner.start().catch(() => {
+      if (cancelled) return;
+      // The detector failed to load (e.g. offline, polyfill chunk 404). Release the camera so the
+      // hardware light does not stay on, then show a plain-language error state. The scanner's own
+      // stop() is safe to call even though start() never finished.
+      stopCamera();
+      setState("start-failed");
+    });
+
+    return () => {
+      cancelled = true;
+    };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
@@ -131,6 +143,13 @@ export function CameraScanButton({ onScan, refocusTargetId = "scanner-input" }: 
             {state === "unavailable" && (
               <p className="text-base text-red-700" data-testid="camera-unavailable-message">
                 No camera is available on this device. Use the keyboard scanner input instead.
+              </p>
+            )}
+
+            {state === "start-failed" && (
+              <p className="text-base text-red-700" data-testid="camera-start-failed-message">
+                Camera scanning could not start. You can still scan with a hardware scanner or type
+                the code.
               </p>
             )}
 

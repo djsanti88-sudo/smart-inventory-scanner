@@ -252,3 +252,151 @@ merge gate will run it in the main tree later").
 - The full `npm run test` run surfaced 10 pre-existing unrelated failures in
   `dtHarvestIntegration.test.ts` (tire knowledge corpus). Confirmed unrelated via stash/pop
   comparison; not touched, not fixed - out of scope for this camera task.
+
+## Fix round 1
+
+Code review after the initial pass flagged one CRITICAL, one IMPORTANT-coverage, one
+IMPORTANT-strength, and one MINOR issue. All four addressed with RED-GREEN TDD.
+
+### Files changed
+
+- `src/services/camera/cameraScanner.ts` - `start()` now wraps `await loadDetector()` in
+  try/catch. On failure it resets internal state (`stopped = true`, `detector = null`) so a
+  subsequent `stop()` is safe, and re-throws a normal `Error` with a wrapped message
+  (`Camera barcode detector failed to load: <original message>`) so the rejection is never
+  swallowed and the caller gets something it can `.catch()` and inspect.
+- `src/components/CameraScanButton.tsx` - the `streaming`-state `useEffect` now calls
+  `scanner.start().catch(...)` instead of firing `void scanner.start()` unobserved. On
+  rejection it calls `stopCamera()` (releases the `MediaStream` tracks, stops the scanner) and
+  sets a new `"start-failed"` `CameraState`. Added a `cancelled` flag captured by the effect's
+  cleanup function so a rejection arriving after the effect re-ran/unmounted cannot call
+  `setState` on a stale render. Added a new UI branch with `data-testid="camera-start-failed-
+  message"` and copy: "Camera scanning could not start. You can still scan with a hardware
+  scanner or type the code." (plain language, no em/en dash, matches existing failure-state
+  copy style).
+- `src/services/camera/cameraScanner.test.ts` - added one new test (detector-load failure
+  rejects cleanly, no dangling rAF, `stop()` safe afterward) and rewrote the polyfill-fallback
+  test to mock the `barcode-detector` module itself (`vi.doMock` + `vi.resetModules` +
+  dynamic re-`import`) with a controllable `detect()` queue, so it now proves a barcode
+  detection actually reaches `onDetect` through the polyfill path, not just that
+  `start()`/`stop()` don't throw.
+- `src/components/CameraScanButton.test.tsx` - added a global `unhandledrejection` listener
+  (installed/removed per test) to prove `scanner.start()` failures are genuinely caught by the
+  component, not merely swallowed silently. Added: (1) detector-load-failure test asserting the
+  new plain-language message renders, `track.stop()` was called, and no unhandled rejection
+  fired; (2) `NotFoundError` no-camera test; (3) `navigator.mediaDevices === undefined` no-camera
+  test; (4) strengthened the existing open/detect/close/refocus test to assert `track.stop()`
+  was actually called on close (previously only inferred via focus + unmount).
+
+### RED/GREEN evidence
+
+**CRITICAL 1 - service-level test** (`cameraScanner.test.ts`, "rejects cleanly with a normal
+Error..."): this test passed immediately against the pre-fix service code (the pre-existing
+`start()` already let a `loadDetector()` rejection propagate naturally, with no dangling rAF
+since scheduling happens only after the `await`). Confirmed honestly rather than presented as
+a false RED - the real CRITICAL bug lives entirely in the component's unobserved
+`void scanner.start()`, not in the service. The service was still hardened (try/catch, state
+reset, wrapped `Error`) per the brief's explicit requirement, and the strengthened test locks
+that behavior in.
+
+**CRITICAL 1 - component-level test** (`CameraScanButton.test.tsx`, "shows a plain-language
+message and releases the camera when the detector fails to load..."): genuine RED, confirmed
+failing for the right reason (missing UI, overlay still showed the live `<video>` streaming
+state instead of an error message):
+
+```
+$ npx vitest run src/components/CameraScanButton.test.tsx -t "detector fails to load"
+ ❯ waitFor(() => expect(screen.getByText(/camera scanning could not start/i)).toBeTruthy())
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 skipped (3)
+```
+
+GREEN after wiring `scanner.start().catch(...)` + `"start-failed"` state + new UI branch:
+
+```
+$ npx vitest run src/components/CameraScanButton.test.tsx -t "detector fails to load"
+ ✓ shows a plain-language message and releases the camera when the detector fails to load ... 122ms
+ Test Files  1 passed (1)
+      Tests  1 passed | 2 skipped (3)
+```
+
+**IMPORTANT 2 - no-camera coverage** (`NotFoundError` + `mediaDevices === undefined`): both
+tests passed immediately - this branch (`state = "unavailable"`) was already implemented
+correctly in `openOverlay()`'s catch block, it simply had zero test coverage before (exactly as
+flagged in the original report's self-review). Documented as coverage-only, not a behavior
+change; verified real by inspection of `openOverlay()`'s existing `NotAllowedError` vs.
+everything-else branching.
+
+**IMPORTANT 3 - polyfill fallback strength**: rewrote the test to mock `barcode-detector` with a
+controllable `detect()` queue and assert `onDetect` fires with the exact detected value through
+that path. To confirm this new test is a real regression guard (not a tautology), temporarily
+broke the polyfill wiring in `cameraScanner.ts` (`loadDetector()` returning a detector whose
+`detect()` always resolves `[]`, discarding the real polyfill constructor) and reran:
+
+```
+$ npx vitest run src/services/camera/cameraScanner.test.ts -t "falls back to the dynamic-imported polyfill"
+ × falls back to the dynamic-imported polyfill ... reaches onDetect through that path
+   → expected null not to be null
+ Tests  1 failed | 5 skipped (6)
+```
+
+Confirmed the test fails when the polyfill path is broken, then restored the real
+`cameraScanner.ts` and reran to green:
+
+```
+$ npx vitest run src/services/camera/cameraScanner.test.ts -t "falls back to the dynamic-imported polyfill"
+ ✓ falls back to the dynamic-imported polyfill ... reaches onDetect through that path 4ms
+ Tests  1 passed | 5 skipped (6)
+```
+
+**MINOR - track.stop() assertion**: added `mockStreamWithTrack()` helper exposing the mock
+track, asserted `track.stop()` was called once after `closeOverlay()` runs in the existing
+open/detect/close/refocus test. Passed immediately (existing `closeOverlay -> stopCamera()`
+already released tracks correctly) - coverage-only, confirmed by inspection.
+
+### Final test command and summary
+
+```
+$ npx vitest run src/services/camera src/components/CameraScanButton.test.tsx
+ Test Files  2 passed (2)
+      Tests  11 passed (11)
+   Duration  1.51s
+```
+
+11 tests total (up from 7 at the end of the initial pass): 6 in `cameraScanner.test.ts` (was 5;
++1 new detector-load-failure test, the polyfill-fallback test was rewritten in place, not
+added), 5 in `CameraScanButton.test.tsx` (was 2; +3 new: detector-load-failure,
+`NotFoundError`, `mediaDevices` undefined).
+
+Full `npm run test` reran as an extra sanity check beyond the required gate:
+
+```
+ Test Files  1 failed | 192 passed | 7 skipped (200)
+      Tests  10 failed | 1817 passed | 30 skipped (1857)
+```
+
+Same single pre-existing failing file as the initial pass (`dtHarvestIntegration.test.ts`, 10
+tests, tire-knowledge corpus - unrelated to camera, already documented above). Passed-test count
+rose from 1813 to 1817, matching the 4 new tests added in this round exactly.
+
+### tsc --noEmit
+
+```
+$ npx tsc --noEmit
+(no output - clean)
+```
+
+### Self-review / honest limitations (fix round 1)
+
+- The CRITICAL-1 service-level test does not prove a pre-fix regression at the service layer
+  (it passed before the fix too) - documented honestly above rather than claimed as a caught
+  bug. The genuine catch was at the component layer, proven with a real RED/GREEN cycle and a
+  global `unhandledrejection` listener.
+- `cancelled` flag pattern in the `useEffect` guards against a late-arriving rejection calling
+  `setState` after the effect has been superseded (e.g. rapid open/close), but this specific
+  race has no dedicated test - it mirrors the existing unmount-cleanup pattern already used
+  elsewhere in the component and was added defensively per the brief's "clean up its own
+  internal state" instruction, not because a test demanded it.
+- Playwright e2e (`e2e/camera-scan.spec.ts`) was not touched or run in this round, consistent
+  with the original task's explicit "do not run in this worktree" instruction; the new
+  `"start-failed"` state and its `data-testid` are not yet exercised end-to-end.
