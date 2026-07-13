@@ -119,3 +119,8 @@ scripts/dt-harvest/state/
 
 # dt-harvest corpus apply backups (local only)
 src/server/tire-knowledge/tireKnowledge.generated.json.bak-*
+
+# Root artifact sweep (Task 1.2, 2026-07-12): root-level proof PNGs and firestore emulator log
+# are regenerated/transient; archived copies live in docs/archive/proof-images/.
+/*.png
+/firestore-debug.log
