@@ -634,3 +634,60 @@ No renames, no moves, no deletion, no logic touched.
 
 **Task complete. All gates green. No STOP condition encountered.**
 
+## Task 2.3
+
+Characterization tests added for three previously untested high-risk `fetchV2`/`tire` modules.
+Each file was read in full before writing tests; every assertion pins CURRENT behavior as found,
+not desired behavior.
+
+### Files created
+
+| File | Tests | Focus |
+|---|---|---|
+| `src/services/fetchV2/scoring.test.ts` | 30 | `hostOf` normalization, `scoreSource` quality/score table for every tier x association-level combination, `decideOutcome` empty-findings/all-junk-rejected/blank-name/check-digit-invalid/non-public paths, the vetted-DB-host free-agreement-fence verify tier (`TRUSTED_DB_HOSTS`), the 3-host search-snippet consensus tier + its conflict-scan-runs-first ordering, snippet-only identity gating (label vs 2+ hosts), and `rulesFired` trace strings per mode |
+| `src/services/fetchV2/siblingGuard.test.ts` | 22 | `identityRelation` on empty/whitespace/undefined-brand inputs, mixed tire-size notation equivalence (`/` vs `x` vs dash vs spaced vs glued ST/LT/P prefix vs Z-speed-rating vs decimal commercial rim), pack-size unit isolation (oz vs g never clash), brand-compatibility gate, and `detectSiblingAmbiguity`'s pairwise-poisons-the-set contract including the empty-list and blank-name-filter cases |
+| `src/services/tire/tirePrefixHints.test.ts` | 14 | Table shape contract (every entry non-empty array of `{brand, weight, source?}`, digit-only keys), known-prefix -> brand/weight/source lookups, unknown-prefix -> `undefined` (direct property lookup, not the fuzzy `lookupTirePrefix` matcher already covered by `tirePrefixLookup.test.ts`), and ambiguous multi-brand prefixes never collapsing to a single winner |
+
+Total: **66 new tests** across 3 new files. These are additive to (not a replacement for) the
+existing indirect coverage in `engine.test.ts` (scoring/siblingGuard) and
+`tirePrefixLookup.test.ts` (tirePrefixHints via the lookup layer) - overlap was deliberately
+avoided by focusing each new file on paths the existing suites do not exercise.
+
+### RED-check evidence (guard verified, not just written)
+
+One assertion per file was temporarily inverted, run, observed to fail, then restored to the
+original (proof-correct) value before commit:
+
+1. `scoring.test.ts` - "authoritative tier + strong association scores 95" changed to expect
+   `score: 99` -> failed with `expected 99, received 95` -> restored.
+2. `siblingGuard.test.ts` - "different tire sizes on the same model => sibling" changed to expect
+   `"agree"` -> failed with `expected 'agree', received 'sibling'` -> restored.
+3. `tirePrefixHints.test.ts` - "unknown prefix is absent" changed to expect a fabricated hint
+   array -> failed with `expected [...], received undefined` -> restored.
+
+All three failed as expected, then all three passed again after restore (see gate table below).
+
+### Behavior finding (odd but NOT changed - pinned as-is)
+
+`scoreSource`'s host-trust fallback is more permissive than intuition suggests:
+`classifySource()` (`src/services/catalog/sourceTrust.ts`) treats a completely **unrecognized**
+host as Tier 3 "supporting" by explicit policy comment ("Unknown host: treat as Tier 3
+(supporting), never authoritative"), NOT as the "weak" tier. Consequently
+`scoreSource(url, strongAssociation, false)` for a random unknown domain
+(`https://random-blog.example.net/post`) with a **strong** code-to-product association returns
+`{ quality: "medium", score: 55 }` - the SAME quality/score as a known barcode-DB host like
+go-upc.com. Only a junk-path or `?q=`-style query URL forces the "weak" tier for an unrecognized
+host. This is pinned in `scoring.test.ts` as two paired tests: "an unrecognized host defaults to
+supporting tier (never weak)" and "a junk-path URL on an unrecognized host IS weak tier". Flagging
+for owner awareness - not fixed per characterization-test scope (no behavior changes authorized).
+
+### Gate result
+
+| Gate | Command | Result | Exit code |
+|---|---|---|---|
+| Target scope | `npx vitest run src/services/fetchV2 src/services/tire` | `Test Files 10 passed (10)` / `Tests 280 passed (280)` | 0 |
+| Full unit suite | `npm run test` | `Test Files 189 passed \| 7 skipped (196)` / `Tests 1789 passed \| 30 skipped (1819)` | 0 |
+| Typecheck | `npx tsc --noEmit` | No output (clean) | 0 |
+
+**Task complete. All gates green. No STOP condition encountered.**
+
