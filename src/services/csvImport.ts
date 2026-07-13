@@ -393,6 +393,14 @@ function hashImportContent(rows: ImportRow[]): string {
  *  - no barcode and no sku (nothing to key on) -> always create a new product. There is nothing to
  *    merge against or conflict with, and refusing to import a row with only a name would silently
  *    drop legitimate rows (e.g. non-barcoded shop goods) from the owner's own file.
+ *
+ * ASSUMPTION (documented, not yet owner-approved): this loop is NOT transactional. If target.* throws
+ * partway through (e.g. a store write fails on row 50 of 200), rows before the failure are already
+ * applied and rows after it are not - there is no rollback. hasImportRun's per-row idempotency (via
+ * importId embedded in each product id / alias idempotencyKey) means a retry of the SAME file will
+ * skip the already-applied rows and only (re)apply the remainder, so a retry is safe, but a partial
+ * failure is not atomic within a single run. Acceptable for the current single-shop MVP scope; revisit
+ * if/when imports need all-or-nothing semantics.
  */
 export function applyCsvImport(rows: ImportRow[], target: ImportTarget): ImportSummary {
   const importId = hashImportContent(rows);
@@ -404,7 +412,14 @@ export function applyCsvImport(rows: ImportRow[], target: ImportTarget): ImportS
   }
 
   for (const row of rows) {
-    const barcode = row.barcode?.trim();
+    // Real scans always resolve through cleanScanCode (see resolver.ts / buildProductImport above) -
+    // a CSV barcode printed with dashes/spaces ("012-345-678905") must match the SAME clean code an
+    // approved alias already stores, or it silently mints a duplicate product. row.barcode itself
+    // stays untouched (raw, for display); only the matching/alias-creation key is normalized here,
+    // using the most-normalized candidate (separators stripped) so a dashed/spaced CSV value matches
+    // a plain scanned code, same as the sibling buildProductImport path's normalizedCode field.
+    const cleaned = row.barcode?.trim() ? cleanScanCode(row.barcode) : undefined;
+    const barcode = cleaned ? cleaned.normalizedCandidates.slice(-1)[0] ?? cleaned.cleanCode : undefined;
 
     if (barcode) {
       const existingByBarcode = target.findProductByAlias(barcode);

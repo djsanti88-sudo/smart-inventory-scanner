@@ -271,6 +271,67 @@ describe("applyCsvImport - merge into existing product via approved alias", () =
     expect(summary.merged).toBe(1);
     expect((products[0] as unknown as { qty: number }).qty).toBe(6);
   });
+
+  it("normalizes a dashed/spaced CSV barcode via cleanScanCode so it merges into an existing product whose alias is the clean form (real scans always normalize)", () => {
+    const existingProduct = { id: "p1", name: "Widget", primarySku: "SKU1", qty: 5 } as unknown as Product;
+    // Alias as a REAL scan would have stored it: clean, no separators.
+    const existingAlias: Alias = {
+      id: "a1", businessId: "b", productId: "p1", rawCodeExample: "012345678905", cleanCode: "012345678905",
+      normalizedCode: "012345678905", aliasType: "barcode", source: "manual", confidence: 1, approved: true,
+      createdAt: "t", updatedAt: "t", createdBy: "seed", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k1",
+    };
+    const { target, products, aliases } = makeTarget([existingProduct], [existingAlias]);
+    // CSV row has the SAME code but with dashes, as a spreadsheet often prints it.
+    const rows: ImportRow[] = [{ name: "Widget restock", barcode: "012-345-678905", qty: 4 }];
+
+    const summary = applyCsvImport(rows, target);
+
+    expect(summary).toEqual({ created: 0, merged: 1, aliasesAdded: 0, skipped: 0 });
+    expect((products[0] as unknown as { qty: number }).qty).toBe(9);
+    expect(aliases).toHaveLength(1); // merged, not duplicated into a second product/alias
+  });
+});
+
+describe("applyCsvImport - stores the CLEAN code as the alias, not the raw dashed/spaced form", () => {
+  function makeTarget(): { target: ImportTarget; products: Product[]; aliases: Alias[] } {
+    const state = { products: [] as Product[], aliases: [] as Alias[] };
+    const target: ImportTarget = {
+      findProductByAlias: (code) => {
+        const a = state.aliases.find((x) => x.approved && x.cleanCode === code);
+        return a ? state.products.find((p) => p.id === a.productId) ?? null : null;
+      },
+      findProductBySku: (sku) => state.products.find((p) => p.primarySku === sku) ?? null,
+      incrementQuantity: (productId, delta) => {
+        const p = state.products.find((x) => x.id === productId);
+        if (p) (p as unknown as { qty: number }).qty = ((p as unknown as { qty: number }).qty ?? 0) + delta;
+      },
+      createProduct: (row, importId) => {
+        const p = { id: `prod-${state.products.length + 1}`, name: row.name, primarySku: row.sku ?? "", qty: row.qty ?? 1, importId } as unknown as Product;
+        state.products.push(p);
+        return p;
+      },
+      addAlias: (productId, code, importId) => {
+        state.aliases.push({
+          id: `alias-${state.aliases.length + 1}`, businessId: "b", productId, rawCodeExample: code,
+          cleanCode: code, normalizedCode: code, aliasType: "barcode", source: "csv_import", confidence: 1,
+          approved: true, createdAt: "t", updatedAt: "t", createdBy: "csv_import", lastSeenAt: "t",
+          syncStatus: "pending", idempotencyKey: `import:${importId}:${code}`,
+        });
+      },
+      hasImportRun: (importId) => state.products.some((p) => (p as unknown as { importId?: string }).importId === importId)
+        || state.aliases.some((a) => a.idempotencyKey.startsWith(`import:${importId}:`)),
+    };
+    return { target, products: state.products, aliases: state.aliases };
+  }
+
+  it("creates the new alias with the normalized/clean code, not the raw dashed CSV value", () => {
+    const { target, aliases } = makeTarget();
+    const summary = applyCsvImport([{ name: "New Widget", barcode: "555-666-777", qty: 3 }], target);
+
+    expect(summary.created).toBe(1);
+    expect(summary.aliasesAdded).toBe(1);
+    expect(aliases[0].cleanCode).toBe("555666777"); // separators stripped, matching the sibling buildProductImport path
+  });
 });
 
 describe("applyCsvImport - create new product + alias", () => {

@@ -112,3 +112,42 @@ describe("CsvImportPanel - explicit confirm required", () => {
     expect(screen.getByTestId("csv-import-summary")).toHaveTextContent("1");
   });
 });
+
+describe("CsvImportPanel - store-level double-apply is a true no-op (idempotent re-import)", () => {
+  it("uploading and confirming the SAME fixture CSV twice writes products/aliases/quantities identically after both confirms (zero new writes on the second)", async () => {
+    const text = "name,sku,barcode,qty\nWidget A,SKU1,111111111,5\nWidget B,SKU2,222222222,2";
+
+    // --- First import ---
+    const { unmount } = render(<CsvImportPanel />);
+    await selectFile(text);
+    await waitFor(() => expect(screen.getByTestId("csv-import-confirm")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("csv-import-confirm"));
+    await waitFor(() => expect(screen.getByTestId("csv-import-summary")).toBeInTheDocument());
+
+    const afterFirst = useScanStore.getState();
+    expect(afterFirst.products).toHaveLength(2);
+    expect(afterFirst.aliases).toHaveLength(2);
+    const productsAfterFirst = JSON.parse(JSON.stringify(afterFirst.products));
+    const aliasesAfterFirst = JSON.parse(JSON.stringify(afterFirst.aliases));
+    unmount();
+
+    // --- Second import: same file content, fresh panel instance (simulates re-upload) ---
+    render(<CsvImportPanel />);
+    await selectFile(text);
+    await waitFor(() => expect(screen.getByTestId("csv-import-confirm")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("csv-import-confirm"));
+    await waitFor(() => expect(screen.getByTestId("csv-import-summary")).toBeInTheDocument());
+
+    const afterSecond = useScanStore.getState();
+
+    // Zero new writes: identical counts and identical row content (deep equal), not just same length.
+    expect(afterSecond.products).toHaveLength(2);
+    expect(afterSecond.aliases).toHaveLength(2);
+    expect(afterSecond.products).toEqual(productsAfterFirst);
+    expect(afterSecond.aliases).toEqual(aliasesAfterFirst);
+
+    // The summary on the second confirm must report the re-import as fully skipped, not re-applied.
+    expect(screen.getByTestId("csv-import-summary")).toHaveTextContent("0 products created");
+    expect(screen.getByTestId("csv-import-summary")).toHaveTextContent("2 rows skipped");
+  });
+});
