@@ -55,8 +55,8 @@ ENGINEERING_DOCTRINE.md. Nothing here is approved to run yet; the owner picks it
 
 - [ ] **Split `scanStore.ts`** (4,511 lines): core store / actions / auto-count gate rules.
 - [ ] **Split `app/api/ai-lookup/route.ts`** (1,097 lines): thin route + decode pipeline service.
-- [ ] **Remove dead code**: `autoAcceptVerifiedDecodes` (types.ts + defaults; gates nothing),
-      deprecate `decodeOrchestrator.ts` (superseded by the ladder; only type imports remain),
+- [x] **Remove dead code**: `autoAcceptVerifiedDecodes` (types.ts + defaults; gates nothing) - done 2026-07-12.
+- [ ] **Remove dead code**: deprecate `decodeOrchestrator.ts` (superseded by the ladder; only type imports remain),
       archive `geminiProvider.ts` decode path (permanently gated off by `GEMINI_DECODE_DISABLED`).
 - [ ] **Add missing unit tests**: `fetchV2/scoring.ts`, `fetchV2/siblingGuard.ts`,
       `fetchV2/index.ts`, `tire/tirePrefixHints.ts` (all high-risk, only indirectly tested).

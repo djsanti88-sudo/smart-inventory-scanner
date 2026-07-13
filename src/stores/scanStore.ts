@@ -364,7 +364,6 @@ export const DEFAULT_SETTINGS: Settings = {
   enablePendingSyncQueue: true,
   enableIdempotentSync: true,
   autoSuggestUnknowns: false,
-  autoAcceptVerifiedDecodes: false,
   autoAddDecodedProducts: true,
   decodeBudgetMs: 13000,
   autoCatalogLearningEnabled: true,

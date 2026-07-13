@@ -68,8 +68,6 @@ Why each choice was made. Newest decisions at the bottom of each section.
   contradiction detection (no productName string equality) -> agree/conflict/single_provider/weak.
 - **decideDecode** gate: "verified" requires public barcode + strong app-verified evidence +
   agreement (or single) + identity + confidence>=threshold. Vendor/FNSKU/internal never verified.
-- **Auto-accept of verified decodes** is a setting (`autoAcceptVerifiedDecodes`, default OFF). Even
-  a Verified AI Decode needs human approval by default - this preserves the prior trust boundary.
 - **Route** gained a "decode" mode (dual provider + server-side verify + cross-check). `IS_E2E=1`
   forces mock-only so E2E can never spend tokens; `page.route` mocks the endpoint in E2E; unit tests
   mock the engines and `fetch`. No live tokens in `npm run test` or `npm run test:e2e`.

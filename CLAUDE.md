@@ -103,8 +103,7 @@ retail, restaurant supplies, medical supplies, and any physical inventory.
   `autoAddDecodedProducts` defaults true (scanStore.ts), and the gate requires status verified +
   app-verified exact code (`exactCodeEvidenceVerifiedByApp`) + confidence >= 0.8 + (for tires) full specs
   + no firewall/brand-prefix conflict, on a public barcode. Set `autoAddDecodedProducts` false to route
-  every decode to manual review instead. NOTE: `autoAcceptVerifiedDecodes` is declared (types.ts) and
-  defaulted false but is currently UNUSED/dead - it does NOT gate auto-count; do not rely on it.
+  every decode to manual review instead.
 - TEST SAFETY: automated tests NEVER call live Gemini/OpenAI. Unit tests mock the engines/`fetch`;
   E2E mocks `/api/ai-lookup` with `page.route`; the Playwright webServer runs with `IS_E2E=1` which
   forces the route to mock-only. Live providers run only in manual/dev use with a key present.

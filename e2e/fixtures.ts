@@ -30,7 +30,6 @@ const GENERIC_SETTINGS = {
   enablePendingSyncQueue: true,
   enableIdempotentSync: true,
   autoSuggestUnknowns: false,
-  autoAcceptVerifiedDecodes: false,
   autoAddDecodedProducts: true,
   decodeBudgetMs: 13000,
   autoCatalogLearningEnabled: true,
