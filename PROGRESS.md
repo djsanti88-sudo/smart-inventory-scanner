@@ -4,6 +4,16 @@
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
 > Last updated: 2026-07-12.
 
+## 2026-07-12 free-work plan (in progress)
+
+- Phase 0 done: LFS fix landed, branch `feat/decode-ladder-goupc` pushed to origin for the
+  first time, remote tip verified against local HEAD with `git ls-remote`.
+- Phase 1 cleanup underway: `reports/` untracked (kept on disk), root artifacts archived to
+  `docs/archive/`, 78 `scripts/tmp-*` probe scripts archived to `scripts/archive-tmp-2026-07/`
+  with a README, doc truth fixes in progress (this task).
+- Phases 2 and 3 next: code health pass, then camera scan, free decode rungs, variance
+  report, and CSV import, each on its own separate branch.
+
 ## Current phase
 
 **DECODE LADDER + SIZE-MERGE FIX: BUILT AND UI-PROVEN ON PREVIEW. NOT PUSHED, NOT DEPLOYED.**

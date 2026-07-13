@@ -378,3 +378,47 @@ majority. No files deleted. No push performed.
 
 **All verification gates passed. Task complete.**
 
+## Task 1.4 - doc truth fixes
+
+Branch: `feat/decode-ladder-goupc`. Purpose: fix a stale claim in `CLAUDE.md` (Tech Stack said
+Firebase was not wired; in reality `firebaseAdmin.ts`, emulator tests, and `qa:bots:live` cloud
+checks already exist) and add a dated free-work-plan marker to `PROGRESS.md`. No code changed.
+
+### Step 1: locate exact current wording
+- Command: `Grep "Local mock data mode" CLAUDE.md` (content mode, `-C 2`).
+- Found at line 28: `- Local mock data mode (no Firebase wired). Firebase Auth/Firestore is a
+  documented future path.`
+
+### Step 2: replace the line
+- Replaced ONLY that line, no other restructuring of `CLAUDE.md`.
+- Before:
+  `- Local mock data mode (no Firebase wired). Firebase Auth/Firestore is a documented future path.`
+- After:
+  `- Local mock data mode is the default; Firebase Phase 2 IS wired (firebaseAdmin.ts, emulator
+  tests via npm run test:firebase, qa:bots:live cloud checks) behind dev:emulator/dev:prod;
+  production stays mock until the go-live gate.`
+- No em dash or en dash used in the new text, per project convention.
+
+### Step 3: `PROGRESS.md` dated marker
+- Inserted a new `## 2026-07-12 free-work plan (in progress)` section directly under the file's
+  header block (before `## Current phase`), per the "near the top" instruction.
+- Content: Phase 0 done (LFS fix + first push of the branch, `git ls-remote` verified), Phase 1
+  cleanup underway (reports/ untracked, root artifacts + 78 tmp scripts archived), Phases 2 and 3
+  next (code health, then camera scan / free rungs / variance report / CSV import on separate
+  branches).
+
+### Step 4: this report section + commit
+- Appended this section to the shared execution report before committing.
+- Commit message: `docs: CLAUDE.md Firebase reality line + PROGRESS marker`.
+
+### Verification
+| Check | Result |
+|---|---|
+| Exact old line matched before editing | PASS (grepped, confirmed verbatim) |
+| Only the one line replaced in CLAUDE.md | PASS (single Edit, no other changes) |
+| No em dash or en dash in new text | PASS (manual check) |
+| PROGRESS.md marker near top, correct heading | PASS |
+| Report section added | PASS (this section) |
+
+**Task complete.**
+
