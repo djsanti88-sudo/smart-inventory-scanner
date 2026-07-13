@@ -61,8 +61,10 @@ export type AliasType =
   | "messy_label"
   | "shelf_code";
 
-/** Where a record came from. */
-export type Source = "seed" | "manual" | "scan" | "human_review" | "ai_mock" | "ai_gemini" | "ai_openai" | "catalog";
+/** Where a record came from. "csv_import" (Task 3.6) = a human-uploaded onboarding CSV row; trusted
+ *  like "manual" (aliases from it may be approved: true immediately), but tagged distinctly so the
+ *  origin of a mapping stays auditable. */
+export type Source = "seed" | "manual" | "scan" | "human_review" | "ai_mock" | "ai_gemini" | "ai_openai" | "catalog" | "csv_import";
 
 /** Operations that get queued for idempotent sync. */
 export type SyncOperation =
