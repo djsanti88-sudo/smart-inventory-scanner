@@ -202,3 +202,110 @@ behavior for anyone already relying on it.
   Playwright. Its line-number and row-count expectations were cross-checked with a permanent vitest
   case against the literal fixture content, so the spec should be correct on first run, but this is
   unverified by an actual browser and remains the responsibility of the merge gate.
+
+## Fix round 1
+
+Fixes for the review findings on this feature. Conflict-safety logic (the sku-disagreement /
+re-pointing guard in `applyCsvImport`) was explicitly out of scope and untouched.
+
+### IMPORTANT 1 - barcode matching bypassed cleanScanCode normalization
+
+**Bug.** `applyCsvImport` (`src/services/csvImport.ts`) matched/created aliases off the RAW
+`row.barcode` string. A CSV barcode printed with separators ("012-345-678905") never matched an
+existing alias stored from a real scan of the same code without separators, so re-uploading a
+shop's own catalog against already-scanned stock silently minted a duplicate product instead of
+merging. The sibling path `buildProductImport` already normalized via `cleanScanCode` (line ~138);
+`applyCsvImport` did not.
+
+**Fix.** `applyCsvImport` now runs `row.barcode` through `cleanScanCode` once per row and uses the
+most-normalized candidate (separators stripped, e.g. `normalizedCandidates.slice(-1)[0]`) as the
+single key for `findProductByAlias`, `findProductBySku`-adjacent conflict checks, `createProduct`,
+and `addAlias`. This mirrors `buildProductImport`'s `normalizedCode` field so a dashed/spaced CSV
+value resolves to the same product a plain scanned code already created. `row.barcode` itself is
+left untouched (raw) - only the derived matching/alias key is normalized.
+
+RED (before fix, `src/services/csvImport.test.ts`):
+```
+ ❯ applyCsvImport - merge into existing product via approved alias > normalizes a dashed/spaced CSV
+   barcode via cleanScanCode so it merges into an existing product whose alias is the clean form
+   AssertionError: expected { created: 1, merged: 0, aliasesAdded: 1, skipped: 0 }
+                    to deeply equal { created: 0, merged: 1, aliasesAdded: 0, skipped: 0 }
+
+ ❯ applyCsvImport - stores the CLEAN code as the alias, not the raw dashed/spaced form >
+   creates the new alias with the normalized/clean code, not the raw dashed CSV value
+   AssertionError: expected '555-666-777' to be '555666777'
+
+ Tests  2 failed | 28 passed (30)
+```
+
+GREEN (after fix): both new tests pass, 30/30 in `csvImport.test.ts`.
+
+### IMPORTANT 2 - store-level double-apply untested (and, once tested, found broken)
+
+**Gap.** The idempotency proof in `csvImport.test.ts` only exercised a hand-mocked `ImportTarget`
+(a `hasImportRun` that correctly embeds `importId`). `CsvImportPanel.tsx`'s real
+`buildStoreImportTarget()` was never exercised for a genuine re-upload through the real component +
+`useScanStore`.
+
+**Bug found by writing that test (RED first).** `buildStoreImportTarget()`'s `createProduct` and
+`addAlias` implementations did not accept/use the `importId` parameter the `ImportTarget` interface
+passes them (TypeScript's structural typing allowed the mismatched arity to compile silently). So
+`hasImportRun`'s `.includes(importId)` had nothing to find - `importId` was never embedded in any
+product id or alias `idempotencyKey` at all. Confirming a real second confirm-click on the same file
+did NOT no-op: `products`/`aliases` length stayed the same only because barcodes matched via
+`findProductByAlias` and merged (`incrementQuantity`) a second time - i.e. quantities silently
+doubled instead of the whole import being skipped. A pure length assertion would have missed this;
+a deep-equal snapshot comparison caught it.
+
+**Fix.** `createProduct` now suffixes the generated product id with `--${importId}`; `addAlias` now
+embeds `importId` as its own segment in `idempotencyKey`
+(`${businessId}::csv_import::${importId}::${cleanCode}`). `hasImportRun` checks for that exact
+suffix/segment (see MINOR below) instead of a bare substring. New component test:
+"CsvImportPanel - store-level double-apply is a true no-op (idempotent re-import)" renders the real
+panel, confirms the same fixture CSV twice through the actual `useScanStore`, and asserts the store
+state is deep-equal (not just same length) after both confirms, plus that the second summary reports
+"0 products created" / "2 rows skipped".
+
+RED (before fix, `src/components/CsvImportPanel.test.tsx`):
+```
+ ❯ CsvImportPanel - store-level double-apply is a true no-op (idempotent re-import) >
+   uploading and confirming the SAME fixture CSV twice writes products/aliases/quantities
+   identically after both confirms (zero new writes on the second)
+   AssertionError: expected [ {...}, {...} ] to deeply equal [ {...}, {...} ]
+   - "updatedAt": "2026-07-13T03:17:14.498Z"
+   + "updatedAt": "2026-07-13T03:17:14.529Z"   <-- second confirm silently re-merged (qty doubled)
+
+ Tests  1 failed | 8 passed (9)
+```
+
+GREEN (after fix): 9/9 in `CsvImportPanel.test.tsx`, including the new double-apply test.
+
+### MINOR - hasImportRun substring check
+
+**Fix.** `hasImportRun` no longer uses a bare `.includes(importId)` (which could false-positive if
+one importId's hash happens to be a substring of another's, and was already false-negative-prone
+before the importId-wiring fix above). It now checks an exact delimiter-bounded match: product ids
+via `.endsWith('--' + importId)` and alias `idempotencyKey`s via `.includes('::' + importId + '::')`
+(the key format's own `scope::action::key` delimiter convention), consistent with the
+`import:${importId}:${code}` exact-match pattern used in the service-level test mocks. Covered by
+the same double-apply test above (a false hasImportRun match would show up as more than 2
+products/aliases after the second confirm; a false negative would show up as the deep-equal /
+updatedAt mismatch demonstrated in the RED run).
+
+### Noted, no code change (owner/reviewer awareness)
+
+- **Merge-by-sku-alone path** (no barcode, sku matches an existing product -> merge) still awaits
+  owner sign-off per the original report. Untouched in this round.
+- **Partial-failure mid-loop assumption** is now documented directly above `applyCsvImport` in
+  `src/services/csvImport.ts`: the loop is not transactional - a mid-loop failure leaves earlier rows
+  applied and later rows unapplied, but the per-row idempotency (via the importId now correctly wired
+  through `createProduct`/`addAlias`) makes a retry of the same file safe (already-applied rows are
+  skipped, the remainder is (re)applied) even though a single run is not atomic.
+
+### Gates
+
+- `npx vitest run src/services/csvImport.test.ts src/components/CsvImportPanel.test.tsx`:
+  2 files passed, 39/39 tests passed.
+- `npx tsc --noEmit`: clean, no output, exit 0.
+- Adjacent suites re-checked for regressions: `src/stores/csvImport.store.test.ts` and
+  `src/services/db/firebase/csvImport.rules.test.ts` - all passing (3 passed, 1 pre-existing skip).

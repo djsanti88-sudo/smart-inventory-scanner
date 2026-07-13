@@ -51,11 +51,13 @@ function buildStoreImportTarget(): ImportTarget {
         ),
       }));
     },
-    createProduct: (row: ImportRow) => {
+    createProduct: (row: ImportRow, importId: string) => {
       const state = useScanStore.getState();
       const nowIso = new Date().toISOString();
       const product: Product = {
-        id: nextId("prod-csvimport"),
+        // importId is embedded (not just a random suffix) so hasImportRun can detect a verbatim
+        // re-import of the same file content and make applyCsvImport a true no-op the second time.
+        id: `${nextId("prod-csvimport")}--${importId}`,
         businessId: state.businessId,
         name: row.name,
         brand: "",
@@ -85,7 +87,7 @@ function buildStoreImportTarget(): ImportTarget {
       useScanStore.setState((s) => ({ products: [...s.products, product] }));
       return product;
     },
-    addAlias: (productId, cleanCode) => {
+    addAlias: (productId, cleanCode, importId) => {
       const state = useScanStore.getState();
       const nowIso = new Date().toISOString();
       const alias: Alias = {
@@ -104,15 +106,20 @@ function buildStoreImportTarget(): ImportTarget {
         createdBy: "csv_import",
         lastSeenAt: nowIso,
         syncStatus: "pending",
-        idempotencyKey: `${state.businessId}::csv_import::${cleanCode}`,
+        // Idempotency key follows the store's existing `scope::action::key` pattern, with the
+        // per-import-run id as its own segment so hasImportRun can match it EXACTLY (never a
+        // substring), consistent with the idempotency-key format used elsewhere in the codebase.
+        idempotencyKey: `${state.businessId}::csv_import::${importId}::${cleanCode}`,
       };
       useScanStore.setState((s) => ({ aliases: [...s.aliases, alias] }));
     },
     hasImportRun: (importId) => {
       const { aliases, products } = useScanStore.getState();
+      const productSuffix = `--${importId}`;
+      const aliasInfix = `::${importId}::`;
       return (
-        products.some((p) => p.id.includes(importId)) ||
-        aliases.some((a) => a.idempotencyKey.includes(importId))
+        products.some((p) => p.id.endsWith(productSuffix)) ||
+        aliases.some((a) => a.idempotencyKey.includes(aliasInfix))
       );
     },
   };
