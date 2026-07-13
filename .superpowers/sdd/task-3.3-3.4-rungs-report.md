@@ -290,3 +290,122 @@ message rather than hidden.
    REVIEW NOTE for 3.3 ("an Opus reviewer confirms the rung cannot auto-count on its own claim
    before merge") has not happened yet - flagging this as an explicit outstanding step before merge
    to `feat/decode-ladder-goupc`.
+
+## Fix round 1 (2026-07-12): free rungs were still burning the paid daily cap
+
+An Opus code review of the above work caught a real bug before merge: **the paid daily-cap slot
+was charged unconditionally, before the free rungs even ran.** `computeDecode()` in `pipeline.ts`
+called `buildLadderRungs()` (the single combined array: `upcitemdb -> openfoodfacts -> goupc ->
+fetchv2 -> gpt`) and `runLadder()` AFTER the LAZY DAILY CAP GATE had already read-checked and then
+unconditionally `chargeDailySlot()`'d. Two concrete symptoms:
+
+1. A scan resolved entirely by a free rung (UPCitemdb or Open Food Facts) still burned one paid
+   daily-cap slot - free rungs are supposed to be free, and were not.
+2. When the paid cap was already exhausted, `DailyCapExceededError` was thrown BEFORE `runLadder`
+   ever started, so the free rungs never got a chance to resolve the code for $0 even though they
+   have nothing to do with the paid cap at all.
+
+### What changed
+
+**`src/server/upc/ladder.ts`**: split the single `buildLadderRungs()` into two builders:
+- `buildFreeLadderRungs(code, deps)` - just `upcitemdb -> openfoodfacts`, same GTIN gate as
+  before, empty array for a non-GTIN or bad-check-digit code.
+- `buildPaidLadderRungs(code, deps)` - `goupc -> fetchv2 -> gpt` (goupc still GTIN-gated).
+- `buildLadderRungs()` itself is now a thin compatibility wrapper (`[...free, ...paid]`) kept
+  because `ladder.test.ts`'s existing describe block still exercises it directly; grepped the
+  whole repo first and confirmed `pipeline.ts` was its only production caller, so no other call
+  site needed touching.
+- `runLadder()` itself is UNCHANGED - it still just executes whatever rung list it is given and
+  stops at first settlement; the two-phase behavior lives entirely in how the caller now invokes
+  it twice.
+
+**`src/server/decode/pipeline.ts`**: `computeDecode()` now calls `runLadder()` TWICE instead of
+once:
+1. First with `buildFreeLadderRungs(...)` - no cap read, no cap charge, unconditionally, before
+   any interaction with `readDailyUsed`/`chargeDailySlot`/`DailyCapExceededError`.
+2. Only if the free phase's `runLadder()` returned no `outcome` (i.e. no free rung settled) does
+   the code reach the LAZY DAILY CAP GATE (unchanged read-then-charge logic, unchanged
+   `DailyCapExceededError` throw on exhaustion) and then call `runLadder()` a second time with
+   `buildPaidLadderRungs(...)`.
+3. The final `LadderResult` fed to the rest of `computeDecode()` (`ladderRun`) is reassembled as
+   `{ settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons,
+   ...paidRun.reasons] }` when the paid phase ran, so a `needs_review` response's `ladderReasons`
+   debug field still lists every rung that actually ran, free-phase-first, in true run order -
+   nothing is silently dropped. When the free phase itself settles, `ladderRun` is just `freeRun`
+   directly (its `reasons` already has the right free-only entries).
+4. Exactly one `chargeDailySlot()` call site remains in the entire decode path (confirmed by grep:
+   the only other call site in the repo is `route.ts`'s explicitly `!isDecodeMode`-gated legacy
+   'lookup' mode charge, which decode requests never reach).
+
+**Confidence value fix (minor finding, same review)**: `SUGGESTION_CONFIDENCE` was already `0.6`
+in both `UpcItemDbProvider.ts` and `OpenFoodFactsProvider.ts` (the constant itself was correct),
+but both provider test files only asserted the loose bound `toBeLessThanOrEqual(0.7)`, and
+`UpcItemDbProvider.ts`'s own comment said "confidence is capped at 0.7" (stale/inconsistent with
+the real `0.6` constant two lines below it). Fixed: both test files now assert
+`toBe(0.6)` exactly (test titles updated to say "confidence exactly 0.6"), and the stale comment
+now says 0.6. Grepped the whole `src/server/upc` and `src/server/decode` trees for any other
+`0.7` mention describing this value - none found.
+
+### Tests added/updated
+
+- `src/server/upc/ladder.test.ts`: new `describe("buildFreeLadderRungs / buildPaidLadderRungs
+  (two-phase split, cap-charge bug fix)")` block, 6 new tests - free-rung order for a valid GTIN,
+  empty free-rung array for a non-GTIN and for a bad-check-digit GTIN, paid-rung order for a valid
+  GTIN, paid-rung order (goupc skipped) for a non-GTIN, and a property test that concatenating the
+  two new builders reproduces the legacy `buildLadderRungs()` output exactly for three
+  representative codes.
+- `src/server/decode/pipeline.test.ts`: 2 new tests under the existing `describe` block, using a
+  new synthetic GTIN fixture `900000000003` (valid GS1 check digit, deliberately absent from the
+  tire corpus / retail knowledge index / barcodeDb fixtures - `848983006257` was tried first but
+  turned out to be a real Falken tire barcode already seeded in the corpus, which short-circuited
+  before ever reaching the ladder rungs and made the test meaningless):
+  - **"free rung settles (UPCitemdb hit) -> paid daily counter UNCHANGED, even when the cap is
+    ALREADY exhausted going in (no DailyCapExceededError)"**: sets `AI_LOOKUP_DAILY_LIMIT=0` (cap
+    already exhausted before the request starts), stubs `fetch` so the UPCitemdb host returns a
+    hit and the OFF host is never reached (free phase stops at the first settled rung). Asserts
+    `outcome.kind === "computed"` (NOT `"cap_blocked"` - proves an exhausted paid cap never blocks
+    a free-rung resolution), asserts the actual stored counter value via `readDailyUsed(...)` is
+    exactly `0` (not just "no throw"), and asserts no AI/paid provider host was ever contacted.
+  - **"cap available + free rungs MISS -> paid charge happens EXACTLY ONCE, paid rungs run, and
+    reasons chain is free-phase-then-paid-phase"**: sets `AI_LOOKUP_DAILY_LIMIT=100`, stubs `fetch`
+    so both free-rung hosts return a genuine miss. Asserts the `ladderReasons` debug array is
+    exactly `["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]` in that order (free phase
+    first, then paid phase, goupc included because the fixture code is GTIN-shaped with a valid
+    check digit), and asserts `readDailyUsed(...)` reads exactly `1` after the request (charged
+    once, not zero, not twice).
+  - The existing "cap-blocked" test (`AI_LOOKUP_DAILY_LIMIT=0`, code `111000222333` which has an
+    INVALID check digit so it never reaches the free rungs at all) was left unchanged - it still
+    asserts `cap_blocked` with the counter at `0`. Its own comment already covers this limitation
+    correctly (a non-GTIN-gated code has no free phase to speak of), so no code comment was added
+    there; the two new tests above are what actually exercise the free-phase-present case.
+
+### Test run output (final, this fix round)
+
+```
+$ npx vitest run src/server/upc src/server/decode
+ Test Files  11 passed (11)
+      Tests  124 passed (124)
+   Duration  1.46s
+
+$ npx tsc --noEmit
+(clean, exit 0)
+```
+
+124 = the prior 116 + 6 new `ladder.test.ts` tests + 2 new `pipeline.test.ts` tests. All green,
+zero live network calls (every new test stubs `global.fetch`; no test imports the real
+`upcItemDbLookup`/`openFoodFactsLookup`/live `fetch`).
+
+A full-repo `npx vitest run` was also run for regression confidence: 1865 passed, 30 skipped, 10
+failed - all 10 failures are in `src/server/tire-knowledge/dtHarvestIntegration.test.ts` (a
+pre-existing corpus-data fixture issue unrelated to this change; confirmed by `git stash`-ing this
+fix's changes and re-running that one file in isolation - identical 10 failures with or without
+this fix applied).
+
+### Paid-cap charge call-site count (decode path)
+
+Grepped `chargeDailySlot(` across the whole repo (excluding tests): exactly 2 call sites exist in
+the entire codebase - `src/server/decode/pipeline.ts:825` (inside the paid phase, gated behind
+`if (!freeRun.outcome)`) and `src/app/api/ai-lookup/route.ts:240` (the legacy non-decode 'lookup'
+mode, explicitly gated `if (!e2eMode() && !isDecodeMode)` - decode requests never execute this
+line). So within the decode path specifically, there is exactly ONE charge call site, matching the
+"charge only before paid phase" requirement.

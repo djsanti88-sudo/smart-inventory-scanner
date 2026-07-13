@@ -44,17 +44,17 @@ function baseDeps(over?: Partial<OpenFoodFactsRungDeps>): OpenFoodFactsRungDeps 
 }
 
 describe("openFoodFactsRung", () => {
-  it("hit -> settled SUGGESTION (confidence <= 0.7, exactCodeEvidence NOT app-verified), usage recorded", async () => {
+  it("hit -> settled SUGGESTION (confidence exactly 0.6, exactCodeEvidence NOT app-verified), usage recorded", async () => {
     const usage = usageGate();
     const deps = baseDeps({ usage });
     const r = await openFoodFactsRung(YOGURT, deps);
     expect(r.path).toBe("openfoodfacts_hit");
     expect(r.decision?.status).toBe("needs_review");
-    expect(r.decision?.confidence).toBeLessThanOrEqual(0.7);
+    expect(r.decision?.confidence).toBe(0.6);
     expect(r.decision?.exactCodeEvidenceVerifiedByApp).toBe(false);
     expect(r.results?.[0].brand).toBe("Danone");
     expect(r.results?.[0].needsHumanReview).toBe(true);
-    expect(r.results?.[0].confidence).toBeLessThanOrEqual(0.7);
+    expect(r.results?.[0].confidence).toBe(0.6);
     expect(usage.records).toBe(1);
   });
 
