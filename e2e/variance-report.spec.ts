@@ -1,9 +1,10 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
 // SDD Task 3.5 e2e proof: seed scans -> save a count snapshot -> change counts -> save a second
-// snapshot -> the variance table shows the delta. Written per the task brief; NOT run in this task
-// (a separate merge gate runs Playwright - see task-3.5-variance-report.md for the controller
-// decision). Screenshot proof: e2e/proof/variance-report.png.
+// snapshot -> the variance table shows the delta. Run + fixed during the 2026-07-12 merge-train
+// gate (see task-3.5-variance-report.md for the original controller decision): the confirm-dialog
+// handling and remove-row targeting needed spec-side fixes, documented above each fix.
+// Screenshot proof: e2e/proof/variance-report.png.
 
 const PROOF = "e2e/proof";
 
@@ -25,6 +26,10 @@ test("count snapshots + variance report: save, change counts, compare, and expor
     if (route.request().method() === "GET") return route.fulfill({ json: NO_AI_STATUS });
     return route.fulfill({ json: {} });
   });
+
+  // FinalCountTable's remove action uses window.confirm(); Playwright dismisses dialogs by default
+  // (does NOT auto-accept), so this listener is required for the remove-count click below to work.
+  page.on("dialog", (d) => d.accept());
 
   await page.goto("/login");
   await page.getByTestId("login-button").click();
@@ -48,8 +53,10 @@ test("count snapshots + variance report: save, change counts, compare, and expor
 
   // 3. Change counts: scan the Falken tire again (qty 1 -> 2) and remove the Coca-Cola row.
   await scan(page, "848983012906");
-  const removeCoke = page.getByTestId(/^remove-count-/).first();
-  await removeCoke.click(); // triggers window.confirm - Playwright auto-accepts by default in this suite
+  // Scope to the Coca-Cola row specifically (not `.first()`, which depends on DOM order and does
+  // not reliably mean "the Coca-Cola row").
+  const cokeRow = page.locator("tr", { hasText: "Coca-Cola" });
+  await cokeRow.getByTestId(/^remove-count-/).click(); // triggers window.confirm - accepted by the page.on("dialog") listener above
 
   // 4. Save the second snapshot ("After").
   await page.getByLabel("snapshot label").fill("After");

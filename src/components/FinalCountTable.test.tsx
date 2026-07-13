@@ -78,6 +78,40 @@ describe("FinalCountTable role gating (Phase 6)", () => {
   });
 });
 
+describe("FinalCountTable Model column customer cleaning (regression, 2026-07-12 merge-train gate)", () => {
+  // Root cause: the deterministic structurer parses the RAW stored name, so a messy legacy name
+  // ("UPC <code> - Model Fits: <vehicle>") can produce a structuredModel that still carries the UPC
+  // prefix / fitment clause. The Name column already cleans via customerDisplayName() for non-platform
+  // roles; the Model column must get the same treatment (P5 bot: customer-clean-names.spec.ts).
+  it("strips a raw UPC prefix and Fits clause from the Model cell for a customer role", () => {
+    delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER; // business / customer
+    const messy: Product = {
+      ...product, id: "pMessy", name: "UPC 086699205636 - Defender LTX M/S 275/70R18 Fits: 2004 Chevrolet",
+      brand: "Michelin", structuredBrand: "Michelin",
+      structuredModel: "UPC 086699205636 - Defender LTX M/S Fits: 2004 Chevrolet",
+    };
+    const mCount: InventoryCount = { ...count, id: "cMessy", productId: "pMessy" };
+    useScanStore.setState({ products: [messy], finalCounts: [mCount] });
+    render(<FinalCountTable />);
+    const modelText = screen.getByTestId("model-pMessy").textContent ?? "";
+    expect(modelText).not.toContain("UPC 086699205636");
+    expect(modelText).not.toContain("Fits");
+  });
+
+  it("keeps the raw structuredModel visible to the platformOwner (render-only cleaning)", () => {
+    process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
+    const messy: Product = {
+      ...product, id: "pMessyPlatform", name: "UPC 086699205636 - Defender LTX M/S 275/70R18 Fits: 2004 Chevrolet",
+      brand: "Michelin", structuredBrand: "Michelin",
+      structuredModel: "UPC 086699205636 - Defender LTX M/S Fits: 2004 Chevrolet",
+    };
+    const mCount: InventoryCount = { ...count, id: "cMessyPlatform", productId: "pMessyPlatform" };
+    useScanStore.setState({ products: [messy], finalCounts: [mCount] });
+    render(<FinalCountTable />);
+    expect(screen.getByTestId("model-pMessyPlatform").textContent).toContain("086699205636");
+  });
+});
+
 describe("FinalCountTable Brand/Model/Size columns + digits filter (Build 2 Task 4)", () => {
   it("renders structured Brand/Model/Size and the digits filter narrows rows by sizeTag prefix", () => {
     process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
