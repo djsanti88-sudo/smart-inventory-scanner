@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ScannerInput } from "@/components/ScannerInput";
+import { CameraScanButton } from "@/components/CameraScanButton";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
@@ -115,6 +116,9 @@ export default function ScanPage() {
         <div className="flex flex-wrap items-end gap-3">
           <div className="grow">
             <ScannerInput onScan={handleScan} submitMode={settings.scannerSubmitMode} debounceMs={settings.scannerDebounceMs} />
+          </div>
+          <div className="shrink-0">
+            <CameraScanButton onScan={handleScan} />
           </div>
           {SHOW_CATEGORY && (
             <div className="flex flex-col gap-1">
