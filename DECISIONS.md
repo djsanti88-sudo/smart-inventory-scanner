@@ -308,3 +308,16 @@ Why each choice was made. Newest decisions at the bottom of each section.
   are visible (Needs Review barcode column, Status column on Your counts).
 - **Corpus slug names are prettified at display time** (digit model-code rule bounded to short
   tokens; hyphen parts cased individually) - stored identity is unchanged.
+
+## Count snapshots persist for every access level (2026-07-12, owner-ratified)
+- `countSnapshots` (variance report) stays in the shared persisted store for ALL roles. Sanity-check
+  performed and passed: snapshot lines carry ONLY productId / display name / qty (scanStore.ts
+  snapshotCount) - no raw codes, no aliases, no provider diagnostics - so the customer data firewall
+  is not widened. Cap 12 bounds growth. Revisit only if snapshot lines ever gain code-bearing fields.
+
+## CSV import: merge-by-sku-alone stays (2026-07-12, owner-ratified)
+- A CSV row with a SKU matching an existing product and NO barcode merges quantity into that product.
+  Rationale: the CSV is the owner's own human-supplied list (same trust basis as the approved-alias
+  rule); SKU is a human-assigned identity in their catalog. Guardrails unchanged: barcode conflicts
+  never re-point (error list), idempotent re-import, preview + explicit confirm. Revisit if
+  multi-tenant catalogs ever share SKUs across businesses.
