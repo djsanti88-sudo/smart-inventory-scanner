@@ -25,7 +25,7 @@ retail, restaurant supplies, medical supplies, and any physical inventory.
 - Zustand (+ persist middleware to localStorage) for local optimistic scan state
 - Vitest (projects split: `node` for pure services, `jsdom` for components) for unit tests
 - Playwright for E2E proof + screenshots
-- Local mock data mode (no Firebase wired). Firebase Auth/Firestore is a documented future path.
+- Local mock data mode is the default; Firebase Phase 2 IS wired (firebaseAdmin.ts, emulator tests via `npm run test:firebase`, `qa:bots:live` cloud checks) behind `dev:emulator`/`dev:prod`; production stays mock until the go-live gate.
 
 ## Run Commands
 - `npm run dev` — dev server (port 3100 used in tests; default 3000 otherwise)
