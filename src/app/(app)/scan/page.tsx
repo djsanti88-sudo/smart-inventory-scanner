@@ -8,6 +8,7 @@ import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { ExportMenu } from "@/components/ExportMenu";
+import { VarianceReport } from "@/components/VarianceReport";
 import { SessionLockControl } from "@/components/SessionLockControl";
 import { SessionsList } from "@/components/SessionsList";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
@@ -228,6 +229,7 @@ export default function ScanPage() {
 
       <LiveScanFeed />
       <FinalCountTable />
+      <VarianceReport />
       </BusinessContextGate>
     </div>
   );
