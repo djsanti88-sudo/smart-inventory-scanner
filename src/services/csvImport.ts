@@ -1,6 +1,7 @@
 import type { Alias, Product } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
+import { parse as parseCsvSync } from "csv-parse/sync";
 
 // Deterministic CSV import (MVP). Pure functions (no React, no next/*). Treats ALL CSV content as
 // UNTRUSTED data (semantic firewall): it is parsed as data, never interpreted as instructions.
@@ -207,4 +208,249 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
   }
 
   return { products, aliases, duplicates, conflicts, rowsParsed: rows.length };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Task 3.6: onboarding CSV import (preview + explicit confirm).
+//
+// Separate, deliberately simpler API from buildProductImport above: a shop owner selects their own
+// file in the CsvImportPanel onboarding UI, sees a PREVIEW (first 20 rows + any bad-row errors), and
+// only applies it after an explicit confirm click - it never imports automatically on file select.
+//
+// Uses csv-parse (moved from devDependencies to dependencies in package.json since the panel needs
+// it at runtime, not just in tests) instead of the hand-rolled RFC4180 parser above.
+//
+// SEMANTIC FIREWALL: every cell is untrusted data. It is never interpreted as instructions - a cell
+// that reads "ignore previous instructions" is just a string that lands in a name/sku field. Every
+// field is: (1) stripped of control characters, (2) capped at 500 characters, (3) defused against
+// CSV-formula-injection (=, +, -, @ leading characters that a spreadsheet app could execute).
+// ------------------------------------------------------------------------------------------------
+
+export interface ImportRow {
+  name: string;
+  sku?: string;
+  barcode?: string;
+  qty?: number;
+}
+
+export interface ImportError {
+  line: number; // 1-based, counts the header as line 1 (so data row N is reported as line N+1)
+  reason: string;
+}
+
+export interface ImportSummary {
+  created: number;
+  merged: number;
+  aliasesAdded: number;
+  skipped: number;
+}
+
+const MAX_FIELD_LENGTH = 500;
+
+/** Strip control characters (\x00-\x1F except \t, and \x7F) that have no place in product data. */
+function stripControlChars(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+}
+
+/**
+ * Defuse CSV/spreadsheet formula injection: a cell starting with =, +, -, or @ can execute as a
+ * formula when the export is later opened in Excel/Sheets. Prefix with a single quote (the standard
+ * "force text" defusal) rather than deleting the content, so the original value stays legible.
+ */
+function defuseFormulaInjection(value: string): string {
+  if (/^[=+\-@]/.test(value)) return `'${value}`;
+  return value;
+}
+
+/** Full untrusted-cell sanitizer: control-char strip -> length cap -> formula defusal. */
+function sanitizeCell(raw: string): string {
+  const stripped = stripControlChars(raw).trim();
+  const capped = stripped.length > MAX_FIELD_LENGTH ? stripped.slice(0, MAX_FIELD_LENGTH) : stripped;
+  return defuseFormulaInjection(capped);
+}
+
+/** First non-empty header key among case-insensitive synonyms. */
+function pickHeader(row: Record<string, string>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = row[k];
+    if (v !== undefined && v !== "") return v;
+  }
+  return undefined;
+}
+
+/**
+ * Parse raw CSV text (untrusted) into ImportRow[] + ImportError[]. NEVER throws on bad data - a
+ * malformed file, a missing name, or an unparseable qty are all collected as errors with 1-based
+ * line numbers instead of aborting the whole import.
+ */
+export function parseCsvImport(text: string): { rows: ImportRow[]; errors: ImportError[] } {
+  const rows: ImportRow[] = [];
+  const errors: ImportError[] = [];
+
+  if (!text || !text.trim()) return { rows, errors };
+
+  let records: Record<string, string>[];
+  try {
+    records = parseCsvSync(text, {
+      columns: (header: string[]) => header.map((h) => h.trim().toLowerCase()),
+      skip_empty_lines: true,
+      relax_column_count: true,
+      relax_quotes: true,
+      trim: true,
+      bom: true,
+    }) as Record<string, string>[];
+  } catch (e) {
+    // A truly unparseable file (e.g. an unterminated quote in strict mode) is reported as a single
+    // error rather than thrown. relax_quotes above already recovers from most real-world messiness.
+    errors.push({ line: 1, reason: `Could not parse this file as CSV: ${e instanceof Error ? e.message : "unknown error"}` });
+    return { rows, errors };
+  }
+
+  records.forEach((record, idx) => {
+    const line = idx + 2; // header is line 1; first data record is line 2
+
+    const sanitized: Record<string, string> = {};
+    for (const [k, v] of Object.entries(record)) {
+      sanitized[k] = sanitizeCell(typeof v === "string" ? v : String(v ?? ""));
+    }
+
+    const name = pickHeader(sanitized, ["name", "product"]);
+    const sku = pickHeader(sanitized, ["sku"]);
+    const barcode = pickHeader(sanitized, ["barcode", "upc", "ean"]);
+    const qtyRaw = pickHeader(sanitized, ["qty", "quantity", "count"]);
+
+    if (!name) {
+      errors.push({ line, reason: "Missing required field: name" });
+      return;
+    }
+
+    let qty: number | undefined;
+    if (qtyRaw !== undefined) {
+      const n = Number(qtyRaw);
+      if (!Number.isFinite(n) || Number.isNaN(n)) {
+        errors.push({ line, reason: `Unparseable quantity: "${qtyRaw}"` });
+        return;
+      }
+      qty = n;
+    }
+
+    const row: ImportRow = { name };
+    if (sku) row.sku = sku;
+    if (barcode) row.barcode = barcode;
+    if (qty !== undefined) row.qty = qty;
+    rows.push(row);
+  });
+
+  return { rows, errors };
+}
+
+/**
+ * Minimal read/write surface applyCsvImport needs against the real product/alias store data.
+ * Mirrors the shapes already used by scanStore (Product/Alias from @/types) so a caller can wire
+ * this directly to Zustand state without inventing a parallel/incompatible model.
+ */
+export interface ImportTarget {
+  /** The product currently owning this code via an APPROVED alias, or null if the code is unknown. */
+  findProductByAlias: (cleanCode: string) => Product | null;
+  /** The product currently using this exact SKU as its primarySku, or null. Used for conflict detection
+   *  when a row's barcode is already claimed but the row's sku points at a DIFFERENT product. */
+  findProductBySku: (sku: string) => Product | null;
+  /** Increment an existing product's quantity by delta (default 1 when the row omits qty). */
+  incrementQuantity: (productId: string, delta: number) => void;
+  /** Create a new product from the row. importId is a stable per-import-run id for idempotency. */
+  createProduct: (row: ImportRow, importId: string) => Product;
+  /** Add an approved, source: csv_import alias for productId -> cleanCode. */
+  addAlias: (productId: string, cleanCode: string, importId: string) => void;
+  /** True if this exact import run (by content hash) has already been applied - makes re-import a no-op. */
+  hasImportRun: (importId: string) => boolean;
+}
+
+/** Deterministic content hash (djb2-ish) used as the idempotent import id. Same rows -> same id. */
+function hashImportContent(rows: ImportRow[]): string {
+  const content = rows
+    .map((r) => [r.name, r.sku ?? "", r.barcode ?? "", r.qty ?? ""].join("|"))
+    .join("\n");
+  let hash = 5381;
+  for (let i = 0; i < content.length; i++) {
+    hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+  }
+  return `csvimport-${(hash >>> 0).toString(36)}-${content.length}`;
+}
+
+/**
+ * Apply parsed rows against the real product/alias data (via ImportTarget). Idempotent: importing
+ * the exact same rows twice is a no-op the second time (net-zero new products/aliases), implemented
+ * via a content-hash import id following the store's existing idempotency-key pattern (see
+ * services/idempotency.ts - a key built once and reused, never regenerated per retry).
+ *
+ * Per row:
+ *  - barcode matches an EXISTING approved alias -> merge: increment that product's quantity, do NOT
+ *    touch/duplicate the alias.
+ *  - barcode present but unknown -> create a new product + an approved csv_import alias for it.
+ *  - barcode already belongs to a product, but the row's sku points at a DIFFERENT existing product
+ *    (a genuine re-pointing attempt) -> skipped, never silently repointed.
+ *  - no barcode and no sku (nothing to key on) -> always create a new product. There is nothing to
+ *    merge against or conflict with, and refusing to import a row with only a name would silently
+ *    drop legitimate rows (e.g. non-barcoded shop goods) from the owner's own file.
+ */
+export function applyCsvImport(rows: ImportRow[], target: ImportTarget): ImportSummary {
+  const importId = hashImportContent(rows);
+  const summary: ImportSummary = { created: 0, merged: 0, aliasesAdded: 0, skipped: 0 };
+
+  if (target.hasImportRun(importId)) {
+    summary.skipped = rows.length;
+    return summary;
+  }
+
+  for (const row of rows) {
+    const barcode = row.barcode?.trim();
+
+    if (barcode) {
+      const existingByBarcode = target.findProductByAlias(barcode);
+      if (existingByBarcode) {
+        // Genuine conflict: the row's sku names a DIFFERENT identity than the product that already
+        // owns this barcode - either it matches a different existing product outright, or it simply
+        // disagrees with the barcode-owner's own sku. Never repoint the alias - skip and let the
+        // owner reconcile by hand.
+        if (row.sku) {
+          const productBySku = target.findProductBySku(row.sku);
+          const pointsAtDifferentProduct = productBySku && productBySku.id !== existingByBarcode.id;
+          const skuDisagreesWithOwner =
+            !productBySku && existingByBarcode.primarySku && existingByBarcode.primarySku !== row.sku;
+          if (pointsAtDifferentProduct || skuDisagreesWithOwner) {
+            summary.skipped += 1;
+            continue;
+          }
+        }
+        target.incrementQuantity(existingByBarcode.id, row.qty ?? 1);
+        summary.merged += 1;
+        continue;
+      }
+
+      // Unknown barcode -> new product + approved alias.
+      const product = target.createProduct(row, importId);
+      target.addAlias(product.id, barcode, importId);
+      summary.created += 1;
+      summary.aliasesAdded += 1;
+      continue;
+    }
+
+    // No barcode. If the sku matches an existing product, treat it as a merge (increment quantity)
+    // rather than minting a duplicate product for the same known item.
+    if (row.sku) {
+      const existingBySku = target.findProductBySku(row.sku);
+      if (existingBySku) {
+        target.incrementQuantity(existingBySku.id, row.qty ?? 1);
+        summary.merged += 1;
+        continue;
+      }
+    }
+
+    // Nothing to key on (no barcode, no matching sku) -> always create a new product.
+    target.createProduct(row, importId);
+    summary.created += 1;
+  }
+
+  return summary;
 }
