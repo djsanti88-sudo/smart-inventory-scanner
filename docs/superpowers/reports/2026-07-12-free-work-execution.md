@@ -328,3 +328,53 @@ stray files. No files deleted. No push performed.
 
 **All verification gates passed. Task complete.**
 
+## Task 1.3 - scripts/ tmp sweep + README
+
+Branch: `feat/decode-ladder-goupc`. Purpose: archive 78 one-off `scripts/tmp-*` probe/benchmark
+artifacts into `scripts/archive-tmp-2026-07/` (archive-only, nothing deleted from disk), document
+the living scripts in `scripts/README.md`, and gitignore the archive directory for its untracked
+majority. No files deleted. No push performed.
+
+### Step 1: identify tracked vs untracked tmp-* files
+- `ls scripts/tmp-* 2>/dev/null | wc -l` -> 78 total.
+- `git ls-files scripts/tmp-*` -> 7 tracked: `tmp-dryrun-sample-retail.mjs`,
+  `tmp-dryrun-sample-tires.mjs`, `tmp-ladder-dryrun-results.json`, `tmp-ladder-dryrun.mts`,
+  `tmp-ladder-dt-report-pdf.py`, `tmp-ladder-grade.mjs`, `tmp-ladder-log-reconstruct.mjs`.
+- Remaining 71 files were untracked.
+
+### Step 2: archive
+- `mkdir scripts/archive-tmp-2026-07`.
+- `git mv` each of the 7 tracked files into the archive dir (staged as `R`, renames preserved).
+- Plain `mv` on the remaining 71 untracked files into the same archive dir.
+- Verify: `ls scripts/tmp-* 2>/dev/null | wc -l` -> `0`. `ls scripts/archive-tmp-2026-07/ | wc -l`
+  -> `78` (7 tracked + 71 untracked).
+
+### Step 3: `scripts/README.md`
+- Verified each of the 18 brief-listed living scripts/dirs exists before writing its line
+  (`dev.mjs`, `build-knowledge-db.mjs`, `build-tire-knowledge.mjs`, `build-retail-knowledge.mjs`,
+  `build-prefix-index.mjs`, `cloud-smoke.mjs`, `corpus-purge.mjs`, `eval-decode.ts`,
+  `benchmark-decodes.ts`, `weekly-report.mjs`, `weekly-intel.mjs`, `release-sentinel.mjs`,
+  `patch-jwks-rsa.cjs`, `email-report.mjs`, `create-god-account.mjs`,
+  `backfill-missing-tires.mjs`, `barcode-harvester/`, `dt-harvest/`) - all 18 present, none
+  omitted.
+- Wrote one line per script summarizing its purpose (read from each file's header comment) plus
+  a closing note that `archive-tmp-2026-07/` is frozen history, safe to delete on owner order.
+
+### Step 4: `.gitignore`
+- Added `scripts/archive-tmp-2026-07/` to `.gitignore`, appended AFTER the git mv's were already
+  staged (git-mv'd files stay tracked regardless of a later-added ignore rule). Verified the 7
+  renames remained staged as `R` and the 71 untracked archived files no longer show as `??` in
+  `git status --porcelain`.
+
+### Verification
+| Check | Command | Result |
+|---|---|---|
+| No tmp-* left directly in scripts/ | `ls scripts/tmp-* 2>/dev/null \| wc -l` | `0` |
+| All 78 archived | `ls scripts/archive-tmp-2026-07/ \| wc -l` | `78` |
+| Tracked renames staged | `git status --porcelain scripts/archive-tmp-2026-07/ \| grep -c "^R "` | `7` |
+| Living scripts verified present | manual `[ -f ]` / `[ -d ]` checks on all 18 brief items | all `OK` |
+| README lines | one per living script + archive note | 18 script/dir lines + 1 archive section |
+| Untracked archive files hidden by gitignore | `git status --porcelain` after ignore rule | no `??` entries under `archive-tmp-2026-07/` |
+
+**All verification gates passed. Task complete.**
+
