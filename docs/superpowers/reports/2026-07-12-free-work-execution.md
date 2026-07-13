@@ -903,3 +903,17 @@ merge-train gate`), combined with the two e2e spec fixes above (same root invest
   `mockups/`, `.serena/`, `scripts/polish-eval-results.json`) - untouched by this task.
 
 Full detail: `.superpowers/sdd/merge-train-report.md`.
+
+## Preview promotion + owner-decision closeout (2026-07-12 evening)
+
+- Preview deployed: https://inventory-8e2guo1yt-sharpenly.vercel.app (vercel deploy, NOT production).
+  Smoke ($0, no decodes fired): GET /api/ai-lookup 200 with keys configured; / redirects to /scan
+  200; screenshot e2e/proof/preview-8e2guo1yt-home.png shows focused scan input + camera button,
+  no login gate (open access preserved).
+- Decision ratified: countSnapshots persists for all roles (sanity-check passed - lines carry
+  name/qty only). See DECISIONS.md.
+- Decision ratified: CSV merge-by-sku-alone stays (owner's own list trust basis). See DECISIONS.md.
+- UPCitemdb ToS: deep-read of devs.upcitemdb.com/termsofservice found no trial-tier commercial
+  prohibition; written-confirmation email DRAFTED in the owner's Gmail (to support@upcitemdb.com,
+  draft id r186973083570233315) - owner reviews and sends. OFF usage declaration remains optional
+  courtesy (form link in rungs report).
