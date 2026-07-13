@@ -166,3 +166,23 @@ only the browser bot run caught them. Rules:
    count) and whether that field even appears in the name being compared.
 3. Corporate brand families (one company, many brands, many GS1 prefixes) must be modeled from
    evidence, or the firewall rejects a company's own products.
+
+## L14 - A persist version bump can wake dormant migrations (2026-07-12)
+
+**What happened.** The variance feature bumped scanStore persist v6 -> v7. That bump made a
+pre-existing product-structuring backfill run for the first time on fresh installs, which leaked a
+raw "UPC ... Fits ..." string into the customer-facing Model column. The feature itself was clean;
+the bump activated old code nobody was looking at. Caught only because qa:bots ran at the merge gate.
+
+**Rule.** Any persist version bump gets the customer-clean-names bot (and qa:bots:security) run
+against a FRESH profile before merge, not just unit tests. Migrations are execution triggers, not
+just data reshapes.
+
+## L15 - Idempotency must be proven against the REAL store target (2026-07-12)
+
+**What happened.** CSV import's double-apply test passed against a hand-mocked ImportTarget while
+the real buildStoreImportTarget silently dropped the importId parameter - genuine re-uploads were
+double-merging quantities. The mock proved the algorithm; the real wiring was broken.
+
+**Rule.** Every idempotency claim needs a test through the real store/component wiring (upload
+twice, assert deep-equal state), not only through a mocked target interface.
