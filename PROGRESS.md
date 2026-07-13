@@ -4,19 +4,40 @@
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
 > Last updated: 2026-07-12.
 
-## 2026-07-12 free-work plan (in progress)
+## 2026-07-12 free-work plan (COMPLETE)
 
-- Phase 0 done: LFS fix landed, branch `feat/decode-ladder-goupc` pushed to origin for the
-  first time, remote tip verified against local HEAD with `git ls-remote`.
-- Phase 1 cleanup underway: `reports/` untracked (kept on disk), root artifacts archived to
-  `docs/archive/`, 78 `scripts/tmp-*` probe scripts archived to `scripts/archive-tmp-2026-07/`
-  with a README, doc truth fixes in progress (this task).
-- Phases 2 and 3 next: code health pass, then camera scan, free decode rungs, variance
-  report, and CSV import, each on its own separate branch.
+All four phases executed subagent-driven and reviewed (two Opus gates + Opus final
+whole-branch review: READY). Full detail: `docs/superpowers/reports/2026-07-12-free-work-execution.md`.
+
+- Phase 0 rescue: `.gitattributes` LFS landmine fixed; branch pushed to origin for the first
+  time (`git ls-remote` verified) with 20 `bkp/2026-07-12/*` safety tags; 391MB LFS uploaded.
+- Phase 1 cleanup (archive-only, nothing deleted): `reports/` untracked, root artifacts to
+  `docs/archive/proof-images/`, 78 tmp scripts to `scripts/archive-tmp-2026-07/` + README,
+  CLAUDE.md Firebase reality line fixed, 12 merged branches pruned (tips tagged), 1 worktree removed.
+- Phase 2 code health: dead `autoAcceptVerifiedDecodes` removed; `decodeOrchestrator`
+  deprecated; 66 characterization tests (fetchV2 scoring/siblingGuard, tirePrefixHints); decode
+  pipeline extracted from the route (1097->297 lines, byte-compare verified); pure auto-count
+  gate extracted to `src/stores/scanGates.ts` (+25 deny-path tests).
+- Phase 3 features (4 parallel branches, each merged `--no-ff` = one-command revert):
+  1. **Camera scanning** (`5d48d0b`): BarcodeDetector native + zxing-wasm fallback
+     (`barcode-detector@3.2.1`), feeds the same `onScan` path, graceful denied/no-camera/
+     load-failure states.
+  2. **Free decode rungs** (`70d8692`): UPCitemdb (90/day self-cap) + Open Food Facts (10/min)
+     run BEFORE paid rungs in a two-phase ladder; zero paid-cap interaction (free rungs work
+     even with the paid cap exhausted); suggestion-only (structurally cannot auto-count).
+  3. **Variance/shrinkage report** (`8a36a19`): count snapshots (persist v7, cap 12) + delta
+     report + CSV export; customer firewall clean.
+  4. **CSV import** (`a341f2f`): preview + confirm, semantic firewall, cleanScanCode-normalized
+     matching, store-level idempotency (double-apply proven; found+fixed a real double-merge bug).
+- Merge-gate bonus: qa:bots caught a pre-existing Model-column raw-string leak; fixed
+  render-only with regression tests (`5f98363`).
+- Final gates: vitest 1946/1946, e2e 34/34 (3 new specs), qa:bots 12/12, build + tsc clean.
+- OWNER DECISIONS surfaced (not resolved): countSnapshots persisted for all access levels;
+  CSV merge-by-sku-alone semantics; UPCitemdb ToS = absence-of-prohibition (confirm before volume).
 
 ## Current phase
 
-**DECODE LADDER + SIZE-MERGE FIX: BUILT AND UI-PROVEN ON PREVIEW. NOT PUSHED, NOT DEPLOYED.**
+**DECODE LADDER + SIZE-MERGE + FREE-WORK PLAN: BUILT, REVIEWED, PUSHED TO ORIGIN. NOT DEPLOYED TO PRODUCTION.**
 
 - **Branch:** `feat/decode-ladder-goupc`, 163 commits ahead of `master`, NOT pushed (push and any
   deploy are owner-gated). Working tree also carries uncommitted scratch scripts (`scripts/tmp-*`),
