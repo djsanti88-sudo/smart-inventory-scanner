@@ -782,3 +782,124 @@ REFUSED), every refusal clause, and the suggestion trust firewall. Store integra
 passed PASS; `npx tsc --noEmit` clean; `npm run qa:bots:data` 1 passed. Zero behavior change.
 
 Full report: `.superpowers/sdd/task-2.5-report.md`.
+
+## Merge train + full gates
+
+Merged four reviewed, disjoint feature branches (all branched from `7213c20`) into
+`feat/decode-ladder-goupc`, one at a time with `--no-ff`, then ran the full gate suite. No push.
+
+### Merge sequence
+
+| # | Branch | Merge SHA | Conflicts |
+|---|---|---|---|
+| 1 | `feat/free-rungs` | `70d8692` | None (clean merge) |
+| 2 | `feat/camera-scan` | `5d48d0b` | None (clean merge); `npm install` for `barcode-detector@3.2.1` - lockfile already correct, no diff |
+| 3 | `feat/variance-report` | `8a36a19` | `src/app/(app)/scan/page.tsx` auto-merged cleanly - both `CameraScanButton` and `VarianceReport` wiring present, additive as expected |
+| 4 | `feat/csv-import` | `a341f2f` | `package.json` auto-merged cleanly (`barcode-detector` dependency + `csv-parse` dev->prod move both landed correctly); lockfile needed regeneration, committed separately as `a7ca019` |
+
+Zero STOP-worthy conflicts: nothing in `src/services`, `src/server`, or `src/stores` conflicted:
+`scanStore.ts` changes (variance-report) and the pipeline/ladder changes (free-rungs) sit in disjoint
+regions and merged cleanly.
+
+Per-merge verification (`npx tsc --noEmit` + targeted vitest of the merged feature's test files),
+all clean:
+- free-rungs: tsc clean, 74/74 targeted tests pass.
+- camera-scan: tsc clean, 11/11 targeted tests pass.
+- variance-report: tsc clean, 31/31 targeted tests pass (+80/80 broader `scanStore` suite as extra
+  safety since `scanStore.ts` was touched).
+- csv-import: tsc clean, 39/39 targeted tests pass.
+
+### Full gates (after all four merges + lockfile regen)
+
+**Gate 1 - `npm run proof:full`:** PASS both runs (before and after the fix commit below).
+Final run: `tsc --noEmit` clean, vitest **1946/1946 passed, 30 skipped** (pre-existing skips,
+unrelated to this merge), `next build` succeeded (Turbopack emits one pre-existing informational NFT
+warning on `next.config.ts` -> `aiSpendGuard.ts`, unrelated to any of the four merges).
+
+**Gate 2 - `npm run test:e2e`:** PASS, **34/34** (31 pre-existing specs + 3 new: `camera-scan.spec.ts`,
+`variance-report.spec.ts`, `csv-import.spec.ts`). `camera-scan.spec.ts` passed without needing the
+fake-media-stream Chromium flags mentioned as a fallback in the task brief - the spec already handles
+the no-camera-permission path gracefully. Screenshot proof in `e2e/proof/`: `csv-import-01-preview.png`,
+`csv-import-02-summary.png`, `variance-report.png` (plus the pre-existing 26 screenshots, all present).
+
+Two of the three new specs had never been run before and needed spec-side fixes (no assertions
+weakened, no app code touched for either):
+1. `e2e/csv-import.spec.ts` used `fileURLToPath(import.meta.url)` to derive `__dirname`. Playwright
+   compiles `.ts` specs as CommonJS in this project (no `"type": "module"` in `package.json`), so
+   `import.meta` is undefined at load time and the loader threw `ReferenceError: require is not
+   defined in ES module scope` on the very first import line. Fixed by using the native `__dirname`
+   Playwright already provides in CJS-compiled specs (no other spec in the repo needed the ESM
+   workaround).
+2. `e2e/variance-report.spec.ts` assumed "Playwright auto-accepts `window.confirm` by default" (per
+   its own comment) - this is false; Playwright **dismisses** dialogs by default unless
+   `page.on("dialog", d => d.accept())` is registered, exactly as other specs in this repo already do
+   (e.g. `e2e/delete-product.spec.ts`). Without the listener, the "remove Coca-Cola from the count"
+   step silently no-opped, so the second snapshot's delta was wrong. Also switched the remove-button
+   locator from `.getByTestId(/^remove-count-/).first()` (order-dependent - grabbed the Falken row,
+   not Coca-Cola) to a row scoped by visible text. Fixed both; the spec now passes and its stale
+   "not run in this task" header comment was corrected to reflect that it now runs in this gate.
+
+**Gate 3 - `npm run qa:bots:all`:** First run: **11/12 passed, 1 failed** -
+`e2e/human-bots/scenarios/customer-clean-names.spec.ts` (P5 - "Counts shows clean Brand Model Size,
+no UPC/Fits"). Investigated as a REAL regression (see below), fixed, reran: **12/12 passed**.
+
+### Regression found and fixed (app code)
+
+The P5 bot failure was verified as a genuine regression introduced by this merge train, not a flake:
+- Confirmed the bot **passes** at the pre-merge base commit `7213c20` (tested in a disposable
+  worktree).
+- Bisected by testing the bot against each of the four merge commits in isolated worktrees: passes
+  after `70d8692` (free-rungs) and `5d48d0b` (camera-scan), **fails** starting at `8a36a19`
+  (variance-report). Root cause isolated to `feat/variance-report`.
+
+**Root cause:** `feat/variance-report`'s Task 3.5 work bumped the `scanStore` persist `version` from
+`6` to `7` (to add the new `countSnapshots` field). The bot seeds `localStorage` at `version: 6`. Before
+this bump, a v6 install was already "current" and skipped `scanStoreMigrate` entirely. After the bump,
+`6 < 7` now triggers the migration's `version >= 5` branch, which runs `backfillProducts()` -
+including the pre-existing deterministic structurer - **for the first time** on this previously-untouched
+install. The structurer parses the product's **raw** stored name ("UPC 086699205636 - Defender LTX
+M/S 275/70R18 Fits: 2004 Chevrolet") into `structuredModel`, and its brand/junk heuristics do not fully
+strip the leading UPC prefix and trailing "Fits" clause in this case. The Name column already cleans
+its display value via `customerDisplayName()` for non-platform roles, but the Model column
+(`resolvedModel()` in `FinalCountTable.tsx`) never did - so the raw UPC/fitment text leaked through the
+Model column, which the bot's `innerText()` assertion correctly caught.
+
+**Fix (`src/components/FinalCountTable.tsx`):** `resolvedModel()` now takes an `isPlatform` flag and
+applies the same `customerDisplayName()` cleaning the Name column already uses, for non-platform roles
+only - the platformOwner still sees the raw `structuredModel` (render-only cleaning, consistent with
+the existing pattern documented in `src/services/displayName.ts`). The Model column's filter/search
+index (a separate call site) intentionally keeps reading the raw platform value so filter behavior is
+unchanged for both roles.
+
+**Regression tests added** (`src/components/FinalCountTable.test.tsx`, 2 new cases): verified failing
+before the fix (temporarily reverted the fix, reran - the new "strips a raw UPC prefix and Fits clause"
+test failed with the exact reported string; the "keeps raw value for platformOwner" test still passed),
+then passing after restoring the fix. Full `FinalCountTable.test.tsx` suite: 15/15 passed.
+
+Committed as `5f98363` (`fix(counts): clean customer-facing Model column + fix new e2e specs found by
+merge-train gate`), combined with the two e2e spec fixes above (same root investigation, one commit).
+
+### Final full-gate rerun (after the fix commit)
+
+- `npm run proof:full`: PASS - tsc clean, vitest **1946/1946 passed, 30 skipped**, `next build` OK.
+- `npm run test:e2e`: PASS - **34/34**.
+- `npm run qa:bots:all`: PASS - **12/12** (including the previously-failing P5 bot).
+
+### Concerns / notes
+
+- The regression was a real app-code bug (Model column customer-cleaning gap), only exposed because
+  the variance-report branch's persist-version bump caused a backfill migration to run for the first
+  time on installs it had never touched before. The fix is narrowly scoped and covered by new
+  regression tests; no other columns were found to have the same gap (Name column already cleaned;
+  Brand/Size/Category/Specs columns do not carry free-text raw names).
+- `npm install` after the camera-scan merge produced no lockfile diff (already correct); after the
+  csv-import merge it did (csv-parse's dev->prod move needed the lock's dependency-type flag
+  updated) - regenerated and committed separately (`a7ca019`), never hand-edited.
+- Bisection used disposable `git worktree` checkouts under this session's scratchpad temp directory,
+  all removed via `git worktree remove --force` before returning to the main tree; the `C:\tmp\wt-*`
+  and other pre-existing worktrees were never touched.
+- Nothing was pushed. Working tree still carries the pre-existing unrelated dirty files noted at
+  session start (`.claude/settings.local.json`, two `.superpowers/sdd/task-*-report.md` files,
+  `mockups/`, `.serena/`, `scripts/polish-eval-results.json`) - untouched by this task.
+
+Full detail: `.superpowers/sdd/merge-train-report.md`.
