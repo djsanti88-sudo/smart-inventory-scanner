@@ -25,6 +25,12 @@ import { ladderStorage } from "@/server/upc/storage";
 import { goUpcRung, makeDefaultPrefixLookup } from "@/server/upc/GoUpcProvider";
 import { goUpcLookup } from "@/services/upc/goUpcClient";
 import { GoUpcGate } from "@/services/upc/goUpcThrottle";
+import { upcItemDbUsage } from "@/server/upc/upcItemDbUsage";
+import { upcItemDbRung } from "@/server/upc/UpcItemDbProvider";
+import { upcItemDbLookup } from "@/services/upc/upcItemDbClient";
+import { openFoodFactsUsage } from "@/server/upc/openFoodFactsUsage";
+import { openFoodFactsRung } from "@/server/upc/OpenFoodFactsProvider";
+import { openFoodFactsLookup } from "@/services/upc/openFoodFactsClient";
 import tirePrefixMap from "@/services/catalog/tirePrefixMap.generated.json";
 import { fetchV2, type FetchV2Deps, type FetchedPage } from "@/services/fetchV2/index";
 import { FetchV2Cache } from "@/services/fetchV2/cache";
@@ -559,6 +565,81 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     };
     const ladderProviderStatuses: ProviderStatus[] = [];
 
+    // ---- Rung 0: UPCitemdb (FREE, keyless trial tier; GTIN codes only; gated in buildLadderRungs) ---
+    // Runs BEFORE Go-UPC (free before paid, owner order 2026-07-12 free-rungs plan). Never touches the
+    // paid daily AI-lookup cap - it owns its own local daily counter (90/day, buffer under the
+    // provider's 100/day trial limit). A hit is ALWAYS a suggestion (Resolver Trust Rules); it can
+    // never settle the ladder as "verified" on its own.
+    const runUpcItemDb = async (): Promise<RungOutcome> => {
+      if (e2eMode()) return { settled: false, reason: "UPCitemdb skipped (E2E mock mode)" };
+      const ladderStore = await ladderStorage();
+      const r = await upcItemDbRung(code, {
+        client: (c) => upcItemDbLookup(c, {}),
+        usage: upcItemDbUsage(ladderStore),
+      });
+      ladderProviderStatuses.push({
+        provider: "upcitemdb",
+        status: r.path === "upcitemdb_hit" ? "ok" : "skipped",
+        latencyMs: 0,
+        sourceUrlsReturned: 0,
+        exactCodeFound: false,
+        identityFound: !!r.results?.length,
+        errorCode: r.path === "upcitemdb_unavailable" || r.path === "upcitemdb_miss" ? r.reason : undefined,
+      });
+      if (r.path === "upcitemdb_hit" && r.decision) {
+        return {
+          settled: true,
+          reason: r.reason,
+          payload: {
+            results: r.results ?? [],
+            evidences: [{ verified: false, strength: "snippet", matchedCode: code, matchedSources: ["upcitemdb"], reason: r.reason }],
+            providerNames: ["upcitemdb"],
+            providerStatuses: [...ladderProviderStatuses],
+            decision: r.decision,
+            reasonCode: "needs_review",
+            reasonText: r.reason,
+          } satisfies LadderPayload,
+        };
+      }
+      // upcitemdb_miss / upcitemdb_unavailable: fall through, reason recorded.
+      return { settled: false, reason: r.reason };
+    };
+
+    // ---- Rung 0.5: Open Food Facts (FREE; built in Task 3.4) -----------------------------------------
+    const runOpenFoodFacts = async (): Promise<RungOutcome> => {
+      if (e2eMode()) return { settled: false, reason: "Open Food Facts skipped (E2E mock mode)" };
+      const ladderStore = await ladderStorage();
+      const r = await openFoodFactsRung(code, {
+        client: (c) => openFoodFactsLookup(c, {}),
+        usage: openFoodFactsUsage(ladderStore),
+      });
+      ladderProviderStatuses.push({
+        provider: "openfoodfacts",
+        status: r.path === "openfoodfacts_hit" ? "ok" : "skipped",
+        latencyMs: 0,
+        sourceUrlsReturned: 0,
+        exactCodeFound: false,
+        identityFound: !!r.results?.length,
+        errorCode: r.path === "openfoodfacts_unavailable" || r.path === "openfoodfacts_miss" ? r.reason : undefined,
+      });
+      if (r.path === "openfoodfacts_hit" && r.decision) {
+        return {
+          settled: true,
+          reason: r.reason,
+          payload: {
+            results: r.results ?? [],
+            evidences: [{ verified: false, strength: "snippet", matchedCode: code, matchedSources: ["openfoodfacts"], reason: r.reason }],
+            providerNames: ["openfoodfacts"],
+            providerStatuses: [...ladderProviderStatuses],
+            decision: r.decision,
+            reasonCode: "needs_review",
+            reasonText: r.reason,
+          } satisfies LadderPayload,
+        };
+      }
+      return { settled: false, reason: r.reason };
+    };
+
     // ---- Rung 1: Go-UPC (GTIN codes only; gated in buildLadderRungs) --------------------------------
     const runGoUpc = async (): Promise<RungOutcome> => {
       // E2E MOCK MODE: live rungs are bypassed exactly like the legacy [mockProvider] path - E2E
@@ -728,7 +809,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       await chargeDailySlot(ladderStore, { limit });
     }
 
-    const rungs = buildLadderRungs(code, { runGoUpc, runFetchV2, runGpt });
+    const rungs = buildLadderRungs(code, { runUpcItemDb, runOpenFoodFacts, runGoUpc, runFetchV2, runGpt });
     const ladderRun = await runLadder(code, rungs);
     const win = ladderRun.outcome?.payload as LadderPayload | undefined;
 
