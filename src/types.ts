@@ -348,9 +348,6 @@ export interface Settings {
   // When true, AI is queried automatically for unknown codes (still only as a SUGGESTION that a
   // human must approve - it never auto-saves). Default false to keep AI manual and cheap.
   autoSuggestUnknowns: boolean;
-  // When true, a "verified" decode (app-verified strong evidence + provider agreement, public
-  // barcode only) is auto-approved. Default FALSE - a human still approves even verified decodes.
-  autoAcceptVerifiedDecodes: boolean;
   // When true, ANY decoded product (verified OR suggested-with-sources) is auto-added to the count -
   // only a provider conflict or a total no-result goes to Needs Review. Default TRUE (owner choice).
   autoAddDecodedProducts: boolean;

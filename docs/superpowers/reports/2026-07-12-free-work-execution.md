@@ -501,3 +501,86 @@ last 4 are merged into `feat/decode-ladder-goupc`, so `--merged` correctly exclu
 
 **Task complete. No commit needed for branch/worktree ops themselves; this report update is the only commit.**
 
+## Task 2.1 - remove dead `autoAcceptVerifiedDecodes` setting
+
+Branch: `feat/decode-ladder-goupc`. Purpose: delete the never-read `autoAcceptVerifiedDecodes`
+settings field (declared in `src/types.ts`, defaulted in `src/stores/scanStore.ts`, but read by
+no production code path) and its documentation caveats. The real auto-count gate,
+`autoAddDecodedProducts`, was NOT touched.
+
+### Step 1: safety grep before any edit
+- Command: `grep -rn autoAcceptVerifiedDecodes` (full repo, then scoped to `src/`).
+- Full-repo hits (8 files): `CLAUDE.md:106`, `DECISIONS.md:71`, `docs/DECODER_ARCHITECTURE.md:46`,
+  `TESTING.md:154`, `src/types.ts:353`, `docs/BACKLOG.md:58`, `src/stores/scanStore.ts:367`,
+  `docs/archive/PROGRESS_HISTORY_2026-06.md:317,351`, `docs/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md` (this task's own spec), `e2e/fixtures.ts:33`.
+- Scoped `src/` grep: only 2 hits - `src/types.ts:353` (type declaration) and
+  `src/stores/scanStore.ts:367` (default literal). No other production code reads or branches on
+  the field. This matches the audit finding exactly; safe to proceed (no STOP condition hit).
+- `e2e/fixtures.ts:33` was an additional hit beyond the brief's prediction (a duplicated settings
+  object for generic-category E2E specs, deliberately not imported from `scanStore.ts` per its own
+  header comment) - it mirrors `DEFAULT_SETTINGS` and needed the same key removed for consistency,
+  not because any test asserts on it.
+
+### Step 2: migrate-tolerance check (persisted localStorage safety)
+- Read `scanStoreMigrate` in `src/stores/scanStore.ts` (persist `version: 6`, lines ~4442-4464).
+- Both the `version < 5` branch and the current branch merge settings as
+  `{ ...DEFAULT_SETTINGS, ...(p.settings ?? {}) }` - a plain object spread with no allowlist/schema
+  validation.
+- Finding: an old browser's persisted state that still contains
+  `settings.autoAcceptVerifiedDecodes: true/false` will spread that key into the merged settings
+  object as a harmless extra property. Nothing reads it (confirmed by the `src/` grep above), and
+  once `Settings` (types.ts) no longer declares the field, no TypeScript code can accidentally
+  consume it either. **Removing the field is safe for existing persisted browser state - no
+  migration bump or extra handling required.**
+
+### Step 3: code changes
+- `src/types.ts`: removed the `autoAcceptVerifiedDecodes: boolean;` field + its comment block from
+  the `Settings` interface (was line 353).
+- `src/stores/scanStore.ts`: removed `autoAcceptVerifiedDecodes: false,` from `DEFAULT_SETTINGS`
+  (was line 367). `autoAddDecodedProducts: true` (the real gate) left untouched, still present.
+- `e2e/fixtures.ts`: removed the matching `autoAcceptVerifiedDecodes: false,` line from
+  `GENERIC_SETTINGS` for consistency with the trimmed `DEFAULT_SETTINGS` shape.
+
+### Step 4: test file check
+- Grepped `src/services` and all of `src` for `autoAcceptVerifiedDecodes` (content mode) - zero
+  hits beyond the type/default already removed. No unit test asserts on this field's default value
+  or toggles it to observe behavior, so no test file needed re-pointing.
+
+### Step 5: doc caveat updates
+- `CLAUDE.md:106-107`: dropped the trailing `NOTE: autoAcceptVerifiedDecodes is declared ...
+  currently UNUSED/dead` sentence from the Evidence Verification section.
+- `docs/DECODER_ARCHITECTURE.md:46`: dropped the parenthetical `(autoAcceptVerifiedDecodes is
+  declared but DEAD - it gates nothing; do not rely on it.)`.
+- `DECISIONS.md:71-72`: removed the now-false "Auto-accept of verified decodes is a setting
+  (autoAcceptVerifiedDecodes, default OFF)" bullet entirely (beyond the brief's named two files,
+  but left in place it would describe a field that no longer exists - out of scope to leave a
+  broken doc claim).
+- `TESTING.md:154`: rewrote "verified auto-saves only when autoAcceptVerifiedDecodes on" to
+  correctly describe the real gate: "verified decode auto-saves per `autoAddDecodedProducts`
+  (default true)".
+- `docs/BACKLOG.md:58`: checked off the "Remove dead code: autoAcceptVerifiedDecodes" TIER 2 item
+  (`[ ]` -> `[x] ... - done 2026-07-12`), split from the still-open `decodeOrchestrator.ts` /
+  `geminiProvider.ts` cleanup items in the same original bullet.
+- `docs/archive/PROGRESS_HISTORY_2026-06.md` deliberately left untouched - it is a dated historical
+  log of what was true in June 2026; rewriting it would falsify the archive record.
+- The plan doc `docs/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md` (this
+  task's own spec) also left untouched - it is the task definition, not living documentation.
+
+### Gate results
+| Gate | Command | Result | Exit code |
+|---|---|---|---|
+| Typecheck | `npx tsc --noEmit` | clean, no output | 0 |
+| Unit tests | `npm run test` | `Test Files 186 passed \| 7 skipped (193)` / `Tests 1723 passed \| 30 skipped (1753)` | 0 |
+
+- `cloudDrainRace.store.test.ts` (known flake) did not trip in this run; included in the 1723
+  passing tests, ran as part of the normal parallel suite (no isolated rerun needed since it did
+  not fail).
+
+### Final safety re-grep (post-edit)
+- `grep -rn autoAcceptVerifiedDecodes` (full repo) after all edits: 3 remaining hits, all
+  intentional - `docs/BACKLOG.md` (the completed `[x]` history line), the unmodified task-spec plan
+  doc, and the unmodified `docs/archive/PROGRESS_HISTORY_2026-06.md` historical log. Zero hits in
+  `src/`, `e2e/`, or any active/living doc.
+
+**Task complete. All gates green. No STOP condition encountered.**
+

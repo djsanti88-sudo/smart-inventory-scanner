@@ -43,7 +43,7 @@ orchestrator; v2 replaced it with the cost-ordered ladder below. Sections 3-9 ca
   (for tires) full specs + a public barcode shape + no firewall/brand-prefix conflict. Set it false
   for manual-review-everything mode. High-trust SUGGESTIONS (>= 0.8 or app-verified exact) auto-apply
   to the counted row; lower-confidence identities display with a "(suggested)" tag and stay
-  review-first. (`autoAcceptVerifiedDecodes` is declared but DEAD - it gates nothing; do not rely on it.)
+  review-first.
 - Identity merge is SIZE-AWARE (`src/services/catalog/identityMerge.ts`): tire size is derived from
   `specsShort`/`specsFull` (corpus names are slugs that never carry sizes), so same-model-DIFFERENT-SIZE
   decodes mint distinct products instead of collapsing into review suggestions.

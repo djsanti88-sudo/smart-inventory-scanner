@@ -150,9 +150,9 @@ Unit (`src/services/ai/evidenceVerifier.test.ts`, `crossCheckEngine.test.ts`, `d
 - Cross-check: agreement / brand conflict / barcode conflict / single_provider / weak.
 - decideDecode: verified only (public barcode + strong evidence + agreement/single + threshold +
   identity); vendor label never verified; below threshold/empty identity not verified.
-- liveDecode (mocked fetch): verified decode does NOT auto-save by default; agreement w/o app-verified
-  evidence stays Suggested; verified auto-saves only when autoAcceptVerifiedDecodes on; re-scan of an
-  approved alias calls fetch zero times.
+- liveDecode (mocked fetch): verified decode auto-saves per `autoAddDecodedProducts` (default true);
+  agreement w/o app-verified evidence stays Suggested; re-scan of an approved alias calls fetch zero
+  times.
 
 E2E (`e2e/decode.spec.ts` -> e2e/proof/decode-*.png), provider responses mocked via `page.route`,
 webServer `IS_E2E=1`:
