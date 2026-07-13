@@ -56,20 +56,29 @@ export async function runLadder(_code: string, rungs: LadderRung[]): Promise<Lad
 
 /** The concrete rung runners the route injects (each already closed over the request + deps). */
 export interface LadderRungRunners {
+  runUpcItemDb: () => Promise<RungOutcome>;
+  runOpenFoodFacts: () => Promise<RungOutcome>;
   runGoUpc: () => Promise<RungOutcome>;
   runFetchV2: () => Promise<RungOutcome>;
   runGpt: () => Promise<RungOutcome>;
 }
 
 /**
- * Build the ordered rung array for a code. Go-UPC is GATED to real GTINs (shape + valid GS1 check
- * digit): a vendor/ASIN/FNSKU-shaped code, or a GTIN-shaped code with a bad check digit, simply gets
- * NO Go-UPC rung in the array (the gate lives here at the caller, so runLadder stays shape-agnostic).
- * Fetch V2 then GPT always follow.
+ * Build the ordered rung array for a code. FREE rungs run first (owner order 2026-07-12: free
+ * before paid, cost-ordered ladder) - UPCitemdb then Open Food Facts, both GATED to real GTINs
+ * (shape + valid GS1 check digit), same gate as Go-UPC. A vendor/ASIN/FNSKU-shaped code, or a
+ * GTIN-shaped code with a bad check digit, simply gets NONE of the three GTIN-gated rungs in the
+ * array (the gate lives here at the caller, so runLadder stays shape-agnostic). Fetch V2 then GPT
+ * always follow, for every code.
+ *
+ * Final order for a valid GTIN: ["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"].
+ * Final order for a non-GTIN: ["fetchv2", "gpt"].
  */
 export function buildLadderRungs(code: string, deps: LadderRungRunners): LadderRung[] {
   const rungs: LadderRung[] = [];
   if (isGtinShaped(code) && isValidCheckDigit(code)) {
+    rungs.push({ name: "upcitemdb", run: deps.runUpcItemDb });
+    rungs.push({ name: "openfoodfacts", run: deps.runOpenFoodFacts });
     rungs.push({ name: "goupc", run: deps.runGoUpc });
   }
   rungs.push({ name: "fetchv2", run: deps.runFetchV2 });
