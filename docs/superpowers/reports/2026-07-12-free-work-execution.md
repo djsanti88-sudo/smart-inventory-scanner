@@ -752,3 +752,33 @@ decode.ts, etc.); ZERO are in `route.ts` or `pipeline.ts`. Lint is not a Task 2.
 gates (baseline, full test, tsc, build) are all green.
 
 **Task 2.4 complete. Pure extraction, all specified gates green.**
+
+---
+
+## Task 2.5 - Carve the pure auto-count gate out of scanStore.ts
+
+Extracted the decode auto-count gate + high-trust suggestion auto-apply rule into pure functions in a new
+`src/stores/scanGates.ts` (142 lines, no store/React imports). scanStore.ts imports and calls them; the
+diff inside scanStore is call-site replacement only (4510 -> 4475 lines).
+
+**Pure functions:**
+- `canAutoCount(input): { allowed, reason }` - the old `evidenceGatePassed` Phase-7 conjunction, including
+  the GPT-ladder trust tier and the T20/code-1225 public-barcode-shape firewall. Store computes `tireOk`
+  and `contextConflict` (they need services) and passes the booleans in, keeping the function pure.
+- `shouldAutoApplySuggestion(input)` - the old `autoSuggestApplyOk` rule (conf>=0.8 non-verified OR
+  app-verified-exact "verified"; requires autoAddOn + usable name + no conflict).
+- `decodeCorroborated` / `isPublicBarcodeShape` - moved out; scanStore re-exports `decodeCorroborated` so
+  the existing `./scanStore` importer (scanStore.autocount.test.ts) is untouched.
+
+**Call sites replaced:** `scanStore.ts` liveDecode (~:2168) and backgroundVerifyDeep (~:2768) both now call
+`canAutoCount({...}).allowed`; `autoSuggestApplyOk` is now a thin wrapper delegating to
+`shouldAutoApplySuggestion`. Both `autoSuggestApplyOk(...)` call sites are unchanged.
+
+**New test:** `src/stores/scanGates.test.ts` (25 tests) ports the gate coverage to hit the pure functions
+directly - all 4 decodeCorroborated cases, the 1225 firewall (gpt_self_report on vendor/SKU shapes
+REFUSED), every refusal clause, and the suggestion trust firewall. Store integration tests unchanged.
+
+**Gates:** `npx vitest run src/stores` 44 files/259 tests PASS (was 43/234); `npm run test` 191 files/1816
+passed PASS; `npx tsc --noEmit` clean; `npm run qa:bots:data` 1 passed. Zero behavior change.
+
+Full report: `.superpowers/sdd/task-2.5-report.md`.
