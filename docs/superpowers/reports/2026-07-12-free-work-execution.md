@@ -691,3 +691,64 @@ for owner awareness - not fixed per characterization-test scope (no behavior cha
 
 **Task complete. All gates green. No STOP condition encountered.**
 
+
+---
+
+## Task 2.4 (OPUS): Extract decode pipeline from `app/api/ai-lookup/route.ts`
+
+**Pure extraction, zero behavior change.** The decode pipeline (computeDecode, the ladder rung
+runners, the daily-cap/breaker gating, and the L1/L2 cache write-through) was lifted out of the
+route handler into a dedicated server module. The route is now a thin HTTP handler.
+
+### Line counts
+| File | Before | After |
+|---|---|---|
+| `src/app/api/ai-lookup/route.ts` | 1097 | 297 |
+| `src/server/decode/pipeline.ts` (new) | - | 868 |
+| `src/server/decode/pipeline.test.ts` (new) | - | 121 |
+
+### What moved
+- Moved to `pipeline.ts` and exported: `runDecodePipeline(req)` (the whole former inline `isDecodeMode`
+  block - L1/L2 persisted-cache peek, free corpus/retail/Plan-D stages, the lazy daily-cap gate, the
+  spec-v6 ladder Go-UPC -> Fetch V2 -> GPT-5.5, and the L2 write-through), `DailyCapExceededError`,
+  `e2eMode`, plus `DecodePipelineRequest` / `DecodePayload` / `DecodePipelineResult` types.
+- Moved to `pipeline.ts` (module-private): `evalCombinedFirewall`, `classifySourceTier` +
+  `PAID_AI_PROVIDER_MARKERS`, `normalizeMockGptLadder`, `GEMINI_DECODE_DISABLED`, the Go-UPC gate +
+  prefix-lookup singletons, the Fetch V2 cache/const/`fetchV2Page`/`fetchV2Discovery` wiring, and the
+  `FETCHV2_*` env constants.
+- `route.ts` keeps: request parsing + server-side sanitize, the abuse/kill-switch/rate-limit guards,
+  the legacy-lookup daily-cap gate, `selectProvider`/`lookupChain`, the `lookup`-mode path, the whole
+  GET status endpoint, and now delegates decode to `runDecodePipeline`, shaping its `{persisted |
+  cap_blocked | computed}` result into the identical HTTP responses (persisted body / 429 daily_cap /
+  200 with `cached` echoed into debug).
+- `pipeline.ts` opens with `import "server-only"` (matches `src/server/upc/*`).
+
+### Domain rules preserved verbatim
+- Daily cap charged ONLY inside the paid rungs, once, AFTER the free corpus/cache peek (lazy cap gate).
+- Ladder order + first-settled short-circuit; Go-UPC GTIN-gated in `buildLadderRungs`.
+- `IS_E2E=1` forces mock-only; `GEMINI_DECODE_DISABLED` unchanged; honest reason chains for every
+  non-decode (cap / miss chains).
+
+### Import adjustments in existing tests
+NONE. `route.test.ts` imports only `POST`/`GET` from the route (never the moved internals), so all 47
+route tests pass UNCHANGED - zero assertion changes. This is the behavior lock, and it held.
+
+### New tests (`pipeline.test.ts`, 2 thin unit tests)
+- all-miss ladder -> `computed` payload, decision not verified, `debug.ladderReasons` names every rung
+  (fetchv2 + gpt), no live AI contacted.
+- cap-exhausted -> `cap_blocked` with an honest `/cap/i` message, counter not charged, no paid call.
+
+### Gate results
+| Gate | Command | Result | Exit |
+|---|---|---|---|
+| Baseline (behavior lock) | `npx vitest run src/app/api/ai-lookup` | `Test Files 2 passed (2)` / `Tests 47 passed (47)` (unchanged) | 0 |
+| New pipeline tests | `npx vitest run src/server/decode/pipeline` | `Test Files 1 passed (1)` / `Tests 2 passed (2)` | 0 |
+| Full unit suite | `npm run test` | `Test Files 190 passed \| 7 skipped (197)` / `Tests 1791 passed \| 30 skipped (1821)` | 0 |
+| Typecheck | `npx tsc --noEmit` | No output (clean) | 0 |
+| Build | `npm run build` | `Compiled successfully` / `/api/ai-lookup` (ƒ Dynamic) | 0 |
+
+Note: `npm run lint` reports 24 pre-existing errors + 37 warnings across OTHER files (weekly-tire-scan,
+decode.ts, etc.); ZERO are in `route.ts` or `pipeline.ts`. Lint is not a Task 2.4 gate; the specified
+gates (baseline, full test, tsc, build) are all green.
+
+**Task 2.4 complete. Pure extraction, all specified gates green.**
