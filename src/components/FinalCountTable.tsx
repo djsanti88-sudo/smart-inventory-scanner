@@ -20,8 +20,18 @@ function resolvedBrand(product: Product): string {
 // Task 4 review fix: the Model column shows the table's existing empty-cell convention ("-") for a
 // row with no structuredModel yet, rather than duplicating the full Product-column name. Filtering
 // by name still works via the description field (structuredDescription falls back to product.name).
-function resolvedModel(product: Product): string {
-  return product.structuredModel ? prettifyProductName(product.structuredModel) : "";
+//
+// Regression fix (2026-07-12 merge-train gate, P5 bot): the deterministic structurer
+// (structureProduct, run by the polish backfill migration) parses the RAW stored name, so a messy
+// legacy name like "UPC 086699205636 - Defender LTX M/S Fits: 2004 Chevrolet" can produce a
+// structuredModel that still carries the UPC prefix / fitment clause when the structurer's brand/
+// junk heuristics do not fully strip them. The Name column already cleans via customerDisplayName()
+// for non-platform roles; the Model column now gets the same treatment so a customer never sees a
+// raw UPC or "Fits" clause leak in through this column instead.
+function resolvedModel(product: Product, isPlatform: boolean): string {
+  if (!product.structuredModel) return "";
+  const model = prettifyProductName(product.structuredModel);
+  return isPlatform ? model : prettifyProductName(customerDisplayName(model));
 }
 function resolvedSizeTag(product: Product): string {
   return product.sizeTag || plainTireSizeDigits(product.specsShort);
@@ -57,7 +67,10 @@ export function FinalCountTable() {
     const filterable = rows.map((r) => ({
       id: r.count.id,
       brand: resolvedBrand(r.product),
-      model: resolvedModel(r.product),
+      // Filtering always searches the raw structured model (not the customer-cleaned display value):
+      // the filter box is a search index, not a rendered cell, and this keeps filter behavior
+      // unchanged for both roles.
+      model: resolvedModel(r.product, true),
       description: r.product.structuredDescription || r.product.name,
       sizeTag: resolvedSizeTag(r.product),
     }));
@@ -237,7 +250,7 @@ function CountRow({
         ) : null}
       </td>
       <td className="px-4 py-3" data-testid={`brand-${product.id}`}>{displayBrand}</td>
-      <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(displayProduct) || "-"}</td>
+      <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(displayProduct, isPlatform) || "-"}</td>
       <td className="px-4 py-3">{displayProduct.category || "-"}</td>
       <td className="px-4 py-3">{displayProduct.specsShort || "-"}</td>
       <td

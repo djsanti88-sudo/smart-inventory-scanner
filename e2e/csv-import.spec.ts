@@ -1,13 +1,15 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { test, expect } from "./fixtures";
 
 // Task 3.6 proof (E2E): the onboarding CSV import panel on /products. Uploads a fixture file with
 // 2 valid rows + 2 bad rows (missing name, unparseable qty), verifies the preview table and error
 // list render, confirms the import, and asserts the resulting summary. Screenshots to e2e/proof/.
+//
+// NOTE: Playwright compiles e2e specs as CommonJS (no "type": "module" in package.json), so
+// __dirname is available natively here - do not use fileURLToPath(import.meta.url) in this
+// project's e2e specs, it breaks Playwright's loader (import.meta is undefined under CJS compile).
 
 const PROOF = "e2e/proof";
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(__dirname, "fixtures", "csv-import-onboarding.csv");
 
 test("CSV import onboarding: preview, error list, explicit confirm, summary", async ({ page }) => {
