@@ -26,6 +26,7 @@ export interface PersistableScanState {
   catalog: unknown[];
   shopOverrides: unknown[];
   feedbackEvents: unknown[];
+  countSnapshots: unknown[];
 }
 
 /** Resolve the persistence access level from the signed-in uid (defaults to customer when unknown). */
@@ -51,6 +52,9 @@ export function buildPersistedScanState(
     pendingSyncQueue: s.pendingSyncQueue,
     syncedScanEventIds: s.syncedScanEventIds,
     simulateSyncFailure: s.simulateSyncFailure,
+    // Task 3.5: snapshot lines are already the product-facing shape (productId, name, qty - no raw
+    // codes), the same fields a customer already sees in finalCounts, so this is safe for every role.
+    countSnapshots: s.countSnapshots,
   };
   if (level === "platform") {
     return {

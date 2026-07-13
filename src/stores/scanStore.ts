@@ -65,6 +65,7 @@ import {
 } from "@/stores/scanGates";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
+import type { CountSnapshot } from "@/services/reports/varianceReport";
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
@@ -222,6 +223,9 @@ function autoSuggestApplyOk(params: {
  * queued/delayed decode only delays the AI enrichment, never the count or the "Decoding..." badge.
  */
 const MAX_CONCURRENT_DECODES = 2;
+// Task 3.5: cap the count-snapshot ring buffer (same pattern as FEEDBACK_EVENT_CAP) so the variance/
+// shrinkage report's history stays useful without growing localStorage unbounded.
+const COUNT_SNAPSHOT_CAP = 12;
 const pendingDecodeIds: string[] = [];
 let activeDecodes = 0;
 const decodeTasks = new Map<string, { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void }>();
@@ -385,6 +389,9 @@ export interface ScanState {
   scanFeed: ScanEvent[]; // newest first
   finalCounts: InventoryCount[];
   needsReviewQueue: UnknownCodeReview[];
+  // Task 3.5: rolling snapshots of finalCounts for the variance/shrinkage report. Capped ring buffer
+  // (same append-and-slice-oldest pattern as feedbackEvents/appendFeedback), most-recent-last.
+  countSnapshots: CountSnapshot[];
 
   // sync
   pendingSyncQueue: PendingSyncItem[];
@@ -549,6 +556,9 @@ export interface ScanState {
     type: FeedbackEventType,
     payload: { code: string; productId?: string | null; meta?: Record<string, string | number | boolean> },
   ) => void;
+  /** Task 3.5: capture the CURRENT finalCounts as a labeled CountSnapshot for the variance/shrinkage
+   *  report. Prepends to countSnapshots (capped at 12, oldest evicted) and returns the created snapshot. */
+  snapshotCount: (label: string) => CountSnapshot;
   /** Import products + approved aliases from CSV text (MVP). Writes via the durable queue + audits. */
   importProductsCsv: (text: string) => CsvImportSummary;
   /** Audit a CSV export (called by the export UI). Fire-and-forget; never blocks. */
@@ -920,6 +930,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       scanFeed: [],
       finalCounts: [],
       needsReviewQueue: [],
+      countSnapshots: [],
       pendingSyncQueue: [],
       syncedScanEventIds: [],
       online: true,
@@ -989,6 +1000,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             meta: payload.meta,
           }),
         })),
+
+      snapshotCount: (label) => {
+        const s = get();
+        const productById = new Map(s.products.map((p) => [p.id, p]));
+        const snapshot: CountSnapshot = {
+          id: idFactory(),
+          label,
+          takenAt: now(),
+          lines: s.finalCounts.map((c) => ({
+            productId: c.productId,
+            name: productById.get(c.productId)?.name ?? "",
+            qty: c.quantity,
+          })),
+        };
+        // Same capped-ring-buffer shape as appendFeedback: append newest, slice off the oldest once
+        // over the cap, so the most recent snapshot is always last.
+        set((cur) => {
+          const next = [...cur.countSnapshots, snapshot];
+          return { countSnapshots: next.length > COUNT_SNAPSHOT_CAP ? next.slice(next.length - COUNT_SNAPSHOT_CAP) : next };
+        });
+        return snapshot;
+      },
 
       startSession: (name, location) => {
         const id = `session-${idFactory()}`;
@@ -4400,11 +4433,17 @@ const appDeps: ScanStoreDeps = {
 // by both). Only installs older than v5 still get the full poison-cleanup reset (unchanged), with
 // structuring applied to the resulting seed as a no-op convenience.
 //
+// v7 (Task 3.5): adds `countSnapshots` (rolling variance/shrinkage-report history, capped at 12 by
+// snapshotCount). No prior version persisted this field, so every install - reset (<5) or additive
+// (>=5) - simply needs it defaulted to []. An install that already has a countSnapshots array (e.g.
+// a fresh v7 write, or a future migrate step run twice) keeps it untouched: never clobber real data.
+//
 // Exported (Task 4 polish-review fix) so a unit test can call this directly with a v5 persisted-state
 // fixture and assert every field survives the migration untouched, without spinning up the full
 // zustand persist/localStorage machinery.
 export function scanStoreMigrate(persisted: unknown, version: number) {
   const p = (persisted ?? {}) as Record<string, unknown>;
+  const existingSnapshots = Array.isArray(p.countSnapshots) ? p.countSnapshots : [];
   if (version < 5) {
     const fresh = getSeed();
     return {
@@ -4416,6 +4455,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
       needsReviewQueue: [],
       pendingSyncQueue: [],
       syncedScanEventIds: [],
+      countSnapshots: existingSnapshots,
       settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
     } as never;
   }
@@ -4423,6 +4463,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   return {
     ...p,
     products: backfillProducts(existingProducts).products,
+    countSnapshots: existingSnapshots,
     settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
   } as never;
 }
@@ -4430,7 +4471,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 6,
+    version: 7,
     storage: createJSONStorage(() => localStorage),
     skipHydration: true,
     migrate: scanStoreMigrate,
