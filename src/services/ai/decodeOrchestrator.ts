@@ -2,6 +2,15 @@ import type { AiLookupResult, CodeType, DecodeDecision, EvidenceResult, Provider
 import { decideDecode, isUsableProductName } from "@/services/ai/decode";
 import { verifyEvidence } from "@/services/ai/evidenceVerifier";
 
+/**
+ * @deprecated Legacy concurrent orchestrator - superseded by the decode ladder
+ * (src/server/upc/ladder.ts) + route computeDecode. Only type exports remain in use
+ * (src/app/api/ai-lookup/route.ts, src/services/decode/index.ts, src/services/ai/decodeFallback.ts,
+ * src/services/benchmark/benchmarkAnalysis.ts import types only). `decode/index.ts` also re-exports
+ * the `runDecode` runtime symbol via its barrel, but no live (non-test) code calls it - do not add
+ * new callers. Kept for its own unit tests and historical reference; do not extend.
+ */
+
 // Decode orchestration with a HARD time budget + full concurrency. Owner rule: if the budget fires
 // before we have a completed answer, ALL pending work is aborted and the code is routed to Needs
 // Review (untrusted) - we never return a partial/best-so-far product on timeout.

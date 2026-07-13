@@ -584,3 +584,53 @@ no production code path) and its documentation caveats. The real auto-count gate
 
 **Task complete. All gates green. No STOP condition encountered.**
 
+## Task 2.2
+
+Deprecate legacy `src/services/ai/decodeOrchestrator.ts` (215 lines) - documentation-only, no
+behavior change. Superseded by the decode ladder (`src/server/upc/ladder.ts`) + the route's
+`computeDecode`.
+
+### Import verification (grep, before editing)
+
+`grep -rn decodeOrchestrator src` found 9 files (more than the brief's 4 known importers). Full
+verdict per file:
+
+| Importer | Import line | Verdict |
+|---|---|---|
+| `src/app/api/ai-lookup/route.ts` | `import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";` | type-only (inline `type` modifier) |
+| `src/services/ai/decodeFallback.ts` | `import type { ProviderStatus } from "@/services/ai/decodeOrchestrator";` | type-only |
+| `src/services/benchmark/benchmarkAnalysis.ts` | `import type { ProviderStatus } from "@/services/ai/decodeOrchestrator";` | type-only |
+| `src/services/decode/index.ts` | `export { runDecode } from "@/services/ai/decodeOrchestrator";` + `export type { DecodeProvider, DecodeRunParams, DecodeRunResult, DecodeEnrich, ProviderStatus } from "@/services/ai/decodeOrchestrator";` | **runtime symbol** - re-exports the `runDecode` function itself, not just its type, alongside a separate type-only export line |
+| `src/services/decode/contract.ts` | `import type { DecodeEnrich, ProviderStatus } from "@/services/ai/decodeOrchestrator";` | type-only (found beyond the brief's named 4) |
+| `src/services/ai/decodeFallback.test.ts` | `import type { ProviderStatus } from "@/services/ai/decodeOrchestrator";` | type-only (test file) |
+| `src/services/ai/decodeOrchestrator.test.ts` | `import { runDecode, type DecodeProvider } from "@/services/ai/decodeOrchestrator";` | runtime symbol - expected, this is the module's own unit test |
+| `src/services/ai/groundedSpecFinder.ts` | comment only (`// Mirrored from decodeOrchestrator.ts line 132...`) | not an import |
+| `src/services/decode/README.md` | prose reference | not code |
+
+Follow-up check: `grep -rn runDecode src` shows the `decode/index.ts` barrel's re-exported
+`runDecode` has zero live (non-test) callers anywhere in `src` - only `decodeOrchestrator.test.ts`
+calls `runDecode` directly. So the one runtime re-export exists but is currently unused dead
+surface, not a hidden production dependency.
+
+**Verdict: 3 of the 4 brief-named importers (route.ts, decodeFallback.ts, benchmarkAnalysis.ts)
+are confirmed type-only, as the prior audit stated. The 4th brief-named importer,
+`decode/index.ts`, is NOT type-only - it re-exports the `runDecode` runtime symbol (plus a
+type-only export line). Per the brief's instruction, no behavior was changed; this is reported
+instead.** One additional type-only importer beyond the brief's list was found
+(`decode/contract.ts`).
+
+### Change made
+
+Added an `@deprecated` JSDoc block above the top-of-file comment in `decodeOrchestrator.ts`,
+naming the ladder as the successor, listing which importers are type-only, and flagging that
+`decode/index.ts`'s `runDecode` re-export has no live callers so no new callers should be added.
+No renames, no moves, no deletion, no logic touched.
+
+### Gate result
+
+| Gate | Command | Result | Exit code |
+|---|---|---|---|
+| Unit tests | `npm run test` | `Test Files 186 passed \| 7 skipped (193)` / `Tests 1723 passed \| 30 skipped (1753)` | 0 |
+
+**Task complete. All gates green. No STOP condition encountered.**
+
