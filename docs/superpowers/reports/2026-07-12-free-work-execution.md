@@ -422,3 +422,82 @@ checks already exist) and add a dated free-work-plan marker to `PROGRESS.md`. No
 
 **Task complete.**
 
+## Task 1.5 - branch + worktree hygiene
+
+Branch: `feat/decode-ladder-goupc`. Purpose: remove stale worktrees under `C:/tmp` and delete
+local branches already fully merged into `feat/decode-ladder-goupc`. Safety net: every local
+branch tip already carries a `bkp/2026-07-12/<branch>` tag from Task 0.3. No remote branches
+touched, no push, no prune.
+
+### Step 0: safety-tag precheck
+- Command: `git tag -l "bkp/2026-07-12/*" | wc -l`
+- Result: `20` - matches the required count. Proceeded.
+
+### Step 1: worktree removal (`git worktree remove <path>`, no `--force`)
+| Worktree | Branch | Result |
+|---|---|---|
+| `C:/tmp/inv-decoder-hardening` | `decoder-hardening-v1-local` | Removed cleanly, exit 0 |
+| `C:/tmp/inventory-demo` | `demo-readiness-vercel-partnumber` | Refused: `fatal: 'C:/tmp/inventory-demo' contains modified or untracked files, use --force to delete it` - left in place, not forced |
+| `C:/tmp/inventory-release-repair` | `feat/reverse-upc-heads-up` | Refused: `fatal: 'C:/tmp/inventory-release-repair' contains modified or untracked files, use --force to delete it` - left in place, not forced |
+
+Post-step `git worktree list`:
+```
+C:/Users/djsan/inventory        b8fbf00 [feat/decode-ladder-goupc]
+C:/tmp/inventory-demo           58855df [demo-readiness-vercel-partnumber]
+C:/tmp/inventory-release-repair 8dcb6b9 [feat/reverse-upc-heads-up]
+```
+1 of 3 worktrees removed. The other 2 are dirty (modified/untracked files) and were left exactly
+as instructed - a dirty worktree is a report item, not something to force-delete.
+
+### Step 2: branch deletion (`git branch -d`, merged-only)
+- Command: `git branch --merged feat/decode-ladder-goupc | grep -v "feat/decode-ladder-goupc\|master\|benchmark-tire-db-automation"`
+- 12 candidates identified, all deleted with `git branch -d` (lowercase only, never `-D`):
+
+| Branch | Result |
+|---|---|
+| `backup/pre-repair-20260628-2054` | Deleted (was `b9dea2a`) |
+| `decoder-hardening-v1-local` | Deleted (was `e5c2e16`) |
+| `feat/option-b-dryrun` | Deleted (was `9dcb2e0`) |
+| `feat/weekly-report-system` | Deleted (was `72a53f2`) |
+| `fix/corpus-lookup-vercel` | Deleted (was `9b76aa5`) |
+| `fix/count-decouple-breaker` | Deleted (was `12302a3`) |
+| `fix/grounding-ladder` | Deleted (was `8e1700c`) |
+| `fix/verified-suggested-model` | Deleted (was `599099c`) |
+| `integration/decode-restoration` | Deleted (was `54d7e96`) |
+| `repair/baseline-v1-plus-reviewed-good-work` | Deleted (was `24d1797`) |
+| `review/comprehensive-ux-sprint` | Deleted (was `192bfa4`) |
+| `test-fixes` | Deleted (was `e81d716`) |
+
+All 12 deletions succeeded on the first `-d` attempt (each was genuinely merged into
+`feat/decode-ladder-goupc`, so `-d`'s safety check never triggered a refusal). No remote
+branches, no `git push`, no `origin` prune.
+
+### Surviving branch list (`git branch` after)
+```
+  benchmark-tire-db-automation
++ demo-readiness-vercel-partnumber
+* feat/decode-ladder-goupc
++ feat/reverse-upc-heads-up
+  fix/exact-code-evidence-verification
+  master
+  strategy-bots-track2
+  test
+```
+7 branches survive: `benchmark-tire-db-automation` (owner-parked, explicitly excluded),
+`demo-readiness-vercel-partnumber` and `feat/reverse-upc-heads-up` (each still checked out by a
+dirty worktree, marked `+`), `feat/decode-ladder-goupc` (current, `*`),
+`fix/exact-code-evidence-verification`, `master`, `strategy-bots-track2`, `test` (none of these
+last 4 are merged into `feat/decode-ladder-goupc`, so `--merged` correctly excluded them).
+
+### Verification
+| Check | Result |
+|---|---|
+| Safety-tag precheck (20 tags) | PASS |
+| Worktrees removed without `--force` | 1/3 (2 legitimately refused, dirty, left in place) |
+| Branch deletions used `-d` only, never `-D` | PASS (verified no `-D` invocation) |
+| `benchmark-tire-db-automation` untouched | PASS (excluded from candidate list, still present) |
+| `master` / current branch untouched | PASS |
+| No remote branch deleted, no push, no prune | PASS (no such commands run) |
+
+**Task complete. No commit needed for branch/worktree ops themselves; this report update is the only commit.**
+
