@@ -17,7 +17,7 @@ import type { UpcItemDbUsage } from "@/server/upc/upcItemDbUsage";
 // spend paths.
 //
 // Resolver Trust Rules: a UPCitemdb hit is ALWAYS a SUGGESTION, never a verified auto-count on its
-// own. confidence is capped at 0.7 and exactCodeEvidenceVerifiedByApp is always false here - only
+// own. confidence is capped at 0.6 and exactCodeEvidenceVerifiedByApp is always false here - only
 // the app's own EvidenceVerifier/store gate can promote a code to verified, and a single free-DB
 // self-report is deliberately excluded from that path (wrong identity is FAILURE; Unknown is
 // ACCEPTABLE).

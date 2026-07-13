@@ -38,7 +38,7 @@ import { braveProvider, firecrawlSearchProvider, type DiscoveryProvider, type Mi
 import { brocadeLookup } from "@/services/fetchV2/sources/brocade";
 import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
-import { runLadder, buildLadderRungs, type RungOutcome } from "@/server/upc/ladder";
+import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome } from "@/server/upc/ladder";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
@@ -790,27 +790,51 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       return { settled: false, reason: ladder.skipReason ? `gpt-5.5 skipped: ${ladder.skipReason}` : "gpt-5.5 tier none (no product)" };
     };
 
-    // LAZY DAILY CAP GATE (fix): every FREE stage above (L1/L2 cache peek, tire-corpus, retail-corpus,
-    // Plan D's verified win) has already run and returned by this point if it had anything to offer -
-    // none of them can reach here. This is the FIRST point where computeDecode is genuinely about to
-    // spend money (Go-UPC / Fetch V2 / GPT-5.5), so it is the correct - and only - place to charge a
-    // cap slot. forceRetry always reaches here too (its whole purpose is to force a fresh paid compute).
-    // Skipped under E2E mock mode (no real spend; the rungs below are already E2E-inert regardless).
-    //
-    // v2 (Task 1): READ-ONLY check first (never writes on a block), THEN a single atomic charge -
-    // exactly once per request, right before runLadder() starts (Go-UPC for GTIN-shaped codes, else
-    // Fetch V2 - whichever rung actually runs first for this code). No rung below individually
-    // charges, so Fetch V2/GPT running after a Go-UPC miss can never double-charge this request.
-    if (!e2eMode()) {
-      const ladderStore = await ladderStorage();
-      const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
-      const used = await readDailyUsed(ladderStore);
-      if (used >= limit) throw new DailyCapExceededError(used, limit);
-      await chargeDailySlot(ladderStore, { limit });
-    }
+    // TWO-PHASE LADDER (bug fix, 2026-07-12 free-rungs review): the FREE rungs (UPCitemdb, Open Food
+    // Facts) must run with ZERO interaction with the paid daily AI-lookup cap - no charge, and no
+    // cap-exhaustion block either. Previously both halves shared one buildLadderRungs() array run
+    // AFTER the cap charge below, which meant (a) a code resolved entirely by a free rung still burned
+    // a paid daily slot, and (b) an already-exhausted cap threw BEFORE the free rungs got a chance to
+    // resolve the code for $0. Splitting into a free phase (no cap) and a paid phase (cap charged once,
+    // immediately before it runs) fixes both: free rungs always get a chance to run, and a cap slot is
+    // only ever spent on genuine paid work.
+    const freeRungs = buildFreeLadderRungs(code, { runUpcItemDb, runOpenFoodFacts });
+    const freeRun = await runLadder(code, freeRungs);
+    let ladderRun = freeRun;
 
-    const rungs = buildLadderRungs(code, { runUpcItemDb, runOpenFoodFacts, runGoUpc, runFetchV2, runGpt });
-    const ladderRun = await runLadder(code, rungs);
+    if (!freeRun.outcome) {
+      // FREE PHASE MISSED (or the code was never GTIN-gated for free rungs at all). LAZY DAILY CAP GATE
+      // (fix): every FREE stage above (L1/L2 cache peek, tire-corpus, retail-corpus, Plan D's verified
+      // win, and now the free ladder rungs) has already run and returned by this point if it had
+      // anything to offer - none of them can reach here. This is the FIRST point where computeDecode is
+      // genuinely about to spend money (Go-UPC / Fetch V2 / GPT-5.5), so it is the correct - and only -
+      // place to charge a cap slot. forceRetry always reaches here too (its whole purpose is to force a
+      // fresh paid compute). Skipped under E2E mock mode (no real spend; the rungs below are already
+      // E2E-inert regardless).
+      //
+      // v2 (Task 1): READ-ONLY check first (never writes on a block), THEN a single atomic charge -
+      // exactly once per request, right before the paid runLadder() starts (Go-UPC for GTIN-shaped
+      // codes, else Fetch V2 - whichever rung actually runs first for this code). No rung below
+      // individually charges, so Fetch V2/GPT running after a Go-UPC miss can never double-charge this
+      // request.
+      if (!e2eMode()) {
+        const ladderStore = await ladderStorage();
+        const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+        const used = await readDailyUsed(ladderStore);
+        if (used >= limit) throw new DailyCapExceededError(used, limit);
+        await chargeDailySlot(ladderStore, { limit });
+      }
+
+      const paidRungs = buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt });
+      const paidRun = await runLadder(code, paidRungs);
+      // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every
+      // rung that actually ran, honestly, in the order it ran.
+      ladderRun = {
+        settledBy: paidRun.settledBy,
+        outcome: paidRun.outcome,
+        reasons: [...freeRun.reasons, ...paidRun.reasons],
+      };
+    }
     const win = ladderRun.outcome?.payload as LadderPayload | undefined;
 
     // receiptState: only a GPT rung that genuinely ran + came back empty earns a permanent receipt.

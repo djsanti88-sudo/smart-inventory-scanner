@@ -118,4 +118,75 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     // No paid provider was contacted once the cap is exhausted.
     expect(hitAnAiProvider()).toBe(false);
   });
+
+  // FREE-RUNGS-OUTSIDE-THE-PAID-CAP (bug fix, 2026-07-12 review): UPCitemdb / Open Food Facts must
+  // never charge the paid daily AI-lookup cap, and an already-exhausted paid cap must never block
+  // them from running and resolving a code for $0. VALID_GTIN has a real GS1 check digit, so it is
+  // GTIN-gated into the free half of the ladder (buildFreeLadderRungs); the earlier cap tests above
+  // use "111000222333", which has a BAD check digit and so never reaches the free rungs at all -
+  // these tests need a code that genuinely exercises the free half.
+  // Synthetic 12-digit code with a valid GS1 check digit but NOT a real product - deliberately
+  // absent from the tire corpus / retail knowledge index / barcodeDb fixtures, so it reaches the
+  // ladder rungs themselves instead of short-circuiting on a free corpus hit above them.
+  const VALID_GTIN = "900000000003";
+  const UPCITEMDB_HOST = "api.upcitemdb.com";
+  const OFF_HOST = "world.openfoodfacts.org";
+
+  function stubFreeRungFetch(opts: { upcHit?: boolean } = {}) {
+    fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(UPCITEMDB_HOST)) {
+        if (opts.upcHit) {
+          return new Response(
+            JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }),
+            { status: 200 }
+          );
+        }
+        return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 }); // genuine miss
+      }
+      if (url.includes(OFF_HOST)) {
+        return new Response(JSON.stringify({ status: 0 }), { status: 200 }); // genuine miss
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+  }
+
+  it("free rung settles (UPCitemdb hit) -> paid daily counter UNCHANGED, even when the cap is ALREADY exhausted going in (no DailyCapExceededError)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted before this request even starts
+    stubFreeRungFetch({ upcHit: true });
+
+    const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+    // The free rung answered -> a normal "computed" result, NOT cap_blocked. Proves an exhausted
+    // paid cap never blocks a free-rung resolution, and no DailyCapExceededError was thrown.
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    expect(outcome.payload.providerNames).toContain("upcitemdb");
+    expect(outcome.payload.decision.status).toBe("needs_review"); // UPCitemdb hit is always a suggestion
+    // The PAID daily-cap counter's actual stored value must be exactly unchanged (still 0) - not
+    // merely "no throw". A free-rung resolution must never touch the paid charge function at all.
+    expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    // Only the free-rung host was ever contacted - never an AI/paid provider host.
+    expect(hitAnAiProvider()).toBe(false);
+  });
+
+  it("cap available + free rungs MISS -> paid charge happens EXACTLY ONCE, paid rungs run, and reasons chain is free-phase-then-paid-phase", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap
+    stubFreeRungFetch({ upcHit: false }); // both free rungs genuinely miss
+
+    const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+    expect(Array.isArray(reasons)).toBe(true);
+    const rungOrder = (reasons ?? []).map((r) => r.rung);
+    // Free phase first (both GTIN-gated free rungs ran and missed), then the paid phase in order.
+    // goupc is GTIN-gated in (VALID_GTIN qualifies), so it appears; no live key means it then misses too.
+    expect(rungOrder).toEqual(["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]);
+    // The paid daily-cap counter was charged EXACTLY ONCE for this request (free rungs missed, so the
+    // paid phase ran; the cap started at 0 and must now read exactly 1 - not 0, not 2+).
+    expect(await readDailyUsed(await ladderStorage())).toBe(1);
+  });
 });

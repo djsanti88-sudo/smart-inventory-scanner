@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runLadder, buildLadderRungs, type LadderRung, type RungOutcome } from "./ladder";
+import { runLadder, buildLadderRungs, buildFreeLadderRungs, buildPaidLadderRungs, type LadderRung, type RungOutcome } from "./ladder";
 
 // A tiny rung factory: names + a controllable outcome, with a call spy.
 function rung(name: string, outcome: RungOutcome): LadderRung & { spy: ReturnType<typeof vi.fn> } {
@@ -123,5 +123,49 @@ describe("buildLadderRungs (caller-side gate)", () => {
     // 036000291453 = valid-length UPC-A but last digit is off by one (bad GS1 check digit).
     const rungs = buildLadderRungs("036000291453", deps);
     expect(rungs.map((r) => r.name)).toEqual(["fetchv2", "gpt"]);
+  });
+});
+
+describe("buildFreeLadderRungs / buildPaidLadderRungs (two-phase split, cap-charge bug fix)", () => {
+  // Minimal stubbed rung runners; the builders only decide WHICH rungs exist + their order.
+  const deps = {
+    runUpcItemDb: async (): Promise<RungOutcome> => miss("upcitemdb"),
+    runOpenFoodFacts: async (): Promise<RungOutcome> => miss("openfoodfacts"),
+    runGoUpc: async (): Promise<RungOutcome> => miss("goupc"),
+    runFetchV2: async (): Promise<RungOutcome> => miss("fetchv2"),
+    runGpt: async (): Promise<RungOutcome> => miss("gpt"),
+  };
+
+  it("buildFreeLadderRungs: a GTIN-shaped code gets upcitemdb -> openfoodfacts only (no paid rungs)", () => {
+    const rungs = buildFreeLadderRungs("848983006257", deps); // valid UPC-A
+    expect(rungs.map((r) => r.name)).toEqual(["upcitemdb", "openfoodfacts"]);
+  });
+
+  it("buildFreeLadderRungs: a non-GTIN code gets NO free rungs at all", () => {
+    const rungs = buildFreeLadderRungs("X004DY7YUT", deps);
+    expect(rungs.map((r) => r.name)).toEqual([]);
+  });
+
+  it("buildFreeLadderRungs: a GTIN-shaped code with a bad check digit gets NO free rungs", () => {
+    const rungs = buildFreeLadderRungs("036000291453", deps);
+    expect(rungs.map((r) => r.name)).toEqual([]);
+  });
+
+  it("buildPaidLadderRungs: a GTIN-shaped code gets goupc -> fetchv2 -> gpt", () => {
+    const rungs = buildPaidLadderRungs("848983006257", deps);
+    expect(rungs.map((r) => r.name)).toEqual(["goupc", "fetchv2", "gpt"]);
+  });
+
+  it("buildPaidLadderRungs: a non-GTIN code skips goupc: fetchv2 -> gpt only", () => {
+    const rungs = buildPaidLadderRungs("X004DY7YUT", deps);
+    expect(rungs.map((r) => r.name)).toEqual(["fetchv2", "gpt"]);
+  });
+
+  it("concatenating buildFreeLadderRungs + buildPaidLadderRungs reproduces buildLadderRungs's combined order exactly", () => {
+    for (const code of ["848983006257", "X004DY7YUT", "036000291453"]) {
+      const combined = [...buildFreeLadderRungs(code, deps), ...buildPaidLadderRungs(code, deps)].map((r) => r.name);
+      const legacy = buildLadderRungs(code, deps).map((r) => r.name);
+      expect(combined).toEqual(legacy);
+    }
   });
 });
