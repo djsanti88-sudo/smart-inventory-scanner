@@ -58,6 +58,11 @@ import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
+import {
+  canAutoCount,
+  shouldAutoApplySuggestion,
+  decodeCorroborated as decodeCorroboratedGate,
+} from "@/stores/scanGates";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
@@ -179,30 +184,14 @@ function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
  * local DB is never involved. Every OTHER gate clause (verified status, confidence >= 0.8, tireOk,
  * no context conflict, autoAddOn) is enforced separately and unchanged.
  */
-export function decodeCorroborated(decision: { exactCodeEvidenceVerifiedByApp?: boolean; corroborationPath?: string } | null | undefined): boolean {
-  return Boolean(decision?.exactCodeEvidenceVerifiedByApp) || decision?.corroborationPath === "internet_two_source_size";
-}
+// Re-exported from the pure gate module (src/stores/scanGates.ts) so existing importers
+// (scanStore.autocount.test.ts imports it from "./scanStore") keep working unchanged.
+export const decodeCorroborated = decodeCorroboratedGate;
 
 /**
- * AUTO-SUGGEST-APPLY gate (owner order 2026-07-10), shared by liveDecode + backgroundVerifyDeep so the
- * rule cannot drift between the two paths. Any decode that did NOT clear the full auto-count gate
- * (evidenceGatePassed above) can still skip Needs Review and have its identity applied straight onto the
- * counted provisional row - AS A SUGGESTION, never verified - when confidence >= 0.8, OR the decode is
- * app-verified exact (status "verified" + exactCodeEvidenceVerifiedByApp true, the Go-UPC exact class).
- * Still requires a usable name and no scan-context conflict; the master switch (autoAddDecodedProducts)
- * is checked by the caller. This never weakens or duplicates the full evidence gate - it only decides
- * whether a decode that landed short of it may still avoid sitting in Needs Review.
- *
- * TRUST FIREWALL (do not remove): the confidence>=0.8 clause is INTENTIONALLY restricted to
- * status !== "verified" (i.e. "suggested"/"needs_review" decodes, which never claimed independent
- * verification). A raw decision.confidence on a "verified" decode is the PROVIDER'S self-reported
- * number and is not itself proof - the app's own evidence check (exactCodeEvidenceVerifiedByApp) is
- * the only thing that may promote a "verified" decode here, exactly like the full evidence gate above.
- * Without this restriction, a bare gpt_self_report or two-AI-agreement "verified" decode on a
- * non-public-barcode-shape code (e.g. a 4-digit vendor SKU) at confidence 0.9 would auto-apply a
- * fabricated identity as a "suggestion" - the exact T20/code-1225 failure class this app's firewalls
- * exist to prevent (see scanStore.gptLadder.test.ts). A wrong identity shown on the counted row is
- * still a wrong identity; "only a suggestion" is not an exemption from that rule.
+ * Thin store-side wrapper over the pure shouldAutoApplySuggestion gate (src/stores/scanGates.ts): it only
+ * computes productNameUsable from the raw productName and delegates. The trust rules live in the pure
+ * module; keeping this wrapper preserves the two identical call sites (liveDecode + backgroundVerifyDeep).
  */
 function autoSuggestApplyOk(params: {
   autoAddOn: boolean;
@@ -212,13 +201,14 @@ function autoSuggestApplyOk(params: {
   status: string | undefined;
   exactCodeEvidenceVerifiedByApp: boolean;
 }): boolean {
-  return (
-    params.autoAddOn &&
-    !params.contextConflict &&
-    isUsableProductName(params.productName) &&
-    ((params.confidence >= 0.8 && params.status !== "verified") ||
-      (params.status === "verified" && params.exactCodeEvidenceVerifiedByApp === true))
-  );
+  return shouldAutoApplySuggestion({
+    autoAddOn: params.autoAddOn,
+    contextConflict: params.contextConflict,
+    productNameUsable: isUsableProductName(params.productName),
+    confidence: params.confidence,
+    status: params.status,
+    exactCodeEvidenceVerifiedByApp: params.exactCodeEvidenceVerifiedByApp,
+  });
 }
 
 /**
@@ -2174,32 +2164,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             result: best,
             brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
           });
-          // GPT LADDER TRUST TIER (Task 5, owner rule): a GPT self-report the app did NOT independently
-          // verify can still auto-count on its OWN, narrower branch - never by weakening the existing
-          // evidence-corroborated conjunction below. Both branches still require the shared data-completeness
-          // (tireOk) and context (contextConflict) gates; only the corroboration requirement differs.
-          // T20/code-1225 FIX: a bare self-report is only theoretically falsifiable for a real public
-          // barcode (GPT claims to have found the exact code on a real page). A vendor/SKU/part-number
-          // code (numeric_sku/alpha_sku/vendor_label/messy) has no public page to have been "found" on,
-          // so self-report trust must NEVER auto-count those shapes - see
-          // .superpowers/sdd/task-1225-report.md. This does not touch decodeCorroborated()'s conjunction.
-          const isPublicBarcodeShapeForGptTrust = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
-          const gptTrusted =
-            isPublicBarcodeShapeForGptTrust &&
-            decision?.corroborationPath === "gpt_self_report" &&
-            decision?.status === "verified" &&
-            (decision?.confidence ?? 0) >= 0.8 &&
-            isUsableProductName(best?.productName ?? "") &&
-            tireOk &&
-            !contextConflict;
-          const evidenceGatePassed =
-            gptTrusted ||
-            (decision?.status === "verified" &&
-              decodeCorroborated(decision) &&
-              (decision?.confidence ?? 0) >= 0.8 &&
-              isUsableProductName(best?.productName ?? "") &&
-              tireOk &&
-              !contextConflict);
+          // PHASE-7 EVIDENCE GATE + GPT-ladder trust tier + T20/code-1225 public-barcode firewall, now in
+          // one pure function (src/stores/scanGates.ts) shared with backgroundVerifyDeep so the two paths
+          // cannot drift. tireOk + contextConflict are computed here (they need store services) and passed in.
+          const evidenceGatePassed = canAutoCount({
+            codeType,
+            decision,
+            productName: best?.productName ?? "",
+            productNameUsable: isUsableProductName(best?.productName ?? ""),
+            tireOk,
+            contextConflict,
+          }).allowed;
           if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
             // Origin decides the catalog write: exact app-confirmed evidence -> VERIFIED global catalog
             // entry; a trusted-but-non-exact AI product -> still counted + aliased, PENDING catalog
@@ -2789,27 +2764,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           result: best,
           brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
         });
-        // Same GPT ladder trust-tier extension as liveDecode's evidence gate (Task 5) - kept in sync so the
-        // two decode paths can never drift.
-        // T20/code-1225 FIX: same public-barcode-shape requirement as liveDecode's gptTrusted (see there
-        // for the full rationale) - kept in sync so the two decode paths can never drift apart again.
-        const isPublicBarcodeShapeForGptTrust = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(codeType);
-        const gptTrusted =
-          isPublicBarcodeShapeForGptTrust &&
-          decision.corroborationPath === "gpt_self_report" &&
-          decision.status === "verified" &&
-          (decision.confidence ?? 0) >= 0.8 &&
-          isUsableProductName(best?.productName ?? "") &&
-          tireOk &&
-          !contextConflict;
-        const evidenceGatePassed =
-          gptTrusted ||
-          (decision.status === "verified" &&
-            decodeCorroborated(decision) &&
-            (decision.confidence ?? 0) >= 0.8 &&
-            isUsableProductName(best?.productName ?? "") &&
-            tireOk &&
-            !contextConflict);
+        // SAME pure evidence gate as liveDecode (src/stores/scanGates.ts): Phase-7 corroboration + GPT
+        // trust tier + T20/code-1225 public-barcode firewall, kept in sync so the two decode paths can
+        // never drift apart again. tireOk + contextConflict are computed here and passed in.
+        const evidenceGatePassed = canAutoCount({
+          codeType,
+          decision,
+          productName: best?.productName ?? "",
+          productNameUsable: isUsableProductName(best?.productName ?? ""),
+          tireOk,
+          contextConflict,
+        }).allowed;
 
         if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
           // OPTION 3: non-public codes never write the global catalog ("auto_verify") - shop-local "ai" only.
