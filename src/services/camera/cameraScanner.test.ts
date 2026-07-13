@@ -121,17 +121,81 @@ describe("createCameraScanner", () => {
     scanner.stop();
   });
 
-  it("falls back to the dynamic-imported polyfill when window.BarcodeDetector is absent", async () => {
-    // window.BarcodeDetector deliberately left undefined - the real `barcode-detector` package is
-    // imported dynamically and used instead. We only assert start() resolves without throwing and
-    // that detection still works end-to-end using the real polyfill's constructor shape (no mock
-    // queue available here since it's the real implementation, so just prove no native-detector path
-    // was used and start/stop do not throw).
+  it("falls back to the dynamic-imported polyfill when window.BarcodeDetector is absent, and a detected barcode reaches onDetect through that path", async () => {
+    // window.BarcodeDetector deliberately left undefined so loadDetector() falls through to the
+    // dynamic import path. Mock the "barcode-detector" module itself (rather than the real
+    // zxing-wasm polyfill) with a controllable detect() queue, so we can prove a detection
+    // actually reaches onDetect through the polyfill code path - not just that start()/stop()
+    // resolve without throwing.
     expect((window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector).toBeUndefined();
+
+    class MockPolyfillDetector {
+      static lastInstance: MockPolyfillDetector | null = null;
+      detectQueue: Array<Array<{ rawValue: string }>> = [];
+      constructor() {
+        MockPolyfillDetector.lastInstance = this;
+      }
+      async detect(_video: unknown) {
+        return this.detectQueue.shift() ?? [];
+      }
+    }
+
+    vi.doMock("barcode-detector", () => ({
+      BarcodeDetector: MockPolyfillDetector,
+    }));
+    vi.resetModules();
+    const { createCameraScanner: createCameraScannerFresh } = await import("@/services/camera/cameraScanner");
+
     const video = makeVideo();
     const onDetect = vi.fn();
-    const scanner = createCameraScanner(video, onDetect);
+    const scanner = createCameraScannerFresh(video, onDetect);
     await expect(scanner.start()).resolves.not.toThrow();
+
+    expect(MockPolyfillDetector.lastInstance).not.toBeNull();
+
+    MockPolyfillDetector.lastInstance!.detectQueue.push([{ rawValue: "POLYFILL-CODE-123" }]);
+    await tick();
+
+    expect(onDetect).toHaveBeenCalledTimes(1);
+    expect(onDetect).toHaveBeenCalledWith("POLYFILL-CODE-123");
+
     scanner.stop();
+    vi.doUnmock("barcode-detector");
+    vi.resetModules();
+  });
+
+  it("rejects cleanly with a normal Error when the detector fails to load, and a subsequent stop() is safe with no rAF scheduled", async () => {
+    // window.BarcodeDetector deliberately left undefined so loadDetector() falls through to the
+    // dynamic import path. Mock the dynamic import to reject, simulating offline / chunk 404.
+    vi.doMock("barcode-detector", () => {
+      throw new Error("Failed to fetch dynamically imported module");
+    });
+    vi.resetModules();
+    const { createCameraScanner: createCameraScannerFresh } = await import("@/services/camera/cameraScanner");
+
+    const video = makeVideo();
+    const onDetect = vi.fn();
+    const scanner = createCameraScannerFresh(video, onDetect);
+
+    let caught: unknown;
+    try {
+      await scanner.start();
+    } catch (err) {
+      caught = err;
+    }
+
+    // Must reject with a real Error the caller can catch (not swallowed, not a raw string/undefined).
+    expect(caught).toBeInstanceOf(Error);
+
+    // No detection loop should have been scheduled since the detector never loaded.
+    expect(rafCallbacks.length).toBe(0);
+
+    // A subsequent stop() call must be safe: no throw, no double-release, and it must not schedule
+    // or cancel a phantom rAF handle.
+    expect(() => scanner.stop()).not.toThrow();
+    expect(rafCallbacks.length).toBe(0);
+
+    vi.doUnmock("barcode-detector");
+    vi.resetModules();
   });
 });
