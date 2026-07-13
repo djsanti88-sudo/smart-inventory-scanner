@@ -58,7 +58,15 @@ describe("server-only boundary: upc modules are never client-bundled", () => {
   it("the upc server modules declare the server-only boundary", () => {
     // GoUpcProvider.ts is guarded conditionally: it does not exist yet, but when it lands it must
     // carry the same first-line guard. existsSync keeps this green now and enforcing later.
-    for (const f of ["storage.ts", "goUpcUsage.ts", "GoUpcProvider.ts"]) {
+    for (const f of [
+      "storage.ts",
+      "goUpcUsage.ts",
+      "GoUpcProvider.ts",
+      "upcItemDbUsage.ts",
+      "UpcItemDbProvider.ts",
+      "openFoodFactsUsage.ts",
+      "OpenFoodFactsProvider.ts",
+    ]) {
       const path = join(SRC, "server", "upc", f);
       if (!existsSync(path)) continue;
       const src = readFileSync(path, "utf8");

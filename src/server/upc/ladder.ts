@@ -56,18 +56,47 @@ export async function runLadder(_code: string, rungs: LadderRung[]): Promise<Lad
 
 /** The concrete rung runners the route injects (each already closed over the request + deps). */
 export interface LadderRungRunners {
+  runUpcItemDb: () => Promise<RungOutcome>;
+  runOpenFoodFacts: () => Promise<RungOutcome>;
   runGoUpc: () => Promise<RungOutcome>;
   runFetchV2: () => Promise<RungOutcome>;
   runGpt: () => Promise<RungOutcome>;
 }
 
 /**
- * Build the ordered rung array for a code. Go-UPC is GATED to real GTINs (shape + valid GS1 check
- * digit): a vendor/ASIN/FNSKU-shaped code, or a GTIN-shaped code with a bad check digit, simply gets
- * NO Go-UPC rung in the array (the gate lives here at the caller, so runLadder stays shape-agnostic).
- * Fetch V2 then GPT always follow.
+ * The FREE half of the ladder: UPCitemdb then Open Food Facts, both GATED to real GTINs (shape +
+ * valid GS1 check digit). Neither rung ever touches the paid daily AI-lookup cap - each owns its
+ * own local usage counter (see UpcItemDbProvider.ts / OpenFoodFactsProvider.ts). A vendor/ASIN/
+ * FNSKU-shaped code, or a GTIN-shaped code with a bad check digit, gets an EMPTY array here (same
+ * gate Go-UPC uses in buildPaidLadderRungs, kept in one place per builder so callers never need to
+ * duplicate the GTIN check).
+ *
+ * Bug fix (2026-07-12, controller-ratified): this half MUST run via runLadder() on its own,
+ * BEFORE any interaction with the paid daily cap - see pipeline.ts's two-phase call. Previously
+ * these rungs ran inside the same buildLadderRungs() array as the paid rungs, AFTER the cap was
+ * already unconditionally charged (or after an exhausted cap had already thrown), so a free-rung
+ * resolution still burned a paid slot and an exhausted cap blocked the free rungs from ever
+ * running. Splitting the builder is what makes the free/paid separation possible at the call site.
+ *
+ * Order for a valid GTIN: ["upcitemdb", "openfoodfacts"]. Order for a non-GTIN: [].
  */
-export function buildLadderRungs(code: string, deps: LadderRungRunners): LadderRung[] {
+export function buildFreeLadderRungs(code: string, deps: Pick<LadderRungRunners, "runUpcItemDb" | "runOpenFoodFacts">): LadderRung[] {
+  const rungs: LadderRung[] = [];
+  if (isGtinShaped(code) && isValidCheckDigit(code)) {
+    rungs.push({ name: "upcitemdb", run: deps.runUpcItemDb });
+    rungs.push({ name: "openfoodfacts", run: deps.runOpenFoodFacts });
+  }
+  return rungs;
+}
+
+/**
+ * The PAID half of the ladder: Go-UPC (GTIN-gated, same check-digit gate as the free rungs) then
+ * Fetch V2 then GPT-5.5, for every code. The caller (pipeline.ts) charges the paid daily cap slot
+ * immediately before running this half - never inside runLadder itself.
+ *
+ * Order for a valid GTIN: ["goupc", "fetchv2", "gpt"]. Order for a non-GTIN: ["fetchv2", "gpt"].
+ */
+export function buildPaidLadderRungs(code: string, deps: Pick<LadderRungRunners, "runGoUpc" | "runFetchV2" | "runGpt">): LadderRung[] {
   const rungs: LadderRung[] = [];
   if (isGtinShaped(code) && isValidCheckDigit(code)) {
     rungs.push({ name: "goupc", run: deps.runGoUpc });
@@ -75,4 +104,17 @@ export function buildLadderRungs(code: string, deps: LadderRungRunners): LadderR
   rungs.push({ name: "fetchv2", run: deps.runFetchV2 });
   rungs.push({ name: "gpt", run: deps.runGpt });
   return rungs;
+}
+
+/**
+ * COMPATIBILITY WRAPPER: the full free+paid ladder in one array, in the original combined order.
+ * No production caller uses this anymore (pipeline.ts now calls buildFreeLadderRungs and
+ * buildPaidLadderRungs separately so it can charge the paid cap only between the two halves) -
+ * kept for any other caller (and existing tests) that still wants the single-array shape.
+ *
+ * Final order for a valid GTIN: ["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"].
+ * Final order for a non-GTIN: ["fetchv2", "gpt"].
+ */
+export function buildLadderRungs(code: string, deps: LadderRungRunners): LadderRung[] {
+  return [...buildFreeLadderRungs(code, deps), ...buildPaidLadderRungs(code, deps)];
 }
