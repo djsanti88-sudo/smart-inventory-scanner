@@ -38,7 +38,7 @@ import { braveProvider, firecrawlSearchProvider, type DiscoveryProvider, type Mi
 import { brocadeLookup } from "@/services/fetchV2/sources/brocade";
 import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
-import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome } from "@/server/upc/ladder";
+import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult } from "@/server/upc/ladder";
 import { canonicalGtin } from "@/services/upc/gtin";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
@@ -480,102 +480,15 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // food/retail codes auto-count with no AI and no Firecrawl.
     }
 
-    // PLAN D - GROUNDING-FIRST FAST RESOLVER (flash-lite grounding -> fetch-verify -> barcode-DB fallback).
-    // Runs AFTER the free corpus/retail misses and BEFORE the spec-v6 decode ladder. One flash-lite
-    // grounding call names the product; the APP fetch-verifies the exact code on a candidate page before
-    // marking Verified, falling back to the barcode-DB leg, Firecrawl, and the prefix floor on a miss.
-    // Gated to PUBLIC barcodes (upc/ean/gtin): a SKU/vendor label must never auto-verify from grounding
-    // (semantic firewall - those still route through the legacy path -> Needs Review).
-    //
-    // TASK T8b FIX (2026-07-08): a VERIFIED Plan D win is still TERMINAL - it is a genuine free-tier
-    // resolution (like a corpus hit) and returns immediately with NO ladder run, exactly as before.
-    // But Plan D's non-verified outcome (the generic "<Brand>/Unidentified item" prefix floor, or an
-    // unverified grounding suggestion) is NOT an answer - it was wrongly treated as terminal, which made
-    // the spec-v6 ladder (Go-UPC -> Fetch V2 -> GPT-5.5) UNREACHABLE for every public barcode (live proof
-    // T19: 10/10 known-good GTINs terminated at the floor, Go-UPC usage delta 0). The floor/suggestion is
-    // now STASHED and the ladder runs; the ladder's own settled result wins, and the stash is the
-    // fallback ONLY if every ladder rung misses. Never runs under E2E (mock-only).
+    // PLAN D (grounding-first fast resolver) MOVED (Task 7, ORDER v3): it used to run HERE, before the
+    // decode ladder. Under the owner-ratified cost order (retail peek -> FREE rungs -> Plan D -> cap gate
+    // -> paid ladder) Plan D's internal Firecrawl legs must not run before the $0 UPCitemdb/OFF rungs, so
+    // its execution now happens further down, AFTER the free ladder run completes. Only these forward
+    // declarations stay up here (they are read by the response assembly below). See "PLAN D EXECUTION".
     const isPublicBarcode = codeType === "upc_a" || codeType === "ean_13" || codeType === "gtin_14";
     let planDStash: DecodePayload | null = null;
     let planDProviderStatusForStash: ProviderStatus | null = null;
     let planDAiCalled = false;
-    if (!e2eMode() && isPublicBarcode) {
-      const fast = await resolveUnknownFast(code, {
-        lookupBarcodeDb: (c) => lookupBarcodeDb(c),
-        retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
-        // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
-        // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.
-        groundIdentify: (c, opts) => (GEMINI_DECODE_DISABLED ? Promise.resolve(null) : groundIdentify(c, opts)),
-        verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
-        firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
-        searchIdentify: (c) => searchIdentifyByBarcode(c),
-        prefixFloor: (c) => prefixFloorName(c, codeType),
-      }).catch(() => null);
-      if (fast) {
-        const verifiedWin = fast.verified && isUsableProductName(fast.name);
-        const result: AiLookupResult = {
-          ...emptyResult(),
-          productName: fast.name,
-          brand: fast.brand,
-          confidence: verifiedWin ? 0.9 : 0.5,
-          needsHumanReview: !verifiedWin,
-          sourceUrls: [],
-        };
-        const evidence: EvidenceResult = verifiedWin
-          ? { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: [`parallel-${fast.source}`], reason: `Exact identification via parallel ${fast.source}` }
-          : { verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: `Unverified parallel ${fast.source} (suggestion/floor) - not auto-counted` };
-        let decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: req.scanContext, brandPrefixConflict: false });
-        const floorReasonCode = decodeReasonCode({ hasProduct: isUsableProductName(fast.name), fallbackFound: false, timedOut: false, decisionStatus: decision.status, statuses: [], firecrawlKey: !!firecrawlKey, coverageMissed: false });
-        const floorReasonText = verifiedWin ? "" : (REASON_TEXT[floorReasonCode] ?? "");
-        if (decision.status !== "verified" && floorReasonText) decision = { ...decision, reason: floorReasonText };
-
-        const pdResults: AiLookupResult[] = [result];
-        const pdEvidences: EvidenceResult[] = [evidence];
-        const pdProviderNames = [`parallel:${fast.source}`];
-        const pdProviderStatus: ProviderStatus = { provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: verifiedWin, identityFound: isUsableProductName(fast.name) };
-        const pdReasonCode = verifiedWin ? "ok" : floorReasonCode;
-        const pdReasonText = floorReasonText;
-
-        if (verifiedWin) {
-          // Verified win is a genuine free-tier resolution - terminal, exactly like a corpus hit.
-          // The ladder never runs and no paid spend occurs.
-          return {
-            mode: "decode" as const,
-            providerNames: pdProviderNames,
-            results: pdResults,
-            evidences: pdEvidences,
-            providerStatuses: [pdProviderStatus],
-            decision,
-            reasonCode: pdReasonCode,
-            reasonText: pdReasonText,
-            timedOut: false,
-            // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
-            // debug instead of consensus quietly degrading to the two correlated DB votes.
-            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
-            sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
-          };
-        }
-
-        // Non-verified (floor/suggestion): STASH the payload and fall through into the spec-v6 ladder
-        // below. This is what makes Go-UPC/Fetch V2/GPT-5.5 reachable for public barcodes at all - the
-        // stash is only used if every ladder rung misses (see the all-miss fallback further down).
-        planDAiCalled = fast.aiCalled;
-        planDProviderStatusForStash = pdProviderStatus;
-        planDStash = {
-          mode: "decode" as const,
-          providerNames: pdProviderNames,
-          results: pdResults,
-          evidences: pdEvidences,
-          providerStatuses: [pdProviderStatus],
-          decision,
-          reasonCode: pdReasonCode,
-          reasonText: pdReasonText,
-          timedOut: false,
-          debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
-          sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
-        };
-      }
-    }
 
     // ===== DECODE LADDER (spec v6): Go-UPC -> Fetch V2 -> GPT-5.5 =====================================
     // Replaces the legacy Gemini/OpenAI fast-path + deep-fallback stage entirely. Gemini is REMOVED
@@ -831,50 +744,154 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       return { settled: false, reason: ladder.skipReason ? `gpt-5.5 skipped: ${ladder.skipReason}` : "gpt-5.5 tier none (no product)" };
     };
 
-    // TWO-PHASE LADDER (bug fix, 2026-07-12 free-rungs review): the FREE rungs (UPCitemdb, Open Food
-    // Facts) must run with ZERO interaction with the paid daily AI-lookup cap - no charge, and no
-    // cap-exhaustion block either. Previously both halves shared one buildLadderRungs() array run
-    // AFTER the cap charge below, which meant (a) a code resolved entirely by a free rung still burned
-    // a paid daily slot, and (b) an already-exhausted cap threw BEFORE the free rungs got a chance to
-    // resolve the code for $0. Splitting into a free phase (no cap) and a paid phase (cap charged once,
-    // immediately before it runs) fixes both: free rungs always get a chance to run, and a cap slot is
-    // only ever spent on genuine paid work.
+    // ===== ORDER v3 (owner-ratified 2026-07-14) =====================================================
+    // retail peek (above, unchanged) -> FREE rungs -> Plan D -> cap gate -> paid ladder.
+    // Free-before-paid now holds STRICTLY: Plan D's internal Firecrawl legs no longer run before the $0
+    // UPCitemdb/OFF rungs. ESCALATION: a free-rung SUGGESTION is a fallback, not a stop - one cap-charged
+    // Go-UPC exact-verify may still upgrade it to verified; fetchv2/gpt NEVER run past it. A total free
+    // MISS keeps today's exact behavior (Plan D -> cap gate -> full paid ladder: goupc -> fetchv2 -> gpt).
     const freeRungs = buildFreeLadderRungs(code, { runUpcItemDb, runOpenFoodFacts });
     const freeRun = await runLadder(code, freeRungs);
-    let ladderRun = freeRun;
+    // The free rungs (UPCitemdb / Open Food Facts) NEVER emit "verified" today - both are always
+    // suggestions (Resolver Trust Rules). freeStatus is read defensively so a future verified free rung
+    // (none exists now) would still be handled as a terminal free win via the `else` branch below.
+    const freeStatus = (freeRun.outcome?.payload as LadderPayload | undefined)?.decision.status ?? null;
+    const freeSuggestion = freeRun.outcome && freeStatus !== "verified" ? freeRun : null;
 
-    if (!freeRun.outcome) {
-      // FREE PHASE MISSED (or the code was never GTIN-gated for free rungs at all). LAZY DAILY CAP GATE
-      // (fix): every FREE stage above (L1/L2 cache peek, tire-corpus, retail-corpus, Plan D's verified
-      // win, and now the free ladder rungs) has already run and returned by this point if it had
-      // anything to offer - none of them can reach here. This is the FIRST point where computeDecode is
-      // genuinely about to spend money (Go-UPC / Fetch V2 / GPT-5.5), so it is the correct - and only -
-      // place to charge a cap slot. forceRetry always reaches here too (its whole purpose is to force a
-      // fresh paid compute). Skipped under E2E mock mode (no real spend; the rungs below are already
-      // E2E-inert regardless).
-      //
-      // v2 (Task 1): READ-ONLY check first (never writes on a block), THEN a single atomic charge -
-      // exactly once per request, right before the paid runLadder() starts (Go-UPC for GTIN-shaped
-      // codes, else Fetch V2 - whichever rung actually runs first for this code). No rung below
-      // individually charges, so Fetch V2/GPT running after a Go-UPC miss can never double-charge this
-      // request.
-      if (!e2eMode()) {
-        const ladderStore = await ladderStorage();
-        const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
-        const used = await readDailyUsed(ladderStore);
-        if (used >= limit) throw new DailyCapExceededError(used, limit);
-        await chargeDailySlot(ladderStore, { limit });
+    // ---- PLAN D EXECUTION (grounding-first fast resolver) --------------------------------------------
+    // Runs AFTER the free ladder rungs (ORDER v3) and BEFORE the cap gate. A VERIFIED Plan D win is a
+    // genuine free-tier resolution and RETURNS immediately, exactly as before (no cap charge, no paid
+    // rung). A non-verified floor/suggestion is STASHED (planDStash) as the all-miss fallback. Gated to
+    // PUBLIC barcodes and skipped under E2E (mock-only). This is the same block that used to sit above the
+    // ladder; only its POSITION moved (owner cost-order fix), the internals are byte-for-byte unchanged.
+    if (!e2eMode() && isPublicBarcode) {
+      const fast = await resolveUnknownFast(code, {
+        lookupBarcodeDb: (c) => lookupBarcodeDb(c),
+        retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
+        // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
+        // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.
+        groundIdentify: (c, opts) => (GEMINI_DECODE_DISABLED ? Promise.resolve(null) : groundIdentify(c, opts)),
+        verifyCodeOnPage: (urls, c) => verifyCodeOnPage(urls, c),
+        firecrawlScrapeCheap: (u) => firecrawlScrapeCheap(u),
+        searchIdentify: (c) => searchIdentifyByBarcode(c),
+        prefixFloor: (c) => prefixFloorName(c, codeType),
+      }).catch(() => null);
+      if (fast) {
+        const verifiedWin = fast.verified && isUsableProductName(fast.name);
+        const result: AiLookupResult = {
+          ...emptyResult(),
+          productName: fast.name,
+          brand: fast.brand,
+          confidence: verifiedWin ? 0.9 : 0.5,
+          needsHumanReview: !verifiedWin,
+          sourceUrls: [],
+        };
+        const evidence: EvidenceResult = verifiedWin
+          ? { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: [`parallel-${fast.source}`], reason: `Exact identification via parallel ${fast.source}` }
+          : { verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: `Unverified parallel ${fast.source} (suggestion/floor) - not auto-counted` };
+        let decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: req.scanContext, brandPrefixConflict: false });
+        const floorReasonCode = decodeReasonCode({ hasProduct: isUsableProductName(fast.name), fallbackFound: false, timedOut: false, decisionStatus: decision.status, statuses: [], firecrawlKey: !!firecrawlKey, coverageMissed: false });
+        const floorReasonText = verifiedWin ? "" : (REASON_TEXT[floorReasonCode] ?? "");
+        if (decision.status !== "verified" && floorReasonText) decision = { ...decision, reason: floorReasonText };
+
+        const pdResults: AiLookupResult[] = [result];
+        const pdEvidences: EvidenceResult[] = [evidence];
+        const pdProviderNames = [`parallel:${fast.source}`];
+        const pdProviderStatus: ProviderStatus = { provider: `parallel:${fast.source}`, status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: verifiedWin, identityFound: isUsableProductName(fast.name) };
+        const pdReasonCode = verifiedWin ? "ok" : floorReasonCode;
+        const pdReasonText = floorReasonText;
+
+        if (verifiedWin) {
+          // Verified win is a genuine free-tier resolution - terminal, exactly like a corpus hit.
+          // The ladder never runs and no paid spend occurs.
+          return {
+            mode: "decode" as const,
+            providerNames: pdProviderNames,
+            results: pdResults,
+            evidences: pdEvidences,
+            providerStatuses: [pdProviderStatus],
+            decision,
+            reasonCode: pdReasonCode,
+            reasonText: pdReasonText,
+            timedOut: false,
+            // groundingStatus makes a silent grounding outage (e.g. a model 503) visible in the decode
+            // debug instead of consensus quietly degrading to the two correlated DB votes.
+            debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
+            sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+          };
+        }
+
+        // Non-verified (floor/suggestion): STASH the payload; it is the all-miss fallback (see below).
+        planDAiCalled = fast.aiCalled;
+        planDProviderStatusForStash = pdProviderStatus;
+        planDStash = {
+          mode: "decode" as const,
+          providerNames: pdProviderNames,
+          results: pdResults,
+          evidences: pdEvidences,
+          providerStatuses: [pdProviderStatus],
+          decision,
+          reasonCode: pdReasonCode,
+          reasonText: pdReasonText,
+          timedOut: false,
+          debug: { providersAttempted: pdProviderNames, evidenceStrengths: pdEvidences.map((e) => e.strength), sourceCounts: pdResults.map((r) => (r.sourceUrls ?? []).length), corroborationPath: decision.corroborationPath ?? `parallel_${fast.source}`, aiCalled: fast.aiCalled, pageFetched: false, cached: false, groundingStatus: getLastGroundingStatus(), retailLookup: retailLookupStatus },
+          sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+        };
       }
+    }
 
-      const paidRungs = buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt });
-      const paidRun = await runLadder(code, paidRungs);
-      // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every
-      // rung that actually ran, honestly, in the order it ran.
-      ladderRun = {
-        settledBy: paidRun.settledBy,
-        outcome: paidRun.outcome,
-        reasons: [...freeRun.reasons, ...paidRun.reasons],
-      };
+    // ---- LAZY DAILY CAP GATE, extracted ONCE (Task 7) -----------------------------------------------
+    // The single read-then-charge block, used by BOTH the escalation branch (before the Go-UPC-only run)
+    // and the full-paid branch (before the full ladder). READ-ONLY check first (never writes on a block),
+    // THEN one atomic charge - exactly once per request, immediately before genuine paid work starts. A
+    // blown cap throws DailyCapExceededError BEFORE any paid rung runs (its semantics are unchanged on
+    // both branches: every free stage has already completed and returned by this point). E2E is a no-op.
+    const chargePaidSlot = async (): Promise<void> => {
+      if (e2eMode()) return;
+      const ladderStore = await ladderStorage();
+      const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+      const used = await readDailyUsed(ladderStore);
+      if (used >= limit) throw new DailyCapExceededError(used, limit);
+      await chargeDailySlot(ladderStore, { limit });
+    };
+
+    let ladderRun: LadderResult;
+    if (freeSuggestion) {
+      // ESCALATION PATH: a free suggestion stands as a fallback; a single cap-charged Go-UPC exact-verify
+      // may still upgrade it to verified (Go-UPC wins). Otherwise the free suggestion is the final answer;
+      // fetchv2/gpt NEVER run past a free suggestion (owner-ratified). receiptState stays {eligible:false}
+      // and gptLadderResult stays null on this branch - the GPT rung never runs, so the code was NOT
+      // exhaustively probed and earns no permanent no_result_receipt.
+      //
+      // The cap is charged BEFORE the Go-UPC-only run (paid work is paid work) - but ONLY when Go-UPC is
+      // genuinely capable of a paid attempt: the goupc rung is present (GTIN-gated; a NON-GTIN code yields
+      // an empty array) AND a Go-UPC key is configured. Charging (and cap-blocking) for a rung that would
+      // immediately no-op as "unavailable" would violate the doctrine that the cap bounds only genuine
+      // PAID work and must never block a $0 free resolution - so when Go-UPC can't actually pay, we skip
+      // the charge and the free suggestion simply stands (no fetchv2/gpt escalation past it).
+      const goUpcRungOnly = buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "goupc");
+      const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
+      if (goUpcCanPay) {
+        await chargePaidSlot();
+        const goRun = await runLadder(code, goUpcRungOnly);
+        const goStatus = (goRun.outcome?.payload as LadderPayload | undefined)?.decision.status ?? null;
+        ladderRun = goStatus === "verified"
+          ? { settledBy: goRun.settledBy, outcome: goRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] }
+          : { settledBy: freeRun.settledBy, outcome: freeRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] };
+      } else {
+        // No paid Go-UPC attempt possible -> the free suggestion is the answer, unblocked, uncharged.
+        ladderRun = freeRun;
+      }
+    } else if (!freeRun.outcome) {
+      // TOTAL FREE MISS: exactly today's path - cap gate then the FULL paid ladder (goupc -> fetchv2 -> gpt).
+      await chargePaidSlot();
+      const paidRun = await runLadder(code, buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }));
+      // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
+      // that actually ran, honestly, in the order it ran.
+      ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...paidRun.reasons] };
+    } else {
+      // Future-proof: a VERIFIED free win (no free rung emits one today). Terminal, no paid work.
+      ladderRun = freeRun;
     }
     const win = ladderRun.outcome?.payload as LadderPayload | undefined;
 
