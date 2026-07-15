@@ -4,7 +4,10 @@ import { MockDb } from "@/services/mockDb";
 import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogEntry } from "@/services/catalog/catalogTypes";
 
-const CODE = "111222333444";
+// A3/AM-2 (2026-07-15): must be a VALID-check-digit GTIN - a bad-check-digit code is now treated
+// as a likely misread and skips auto-decode entirely (src/services/upc/misread.ts), which is
+// unrelated to what this suite tests. Fixture value only; no assertions changed.
+const CODE = "111222333446";
 
 // Reproduces the real UI regression: a single-provider, Tier-3 (barcode DB) decode that the app
 // independently verified (exact code in fetched/strong evidence). It must auto-save + count, never
