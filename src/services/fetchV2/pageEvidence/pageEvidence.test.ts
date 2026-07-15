@@ -65,6 +65,55 @@ describe("evaluatePageJunk", () => {
     expect(v.rejected).toBe(true);
     expect(v.reasons.join(" ")).toMatch(/url/i);
   });
+
+  // Task 11 / AM-8: anti-enumeration guard. Live meros.io probe (2026-07-15) found bare sequential
+  // code-listing pages that "contain" every code under a prefix - that is evidence poison, not
+  // evidence. The guard must not reject dense-but-legitimate fitment/spec pages (AM-8).
+  test("anti-enumeration guard: a page that is mostly sequential bare digit runs is junk-rejected", () => {
+    // synthetic meros-style enumeration: 500 sequential 12-digit codes, whitespace-separated, ~no prose
+    const codes = Array.from({ length: 500 }, (_, i) => String(392720000000 + i * 7).padStart(12, "0")).join(" ");
+    const v = evaluatePageJunk(
+      { url: "https://meros.io/0392720", title: "UPC Lookup for 0392720#####", text: `UPC Codes ${codes}` },
+      "392720000021",
+    );
+    expect(v.rejected).toBe(true);
+    expect(v.reasons.join(" ")).toMatch(/enumeration/i);
+  });
+
+  test("anti-enumeration guard: a real product page with one code and prose survives", () => {
+    const v = evaluatePageJunk(
+      {
+        url: "https://tires.example.com/michelin-defender",
+        title: "Michelin Defender LTX M/S 275/60R20 115T",
+        text: "Michelin Defender LTX M/S 275/60R20 115T. All-season truck tire. UPC 086699371942. In stock.",
+      },
+      "086699371942",
+    );
+    expect(v.reasons.join(" ")).not.toMatch(/enumeration/i);
+  });
+
+  test("anti-enumeration guard: a DENSE but legitimate fitment/spec table with scattered (non-sequential) part numbers and interleaved prose survives (AM-8)", () => {
+    // 60+ scattered part numbers, each embedded in a prose sentence about fitment - never sequential.
+    // build 62 scattered (non-monotonic-neighbor) 8-digit numbers by hashing an index into a spread range
+    const scattered: number[] = [];
+    for (let i = 0; i < 62; i++) {
+      // large multiplicative step mod a big range keeps neighbors far apart (never within delta<=20)
+      const v = (10000000 + ((i * 7919 + 3) % 89999999)) % 99999999;
+      scattered.push(Math.max(10000000, v));
+    }
+    const sentences = scattered.map(
+      (n, i) => `Part number ${n} fits the ${["sedan", "coupe", "SUV", "truck", "wagon"][i % 5]} model year ${2010 + (i % 14)} with ${["front", "rear", "all-wheel"][i % 3]} drive.`,
+    );
+    const text =
+      `Fitment Guide and Specification Table\n` +
+      sentences.join(" ") +
+      ` This fitment guide covers dozens of part numbers across trims and model years; consult your VIN for the exact match.`;
+    const v = evaluatePageJunk(
+      { url: "https://parts.example.com/fitment-guide", title: "Fitment Guide - Compatible Part Numbers by Model", text },
+      "086699371942",
+    );
+    expect(v.reasons.join(" ")).not.toMatch(/enumeration/i);
+  });
 });
 
 // ------------------------------------------------------------------ structured extraction

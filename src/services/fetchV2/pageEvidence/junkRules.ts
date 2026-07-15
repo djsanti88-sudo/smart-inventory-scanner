@@ -58,6 +58,49 @@ export function cleanBrand(brand: string): string {
   return !b || NAV_NAME_RE.test(b) || GENERIC_NAME_RE.test(b) ? "" : b;
 }
 
+/**
+ * Anti-enumeration guard (owner meros decision 2026-07-15, hardened AM-8): a page that mechanically
+ * lists every possible code under a prefix "contains" ANY exact code - that is evidence-poison, not
+ * evidence. Reject pages whose visible text is dominated by bare digit runs that are mostly
+ * SEQUENTIAL (sorted numeric neighbors within a small delta) - the structural signature of a
+ * generated enumeration table, not a real catalog/spec page. A dense but legitimate fitment/spec
+ * page (many SCATTERED part numbers interleaved with prose) has a low digit-to-text ratio and/or a
+ * low sequential-pair ratio, so it survives. Protects against every aggregator of this class, not
+ * just meros.io.
+ */
+const ENUMERATION_MIN_RUNS = 50;
+const ENUMERATION_MIN_DIGIT_RATIO = 0.5;
+const ENUMERATION_MIN_SEQUENTIAL_RATIO = 0.3;
+const ENUMERATION_SEQUENTIAL_DELTA = 20;
+
+/** True when >= 30% of the numeric runs are pairwise-sequential (sorted neighbors within a small delta). */
+export function sequentialRunRatio(runs: string[]): number {
+  if (runs.length < 2) return 0;
+  const nums = runs.map((r) => Number(r)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (nums.length < 2) return 0;
+  let sequential = 0;
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] - nums[i - 1] <= ENUMERATION_SEQUENTIAL_DELTA) sequential++;
+  }
+  return sequential / (nums.length - 1);
+}
+
+/**
+ * True when the page text is a mechanical enumeration of codes: at least 50 digit runs (8-14
+ * digits), those runs make up over half of the visible text, AND at least 30% of the runs are
+ * pairwise-sequential. All three conditions must hold - a dense-but-scattered fitment/spec page
+ * fails the sequential-ratio (or digit-ratio) condition and survives.
+ */
+export function isEnumerationPage(pageText: string): boolean {
+  const text = (pageText ?? "").trim();
+  if (!text) return false;
+  const digitRuns = text.match(/\d{8,14}/g) ?? [];
+  if (digitRuns.length < ENUMERATION_MIN_RUNS) return false;
+  const digitChars = digitRuns.join("").length;
+  if (digitChars / text.length <= ENUMERATION_MIN_DIGIT_RATIO) return false;
+  return sequentialRunRatio(digitRuns) >= ENUMERATION_MIN_SEQUENTIAL_RATIO;
+}
+
 /** Hard junk verdict. A rejected page must never contribute identity OR evidence. */
 export function evaluatePageJunk(page: PageInput, code: string): JunkVerdict {
   const reasons: string[] = [];
@@ -69,6 +112,7 @@ export function evaluatePageJunk(page: PageInput, code: string): JunkVerdict {
   if (looksRecycledUpc(title) || looksRecycledUpc(text)) reasons.push("recycled-UPC / nutrition-DB page markers");
   if (looksInvalidating(text)) reasons.push("page text invalidates the code (not a valid / did you mean / no such product)");
   if (NOT_FOUND_RE.test(text) || NOT_FOUND_RE.test(title)) reasons.push("no-result / not-found page");
+  if (isEnumerationPage(text)) reasons.push("enumeration page - lists codes en masse, proves nothing");
 
   let host = "";
   let path = "";
