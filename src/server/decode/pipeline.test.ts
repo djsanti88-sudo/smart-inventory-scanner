@@ -24,6 +24,7 @@ import { runDecodePipeline, DailyCapExceededError } from "@/server/decode/pipeli
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { __resetForTest, readDailyUsed } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
+import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
 
@@ -188,5 +189,26 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     // The paid daily-cap counter was charged EXACTLY ONCE for this request (free rungs missed, so the
     // paid phase ran; the cap started at 0 and must now read exactly 1 - not 0, not 2+).
     expect(await readDailyUsed(await ladderStorage())).toBe(1);
+  });
+
+  it("Z3: two encodings of one product share one cache identity (canonical GTIN cache key)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap; the point is the shared key, not the block
+    const seen: string[] = [];
+    const withDecodeCacheSpy = vi.spyOn(decodeCacheModule, "withDecodeCache");
+    withDecodeCacheSpy.mockImplementation(async (key, _isSuccess, compute) => {
+      seen.push(key);
+      return { value: await compute(), cached: false };
+    });
+
+    // Same product, two zero-padding encodings: EAN-13 "0036000291452" and its UPC-A form
+    // "036000291452" both canonicalize to "00036000291452" (canonicalGtin pads to 14).
+    await runDecodePipeline(makeReq("0036000291452"));
+    await runDecodePipeline(makeReq("036000291452"));
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe(seen[1]); // one shared cache identity, not two
+    expect(seen[0]).toBe("00036000291452");
+
+    withDecodeCacheSpy.mockRestore();
   });
 });

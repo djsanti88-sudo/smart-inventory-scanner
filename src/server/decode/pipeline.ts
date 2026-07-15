@@ -39,6 +39,7 @@ import { brocadeLookup } from "@/services/fetchV2/sources/brocade";
 import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
 import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome } from "@/server/upc/ladder";
+import { canonicalGtin } from "@/services/upc/gtin";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
@@ -253,6 +254,11 @@ export type DecodePipelineResult =
 export async function runDecodePipeline(req: DecodePipelineRequest): Promise<DecodePipelineResult> {
   const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry } = req;
 
+  // Z3 (owner pay-once rule 2026-07-14): ALL cache identities are canonical so two zero-padding
+  // encodings of one product never produce two cache entries, two paid runs, or two cap slots.
+  // The raw code still flows to every provider/evidence check unchanged.
+  const cacheKey = canonicalGtin(code) ?? code;
+
   // L2 PERSISTENT DECODE CACHE (Task 4): consulted on an L1 miss, BEFORE the daily cap check below -
   // same guard window as the existing L1 peek, so a persisted "result" OR a permanent
   // "no_result_receipt" never burns a daily slot. Never touched under E2E (tests/Playwright must
@@ -260,8 +266,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // (owner manual override: bypasses the receipt here, and overwrites it once the fresh compute
   // below finishes - see the write-through at the withDecodeCache call site).
   let persistedHit: PersistedDecode | null = null;
-  if (!e2eMode() && !forceRetry && getDecodeCache(code) === undefined) {
-    persistedHit = await getPersistedDecode(code);
+  if (!e2eMode() && !forceRetry && getDecodeCache(cacheKey) === undefined) {
+    persistedHit = await getPersistedDecode(cacheKey);
   }
 
   // Hard server-side daily spend cap (auth DEFERRED): the cap must bound ONLY genuine PAID work (the
@@ -932,7 +938,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   try {
     const outcome = e2eMode()
       ? { value: await computeDecode(), cached: false }
-      : await withDecodeCache(code, hasUsable, computeDecode, { forceRefresh: forceRetry });
+      : await withDecodeCache(cacheKey, hasUsable, computeDecode, { forceRefresh: forceRetry });
     payload = outcome.value;
     cached = outcome.cached;
   } catch (e) {
@@ -962,10 +968,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     if (status === "verified" || status === "suggested") {
       const sourceTier = classifySourceTier(payload.reasonCode, payload.providerNames);
       if (sourceTier) {
-        await persistDecode({ code, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
+        await persistDecode({ code: cacheKey, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
       }
     } else if (receiptState.eligible) {
-      await persistDecode({ code, kind: "no_result_receipt", payload: JSON.stringify(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
+      await persistDecode({ code: cacheKey, kind: "no_result_receipt", payload: JSON.stringify(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
     }
   }
 
