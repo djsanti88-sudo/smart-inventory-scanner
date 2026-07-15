@@ -52,3 +52,52 @@ export function gtinVariants(code: string): string[] {
   }
   return [...out].filter((c) => c.length >= 8 && c.length <= 14);
 }
+
+/**
+ * UPC-E -> UPC-A expansion (GS1 zero-suppression rules). An 8-digit code is ambiguous
+ * (EAN-8 vs UPC-E): callers must FIRST accept a valid-check-digit EAN-8 as-is and only
+ * try expansion when the 8-digit check fails (see lookupCandidates). Number systems 0/1 only.
+ */
+export function expandUpcE(code: string): string | null {
+  const t = (code ?? "").trim();
+  if (!/^[01]\d{7}$/.test(t)) return null;
+  const ns = t[0];
+  const body = t.slice(1, 7);
+  const check = t[7];
+  const last = body[5];
+  let mfr: string, prod: string;
+  if (last === "0" || last === "1" || last === "2") {
+    mfr = body.slice(0, 2) + last + "00";
+    prod = "00" + body.slice(2, 5);
+  } else if (last === "3") {
+    mfr = body.slice(0, 3) + "00";
+    prod = "000" + body.slice(3, 5);
+  } else if (last === "4") {
+    mfr = body.slice(0, 4) + "0";
+    prod = "0000" + body[4];
+  } else {
+    mfr = body.slice(0, 5);
+    prod = "0000" + last;
+  }
+  const upcA = ns + mfr + prod + check;
+  return isValidCheckDigit(upcA) ? upcA : null;
+}
+
+/**
+ * THE single variant source for every barcode lookup (corpus, caches, doors).
+ * Order: raw first, then UPC-E expansion (only when the raw 8-digit check digit FAILS as
+ * EAN-8 - a valid EAN-8 stays EAN-8), then gtinVariants (stripped + 12/13/14 pads).
+ * Non-GTIN-shaped codes pass through untouched as [code].
+ */
+export function lookupCandidates(code: string): string[] {
+  const t = (code ?? "").trim();
+  if (!t) return [];
+  if (!isGtinShaped(t)) return [t];
+  const out: string[] = [t];
+  if (/^\d{8}$/.test(t) && !isValidCheckDigit(t)) {
+    const expanded = expandUpcE(t);
+    if (expanded) out.push(...gtinVariants(expanded));
+  }
+  out.push(...gtinVariants(t));
+  return [...new Set(out)];
+}
