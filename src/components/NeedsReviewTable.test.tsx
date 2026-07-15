@@ -48,6 +48,30 @@ describe("NeedsReviewTable - prettifies product dropdown labels (Task 5)", () =>
   });
 });
 
+describe("NeedsReviewTable - Task 9 copy fix (no bogus demotion on a verified decode)", () => {
+  it("does NOT show 'Confidence too low to save automatically' when the decode was VERIFIED (the hot-sauce 90% incident)", () => {
+    // Real incident: an app-verified 90% off-category decode rendered a bogus "50/100" demotion. A verified
+    // decode's confidence is honest - the "too low to save" copy must be suppressed for decodeStatus verified.
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "v1", cleanCode: "0792080004312", status: "open", syncStatus: "pending", decodeStatus: "verified", autoVerifyScore: 50 }),
+      ],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.queryByTestId("review-score")).toBeNull();
+  });
+
+  it("STILL shows the demotion copy for a NON-verified decode that scored below the auto-save bar", () => {
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "nv1", cleanCode: "0000000000001", status: "open", syncStatus: "pending", decodeStatus: "needs_review", autoVerifyScore: 50 }),
+      ],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.getByTestId("review-score")).toHaveTextContent("50/100");
+  });
+});
+
 describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
   it("hides an item that is resolved AND synced, keeps open items", () => {
     useScanStore.setState({

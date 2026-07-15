@@ -110,6 +110,14 @@ export function LiveScanFeed() {
                       ) : suggestionTag === "(suggested)" ? (
                         <span className="ml-1 text-xs text-amber-700">(suggested)</span>
                       ) : null}
+                      {/* Task 9: an app-verified decode that counted despite being off the business scan
+                          context (e.g. hot sauce in a tire shop) shows this advisory tag - it counted, but
+                          the operator sees it is not a tire. */}
+                      {e.offCategory ? (
+                        <span className="ml-1 text-xs text-amber-700" data-testid={`feed-off-category-${e.id}`}>
+                          Off-category item
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 font-mono text-sm" data-testid={`feed-part-number-${e.id}`}>
                       {displaySku}

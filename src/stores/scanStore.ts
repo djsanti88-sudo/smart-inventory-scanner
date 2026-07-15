@@ -55,7 +55,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
-import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
+import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
 import {
@@ -2197,13 +2197,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const tireOk = tireAutoCountOk(best);
           // Phase 8 FIREWALL: exact-code evidence is necessary but NOT sufficient. If the decoded product
           // contradicts the business scan context (tire) or a learned brand-prefix hint, block auto-count.
-          const contextConflict = detectScanContextConflict({
+          // Task 9 (owner-ratified 2026-07-14, decode-anything): strong APP-VERIFIED exact-code evidence
+          // clears the tire category hard-block - a tire shop can really stock hot sauce. Weak/unverified
+          // single-source identities (the go-upc-poison / coconut-oil class) still hard-block.
+          const exactCodeVerifiedByApp =
+            decision?.exactCodeEvidenceVerifiedByApp === true && decision?.status === "verified";
+          const firewallParams = {
             scanContext: s.scanContext ?? "any",
             code: review.cleanCode,
             codeType,
             result: best,
             brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
-          });
+            exactCodeVerifiedByApp,
+          };
+          const contextConflict = detectScanContextConflict(firewallParams);
+          // True exactly when the category conflict was CLEARED by verification -> the row still counts but
+          // is tagged "Off-category item" so the operator sees it is not a tire.
+          const offCategory = detectOffCategoryAdvisory(firewallParams);
           // PHASE-7 EVIDENCE GATE + GPT-ladder trust tier + T20/code-1225 public-barcode firewall, now in
           // one pure function (src/stores/scanGates.ts) shared with backgroundVerifyDeep so the two paths
           // cannot drift. tireOk + contextConflict are computed here (they need store services) and passed in.
@@ -2260,6 +2270,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // verified when resolveUnknown actually resolved it.
             if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
               get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "");
+            }
+            // Task 9: an app-verified off-category decode counts, but flag the row so the feed shows the
+            // "Off-category item" tag (the product is not a tire, even though it cleared the firewall).
+            if (offCategory) {
+              set((st) => ({
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode ? { ...e, offCategory: true } : e,
+                ),
+              }));
             }
           } else {
             // DECODE-EVERYTHING provisional count: EVERY scan that reached decode gets counted, even if
@@ -2801,13 +2820,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // SAME Phase 7 evidence gate + Phase 8 firewall as liveDecode. A non-verified result never reaches
         // here, and a firewall/brand-prefix conflict (poison in tire context) still blocks the count.
         const tireOk = tireAutoCountOk(best);
-        const contextConflict = detectScanContextConflict({
+        // Task 9 (owner-ratified 2026-07-14, decode-anything): app-verified exact-code evidence clears the
+        // tire category hard-block; weak/unverified identities still hard-block (poison guard intact).
+        const exactCodeVerifiedByApp =
+          decision?.exactCodeEvidenceVerifiedByApp === true && decision?.status === "verified";
+        const firewallParams = {
           scanContext: s.scanContext ?? "any",
           code: review.cleanCode,
           codeType,
           result: best,
           brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
-        });
+          exactCodeVerifiedByApp,
+        };
+        const contextConflict = detectScanContextConflict(firewallParams);
+        const offCategory = detectOffCategoryAdvisory(firewallParams);
         // SAME pure evidence gate as liveDecode (src/stores/scanGates.ts): Phase-7 corroboration + GPT
         // trust tier + T20/code-1225 public-barcode firewall, kept in sync so the two decode paths can
         // never drift apart again. tireOk + contextConflict are computed here and passed in.
@@ -2852,6 +2878,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // "verified" in that case would show "Verified match" over the unresolved placeholder name.
           if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
             get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
+          }
+          // Task 9: tag an app-verified off-category decode so the feed shows "Off-category item".
+          if (offCategory) {
+            set((st) => ({
+              scanFeed: st.scanFeed.map((e) =>
+                e.cleanCode === review.cleanCode ? { ...e, offCategory: true } : e,
+              ),
+            }));
           }
         } else if (contextConflict) {
           // FALSE-AUTO-COUNT BACKSTOP: a "verified" deep decode that contradicts the tire context (poison)

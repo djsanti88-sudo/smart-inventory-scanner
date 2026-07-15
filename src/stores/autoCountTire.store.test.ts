@@ -19,17 +19,21 @@ const COOPER_CORROBORATED = {
   decision: { status: "verified", confidence: 0.92, reason: "Verified AI Decode: tire corroborated by prefix family + specs.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
 };
 
-// Poison: go-upc maps the tire UPC 745125495781 to a "Manstel rivet kit". Even if the model claimed a
-// "verified" decision, the firewall (non-tire product in tire context) MUST block the auto-count.
+// Poison: go-upc maps the tire UPC 745125495781 to a "Manstel rivet kit". This is the WEAK/UNVERIFIED
+// class - in production the app's EvidenceVerifier returns exactCodeEvidenceVerifiedByApp:false for it
+// (the go-upc evidence carries a DIFFERENT code + an invalidation phrase; see src/eval/fixtures.ts). The
+// category firewall (non-tire in tire context) MUST still block the auto-count on this weak class. Task 9
+// (owner-ratified 2026-07-14) only clears the block for an APP-VERIFIED exact code, which the poison never
+// has - so this fixture mirrors the real weak shape (false) and the poison guard stays intact.
 const MANSTEL_POISON_VERIFIED = {
   providerNames: ["gemini"],
   results: [{
     productName: "Manstel 200 Pcs Aluminum Rivet Screw Kit", brand: "Manstel", category: "Hardware",
     specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "745125495781", gtin: "",
     upc: "745125495781", ean: "", aliases: [], imageUrl: "", productUrl: "",
-    sourceUrls: ["https://go-upc.com/745125495781"], confidence: 0.92, verifiedFacts: [], guesses: [],
+    sourceUrls: ["https://go-upc.com/745125495781"], confidence: 0.6, verifiedFacts: [], guesses: [],
   }],
-  decision: { status: "verified", confidence: 0.92, reason: "(poisoned source)", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+  decision: { status: "suggested", confidence: 0.6, reason: "(poisoned source)", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };
 
 function stub(resp: object) {

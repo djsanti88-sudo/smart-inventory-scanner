@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyProductDomain, detectScanContextConflict, detectIdentityContextConflict, detectBrandPrefixAdvisory } from "@/services/ai/scanContextFirewall";
+import { classifyProductDomain, detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, detectBrandPrefixAdvisory } from "@/services/ai/scanContextFirewall";
 import type { AiLookupResult } from "@/types";
 
 const r = (over: Partial<AiLookupResult>): AiLookupResult => ({
@@ -45,6 +45,66 @@ describe("detectScanContextConflict (Phase 8 firewall)", () => {
   it("non-tire product in ANY (non-tire) context -> no category conflict", () => {
     const result = r({ productName: "Manstel Rivet Kit" });
     expect(detectScanContextConflict({ scanContext: "any", code: "745125495781", codeType: "upc_a", result, brandPrefixHints: [] })).toBeNull();
+  });
+});
+
+describe("Task 9: category conflict is ADVISORY when app-verified (owner-ratified 2026-07-14, decode-anything)", () => {
+  // Real incident: 0792080004312 decoded via Go-UPC EXACT match as a hot sauce at 90% with app-verified
+  // evidence, yet the tire-context category firewall hard-blocked it to Needs Review. Owner rule: strong
+  // APP-VERIFIED exact-code evidence clears the category hard-block (a tire shop can really stock hot
+  // sauce); the poison guard (coconut-oil class: weak/unverified single-source identities) KEEPS the block.
+  const hotSauce = r({ productName: "Original Anchor Bar Hot Sauce", brand: "Anchor Bar", category: "food", confidence: 0.9 });
+
+  it("hot-sauce case: verified non-tire product in tire context does NOT hard-block", () => {
+    const out = detectScanContextConflict({
+      scanContext: "tire", code: "0792080004312", codeType: "ean_13",
+      result: hotSauce, brandPrefixHints: [], exactCodeVerifiedByApp: true,
+    });
+    expect(out).toBeNull();
+  });
+
+  it("poison guard intact: the SAME identity WITHOUT app verification still hard-blocks", () => {
+    const out = detectScanContextConflict({
+      scanContext: "tire", code: "0792080004312", codeType: "ean_13",
+      result: hotSauce, brandPrefixHints: [], exactCodeVerifiedByApp: false,
+    });
+    expect(out).toBe("category_context_conflict");
+  });
+
+  it("poison guard intact: omitting the flag (undefined) still hard-blocks", () => {
+    const out = detectScanContextConflict({
+      scanContext: "tire", code: "0792080004312", codeType: "ean_13",
+      result: hotSauce, brandPrefixHints: [],
+    });
+    expect(out).toBe("category_context_conflict");
+  });
+
+  it("advisory fires exactly on the cleared case (verified non-tire in tire context)", () => {
+    expect(
+      detectOffCategoryAdvisory({
+        scanContext: "tire", code: "0792080004312", codeType: "ean_13",
+        result: hotSauce, brandPrefixHints: [], exactCodeVerifiedByApp: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("advisory does NOT fire for a tire product (no off-category tag on a real tire)", () => {
+    const tire = r({ productName: "Fortune Tormenta A/T 275/55R20 117T", brand: "Fortune", specsShort: "275/55R20 117T" });
+    expect(
+      detectOffCategoryAdvisory({
+        scanContext: "tire", code: "745125495781", codeType: "upc_a",
+        result: tire, brandPrefixHints: [], exactCodeVerifiedByApp: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("advisory does NOT fire when the conflict was NOT cleared (unverified non-tire still blocks, no advisory)", () => {
+    expect(
+      detectOffCategoryAdvisory({
+        scanContext: "tire", code: "0792080004312", codeType: "ean_13",
+        result: hotSauce, brandPrefixHints: [], exactCodeVerifiedByApp: false,
+      }),
+    ).toBe(false);
   });
 });
 

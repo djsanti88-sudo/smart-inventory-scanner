@@ -170,6 +170,11 @@ export interface ScanEvent {
   reason: string; // customer-safe, product-facing explanation (no AI/provider/Settings mechanics)
   decodeNote?: string; // platformOwner-only auto-decode detail (why AI did/didn't run); never shown to customers
   decodeStatus?: FeedDecodeStatus; // live-decode pipeline state for this scan row
+  // Task 9 (owner-ratified 2026-07-14, decode-anything): true when an app-verified exact-code decode
+  // counted even though its product domain is off the business scan context (e.g. hot sauce in a tire
+  // shop). The category firewall was CLEARED by verification, not skipped - the row still shows an
+  // "Off-category item" tag so the operator sees it is not a tire.
+  offCategory?: boolean;
   quantityDelta: number;
   quantityAfterScan: number;
   createdAt: string;
