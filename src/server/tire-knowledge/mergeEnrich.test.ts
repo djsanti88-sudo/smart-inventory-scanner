@@ -123,14 +123,13 @@ describe("mergeRows cross_source_duplicate field-level enrichment (Task 2 / AM-R
     expect(merged[0].part_number_source).toBeUndefined();
   });
 
-  it("does not flip a future less_complete_duplicate decision because of enrichment (AM-R2)", () => {
-    // Craft two SEPARATE discounttire-sourced rows (different barcodes) so the completeness
-    // comparison in the "within discounttire" branch is exercised deterministically, then prove
-    // that an EARLIER cross_source_duplicate enrichment (which adds part_number_source) does not
-    // change the completeness count used elsewhere. Concretely: an existing row enriched with
-    // part_number_source must have the SAME field_completeness-driving behavior as if that field
-    // did not exist, i.e. adding part_number_source alone must never be what tips a completeness
-    // comparison between two rows that were equal on every OTHER field.
+  it("cross-contamination regression guard: an unrelated row's enrichment tag never leaks into a DIFFERENT barcode's completeness contest", () => {
+    // NOTE: this is a cross-contamination regression guard, not the AM-R2 flip proof. It puts the
+    // enriched row and the completeness contest on two DIFFERENT barcodes, so part_number_source
+    // never actually enters the fieldCompleteness() call being asserted below. It is kept because
+    // it is still a valid (if weaker) regression guard against a completely different bug class
+    // (state leaking across unrelated rows during a single mergeRows call). See the next test for
+    // the real AM-R2 proof that a SAME-barcode completeness contest is immune to the tag.
     const BARCODE_2 = "036000291452"; // distinct valid UPC-A
     const existingEnrichable = corpusRow({ barcode: VALID_UPC, manufacturer_part_number: "" });
     const existingDiscountTireDup = corpusRow({
@@ -143,12 +142,6 @@ describe("mergeRows cross_source_duplicate field-level enrichment (Task 2 / AM-R
     });
 
     const incomingEnrichSource = tireRow({ gtin: VALID_UPC, partNumber: "28034300" });
-    // Same completeness as existingDiscountTireDup on every field OTHER than the ones already
-    // compared by the pre-existing "higher field-completeness wins" test in merge.test.mjs; this
-    // incoming row is intentionally NO MORE complete than existingDiscountTireDup once you ignore
-    // the enrichment-only field, so if part_number_source counted toward completeness it would
-    // wrongly tip a comparison. Here it must simply lose on merit under the correct rule (fewer
-    // populated business fields), never accidentally win because a provenance tag inflated a count.
     const incomingDiscountTireDup = tireRow({
       gtin: BARCODE_2,
       model: "",
@@ -175,6 +168,61 @@ describe("mergeRows cross_source_duplicate field-level enrichment (Task 2 / AM-R
     // an equally-or-less-complete incoming candidate) still wins, exactly as the "existing wins
     // when not more complete" rule specifies elsewhere in this file.
     expect(dupRow).toEqual(existingDiscountTireDup);
+  });
+
+  it("AM-R2: a SAME-barcode completeness contest is decided identically whether or not the existing row carries part_number_source", () => {
+    // This is the real AM-R2 proof (the previous test above does NOT prove this property - it
+    // never puts part_number_source and a fieldCompleteness() contest on the same barcode).
+    //
+    // Setup: the EXISTING row already carries part_number_source (as if a prior harvest run had
+    // enriched it - simulated directly here since the enrichment path itself is a separate,
+    // already-covered branch). It is discounttire-sourced and fully complete on every business
+    // field EXCEPT manufacturer_part_number, which is blank. The INCOMING discounttire candidate
+    // ties the existing row on every business field except it also FILLS manufacturer_part_number
+    // - i.e. the incoming candidate is objectively more complete BY EXACTLY ONE business field.
+    //
+    // Business-field count (excluding part_number_source, which is provenance-only):
+    //   existing = 10 non-blank business fields (missing only manufacturer_part_number)
+    //   candidate = 11 non-blank business fields (has manufacturer_part_number too)
+    // So the correct, spec-mandated rule (part_number_source excluded) must let candidate win:
+    // candidate (11) > existing (10) -> existing is replaced, added === 1.
+    //
+    // If part_number_source were WRONGLY counted (the mutation the reviewer tested), existing
+    // would count as 11 (10 business fields + the tag) and candidate would still count as 11
+    // (11 business fields, no tag) - a TIE. Since mergeRows uses a strict `>` comparison, a tie
+    // means candidate does NOT win, so existing survives as the "more or equally complete" row
+    // and the incoming candidate is skipped as less_complete_duplicate instead. That is a genuine
+    // flip of the decision, entirely caused by whether the provenance tag counts - exactly what
+    // this test must catch.
+    const existingWithTag = corpusRow({
+      barcode: VALID_UPC,
+      source: "discounttire",
+      model: "wildpeak a t3w",
+      load_index: "115",
+      speed_rating: "T",
+      manufacturer_part_number: "", // the one field the incoming candidate will beat it on
+      part_number_source: "discounttire", // provenance tag from a prior enrichment
+    });
+    const tyingCandidate = tireRow({
+      gtin: VALID_UPC,
+      model: "wildpeak a t3w",
+      loadIndex: "115",
+      speedRating: "T",
+      partNumber: "28034300", // fills the field existing is missing -> objectively more complete
+      canonicalProductUid: "uid", // toCorpusRow blanks this unless set; keeps counts exact and honest
+    });
+
+    const { merged, added, skipped } = run([existingWithTag], [tyingCandidate]);
+
+    // The tag must NOT have tipped the contest: candidate is genuinely more complete on business
+    // fields alone and must win, exactly as it would if part_number_source did not exist at all.
+    expect(added).toBe(1);
+    expect(skipped).toEqual([]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].manufacturer_part_number).toBe("28034300");
+    // The winning row is the fresh candidate (toCorpusRow never sets part_number_source), so the
+    // provenance tag from the replaced existing row is correctly gone, not merely "not counted".
+    expect(merged[0].part_number_source).toBeUndefined();
   });
 
   it("existing merge suite stays green (no regression in add / guard / same-source-completeness paths)", () => {
