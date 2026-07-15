@@ -186,3 +186,19 @@ double-merging quantities. The mock proved the algorithm; the real wiring was br
 
 **Rule.** Every idempotency claim needs a test through the real store/component wiring (upload
 twice, assert deep-equal state), not only through a mocked target interface.
+
+## L16 (2026-07-15) - Parallel-subagent hygiene on one working tree
+- A shared git index races: two agents' commits swept each other's staged files. Rule now standing:
+  subagents commit ONLY via pathspec (git commit -m ... -- <files>) and verify git show --stat HEAD.
+- Self-check sweeps must include src/app/ (route tests were outside two agents' sweeps and broke silently).
+- Background Bash inside subagents may never re-notify them; long verifications belong to the orchestrator.
+- Intentional behavior changes (L6, AM-7, A3) each broke sibling tests asserting the OLD behavior; the fix
+  is value-level fixture updates with assertions intact - never weakening, never forcing green.
+
+## L17 (2026-07-15) - Request-shape traps on /api/ai-lookup
+- The route reads cleanCode/rawCode, never body.code; omitting mode:"decode" routes to LEGACY Gemini lookup
+  (3 accidental legacy calls made this session - always read the route contract before curling an API).
+
+## L18 (2026-07-15) - E2E fixture codes must be real GS1
+- Any 12-14 digit fixture code in tests must carry a valid check digit now (A3 refuses misreads at 0ms);
+  generators should compute the check digit, not hardcode it.
