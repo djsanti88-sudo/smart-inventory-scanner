@@ -23,11 +23,15 @@ const STATUS = {
   mode: "aggressive", dailyLimit: 100, missingKeys: [], e2e: true,
 };
 
-// Poisoned source: VERIFIED exact-code evidence, but the product is a non-tire rivet kit.
+// Poisoned source: WEAK/unverified exact-code evidence (go-upc url_only, not app-verified), and the
+// product is a non-tire rivet kit. owner-ratified 2026-07-14: advisory-when-app-verified (fixture
+// migrated to real weak evidence shape) - the real EvidenceVerifier never marks a go-upc url_only
+// source app-verified (go-upc is the canonical poison source, not a trusted host), so this fixture must
+// use the weak shape to prove the poison guard still hard-blocks. Assertions are unchanged.
 const POISONED = {
   providerNames: ["page-fetch"],
   results: [result({ productName: "Manstel 200 Pcs Aluminum Core Blind Rivet Semi-Round Head Screw Kit M3.2X11mm", upc: CODE, sourceUrls: ["https://go-upc.com/search?q=" + CODE] })],
-  decision: { status: "verified", confidence: 0.92, reason: "Verified AI Decode: single provider, exact code confirmed.", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+  decision: { status: "suggested", confidence: 0.6, reason: "Suggested, sources found.", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
 };
 
 async function scan(page: Page, code: string) {
