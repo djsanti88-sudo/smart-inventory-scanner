@@ -1,0 +1,238 @@
+// identityMatcher.ts (reconcile Phase 2, Task 5) - brand-qualified identity matcher, the correctness
+// heart of the Shop-Ware reconcile round. PURE function: no corpus/server imports, no React/next
+// imports, no store access. All lookups are injected via MatcherDeps so this file never touches a
+// database or the network. The matcher NEVER writes aliases or touches stores - linkageSuggestion is
+// DATA ONLY, surfaced for a human to confirm elsewhere (AM-R6; reconcile matches never auto-approve).
+//
+// Resolution order (AM-R4/AM-R5, spec 2026-07-15-shopware-reconcile-pn-fill-design.md - copied
+// verbatim, it is the law):
+//   1. Part-number hit [AM-R4]: a bare index hit is NOT safe (PNs are per-manufacturer namespaces
+//      that collide across brands). A PN hit is `matched` ONLY when it ALSO passes: brand equal or
+//      `sameBrandFamily` (when the row carries a brand), AND size equal (when both sides carry a
+//      parseable size). A PN hit failing that corroboration, or resolving to multiple corpus rows,
+//      is `ambiguous` - never `matched`. A row with NO brand and NO size but a unique PN hit is also
+//      `ambiguous` (nothing corroborates it, AM-R10a class).
+//   2. Identity match [AM-R5]: size EXACT via the existing `tireSizeToken` (never a new parser) +
+//      brand equal or same `brandFamilies` family + model token overlap via `identityMerge`'s
+//      tokenizer with Jaccard >= 0.75 AND the `plusGenerationDiff` guard (R8 vs R8+ are different
+//      products) -> `matched` when exactly ONE candidate; `ambiguous` when several.
+//   3. Not a tire (no parseable size and no tire signals) -> `non_tire` passthrough (not an error).
+//   4. Otherwise -> `unmatched`.
+//
+// Trust rule: wrong product identity is FAILURE; unmatched/ambiguous is ACCEPTABLE. When in doubt
+// between matched and ambiguous, the answer is ambiguous.
+
+import type { ExpectedInventoryRow } from "./types";
+import { sameBrandFamily } from "@/services/catalog/brandFamilies";
+import { nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
+import { tireSizeToken } from "@/services/ai/tireSpecs";
+
+export type MatchStatus = "matched" | "ambiguous" | "unmatched" | "non_tire";
+
+export interface CorpusCandidate {
+  uid: string;
+  brand: string;
+  name: string;
+  sizeToken?: string;
+  partNumber?: string;
+  barcode?: string;
+}
+
+export interface MatchResult {
+  row: ExpectedInventoryRow;
+  status: MatchStatus;
+  /** Honest, human-readable, always set - even on `matched`. */
+  reason: string;
+  /** Only set when `status === "matched"`. */
+  candidate?: CorpusCandidate;
+  /** Set when `status === "ambiguous"` and there is more than one colliding candidate. */
+  candidates?: CorpusCandidate[];
+  /** Matched rows with a corpus barcode (AM-R6): a SUGGESTION-GRADE barcode <-> part-number linkage.
+   *  Data only - the matcher never writes this as an alias or touches any store. */
+  linkageSuggestion?: { barcode: string; partNumber: string };
+}
+
+export interface MatcherDeps {
+  /** ALL hits for a normalized part number, never LIMIT 1 (a non-unique index must not be treated as unique). */
+  lookupByPartNumber(normalizedPn: string): CorpusCandidate[];
+  /** Candidates sharing a brand (or its family) and an exact tire size token, for the identity path. */
+  candidatesByBrandSize(brand: string | undefined, sizeToken: string): CorpusCandidate[];
+}
+
+const JACCARD_THRESHOLD = 0.75;
+
+/** Normalize a part number for lookup: strip spaces/hyphens, uppercase. Mirrors normPartKey in
+ *  src/server/tire-knowledge/tireKnowledgeIndex.ts:40-42 (same semantics, kept local so this pure
+ *  matcher has zero server imports). */
+function normalizePartNumber(pn: string): string {
+  return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
+}
+
+/** Same brand-equality test the rest of the round uses: equal after brandFamilies' own normalization,
+ *  or the two brands are members of the same curated company family. */
+function brandsCorroborate(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  if (a.trim().toLowerCase() === b.trim().toLowerCase()) return true;
+  return sameBrandFamily(a, b);
+}
+
+/** Best-effort parseable tire size for a row: sizeText first, falling back to specs/model text so a
+ *  size embedded in a free-text spec column is still found. "" when nothing parses. */
+function rowSizeToken(row: ExpectedInventoryRow): string {
+  const text = [row.sizeText ?? "", row.specs ?? "", row.model ?? ""].join(" ");
+  return tireSizeToken({ productName: text, brand: row.brand });
+}
+
+/** Whether the row shows any tire signal at all (a parseable size, or a brand/model that reads as a
+ *  tire even without one) - used only to decide `non_tire` vs `unmatched` when nothing else matched. */
+function hasAnyTireSignal(row: ExpectedInventoryRow, sizeToken: string): boolean {
+  if (sizeToken) return true;
+  const text = `${row.brand ?? ""} ${row.model ?? ""} ${row.specs ?? ""}`.toLowerCase();
+  return /\b(tire|tyre|r1[3-9]|r20|r21|r22)\b/.test(text);
+}
+
+function buildLinkageSuggestion(candidate: CorpusCandidate, row: ExpectedInventoryRow): { barcode: string; partNumber: string } | undefined {
+  if (!candidate.barcode) return undefined;
+  const pn = candidate.partNumber ?? row.partNumbers[0];
+  if (!pn) return undefined;
+  return { barcode: candidate.barcode, partNumber: pn };
+}
+
+/**
+ * Match one Shop-Ware expected-inventory row against the corpus. Pure: all data access is through
+ * `deps`. Never mutates `row`. Never writes aliases or touches a store - `linkageSuggestion` is a
+ * data-only hint for a human confirmation step elsewhere (AM-R6).
+ */
+export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): MatchResult {
+  const rowSize = rowSizeToken(row);
+
+  // --- Step 1: part-number hit (AM-R4) ---------------------------------------------------------
+  const pnHits = new Map<string, CorpusCandidate>();
+  for (const rawPn of row.partNumbers) {
+    const normalized = normalizePartNumber(rawPn);
+    if (!normalized) continue;
+    for (const hit of deps.lookupByPartNumber(normalized)) {
+      pnHits.set(hit.uid, hit);
+    }
+  }
+
+  if (pnHits.size > 0) {
+    const hits = [...pnHits.values()];
+
+    if (hits.length > 1) {
+      return {
+        row,
+        status: "ambiguous",
+        reason: `Part number matches ${hits.length} different corpus products (${hits.map((h) => `${h.brand} ${h.name}`).join(", ")}); cannot pick one safely.`,
+        candidates: hits,
+      };
+    }
+
+    const hit = hits[0];
+    const hasRowBrand = !!row.brand && row.brand.trim().length > 0;
+    const hitSize = hit.sizeToken ?? "";
+    const bothHaveSize = !!rowSize && !!hitSize;
+
+    if (!hasRowBrand && !rowSize) {
+      // Nothing to corroborate a per-manufacturer-namespace PN hit with - ambiguous, not matched.
+      return {
+        row,
+        status: "ambiguous",
+        reason: `Part number hit for "${hit.brand} ${hit.name}" but the Shop-Ware row has no brand or size to corroborate it; a bare PN hit is not safe (PN namespaces collide across brands).`,
+      };
+    }
+
+    if (hasRowBrand && !brandsCorroborate(row.brand, hit.brand)) {
+      return {
+        row,
+        status: "ambiguous",
+        reason: `Part number hit resolves to brand "${hit.brand}" but the Shop-Ware row says brand "${row.brand}" (not the same company); treating as a brand collision, not a match.`,
+      };
+    }
+
+    if (bothHaveSize && rowSize !== hitSize) {
+      return {
+        row,
+        status: "ambiguous",
+        reason: `Part number hit for "${hit.brand} ${hit.name}" has size ${hitSize}, but the Shop-Ware row says ${rowSize}; sizes disagree so this is not a safe match.`,
+      };
+    }
+
+    // At least one corroboration signal must have actually been CHECKED and agreed - a signal that
+    // was merely absent on one side (e.g. row has a size but the corpus hit carries none at all) is
+    // not corroboration, it is just an unchecked dimension. Without this, a PN hit with a size-only
+    // row against a size-less corpus candidate would fall through to `matched` on zero real evidence.
+    const brandCorroborated = hasRowBrand && brandsCorroborate(row.brand, hit.brand);
+    const sizeCorroborated = bothHaveSize && rowSize === hitSize;
+    if (!brandCorroborated && !sizeCorroborated) {
+      return {
+        row,
+        status: "ambiguous",
+        reason: `Part number hit for "${hit.brand} ${hit.name}" but neither brand nor size could actually be corroborated against the corpus record; a bare PN hit is not safe (PN namespaces collide across brands).`,
+      };
+    }
+
+    const reasonBits: string[] = [];
+    if (brandCorroborated) reasonBits.push("brand corroborated");
+    if (sizeCorroborated) reasonBits.push("size corroborated");
+    return {
+      row,
+      status: "matched",
+      reason: `Part number hit for "${hit.brand} ${hit.name}" (${reasonBits.join(", ") || "corroborated"}).`,
+      candidate: hit,
+      linkageSuggestion: buildLinkageSuggestion(hit, row),
+    };
+  }
+
+  // --- Step 2: identity match (AM-R5) -----------------------------------------------------------
+  if (rowSize) {
+    const rowTokens = nameTokens(row.model ?? "");
+    const candidates = deps.candidatesByBrandSize(row.brand, rowSize);
+
+    const identityMatches: CorpusCandidate[] = [];
+    for (const cand of candidates) {
+      if (cand.sizeToken !== rowSize) continue;
+      if (!brandsCorroborate(row.brand, cand.brand)) continue;
+      const candTokens = nameTokens(cand.name);
+      const sim = jaccard(rowTokens, candTokens);
+      if (sim < JACCARD_THRESHOLD) continue;
+      if (plusGenerationDiff(rowTokens, candTokens)) continue; // R8 vs R8+ - different product, never match here.
+      identityMatches.push(cand);
+    }
+
+    if (identityMatches.length === 1) {
+      const cand = identityMatches[0];
+      return {
+        row,
+        status: "matched",
+        reason: `Identity match on size ${rowSize}, brand "${cand.brand}", and model name similarity to "${cand.name}".`,
+        candidate: cand,
+        linkageSuggestion: buildLinkageSuggestion(cand, row),
+      };
+    }
+
+    if (identityMatches.length > 1) {
+      return {
+        row,
+        status: "ambiguous",
+        reason: `Identity match on size ${rowSize} and brand matches ${identityMatches.length} different corpus products (${identityMatches.map((c) => c.name).join(", ")}); cannot pick one safely.`,
+        candidates: identityMatches,
+      };
+    }
+  }
+
+  // --- Step 3 / 4: non_tire vs unmatched ---------------------------------------------------------
+  if (!hasAnyTireSignal(row, rowSize)) {
+    return {
+      row,
+      status: "non_tire",
+      reason: "No parseable tire size and no tire signals found on this row; not treated as a tire product.",
+    };
+  }
+
+  return {
+    row,
+    status: "unmatched",
+    reason: "No part-number hit and no identity match found in the corpus for this row.",
+  };
+}
