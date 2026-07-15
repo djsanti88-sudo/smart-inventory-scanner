@@ -31,6 +31,19 @@ vi.mock("@/server/decodeCacheStore", async (importOriginal) => {
   return { ...actual, getPersistedDecode: vi.fn(actual.getPersistedDecode) };
 });
 
+// Task 8 (P1): the plain all-miss needs_review arm is only reachable for a PUBLIC code when Plan D's
+// resolveUnknownFast throws (its result is .catch(() => null)'d in the pipeline). Mock it so a P1 test
+// can drive a public, prefix-floored code into that arm and assert the floor-named result appears.
+// Real implementation passes through by default; only the P1 test overrides it with mockRejectedValueOnce.
+const realParallel = vi.hoisted(() => ({
+  resolveUnknownFast: undefined as unknown as typeof import("@/services/ai/parallelResolve").resolveUnknownFast,
+}));
+vi.mock("@/services/ai/parallelResolve", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/ai/parallelResolve")>();
+  realParallel.resolveUnknownFast = actual.resolveUnknownFast;
+  return { ...actual, resolveUnknownFast: vi.fn(actual.resolveUnknownFast) };
+});
+
 // Redirect ladderStorage() at a per-process tmp dir so the daily-cap / Go-UPC usage counters never
 // pollute the real repo working tree (identical to the route test's mock).
 vi.mock("@/server/upc/storage", async (importOriginal) => {
@@ -52,6 +65,7 @@ import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest, getPersistedDecode, type PersistedDecode } from "@/server/decodeCacheStore";
 import { resolveExactBarcode, resolveExactPartNumber, type CorpusDecodeResult } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 
 // Thin unit tests for the extracted decode pipeline (Task 2.4). They run with NO API keys and a fully
 // STUBBED global.fetch, so NO live provider call and NO real network can occur - every rung either
@@ -92,6 +106,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(resolveExactBarcode).mockReset().mockImplementation(realImpls.resolveExactBarcode);
     vi.mocked(resolveExactPartNumber).mockReset().mockImplementation(realImpls.resolveExactPartNumber);
     vi.mocked(getPersistedDecode).mockReset().mockImplementation(realImpls.getPersistedDecode);
+    vi.mocked(resolveUnknownFast).mockReset().mockImplementation(realParallel.resolveUnknownFast);
     __resetForTest();
     __resetDecodeCacheStoreForTest();
     clearDecodeCache();
@@ -156,6 +171,62 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(await readDailyUsed(await ladderStorage())).toBe(0);
     // No paid provider was contacted once the cap is exhausted.
     expect(hitAnAiProvider()).toBe(false);
+  });
+
+  // Task 8 (P1/P2): the owner "never fully unknown" rule - a scan must never surface as a bare
+  // "Unidentified item" when the GS1 company prefix knows the company. FLOORED_GTIN's prefix 5603344
+  // has a REAL prefixIndex dominant ("general", a Continental-family member), so prefixFloorName names
+  // it "General (Continental family) / product unconfirmed". It is deliberately absent from every free
+  // corpus/DB fixture, so it reaches the paid ladder (P2) or the all-miss return (P1).
+  const FLOORED_GTIN = "5603344000017";
+
+  it("P2: a cap-blocked decode still carries the prefix floor (never a fully-unknown 429)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted -> paid ladder is blocked
+    const outcome = await runDecodePipeline(makeReq(FLOORED_GTIN));
+
+    expect(outcome.kind).toBe("cap_blocked");
+    if (outcome.kind !== "cap_blocked") throw new Error("unreachable");
+    // Honest cap message is unchanged...
+    expect(outcome.message).toMatch(/cap/i);
+    // ...AND the $0 prefix floor survives the block so the client can name the row.
+    expect(outcome.floor).toBeTruthy();
+    expect(outcome.floor?.brand).toBe("General");
+    expect(outcome.floor?.name).toBe("General (Continental family) / product unconfirmed");
+    expect(outcome.floor?.name).toMatch(/product unconfirmed/);
+    // No paid provider was contacted once the cap is exhausted.
+    expect(hitAnAiProvider()).toBe(false);
+  });
+
+  it("P2: a cap block WITHOUT a known prefix carries no floor (today's behavior, unchanged)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+    // "111000222333" has no prefixIndex dominant -> prefixFloorName returns null.
+    const outcome = await runDecodePipeline(makeReq("111000222333"));
+    expect(outcome.kind).toBe("cap_blocked");
+    if (outcome.kind !== "cap_blocked") throw new Error("unreachable");
+    expect(outcome.message).toMatch(/cap/i);
+    expect(outcome.floor).toBeUndefined();
+  });
+
+  it("P1: the plain all-miss arm names a public prefix-floored code (Plan D unavailable)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap; the point is the all-miss floor
+    // Force the plain (!planDStash) arm for a PUBLIC code: Plan D's resolveUnknownFast throws, so the
+    // pipeline's `.catch(() => null)` leaves planDStash null and the ladder then all-misses.
+    vi.mocked(resolveUnknownFast).mockRejectedValueOnce(new Error("plan D unavailable"));
+
+    const outcome = await runDecodePipeline(makeReq(FLOORED_GTIN));
+
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    // Decision stays needs_review (never verified) and the reason keeps the full all-miss chain.
+    expect(outcome.payload.decision.status).not.toBe("verified");
+    expect(outcome.payload.reasonText).toMatch(/No rung resolved the code/);
+    // The floor names the row: one result, confidence 0.3, needs review, empty sourceUrls.
+    const floorResult = outcome.payload.results.find((r) => /product unconfirmed/.test(r.productName));
+    expect(floorResult).toBeTruthy();
+    expect(floorResult?.productName).toBe("General (Continental family) / product unconfirmed");
+    expect(floorResult?.confidence).toBe(0.3);
+    expect(floorResult?.needsHumanReview).toBe(true);
+    expect(floorResult?.sourceUrls ?? []).toHaveLength(0);
   });
 
   // Task 6 factories: a synthetic corpus hit and a stale L2 no_result_receipt for the reorder test.

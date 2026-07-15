@@ -61,8 +61,13 @@ export function resolveScan(
   }
 
   // No deterministic match -> Needs Review (unknown is acceptable; wrong identity is not).
-  const reason =
-    codeType === "vendor_label"
+  // P4 (Task 8) - FNSKU honesty: an X00-prefixed vendor label is an Amazon FULFILLMENT label (FNSKU),
+  // NOT a public product barcode, so it can never be decoded from the open web - it must be resolved
+  // against the seller's own Amazon inventory. B0 (ASIN) and other vendor labels keep the generic copy.
+  const isFnsku = codeType === "vendor_label" && cleaned.cleanCode.trim().toUpperCase().startsWith("X0");
+  const reason = isFnsku
+    ? "Amazon fulfillment label (FNSKU). Not a public barcode - resolve via your Amazon inventory."
+    : codeType === "vendor_label"
       ? "Vendor/Amazon label. Link it to a product once and it will count automatically after that."
       : "No approved alias or verified product matches this code yet.";
 

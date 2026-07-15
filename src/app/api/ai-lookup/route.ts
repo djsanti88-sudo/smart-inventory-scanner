@@ -263,8 +263,11 @@ export async function POST(request: Request) {
       return Response.json(outcome.body);
     }
     if (outcome.kind === "cap_blocked") {
-      // Daily cap blocked the paid ladder: same 429 daily_cap shape the route has always returned.
-      return Response.json({ error: outcome.message, reasonCode: "daily_cap" }, { status: 429 });
+      // Daily cap blocked the paid ladder: same 429 daily_cap shape the route has always returned, now
+      // carrying the $0 prefix floor (P2) when the GS1 prefix knows the company, so the client names the
+      // row "<Brand> / product unconfirmed" instead of a bare "Unidentified item". Absent (undefined)
+      // when the code isn't a public barcode or the prefix maps to no confident brand - unchanged there.
+      return Response.json({ error: outcome.message, reasonCode: "daily_cap", floor: outcome.floor }, { status: 429 });
     }
     // computed: echo the L1/L2 `cached` flag into debug exactly as before.
     return Response.json({ ...outcome.payload, debug: { ...outcome.payload.debug, cached: outcome.cached } });

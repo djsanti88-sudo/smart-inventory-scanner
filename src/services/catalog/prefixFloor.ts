@@ -9,12 +9,17 @@
 import type { CodeType } from "@/types";
 import { decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { lookupPrefix } from "@/services/catalog/prefixIndex";
+import { familyLabelFor } from "@/services/catalog/brandFamilies";
 
 export interface PrefixFloorResult {
-  /** Display name for the provisional row, e.g. "Coca-Cola / product unconfirmed". */
+  /** Display name for the provisional row, e.g. "Coca-Cola / product unconfirmed", or with a corporate
+   *  family annotation when the brand is a family member, e.g. "General (Continental family) / product unconfirmed". */
   name: string;
   /** The resolved brand/manufacturer only (no "product unconfirmed" suffix). */
   brand: string;
+  /** P5: the corporate-family label ("<Leader> family") when the brand is a NON-LEADER member of a
+   *  curated family; undefined for a leader or an independent brand. Naming aid only, never an identity claim. */
+  familyLabel?: string;
 }
 
 function titleCase(s: string): string {
@@ -33,5 +38,10 @@ export function prefixFloorName(code: string, codeType: CodeType): PrefixFloorRe
   const rawBrand = entry?.dominant?.name?.trim();
   if (!rawBrand) return null;
   const brand = titleCase(rawBrand);
-  return { name: `${brand} / product unconfirmed`, brand };
+  // P5 (Task 8): annotate the corporate family when the resolved brand is a NON-LEADER family member,
+  // so the floor reads "General (Continental family) / product unconfirmed". A leader / independent
+  // brand keeps the plain "<Brand> / product unconfirmed" form. Still a naming aid, never verified.
+  const familyLabel = familyLabelFor(brand) ?? undefined;
+  const name = familyLabel ? `${brand} (${familyLabel}) / product unconfirmed` : `${brand} / product unconfirmed`;
+  return { name, brand, familyLabel };
 }

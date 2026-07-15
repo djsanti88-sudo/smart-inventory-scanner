@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sameBrandFamily } from "@/services/catalog/brandFamilies";
+import { sameBrandFamily, familyLabelFor } from "@/services/catalog/brandFamilies";
 
 describe("sameBrandFamily (curated same-company groups)", () => {
   it("identical brands match trivially (case / punctuation insensitive)", () => {
@@ -80,5 +80,33 @@ describe("other evidenced corporate families", () => {
   it("unrelated pairs still never match", () => {
     expect(sameBrandFamily("Cooper", "Michelin")).toBe(false);
     expect(sameBrandFamily("Nitto", "Hankook")).toBe(false);
+  });
+});
+
+describe("familyLabelFor (P5: family annotation for the prefix floor)", () => {
+  it("maps a non-leader MEMBER brand to its family leader label", () => {
+    // Leader is the FIRST entry of each FAMILIES group: Michelin group -> michelin;
+    // Goodyear group -> goodyear; Continental group -> continental.
+    expect(familyLabelFor("BFGoodrich")).toBe("Michelin family");
+    expect(familyLabelFor("Cooper")).toBe("Goodyear family"); // Cooper is a member of the Goodyear group
+    expect(familyLabelFor("General")).toBe("Continental family");
+    expect(familyLabelFor("Firestone")).toBe("Bridgestone family");
+  });
+
+  it("returns null for a family LEADER (the leader carries no label)", () => {
+    expect(familyLabelFor("Michelin")).toBeNull();
+    expect(familyLabelFor("Goodyear")).toBeNull();
+    expect(familyLabelFor("Continental")).toBeNull();
+  });
+
+  it("returns null for an INDEPENDENT brand (in no family) and for empty input", () => {
+    expect(familyLabelFor("Nokian")).toBeNull(); // not in any curated group
+    expect(familyLabelFor("Westlake")).toBeNull();
+    expect(familyLabelFor("")).toBeNull();
+  });
+
+  it("is case / punctuation / noise insensitive (reuses the module norm)", () => {
+    expect(familyLabelFor("BFGoodrich Tires")).toBe("Michelin family");
+    expect(familyLabelFor("  cooper  ")).toBe("Goodyear family");
   });
 });

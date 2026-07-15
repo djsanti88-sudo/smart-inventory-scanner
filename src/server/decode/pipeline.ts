@@ -275,7 +275,7 @@ export interface DecodePayload {
  *  a cap block, or a freshly computed payload plus the `cached` flag for the debug echo. */
 export type DecodePipelineResult =
   | { kind: "persisted"; body: Record<string, unknown> }
-  | { kind: "cap_blocked"; message: string }
+  | { kind: "cap_blocked"; message: string; floor?: import("@/services/catalog/prefixFloor").PrefixFloorResult }
   | { kind: "computed"; payload: DecodePayload; cached: boolean };
 
 /**
@@ -958,10 +958,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       };
     }
     const nrDecision = decideDecode({ codeType, results: [], evidences: [], confidenceThreshold: threshold, code, scanContext: req.scanContext, brandPrefixConflict: false, allowNonPublicAutoCount });
+    // P1 (owner "never fully unknown"): when the GS1 company prefix maps to a known brand, this plain
+    // all-miss arm (reached by a non-public code, or a public code where Plan D's resolveUnknownFast
+    // threw) still names the row "<Brand> / product unconfirmed" instead of leaving it bare. It is a
+    // naming aid ONLY - confidence 0.3, needsHumanReview true, empty sourceUrls, NEVER verified. The
+    // decision stays needs_review and the reason keeps the full all-miss chain (owner: never silent).
+    const allMissFloor = prefixFloorName(code, codeType);
+    const nrResults: AiLookupResult[] = allMissFloor
+      ? [{ ...emptyResult(), productName: allMissFloor.name, brand: allMissFloor.brand, confidence: 0.3, needsHumanReview: true, sourceUrls: [] }]
+      : [];
     return {
       mode: "decode" as const,
       providerNames: ladderRun.reasons.map((r) => r.rung),
-      results: [],
+      results: nrResults,
       evidences: [],
       providerStatuses: ladderProviderStatuses,
       decision: { ...nrDecision, reason: allMissReason },
@@ -999,7 +1008,11 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // was cached (the throw happens before withDecodeCache's setDecodeCache call) - the next request
     // for this code retries from scratch, which is correct once the cap resets.
     if (e instanceof DailyCapExceededError) {
-      return { kind: "cap_blocked", message: e.message };
+      // P2 (owner "never fully unknown"): the $0 prefix floor must survive a cap block so the client can
+      // still name the row "<Brand> / product unconfirmed" instead of a bare "Unidentified item". Null
+      // when the code isn't a public barcode or the prefix maps to no confident brand (unchanged behavior).
+      const floor = prefixFloorName(code, codeType) ?? undefined;
+      return { kind: "cap_blocked", message: e.message, floor };
     }
     throw e;
   }
