@@ -219,3 +219,16 @@ describe("A3/AM-2: bad-check-digit codes get an additive, non-terminal misread r
     expect(r.reason).not.toContain("Barcode check digit fails");
   });
 });
+
+describe("resolveRawScan - affix core does not auto-count against a different-format alias", () => {
+  it("scanning 762590BH with an approved alias for 762590 routes to Needs Review, not Known", () => {
+    const products = [{ id: "p1", businessId: "b1", name: "Some Tire", verified: true } as unknown as Product];
+    const aliases = [{
+      id: "a1", businessId: "b1", productId: "p1", approved: true,
+      cleanCode: "762590", normalizedCode: "762590", rawCodeExample: "762590",
+    } as unknown as Alias];
+    const res = resolveRawScan("762590BH", products, aliases, "b1");
+    expect(res.resolverStatus).toBe("needs_review");
+    expect(res.productId).toBeNull();
+  });
+});

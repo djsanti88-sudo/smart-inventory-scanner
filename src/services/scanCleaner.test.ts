@@ -36,3 +36,14 @@ describe("buildNormalizedCandidates", () => {
     expect(buildNormalizedCandidates("")).toEqual([]);
   });
 });
+
+describe("buildNormalizedCandidates - affix core stays OUT of the auto-count path (owner correction 1)", () => {
+  it("does NOT emit a bare affix-stripped core as a deterministic candidate", () => {
+    // 762590BH must not silently become 762590: a generic core is discovery-only, not auto-count.
+    expect(buildNormalizedCandidates("762590BH")).not.toContain("762590");
+    expect(buildNormalizedCandidates("BH762590")).not.toContain("762590");
+  });
+  it("still emits the exact, lossless variants it always did", () => {
+    expect(buildNormalizedCandidates("2881-6861")).toContain("28816861");
+  });
+});
