@@ -60,7 +60,7 @@ export function applyBackfill(corpus, harvestRows, { prefixMap }) {
 
 **CLI (`backfill-part-numbers.mjs`):** reads `state/harvested*.jsonl` + corpus JSON, calls `applyBackfill`, writes updated corpus + `state/pn-conflicts.json`, prints the report. `--dry-run` flag prints report without writing. Do NOT run it against the real corpus in this task (that is Task 3).
 
-- [ ] Commit (pathspec): `feat(corpus): part-number backfill lib + CLI (AM-R1/R2)`
+- [x] Commit (pathspec): `feat(corpus): part-number backfill lib + CLI (AM-R1/R2)`
 
 ### Task 2: merge.mjs field-level enrichment (Phase 1 root cause)
 
@@ -79,7 +79,7 @@ export function applyBackfill(corpus, harvestRows, { prefixMap }) {
 - [ ] completeness decision unchanged by enrichment (craft two rows where counting the enriched field would flip the winner; assert it does not)
 - [ ] existing merge suite green
 
-- [ ] Commit (pathspec): `fix(dt-harvest): field-level enrichment on cross_source_duplicate (stop PN discards)`
+- [x] Commit (pathspec): `fix(dt-harvest): field-level enrichment on cross_source_duplicate (stop PN discards)`
 
 ### Task 3: Run the backfill for real + rebuild local DB (data change)
 
@@ -142,7 +142,7 @@ export function parseShopwareCsv(fileText: string): AdapterResult;
 - [ ] malformed row -> `unparseable` with line + reason; good rows still parse
 - [ ] a cell containing "ignore previous instructions" is just data (survives as text, changes nothing)
 
-- [ ] Commit (pathspec): `feat(reconcile): Shop-Ware CSV adapter + types (AM-R3)`
+- [x] Commit (pathspec): `feat(reconcile): Shop-Ware CSV adapter + types (AM-R3)`
 
 ### Task 5: Identity matcher (Phase 2)
 
@@ -193,7 +193,7 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
 - [ ] no size, no tire signals -> non_tire
 - [ ] every result has a non-empty reason
 
-- [ ] Commit (pathspec): `feat(reconcile): brand-qualified identity matcher (AM-R4/R5)`
+- [x] Commit (pathspec): `feat(reconcile): brand-qualified identity matcher (AM-R4/R5)`
 
 ### Task 6: Reconcile report service (Phase 3 core)
 
@@ -236,7 +236,7 @@ export function reconcileReportCsv(report: ReconcileReport): string;
 - [ ] totals count every line exactly once
 - [ ] CSV escapes commas/quotes (reuse buildCsv) and renders empty report
 
-- [ ] Commit (pathspec): `feat(reconcile): reconcile report with scope boundary (AM-R7/R8)`
+- [x] Commit (pathspec): `feat(reconcile): reconcile report with scope boundary (AM-R7/R8)`
 
 ### Task 7: Server match route + reconcile page/store (wiring)
 
@@ -259,7 +259,7 @@ export function reconcileReportCsv(report: ReconcileReport): string;
 - [ ] component: buckets render grouped, variance delta highlighted, empty state honest
 - [ ] AM-R10f: confirming a linkage creates approved alias; before confirmation none exists
 
-- [ ] Commit (pathspec): `feat(reconcile): match route + session store + reconcile page (AM-R6/R9)`
+- [x] Commit (pathspec): `feat(reconcile): match route + session store + reconcile page (AM-R6/R9)`
 
 ### Task 8: E2E + full gates
 
@@ -272,4 +272,4 @@ export function reconcileReportCsv(report: ReconcileReport): string;
 - [ ] `npm run test` full green; `npx tsc --noEmit` clean; `npm run build` clean; `npm run test:golden` green
 - [ ] `npm run test:e2e` full suite green (not just the new spec)
 - [ ] Relevant `npm run qa:bots:*` (catalog/alias/resolution surface) green
-- [ ] Commit (pathspec): `test(reconcile): E2E variance report proof + gates`
+- [x] Commit (pathspec): `test(reconcile): E2E variance report proof + gates`
