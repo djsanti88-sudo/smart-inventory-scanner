@@ -44,6 +44,30 @@ export interface DecodeArchiveEntry {
 }
 
 /**
+ * A4 (owner-ratified 2026-07-15, "trace every non-decode"): one append-only outcome row per decode
+ * request, recorded at the runDecodePipeline OUTER choke point so it sees every exit -- Plan D's
+ * verified early return, an escalation/free-ladder win, a full paid-ladder win, a total all-rung
+ * miss, AND a cap_blocked request (see AM-5). Never used to decide truth or gate behavior; it is a
+ * trace record only, append-only like DecodeArchiveEntry above.
+ */
+export interface DecodeOutcomeEntry {
+  code: string;
+  /** `canonicalGtin(code) ?? code`. */
+  canonicalGtin: string;
+  /** The rung that settled the ladder, or null for a total miss / cap block. */
+  settledBy: string | null;
+  /** The decision status (e.g. "verified" / "suggested" / "needs_review"), or "cap_blocked". A
+   *  cached/replayed hit is recorded with its status prefixed "cached:" so replays are
+   *  distinguishable from a fresh compute in the rollup. */
+  status: string;
+  reasons: Array<{ rung: string; reason: string }>;
+  durationMs: number;
+  /** `classifySourceTier` output, or null when the outcome did not come from a paid stage. */
+  sourceTier: string | null;
+  createdAt: string;
+}
+
+/**
  * Async on every method: the Turso adapter (Task 21) is a network client, so the interface is
  * honestly async everywhere rather than faking sync via a hidden write-queue / read-through cache
  * (that would be a data-race risk across concurrent function instances). The file adapter's fs
@@ -66,6 +90,13 @@ export interface LadderStorage {
   writeMissCache(key: string, e: MissEntry): Promise<void>;
   appendArchive(entry: DecodeArchiveEntry): Promise<void>;
   /**
+   * A4: append one decode outcome trace row. Same append-only contract as appendArchive (JSONL for
+   * the file adapter, INSERT-only for Turso -- never UPDATE/DELETE). Best-effort by convention at the
+   * call site (pipeline.ts wraps this in a fire-and-forget try/catch); the interface itself just
+   * appends and lets a genuine storage failure reject normally.
+   */
+  appendOutcome(entry: DecodeOutcomeEntry): Promise<void>;
+  /**
    * Generic atomic get/increment over an arbitrary string key, backing the daily AI-lookup spend
    * cap (see src/services/security/aiSpendGuard.ts's chargeDailySlot/readDailyUsed). Same atomicity
    * contract as incrementUsage: never a JS-side read-modify-write, so concurrent serverless
@@ -80,6 +111,7 @@ export interface LadderStorage {
 const USAGE_FILE = ".go-upc-usage.json";
 const MISS_FILE = ".go-upc-miss-cache.json";
 const ARCHIVE_SUBDIR = "decode-archive";
+const OUTCOMES_SUBDIR = "decode-outcomes";
 const KV_FILE = ".ladder-kv.json";
 
 function currentMonth(): string {
@@ -112,6 +144,7 @@ export function fileLadderStorage(dir: string): LadderStorage {
   const usagePath = join(dir, USAGE_FILE);
   const missPath = join(dir, MISS_FILE);
   const archiveDir = join(dir, ARCHIVE_SUBDIR);
+  const outcomesDir = join(dir, OUTCOMES_SUBDIR);
   const kvPath = join(dir, KV_FILE);
 
   function ensureDir(target: string): void {
@@ -157,6 +190,13 @@ export function fileLadderStorage(dir: string): LadderStorage {
       appendFileSync(monthFile, JSON.stringify(entry) + "\n", "utf8");
     },
 
+    async appendOutcome(entry: DecodeOutcomeEntry): Promise<void> {
+      ensureDir(outcomesDir);
+      const month = entry.createdAt.slice(0, 7); // YYYY-MM from createdAt
+      const monthFile = join(outcomesDir, `${month}.jsonl`);
+      appendFileSync(monthFile, JSON.stringify(entry) + "\n", "utf8");
+    },
+
     async get(key: string): Promise<string | null> {
       const map = readJson<Record<string, string>>(kvPath, {});
       return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
@@ -199,6 +239,7 @@ const TABLE_USAGE = "goupc_usage";
 const TABLE_MISS_CACHE = "goupc_miss_cache";
 const TABLE_ARCHIVE = "decode_archive";
 const TABLE_KV = "ladder_kv";
+const TABLE_OUTCOMES = "decode_outcomes";
 
 /**
  * Turso-backed LadderStorage over an injected client (never constructs its own connection --
@@ -237,6 +278,20 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
         });
         await client.execute({
           sql: `CREATE TABLE IF NOT EXISTS ${TABLE_KV} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+          args: [],
+        });
+        await client.execute({
+          sql: `CREATE TABLE IF NOT EXISTS ${TABLE_OUTCOMES} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL,
+            canonical_gtin TEXT NOT NULL,
+            settled_by TEXT,
+            status TEXT NOT NULL,
+            reasons TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            source_tier TEXT,
+            created_at TEXT NOT NULL
+          )`,
           args: [],
         });
       })();
@@ -319,6 +374,25 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
           JSON.stringify(entry.raw),
           entry.sourceUrls ? JSON.stringify(entry.sourceUrls) : null,
           entry.fetchedAt,
+        ],
+      });
+    },
+
+    async appendOutcome(entry: DecodeOutcomeEntry): Promise<void> {
+      await ensureTables();
+      // Append-only: plain INSERT, no upsert/update/delete -- same purge-proof contract as appendArchive.
+      await client.execute({
+        sql: `INSERT INTO ${TABLE_OUTCOMES} (code, canonical_gtin, settled_by, status, reasons, duration_ms, source_tier, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          entry.code,
+          entry.canonicalGtin,
+          entry.settledBy,
+          entry.status,
+          JSON.stringify(entry.reasons),
+          entry.durationMs,
+          entry.sourceTier,
+          entry.createdAt,
         ],
       });
     },
