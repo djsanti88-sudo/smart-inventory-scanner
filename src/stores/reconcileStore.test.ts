@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useReconcileStore, RECONCILE_PERSIST_KEY } from "@/stores/reconcileStore";
 import type { AdapterResult } from "@/services/reconcile/types";
 import type { MatchResult } from "@/services/reconcile/identityMatcher";
@@ -83,6 +83,54 @@ describe("reconcileStore - persistence round trip", () => {
     window.localStorage.setItem(RECONCILE_PERSIST_KEY, rawPersisted!);
     await useReconcileStore.persist.rehydrate();
     expect(useReconcileStore.getState().session?.fileName).toBe("persisted.csv");
+  });
+});
+
+describe("reconcileStore - persisted blob is bounded (review finding: raw stripped, quota fails soft)", () => {
+  it("persisted payload does NOT contain the heavy `raw` field from adapter rows", () => {
+    const withRaw = adapter(2, "a");
+    withRaw.rows[0].raw = { color: "black", warehouse: "12", note: "some long descriptive column value" };
+    withRaw.rows[1].raw = { color: "white", warehouse: "7", note: "another long descriptive column value" };
+
+    useReconcileStore.getState().startSession(withRaw, "heavy.csv");
+
+    const rawPersisted = window.localStorage.getItem(RECONCILE_PERSIST_KEY);
+    expect(rawPersisted).toBeTruthy();
+    // None of the raw column values leaked into the persisted blob.
+    expect(rawPersisted).not.toContain("warehouse");
+    expect(rawPersisted).not.toContain("some long descriptive column value");
+
+    const parsed = JSON.parse(rawPersisted!);
+    const persistedRows = parsed.state.session.adapter.rows as Array<Record<string, unknown>>;
+    for (const row of persistedRows) {
+      expect(row.raw).toBeUndefined();
+    }
+    // The fields the report/match actually need must survive.
+    expect(persistedRows[0].externalId).toBe("a-pn-0");
+    expect(persistedRows[0].partNumbers).toEqual(["a-pn-0"]);
+    expect(persistedRows[0].qty).toBe(1);
+  });
+
+  it("a storage whose setItem throws QuotaExceededError does not throw out of startSession (fail soft)", () => {
+    // jsdom's Storage#setItem lives on the prototype, not as an own property of the localStorage
+    // instance - spying on the instance creates a shadowing own-property that jsdom's internal
+    // dispatch never reaches. Spy on the prototype so the real call path is actually exercised,
+    // the same method every write in the app goes through.
+    const quotaError = new DOMException("Quota exceeded", "QuotaExceededError");
+    const proto = Object.getPrototypeOf(window.localStorage);
+    const setItemSpy = vi.spyOn(proto, "setItem").mockImplementation(() => {
+      throw quotaError;
+    });
+
+    try {
+      expect(() => {
+        useReconcileStore.getState().startSession(adapter(1, "a"), "quota.csv");
+      }).not.toThrow();
+      // The in-memory store still works this run even though persistence failed.
+      expect(useReconcileStore.getState().session?.fileName).toBe("quota.csv");
+    } finally {
+      setItemSpy.mockRestore();
+    }
   });
 });
 
