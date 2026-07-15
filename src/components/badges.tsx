@@ -68,22 +68,30 @@ export function SyncBadge({ status }: { status: SyncStatus }) {
   );
 }
 
-export function StatusBadge({ status }: { status: ScanStatus }) {
-  const map: Record<ScanStatus, string> = {
+// "suggested" (Task 9b, owner-ratified 2026-07-14): the PARKED pending-inline-suggestion review
+// status. NeedsReviewTable filters those reviews out of the queue entirely, but the badge stays
+// tolerant (defense in depth) so any surface that ever renders one shows a real amber "Suggested"
+// label instead of an empty label with a literal "undefined" className.
+type StatusBadgeStatus = ScanStatus | "suggested";
+
+export function StatusBadge({ status }: { status: StatusBadgeStatus }) {
+  const map: Record<StatusBadgeStatus, string> = {
     known: "bg-green-100 text-green-700",
     unknown: "bg-red-100 text-red-800",
     needs_review: "bg-amber-100 text-amber-900",
     resolved: "bg-blue-100 text-blue-700",
     ignored: "bg-zinc-100 text-zinc-600",
     conflict: "bg-amber-100 text-amber-900",
+    suggested: "bg-amber-100 text-amber-900",
   };
-  const label: Record<ScanStatus, string> = {
+  const label: Record<StatusBadgeStatus, string> = {
     known: "Counted",
     unknown: "Not recognised",
     needs_review: "Needs review",
     resolved: "Resolved",
     ignored: "Ignored",
     conflict: "Conflict",
+    suggested: "Suggested",
   };
   return <span className={`rounded-md px-2 py-1 text-sm font-medium ${map[status]}`}>{label[status]}</span>;
 }

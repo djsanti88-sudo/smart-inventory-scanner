@@ -113,6 +113,33 @@ approval calls working; all its trust assertions pass unchanged).
 - e2e/suggested-decode.spec.ts (+2 tests, 3 screenshots)
 - Migrated (status-only): 8 store test files + auto-decode.spec.ts + batch-approve.spec.ts
 
+## Review fix (Important finding): NeedsReviewTable tolerates the "suggested" status
+
+Reviewer finding: a review PARKED at status "suggested" with syncStatus "pending" (its value at
+creation, scanStore.ts review mint) passed NeedsReviewTable's visible-rows filter via the second
+clause (`r.syncStatus !== "synced"`) and rendered on the default All tab with a broken StatusBadge
+(the `as "resolved" | "ignored"` cast fed "suggested" into undefined map/label lookups -> className
+"... undefined", empty label) and resolved-row styling. Latent on the ASYNC Firebase cloud sync
+path only (local mock sync is synchronous, which is why the e2e passed).
+
+Fix (TDD, failing-first):
+1. Tests written FIRST - `NeedsReviewTable.test.tsx` (+2): a parked "suggested" review with
+   syncStatus "pending" does NOT render (and an open review beside it still does);
+   `badges.test.tsx` (+1): `<StatusBadge status="suggested" />` renders a real "Suggested" label
+   with no "undefined" in its className. Ran: 3/3 failed, reproducing the finding exactly.
+2. `NeedsReviewTable.tsx` filter: `r.status !== "suggested" && (r.status === "open" ||
+   r.syncStatus !== "synced")` - suggested reviews belong to the feed controls + the
+   SuggestedApprovalPanel, never the queue, regardless of sync state.
+3. Defense in depth: `StatusBadge` prop widened to `ScanStatus | "suggested"` with a real amber
+   "Suggested" map/label entry; the unsafe cast at the badge call site removed (raw status passes
+   through); `resolved` styling guard now `status !== "open" && status !== "suggested"`.
+
+Commands + output:
+- `npx vitest run src/components/NeedsReviewTable.test.tsx src/components/badges.test.tsx` ->
+  before fix: 3 failed | 9 passed; after fix: 12 passed (12).
+- `npx vitest run src/components/ src/stores/ src/eval/eval.test.ts` -> 373 passed (373), 61 files.
+- `npx tsc --noEmit` -> exit 0. `npx eslint` on the 4 touched files -> exit 0.
+
 ## Flag for the coordinator (NOT mine, proven)
 
 e2e/firewall.spec.ts and e2e/auto-count-tire.spec.ts fail on branch HEAD (93cca79) WITHOUT any of
