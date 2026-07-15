@@ -2,8 +2,21 @@
 // Vitest node project. Imports the pure .mjs lib directly (no server-only import boundary here -
 // this is a build-time/offline maintenance lib, never used at request time).
 import { describe, it, expect } from "vitest";
-// @ts-expect-error - plain .mjs lib, no type declarations
 import { applyBackfill } from "../../../scripts/dt-harvest/lib/backfill.mjs";
+
+// Shared aliases matching applyBackfill's JSDoc @param/@returns shape (backfill.mjs lines 36-44).
+// One clean alias reused everywhere instead of per-call casts.
+type Corpus = { barcodeIndex: Record<string, Record<string, unknown>>; partNumberIndex: Record<string, string> };
+type BackfillReport = {
+  filled: number;
+  agreed: number;
+  conflicts: Array<{ barcode: string; corpusPn: string; dtPn: string; brand: string; model: string; size: string }>;
+  guardRejected: number;
+  junkKeysDropped: number;
+  junkFillsNotIndexed: number;
+  noCorpusRow: number;
+};
+type BackfillResult = { corpus: Corpus; report: BackfillReport };
 
 // Valid GS1 check-digit fixtures (reused from scripts/dt-harvest/lib/merge.test.mjs conventions).
 const VALID_UPC = "848983006257"; // falken wildpeak sample, valid mod-10 check digit
@@ -54,8 +67,8 @@ function corpusRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCorpus(rows: Record<string, unknown>[], partNumberIndex: Record<string, string> = {}) {
-  const barcodeIndex: Record<string, unknown> = {};
+function makeCorpus(rows: Record<string, unknown>[], partNumberIndex: Record<string, string> = {}): Corpus {
+  const barcodeIndex: Record<string, Record<string, unknown>> = {};
   for (const row of rows) barcodeIndex[(row as { barcode: string }).barcode] = row;
   return { barcodeIndex, partNumberIndex };
 }
@@ -63,7 +76,7 @@ function makeCorpus(rows: Record<string, unknown>[], partNumberIndex: Record<str
 describe("applyBackfill", () => {
   it("fills a blank PN and sets part_number_source", () => {
     const corpus = makeCorpus([corpusRow({ manufacturer_part_number: "" })]);
-    const { corpus: result, report } = applyBackfill(corpus, [harvestRow()], { prefixMap: {} });
+    const { corpus: result, report } = applyBackfill(corpus, [harvestRow()], { prefixMap: {} }) as BackfillResult;
 
     const row = result.barcodeIndex[VALID_UPC];
     expect(row.manufacturer_part_number).toBe("28034300");
@@ -73,7 +86,7 @@ describe("applyBackfill", () => {
 
   it("never overwrites a non-blank PN (agree case counted in agreed)", () => {
     const corpus = makeCorpus([corpusRow({ manufacturer_part_number: "28034300" })]);
-    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ partNumber: "28034300" })], { prefixMap: {} });
+    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ partNumber: "28034300" })], { prefixMap: {} }) as BackfillResult;
 
     const row = result.barcodeIndex[VALID_UPC];
     expect(row.manufacturer_part_number).toBe("28034300");
@@ -85,7 +98,7 @@ describe("applyBackfill", () => {
   it("emits a conflict with all five fields and leaves the corpus unchanged", () => {
     const existingRow = corpusRow({ manufacturer_part_number: "DIFFERENT-PN" });
     const corpus = makeCorpus([existingRow]);
-    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ partNumber: "28034300" })], { prefixMap: {} });
+    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ partNumber: "28034300" })], { prefixMap: {} }) as BackfillResult;
 
     expect(result.barcodeIndex[VALID_UPC]).toEqual(existingRow); // unchanged
     expect(report.conflicts).toHaveLength(1);
@@ -101,7 +114,7 @@ describe("applyBackfill", () => {
 
   it("skips a guard-rejected harvest row and counts it", () => {
     const corpus = makeCorpus([corpusRow({ manufacturer_part_number: "" })]);
-    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ gtin: INVALID_UPC })], { prefixMap: {} });
+    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ gtin: INVALID_UPC })], { prefixMap: {} }) as BackfillResult;
 
     expect(report.guardRejected).toBe(1);
     expect(report.filled).toBe(0);
@@ -111,7 +124,7 @@ describe("applyBackfill", () => {
 
   it("fills the row but never indexes a normPartKey with length <= 4 (AM-R1)", () => {
     const corpus = makeCorpus([corpusRow({ manufacturer_part_number: "" })]);
-    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ partNumber: "AB12" })], { prefixMap: {} });
+    const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ partNumber: "AB12" })], { prefixMap: {} }) as BackfillResult;
 
     const row = result.barcodeIndex[VALID_UPC];
     expect(row.manufacturer_part_number).toBe("AB12");
@@ -126,7 +139,7 @@ describe("applyBackfill", () => {
       [corpusRow({ manufacturer_part_number: "9999", canonical_product_uid: "junk-uid" })],
       { "9999": "junk-uid", "LONGKEY123": "some-other-uid" }
     );
-    const { corpus: result, report } = applyBackfill(corpus, [], { prefixMap: {} });
+    const { corpus: result, report } = applyBackfill(corpus, [], { prefixMap: {} }) as BackfillResult;
 
     expect(result.partNumberIndex["9999"]).toBeUndefined();
     expect(result.partNumberIndex["LONGKEY123"]).toBe("some-other-uid");
@@ -135,8 +148,8 @@ describe("applyBackfill", () => {
 
   it("is idempotent: applying twice yields deep-equal corpus and zero new fills", () => {
     const corpus = makeCorpus([corpusRow({ manufacturer_part_number: "" })]);
-    const first = applyBackfill(corpus, [harvestRow()], { prefixMap: {} });
-    const second = applyBackfill(first.corpus, [harvestRow()], { prefixMap: {} });
+    const first = applyBackfill(corpus, [harvestRow()], { prefixMap: {} }) as BackfillResult;
+    const second = applyBackfill(first.corpus, [harvestRow()], { prefixMap: {} }) as BackfillResult;
 
     expect(second.corpus).toEqual(first.corpus);
     expect(second.report.filled).toBe(0);
@@ -144,7 +157,7 @@ describe("applyBackfill", () => {
 
   it("counts a harvest gtin missing from the corpus as noCorpusRow and adds nothing", () => {
     const corpus = makeCorpus([]);
-    const { corpus: result, report } = applyBackfill(corpus, [harvestRow()], { prefixMap: {} });
+    const { corpus: result, report } = applyBackfill(corpus, [harvestRow()], { prefixMap: {} }) as BackfillResult;
 
     expect(report.noCorpusRow).toBe(1);
     expect(Object.keys(result.barcodeIndex)).toHaveLength(0);
@@ -156,7 +169,7 @@ describe("applyBackfill", () => {
       corpus,
       [harvestRow({ partNumber: "OLDPN0001" }), harvestRow({ partNumber: "NEWPN0002" })],
       { prefixMap: {} }
-    );
+    ) as BackfillResult;
 
     expect(result.barcodeIndex[VALID_UPC].manufacturer_part_number).toBe("NEWPN0002");
     expect(report.filled).toBe(1);
@@ -171,7 +184,7 @@ describe("applyBackfill", () => {
       corpus,
       [harvestRow({ gtin: VALID_UPC, partNumber: "NEWFILL01" }), harvestRow({ gtin: VALID_UPC_2, partNumber: "CONFLICTPN" })],
       { prefixMap: {} }
-    );
+    ) as BackfillResult;
 
     expect(report.filled).toBe(1);
     expect(report.conflicts).toHaveLength(1);
