@@ -660,4 +660,54 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(rungs).toEqual(["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]);
     });
   });
+
+  // AM-10 (Task 12 deferred pipeline hunk): an ASIN-shaped code's fetchv2 rung must fetch its
+  // Amazon /dp/ pattern URL. ASIN is a vendor_label (non-GTIN) shape, so buildPaidLadderRungs only
+  // includes ["fetchv2", "gpt"] - no goupc, no free rungs - which routes the code straight to the
+  // fetchv2 rung under test with nothing else to interfere.
+  it("AM-10: an ASIN code's fetchv2 rung fetches its /dp/ pattern URL", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap; the point is the URL fetched, not a block
+    const ASIN = "B08XYZ9ABC"; // fresh fixture, distinct from every GTIN code used elsewhere in this file
+    const outcome = await runDecodePipeline(makeReq(ASIN));
+
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    // The rung ran (it may still miss - the stubbed fetch 404s everything by default - the point is
+    // that the /dp/ URL was actually requested, proving the pattern-URL hunk fires for an ASIN).
+    const dpCalls = fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("amazon.com/dp/B08XYZ9ABC"));
+    expect(dpCalls.length).toBeGreaterThan(0);
+    const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+    expect((reasons ?? []).map((r) => r.rung)).toContain("fetchv2");
+    // ASIN is never a public barcode - decideDecode must never verify/auto-count it via this door.
+    expect(outcome.payload.decision.status).not.toBe("verified");
+  });
+
+  // A6 (Task 9, AM-3 hardened gate): a code whose GTIN prefix carries a STRONG, >=8-digit tire hint
+  // must skip BOTH free LADDER rungs entirely (neither "upcitemdb" nor "openfoodfacts" appears in the
+  // ladder's own reasons chain) and record the steering reason instead. Prefix "04501135" (Aplus,
+  // strong, 8 digits) is the same real fixture proven in freeRungSteering.test.ts; a distinct 12-digit
+  // padding is used here so this test's ladder run shares no FetchV2Cache/GoUpcGate module-singleton
+  // residue with that unit test. NOTE: this assertion is scoped to the LADDER's reasons chain (not raw
+  // fetch call inspection) because Plan D's own retail peek (lookupBarcodeDb, pipeline.ts:852) and the
+  // AM-7 keyless fetchv2 pattern-URL door (barcodeSources.ts's "upcitemdb.com" web-page entry) both
+  // legitimately reach upcitemdb-family hosts for unrelated reasons - only the ladder's own reasons
+  // chain unambiguously proves whether the STEERED rungs (upcitemdb/openfoodfacts) ran.
+  it("A6: a steered tire-prefix code skips upcitemdb/openfoodfacts and records the steering reason", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const STEERED_TIRE_CODE = "450113522222"; // GTIN-13 "0450113522222" -> prefix "04501135" (Aplus, strong, 8 digits)
+    stubFreeRungFetch({ upcHit: false }); // if the free rungs WERE called (steering broken), they would 200 with a miss body - never called here
+
+    const outcome = await runDecodePipeline(makeReq(STEERED_TIRE_CODE));
+
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+    const rungsSeen = (reasons ?? []).map((r) => r.rung);
+    expect(rungsSeen).not.toContain("upcitemdb");
+    expect(rungsSeen).not.toContain("openfoodfacts");
+    expect(rungsSeen).toContain("free-steering");
+    const steeringReason = (reasons ?? []).find((r) => r.rung === "free-steering")?.reason ?? "";
+    expect(steeringReason).toContain("tire-prefix steering");
+    expect(steeringReason).toContain("04501135");
+  });
 });
