@@ -128,3 +128,18 @@ describe("POST /api/reconcile/match - matching through the mocked local corpus",
     expect(body.matches[0].reason).toBeTruthy();
   });
 });
+
+describe("POST /api/reconcile/match - distributor-affix core lookup", () => {
+  it("pre-fetches the numeric core so an affixed row PN resolves via a core-keyed corpus row", async () => {
+    // Corpus stores the bare core "90000027117"; the shop row carries an affixed "COOP-90000027117".
+    mockLookupAll.mockImplementation(async (key: string) =>
+      key === "90000027117" ? [CORPUS_ROW] : [],
+    );
+    const res = await POST(makeRequest({ rows: [validRow({ partNumbers: ["COOP-90000027117"] })] }));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.matches[0].status).toBe("matched");
+    // The core key was pre-fetched (not only the raw affixed key).
+    expect(mockLookupAll).toHaveBeenCalledWith("90000027117");
+  });
+});
