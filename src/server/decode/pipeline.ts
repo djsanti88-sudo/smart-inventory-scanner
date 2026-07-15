@@ -140,9 +140,18 @@ function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, 
 // is explicitly classified as a free/local rung for L2-persistence purposes per the review brief, so it
 // correctly falls through to "not paid" (null) here regardless of what it calls internally.
 const PAID_AI_PROVIDER_MARKERS = new Set(["gemini", "openai", "gemini:read", "openai:read", "ai-deep", "ai-cited-deep", "firecrawl"]);
-function classifySourceTier(reasonCode: string, providerNames: string[]): "paid_ai" | "gpt_ladder" | null {
+
+// PAY-ONCE RULE (owner ratified 2026-07-14): a Go-UPC or Fetch V2 win (verified OR suggestion) is paid
+// work - the app must never pay for the same code twice, so its result MUST persist to the durable L2
+// store. "fetchv2" also has to be recognized when Plan D's parallel-resolve stash prepends its own
+// "parallel:<source>" provider name ahead of it in providerNames (see the Fetch V2 rung wiring above) -
+// hence `.some()` membership, not an exact-array match.
+const PAID_RUNG_PROVIDERS = new Set(["go-upc", "fetchv2"]);
+
+export function classifySourceTier(reasonCode: string, providerNames: string[]): "paid_ai" | "gpt_ladder" | "paid_rung" | null {
   if (reasonCode === "gpt_ladder") return "gpt_ladder";
   if (providerNames.some((n) => PAID_AI_PROVIDER_MARKERS.has(n))) return "paid_ai";
+  if (providerNames.some((n) => PAID_RUNG_PROVIDERS.has(n))) return "paid_rung";
   return null;
 }
 
@@ -955,24 +964,38 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     throw e;
   }
 
-  // L2 WRITE-THROUGH (Task 4; IMPORTANT 3 review fix): only on a genuinely fresh compute
-  // (cached === false) - a repeat served straight from L1 must never re-persist. Never touches the
-  // store under E2E. verified/suggested -> permanent "result" ONLY when classifySourceTier says the
-  // outcome came from a PAID stage (a later decode of this code then replays it with zero provider
-  // work, in ANY serverless instance, not just this one); a free-rung win (tire corpus / Turso retail /
-  // Plan D) is intentionally left UNPERSISTED so a future corpus/index correction is never masked by a
-  // stale permanent cache entry. A genuinely exhausted ladder (classifyReceipt, tracked in receiptState
-  // from whichever exit ran the ladder) -> permanent "no_result_receipt". Anything else (needs_review
-  // from a transient skip, or a conflict) is left untouched - it stays retryable exactly like today's
+  // L2 WRITE-THROUGH (Task 4; IMPORTANT 3 review fix; extended by the PAY-ONCE rule, owner 2026-07-14):
+  // only on a genuinely fresh compute (cached === false) - a repeat served straight from L1 must never
+  // re-persist. Never touches the store under E2E. verified/suggested -> permanent "result" ONLY when
+  // classifySourceTier says the outcome came from a PAID stage (a later decode of this code then
+  // replays it with zero provider work, in ANY serverless instance, not just this one); a free-rung win
+  // (tire corpus / Turso retail / Plan D) is intentionally left UNPERSISTED so a future corpus/index
+  // correction is never masked by a stale permanent cache entry.
+  //
+  // PAY-ONCE nuance: a Go-UPC/Fetch V2 SUGGESTION (e.g. goupc_inferred) is ALSO paid work - the call
+  // already happened and was already charged - even though decideDecode leaves it at status
+  // "needs_review" rather than "suggested". So a paid_rung outcome persists on ANY status, as long as
+  // it carries a usable identity (isUsableProductName), not just on "verified"/"suggested". It replays
+  // as the same suggestion next time; forceRetry still overrides. Free-rung needs_review outcomes are
+  // NOT covered by this branch (sourceTier is null for them), so they still never persist.
+  //
+  // A genuinely exhausted ladder (classifyReceipt, tracked in receiptState from whichever exit ran the
+  // ladder) -> permanent "no_result_receipt". Anything else (needs_review from a transient skip, or a
+  // conflict, with no paid-rung identity) is left untouched - it stays retryable exactly like today's
   // short-TTL L1 miss cache. forceRetry's fresh compute overwrites whatever was there (persistDecode is
   // an upsert by code).
   if (!e2eMode() && !cached) {
     const status = payload.decision.status;
+    const sourceTier = classifySourceTier(payload.reasonCode, payload.providerNames);
+    const hasUsableIdentity = payload.results.some((r) => isUsableProductName(r.productName));
     if (status === "verified" || status === "suggested") {
-      const sourceTier = classifySourceTier(payload.reasonCode, payload.providerNames);
       if (sourceTier) {
         await persistDecode({ code: cacheKey, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
       }
+    } else if (sourceTier === "paid_rung" && hasUsableIdentity) {
+      // A paid_rung suggestion that never reached "verified"/"suggested" status (e.g. goupc_inferred
+      // stays "needs_review") - still paid work, still persists, tier records the true status.
+      await persistDecode({ code: cacheKey, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
     } else if (receiptState.eligible) {
       await persistDecode({ code: cacheKey, kind: "no_result_receipt", payload: JSON.stringify(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
     }

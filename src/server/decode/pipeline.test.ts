@@ -20,13 +20,13 @@ vi.mock("@/server/upc/storage", async (importOriginal) => {
   };
 });
 
-import { runDecodePipeline, DailyCapExceededError } from "@/server/decode/pipeline";
+import { runDecodePipeline, DailyCapExceededError, classifySourceTier } from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { __resetForTest, readDailyUsed } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
-import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
+import { __resetForTest as __resetDecodeCacheStoreForTest, getPersistedDecode } from "@/server/decodeCacheStore";
 
 // Thin unit tests for the extracted decode pipeline (Task 2.4). They run with NO API keys and a fully
 // STUBBED global.fetch, so NO live provider call and NO real network can occur - every rung either
@@ -50,6 +50,11 @@ function makeReq(code: string) {
 }
 
 const ladderKvFile = () => path.join(os.tmpdir(), `ladder-storage-pipeline-test-${process.pid}`, ".ladder-kv.json");
+// Isolated per-process L2 decode-cache file so persistDecode/getPersistedDecode in these tests never
+// read or write the real repo-root .decode-cache.json, and never leak a "result" from one test's
+// PAY-ONCE persistence assertions into the next test's (previously-passing tests never exercised L2
+// persistence, so this gap was latent until the PAY-ONCE suggestion-persist tests below).
+const decodeCacheTestFile = () => path.join(os.tmpdir(), `decode-cache-pipeline-test-${process.pid}.json`);
 
 describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   const saved: Record<string, string | undefined> = {};
@@ -61,6 +66,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     __resetDecodeCacheStoreForTest();
     clearDecodeCache();
     try { fs.unlinkSync(ladderKvFile()); } catch {}
+    try { fs.unlinkSync(decodeCacheTestFile()); } catch {}
     for (const k of keys) saved[k] = process.env[k];
     // Guards ACTIVE (not E2E) + NO provider keys (so every rung skips or misses; no real network).
     delete process.env.IS_E2E;
@@ -71,6 +77,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     delete process.env.BRAVE_SEARCH_API_KEY;
     delete process.env.TURSO_DATABASE_URL;
     delete process.env.TURSO_AUTH_TOKEN;
+    process.env.DECODE_CACHE_FILE = decodeCacheTestFile();
     // Any stray outbound fetch resolves to a benign 404 - proves no live provider is required.
     fetchSpy = vi.fn(async () => new Response("not found", { status: 404 }));
     vi.stubGlobal("fetch", fetchSpy);
@@ -81,6 +88,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }
+    try { fs.unlinkSync(decodeCacheTestFile()); } catch {}
     vi.unstubAllGlobals();
   });
 
@@ -210,5 +218,102 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(seen[0]).toBe("00036000291452");
 
     withDecodeCacheSpy.mockRestore();
+  });
+
+  // PAY-ONCE RULE (owner ratified 2026-07-14): a Go-UPC or Fetch V2 win is PAID WORK - it must persist
+  // to the durable L2 store so no other serverless instance ever pays for the same code twice. Free
+  // rungs (tire-corpus, retail, upcitemdb, openfoodfacts, parallel:* i.e. Plan D) must still NEVER
+  // persist - a wrong free guess must stay correctable by a future corpus update.
+  describe("classifySourceTier (PAY-ONCE persistence classification)", () => {
+    it("PAY-ONCE: a Go-UPC verified win persists to L2", () => {
+      expect(classifySourceTier("ok", ["go-upc"])).toBe("paid_rung");
+    });
+
+    it("PAY-ONCE: a Fetch V2 win persists even when Plan D stash prepended its provider name", () => {
+      expect(classifySourceTier("ok", ["parallel:barcodeDb", "fetchv2"])).toBe("paid_rung");
+    });
+
+    it("gpt_ladder reasonCode still classifies as gpt_ladder (unchanged, checked before paid_rung)", () => {
+      expect(classifySourceTier("gpt_ladder", ["gpt"])).toBe("gpt_ladder");
+    });
+
+    it("legacy paid AI provider markers still classify as paid_ai (unchanged, checked before paid_rung)", () => {
+      expect(classifySourceTier("ok", ["gemini"])).toBe("paid_ai");
+      expect(classifySourceTier("ok", ["openai"])).toBe("paid_ai");
+    });
+
+    it("free rungs still never persist", () => {
+      expect(classifySourceTier("ok", ["tire-corpus"])).toBeNull();
+      expect(classifySourceTier("needs_review", ["upcitemdb"])).toBeNull();
+      expect(classifySourceTier("needs_review", ["openfoodfacts"])).toBeNull();
+      expect(classifySourceTier("ok", ["parallel:groundIdentify"])).toBeNull();
+    });
+  });
+
+  describe("PAY-ONCE L2 write-through: paid-rung suggestions persist too", () => {
+    const GOUPC_HOST = "go-upc.com";
+
+    function stubGoUpcInferredHit() {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(GOUPC_HOST)) {
+          return new Response(
+            JSON.stringify({
+              inferred: true,
+              product: { name: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire", specs: [] },
+            }),
+            { status: 200 }
+          );
+        }
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    }
+
+    function stubGoUpcGenuineMiss() {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(GOUPC_HOST)) return new Response("not found", { status: 404 }); // genuine miss
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    }
+
+    it("a goupc_inferred SUGGESTION (needs_review) is paid work and persists to L2", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubGoUpcInferredHit();
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.providerNames).toContain("go-upc");
+      expect(outcome.payload.decision.status).toBe("needs_review"); // inferred hit is a suggestion, not verified
+
+      const persisted = await getPersistedDecode("00" + VALID_GTIN);
+      expect(persisted).not.toBeNull();
+      expect(persisted?.kind).toBe("result");
+      expect(persisted?.sourceTier).toBe("paid_rung");
+    });
+
+    it("a genuine Go-UPC miss (no usable identity) does NOT persist a result to L2", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubGoUpcGenuineMiss();
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).not.toBe("verified");
+
+      const persisted = await getPersistedDecode("00" + VALID_GTIN);
+      // Either nothing was persisted, or (if the exhausted ladder earned a receipt) it is a receipt,
+      // never a "result" - a miss must never fabricate a permanent paid_rung result.
+      if (persisted) {
+        expect(persisted.kind).not.toBe("result");
+      }
+    });
   });
 });
