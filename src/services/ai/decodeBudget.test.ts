@@ -35,4 +35,16 @@ describe("clampDecodeBudgetMs (server-side safety clamp)", () => {
     expect(DECODE_BUDGET_DEFAULT_MS).toBe(8_000);
     expect(clampDecodeBudgetMs(13_000)).toBe(8_000); // a stale 13s client setting is clamped down
   });
+
+  // B6 (2026-07-15): exact boundary assertions for the [5000, 8000] clamp range - the tests above cover
+  // clearly-out-of-range values; these pin the exact edges so a future off-by-one in clampToRange trips
+  // immediately.
+  it("B6: clamp bounds are exactly [5000, 8000]", () => {
+    expect(clampDecodeBudgetMs(1)).toBe(5000);
+    expect(clampDecodeBudgetMs(4999)).toBe(5000);
+    expect(clampDecodeBudgetMs(8001)).toBe(8000);
+    expect(clampDecodeBudgetMs(20000)).toBe(8000);
+    expect(clampDecodeBudgetMs(undefined)).toBe(8000);
+    expect(clampDecodeBudgetMs("garbage")).toBe(8000);
+  });
 });

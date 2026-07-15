@@ -176,4 +176,36 @@ describe("aiSpendGuard", () => {
       }
     });
   });
+
+  // B8 (2026-07-15): the cap has two historical bugs (double-billing across two request paths -
+  // LESSONS L12 - and the 232/200 counter that incremented on REJECTED requests). Storage-level
+  // atomicity is already proven above ("20 concurrent charges land on exactly 20"). This block adds
+  // the GUARD-level contract: (a) a wider concurrent burst still bills exactly once per genuine call,
+  // and (b) the pipeline's actual read-check-charge dance (readDailyUsed then chargeDailySlot, NOT a
+  // single atomic compare-and-swap) has a KNOWN, BOUNDED TOCTOU window - concurrent callers can all
+  // pass the read-check before any of them charges, so overshoot is bounded by concurrency, never
+  // unbounded. This documents the accepted semantics; it does not claim the race is eliminated.
+  describe("B8 daily cap race contract (guard level)", () => {
+    it("50 parallel chargeDailySlot calls bill exactly 50 (no lost increments)", async () => {
+      const s = memStorage();
+      await Promise.all(Array.from({ length: 50 }, () => chargeDailySlot(s, { limit: 500, dateKey: "2026-07-15" })));
+      expect(await readDailyUsed(s, "2026-07-15")).toBe(50);
+    });
+
+    it("read-then-charge overshoot is bounded by caller concurrency (documented TOCTOU)", async () => {
+      // limit 10, 15 concurrent callers doing the pipeline's read-check-charge dance:
+      const s = memStorage();
+      const limit = 10;
+      let charged = 0;
+      await Promise.all(Array.from({ length: 15 }, async () => {
+        const used = await readDailyUsed(s, "2026-07-15");
+        if (used >= limit) return;
+        await chargeDailySlot(s, { limit, dateKey: "2026-07-15" });
+        charged++;
+      }));
+      // The check-then-charge window means up to (concurrency) overshoot, never unbounded:
+      expect(charged).toBeGreaterThanOrEqual(10);
+      expect(charged).toBeLessThanOrEqual(15);
+    });
+  });
 });
