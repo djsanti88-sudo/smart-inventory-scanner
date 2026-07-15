@@ -1274,4 +1274,64 @@ describe("fetchV2 pipeline", () => {
     });
     expect(r.outcome).not.toBe("verified");
   });
+
+  // ---------------------------------------------------------- AM-7 / Task 12: ASIN + keyless door
+  test("AM-7: the FREE pattern-URL door fires for a public barcode with ZERO discovery providers (keyless reachability)", async () => {
+    // Before AM-7 the door lived inside `if (needsDiscovery && deps.discovery.length > 0)` - an
+    // empty discovery array (no keys configured) skipped the door entirely, even though it is free
+    // and needs no discovery provider at all. This proves the door is now reachable keyless.
+    const C = "028400325042";
+    const html = `<html><head><title>Doritos Cool Ranch - GoUPC</title>
+<script type="application/ld+json">{"@type":"Product","name":"Doritos Cool Ranch Tortilla Chips 9.25 oz","brand":{"name":"Doritos"},"gtin13":"0028400325042"}</script></head><body>UPC ${C}</body></html>`;
+    const fetchPage = vi.fn(async () => ({ ok: true, status: 200, html }));
+    const r = await fetchV2(C, {
+      fetchPage,
+      discovery: [], // no discovery providers configured at all
+      patternUrls: () => ["https://go-upc.example.com/search?q=" + C],
+    });
+    expect(fetchPage).toHaveBeenCalledWith("https://go-upc.example.com/search?q=" + C);
+    expect(["verified", "suggested"]).toContain(r.outcome);
+    expect(r.product.name).toContain("Doritos");
+  });
+
+  test("Task 12/ASIN door: an asin identifier fetches its pattern URL and yields a suggestion-grade identity, never verified", async () => {
+    const ASIN = "B08XYZ1234";
+    // A realistic Amazon /dp/ page: JSON-LD Product carrying the ASIN in sku/mpn (Amazon dp pages
+    // commonly emit structured data this way) plus the literal "ASIN B08XYZ1234" detail-table text.
+    const html = `<html><head><title>Anker PowerCore 10000 Portable Charger</title>
+<script type="application/ld+json">{"@type":"Product","name":"Anker PowerCore 10000 Portable Charger","brand":{"name":"Anker"},"sku":"${ASIN}"}</script></head>
+<body><table><tr><th>ASIN</th><td>${ASIN}</td></tr></table></body></html>`;
+    const fetchPage = vi.fn(async (url: string) =>
+      url === `https://www.amazon.com/dp/${ASIN}` ? { ok: true, status: 200, html } : { ok: false, status: 404, html: "" },
+    );
+    const r = await fetchV2(ASIN, {
+      fetchPage,
+      discovery: [],
+      patternUrls: () => [`https://www.amazon.com/dp/${ASIN}`],
+    });
+    expect(fetchPage).toHaveBeenCalledWith(`https://www.amazon.com/dp/${ASIN}`);
+    expect(r.sourcesChecked).toContain(`https://www.amazon.com/dp/${ASIN}`);
+    expect(r.identifier.type).toBe("asin");
+    expect(r.product.name).toContain("Anker");
+    // Suggestion-grade by construction: decideOutcome never verifies a non-public-barcode identifier.
+    expect(r.outcome).not.toBe("verified");
+    expect(r.outcome).toBe("suggested");
+    expect(r.countBehavior.productAssignmentAllowed).toBe(false);
+  });
+
+  test("Task 12/ASIN door: a bot-walled dp page (503 Robot Check) degrades to no identity, no crash", async () => {
+    const ASIN = "B08XYZ1234";
+    const robotHtml = `<html><head><title>Robot Check</title></head><body>Sorry, we just need to make sure you're not a robot.</body></html>`;
+    const fetchPage = vi.fn(async () => ({ ok: false, status: 503, html: robotHtml }));
+    const r = await fetchV2(ASIN, {
+      fetchPage,
+      discovery: [],
+      patternUrls: () => [`https://www.amazon.com/dp/${ASIN}`],
+    });
+    expect(fetchPage).toHaveBeenCalledWith(`https://www.amazon.com/dp/${ASIN}`);
+    expect(r.product.name).toBe("");
+    expect(r.outcome).not.toBe("verified");
+    // Falls through exactly like today's vendor-label dead end: unknown/needs_review, never a crash.
+    expect(["unknown", "needs_review", "suggested"]).toContain(r.outcome);
+  });
 });

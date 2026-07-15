@@ -144,7 +144,72 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
   }
 
   // 4) Discovery (candidate URLs only) -> prioritized page fetches with junk gate + association proof.
+  // junkUrls/processPage are shared by the FREE pattern-URL door (below, keyless) and the paid
+  // discovery-provider loop (inside the needsDiscovery guard) - both stages mark bad URLs the same way.
+  const junkUrls = new Set<string>();
+  const processPage = async (cand: DiscoveryCandidate): Promise<SourceFinding | null> => {
+    let page: FetchedPage;
+    try {
+      page = await deps.fetchPage(cand.url);
+    } catch {
+      deps.cache?.markBadUrl(cand.url, "fetch failed");
+      return null;
+    }
+    sourcesChecked.push(cand.url);
+    if (!page.ok) {
+      deps.cache?.markBadUrl(cand.url, `http ${page.status}`);
+      return null;
+    }
+    const title = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() ?? cand.title;
+    const text = htmlToText(page.html);
+    const junk = evaluatePageJunk({ url: cand.url, title, text }, normalized.primary);
+    if (junk.rejected) {
+      if (junk.reasons.some((r) => /search|echo|no-result|not-found|invalidat|recycled|only in the url/i.test(r))) {
+        junkUrls.add(cand.url);
+      }
+      deps.cache?.markBadUrl(cand.url, junk.reasons[0] ?? "junk page");
+      const f: SourceFinding = { url: cand.url, association: { level: "none", matchedVariant: "", matchedField: "", product: null }, product: null, junkRejected: true, junkReasons: junk.reasons, quality: "rejected", score: 0 };
+      findings.push(f);
+      return f;
+    }
+    const products = extractProducts(page.html).map((p) => ({
+      ...p,
+      name: usableIdentityName(p.name, normalized.primary) ? p.name : "",
+      brand: cleanBrand(p.brand),
+    }));
+    const association = proveAssociation(normalized.all, products, text, cand.url);
+    if (association.level === "none" && products.length === 0) {
+      deps.cache?.markBadUrl(cand.url, "no code evidence and no product structure");
+    }
+    const { quality, score } = scoreSource(cand.url, association, false);
+    const f: SourceFinding = { url: cand.url, association, product: association.product, junkRejected: false, junkReasons: [], quality, score };
+    findings.push(f);
+    return f;
+  };
+
+  // FREE pattern-URL door (owner: one good website is enough): predictable barcode-DB product
+  // pages (or an ASIN's /dp/ catalog page), direct-fetched before any paid search and BEFORE any
+  // discovery-provider check - it needs no discovery provider at all (AM-7: previously nested
+  // inside `needsDiscovery && deps.discovery.length > 0`, so a keyless environment with zero
+  // discovery providers configured never ran this free, no-cost door, even for a public barcode).
+  // Task 12 extends the gate to ASIN identifiers; decideOutcome never verifies a non-public-barcode
+  // identity, so an ASIN hit here is suggestion-grade by construction, never auto-counted.
   const needsDiscovery = !findings.some((f) => f.quality === "strong" && f.association.level === "strong");
+  if (needsDiscovery && deps.patternUrls && (identifier.isPublicBarcode || identifier.type === "asin")) {
+    for (const url of deps.patternUrls(normalized.all).slice(0, 2)) {
+      if (timeLeft() <= 0) { earlyStopped = true; break; }
+      const f = await processPage({ url, title: "", snippet: "", rank: -1 });
+      if (f && !f.junkRejected && f.association.level === "strong" && (f.product?.name ?? "").trim()) {
+        rulesFired.push(
+          f.quality === "strong"
+            ? "free pattern-URL door secured a STRONG identity - entire provider loop skipped"
+            : "free pattern-URL door secured the identity - paid search skipped (free corroboration may still run)",
+        );
+        break;
+      }
+    }
+  }
+
   if (needsDiscovery && deps.discovery.length > 0) {
     let candidates: DiscoveryCandidate[] = [];
     let exactMatchCandidates: DiscoveryCandidate[] = [];
@@ -153,64 +218,6 @@ export async function fetchV2(raw: string, deps: FetchV2Deps, opts: FetchV2Optio
     // (scoring.ts). Host is kept so a finding can never fence itself with its OWN page's title
     // (review finding: brave returning the same vetted URL would trivially self-agree).
     const freeTitles: Array<{ title: string; host: string }> = [];
-
-    const junkUrls = new Set<string>();
-    const processPage = async (cand: DiscoveryCandidate): Promise<SourceFinding | null> => {
-      let page: FetchedPage;
-      try {
-        page = await deps.fetchPage(cand.url);
-      } catch {
-        deps.cache?.markBadUrl(cand.url, "fetch failed");
-        return null;
-      }
-      sourcesChecked.push(cand.url);
-      if (!page.ok) {
-        deps.cache?.markBadUrl(cand.url, `http ${page.status}`);
-        return null;
-      }
-      const title = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim() ?? cand.title;
-      const text = htmlToText(page.html);
-      const junk = evaluatePageJunk({ url: cand.url, title, text }, normalized.primary);
-      if (junk.rejected) {
-        if (junk.reasons.some((r) => /search|echo|no-result|not-found|invalidat|recycled|only in the url/i.test(r))) {
-          junkUrls.add(cand.url);
-        }
-        deps.cache?.markBadUrl(cand.url, junk.reasons[0] ?? "junk page");
-        const f: SourceFinding = { url: cand.url, association: { level: "none", matchedVariant: "", matchedField: "", product: null }, product: null, junkRejected: true, junkReasons: junk.reasons, quality: "rejected", score: 0 };
-        findings.push(f);
-        return f;
-      }
-      const products = extractProducts(page.html).map((p) => ({
-        ...p,
-        name: usableIdentityName(p.name, normalized.primary) ? p.name : "",
-        brand: cleanBrand(p.brand),
-      }));
-      const association = proveAssociation(normalized.all, products, text, cand.url);
-      if (association.level === "none" && products.length === 0) {
-        deps.cache?.markBadUrl(cand.url, "no code evidence and no product structure");
-      }
-      const { quality, score } = scoreSource(cand.url, association, false);
-      const f: SourceFinding = { url: cand.url, association, product: association.product, junkRejected: false, junkReasons: [], quality, score };
-      findings.push(f);
-      return f;
-    };
-
-    // FREE pattern-URL door (owner: one good website is enough): predictable barcode-DB product
-    // pages, direct-fetched before any paid search. Identity secured here = zero credits spent.
-    if (deps.patternUrls && identifier.isPublicBarcode) {
-      for (const url of deps.patternUrls(normalized.all).slice(0, 2)) {
-        if (timeLeft() <= 0) { earlyStopped = true; break; }
-        const f = await processPage({ url, title: "", snippet: "", rank: -1 });
-        if (f && !f.junkRejected && f.association.level === "strong" && (f.product?.name ?? "").trim()) {
-          rulesFired.push(
-            f.quality === "strong"
-              ? "free pattern-URL door secured a STRONG identity - entire provider loop skipped"
-              : "free pattern-URL door secured the identity - paid search skipped (free corroboration may still run)",
-          );
-          break;
-        }
-      }
-    }
     // Economic rule: a STRONG-quality identity skips the ENTIRE provider loop - nothing left to
     // prove. Any held identity (even medium, e.g. a single structured/pattern hit) still lets the
     // FREE provider (index 0) run once for corroboration, but PAID escalation providers (i > 0)
