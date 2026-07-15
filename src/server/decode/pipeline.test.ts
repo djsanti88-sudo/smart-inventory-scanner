@@ -74,7 +74,11 @@ import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 // rung that came back empty (owner: never silent); (2) a cap-exhausted request is blocked from the
 // paid ladder with an honest cap reason.
 
-const AI_PROVIDER_HOSTS = ["generativelanguage.googleapis.com", "api.openai.com", "go-upc.com", "firecrawl.dev"];
+// PAID/live provider endpoints only. Go-UPC is pinned to its paid API PATH ("go-upc.com/api", the
+// key-gated GET /api/v1/code endpoint) because since AM-7 the FREE fetchv2 pattern-URL door fetches
+// the go-upc.com/search PAGE ($0 scrape, no key) even with zero discovery providers configured -
+// that free page fetch is intended keyless behavior, not a paid provider call.
+const AI_PROVIDER_HOSTS = ["generativelanguage.googleapis.com", "api.openai.com", "go-upc.com/api", "firecrawl.dev"];
 
 function makeReq(code: string) {
   return {
@@ -155,6 +159,12 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(rungsSeen).toContain("gpt");
     // No live AI/paid provider was contacted (all keys absent).
     expect(hitAnAiProvider()).toBe(false);
+    // AM-7: with ZERO discovery providers (no Brave/Firecrawl keys) the FREE pattern-URL door still
+    // runs - the stubbed fetch sees the $0 go-upc.com/search PAGE scrape (it 404s = clean miss),
+    // and the paid Go-UPC API (/api/v1/code, key-gated) is never touched.
+    const goUpcCalls = fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("go-upc.com"));
+    expect(goUpcCalls.length).toBeGreaterThan(0);
+    expect(goUpcCalls.every((u) => !u.includes("go-upc.com/api"))).toBe(true);
   }, 30000);
 
   it("cap-blocked: an exhausted daily cap blocks the paid ladder with an honest cap reason and zero paid calls", async () => {
