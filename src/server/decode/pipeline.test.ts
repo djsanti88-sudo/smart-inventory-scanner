@@ -385,4 +385,148 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       }
     });
   });
+
+  // ORDER v3 + ESCALATE-PAST-SUGGESTION (owner ratified 2026-07-14, Task 7). New computeDecode order:
+  // retail peek -> FREE ladder rungs -> Plan D -> cap gate -> paid ladder. A free-rung SUGGESTION
+  // (UPCitemdb / Open Food Facts always suggest, never verify) no longer STOPS the pipeline: it is
+  // stashed as a fallback, the pipeline continues to Plan D and then a cap-charged GO-UPC-ONLY phase.
+  // Go-UPC verified exact -> Go-UPC wins; otherwise the free suggestion is the final answer, and
+  // fetchv2/gpt NEVER run past it. A total free MISS keeps today's full paid ladder.
+  describe("ORDER v3 escalate-past-suggestion", () => {
+    const GOUPC_HOST = "go-upc.com";
+
+    // Isolation: the Go-UPC negative miss cache lives in the SHARED per-pid ladder-storage tmp dir and
+    // is NOT cleared by the outer beforeEach (only the daily-cap KV is). An earlier PAY-ONCE "genuine
+    // Go-UPC miss" test writes a 30-day negative-cache entry for VALID_GTIN; without clearing it, this
+    // suite's Go-UPC escalation would short-circuit on the stale miss instead of the fresh 200 hit.
+    beforeEach(() => {
+      try { fs.unlinkSync(path.join(os.tmpdir(), `ladder-storage-pipeline-test-${process.pid}`, ".go-upc-miss-cache.json")); } catch {}
+    });
+
+    // Drive UPCitemdb -> a suggestion hit; Go-UPC -> verified exact (200, inferred:false); everything
+    // else 404. Open Food Facts misses (status 0). A verified exact Go-UPC hit needs a code whose GS1
+    // prefix isn't a known single-brand owner - VALID_GTIN "900000000003" (prefix 9000000) qualifies.
+    function stubUpcSuggestionThenGoupc(opts: { goupcVerified: boolean }) {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) {
+          return new Response(
+            JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }),
+            { status: 200 }
+          );
+        }
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes(GOUPC_HOST)) {
+          if (opts.goupcVerified) {
+            return new Response(
+              JSON.stringify({ inferred: false, product: { name: "Continental TrueContact Tour 235/60R18", brand: "Continental", category: "Tire", specs: [] } }),
+              { status: 200 }
+            );
+          }
+          return new Response("not found", { status: 404 }); // Go-UPC genuine miss
+        }
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    }
+
+    const ladderRungsOf = (out: Awaited<ReturnType<typeof runDecodePipeline>>): string[] => {
+      if (out.kind !== "computed") return [];
+      const reasons = out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+      return (reasons ?? []).map((r) => r.rung);
+    };
+
+    it("free rungs run BEFORE the paid Go-UPC phase (no paid spend charged before the free UPCitemdb suggestion)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      // The free UPCitemdb suggestion is observed FIRST in the reasons chain, ahead of goupc.
+      const rungs = ladderRungsOf(out);
+      expect(rungs.indexOf("upcitemdb")).toBeGreaterThanOrEqual(0);
+      expect(rungs.indexOf("upcitemdb")).toBeLessThan(rungs.indexOf("goupc"));
+    });
+
+    it("ESCALATION: a free suggestion continues to Go-UPC; a Go-UPC verified exact WINS", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      expect(out.payload.decision.status).toBe("verified");
+      expect(out.payload.providerNames).toContain("go-upc");
+      // The escalation ran Go-UPC only; fetchv2/gpt were NEVER reached.
+      const rungs = ladderRungsOf(out);
+      expect(rungs).not.toContain("fetchv2");
+      expect(rungs).not.toContain("gpt");
+    });
+
+    it("ESCALATION: a Go-UPC miss falls back to the stashed free suggestion; fetchv2/gpt NEVER run", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubUpcSuggestionThenGoupc({ goupcVerified: false });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      // The stashed free suggestion is the final answer (its provider name survives in the payload).
+      expect(out.payload.providerNames).toContain("upcitemdb");
+      // fetchv2/gpt must never run past a free suggestion.
+      const rungs = ladderRungsOf(out);
+      expect(rungs).not.toContain("fetchv2");
+      expect(rungs).not.toContain("gpt");
+    });
+
+    it("cap slot IS charged for the escalation Go-UPC call (paid work is paid work)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      await runDecodePipeline(makeReq(VALID_GTIN));
+
+      // Exactly one paid slot charged for the escalation Go-UPC phase.
+      expect(await readDailyUsed(await ladderStorage())).toBe(1);
+    });
+
+    it("ESCALATION cap-blocked: an exhausted cap blocks the Go-UPC escalation, free suggestion still stands, zero charge", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubUpcSuggestionThenGoupc({ goupcVerified: true });
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      // The cap gate throws before the paid Go-UPC escalation runs -> route turns it into a cap block.
+      expect(out.kind).toBe("cap_blocked");
+      if (out.kind !== "cap_blocked") throw new Error("unreachable");
+      expect(out.message).toMatch(/cap/i);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("free phase TOTAL MISS still runs the full paid ladder (goupc -> fetchv2 -> gpt) as before", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      // Free rungs both miss; Go-UPC misses too -> the full paid ladder runs in order.
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      const rungs = ladderRungsOf(out);
+      // The full paid ladder ran after the free miss: goupc -> fetchv2 -> gpt all present.
+      expect(rungs).toEqual(["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]);
+    });
+  });
 });
