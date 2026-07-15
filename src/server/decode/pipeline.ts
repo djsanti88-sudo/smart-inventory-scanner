@@ -256,7 +256,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
 
   // Z3 (owner pay-once rule 2026-07-14): ALL cache identities are canonical so two zero-padding
   // encodings of one product never produce two cache entries, two paid runs, or two cap slots.
-  // The raw code still flows to every provider/evidence check unchanged.
+  // The raw code still flows to every provider/evidence check AND the daily-cap/ladder logic
+  // unchanged. MIGRATION NOTE (accepted one-time cost): L2 rows persisted before this change are
+  // keyed by the RAW code; canonical reads miss them, so each previously cached GTIN-shaped code
+  // recomputes ONCE after deploy (old rows are orphaned, never wrong - upsert re-fills canonically).
   const cacheKey = canonicalGtin(code) ?? code;
 
   // L2 PERSISTENT DECODE CACHE (Task 4): consulted on an L1 miss, BEFORE the daily cap check below -
