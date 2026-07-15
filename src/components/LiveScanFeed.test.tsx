@@ -116,6 +116,23 @@ describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3
     expect(screen.queryByText(/unconfirmed/i)).not.toBeInTheDocument();
   });
 
+  it("Task 9: an app-verified off-category row shows the 'Off-category item' tag (hot sauce in a tire shop)", () => {
+    const event = {
+      id: "evOff", rawCode: "0792080004312", cleanCode: "0792080004312", matchedProductId: "pOff", matchType: "barcode",
+      status: "known", quantityAfterScan: 1, decodeStatus: "verified", reason: "", syncStatus: "synced", createdAt: Date.now(),
+      offCategory: true,
+    } as unknown as ScanEvent;
+    useScanStore.setState({
+      scanFeed: [event], needsReviewQueue: [], finalCounts: [],
+      products: [{ id: "pOff", name: "Original Anchor Bar Hot Sauce", primarySku: "", provisional: false } as unknown as Product],
+    });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByText("Original Anchor Bar Hot Sauce")).toBeInTheDocument();
+    expect(screen.getByTestId("feed-off-category-evOff")).toHaveTextContent("Off-category item");
+  });
+
   it("prettifies a corpus slug product name (Task 5)", () => {
     const event = {
       id: "ev5", rawCode: "078742051987", cleanCode: "078742051987", matchedProductId: "p5", matchType: "barcode",

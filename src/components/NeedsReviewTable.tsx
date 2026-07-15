@@ -128,7 +128,10 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
       <td className="px-4 py-3 font-mono text-sm" data-testid="review-barcode">{review.cleanCode || review.rawCode || "-"}</td>
       <td className="max-w-48 px-4 py-3 text-sm text-zinc-700" data-testid="review-reason">
         {review.reason || "Unknown code."}
-        {typeof review.autoVerifyScore === "number" && (
+        {/* Task 9 copy fix: never show the "confidence too low" demotion next to a decode the app actually
+            VERIFIED. The old demotion rendered a bogus "50/100" beside a real 90% app-verified decode (the
+            hot-sauce incident). A verified decode is not "too low to save" - its confidence is honest. */}
+        {typeof review.autoVerifyScore === "number" && review.decodeStatus !== "verified" && (
           <span className="mt-1 block text-zinc-600" data-testid="review-score">
             Confidence too low to save automatically ({review.autoVerifyScore}/100)
           </span>

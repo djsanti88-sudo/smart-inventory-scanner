@@ -835,18 +835,23 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
   });
 
   it("FIREWALL: 745125495781 rivet kit in tire context provisionally counts (category conflict flagged, review stays open)", async () => {
+    // Task 9 (owner-ratified 2026-07-14): the category hard-block now clears ONLY for an APP-VERIFIED exact
+    // code. The go-upc rivet-kit POISON is the canonical weak/unverified class - in production the app's
+    // EvidenceVerifier returns exactCodeEvidenceVerifiedByApp:false for it (the evidence text carries a
+    // DIFFERENT code + an invalidation phrase, proven by src/eval/fixtures.ts:745125495781). Mirror that
+    // real weak shape here so the poison guard is exercised honestly: it STILL hard-blocks and stays open.
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ scanContext: "tire" });
     const { reviewId } = await decode(
       store,
       "745125495781",
       decodeResponse(
-        { status: "verified", confidence: 0.92, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { status: "suggested", confidence: 0.6, reason: "Suggested", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
         { productName: "Manstel 200 Pcs Aluminum Core Blind Rivet Semi-Round Head Screw Kit M3.2X11mm", brand: "", upc: "745125495781", sourceUrls: ["https://go-upc.com/search?q=745125495781"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
-    expect(review.status).toBe("open"); // category conflict flagged for review
+    expect(review.status).toBe("open"); // category conflict flagged for review (poison guard intact)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name.toLowerCase().includes("manstel") || p.name.toLowerCase().includes("rivet"));
     expect(prov).toBeDefined();
@@ -871,14 +876,66 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(1);
   });
 
+  it("TASK 9 (owner-ratified 2026-07-14): an APP-VERIFIED off-category decode COUNTS with an off-category tag and its REAL confidence", async () => {
+    // Real incident: 0792080004312 decoded via Go-UPC EXACT match as "Original Anchor Bar Hot Sauce" at 90%
+    // with app-verified evidence. The tire-context category firewall used to hard-block it to Needs Review
+    // and demote it to a bogus "50/100". Now the app-verified exact code CLEARS the hard-block: it counts,
+    // the feed row is tagged offCategory, the review resolves, and the honest 90% confidence is kept.
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "0792080004312",
+      decodeResponse(
+        { status: "verified", confidence: 0.9, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { productName: "Original Anchor Bar Hot Sauce", brand: "Anchor Bar", category: "food", upc: "0792080004312", sourceUrls: ["https://go-upc.com/search?q=0792080004312"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    // Counts (the category hard-block was cleared by verification, not skipped).
+    expect(store.getState().finalCounts).toHaveLength(1);
+    // Review resolves - it is NOT routed to Needs Review.
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("resolved");
+    // The feed row carries the off-category advisory flag.
+    const feedRow = store.getState().scanFeed.find((e) => e.cleanCode === "0792080004312");
+    expect(feedRow?.offCategory).toBe(true);
+    // COPY FIX: a resolved review never shows the "confidence too low (50/100)" demotion. Even if a score
+    // were present, decodeStatus "verified" suppresses that copy (asserted in the NeedsReviewTable test).
+    // The product exists at its honest identity.
+    const prod = store.getState().products.find((p) => p.name.toLowerCase().includes("hot sauce"));
+    expect(prod).toBeDefined();
+  });
+
+  it("TASK 9 poison guard intact: a WEAK (non-app-verified) non-tire decode in tire context still hard-blocks (no off-category count)", async () => {
+    // Same off-category product, but WITHOUT app-verified exact evidence -> the coconut-oil / poison class.
+    // The hard-block MUST stay: it counts only provisionally (scan N = count N) with the review left OPEN,
+    // and the row is NOT tagged offCategory (the conflict was NOT cleared).
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "0792080004312",
+      decodeResponse(
+        { status: "suggested", confidence: 0.6, reason: "Suggested", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
+        { productName: "Original Anchor Bar Hot Sauce", brand: "Anchor Bar", category: "food", upc: "0792080004312", sourceUrls: ["https://go-upc.com/search?q=0792080004312"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("open"); // still hard-blocked to review
+    expect(review.reason.toLowerCase()).toContain("category conflict");
+    const feedRow = store.getState().scanFeed.find((e) => e.cleanCode === "0792080004312");
+    expect(feedRow?.offCategory).toBeFalsy(); // conflict NOT cleared -> no advisory tag
+  });
+
   it("FIREWALL: after a category conflict provisionally counts, manual relink makes future scans count the correct product", async () => {
+    // Task 9: same weak-poison shape as above (exactCodeEvidenceVerifiedByApp:false) so the rivet kit still
+    // hard-blocks and only provisionally counts - the app-verified clear does NOT apply to the poison class.
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ scanContext: "tire" });
     const { reviewId } = await decode(
       store,
       "745125495781",
       decodeResponse(
-        { status: "verified", confidence: 0.92, reason: "Verified", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { status: "suggested", confidence: 0.6, reason: "Suggested", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
         { productName: "Manstel Aluminum Rivet Kit", brand: "", upc: "745125495781", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
