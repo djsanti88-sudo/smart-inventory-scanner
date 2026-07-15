@@ -31,7 +31,7 @@ const GENERIC_SETTINGS = {
   enableIdempotentSync: true,
   autoSuggestUnknowns: false,
   autoAddDecodedProducts: true,
-  decodeBudgetMs: 13000,
+  decodeBudgetMs: 8000, // AM-9: keep in sync with production DEFAULT_SETTINGS (drift fix 2026-07-15)
   autoCatalogLearningEnabled: true,
   autoVerifyConfidenceThreshold: 80,
   scanContext: "any", // <-- the only deliberate difference from production DEFAULT_SETTINGS ("tire")
