@@ -54,7 +54,7 @@ import { extractTireFields } from "@/services/tire/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
-import { prefixFloorName } from "@/services/catalog/prefixFloor";
+import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
 import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
@@ -113,9 +113,14 @@ export interface ProductDeleteBackup {
  */
 export class DailyCapReachedError extends Error {
   readonly reasonCode = "daily_cap" as const;
-  constructor(message = "Daily AI lookup cap reached") {
+  /** P2 (Task 8): the $0 prefix floor the server threaded through the 429 body when the GS1 company
+   *  prefix knows the company, so the cap-blocked row is named "<Brand> / product unconfirmed" instead
+   *  of a bare "Unidentified item". Undefined when the code has no known prefix (unchanged behavior). */
+  readonly floor?: PrefixFloorResult;
+  constructor(message = "Daily AI lookup cap reached", floor?: PrefixFloorResult) {
     super(message);
     this.name = "DailyCapReachedError";
+    this.floor = floor;
   }
 }
 
@@ -2004,8 +2009,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             //  - anything else: a self-inflicted rate limit (costs $0). Keep the single retry with
             //    backoff, respecting Retry-After, exactly as before.
             if (res.status === 429) {
-              const body = await res.json().catch(() => ({}) as { reasonCode?: string });
-              if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError();
+              const body = await res.json().catch(() => ({}) as { reasonCode?: string; floor?: PrefixFloorResult });
+              // P2: thread the server's $0 prefix floor into the error so the cap-blocked row is named
+              // "<Brand> / product unconfirmed" from the GS1 company prefix, not a bare "Unidentified item".
+              if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError(undefined, body?.floor);
               const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
               await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
               const retry = await fetch("/api/ai-lookup", {
@@ -2493,8 +2500,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // when the GS1 prefix maps to a known brand - see prefixFloorName. Label text comes from the
           // shared provisionalPlaceholderName helper (same one ensureProvisionalCount uses) so this
           // mint can never drift from what resolveUnknown's reload-resilient fallback expects to match.
-          const floor = prefixFloorName(code, codeType);
-          const fbName = provisionalPlaceholderName(code);
+          // P2 (Task 8): on a daily_cap block the SERVER already resolved the floor and threaded it through
+          // the 429 body; prefer that authoritative floor when present (falls back to the identical local
+          // recompute for every other failure). The honest cap reason text (failReason) is unchanged.
+          const capFloor = e instanceof DailyCapReachedError ? e.floor : undefined;
+          const floor = capFloor ?? prefixFloorName(code, codeType);
+          const fbName = capFloor?.name ?? provisionalPlaceholderName(code);
           const cur = get();
           const countedIds = new Set(cur.finalCounts.map((c) => c.productId));
           let provId = cur.products.find(

@@ -100,6 +100,22 @@ describe("X00/Amazon/vendor label rules", () => {
     expect(r.resolverStatus).toBe("known");
     expect(r.productId).toBe("prod-coke");
   });
+
+  it("P4: an X00 FNSKU gets the honest Amazon-fulfillment-label copy (not a public barcode)", () => {
+    const r = resolve("X004DY7YUT");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.reason).toBe(
+      "Amazon fulfillment label (FNSKU). Not a public barcode - resolve via your Amazon inventory.",
+    );
+  });
+
+  it("P4: a B0 ASIN keeps the generic vendor-label copy (only X00 FNSKUs get the FNSKU copy)", () => {
+    const r = resolve("B004DY7YUT");
+    expect(r.codeType).toBe("vendor_label");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.reason).not.toContain("FNSKU");
+    expect(r.reason.toLowerCase()).toContain("label");
+  });
 });
 
 describe("trust gates", () => {

@@ -82,3 +82,26 @@ export function sameBrandFamily(a: string, b: string): boolean {
   const fb = BRAND_TO_FAMILY.get(nb);
   return fa !== undefined && fa === fb;
 }
+
+/** Title-case a normalized (lowercase) family-leader key for display, e.g. "goodyear" -> "Goodyear",
+ *  "mickey thompson" -> "Mickey Thompson". Pure; used only for the family-label suffix below. */
+function titleCaseLeader(leader: string): string {
+  return leader.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * P5 (Task 8) - "never fully unknown" family annotation for the prefix floor. Returns the family label
+ * "<Leader> family" for a NON-LEADER member of a curated group (the leader is the FIRST entry of its
+ * FAMILIES group), or null for a leader, an independent brand (in no group), or empty input. Reuses
+ * this module's own norm() so lookups line up with the family table. Pure, no imports.
+ * Examples: "BFGoodrich" -> "Michelin family"; "Cooper" -> "Goodyear family"; "Michelin" -> null.
+ */
+export function familyLabelFor(brand: string): string | null {
+  const b = norm(brand);
+  if (!b) return null;
+  for (const family of FAMILIES) {
+    const leader = family[0];
+    if (b !== leader && family.includes(b)) return `${titleCaseLeader(leader)} family`;
+  }
+  return null;
+}
