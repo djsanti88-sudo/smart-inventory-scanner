@@ -53,6 +53,10 @@ function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage 
     appendArchive: async (entry) => {
       archives.push(entry);
     },
+    appendOutcome: async () => {
+      // A4 ledger: not exercised by these Go-UPC rung tests; no-op stub keeps the fake LadderStorage
+      // interface-complete after storage.ts added appendOutcome (Task 10/A4).
+    },
     get: async (key) => kv.get(key) ?? null,
     set: async (key, value) => {
       kv.set(key, value);

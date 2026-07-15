@@ -10,6 +10,7 @@ import {
   type UsageState,
   type MissEntry,
   type DecodeArchiveEntry,
+  type DecodeOutcomeEntry,
   type TursoClientLike,
 } from "./storage";
 
@@ -164,6 +165,90 @@ describe("fileLadderStorage", () => {
     });
   });
 
+  describe("outcomes (A4 decode outcome ledger)", () => {
+    it("appends entries and buckets them by createdAt month (append-only JSONL)", async () => {
+      const store = fileLadderStorage(dir);
+      const e1: DecodeOutcomeEntry = {
+        code: "036000291452",
+        canonicalGtin: "0036000291452",
+        settledBy: "go-upc",
+        status: "verified",
+        reasons: [{ rung: "go-upc", reason: "Go-UPC exact barcode match" }],
+        durationMs: 120,
+        sourceTier: "paid_rung",
+        createdAt: "2026-07-08T12:00:00.000Z",
+      };
+      const e2: DecodeOutcomeEntry = {
+        code: "999",
+        canonicalGtin: "0000000000999",
+        settledBy: null,
+        status: "needs_review",
+        reasons: [],
+        durationMs: 40,
+        sourceTier: null,
+        createdAt: "2026-07-09T00:00:00.000Z",
+      };
+      await store.appendOutcome(e1);
+      await store.appendOutcome(e2);
+
+      // Both land in the same YYYY-MM bucket file (2026-07), append-only, order preserved.
+      const monthFile = join(dir, "decode-outcomes", "2026-07.jsonl");
+      expect(existsSync(monthFile)).toBe(true);
+      const lines = readFileSync(monthFile, "utf8").trim().split("\n");
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0])).toEqual(e1);
+      expect(JSON.parse(lines[1])).toEqual(e2);
+    });
+
+    it("buckets a different month into its own file", async () => {
+      const store = fileLadderStorage(dir);
+      const aug: DecodeOutcomeEntry = {
+        code: "888",
+        canonicalGtin: "0000000000888",
+        settledBy: "fetchv2",
+        status: "suggested",
+        reasons: [],
+        durationMs: 500,
+        sourceTier: "paid_rung",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      };
+      await store.appendOutcome(aug);
+      expect(existsSync(join(dir, "decode-outcomes", "2026-08.jsonl"))).toBe(true);
+    });
+
+    it("appending never rewrites existing lines", async () => {
+      const store = fileLadderStorage(dir);
+      const first: DecodeOutcomeEntry = {
+        code: "1",
+        canonicalGtin: "0000000000001",
+        settledBy: "go-upc",
+        status: "verified",
+        reasons: [],
+        durationMs: 100,
+        sourceTier: "paid_rung",
+        createdAt: "2026-07-08T00:00:00.000Z",
+      };
+      await store.appendOutcome(first);
+      const monthFile = join(dir, "decode-outcomes", "2026-07.jsonl");
+      const afterFirst = readFileSync(monthFile, "utf8");
+
+      const second: DecodeOutcomeEntry = {
+        code: "2",
+        canonicalGtin: "0000000000002",
+        settledBy: null,
+        status: "needs_review",
+        reasons: [],
+        durationMs: 200,
+        sourceTier: null,
+        createdAt: "2026-07-20T00:00:00.000Z",
+      };
+      await store.appendOutcome(second);
+      const afterSecond = readFileSync(monthFile, "utf8");
+      // The original bytes are still a prefix of the file (nothing rewritten).
+      expect(afterSecond.startsWith(afterFirst)).toBe(true);
+    });
+  });
+
   describe("resilience", () => {
     it("skips corrupt lines on read of usage/miss without throwing (returns default)", async () => {
       // Corrupt the usage file directly, then confirm read degrades gracefully.
@@ -222,6 +307,7 @@ describe("tursoLadderStorage", () => {
     const usage = new Map<string, number>();
     const miss = new Map<string, { canonical: string; missed_at: string; ttl_days: number }>();
     const archive: Record<string, unknown>[] = [];
+    const outcomes: Record<string, unknown>[] = [];
     const kv = new Map<string, number>();
     const calls: string[] = [];
     return {
@@ -288,6 +374,20 @@ describe("tursoLadderStorage", () => {
           archive.push({ code, canonicalGtin, provider, httpStatus, raw, sourceUrls, fetchedAt });
           return { rows: [] };
         }
+        if (sql.startsWith("INSERT INTO decode_outcomes")) {
+          const [code, canonicalGtin, settledBy, status, reasons, durationMs, sourceTier, createdAt] = args as [
+            string,
+            string,
+            string | null,
+            string,
+            string,
+            number,
+            string | null,
+            string,
+          ];
+          outcomes.push({ code, canonicalGtin, settledBy, status, reasons, durationMs, sourceTier, createdAt });
+          return { rows: [] };
+        }
         throw new Error(`memTursoClient: unhandled SQL: ${sql}`);
       },
     };
@@ -337,6 +437,24 @@ describe("tursoLadderStorage", () => {
     expect(client.calls.some((c) => c.startsWith("INSERT INTO"))).toBe(true);
   });
 
+  it("appendOutcome (A4) inserts append-only (no update/delete SQL issued)", async () => {
+    const client = memTursoClient();
+    const store = tursoLadderStorage(client);
+    const entry: DecodeOutcomeEntry = {
+      code: "036000291452",
+      canonicalGtin: "0036000291452",
+      settledBy: "go-upc",
+      status: "verified",
+      reasons: [{ rung: "go-upc", reason: "Go-UPC exact barcode match" }],
+      durationMs: 120,
+      sourceTier: "paid_rung",
+      createdAt: "2026-07-08T12:00:00.000Z",
+    };
+    await store.appendOutcome(entry);
+    expect(client.calls.some((c) => c.startsWith("UPDATE") || c.startsWith("DELETE"))).toBe(false);
+    expect(client.calls.some((c) => c.startsWith("INSERT INTO"))).toBe(true);
+  });
+
   it("incrementUsage issues an atomic in-SQL increment (used = used + 1), not a JS-computed value", async () => {
     const client = memTursoClient();
     const store = tursoLadderStorage(client);
@@ -361,9 +479,9 @@ describe("tursoLadderStorage", () => {
     await store.readUsage();
     await store.readUsage();
     const createCalls = client.calls.filter((c) => c.startsWith("CREATE TABLE"));
-    // 4 tables (usage, miss cache, archive, generic kv) created on the FIRST call only; the second
-    // readUsage must not re-issue them.
-    expect(createCalls).toHaveLength(4);
+    // 5 tables (usage, miss cache, archive, generic kv, decode outcomes) created on the FIRST call
+    // only; the second readUsage must not re-issue them.
+    expect(createCalls).toHaveLength(5);
   });
 
   describe("generic kv (get/set/increment)", () => {

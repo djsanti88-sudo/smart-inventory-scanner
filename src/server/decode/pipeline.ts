@@ -287,6 +287,49 @@ export type DecodePipelineResult =
 export async function runDecodePipeline(req: DecodePipelineRequest): Promise<DecodePipelineResult> {
   const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry } = req;
 
+  // A4 (owner-ratified 2026-07-15, "trace every non-decode"): started at the very TOP of the OUTER
+  // function (not computeDecode) so durationMs covers the corpus peek, the L2 persisted-decode peek,
+  // and the full ladder -- every exit this request can take. Consumed by Task 12b's ladder deadline
+  // wiring too (see AM-10 serialization note: this task lands first).
+  const decodeStartedAt = Date.now();
+
+  // A4 outcome ledger append (AM-5): fire-and-forget, best-effort -- a ledger failure must never
+  // affect the scan response. Skipped entirely under e2eMode() (tests/Playwright must never touch the
+  // real store). `status` is prefixed "cached:" by the caller for a replayed L1/L2 hit so the rollup
+  // can tell a fresh compute from a replay. Placed at the OUTER runDecodePipeline level (not inside
+  // computeDecode) so it can be called from every exit this function has: the corpus/Plan-D-verified
+  // early returns, the L2 persisted-hit replay, a cap block, and the final computed payload.
+  const appendDecodeOutcome = (entry: {
+    settledBy: string | null;
+    status: string;
+    reasons: Array<{ rung: string; reason: string }>;
+    sourceTier: string | null;
+  }): void => {
+    if (e2eMode()) return;
+    void (async () => {
+      try {
+        const store = await ladderStorage();
+        await store.appendOutcome({
+          code,
+          canonicalGtin: cacheKeyForOutcomeLedger(),
+          settledBy: entry.settledBy,
+          status: entry.status,
+          reasons: entry.reasons,
+          durationMs: Date.now() - decodeStartedAt,
+          sourceTier: entry.sourceTier,
+          createdAt: new Date().toISOString(),
+        });
+      } catch {
+        /* ledger is best-effort */
+      }
+    })();
+  };
+  // canonicalGtin(code) is computed again below as `cacheKey`; this tiny wrapper lets the ledger
+  // helper above be declared before `cacheKey` exists without restructuring the function.
+  function cacheKeyForOutcomeLedger(): string {
+    return canonicalGtin(code) ?? code;
+  }
+
   // Z3 (owner pay-once rule 2026-07-14): ALL cache identities are canonical so two zero-padding
   // encodings of one product never produce two cache entries, two paid runs, or two cap slots.
   // The raw code still flows to every provider/evidence check AND the daily-cap/ladder logic
@@ -311,6 +354,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     const skuShaped = codeType === "alpha_sku" || codeType === "vendor_label";
     const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
     if (corpus) {
+      appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });
       return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false };
     }
   }
@@ -350,6 +394,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     }
     if (parsedPayload) {
       const priorDebug = (parsedPayload.debug as Record<string, unknown> | undefined) ?? {};
+      appendDecodeOutcome({
+        settledBy: (priorDebug.ladderPath as string | undefined) ?? null,
+        status: `cached:${persistedHit.kind === "no_result_receipt" ? "no_result_receipt" : (parsedPayload.decision as { status?: string } | undefined)?.status ?? "unknown"}`,
+        reasons: (priorDebug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [],
+        sourceTier: persistedHit.sourceTier ?? null,
+      });
       return {
         kind: "persisted",
         body: {
@@ -1012,9 +1062,31 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // still name the row "<Brand> / product unconfirmed" instead of a bare "Unidentified item". Null
       // when the code isn't a public barcode or the prefix maps to no confident brand (unchanged behavior).
       const floor = prefixFloorName(code, codeType) ?? undefined;
+      // A4: the cap blocked every paid rung before it could run - settledBy is null and there is no
+      // per-rung reason chain (the block happened BEFORE the paid ladder was ever built), so this is
+      // recorded distinctly as status "cap_blocked" (never conflated with a genuine all-miss).
+      appendDecodeOutcome({ settledBy: null, status: "cap_blocked", reasons: [], sourceTier: null });
       return { kind: "cap_blocked", message: e.message, floor };
     }
     throw e;
+  }
+
+  // A4 outcome ledger (AM-5): the route choke point, now that `payload`/`cached` are both known --
+  // this is the ONE place that sees every settled-decode exit (Plan D verified early return, an
+  // escalation/free-ladder win, a full paid-ladder win, and a total all-rung miss all funnel through
+  // computeDecode into `payload` here). A cached (L1 in-flight-coalesced or memory-cached) hit is
+  // recorded with its status prefixed "cached:" per AM-6/AM-5 so a replay is distinguishable from a
+  // fresh compute in the rollup, rather than double-counting the same underlying decode.
+  {
+    const ladderPath = (payload.debug as Record<string, unknown>).ladderPath as string | undefined;
+    const ladderReasons = ((payload.debug as Record<string, unknown>).ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
+    const status = payload.decision.status;
+    appendDecodeOutcome({
+      settledBy: ladderPath && ladderPath !== "none" ? ladderPath : null,
+      status: cached ? `cached:${status}` : status,
+      reasons: ladderReasons,
+      sourceTier: classifySourceTier(payload.reasonCode, payload.providerNames),
+    });
   }
 
   // L2 WRITE-THROUGH (Task 4; IMPORTANT 3 review fix; extended by the PAY-ONCE rule, owner 2026-07-14):
