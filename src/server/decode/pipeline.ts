@@ -40,6 +40,7 @@ import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
 import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult } from "@/server/upc/ladder";
 import { canonicalGtin } from "@/services/upc/gtin";
+import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
@@ -947,8 +948,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         ladderRun = freeRun;
       }
     } else if (!freeRun.outcome) {
-      // TOTAL FREE MISS: exactly today's path - cap gate then the FULL paid ladder (goupc -> fetchv2 -> gpt).
-      await chargePaidSlot();
+      // TOTAL FREE MISS: cap gate then the FULL paid ladder (goupc -> fetchv2 -> gpt) - BUT (L6, Task
+      // 12c) only charge the cap slot when paid work is genuinely POSSIBLE for this code. With zero
+      // provider keys configured, this branch degrades entirely to the AM-7 keyless pattern-URL scrape
+      // and honest per-rung skips - never a slot for work that was never actually paid. Escalation
+      // above already applies the equivalent gate (goUpcCanPay) for its own paid attempt.
+      if (paidWorkPossible(code)) await chargePaidSlot();
       const paidRun = await runLadder(code, buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }), { deadlineAt: ladderDeadlineAt });
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
       // that actually ran, honestly, in the order it ran.
@@ -1060,12 +1065,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   const hasUsable = (p: Awaited<ReturnType<typeof computeDecode>>) => p.results.some((r) => isUsableProductName(r.productName));
   let payload: Awaited<ReturnType<typeof computeDecode>>;
   let cached: boolean;
+  // AM-5/AM-6 reconciliation: a request that JOINED another in-flight computation (L3 coalescing,
+  // decodeCache.ts) never ran its own compute - the winner's compute already appends its own ledger
+  // row. Appending again here would double-count one underlying decode as N ledger rows for N
+  // concurrent callers. `joined` is undefined for e2eMode/every non-coalesced path (real cache hit,
+  // fresh compute), so the ledger append below still fires exactly as before for those.
+  let joinedInFlight = false;
   try {
     const outcome = e2eMode()
       ? { value: await computeDecode(), cached: false }
       : await withDecodeCache(cacheKey, hasUsable, computeDecode, { forceRefresh: forceRetry });
     payload = outcome.value;
     cached = outcome.cached;
+    joinedInFlight = !!(outcome as { joined?: true }).joined;
   } catch (e) {
     // Daily cap blocked the paid ladder (see DailyCapExceededError above): every free stage already
     // ran and found nothing, so this is a genuine paid-work block, not a free-hit false block. Nothing
@@ -1088,10 +1100,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // A4 outcome ledger (AM-5): the route choke point, now that `payload`/`cached` are both known --
   // this is the ONE place that sees every settled-decode exit (Plan D verified early return, an
   // escalation/free-ladder win, a full paid-ladder win, and a total all-rung miss all funnel through
-  // computeDecode into `payload` here). A cached (L1 in-flight-coalesced or memory-cached) hit is
-  // recorded with its status prefixed "cached:" per AM-6/AM-5 so a replay is distinguishable from a
-  // fresh compute in the rollup, rather than double-counting the same underlying decode.
-  {
+  // computeDecode into `payload` here). A genuine cache replay (L1 memory hit or L2 persisted read via
+  // a fresh `withDecodeCache` call that found a cache entry) is recorded with its status prefixed
+  // "cached:" so a replay is distinguishable from a fresh compute in the rollup. A request that instead
+  // JOINED another in-flight computation (L3 coalescing) is WINNER-ONLY per AM-5/AM-6: it never ran
+  // its own compute, so its ledger append is suppressed entirely here - the original (winning) caller's
+  // own pass through this same code path already appended the one true row for this decode.
+  if (!joinedInFlight) {
     const ladderPath = (payload.debug as Record<string, unknown>).ladderPath as string | undefined;
     const ladderReasons = ((payload.debug as Record<string, unknown>).ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
     const status = payload.decision.status;

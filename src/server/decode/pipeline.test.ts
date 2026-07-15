@@ -169,6 +169,10 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
   it("cap-blocked: an exhausted daily cap blocks the paid ladder with an honest cap reason and zero paid calls", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap
+    // L6 (Task 12c): the cap gate only fires when paid work is genuinely possible for this code
+    // (paidWorkPossible). A Brave key makes Fetch V2's paid discovery door capable, regardless of
+    // code shape, so this proves the cap still genuinely blocks paid work when it CAN run.
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
     const outcome = await runDecodePipeline(makeReq("111000222333"));
 
     expect(outcome.kind).toBe("cap_blocked");
@@ -183,6 +187,21 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(hitAnAiProvider()).toBe(false);
   });
 
+  it("L6: a fully KEYLESS total-miss run NEVER charges the cap, even with AI_LOOKUP_DAILY_LIMIT=0 (no paid rung could run anyway)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap - but irrelevant with zero keys
+    // beforeEach already deletes every provider key - paidWorkPossible("111000222333") is false, so the
+    // total-miss branch must skip chargePaidSlot() entirely and fall through to a normal computed
+    // all-miss response instead of a cap_blocked 429 for work that could never have cost anything.
+    const outcome = await runDecodePipeline(makeReq("111000222333"));
+
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    expect(outcome.payload.decision.status).not.toBe("verified");
+    // The counter genuinely never moved - no charge attempt, blocked or otherwise.
+    expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    expect(hitAnAiProvider()).toBe(false);
+  });
+
   // Task 8 (P1/P2): the owner "never fully unknown" rule - a scan must never surface as a bare
   // "Unidentified item" when the GS1 company prefix knows the company. FLOORED_GTIN's prefix 5603344
   // has a REAL prefixIndex dominant ("general", a Continental-family member), so prefixFloorName names
@@ -192,6 +211,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
   it("P2: a cap-blocked decode still carries the prefix floor (never a fully-unknown 429)", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted -> paid ladder is blocked
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: paid work must be genuinely possible to block
     const outcome = await runDecodePipeline(makeReq(FLOORED_GTIN));
 
     expect(outcome.kind).toBe("cap_blocked");
@@ -209,6 +229,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
   it("P2: a cap block WITHOUT a known prefix carries no floor (today's behavior, unchanged)", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: paid work must be genuinely possible to block
     // "111000222333" has no prefixIndex dominant -> prefixFloorName returns null.
     const outcome = await runDecodePipeline(makeReq("111000222333"));
     expect(outcome.kind).toBe("cap_blocked");
@@ -332,6 +353,16 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
   it("cap available + free rungs MISS -> paid charge happens EXACTLY ONCE, paid rungs run, and reasons chain is free-phase-then-paid-phase", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap
+    // L6 (Task 12c): the total-miss cap charge now only fires when paidWorkPossible() is true. A Brave
+    // key makes Fetch V2's paid discovery door capable (code-shape-agnostic), so this stays genuinely
+    // paid-capable WITHOUT touching Go-UPC's own 30-day negative-miss cache (a GO_UPC_API_KEY here
+    // would make goupc actually query go-upc.com and write a real negative-cache entry for VALID_GTIN
+    // into the shared per-file ladder-storage tmp dir, which would then leak into the PAY-ONCE
+    // describe block's later "genuine Go-UPC miss"/"goupc_inferred" tests on the same code - see the
+    // ORDER v3 describe block's own beforeEach below, which has to explicitly clean up that exact file
+    // for the same reason). goupc itself still has no key, so it still just records its own "no key"
+    // skip reason - the rung order is unchanged from before L6.
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
     stubFreeRungFetch({ upcHit: false }); // both free rungs genuinely miss
 
     const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
@@ -342,11 +373,30 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(Array.isArray(reasons)).toBe(true);
     const rungOrder = (reasons ?? []).map((r) => r.rung);
     // Free phase first (both GTIN-gated free rungs ran and missed), then the paid phase in order.
-    // goupc is GTIN-gated in (VALID_GTIN qualifies), so it appears; no live key means it then misses too.
+    // goupc is GTIN-gated in (VALID_GTIN qualifies); no live Go-UPC key means it still misses too.
     expect(rungOrder).toEqual(["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]);
     // The paid daily-cap counter was charged EXACTLY ONCE for this request (free rungs missed, so the
     // paid phase ran; the cap started at 0 and must now read exactly 1 - not 0, not 2+).
     expect(await readDailyUsed(await ladderStorage())).toBe(1);
+  });
+
+  it("L6: total-miss with free rungs MISS but NO keys at all -> cap counter stays at 0 (paid work was never possible)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap - the point is the charge gate, not a block
+    stubFreeRungFetch({ upcHit: false }); // both free rungs genuinely miss; no provider keys configured
+
+    // A code DISTINCT from VALID_GTIN (own module-level FetchV2Cache/GoUpcGate singleton residue must
+    // never leak into the other VALID_GTIN-keyed tests in this file that expect a FRESH ladder run).
+    const KEYLESS_MISS_GTIN = "900000000102"; // valid GS1 check digit, absent from every fixture
+    const outcome = await runDecodePipeline(makeReq(KEYLESS_MISS_GTIN));
+
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    // The paid phase still RUNS (goupc/fetchv2/gpt each record their own skip/miss reason - L6 only
+    // gates the CAP CHARGE, never the rungs themselves), but nothing was genuinely payable.
+    const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+    const rungOrder = (reasons ?? []).map((r) => r.rung);
+    expect(rungOrder).toEqual(["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]);
+    expect(await readDailyUsed(await ladderStorage())).toBe(0);
   });
 
   it("Z3: two encodings of one product share one cache identity (canonical GTIN cache key)", async () => {
