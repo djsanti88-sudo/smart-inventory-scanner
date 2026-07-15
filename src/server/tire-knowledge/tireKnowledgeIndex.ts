@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getKnowledgeDb } from "@/server/knowledgeDb";
 import { getTursoClient as getRetailTursoClient, type TursoClient } from "@/server/retail-knowledge/retailKnowledgeIndex";
+import { lookupCandidates } from "@/services/upc/gtin";
 
 // SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
 // The `server-only` import makes this a BUILD ERROR if imported from a client component.
@@ -179,12 +180,26 @@ async function lookupPartNumberTurso(key: string): Promise<TireKnowledgeRow | nu
 export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeRow | null> {
   const key = normBarcodeKey(code);
   if (!key) return null;
+  const candidates = lookupCandidates(key);
   const stmt = getStmtBarcode();
-  if (stmt) return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
-  const tursoRow = await lookupBarcodeTurso(key);
-  if (tursoRow) return tursoRow;
+  if (stmt) {
+    for (const c of candidates) {
+      const row = (stmt.get(c) as TireKnowledgeRow | undefined) ?? null;
+      if (row) return row;
+    }
+    return null;
+  }
+  for (const c of candidates) {
+    const tursoRow = await lookupBarcodeTurso(c);
+    if (tursoRow) return tursoRow;
+  }
   const idx = getJsonIndex();
-  return idx ? (idx.barcodeIndex[key] ?? null) : null;
+  if (!idx) return null;
+  for (const c of candidates) {
+    const row = idx.barcodeIndex[c] ?? null;
+    if (row) return row;
+  }
+  return null;
 }
 
 /** EXACT trusted manufacturer-part-number lookup. Same SQLite -> Turso -> JSON order as barcode lookup. */
