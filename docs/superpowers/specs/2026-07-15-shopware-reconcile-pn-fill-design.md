@@ -56,6 +56,12 @@ New script `scripts/dt-harvest/backfill-part-numbers.mjs` (pure lib + thin CLI, 
   existing poison guard `guardRow` before trusting any row).
 - Fill `manufacturer_part_number` ONLY where the corpus row's field is blank; never overwrite
   non-blank values; never touch any other field. Expected: ~2,627 fills.
+  **[AM-R11 - executed 2026-07-15, actual: 2,560 fills.]** The 2,627 estimate was computed WITHOUT
+  the poison guard; guardRow rejects 225 harvest rows (130 invalid check digit + 95 prefix
+  conflict), of which 67 were fill-candidates. Guard-rejected rows must never fill (trust law), so
+  2,560 is the correct number; 2,560 + 67 = 2,627 reconciles exactly. Owner data-quality question
+  parked: most of the 67 are Westlake rows on GS1 prefix 7588230 flagged prefix_conflict - if that
+  prefix legitimately includes Westlake, a brandPrefixMap review would recover some later.
 - Rebuild `partNumberIndex` entries for filled rows using the existing `normPartKey`; drop keys with
   normalized length <= 4 (junk cleanup, ~247 keys).
 - Conflicts (corpus PN != DT PN, ~269): NO auto-resolution. Emit `state/pn-conflicts.json` review
