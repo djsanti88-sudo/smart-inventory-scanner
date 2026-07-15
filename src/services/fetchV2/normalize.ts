@@ -49,7 +49,10 @@ export function normalizeVariants(raw: string, idType: FetchV2IdType): Normalize
     if (digits.length === 12) upcA = digits;
   }
 
+  const stripped = isPublic && digits.length >= 12 ? digits.replace(/^0+/, "") : "";
   const primary = UPPER_TYPES.has(idType) ? upper : withoutSeparators;
-  const all = [primary, upcA, ean13, gtin14].filter((v, i, arr) => v && arr.indexOf(v) === i);
+  const all = [primary, upcA, ean13, gtin14, stripped.length >= 8 ? stripped : ""].filter(
+    (v, i, arr) => v && arr.indexOf(v) === i,
+  );
   return { primary, upcA, ean13, gtin14, withoutSeparators: primary === upper ? upper : withoutSeparators, all };
 }
