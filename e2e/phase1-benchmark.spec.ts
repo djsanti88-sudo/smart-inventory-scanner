@@ -7,12 +7,12 @@ import { test, expect, type Page } from "./fixtures";
 // and a truly-unlisted code shows product_not_found_after_search. Screenshot -> phase1-100-code-benchmark.png
 
 const PROOF = "e2e/proof";
-const FAST1 = "111111111110";
-const FAST2 = "222222222221";
+const FAST1 = "111111111117";
+const FAST2 = "222222222224";
 const FAST3 = "333333333331";
 const FALLBACK = "810118139604";
-const NEEDS_REVIEW = "444444444440"; // provider rate-limited
-const NOT_FOUND = "555555555550"; // searched, genuinely not listed
+const NEEDS_REVIEW = "444444444448"; // provider rate-limited
+const NOT_FOUND = "555555555555"; // searched, genuinely not listed
 
 const STATUS = {
   liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,

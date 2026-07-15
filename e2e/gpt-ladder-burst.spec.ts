@@ -40,8 +40,19 @@ const gptVerifiedPayload = (code: string, n: number) => ({
   debug: {},
 });
 
-// 20 distinct checksum-agnostic 12-digit unknowns (no seeded alias).
-const CODES = Array.from({ length: 20 }, (_, i) => `74911122${String(3300 + i)}`);
+// 20 distinct check-digit-VALID 12-digit unknowns (no seeded alias). The A3 misread gate skips
+// auto-decode for any GTIN-shaped code whose GS1 check digit fails, so burst codes must carry a
+// real GS1 check digit (computed below) or no decode POST would ever fire.
+const gs1CheckDigit = (payload: string): string => {
+  const d = payload.split("").map(Number);
+  let sum = 0;
+  for (let i = d.length - 1, w = 3; i >= 0; i--, w = 4 - w) sum += d[i] * w;
+  return String((10 - (sum % 10)) % 10);
+};
+const CODES = Array.from({ length: 20 }, (_, i) => {
+  const payload = `74911122${String(330 + i)}`; // 11-digit payload keeps the original prefix
+  return payload + gs1CheckDigit(payload);
+});
 
 async function scan(page: Page, code: string) {
   const input = page.getByTestId("scanner-input");

@@ -12,8 +12,8 @@ import { test, expect, type Page } from "@playwright/test";
 const PROOF = "e2e/proof";
 const FAST = "036000291452"; // fast path, found on a barcode DB
 const FALLBACK = "810118139604"; // the real Faire product that only the open-web fallback finds
-const RATELIMIT = "222222222220"; // provider 429'd; nothing found
-const UNLISTED = "333333333330"; // searched everywhere, genuinely not listed
+const RATELIMIT = "222222222224"; // provider 429'd; nothing found
+const UNLISTED = "333333333331"; // searched everywhere, genuinely not listed
 
 const STATUS = {
   liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,

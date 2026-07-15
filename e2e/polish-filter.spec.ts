@@ -30,9 +30,9 @@ interface FixtureRow {
 // Two rows share the "205" size prefix; the third is a distinct "225" size, so the prefix filter
 // proof has a real multi-row match and the exact-size filter proof has a real single-row match.
 const ROWS: FixtureRow[] = [
-  { code: "740000000101", productName: "Cooper Discoverer AT3 205/55R16", brand: "Cooper", specsShort: "205/55R16" },
-  { code: "740000000102", productName: "Michelin Defender 205/65R15", brand: "Michelin", specsShort: "205/65R15" },
-  { code: "740000000103", productName: "Falken Wildpeak AT3W 225/45R17", brand: "Falken", specsShort: "225/45R17" },
+  { code: "740000000104", productName: "Cooper Discoverer AT3 205/55R16", brand: "Cooper", specsShort: "205/55R16" },
+  { code: "740000000111", productName: "Michelin Defender 205/65R15", brand: "Michelin", specsShort: "205/65R15" },
+  { code: "740000000128", productName: "Falken Wildpeak AT3W 225/45R17", brand: "Falken", specsShort: "225/45R17" },
 ];
 
 function gptVerifiedPayload(row: FixtureRow) {

@@ -37,12 +37,12 @@ const DECODE: Record<string, object> = {
     decision: verified("Verified AI Decode: providers agree, code confirmed."),
   },
   // Real tire, full specs, but NO SKU -> Part number must be blank ("-"), never invented.
-  "036625112233": {
+  "036625112231": {
     providerNames: ["gemini", "openai"], premiumUsed: false,
     results: [result({
       productName: "Falken Wildpeak AT3W 275/55R20 113T",
       brand: "Falken", specsShort: "275/55R20 113T",
-      upc: "036625112233", sourceUrls: ["https://gs1.org/036625112233"],
+      upc: "036625112231", sourceUrls: ["https://gs1.org/036625112231"],
     })],
     decision: verified("Verified AI Decode: providers agree, code confirmed."),
   },
@@ -91,7 +91,7 @@ test("decoded tire fills Size / Brand / Part number with a clean description", a
   await expect(rowA.locator("td").nth(7)).toContainText("MICH-99812"); // part number
 
   // Tire B: real tire, NO SKU -> Part number blank ("-"), not fabricated.
-  await scan(page, "036625112233");
+  await scan(page, "036625112231");
   const rowB = page.locator('[data-testid^="count-row-"]', { hasText: "Wildpeak" });
   await expect(rowB).toBeVisible();
   await expect(rowB.locator("td").nth(2)).toContainText("Falken");
