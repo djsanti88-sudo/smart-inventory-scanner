@@ -2087,6 +2087,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               const retry = await fetch("/api/ai-lookup", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                // Review hardening 2026-07-15: the retry leg carries the same abort signal as the
+                // initial call so a hung retry can never block the scanner past the abort window.
+                signal: abortController.signal,
                 body: JSON.stringify({
                   mode: "decode", proRecheck: review.reopenedFromWrong === true,
                   rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
