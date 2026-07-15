@@ -27,13 +27,15 @@ export interface PersistedDecode {
    *  a different question ("which stage paid for this"), not "what did the ladder decide". */
   tier: string;
   /** Result-only (never set on a "no_result_receipt"): which PAID stage produced this "result" -
-   *  "gpt_ladder" (the GPT-5.5 ladder rung) or "paid_ai" (the legacy Gemini/OpenAI fast/escalation/
-   *  deep-fallback path). A free-rung result (tire corpus / Turso retail / Plan D) is never persisted at
-   *  all (see route.ts's classifySourceTier), so this field is always present whenever `kind` is
-   *  "result". NOT yet stored by the Turso backend (schema unchanged by this fix - documented debt);
-   *  the file-fallback backend persists it as a normal JSON property.
+   *  "gpt_ladder" (the GPT-5.5 ladder rung), "paid_ai" (the legacy Gemini/OpenAI fast/escalation/
+   *  deep-fallback path), or "paid_rung" (the Go-UPC or Fetch V2 ladder rung - PAY-ONCE rule, owner
+   *  2026-07-14: persists on a verified win AND on a paid suggestion, e.g. goupc_inferred, since the
+   *  paid call already happened either way). A free-rung result (tire corpus / Turso retail / Plan D)
+   *  is never persisted at all (see pipeline.ts's classifySourceTier), so this field is always present
+   *  whenever `kind` is "result". NOT yet stored by the Turso backend (schema unchanged by this fix -
+   *  documented debt); the file-fallback backend persists it as a normal JSON property.
    */
-  sourceTier?: "paid_ai" | "gpt_ladder";
+  sourceTier?: "paid_ai" | "gpt_ladder" | "paid_rung";
   createdAt: number;
 }
 
