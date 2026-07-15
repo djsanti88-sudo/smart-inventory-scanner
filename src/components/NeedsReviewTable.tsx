@@ -40,7 +40,13 @@ export function NeedsReviewTable() {
   const isPlatform = useIsPlatformOwner();
   // Owner rule: an item that is ALREADY solved AND synced is done - it must not linger in Needs Review.
   // A resolved item that is NOT yet synced stays visible (so nothing looks lost before it saves).
-  const reviews = allReviews.filter((r) => r.status === "open" || r.syncStatus !== "synced");
+  // Task 9b (owner-ratified 2026-07-14): a review PARKED at status "suggested" (pending inline
+  // suggestion) NEVER belongs in this queue regardless of sync state - it lives on the feed row's
+  // inline controls + the SuggestedApprovalPanel. Without this exclusion, a freshly parked review
+  // (syncStatus "pending" until the ASYNC cloud sync drains) leaked in via the second clause.
+  const reviews = allReviews.filter(
+    (r) => r.status !== "suggested" && (r.status === "open" || r.syncStatus !== "synced"),
+  );
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -111,7 +117,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   const aliasConflicts = useScanStore((s) => s.lastAliasConflicts);
   const myConflicts = (aliasConflicts ?? []).filter((c) => c.reviewId === review.id);
 
-  const resolved = review.status !== "open";
+  // Task 9b: a parked "suggested" review is still AWAITING the human (never styled/treated as
+  // resolved). Defense in depth - the table filter above already excludes suggested reviews.
+  const resolved = review.status !== "open" && review.status !== "suggested";
 
   // P4: elderly-readable controls. One PRIMARY action per row (blue filled, >=44px, text-base); everything
   // else is a same-size outline so nothing scary competes with the primary. Approve is primary when there is
@@ -207,7 +215,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
       </td>
       {isPlatform && <td className="px-4 py-3 text-sm">{review.providerName || "-"}</td>}
       <td className="px-4 py-3">
-        <StatusBadge status={review.status === "open" ? "needs_review" : (review.status as "resolved" | "ignored")} />
+        {/* Task 9b: StatusBadge is "suggested"-aware, so the raw review status passes through
+            without the old unsafe cast (which fed "suggested" into undefined map/label lookups). */}
+        <StatusBadge status={review.status === "open" ? "needs_review" : review.status} />
       </td>
       <td className="px-4 py-3">
         <SyncBadge status={review.syncStatus} />

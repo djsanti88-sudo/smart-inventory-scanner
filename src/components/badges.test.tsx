@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { DecodeStatusBadge } from "@/components/badges";
+import { DecodeStatusBadge, StatusBadge } from "@/components/badges";
 
 // Plan C, Task 1 (presentational only): collapse the weak decode states into a single
 // user-facing "Suggested" label. needs_review and conflict must both read "Suggested";
@@ -26,5 +26,19 @@ describe("DecodeStatusBadge - Suggested relabel (Plan C Task 1)", () => {
     render(<DecodeStatusBadge status="verified" />);
     expect(screen.getByText(/Verified/)).toBeTruthy();
     expect(screen.queryByText("Suggested")).toBeNull();
+  });
+});
+
+// Task 9b fix (reviewer finding): StatusBadge must tolerate the parked review status "suggested" -
+// a real label + real classes, never an empty label with a literal "undefined" className. Defense
+// in depth: NeedsReviewTable filters suggested reviews out, but any future surface that renders one
+// must not show a broken badge.
+describe("StatusBadge - tolerates the parked 'suggested' review status (Task 9b)", () => {
+  it('renders a real "Suggested" label with no undefined className for status "suggested"', () => {
+    render(<StatusBadge status="suggested" />);
+    const el = screen.getByText("Suggested");
+    expect(el).toBeTruthy();
+    expect(el.className).not.toContain("undefined");
+    expect(el.className.trim().length).toBeGreaterThan(0);
   });
 });

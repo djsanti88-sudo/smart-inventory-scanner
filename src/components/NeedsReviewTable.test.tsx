@@ -95,3 +95,34 @@ describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
     expect(screen.queryByTestId("review-row-3000000000003")).not.toBeNull(); // resolved but pending sync -> still shown
   });
 });
+
+// Task 9b fix (reviewer finding): a review PARKED at status "suggested" (pending inline suggestion,
+// owner-ratified 2026-07-14) must NOT render in the Needs Review queue - it belongs to the feed
+// row's inline controls + the SuggestedApprovalPanel surface. The reviewer's exact hole: at
+// creation a review has syncStatus "pending", so the visible-rows filter's second clause
+// (`syncStatus !== "synced"`) let a parked suggested review leak onto the All tab whenever the
+// ASYNC cloud sync had not drained yet (local mock sync is synchronous, which hid it).
+describe("NeedsReviewTable - parked 'suggested' reviews never render (Task 9b)", () => {
+  it("does NOT render a status 'suggested' review even while its sync is still pending", () => {
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "sg1", cleanCode: "4000000000004", status: "suggested", hasSuggestion: true, suggestedProductName: "Parked Widget", syncStatus: "pending" }),
+      ],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.queryByTestId("review-row-4000000000004")).toBeNull(); // parked -> never in the queue
+    expect(screen.getByText(/Nothing to review/i)).not.toBeNull(); // table honestly empty
+  });
+
+  it("still renders an OPEN review alongside a hidden 'suggested' one (filter is status-scoped, not blanket)", () => {
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "sg2", cleanCode: "5000000000005", status: "suggested", hasSuggestion: true, suggestedProductName: "Parked Widget 2", syncStatus: "pending" }),
+        review({ id: "op2", cleanCode: "6000000000006", status: "open", syncStatus: "pending" }),
+      ],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.queryByTestId("review-row-5000000000005")).toBeNull();
+    expect(screen.queryByTestId("review-row-6000000000006")).not.toBeNull();
+  });
+});
