@@ -350,3 +350,64 @@ describe("resolveUnknownFast - cross-check auto-count", () => {
     expect(r?.name).toMatch(/Pringles Scorchin/);
   });
 });
+
+// QA 2026-07-15 Task 5 (corpus poisoning): the retail corpus contains poisoned rows whose brand is a
+// run-on OFF tag list ("Fleischer, Selbst gemacht, The Wholesome Bar, Uberti") or whose name is an
+// ingredient/nutrition blob. Such a garbled row must be EXCLUDED from the consensus pool entirely, so a
+// second source that happens to share >=2 tokens with the garbage can never push it to an auto-count.
+// This closes the EvidenceVerifier bypass on the structured-DB consensus path (pipeline.ts hand-sets
+// evidence.verified=true from fast.verified; a garbled corpus row must never reach that as verified).
+describe("garbled corpus row is never auto-counted (Task 5 corpus-poisoning firewall)", () => {
+  it("(gp1) a run-on multi-brand retail row is dropped from the pool - never verified even if another source shares tokens", async () => {
+    // The real live-poisoned row content (barcode 0123456789012).
+    const retailMock = vi.fn(async () => ({
+      name: "Peanut Butter Crunch",
+      brand: "Fleischer, Selbst gemacht, The Wholesome Bar, Uberti",
+    }));
+    // A second source that shares >=2 distinctive tokens ("peanut","butter","crunch") with the garbage
+    // name - WITHOUT the firewall this would reach consensus and auto-count the poisoned identity.
+    const groundMock = ground("Peanut Butter Crunch Cereal");
+    const deps = baseDeps({ lookupBarcodeDb: vi.fn(async () => null), retailDb: retailMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+
+    // Grounding alone is a single source -> at most a suggestion, never verified. The poisoned retail
+    // row must NOT have contributed a verifying vote.
+    expect(r?.verified).toBe(false);
+  });
+
+  it("(gp2) a run-on ingredient-blob NAME in the retail row is dropped from the pool", async () => {
+    const retailMock = vi.fn(async () => ({
+      name: "Ingredients sugar palm oil hazelnuts cocoa skimmed milk powder emulsifier lecithin storage keep cool and dry place manufacturer address",
+      brand: "Somebrand",
+    }));
+    const groundMock = ground("Ingredients sugar palm oil hazelnuts cocoa skimmed milk"); // shares many tokens
+    const deps = baseDeps({ lookupBarcodeDb: vi.fn(async () => null), retailDb: retailMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+    expect(r?.verified).toBe(false);
+  });
+
+  it("(gp3) a garbled barcode_db row is likewise excluded (does not verify via agreement)", async () => {
+    const bdbMock = vi.fn(async () => ({
+      name: "Product, Retailer, Another Brand, Yet Another, Fifth Tag Name",
+      brand: "Brand, Retailer, Distributor, Importer",
+      sourceUrl: "https://x/y",
+    }));
+    const retailMock = vi.fn(async () => ({ name: "Product Retailer Another Brand", brand: "Brand" }));
+    const deps = baseDeps({ lookupBarcodeDb: bdbMock, retailDb: retailMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+    expect(r?.verified).toBe(false);
+  });
+
+  it("(gp4) a CLEAN retail + grounding agreement still auto-counts (firewall does not over-block real rows)", async () => {
+    const retailMock = vi.fn(async () => ({ name: "Pringles Scorchin Cheddar", brand: "Pringles" }));
+    const groundMock = ground("Pringles Scorchin Cheddar Potato Crisps");
+    const deps = baseDeps({ lookupBarcodeDb: vi.fn(async () => null), retailDb: retailMock, groundIdentify: groundMock });
+
+    const r = await resolveUnknownFast(CODE, deps);
+    expect(r?.verified).toBe(true);
+    expect(r?.name).toMatch(/Pringles Scorchin/);
+  });
+});

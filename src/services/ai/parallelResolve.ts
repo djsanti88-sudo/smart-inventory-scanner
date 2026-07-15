@@ -26,6 +26,7 @@
 
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
+import { isGarbledCorpusRow } from "@/services/catalog/corpusGarbage";
 
 export type ResolveSource = "barcode_db" | "retail_db" | "grounding" | "firecrawl" | "floor";
 
@@ -203,10 +204,18 @@ export async function resolveUnknownFast(
     deps.retailDb ? safe(() => deps.retailDb!(code)) : Promise.resolve(null),
   ]);
   if (bd?.sourceUrl) bestUrl = bd.sourceUrl;
+  // A garbled corpus row (run-on multi-brand tag list / ingredient blob - the QA Task 5 poisoning) is
+  // dropped BEFORE candidate-pool admission, so it can never contribute a verifying/consensus vote. This
+  // closes the EvidenceVerifier bypass on the structured-DB path: pipeline hand-sets evidence.verified
+  // from fast.verified, so a garbled row must never reach here as a verifying source.
   const bdName =
-    bd && isUsable(bd.name) && !brandConflict(code, bd.brand) ? cleanProductName(bd.name) : "";
+    bd && isUsable(bd.name) && !brandConflict(code, bd.brand) && !isGarbledCorpusRow(bd.name, bd.brand)
+      ? cleanProductName(bd.name)
+      : "";
   const rtName =
-    rt && isUsable(rt.name) && !brandConflict(code, rt.brand) ? cleanProductName(rt.name) : "";
+    rt && isUsable(rt.name) && !brandConflict(code, rt.brand) && !isGarbledCorpusRow(rt.name, rt.brand)
+      ? cleanProductName(rt.name)
+      : "";
 
   // 2. FASTEST FREE PATH: the two structured DBs AGREE -> auto-count in ~160ms with NO AI call and NO
   //    Firecrawl. This is the new common path for food/retail (both DBs cover it). aiCalled:false.

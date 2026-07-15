@@ -7,6 +7,7 @@
 // Both return the same RetailLookupResult shape. If neither is available, returns null.
 
 import { getKnowledgeDb } from "@/server/knowledgeDb";
+import { isGarbledCorpusRow } from "@/services/catalog/corpusGarbage";
 
 /** Generate zero-padded barcode variants (UPC-12, EAN-13, GTIN-14) for lookup normalization. */
 function barcodeVariants(code: string): string[] {
@@ -54,6 +55,9 @@ function lookupSqlite(code: string): RetailLookupResult | null {
   for (const v of variants) {
     const row = stmt.get(v) as { barcode: string; product_name: string; brand: string; category: string } | undefined;
     if (row) {
+      // Defense-in-depth read guard (QA Task 5): even a not-yet-rebuilt local DB or drifted Turso mirror
+      // must not serve a garbled (run-on multi-brand / ingredient-blob) row as a trusted hit.
+      if (isGarbledCorpusRow(row.product_name, row.brand)) continue;
       _lastStatus = "sqlite_hit";
       return { productName: row.product_name, brand: row.brand, category: row.category, barcode: row.barcode };
     }
@@ -112,16 +116,22 @@ async function lookupTurso(code: string): Promise<RetailLookupResult | null> {
   // Query all variants in one round-trip
   const placeholders = variants.map(() => "?").join(", ");
   try {
+    // Fetch a few matching variants (not LIMIT 1) so the read-time garbage guard can skip a poisoned
+    // row and still return a clean sibling variant if one exists (QA Task 5 defense-in-depth).
     const result = await client.execute({
-      sql: `SELECT barcode, product_name, brand, category FROM retail WHERE barcode IN (${placeholders}) LIMIT 1`,
+      sql: `SELECT barcode, product_name, brand, category FROM retail WHERE barcode IN (${placeholders}) LIMIT 5`,
       args: variants,
     });
-    if (result.rows.length > 0) {
-      const row = result.rows[0];
+    for (const row of result.rows) {
+      const productName = (row.product_name as string) || "";
+      const brand = (row.brand as string) || "";
+      // Skip garbled (run-on multi-brand / ingredient-blob) rows: a drifted Turso mirror may still be
+      // dirty even after the local rebuild, so never serve one as a trusted hit.
+      if (isGarbledCorpusRow(productName, brand)) continue;
       _lastStatus = "turso_hit";
       return {
-        productName: row.product_name as string,
-        brand: (row.brand as string) || "",
+        productName,
+        brand,
         category: (row.category as string) || "",
         barcode: row.barcode as string,
       };

@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import Database from "better-sqlite3";
+import { sanitizeRetailEntry } from "./retailIngestRules.mjs";
 
 const ROOT = process.cwd();
 const TIRE_JSON = join(ROOT, "src", "server", "tire-knowledge", "tireKnowledge.generated.json");
@@ -196,10 +197,17 @@ if (retailData) {
     "INSERT INTO retail (barcode, product_name, brand, category) VALUES (?, ?, ?, ?)"
   );
 
+  // Sanitize at conversion time too: the generated JSON was produced before the ingest fix, so it
+  // still carries poisoned rows (dummy barcodes, run-on multi-brand tag lists). sanitizeRetailEntry
+  // drops dummy/placeholder barcodes and garbled names and keeps only the first brand tag, so the
+  // LOCAL DB rebuild is clean even without re-running the OFF ingest from source (QA Task 5).
+  let retailDropped = 0;
   const insertRetailBatch = db.transaction((batch) => {
     for (const [barcode, entry] of batch) {
       if (!barcode) continue;
-      insertRetail.run(barcode, entry[0] || "", entry[1] || "", entry[2] || "");
+      const clean = sanitizeRetailEntry(barcode, entry);
+      if (!clean) { retailDropped++; continue; }
+      insertRetail.run(barcode, clean[0] || "", clean[1] || "", clean[2] || "");
     }
   });
 
@@ -216,7 +224,7 @@ if (retailData) {
   console.log("[knowledge-db] Creating retail barcode index...");
   db.exec("CREATE INDEX idx_retail_barcode ON retail(barcode)");
 
-  console.log(`[knowledge-db] Retail: ${retailEntries.length} rows in ${elapsed(t2)}`);
+  console.log(`[knowledge-db] Retail: ${retailEntries.length - retailDropped} rows inserted (${retailDropped} poisoned/dummy dropped) in ${elapsed(t2)}`);
 }
 
 // ---------------------------------------------------------------------------
