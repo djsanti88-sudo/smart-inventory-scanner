@@ -168,7 +168,7 @@ async function scan(page: Page, code: string) {
 
 test.describe("Go-UPC decode ladder (mocked)", () => {
   test("1. exact hit -> Verified AI Decode, auto-counts", async ({ page }) => {
-    const code = "034000002709"; // checksum-valid UPC-A, no seeded alias
+    const code = "034000002702"; // checksum-valid UPC-A, no seeded alias
     await page.route("**/api/ai-lookup", async (route: Route) => {
       const req = route.request();
       if (req.method() === "GET") return route.fulfill({ json: AI_ON_STATUS });
@@ -192,7 +192,7 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
   });
 
   test("2. inferred hit -> Needs Review suggestion with product attached", async ({ page }) => {
-    const code = "034000002716"; // checksum-valid UPC-A, distinct from scenario 1
+    const code = "034000002719"; // checksum-valid UPC-A, distinct from scenario 1
     await page.route("**/api/ai-lookup", async (route: Route) => {
       const req = route.request();
       if (req.method() === "GET") return route.fulfill({ json: AI_ON_STATUS });
@@ -219,7 +219,7 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
   });
 
   test("3. cap reached -> row reason contains 'Go-UPC monthly cap reached'", async ({ page }) => {
-    const code = "034000002723"; // checksum-valid UPC-A, distinct from scenarios 1-2
+    const code = "034000002726"; // checksum-valid UPC-A, distinct from scenarios 1-2
     await page.route("**/api/ai-lookup", async (route: Route) => {
       const req = route.request();
       if (req.method() === "GET") return route.fulfill({ json: AI_ON_STATUS });
@@ -240,7 +240,7 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
   });
 
   test("4. all providers dead (500s) -> raw row persists in Needs Review after reload", async ({ page }) => {
-    const code = "034000002730"; // checksum-valid UPC-A, distinct from scenarios 1-3
+    const code = "034000002733"; // checksum-valid UPC-A, distinct from scenarios 1-3
     await page.route("**/api/ai-lookup", async (route: Route) => {
       const req = route.request();
       if (req.method() === "GET") return route.fulfill({ json: AI_ON_STATUS });

@@ -30,8 +30,19 @@ function result(over: Record<string, unknown>) {
   };
 }
 
-// 6 distinct 12-digit unknowns, no seeded alias.
-const CODES = Array.from({ length: 6 }, (_, i) => `749333114${400 + i}`);
+// 6 distinct check-digit-VALID 12-digit unknowns, no seeded alias. The A3 misread gate skips
+// auto-decode for any GTIN-shaped code whose GS1 check digit fails, so these codes must carry a
+// real GS1 check digit (computed below) or no decode POST would ever fire.
+const gs1CheckDigit = (payload: string): string => {
+  const d = payload.split("").map(Number);
+  let sum = 0;
+  for (let i = d.length - 1, w = 3; i >= 0; i--, w = 4 - w) sum += d[i] * w;
+  return String((10 - (sum % 10)) % 10);
+};
+const CODES = Array.from({ length: 6 }, (_, i) => {
+  const payload = `749333114${40 + i}`; // 11-digit payload keeps the original prefix
+  return payload + gs1CheckDigit(payload);
+});
 
 // Every code decodes as "suggested" with WEAK (url_only) evidence - never auto-counted, always
 // lands open + hasSuggestion in Needs Review, which is exactly the Suggested pile this screen targets.
