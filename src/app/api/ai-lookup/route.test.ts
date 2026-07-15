@@ -27,6 +27,7 @@ import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCal
 import { ladderStorage } from "@/server/upc/storage";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
+import { canonicalGtin } from "@/services/upc/gtin";
 
 // v2 daily cap (Task 1): the counter now lives in ladderStorage() (mocked above to a per-process tmp
 // dir), not the old AI_LOOKUP_COUNTER_FILE. Reads today's usage through the SAME storage the route
@@ -352,9 +353,11 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const ladderCallsBefore = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
     expect(ladderCallsBefore).toBeGreaterThan(0);
     const storedAfterFirst = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    expect(storedAfterFirst[code].kind).toBe("result");
-    expect(storedAfterFirst[code].tier).toBe("suggested");
-    expect(storedAfterFirst[code].sourceTier).toBe("gpt_ladder");
+    // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
+    const storeKey = canonicalGtin(code) ?? code;
+    expect(storedAfterFirst[storeKey].kind).toBe("result");
+    expect(storedAfterFirst[storeKey].tier).toBe("suggested");
+    expect(storedAfterFirst[storeKey].sourceTier).toBe("gpt_ladder");
 
     // Fast-forward past the (default 10-minute) L1 miss TTL - a cached RESULT must still short-circuit
     // (from L1's long success TTL or the L2 persisted result), with zero new paid calls.
@@ -490,8 +493,9 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect((await dailyUsedNow())).toBe(1);
 
     // The receipt landed in the L2 store (file-fallback mode here).
+    // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
     const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    expect(stored[code].kind).toBe("no_result_receipt");
+    expect(stored[canonicalGtin(code) ?? code].kind).toBe("no_result_receipt");
 
     const ladderCallsBefore = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
     clearDecodeCache(); // simulate a fresh serverless instance: L1 is empty, only L2 has the receipt
@@ -537,7 +541,8 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect((await first.json()).decision.status).toBe("needs_review");
     const storedAfterFirst = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    expect(storedAfterFirst[code].kind).toBe("no_result_receipt");
+    // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
+    expect(storedAfterFirst[canonicalGtin(code) ?? code].kind).toBe("no_result_receipt");
     expect((await dailyUsedNow())).toBe(1);
 
     clearDecodeCache();
@@ -552,8 +557,9 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect((await dailyUsedNow()), "a genuine forceRetry recompute burns its own slot").toBe(2);
 
     // The overwrite is durable: the receipt is now a "result" entry.
+    // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
     const storedAfterRetry = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    expect(storedAfterRetry[code].kind).toBe("result");
+    expect(storedAfterRetry[canonicalGtin(code) ?? code].kind).toBe("result");
 
     // And a THIRD, normal (non-forceRetry) POST now short-circuits on the fresh verified result with
     // no further provider calls.
@@ -588,9 +594,11 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect((await first.json()).decision.status).toBe("verified");
     const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
-    expect(stored[code].kind).toBe("result");
+    // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
+    const storeKey = canonicalGtin(code) ?? code;
+    expect(stored[storeKey].kind).toBe("result");
     // IMPORTANT 3 (review): a GPT-ladder result must record which PAID stage produced it.
-    expect(stored[code].sourceTier).toBe("gpt_ladder");
+    expect(stored[storeKey].sourceTier).toBe("gpt_ladder");
     expect((await dailyUsedNow())).toBe(1);
 
     const ladderCallsBefore = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
