@@ -3,6 +3,7 @@ import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
+import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
 // status. MASTER BASELINE v1 (owner-locked, supersedes the older two-provider rule): a "verified"
@@ -276,9 +277,38 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
             : internetTwoSourceSize
               ? "internet_two_source_size"
               : "non_public_trusted_source";
+    const exactCodeEvidenceVerifiedByApp = canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || nonPublicTrustedVerified;
+    const computedConfidence = Math.min(1, Math.max(maxConfidence, cc.confidence));
+
+    // TASK 21 (owner-ratified 2026-07-15): TRUSTED-SOURCE CONFIDENCE FLOOR. One LEGIT source
+    // (manufacturer site, Walmart, Target, Discount Tire, Tire Rack class) that the app itself
+    // FETCHED and independently confirmed carries the exact code deserves near-certain confidence -
+    // 0.95, never higher (retail pages still carry a small wrong-UPC rate; human override stays
+    // supreme, so this NEVER floors to a literal 1.0) and never LOWER than whatever was already
+    // computed (a stronger signal must never be pulled down to the floor). The floor applies ONLY
+    // when ALL of these hold simultaneously:
+    //   - evidence strength is "fetched_source" (the app actually retrieved and read the page -
+    //     "strong association" for the fetchv2 rung specifically, since fetchv2's own scoring
+    //     (scoring.ts) only ever emits a verified fetched_source evidence off a strong-association
+    //     winner - a snippet/grounding_chunk/url_only match never qualifies, no matter how trusted
+    //     the host, because the app never actually fetched and read that page);
+    //   - exactCodeEvidenceVerifiedByApp is true (the APP's own verifier confirmed the code, never
+    //     the model's self-claim);
+    //   - the winning source URL's host is on the curated trusted-product allowlist
+    //     (trustedProductHosts.ts - major retailers + the KNOWN_TIRE_BRANDS manufacturer domains);
+    //   - there is NO catalog-derived brand-prefix conflict (params.brandPrefixConflict) - a wrong
+    //     brand for this barcode's GS1 prefix must never be floored to near-certain, even if a
+    //     trusted host happened to also confirm the code (a recycled/scanned-wrong-item case).
+    const trustedFetchedSource =
+      bestEvidence.strength === "fetched_source" &&
+      exactCodeEvidenceVerifiedByApp &&
+      !params.brandPrefixConflict &&
+      (bestEvidence.matchedSources ?? []).some((u) => isTrustedProductHost(u));
+    const confidence = trustedFetchedSource ? Math.max(computedConfidence, 0.95) : computedConfidence;
+
     return {
       status: "verified",
-      confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
+      confidence,
       reason: canVerify
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
         : singleSourceVerified
@@ -291,7 +321,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
                 ? "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size."
                 : "Verified AI Decode: the app confirmed the exact code in a trusted source (one trusted source is enough for this code type).",
       evidenceStrength: bestEvidence.strength,
-      exactCodeEvidenceVerifiedByApp: canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || nonPublicTrustedVerified,
+      exactCodeEvidenceVerifiedByApp,
       crossCheck: baseCrossCheck,
       corroborationPath,
     };

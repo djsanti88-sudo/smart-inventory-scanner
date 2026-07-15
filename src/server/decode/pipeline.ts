@@ -42,6 +42,7 @@ import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome
 import { canonicalGtin } from "@/services/upc/gtin";
 import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
+import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, type LearnedProductRow } from "@/server/learnedProducts";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
@@ -113,6 +114,67 @@ function corpusPayload(
     reasonText: "",
     timedOut: false,
     debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false },
+    sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+  };
+}
+
+// Task 21 (owner-ratified 2026-07-15): PURE payload assembly for a learned-products tier hit. Mirrors
+// corpusPayload's shape exactly, EXCEPT the decision is HONESTLY built as a SUGGESTION at the row's
+// stored confidence - a learned row is server-side decode assistance, never ground truth, and must
+// NEVER be reported as "verified" (that stays reserved for the trusted tire/retail corpus and a live
+// decode that clears decideDecode's own verify gates). The reason names the learned tier, the original
+// source host, and the date it was learned, so the row is always honest about its provenance. A
+// >=0.8 confidence learned suggestion flows through the existing client-side auto-apply gate
+// (shouldAutoApplySuggestion in scanGates.ts) exactly like any other high-trust suggestion.
+function learnedPayload(
+  row: LearnedProductRow,
+  rawCodeSanitized: string,
+  cleanCodeSanitized: string,
+): DecodePayload {
+  let host = row.sourceUrl;
+  try {
+    host = new URL(row.sourceUrl).hostname.replace(/^www\./, "");
+  } catch {
+    /* keep the raw sourceUrl if it somehow fails to parse */
+  }
+  const learnedDate = (row.createdAt || "").slice(0, 10) || "unknown date";
+  const reason = `Suggested from the learned-products tier: learned from ${host} on ${learnedDate}, prefix-corroborated (${row.prefixCheck}). Not re-verified live - approve once to make it permanent.`;
+  const result: AiLookupResult = {
+    ...emptyResult(),
+    productName: row.name,
+    brand: row.brand,
+    category: row.category,
+    specsShort: row.specsShort,
+    specsFull: row.specsFull,
+    confidence: row.confidence,
+    sourceUrls: row.sourceUrl ? [row.sourceUrl] : [],
+    needsHumanReview: true,
+  };
+  const evidence: EvidenceResult = {
+    verified: false,
+    strength: row.evidenceStrength,
+    matchedCode: "",
+    matchedSources: row.sourceUrl ? [row.sourceUrl] : [],
+    reason: "Learned-tier replay: not independently re-verified this scan.",
+  };
+  return {
+    mode: "decode" as const,
+    providerNames: ["learned-products"],
+    results: [result],
+    evidences: [evidence],
+    providerStatuses: [{ provider: "learned-products", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: row.sourceUrl ? 1 : 0, exactCodeFound: false, identityFound: true }],
+    decision: {
+      status: "suggested",
+      confidence: row.confidence,
+      reason,
+      evidenceStrength: row.evidenceStrength,
+      exactCodeEvidenceVerifiedByApp: false,
+      crossCheck: { decision: "single_provider", confidence: row.confidence, reason: "Learned-tier replay (single stored source).", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+    },
+    reasonCode: "ok",
+    reasonText: reason,
+    timedOut: false,
+    debug: { providersAttempted: ["learned-products"], evidenceStrengths: [row.evidenceStrength], sourceCounts: [row.sourceUrl ? 1 : 0], corroborationPath: "learned_products", aiCalled: false, pageFetched: false, cached: false, learnedTier: true },
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
   };
 }
@@ -372,6 +434,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     if (corpus) {
       appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });
       return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false };
+    }
+
+    // TASK 21 (owner-ratified 2026-07-15): LEARNED-PRODUCTS TIER PEEK, immediately after the trusted
+    // tire/retail corpus MISSES (never before it - the trusted corpus is authoritative ground truth
+    // and always wins). A learned hit NEVER reports "verified" - it is honestly a SUGGESTION at its
+    // stored confidence (see learnedPayload above), so it can never be confused with the trusted
+    // corpus's own verified exit above. A >=0.8 learned suggestion still auto-applies client-side via
+    // the existing shouldAutoApplySuggestion gate (scanGates.ts) - that gate, not this peek, is what
+    // decides the count; this peek only ever hands back an honest, review-first suggestion.
+    const learned = await getLearnedProduct(cacheKey);
+    if (learned) {
+      appendDecodeOutcome({ settledBy: "learned-products", status: "suggested", reasons: [], sourceTier: null });
+      return { kind: "computed", payload: learnedPayload(learned, rawCodeSanitized, cleanCodeSanitized), cached: false };
     }
   }
 
@@ -1170,6 +1245,54 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       await persistDecode({ code: cacheKey, kind: "result", payload: JSON.stringify(payload), tier: status, sourceTier, createdAt: Date.now() });
     } else if (receiptState.eligible) {
       await persistDecode({ code: cacheKey, kind: "no_result_receipt", payload: JSON.stringify(payload), tier: receiptState.reason ?? "unknown", createdAt: Date.now() });
+    }
+  }
+
+  // TASK 21 (owner-ratified 2026-07-15): LEARNED-PRODUCTS WRITE. Fire-and-forget, best-effort - a
+  // learned-tier write failure must never affect the scan response (same posture as the A4 outcome
+  // ledger). Only on a genuinely FRESH compute (never a cache replay, never a joined in-flight
+  // request, never under E2E) and only when the full shouldLearnDecode gate passes: verified status +
+  // app-verified exact code + fetched_source strength + a trusted product host + the barcode's own
+  // GS1 prefix POSITIVELY CORROBORATING the decoded brand (never merely "no conflict") + (for tires)
+  // the required tire specs. A joined in-flight waiter never writes here - the winning caller's own
+  // pass through this same code path already would have (winner-only, same rule as the ledger above).
+  if (!e2eMode() && !cached && !joinedInFlight && payload.decision.status === "verified") {
+    const winningResult = payload.results[0];
+    const winningSourceUrl = payload.decision.evidenceStrength === "fetched_source" ? (winningResult?.sourceUrls ?? [])[0] ?? "" : "";
+    if (winningResult && winningSourceUrl) {
+      const gateInput = {
+        code: cacheKey,
+        status: payload.decision.status,
+        exactCodeEvidenceVerifiedByApp: payload.decision.exactCodeEvidenceVerifiedByApp,
+        evidenceStrength: payload.decision.evidenceStrength,
+        sourceUrl: winningSourceUrl,
+        brand: winningResult.brand,
+        category: winningResult.category,
+        productName: winningResult.productName,
+        specsShort: winningResult.specsShort,
+        specsFull: winningResult.specsFull,
+      };
+      if (shouldLearnDecode(gateInput)) {
+        void (async () => {
+          try {
+            await upsertLearnedProduct({
+              code: cacheKey,
+              name: winningResult.productName,
+              brand: winningResult.brand,
+              category: winningResult.category,
+              specsShort: winningResult.specsShort,
+              specsFull: winningResult.specsFull,
+              confidence: payload.decision.confidence,
+              sourceUrl: winningSourceUrl,
+              evidenceStrength: payload.decision.evidenceStrength,
+              prefixCheck: prefixCheckNote(cacheKey, winningResult.brand),
+              createdAt: new Date().toISOString(),
+            });
+          } catch {
+            /* learned-tier write is best-effort */
+          }
+        })();
+      }
     }
   }
 
