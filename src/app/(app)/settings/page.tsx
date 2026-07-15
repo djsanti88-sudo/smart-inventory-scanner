@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { useReconcileStore } from "@/stores/reconcileStore";
 import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -39,6 +40,8 @@ export default function SettingsPage() {
       );
     if (!ok) return;
     clearLocalCache();
+    // AM-R9: the reconcile session is browser-local session state too - the same wipe clears it.
+    useReconcileStore.getState().clearLocalCache();
     setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
     // Reload cleanly so cloud data re-loads fresh (and a poisoned alias that returns proves it is in
     // cloud data, to be fixed via the alias repair path, not local cache).

@@ -71,6 +71,8 @@ function getJsonIndex(): TireJsonIndex | null {
 // SQLite prepared statements (created lazily, cached for process lifetime)
 let _stmtBarcode: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 let _stmtPartNumber: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
+let _stmtAllPartNumber: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
+let _stmtBySize: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 
 function getStmtBarcode() {
   if (_stmtBarcode) return _stmtBarcode;
@@ -89,6 +91,30 @@ function getStmtPartNumber() {
   try {
     _stmtPartNumber = db.prepare("SELECT * FROM tires WHERE manufacturer_part_number = ? LIMIT 1");
     return _stmtPartNumber;
+  } catch { return null; }
+}
+
+function getStmtAllPartNumber() {
+  if (_stmtAllPartNumber) return _stmtAllPartNumber;
+  const db = getKnowledgeDb();
+  if (!db) return null;
+  try {
+    // Deliberately NO LIMIT: the reconcile matcher must see EVERY row a part number maps to
+    // (a non-unique index treated as unique would silently hide a brand collision).
+    _stmtAllPartNumber = db.prepare("SELECT * FROM tires WHERE manufacturer_part_number = ?");
+    return _stmtAllPartNumber;
+  } catch { return null; }
+}
+
+function getStmtBySize() {
+  if (_stmtBySize) return _stmtBySize;
+  const db = getKnowledgeDb();
+  if (!db) return null;
+  try {
+    // Canonical compare: stored size stripped of spaces + uppercased, matched against a
+    // tireSizeToken-style token (already space-free and uppercase).
+    _stmtBySize = db.prepare("SELECT * FROM tires WHERE UPPER(REPLACE(size, ' ', '')) = ?");
+    return _stmtBySize;
   } catch { return null; }
 }
 
@@ -216,6 +242,92 @@ export async function lookupByExactPartNumber(partNumber: string): Promise<TireK
   return uid && _uidToRow ? (_uidToRow.get(uid) ?? null) : null;
 }
 
+/** Turso: ALL rows for a normalized part number via a single join. Fail-safe: errors return []. */
+async function lookupAllPartNumberTurso(key: string): Promise<TireKnowledgeRow[]> {
+  try {
+    const client = await getTireTursoClient();
+    if (!client) return [];
+    const result = await client.execute({
+      sql: "SELECT t.* FROM tires t JOIN tire_part_numbers p ON p.canonical_product_uid = t.canonical_product_uid WHERE p.normalized_part_number = ?",
+      args: [key],
+    });
+    return result.rows.map((r) => rowFromTurso(r as Record<string, unknown>));
+  } catch (e) {
+    console.warn("[tire-knowledge] Turso all-part-number lookup failed:", (e as Error).message);
+    return [];
+  }
+}
+
+/** Turso: all rows whose canonical size equals the token. Fail-safe: errors return []. */
+async function candidatesBySizeTurso(token: string): Promise<TireKnowledgeRow[]> {
+  try {
+    const client = await getTireTursoClient();
+    if (!client) return [];
+    const result = await client.execute({
+      sql: "SELECT * FROM tires WHERE UPPER(REPLACE(size, ' ', '')) = ?",
+      args: [token],
+    });
+    return result.rows.map((r) => rowFromTurso(r as Record<string, unknown>));
+  } catch (e) {
+    console.warn("[tire-knowledge] Turso size lookup failed:", (e as Error).message);
+    return [];
+  }
+}
+
+/** Canonical size key for the in-memory JSON fallback: spaces stripped, uppercased. */
+function canonicalSizeKey(size: string): string {
+  return (size ?? "").replace(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * Reconcile helper (Task 7): ALL corpus rows for an ALREADY-NORMALIZED part-number key.
+ * Contract (carry-forward review note): the caller (identityMatcher via the route's MatcherDeps)
+ * normalized the PN with normPartKey semantics BEFORE calling this - this function performs a
+ * DIRECT keyed lookup with NO re-normalization, and returns EVERY matching row, never LIMIT 1.
+ * The JSON fallback's partNumberIndex is single-valued today (Record<key, uid>), so that path
+ * returns at most one row - the array shape keeps the contract honest for multi-hit backends.
+ * Same backend order as the other lookups: SQLite -> Turso -> in-memory JSON. Never throws.
+ */
+export async function lookupAllByPartNumber(normalizedPn: string): Promise<TireKnowledgeRow[]> {
+  const key = (normalizedPn ?? "").toString();
+  if (!key) return [];
+  const stmt = getStmtAllPartNumber();
+  if (stmt) {
+    try { return stmt.all(key) as TireKnowledgeRow[]; } catch { return []; }
+  }
+  const tursoRows = await lookupAllPartNumberTurso(key);
+  if (tursoRows.length > 0) return tursoRows;
+  const idx = getJsonIndex();
+  if (!idx) return [];
+  const uid = idx.partNumberIndex[key];
+  const row = uid && _uidToRow ? _uidToRow.get(uid) : undefined;
+  return row ? [row] : [];
+}
+
+/**
+ * Reconcile helper (Task 7): every corpus row whose canonical size (spaces stripped, uppercased)
+ * equals `sizeToken` (a tireSizeToken-style token, e.g. "265/70R17"). Feeds the identity-match
+ * rung of the reconcile matcher, which re-checks brand/family and size on every candidate itself,
+ * so over-returning across brands here is safe. Same backend order; never throws.
+ */
+export async function candidatesBySizeToken(sizeToken: string): Promise<TireKnowledgeRow[]> {
+  const token = canonicalSizeKey(sizeToken);
+  if (!token) return [];
+  const stmt = getStmtBySize();
+  if (stmt) {
+    try { return stmt.all(token) as TireKnowledgeRow[]; } catch { return []; }
+  }
+  const tursoRows = await candidatesBySizeTurso(token);
+  if (tursoRows.length > 0) return tursoRows;
+  const idx = getJsonIndex();
+  if (!idx || !_uidToRow) return [];
+  const out: TireKnowledgeRow[] = [];
+  for (const row of _uidToRow.values()) {
+    if (canonicalSizeKey(row.size) === token) out.push(row);
+  }
+  return out;
+}
+
 /** Read the generated metadata (counts/version) — for platformOwner diagnostics only. Fail-closed. */
 export async function getTireKnowledgeMeta(): Promise<TireKnowledgeMeta | null> {
   if (!_metaPromise) _metaPromise = readFile(META_PATH, "utf8").then((r) => JSON.parse(r) as TireKnowledgeMeta).catch(() => null);
@@ -227,6 +339,8 @@ export function __resetTireKnowledgeCacheForTests(): void {
   _metaPromise = null;
   _stmtBarcode = null;
   _stmtPartNumber = null;
+  _stmtAllPartNumber = null;
+  _stmtBySize = null;
   _jsonIndex = null;
   _uidToRow = null;
   _tursoClient = null;
