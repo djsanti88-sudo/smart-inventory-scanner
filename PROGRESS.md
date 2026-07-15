@@ -103,3 +103,18 @@ whole-branch review: READY). Full detail: `docs/superpowers/reports/2026-07-12-f
 - No deploy, no push, no paid/live API calls, no real-data writes without explicit owner approval.
 - No keys in client code. No secrets committed. Automated tests never call live providers.
 - Wrong product identity is FAILURE; Unknown is ACCEPTABLE.
+
+## 2026-07-15 - Recall + Hardening Round SHIPPED (17 commits, f583ddd..9226f3d)
+Plan: docs/superpowers/plans/2026-07-15-recall-hardening-round.md (owner-ratified, 3-angle reviewed).
+Shipped: Z4+G2+G1 GPT rung upgrades; A3 misread gate; A4 outcome ledger; A6 conservative tire steering;
+L2 total ladder deadline + client abort + budgetMs threading (the 36-70s freeze fix); L3 in-flight
+coalescing; L6 keyless-never-charges; ASIN /dp/ door + keyless pattern-URL reachability; anti-enumeration
+evidence guard; meros probe (0% identity yield - removal decision pending owner); Task 20 decode-cache
+backup/restore; Task 21 trusted-source 0.95 floor + prefix-corroborated learned_products tier;
+T17 budget drift fix; B2/B5/B8/B3/B6/B7 hardening gates.
+Proof: proof:full green (2160 unit / 0 fail), golden 2/2, E2E 36/36, qa:bots 12/12, Opus review x3 all
+APPROVE, preview live re-proof (tires 5/5 verified ~200ms, non-tire cached instant, misread honest).
+Preview: https://inventory-y4ky0zj9t-sharpenly.vercel.app  Branch pushed through 9226f3d.
+Review loop caught + fixed 3 intentional-behavior test fallouts (route cap tests->L6, pipeline spec->AM-7,
+e2e fixtures->A3) - all value-only updates, zero weakened assertions.
+NEXT: owner demo (2026-07-16); production promote NOT authorized; meros door removal = owner decision.
