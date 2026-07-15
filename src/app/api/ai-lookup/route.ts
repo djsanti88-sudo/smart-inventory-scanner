@@ -15,6 +15,7 @@ import { ladderStorage } from "@/server/upc/storage";
 // route keeps only HTTP concerns: request parsing, the abuse/mock-mode guards, response shaping, the
 // legacy 'lookup' back-compat path, and the GET status endpoint. e2eMode is shared from the pipeline.
 import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
+import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -258,7 +259,9 @@ export async function POST(request: Request) {
       forceRetry,
       scanContext: body.scanContext,
       mockGptLadder: body.mockGptLadder,
-      budgetMs: body.budgetMs,
+      // Server-side clamp (review hardening 2026-07-15): the client already clamps, but a hand-crafted
+      // request must not be able to stretch the ladder deadline via a huge budgetMs.
+      budgetMs: typeof body.budgetMs === "number" ? clampDecodeBudgetMs(body.budgetMs) : undefined,
     });
     if (outcome.kind === "persisted") {
       return Response.json(outcome.body);
