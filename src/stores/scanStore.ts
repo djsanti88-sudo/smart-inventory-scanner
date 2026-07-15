@@ -125,6 +125,22 @@ export class DailyCapReachedError extends Error {
   }
 }
 
+/**
+ * AM-1(a) (owner-reported 36-70s browser blocks): thrown when the client-side decode fetch is
+ * aborted by our own AbortController (timeout = decodeBudgetMs + 7000ms margin). The server-side
+ * ladder deadline (L2, see pipeline.ts) is the primary fix - it bounds the SUM of every rung so the
+ * request itself finishes fast - but the client must never trust the network to behave: an abort
+ * here is NOT a retry case (the decode keeps running server-side; there is nowhere to retry TO), it
+ * is an honest "still working, check back" signal that keeps the scan row open and reviewable.
+ */
+export class DecodeAbortedError extends Error {
+  readonly reasonCode = "decode_aborted" as const;
+  constructor(message = "Decode client-side abort timeout") {
+    super(message);
+    this.name = "DecodeAbortedError";
+  }
+}
+
 const DEFAULT_AI_STATUS: AiStatus = {
   liveEnabled: true,
   autoDecodeOnScan: true,
@@ -2007,24 +2023,44 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             .join(". ") || undefined;
 
         try {
+          // AM-1(a) (owner-reported 36-70s browser blocks): the decode fetch had no client-side
+          // timeout at all - a slow/hung server response could block the scan row (and the browser
+          // connection) indefinitely. Timeout margin gives the server-side L2 ladder deadline
+          // (DECODE_LADDER_TOTAL_MS, see pipeline.ts) room to finish and reply honestly before the
+          // client gives up; the abort is a client-local giveup only - the server keeps computing and
+          // caches its answer for the next scan, so nothing is lost.
+          const abortController = new AbortController();
+          const abortTimer = setTimeout(() => abortController.abort(), (s.decodeBudgetMs ?? 8000) + 7000);
           const decodeOnce = async () => {
-            const res = await fetch("/api/ai-lookup", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                mode: "decode",
-                proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
-                rawCode: rawCodeSanitized,
-                cleanCode: cleanCodeSanitized,
-                codeType,
-                confidenceThreshold: 0.8,
-                allowImageSuggestions: s.allowImageSuggestions,
-                budgetMs: s.decodeBudgetMs ?? 8000,
-                scanContext,
-                brandPrefixHint,
-                autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
-              }),
-            });
+            let res: Response;
+            try {
+              res = await fetch("/api/ai-lookup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                signal: abortController.signal,
+                body: JSON.stringify({
+                  mode: "decode",
+                  proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
+                  rawCode: rawCodeSanitized,
+                  cleanCode: cleanCodeSanitized,
+                  codeType,
+                  confidenceThreshold: 0.8,
+                  allowImageSuggestions: s.allowImageSuggestions,
+                  budgetMs: s.decodeBudgetMs ?? 8000,
+                  scanContext,
+                  brandPrefixHint,
+                  autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
+                }),
+              });
+            } catch (fetchErr) {
+              // An abort is NEVER a retry case (there is nowhere to retry TO - the decode keeps
+              // running server-side and the client just gave up waiting). Every other fetch-level
+              // failure (network down, DNS, etc.) falls through to the existing generic catch below.
+              if (fetchErr instanceof Error && fetchErr.name === "AbortError") {
+                throw new DecodeAbortedError();
+              }
+              throw fetchErr;
+            }
             // 429 has two distinct causes that must NOT be treated the same:
             //  - daily_cap: the server-side daily AI spend cap is reached. There is no automatic
             //    decode-on-cap-reset queue anywhere in the app, so retrying now is pointless (it will
@@ -2058,7 +2094,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // to ~70s, which dropped the browser connection -> "Failed to fetch") and the token spend. One
           // call only; a miss is shown fast with its honest reason and is briefly miss-cached server-side
           // so an immediate re-scan does not re-pay.
-          const data = await decodeOnce();
+          let data: Awaited<ReturnType<typeof decodeOnce>>;
+          try {
+            data = await decodeOnce();
+          } finally {
+            clearTimeout(abortTimer);
+          }
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
@@ -2568,9 +2609,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const failReason =
             e instanceof DailyCapReachedError
               ? "Daily AI lookup cap reached. This scan is saved and counted as unverified. Retry after the cap resets."
-              : `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${
-                  e instanceof Error ? e.message : ""
-                }`.trim();
+              : e instanceof DecodeAbortedError
+                ? "Decode is taking longer than expected - it keeps working in the background; check Needs Review shortly"
+                : `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${
+                    e instanceof Error ? e.message : ""
+                  }`.trim();
           // DECODE-EVERYTHING (owner): a FAILED decode (timeout / 429 rate-limit / provider error / AI down)
           // must NOT leave the scan blank. We still COUNT it as an UNVERIFIED, reviewable provisional row with
           // a SAFE label and the scanned code - never a fabricated product identity, never an approved alias,
