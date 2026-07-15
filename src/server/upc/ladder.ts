@@ -37,14 +37,34 @@ export interface LadderResult {
   reasons: Array<{ rung: string; reason: string }>;
 }
 
+/** Optional request-scoped budget (L2, owner-reported 36-70s blocking decodes, AM-1). Fully
+ *  backward compatible: omit `opts` entirely and behavior is byte-for-byte identical to before. */
+export interface RunLadderOpts {
+  /** Absolute timestamp (same clock as `now`). No rung may START at or after this instant. */
+  deadlineAt?: number;
+  /** Clock override for tests. Defaults to `Date.now`. */
+  now?: () => number;
+}
+
 /**
  * Run rungs in order until one settles. The first settled outcome stops the ladder; every rung that
  * ran contributes its reason (in order). An all-miss ladder returns no `settledBy`/`outcome` and a
  * full reason list.
+ *
+ * L2 (owner-reported 36-70s blocking decodes, AM-1): when `opts.deadlineAt` is passed, the deadline
+ * is checked BEFORE each rung starts - never mid-flight. A rung already running is NEVER aborted
+ * here (each rung owns its own internal timeout); this only stops NEW rungs from starting once the
+ * request-scoped budget is spent. Every skipped rung still records an honest reason so the
+ * needs_review response can say exactly why it never got a full answer.
  */
-export async function runLadder(_code: string, rungs: LadderRung[]): Promise<LadderResult> {
+export async function runLadder(_code: string, rungs: LadderRung[], opts: RunLadderOpts = {}): Promise<LadderResult> {
+  const now = opts.now ?? Date.now;
   const reasons: Array<{ rung: string; reason: string }> = [];
   for (const r of rungs) {
+    if (opts.deadlineAt !== undefined && now() >= opts.deadlineAt) {
+      reasons.push({ rung: r.name, reason: "skipped: ladder deadline reached (DECODE_LADDER_TOTAL_MS)" });
+      continue;
+    }
     const outcome = await r.run();
     reasons.push({ rung: r.name, reason: outcome.reason });
     if (outcome.settled) {

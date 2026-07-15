@@ -169,3 +169,56 @@ describe("buildFreeLadderRungs / buildPaidLadderRungs (two-phase split, cap-char
     }
   });
 });
+
+describe("L2 total ladder deadline (owner-reported 36-70s blocking decodes, AM-1)", () => {
+  it("skips rungs whose start time is past the deadline, with an honest reason", async () => {
+    let t = 0;
+    const now = () => t;
+    const slowRung: LadderRung = {
+      name: "slow",
+      run: async () => {
+        t += 50_000;
+        return { settled: false, reason: "miss after 50s" };
+      },
+    };
+    const second = rung("second", miss("second miss"));
+    const third = rung("third", miss("third miss"));
+
+    const r = await runLadder("049000006346", [slowRung, second, third], { deadlineAt: 40_000, now });
+
+    expect(r.settledBy).toBeUndefined();
+    expect(r.reasons.map((x) => x.rung)).toEqual(["slow", "second", "third"]);
+    expect(r.reasons[1].reason).toContain("skipped: ladder deadline reached (DECODE_LADDER_TOTAL_MS)");
+    expect(r.reasons[2].reason).toContain("skipped: ladder deadline reached (DECODE_LADDER_TOTAL_MS)");
+    // A rung already in flight is NEVER aborted mid-run - "slow" still ran to completion.
+    expect(r.reasons[0]).toEqual({ rung: "slow", reason: "miss after 50s" });
+  });
+
+  it("a rung that settles BEFORE the deadline still stops the ladder normally, even with opts passed", async () => {
+    let t = 0;
+    const now = () => t;
+    const a = rung("a", miss("a miss"));
+    const b = rung("b", settled("b hit"));
+    const c = rung("c", miss("c unreached"));
+
+    const r = await runLadder("049000006346", [a, b, c], { deadlineAt: 1_000_000, now });
+
+    expect(r.settledBy).toBe("b");
+    expect(c.spy).not.toHaveBeenCalled();
+  });
+
+  it("no deadline passed = identical behavior to today (fully backward compatible)", async () => {
+    const a = rung("a", miss("a miss"));
+    const b = rung("b", settled("b hit"));
+
+    const r = await runLadder("049000006346", [a, b]);
+
+    expect(r.settledBy).toBe("b");
+  });
+
+  it("no now() passed = defaults to Date.now (never throws, opts.deadlineAt alone works)", async () => {
+    const a = rung("a", settled("a hit"));
+    const r = await runLadder("049000006346", [a], { deadlineAt: Date.now() + 60_000 });
+    expect(r.settledBy).toBe("a");
+  });
+});

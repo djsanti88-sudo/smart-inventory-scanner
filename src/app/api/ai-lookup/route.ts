@@ -258,6 +258,7 @@ export async function POST(request: Request) {
       forceRetry,
       scanContext: body.scanContext,
       mockGptLadder: body.mockGptLadder,
+      budgetMs: body.budgetMs,
     });
     if (outcome.kind === "persisted") {
       return Response.json(outcome.body);

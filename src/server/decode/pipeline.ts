@@ -253,6 +253,10 @@ export interface DecodePipelineRequest {
   forceRetry: boolean;
   scanContext?: "any" | "tire";
   mockGptLadder?: Partial<GptFromScratchResult>;
+  /** AM-1(b): the client's own decode budget (ms), parsed by route.ts but previously never threaded
+   *  through - dead since Task 2.4's extraction. Combined with DECODE_LADDER_TOTAL_MS to derive the
+   *  single request-scoped ladder deadline (see decodeStartedAt / ladderDeadlineAt below). */
+  budgetMs?: number;
 }
 
 /** The settled decode payload (the response body the route serializes; debug is loose because each
@@ -285,13 +289,23 @@ export type DecodePipelineResult =
  * Behavior is identical to the former inline `isDecodeMode` block in route.ts.
  */
 export async function runDecodePipeline(req: DecodePipelineRequest): Promise<DecodePipelineResult> {
-  const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry } = req;
+  const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry, budgetMs } = req;
 
   // A4 (owner-ratified 2026-07-15, "trace every non-decode"): started at the very TOP of the OUTER
   // function (not computeDecode) so durationMs covers the corpus peek, the L2 persisted-decode peek,
   // and the full ladder -- every exit this request can take. Consumed by Task 12b's ladder deadline
   // wiring too (see AM-10 serialization note: this task lands first).
   const decodeStartedAt = Date.now();
+
+  // L2 total ladder deadline (AM-1(b), owner-reported 36-70s blocking decodes): ONE request-scoped
+  // deadline, derived once, passed to EVERY runLadder call below (free run, escalation Go-UPC-only
+  // run, full paid run). DECODE_LADDER_TOTAL_MS defaults to 15000ms (AM-1(c): a budget the client's
+  // own AbortController - decodeBudgetMs + 7000ms margin, see scanStore.ts - actually outlives), and
+  // is widened by the client's own budgetMs when the client asked for a longer window (never
+  // narrowed - a client requesting a bigger budget must not get a SMALLER server deadline than its
+  // own env default). Never trips on the golden gate: that gate runs fully offline with instant
+  // rungs, so wall-clock time never reaches the deadline (do not make it time-sensitive there).
+  const ladderDeadlineAt = decodeStartedAt + Math.max(intEnv(process.env.DECODE_LADDER_TOTAL_MS, 15_000), budgetMs ?? 0);
 
   // A4 outcome ledger append (AM-5): fire-and-forget, best-effort -- a ledger failure must never
   // affect the scan response. Skipped entirely under e2eMode() (tests/Playwright must never touch the
@@ -801,7 +815,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // Go-UPC exact-verify may still upgrade it to verified; fetchv2/gpt NEVER run past it. A total free
     // MISS keeps today's exact behavior (Plan D -> cap gate -> full paid ladder: goupc -> fetchv2 -> gpt).
     const freeRungs = buildFreeLadderRungs(code, { runUpcItemDb, runOpenFoodFacts });
-    const freeRun = await runLadder(code, freeRungs);
+    const freeRun = await runLadder(code, freeRungs, { deadlineAt: ladderDeadlineAt });
     // The free rungs (UPCitemdb / Open Food Facts) NEVER emit "verified" today - both are always
     // suggestions (Resolver Trust Rules). freeStatus is read defensively so a future verified free rung
     // (none exists now) would still be handled as a terminal free win via the `else` branch below.
@@ -923,7 +937,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
       if (goUpcCanPay) {
         await chargePaidSlot();
-        const goRun = await runLadder(code, goUpcRungOnly);
+        const goRun = await runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt });
         const goStatus = (goRun.outcome?.payload as LadderPayload | undefined)?.decision.status ?? null;
         ladderRun = goStatus === "verified"
           ? { settledBy: goRun.settledBy, outcome: goRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] }
@@ -935,7 +949,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     } else if (!freeRun.outcome) {
       // TOTAL FREE MISS: exactly today's path - cap gate then the FULL paid ladder (goupc -> fetchv2 -> gpt).
       await chargePaidSlot();
-      const paidRun = await runLadder(code, buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }));
+      const paidRun = await runLadder(code, buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }), { deadlineAt: ladderDeadlineAt });
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
       // that actually ran, honestly, in the order it ran.
       ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...paidRun.reasons] };
