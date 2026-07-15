@@ -106,3 +106,132 @@ test("suggested decode (confidence 0.92) shows identity + unconfirmed tag; revie
   const row = page.getByTestId(`review-row-${CODE}`);
   await expect(row).toHaveCount(0);
 });
+
+// ---------------------------------------------------------------------------------------------
+// Task 9b (owner-ratified 2026-07-14): inline suggestion approve/decline on the feed row.
+// A LOW-confidence suggestion (0.3, below the 0.8 auto-apply bar) counts immediately, shows the
+// honest "(suggested, 30%)" tag with pointer-only ✓/✕ controls, and creates NO open Needs Review
+// item. Approve = permanent alias via the existing human-approval core -> a rescan resolves
+// deterministically with NO second decode call. Decline renames the row to the safe placeholder
+// and ONLY THEN opens the review. All decode traffic is mocked (IS_E2E=1 webServer + page.route).
+// ---------------------------------------------------------------------------------------------
+
+const CODE_9B = "0792080004312";
+const NAME_9B = "Original Anchor Bar Hot Sauce";
+
+function lowConfSuggestedResponse(code: string) {
+  return {
+    mode: "decode",
+    providerNames: ["gpt-5.5-ladder"],
+    results: [
+      {
+        productName: NAME_9B, brand: "Anchor Bar", category: "food",
+        specsShort: "", specsFull: "", primarySku: "", primaryBarcode: "",
+        gtin: "", upc: "", ean: "", aliases: [], imageUrl: "", productUrl: "",
+        sourceUrls: [`https://go-upc.com/search?q=${code}`], confidence: 0.3,
+        verifiedFacts: [], guesses: ["g"], needsHumanReview: true,
+      },
+    ],
+    evidences: [],
+    decision: {
+      status: "suggested", confidence: 0.3, reason: "Suggested", evidenceStrength: "none",
+      exactCodeEvidenceVerifiedByApp: false,
+      crossCheck: { decision: "single_provider", confidence: 0.3, reason: "", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+    },
+    timedOut: false,
+    debug: {},
+  };
+}
+
+async function setupNonTireSuggested(page: Page, counter: { posts: number }) {
+  await page.route("**/api/ai-lookup", async (route: Route) => {
+    const req = route.request();
+    if (req.method() === "GET") return route.fulfill({ json: STATUS });
+    counter.posts += 1;
+    return route.fulfill({ json: lowConfSuggestedResponse(CODE_9B) });
+  });
+
+  await page.goto("/login");
+  await page.getByTestId("login-button").click();
+  await page.waitForURL("**/scan");
+
+  // Enable AI lookup + set the shop context to "any" (the plain retail case; tire context keeps
+  // its own background-verify escalation behavior, proven elsewhere).
+  await page.goto("/settings");
+  await page.getByTestId("setting-ai-enabled").check();
+  await page.getByTestId("setting-scan-context").selectOption("any");
+  await page.goto("/scan");
+  await expect(page.getByTestId("auto-decode-status")).toContainText("On");
+}
+
+test("Task 9b APPROVE: low-conf suggestion shows '(suggested, 30%)' + controls, no open review; approve clears the tag, keeps scanner focus, and the rescan is deterministic-known (no second decode)", async ({ page }) => {
+  const counter = { posts: 0 };
+  await setupNonTireSuggested(page, counter);
+
+  await scan(page, CODE_9B);
+
+  // The counted row shows the suggested identity + the honest confidence tag + the two controls.
+  const tag = page.locator('[data-testid^="feed-suggestion-"]');
+  await expect(tag).toHaveCount(1);
+  await expect(tag).toContainText("(suggested, 30%)");
+  const approveBtn = page.locator('[data-testid^="approve-suggestion-"]');
+  const declineBtn = page.locator('[data-testid^="decline-suggestion-"]');
+  await expect(approveBtn).toHaveCount(1);
+  await expect(declineBtn).toHaveCount(1);
+  // SCANNER SAFETY: pointer-only targets, never in the tab/Enter path.
+  await expect(approveBtn).toHaveAttribute("tabindex", "-1");
+  await expect(declineBtn).toHaveAttribute("tabindex", "-1");
+  await expect(page.getByTestId("scan-feed-body")).toContainText(NAME_9B);
+
+  // THE change: no open Needs Review item for a suggestion (no red badge on the Review link).
+  const reviewNavLink = page.getByRole("link", { name: "Review" });
+  await expect(reviewNavLink.locator("span")).toHaveCount(0);
+
+  await page.screenshot({ path: `${PROOF}/suggestion-inline-pending.png`, fullPage: true });
+
+  // Approve: a real pointer click that must NOT steal focus from the scanner input.
+  await approveBtn.click();
+  await expect(tag).toHaveCount(0); // tag + controls cleared
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  expect(focused).toBe("scanner-input");
+
+  // Rescan: resolves deterministically via the approved alias - NO second decode POST.
+  const postsBefore = counter.posts;
+  await scan(page, CODE_9B);
+  await expect(page.locator('[data-testid^="feed-product-"]').filter({ hasText: NAME_9B })).toHaveCount(2);
+  await expect(page.locator('[data-testid^="feed-suggestion-"]')).toHaveCount(0);
+  expect(counter.posts).toBe(postsBefore); // deterministic-known, AI never called again
+  await expect(reviewNavLink.locator("span")).toHaveCount(0);
+
+  await page.screenshot({ path: `${PROOF}/suggestion-inline-approved.png`, fullPage: true });
+});
+
+test("Task 9b DECLINE: ✕ renames the row to the safe placeholder and ONLY THEN opens the review", async ({ page }) => {
+  const counter = { posts: 0 };
+  await setupNonTireSuggested(page, counter);
+
+  await scan(page, CODE_9B);
+  const declineBtn = page.locator('[data-testid^="decline-suggestion-"]');
+  await expect(declineBtn).toHaveCount(1);
+
+  await declineBtn.click();
+  // Tag + controls gone; the row never keeps the declined identity. This code's GS1 prefix maps to
+  // a known company, so the row gets the Task 8 PREFIX FLOOR name (brand stated with confidence,
+  // product flagged unconfirmed) - never a fabricated product, never "verified".
+  await expect(page.locator('[data-testid^="feed-suggestion-"]')).toHaveCount(0);
+  await expect(page.getByTestId("scan-feed-body")).not.toContainText(NAME_9B);
+  await expect(page.getByTestId("scan-feed-body")).toContainText("Pellicano");
+  await expect(page.getByTestId("scan-feed-body")).toContainText("product unconfirmed");
+  // Scanner focus survives the decline click too.
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  expect(focused).toBe("scanner-input");
+
+  // Decline is the ONLY suggestion path that creates a review - it is open, with the honest reason.
+  const reviewNavLink = page.getByRole("link", { name: "Review" });
+  await expect(reviewNavLink.locator("span")).toContainText("1");
+  await page.goto("/review");
+  await expect(page.getByTestId(`review-row-${CODE_9B}`)).toHaveCount(1);
+  await expect(page.getByTestId(`review-row-${CODE_9B}`)).toContainText("Suggestion declined");
+
+  await page.screenshot({ path: `${PROOF}/suggestion-inline-declined.png`, fullPage: true });
+});

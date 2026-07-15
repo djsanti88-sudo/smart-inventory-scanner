@@ -175,6 +175,18 @@ export interface ScanEvent {
   // shop). The category firewall was CLEARED by verification, not skipped - the row still shows an
   // "Off-category item" tag so the operator sees it is not a tire.
   offCategory?: boolean;
+  // Task 9b (owner-ratified 2026-07-14): inline suggestion on the counted feed row. A decode whose
+  // decision is "suggested" (usable identity, no firewall conflict, not auto-applied, not awaiting the
+  // tire background verify) no longer sits in Needs Review - it tags the row "(suggested, NN%)" with
+  // pointer-only approve/decline controls. Approve routes through the EXISTING human-approval core
+  // (resolveUnknown via batchApprove); decline renames the row to the prefix floor and ONLY THEN
+  // creates the open review. Both actions no-op unless status is "pending" (double-tap safe).
+  suggestion?: {
+    productName: string;
+    brand: string;
+    confidence: number; // 0..1 decision confidence, shown honestly in the tag
+    status: "pending" | "approved" | "declined";
+  };
   quantityDelta: number;
   quantityAfterScan: number;
   createdAt: string;
@@ -268,7 +280,12 @@ export interface UnknownCodeReview {
   // Confidence-based auto-verify outcome (when a decode was scored but did NOT auto-save).
   autoVerifyScore?: number;
   blockingReasons?: string[];
-  status: "open" | "resolved" | "ignored";
+  // "suggested" (Task 9b, owner-ratified 2026-07-14): a PENDING inline suggestion. The review record
+  // is PARKED here (kept for the audit trail + the batch-approve surface) instead of sitting "open" in
+  // the Needs Review queue/badge. It is still awaiting a human: resolveUnknown accepts it exactly like
+  // "open" (inline approve routes through that same core); decline flips it back to "open" with the
+  // decline reason. Additive value - old persisted snapshots only carry the original three.
+  status: "open" | "suggested" | "resolved" | "ignored";
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;

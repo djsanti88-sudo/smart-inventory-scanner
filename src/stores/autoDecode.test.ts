@@ -97,7 +97,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     } finally {
       restore();
     }
-    expect(lastReview(store).status).toBe("open"); // review stays open for human confirmation
+    expect(lastReview(store).status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name === "Maybe Snack");
     expect(prov).toBeDefined();

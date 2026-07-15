@@ -86,7 +86,8 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   // Suggested (weak url_only evidence) -> EVIDENCE GATE blocks a VERIFIED auto-add, but the
   // "scan N = count N" invariant (Plan A/Plan C, see docs/superpowers/plans/2026-07-01-plan-c-verified-suggested.md
   // and the DECODE-EVERYTHING provisional-count block in scanStore.ts) still provisionally counts the
-  // scan as an unverified row while the review stays open (checked below via review-row-111111111119).
+  // scan as an unverified row. owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b) -
+  // the suggestion now sits as a PENDING inline tag on the row / the Suggested tab (checked below).
   await scan(page, "111111111119");
   await expect(page.getByTestId("final-count-body")).toContainText("Maybe Energy Bar");
 
@@ -97,10 +98,14 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   await expect(page.getByTestId("scanner-input")).toBeFocused();
   await page.screenshot({ path: `${PROOF}/auto-decode-01-feed.png`, fullPage: true });
 
-  // Both the weak-suggested and the conflict are left in Needs Review (evidence gate; neither auto-counted).
+  // The CONFLICT stays an open Needs Review row (unchanged). The weak-suggested no longer sits in
+  // the open queue (owner-ratified 2026-07-14: suggestions bypass Needs Review, Task 9b) - it is a
+  // pending inline suggestion, still surfaced on the Suggested tab for batch cleanup.
   await page.goto("/review");
-  await expect(page.getByTestId("review-row-111111111119")).toBeVisible();
   await expect(page.getByTestId("review-row-222222222226")).toBeVisible();
+  await expect(page.getByTestId("review-row-111111111119")).toHaveCount(0);
+  await page.getByTestId("review-tab-suggested").click();
+  await expect(page.getByTestId("suggested-row-111111111119")).toBeVisible();
   await page.screenshot({ path: `${PROOF}/auto-decode-02-review.png`, fullPage: true });
 
   // Re-scan the auto-added code: deterministic Known, ZERO new AI calls.

@@ -351,7 +351,7 @@ describe("GPT ladder trust tiers - suggested tier flows through unchanged", () =
     }
 
     const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
-    expect(r.status).toBe("open");
+    expect(r.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(r.hasSuggestion).toBe(true);
     expect(r.suggestedProductName).toBe("Michelin Defender 225/65R17");
   });
@@ -389,7 +389,7 @@ describe("GPT ladder - weak guesses are normal candidates (info_only deleted, ow
     }
 
     const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
-    expect(r.status).toBe("open");
+    expect(r.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(r.hasSuggestion).toBe(true);
     expect(r.suggestedProductName).toBe("Goodyear (best guess, low confidence)");
     expect(r.suggestedBrand).toBe("Goodyear");

@@ -527,6 +527,16 @@ export interface ScanState {
    *  throws, has no open suggestion, or is already resolved/ignored is recorded and the loop continues; it
    *  never aborts the rest of the batch. */
   batchApprove: (reviewIds: string[]) => { approved: string[]; failed: Array<{ id: string; reason: string }> };
+  /** Task 9b (owner-ratified 2026-07-14): approve the feed row's PENDING inline suggestion. Routes
+   *  through the EXISTING human-approval core (batchApprove -> resolveUnknown "create_new"), so the
+   *  idempotency-keyed alias write, poison guard, dedup guard, and provisional upgrade are inherited,
+   *  never re-implemented. No-op unless the row's suggestion.status is "pending" (double-tap safe). */
+  approveSuggestion: (scanEventId: string) => void;
+  /** Task 9b: decline the feed row's PENDING inline suggestion ("Not this product"). Renames the
+   *  counted provisional row to the prefix floor (or the safe Unidentified placeholder) FIRST, and
+   *  ONLY THEN creates/reopens the OPEN Needs Review item (decline is now the only suggestion path
+   *  that creates one). No-op unless suggestion.status is "pending" (double-tap safe). */
+  declineSuggestion: (scanEventId: string) => void;
   /** Evaluate (without committing) whether linking a review's code to a product looks like a mistake. */
   evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
   /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
@@ -2497,6 +2507,44 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // self-guards on the review still being open (idempotent against a late/duplicate response).
               void get().backgroundVerifyDeep(reviewId);
             }
+
+            // Task 9b (owner-ratified 2026-07-14): a suggestion-bearing decode NO LONGER sits in Needs
+            // Review. The scan already counted (count-decouple, above); the suggestion concerns only the
+            // NAME, so it moves onto the counted feed row as a PENDING inline suggestion (approve/decline
+            // controls) and the review record is PARKED at status "suggested" (kept for the audit trail +
+            // the batch-approve surface; dropped from the open queue/badge). APPROVED SEAM: only a decision
+            // that is honestly "suggested", with a usable name, no firewall conflict, not auto-suggest-
+            // applied, and NOT a tire scan awaiting the background deep-verify escalation just fired above
+            // (that proven owner-loved path keeps its open review until it completes; backgroundVerifyDeep
+            // performs the same conversion itself when it finishes WITHOUT verifying). Conflicts, empty
+            // decodes, and blocked-verified decodes still create/keep open reviews (unchanged).
+            // autoAddOn gate: with autoAddDecodedProducts OFF the owner asked for EVERY decode to go to
+            // manual review (documented master switch) - suggestions then keep landing in the open queue.
+            const suggestionInline =
+              autoAddOn &&
+              !autoSuggestApplied &&
+              decision?.status === "suggested" &&
+              isUsableProductName(best?.productName ?? "") &&
+              !contextConflict &&
+              !(tireScan && !fastWasVerified);
+            if (suggestionInline) {
+              const pendingSuggestion = {
+                productName: suggestionFields.suggestedProductName,
+                brand: suggestionFields.suggestedBrand,
+                confidence: decision?.confidence ?? 0,
+                status: "pending" as const,
+              };
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId && r.status === "open" ? { ...r, status: "suggested" as const } : r,
+                ),
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.decodeStatus !== "verified" && !e.suggestion
+                    ? { ...e, suggestion: pendingSuggestion }
+                    : e,
+                ),
+              }));
+            }
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
@@ -2770,6 +2818,54 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               ),
             }));
           }
+          // Task 9b (owner-ratified 2026-07-14 addition): the deep pass has now COMPLETED without
+          // verifying - the identity is still only a suggestion, and suggestions never sit in Needs
+          // Review. Convert this review to the same PENDING inline-suggestion state the fast path
+          // uses (status "suggested" + approve/decline controls on the counted feed row). Guarded on
+          // the review still being open (idempotent against duplicate/late deep responses) and on a
+          // usable suggested identity; a deep result that returned a NEW identity is re-checked
+          // against the context firewall first (the fast identity was already cleared before this
+          // escalation ever fired - see the backgroundVerifyDeep trigger in runLiveDecodeOnce).
+          const freshAfter = get().needsReviewQueue.find((r) => r.id === reviewId);
+          // Same autoAddOn master-switch gate as the fast path: with autoAddDecodedProducts OFF the
+          // owner asked for every decode to sit in manual review, so no inline conversion happens.
+          if (
+            (s.autoAddDecodedProducts ?? true) &&
+            freshAfter &&
+            freshAfter.status === "open" &&
+            freshAfter.hasSuggestion &&
+            isUsableProductName(freshAfter.suggestedProductName)
+          ) {
+            const deepConflict =
+              best && isUsableProductName(best.productName ?? "")
+                ? detectScanContextConflict({
+                    scanContext: s.scanContext ?? "any",
+                    code: review.cleanCode,
+                    codeType,
+                    result: best,
+                    brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
+                    exactCodeVerifiedByApp: false,
+                  })
+                : null; // no new deep identity: the fast pass already cleared the firewall before escalating
+            if (!deepConflict) {
+              const pendingSuggestion = {
+                productName: freshAfter.suggestedProductName,
+                brand: freshAfter.suggestedBrand,
+                confidence: freshAfter.confidence,
+                status: "pending" as const,
+              };
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId && r.status === "open" ? { ...r, status: "suggested" as const } : r,
+                ),
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.decodeStatus !== "verified" && !e.suggestion
+                    ? { ...e, suggestion: pendingSuggestion }
+                    : e,
+                ),
+              }));
+            }
+          }
           return;
         }
 
@@ -2961,11 +3057,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       resolveUnknown: (reviewId, action, payload) => {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
-        // Idempotency / re-entry guard: only act on an OPEN review. A double-click, or a race where a
-        // background decode resolves the same review while a human approves it, must NOT re-run
-        // applyToCount -> a second count of the same physical item. Matches the open-status guard already
-        // used by liveDecode / backgroundVerifyDeep / cloudCatalogResolve / correctionRecheck.
-        if (!review || review.status !== "open") return;
+        // Idempotency / re-entry guard: only act on a review still AWAITING a decision - OPEN, or a
+        // PENDING inline suggestion ("suggested", Task 9b owner-ratified 2026-07-14: the feed row's
+        // inline approve routes through this exact core, so a parked suggestion must be resolvable
+        // here). A double-click, or a race where a background decode resolves the same review while a
+        // human approves it, must NOT re-run applyToCount -> a second count of the same physical item:
+        // resolved/ignored stays a hard no-op. Matches the open-status guard already used by
+        // liveDecode / backgroundVerifyDeep / cloudCatalogResolve / correctionRecheck.
+        if (!review || (review.status !== "open" && review.status !== "suggested")) return;
 
         if (action === "ignore") {
           set({
@@ -3646,12 +3745,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               }
               // Idempotent: a review already resolved/ignored (this call or an earlier one) is silently
               // skipped, exactly like resolveUnknown's own open-status guard - a re-click or a retried
-              // batch never double-counts and is not reported as a failure.
-              if (review.status !== "open") continue;
+              // batch never double-counts and is not reported as a failure. Task 9b (owner-ratified
+              // 2026-07-14): a PENDING inline suggestion (status "suggested") is approvable here too -
+              // resolveUnknown accepts it exactly like "open", so the same core path runs unchanged.
+              if (review.status !== "open" && review.status !== "suggested") continue;
               if (!review.hasSuggestion || !review.suggestedProductName) {
                 failed.push({ id: reviewId, reason: "No suggestion to approve" });
                 continue;
               }
+              // Task 9b: capture the feed row(s) carrying this suggestion BEFORE resolveUnknown runs
+              // (it may remap the row's matchedProductId), so the inline tag can be settled afterwards.
+              const pendingRowIds = get()
+                .scanFeed.filter(
+                  (e) =>
+                    e.suggestion?.status === "pending" &&
+                    ((e.cleanCode && e.cleanCode === review.cleanCode) ||
+                      (e.matchedProductId && e.matchedProductId === review.provisionalProductId)),
+                )
+                .map((e) => e.id);
 
               const discovered = buildDiscoveredIdentifiers(review);
               // TRUST RULE (Build 3 review Finding 1): do NOT pass origin: "human" here. That value disables
@@ -3683,11 +3794,35 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               });
 
               // resolveUnknown silently no-ops on a guard it hit (e.g. a dedup conflict); only count this
-              // row as approved if it actually left the open state.
+              // row as approved if it actually left the awaiting states (open / suggested).
               const after = get().needsReviewQueue.find((r) => r.id === reviewId);
-              if (after && after.status !== "open") {
+              if (after && after.status !== "open" && after.status !== "suggested") {
                 approved.push(reviewId);
+                // Task 9b: settle the inline tag on the row(s) this suggestion belonged to.
+                if (pendingRowIds.length > 0) {
+                  set((st) => ({
+                    scanFeed: st.scanFeed.map((e) =>
+                      pendingRowIds.includes(e.id) && e.suggestion?.status === "pending"
+                        ? { ...e, suggestion: { ...e.suggestion, status: "approved" as const } }
+                        : e,
+                    ),
+                  }));
+                }
               } else {
+                // Task 9b: an approve that could NOT auto-resolve (identity-merge suggest_link / dedup
+                // conflict) surfaces honestly in the OPEN queue for the human instead of staying parked,
+                // and the row's dead inline controls are dropped (the review-derived "(suggested)" tag
+                // takes over, exactly the pre-9b display for an open suggestion-bearing review).
+                if (after && after.status === "suggested") {
+                  set((st) => ({
+                    needsReviewQueue: st.needsReviewQueue.map((r) =>
+                      r.id === reviewId && r.status === "suggested" ? { ...r, status: "open" as const } : r,
+                    ),
+                    scanFeed: st.scanFeed.map((e) =>
+                      pendingRowIds.includes(e.id) ? { ...e, suggestion: undefined } : e,
+                    ),
+                  }));
+                }
                 failed.push({ id: reviewId, reason: "Could not resolve automatically - needs manual review" });
               }
             } catch (e) {
@@ -3697,6 +3832,82 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
 
         return { approved, failed };
+      },
+
+      // Task 9b (owner-ratified 2026-07-14): inline approve on the feed row. REUSE, never duplicate:
+      // batchApprove -> resolveUnknown "create_new" IS the single-row human-approval path, so the
+      // idempotency-keyed alias write, Phase-2 poison guard, dedup guard, and no-double-count
+      // provisional upgrade are all inherited. The review is located by the row's cleanCode, with the
+      // reload-resilient provisionalProductId fallback (a customer persist strips the event's code).
+      approveSuggestion: (scanEventId) => {
+        const st = get();
+        const ev = st.scanFeed.find((e) => e.id === scanEventId);
+        if (!ev || ev.suggestion?.status !== "pending") return; // idempotent double-tap guard
+        const review = st.needsReviewQueue.find(
+          (r) =>
+            r.status === "suggested" &&
+            ((ev.cleanCode && r.cleanCode === ev.cleanCode) ||
+              (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
+        );
+        if (!review) return;
+        get().batchApprove([review.id]); // settles the row tag itself on success
+      },
+
+      // Task 9b: inline decline ("Not this product"). Order is owner-ratified: rename the counted row
+      // to the prefix floor FIRST (a declined identity never stays on the count; the floor/placeholder
+      // is a naming aid, NEVER a verified identity), and ONLY THEN create/reopen the OPEN Needs Review
+      // item - decline is now the only suggestion path that creates one. reopenNeedsReview is the
+      // existing core: it opens (or creates) the review with the decline reason and clears the
+      // (declined) suggestion fields so the Suggested batch pile can never re-offer it.
+      declineSuggestion: (scanEventId) => {
+        const st = get();
+        const ev = st.scanFeed.find((e) => e.id === scanEventId);
+        if (!ev || ev.suggestion?.status !== "pending") return; // idempotent double-tap guard
+        const review = st.needsReviewQueue.find(
+          (r) =>
+            (r.status === "suggested" || r.status === "open") &&
+            ((ev.cleanCode && r.cleanCode === ev.cleanCode) ||
+              (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
+        );
+        const code = ev.cleanCode || review?.cleanCode || "";
+        const floor = code ? prefixFloorName(code, detectCodeType(code)) : null;
+        const floorName = code ? provisionalPlaceholderName(code) : "Unidentified item";
+        const declineReason = "Suggestion declined by operator - needs a correct name";
+        const prodId = ev.matchedProductId ?? review?.provisionalProductId ?? null;
+        set((s2) => ({
+          products: prodId
+            ? s2.products.map((p) =>
+                p.id === prodId && p.provisional === true && p.verified !== true
+                  ? {
+                      ...p,
+                      name: floorName,
+                      brand: floor?.brand ?? "",
+                      category: "",
+                      specsShort: "",
+                      specsFull: "",
+                      imageUrl: "",
+                      productUrl: "",
+                      confidence: 0,
+                      updatedAt: now(),
+                      updatedBy: "human",
+                    }
+                  : p,
+              )
+            : s2.products,
+          scanFeed: s2.scanFeed.map((e) =>
+            e.id === scanEventId && e.suggestion
+              ? { ...e, suggestion: { ...e.suggestion, status: "declined" as const }, reason: declineReason }
+              : e,
+          ),
+        }));
+        if (code) get().reopenNeedsReview(code, declineReason);
+        get().recordFeedback("product_rejected", { code });
+        emitAudit({
+          entityType: "UnknownCodeReview",
+          entityId: review?.id ?? code,
+          action: "alias_rejected",
+          metadata: { code, kind: "inline_suggestion_declined" },
+        });
       },
 
       evaluateLinkMismatch: (reviewId, productId) => {

@@ -199,7 +199,7 @@ describe("client-orchestrated background verify (suggested tire -> verified -> c
     expect(prov).toBeDefined();
     expect(prov!.provisional).toBe(true);
     expect(prov!.verified).toBe(false);
-    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open");
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b) - the deep pass completed without verifying, so the review converts to a pending inline suggestion
     expect(store.getState().aliases.some((a) => a.cleanCode === HANKOOK_CODE && a.approved)).toBe(false);
   });
 
