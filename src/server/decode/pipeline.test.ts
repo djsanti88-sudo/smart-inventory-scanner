@@ -7,6 +7,30 @@ import fs from "node:fs";
 // The pipeline imports `server-only` (and server-only modules). Stub the marker so it loads in vitest.
 vi.mock("server-only", () => ({}));
 
+// Task 6: the corpus exact peek and the L2 persisted-decode peek are the two stages the reorder
+// swaps. Mock BOTH so a test can assert "a fresh corpus hit beats a stale no_result_receipt" without a
+// real tire DB or a real L2 store. Real implementations pass through by default (importOriginal); each
+// test overrides the specific call it cares about with mockResolvedValueOnce.
+// Hoisted holder for the real (pass-through) implementations so beforeEach can restore them after a
+// per-test mockResolvedValueOnce override. vi.hoisted runs before the vi.mock factories, which the
+// factories then populate; the holder itself is safe to reference inside the hoisted factories.
+const realImpls = vi.hoisted(() => ({
+  resolveExactBarcode: undefined as unknown as typeof import("@/server/tire-knowledge/TireKnowledgeProvider").resolveExactBarcode,
+  resolveExactPartNumber: undefined as unknown as typeof import("@/server/tire-knowledge/TireKnowledgeProvider").resolveExactPartNumber,
+  getPersistedDecode: undefined as unknown as typeof import("@/server/decodeCacheStore").getPersistedDecode,
+}));
+vi.mock("@/server/tire-knowledge/TireKnowledgeProvider", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/tire-knowledge/TireKnowledgeProvider")>();
+  realImpls.resolveExactBarcode = actual.resolveExactBarcode;
+  realImpls.resolveExactPartNumber = actual.resolveExactPartNumber;
+  return { ...actual, resolveExactBarcode: vi.fn(actual.resolveExactBarcode), resolveExactPartNumber: vi.fn(actual.resolveExactPartNumber) };
+});
+vi.mock("@/server/decodeCacheStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/decodeCacheStore")>();
+  realImpls.getPersistedDecode = actual.getPersistedDecode;
+  return { ...actual, getPersistedDecode: vi.fn(actual.getPersistedDecode) };
+});
+
 // Redirect ladderStorage() at a per-process tmp dir so the daily-cap / Go-UPC usage counters never
 // pollute the real repo working tree (identical to the route test's mock).
 vi.mock("@/server/upc/storage", async (importOriginal) => {
@@ -26,7 +50,8 @@ import { __resetForTest, readDailyUsed } from "@/services/security/aiSpendGuard"
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
-import { __resetForTest as __resetDecodeCacheStoreForTest, getPersistedDecode } from "@/server/decodeCacheStore";
+import { __resetForTest as __resetDecodeCacheStoreForTest, getPersistedDecode, type PersistedDecode } from "@/server/decodeCacheStore";
+import { resolveExactBarcode, resolveExactPartNumber, type CorpusDecodeResult } from "@/server/tire-knowledge/TireKnowledgeProvider";
 
 // Thin unit tests for the extracted decode pipeline (Task 2.4). They run with NO API keys and a fully
 // STUBBED global.fetch, so NO live provider call and NO real network can occur - every rung either
@@ -62,6 +87,11 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    // Task 6: restore the pass-through implementations so each test starts from real behavior; a test
+    // that wants a synthetic corpus hit / persisted receipt uses mockResolvedValueOnce explicitly.
+    vi.mocked(resolveExactBarcode).mockReset().mockImplementation(realImpls.resolveExactBarcode);
+    vi.mocked(resolveExactPartNumber).mockReset().mockImplementation(realImpls.resolveExactPartNumber);
+    vi.mocked(getPersistedDecode).mockReset().mockImplementation(realImpls.getPersistedDecode);
     __resetForTest();
     __resetDecodeCacheStoreForTest();
     clearDecodeCache();
@@ -126,6 +156,45 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(await readDailyUsed(await ladderStorage())).toBe(0);
     // No paid provider was contacted once the cap is exhausted.
     expect(hitAnAiProvider()).toBe(false);
+  });
+
+  // Task 6 factories: a synthetic corpus hit and a stale L2 no_result_receipt for the reorder test.
+  function makeCorpusHit(): CorpusDecodeResult {
+    return {
+      decision: {
+        status: "verified",
+        confidence: 0.97,
+        reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
+        evidenceStrength: "fetched_source",
+        exactCodeEvidenceVerifiedByApp: true,
+        crossCheck: { decision: "single_provider", confidence: 0.97, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+        corroborationPath: "corpus_exact_barcode",
+      },
+      results: [{ productName: "Michelin Defender T+H 235/60R18", brand: "Michelin", category: "Tire", specsShort: "235/60R18", confidence: 0.97, needsHumanReview: false, sourceUrls: [], verifiedFacts: [], primaryBarcode: "848983006257" } as unknown as CorpusDecodeResult["results"][number]],
+      evidences: [{ verified: true, strength: "fetched_source", matchedCode: "848983006257", matchedSources: ["tire_knowledge_corpus"], reason: "Exact code found in the trusted tire knowledge base." }],
+      providerNames: ["tire-corpus"],
+      path: "corpus_exact_barcode",
+    };
+  }
+  function makeReceipt(): PersistedDecode {
+    // A prior run exhausted the ladder and wrote a PERMANENT no_result_receipt (unresolved shape).
+    const unresolvedBody = { mode: "decode", providerNames: ["gpt"], results: [], evidences: [], decision: { status: "needs_review", confidence: 0, reason: "No rung resolved the code." }, reasonCode: "no_result", reasonText: "No rung resolved the code.", debug: {} };
+    return { code: "00848983006257", kind: "no_result_receipt", payload: JSON.stringify(unresolvedBody), tier: "gpt_none", createdAt: Date.now() - 86_400_000 };
+  }
+
+  it("L1 fix: a code with a stale no_result_receipt resolves from the corpus (corpus heals receipts)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    vi.mocked(resolveExactBarcode).mockResolvedValueOnce(makeCorpusHit()); // corpus NOW knows it
+    vi.mocked(getPersistedDecode).mockResolvedValueOnce(makeReceipt()); // old receipt exists
+
+    const out = await runDecodePipeline(makeReq("848983006257"));
+
+    // Corpus peek runs FIRST: the fresh corpus win beats the stale receipt (which would have
+    // short-circuited "persisted"/unresolved before this fix).
+    expect(out.kind).toBe("computed");
+    if (out.kind !== "computed") throw new Error("unreachable");
+    expect(out.payload.providerNames).toContain("tire-corpus");
+    expect(out.payload.decision.status).toBe("verified");
   });
 
   // FREE-RUNGS-OUTSIDE-THE-PAID-CAP (bug fix, 2026-07-12 review): UPCitemdb / Open Food Facts must

@@ -91,6 +91,30 @@ export function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
 }
 
+// Task 6: PURE payload assembly for a trusted-corpus exact hit (barcode or SKU-shaped part number),
+// lifted VERBATIM out of the former corpus block inside computeDecode so the early corpus peek at the
+// top of runDecodePipeline can reuse it. No closure over request-scoped mutable state - the sanitized
+// input strings are passed in explicitly. Debug fields are copied unchanged from the original block.
+function corpusPayload(
+  corpus: import("@/server/tire-knowledge/TireKnowledgeProvider").CorpusDecodeResult,
+  rawCodeSanitized: string,
+  cleanCodeSanitized: string,
+): DecodePayload {
+  return {
+    mode: "decode" as const,
+    providerNames: corpus.providerNames,
+    results: corpus.results,
+    evidences: corpus.evidences,
+    providerStatuses: [{ provider: "tire-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
+    decision: corpus.decision,
+    reasonCode: "ok",
+    reasonText: "",
+    timedOut: false,
+    debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false },
+    sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+  };
+}
+
 // Combined prefix conflict fed to decideDecode: the existing catalog-derived brand sanity OR the new
 // evidence-weighted firewall (barcode prefix-owner vs the candidate's manufacturer/category). The
 // firewall is OVERRIDE-AWARE - strong app-verified exact-code evidence makes fw.conflict false - so this
@@ -271,6 +295,26 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // recomputes ONCE after deploy (old rows are orphaned, never wrong - upsert re-fills canonically).
   const cacheKey = canonicalGtin(code) ?? code;
 
+  // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST (Task 6: moved to the TOP of the pipeline, ahead of
+  // the L2 persisted-decode peek below). An EXACT trusted-corpus barcode (or, for SKU-shaped codes, an
+  // exact part number) resolves with NO AI call and NO page fetch - a FREE win. It must run BEFORE the
+  // persistedHit peek so that when the weekly corpus harvest adds a barcode that previously exhausted
+  // the ladder, the fresh corpus hit heals the stale permanent "no_result_receipt" instead of replaying
+  // "unresolved" forever. A corpus hit is never persisted to L2 (classifySourceTier returns null for
+  // tire-corpus) and never charges the daily cap. e2eMode() skips the peek exactly as before. forceRetry
+  // is intentionally NOT special-cased: corpus runs first regardless (equivalent to today, where the
+  // corpus stage inside computeDecode always ran even under forceRetry). The corpus is GROUNDING - the
+  // downstream store auto-count gate (firewall + tire specs + brand-prefix + >=0.8) still applies.
+  // CONSEQUENCE (accepted, Task 6): corpus hits no longer enter the L1 memory cache via withDecodeCache;
+  // corpus lookup is ~0-150ms, which is acceptable.
+  if (!e2eMode()) {
+    const skuShaped = codeType === "alpha_sku" || codeType === "vendor_label";
+    const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
+    if (corpus) {
+      return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false };
+    }
+  }
+
   // L2 PERSISTENT DECODE CACHE (Task 4): consulted on an L1 miss, BEFORE the daily cap check below -
   // same guard window as the existing L1 peek, so a persisted "result" OR a permanent
   // "no_result_receipt" never burns a daily slot. Never touched under E2E (tests/Playwright must
@@ -412,31 +456,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // real product, a repeat scan in this server returns instantly with NO AI/Firecrawl spend. Only a
   // SUCCESS (a usable product) is cached - a failure stays retryable. Skipped under E2E (mock-only).
   const computeDecode = async (): Promise<DecodePayload> => {
-    // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST: an EXACT trusted-corpus barcode (or, for SKU-shaped
-    // codes, an exact part number) resolves with NO AI call and NO page fetch. A miss returns null and the
-    // existing AI/page-fetch path below runs unchanged. The corpus is GROUNDING - the downstream store
-    // auto-count gate (firewall + tire specs + brand-prefix + >=0.9) still applies, so a non-tire or a
-    // near-match can never auto-count this way. (Human-confirmed business catalog/flywheel still wins
-    // first, in the store, before this route is ever called for an unknown code.)
-    if (!e2eMode()) {
-      const skuShaped = codeType === "alpha_sku" || codeType === "vendor_label";
-      const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
-      if (corpus) {
-        return {
-          mode: "decode" as const,
-          providerNames: corpus.providerNames,
-          results: corpus.results,
-          evidences: corpus.evidences,
-          providerStatuses: [{ provider: "tire-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
-          decision: corpus.decision,
-          reasonCode: "ok",
-          reasonText: "",
-          timedOut: false,
-          debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false },
-          sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
-        };
-      }
-    }
+    // Task 6: the SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE peek that used to sit here has moved to the
+    // TOP of runDecodePipeline (ahead of the L2 persisted-decode peek) so a corpus hit can heal a stale
+    // no_result_receipt. computeDecode is only ever reached on a corpus MISS now, so no corpus check
+    // remains here - see corpusPayload + the early peek above.
 
     // RETAIL PRODUCT KNOWLEDGE INDEX (4M+ Open Food Facts products): exact barcode hit resolves
     // the product WITHOUT AI. Tries local SQLite first, then Turso remote DB. retailLookupStatus
