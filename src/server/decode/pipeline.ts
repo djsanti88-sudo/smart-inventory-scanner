@@ -1094,10 +1094,17 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
 
     // ALL RUNGS MISSED. If Plan D had already stashed a floor/suggestion, fall back to it exactly as
     // before the T8b fix (unchanged user experience for a genuinely unfindable public barcode), merging
-    // the ladder's per-rung miss reasons into the reason text/providerStatuses/debug so nothing is
-    // silent. Otherwise (non-public code, or Plan D itself found nothing to stash) emit the plain
-    // needs_review whose reason lists every rung that came back empty (owner: never silent).
-    const allMissReason = `No rung resolved the code. ${ladderRun.reasons.map((r) => `${r.rung}: ${r.reason}`).join("; ")}`;
+    // the ladder's per-rung miss reasons into providerStatuses/debug so nothing is silent server-side.
+    // Otherwise (non-public code, or Plan D itself found nothing to stash) emit the plain needs_review.
+    // QA Task 2 (2026-07-15, review finding): the customer-facing reason text used to join the RAW rung
+    // identifiers + raw internal reasons (e.g. "upcitemdb: ...", "fetchv2: ... -> fall through",
+    // "gpt: gpt-5.5 skipped: ..."). That string flows into scanStore.ts's review/feed `.reason`, which
+    // LiveScanFeed.tsx renders to EVERY role (only `decodeNote` is platform-gated) - leaking internal
+    // provider/vendor names to non-platform customers. The safe, honest REASON_TEXT copy (identical
+    // wording used elsewhere in this file for the same "nothing found" outcome) replaces it here; the
+    // full raw per-rung chain remains available server-side via debug.ladderReasons (never rendered by
+    // any component - see pipeline.test.ts / route.test.ts, which assert on it directly).
+    const allMissReason = `No rung resolved the code. ${REASON_TEXT["product_not_found_after_search"]}`;
     if (planDStash) {
       const mergedReasonText = `${planDStash.reasonText || planDStash.decision.reason || "Unresolved"}. ${allMissReason}`;
       return {

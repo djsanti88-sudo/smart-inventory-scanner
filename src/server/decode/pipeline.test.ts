@@ -300,6 +300,36 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(floorResult?.sourceUrls ?? []).toHaveLength(0);
   });
 
+  // QA Task 2 (2026-07-15): the all-miss reason text was joining raw rung identifiers + raw internal
+  // provider reasons (e.g. "upcitemdb: ...", "fetchv2 needs_review (no usable identity) -> fall
+  // through", "gpt-5.5 skipped: ...") straight into reasonText, which flows into scanStore.ts's
+  // review/feed `.reason` and is rendered to EVERY role by LiveScanFeed.tsx (only `decodeNote` is
+  // platform-gated). That leaked internal provider/vendor names to non-platform customers. The
+  // customer-facing reasonText must stay honest (still starts with "No rung resolved the code.") but
+  // must never name a raw provider/rung identifier or an internal fall-through phrase.
+  it("QA Task 2: the all-miss customer-facing reasonText never leaks raw rung names or internal reasons", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap; the point is the leak, not the block
+    const outcome = await runDecodePipeline(makeReq("111000222333"));
+
+    expect(outcome.kind).toBe("computed");
+    if (outcome.kind !== "computed") throw new Error("unreachable");
+    expect(outcome.payload.decision.status).not.toBe("verified");
+    // Still honest and non-empty (owner: never silent).
+    expect(outcome.payload.reasonText).toMatch(/No rung resolved the code/);
+    expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+    // Never names a raw internal rung identifier or vendor/provider name.
+    expect(outcome.payload.reasonText).not.toMatch(/upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|gpt-5\.5|gpt\b|ladder|free-steering/i);
+    // Never leaks the raw internal fall-through / skip phrasing either.
+    expect(outcome.payload.reasonText).not.toMatch(/fall through|skipped:|self-report/i);
+    // The same honesty applies to decision.reason (the review/feed `.reason` field reads from either).
+    expect(outcome.payload.decision.reason).not.toMatch(/upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|gpt-5\.5|gpt\b|ladder|free-steering/i);
+    // The raw per-rung chain is still fully available server-side for debugging (never removed).
+    const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+    const rungsSeen = (reasons ?? []).map((r) => r.rung);
+    expect(rungsSeen).toContain("fetchv2");
+    expect(rungsSeen).toContain("gpt");
+  }, 30000);
+
   // Task 6 factories: a synthetic corpus hit and a stale L2 no_result_receipt for the reorder test.
   function makeCorpusHit(): CorpusDecodeResult {
     return {
