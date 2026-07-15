@@ -101,7 +101,13 @@ function getStmtAllPartNumber() {
   try {
     // Deliberately NO LIMIT: the reconcile matcher must see EVERY row a part number maps to
     // (a non-unique index treated as unique would silently hide a brand collision).
-    _stmtAllPartNumber = db.prepare("SELECT * FROM tires WHERE manufacturer_part_number = ?");
+    // Normalized compare (review I-1): the caller always passes an already-normPartKey'd key
+    // (spaces + hyphens stripped, uppercased), but the stored column is RAW. Mirror the
+    // getStmtBySize normalization style so a hyphenated/spaced PN (e.g. "TBAT-I0041295") still
+    // matches; without this, SQLite silently missed while Turso/JSON (both normalized) hit.
+    _stmtAllPartNumber = db.prepare(
+      "SELECT * FROM tires WHERE UPPER(REPLACE(REPLACE(manufacturer_part_number, ' ', ''), '-', '')) = ?",
+    );
     return _stmtAllPartNumber;
   } catch { return null; }
 }
