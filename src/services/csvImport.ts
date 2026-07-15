@@ -1,6 +1,7 @@
 import type { Alias, Product } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
+import { isGtinShaped, gtinVariants } from "@/services/upc/gtin";
 import { parse as parseCsvSync } from "csv-parse/sync";
 
 // Deterministic CSV import (MVP). Pure functions (no React, no next/*). Treats ALL CSV content as
@@ -460,13 +461,25 @@ export function applyCsvImport(rows: ImportRow[], target: ImportTarget): ImportS
     // a CSV barcode printed with dashes/spaces ("012-345-678905") must match the SAME clean code an
     // approved alias already stores, or it silently mints a duplicate product. row.barcode itself
     // stays untouched (raw, for display); only the matching/alias-creation key is normalized here,
-    // using the most-normalized candidate (separators stripped) so a dashed/spaced CSV value matches
-    // a plain scanned code, same as the sibling buildProductImport path's normalizedCode field.
+    // using the most-normalized SEPARATOR-STRIPPED candidate (never a GTIN zero-padding variant - see
+    // nonGtinCandidates below) so a dashed/spaced CSV value matches a plain scanned code, same as the
+    // sibling buildProductImport path's normalizedCode field.
     const cleaned = row.barcode?.trim() ? cleanScanCode(row.barcode) : undefined;
-    const barcode = cleaned ? cleaned.normalizedCandidates.slice(-1)[0] ?? cleaned.cleanCode : undefined;
+    // Task 4 (GTIN-14 canonicalization): buildNormalizedCandidates additively appends zero-padded GTIN
+    // variants (via gtinVariants) AFTER the separator-stripped forms, purely so a differently-padded
+    // EXISTING alias (00049000028911 == 049000028911) is still found. Those variants must never become
+    // the stored alias key on a brand-new product - that key stays the separator-stripped clean form,
+    // unchanged from before this task. So: (a) the stored `barcode` = the last candidate that is NOT one
+    // of the GTIN zero-padding variants, (b) the alias LOOKUP tries every candidate (including the GTIN
+    // variants) so a differently-padded existing alias is still matched.
+    const gtinVariantSet = new Set(cleaned && isGtinShaped(cleaned.cleanCode) ? gtinVariants(cleaned.cleanCode) : []);
+    const nonGtinCandidates = cleaned ? cleaned.normalizedCandidates.filter((c) => !gtinVariantSet.has(c) || c === cleaned.cleanCode) : [];
+    const barcode = cleaned ? nonGtinCandidates.slice(-1)[0] ?? cleaned.cleanCode : undefined;
 
     if (barcode) {
-      const existingByBarcode = target.findProductByAlias(barcode);
+      const existingByBarcode = cleaned
+        ? cleaned.normalizedCandidates.map((c) => target.findProductByAlias(c)).find((p): p is Product => !!p) ?? null
+        : null;
       if (existingByBarcode) {
         // Genuine conflict: the row's sku names a DIFFERENT identity than the product that already
         // owns this barcode - either it matches a different existing product outright, or it simply

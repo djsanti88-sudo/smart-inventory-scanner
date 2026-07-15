@@ -22,6 +22,7 @@ import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismat
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
+import { canonicalGtin } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProduct } from "@/services/aliasMatcher";
@@ -324,6 +325,23 @@ function provisionalPlaceholderName(code: string): string {
   const struct = decodeBarcodeStructure(code, ct);
   const floor = prefixFloorName(code, ct);
   return floor ? floor.name : struct.checkDigitValid ? `Unidentified item (barcode ${code})` : `Unidentified item (code ${code})`;
+}
+
+/**
+ * Task 4 (GTIN-14 canonicalization): exact-match identifier comparison that ALSO recognizes a
+ * leading-zero-padding difference between two GTIN-shaped codes as the same identity (00049000028911
+ * == 049000028911). Falls back to plain string equality for non-GTIN codes (SKUs, vendor labels) - never
+ * canonicalizes those. Uses canonicalGtin (strips leading zeros, pads to 14), which NEVER strips a
+ * genuine GTIN-14 case-pack indicator digit (>=1), so a case pack never false-merges into its unit GTIN.
+ */
+function codeMatchesIdentifier(scanned: string, identifier: string | undefined | null): boolean {
+  const a = (scanned ?? "").trim();
+  const b = (identifier ?? "").trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ca = canonicalGtin(a);
+  const cb = canonicalGtin(b);
+  return !!ca && !!cb && ca === cb;
 }
 
 // The local optimistic session store. Known scans update this store immediately - the UI never
@@ -2384,7 +2402,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (p) =>
                   countedIds.has(p.id) &&
                   p.status !== "archived" &&
-                  [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
+                  [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].some((c) => codeMatchesIdentifier(code, c)),
               )?.id;
               if (!provId) {
                 provId = `prod-${idFactory()}`;
@@ -2648,7 +2666,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             (p) =>
               countedIds.has(p.id) &&
               p.status !== "archived" &&
-              [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
+              [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].some((c) => codeMatchesIdentifier(code, c)),
           )?.id;
           if (!provId) {
             provId = `prod-${idFactory()}`;
@@ -2706,7 +2724,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           (p) =>
             counted.has(p.id) &&
             p.status !== "archived" &&
-            [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
+            [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].some((c) => codeMatchesIdentifier(code, c)),
         );
         if (existing) return;
         // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
@@ -3188,9 +3206,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               p.provisional === true &&
               countedIdsForOrphan.has(p.id) &&
               p.status !== "archived" &&
-              [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku]
-                .map((c) => (c ?? "").trim())
-                .includes(review.cleanCode),
+              [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].some((c) =>
+                codeMatchesIdentifier(review.cleanCode, c),
+              ),
           )?.id ??
           // BACKWARD-COMPAT NAME FALLBACK: only reached when the review has no usable `provisionalProductId`
           // (a review persisted/created before this field existed) AND the strict identifier match above
@@ -3246,7 +3264,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // exclude it so it never causes a false "multiple products own this identity" conflict.
             if (p.id === provOrphanId) continue;
             const pCodes = [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).filter(Boolean);
-            if (pCodes.some((c) => identityCodes.includes(c))) matchedIds.add(p.id);
+            if (pCodes.some((c) => identityCodes.some((ic) => codeMatchesIdentifier(ic, c)))) matchedIds.add(p.id);
             // BARCODE-IN-NAME DEDUP (P2): a legacy product can carry its barcode ONLY inside the name
             // (e.g. "UPC 029142712886 - Discoverer A/T3"), so the identifier-field check above misses it
             // and re-scanning that barcode mints a duplicate. Reuse it when the scanned code appears as an

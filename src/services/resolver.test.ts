@@ -148,6 +148,33 @@ describe("trust gates", () => {
   });
 });
 
+describe("Task 4: GTIN-14 canonicalization (00049000028911 vs product upc 049000028911)", () => {
+  it("a 14-digit zero-padded scan resolves Known against a product whose upc is stored as 12 digits", () => {
+    const seedProduct = product({ id: "prod-gtin14", name: "Canned Beans", upc: "049000028911", verified: true });
+    const r = resolve("00049000028911", [...products, seedProduct], aliases);
+    expect(r.resolverStatus).toBe("known");
+    expect(r.matchType).toBe("upc");
+    expect(r.productId).toBe("prod-gtin14");
+  });
+
+  it("a 12-digit scan resolves Known against a product whose upc is stored as a 14-digit zero-padded GTIN", () => {
+    const seedProduct = product({ id: "prod-gtin14b", name: "Canned Beans", upc: "00049000028911", verified: true });
+    const r = resolve("049000028911", [...products, seedProduct], aliases);
+    expect(r.resolverStatus).toBe("known");
+    expect(r.matchType).toBe("upc");
+    expect(r.productId).toBe("prod-gtin14b");
+  });
+
+  it("CASE-PACK NEGATIVE: a GTIN-14 with a non-zero indicator digit (case pack) must NOT merge into the unit UPC product", () => {
+    const unitProduct = product({ id: "prod-unit", name: "Canned Beans (unit)", upc: "049000028911", verified: true });
+    // 10049000028918 = same company/item reference as 049000028911 but indicator digit "1" -> a genuinely
+    // different countable product (a case pack of 10). It must stay Needs Review, never silently merge.
+    const r = resolve("10049000028918", [...products, unitProduct], aliases);
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+  });
+});
+
 describe("A3/AM-2: bad-check-digit codes get an additive, non-terminal misread reason", () => {
   it("an unknown GTIN-shaped code failing its check digit gets the misread reason and stays a normal needs_review row", () => {
     const r = resolve("049000006345");

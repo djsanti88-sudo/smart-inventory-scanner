@@ -339,6 +339,41 @@ describe("applyCsvImport - merge into existing product via approved alias", () =
     expect((products[0] as unknown as { qty: number }).qty).toBe(9);
     expect(aliases).toHaveLength(1); // merged, not duplicated into a second product/alias
   });
+
+  it("Task 4: a zero-padded 14-digit CSV barcode merges into an existing product whose alias is stored at 12 digits", () => {
+    const existingProduct = { id: "p1", name: "Widget", primarySku: "SKU1", qty: 5 } as unknown as Product;
+    const existingAlias: Alias = {
+      id: "a1", businessId: "b", productId: "p1", rawCodeExample: "049000028911", cleanCode: "049000028911",
+      normalizedCode: "049000028911", aliasType: "barcode", source: "manual", confidence: 1, approved: true,
+      createdAt: "t", updatedAt: "t", createdBy: "seed", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k1",
+    };
+    const { target, products, aliases } = makeTarget([existingProduct], [existingAlias]);
+    const rows: ImportRow[] = [{ name: "Widget restock", barcode: "00049000028911", qty: 4 }];
+
+    const summary = applyCsvImport(rows, target);
+
+    expect(summary).toEqual({ created: 0, merged: 1, aliasesAdded: 0, skipped: 0 });
+    expect((products[0] as unknown as { qty: number }).qty).toBe(9);
+    expect(aliases).toHaveLength(1); // merged into the existing 12-digit alias, never duplicated
+  });
+
+  it("Task 4 CASE-PACK NEGATIVE: a GTIN-14 case pack (non-zero indicator digit) does NOT merge into the unit product's alias", () => {
+    const existingProduct = { id: "p1", name: "Widget (unit)", primarySku: "SKU1", qty: 5 } as unknown as Product;
+    const existingAlias: Alias = {
+      id: "a1", businessId: "b", productId: "p1", rawCodeExample: "049000028911", cleanCode: "049000028911",
+      normalizedCode: "049000028911", aliasType: "barcode", source: "manual", confidence: 1, approved: true,
+      createdAt: "t", updatedAt: "t", createdBy: "seed", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k1",
+    };
+    const { target, products, aliases } = makeTarget([existingProduct], [existingAlias]);
+    // 10049000028918: indicator digit "1" -> a genuinely different case-pack product.
+    const rows: ImportRow[] = [{ name: "Widget (case of 10)", barcode: "10049000028918", qty: 3 }];
+
+    const summary = applyCsvImport(rows, target);
+
+    expect(summary).toEqual({ created: 1, merged: 0, aliasesAdded: 1, skipped: 0 });
+    expect((products[0] as unknown as { qty: number }).qty).toBe(5); // unit product's qty untouched
+    expect(aliases).toHaveLength(2); // a new, separate alias for the case pack - never merged
+  });
 });
 
 describe("applyCsvImport - stores the CLEAN code as the alias, not the raw dashed/spaced form", () => {
