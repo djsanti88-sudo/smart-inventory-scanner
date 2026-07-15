@@ -41,6 +41,7 @@ import { isSafePublicUrl } from "@/services/ai/urlSafety";
 import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult } from "@/server/upc/ladder";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
+import { steerFreeRungs } from "@/server/upc/freeRungSteering";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
@@ -726,6 +727,15 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         structured: [{ name: "brocade", lookup: (variants) => brocadeLookup(variants) }],
         cache: fetchV2Cache,
         patternUrls: (variants) => {
+          // AM-10 (Task 12 deferred hunk, owner-ratified 2026-07-15): an ASIN-shaped variant
+          // (Amazon's "B0" + 8 alphanumerics) gets its public /dp/ catalog page as the pattern URL
+          // instead of a numeric-barcode source list. The fetchV2 engine's door gate (AM-7,
+          // fetchV2/index.ts:198) already allows `identifier.type === "asin"` to reach this door
+          // even with zero discovery providers configured - this hunk is what actually feeds it a
+          // URL. Evidence from this door is suggestion-grade by construction: decideDecode never
+          // verifies a non-public-barcode code, so an ASIN can never auto-count from this alone.
+          const asin = variants.find((v) => /^B0[0-9A-Z]{8}$/i.test(v));
+          if (asin) return [`https://www.amazon.com/dp/${asin.toUpperCase()}`];
           const c = variants.find((v) => /^\d{12,14}$/.test(v)) ?? variants[0];
           return selectBarcodeUrls(c).slice(0, 4);
         },
@@ -815,8 +825,16 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // UPCitemdb/OFF rungs. ESCALATION: a free-rung SUGGESTION is a fallback, not a stop - one cap-charged
     // Go-UPC exact-verify may still upgrade it to verified; fetchv2/gpt NEVER run past it. A total free
     // MISS keeps today's exact behavior (Plan D -> cap gate -> full paid ladder: goupc -> fetchv2 -> gpt).
-    const freeRungs = buildFreeLadderRungs(code, { runUpcItemDb, runOpenFoodFacts });
+    //
+    // A6 (owner-ratified 2026-07-15, AM-3 hardened): a code with a strong, >=8-digit tire-prefix hint
+    // skips BOTH free rungs (UPCitemdb/OFF have never returned a tire). The steered path is otherwise
+    // IDENTICAL to today's non-GTIN path (buildFreeLadderRungs already returns [] for non-GTINs), so no
+    // downstream freeSuggestion/total-miss branch needed any change - see freeRungSteering.ts's doc
+    // comment for the full blast-radius rationale (a false steer can cost a real paid cap slot).
+    const steering = steerFreeRungs(code);
+    const freeRungs = steering.skip ? [] : buildFreeLadderRungs(code, { runUpcItemDb, runOpenFoodFacts });
     const freeRun = await runLadder(code, freeRungs, { deadlineAt: ladderDeadlineAt });
+    if (steering.skip) freeRun.reasons.push({ rung: "free-steering", reason: steering.reason });
     // The free rungs (UPCitemdb / Open Food Facts) NEVER emit "verified" today - both are always
     // suggestions (Resolver Trust Rules). freeStatus is read defensively so a future verified free rung
     // (none exists now) would still be handled as a terminal free win via the `else` branch below.
