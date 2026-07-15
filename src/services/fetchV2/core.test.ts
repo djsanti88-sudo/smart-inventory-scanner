@@ -112,6 +112,14 @@ describe("normalizeVariants", () => {
     expect(new Set(n.all).size).toBe(n.all.length); // no duplicate variants
   });
 
+  test("public codes include the zero-STRIPPED form in all (Z2: pages print codes without leading zeros)", () => {
+    const n = normalizeVariants("0049000006346", "ean_13");
+    expect(n.all).toContain("49000006346");
+    const n2 = normalizeVariants("848983006257", "upc_a");
+    expect(n2.all).not.toContain(""); // stripped equals a pad here; no empty/dup entries
+    expect(new Set(n2.all).size).toBe(n2.all.length);
+  });
+
   test("separators and spaces are stripped without losing the code", () => {
     const n = normalizeVariants(" 00 78742-05822 1 ", "ean_13");
     expect(n.withoutSeparators).toBe("0078742058221");
