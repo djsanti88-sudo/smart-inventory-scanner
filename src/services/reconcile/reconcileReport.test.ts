@@ -219,6 +219,34 @@ describe("buildReconcileReport", () => {
     expect(report.assumptions).toEqual(['Quantities assumed unit "each" (no UOM column).']);
   });
 
+  it("matched row with a corpus uid equal to an inherited Object.prototype property name (e.g. \"constructor\") and an EMPTY countedByUid -> expected_not_counted, never variance with NaN delta (review finding, AM-R8 path)", () => {
+    const m = matched("constructor", { qty: 9 });
+    const report = buildReconcileReport({
+      matches: [m],
+      adapter: { uomReview: [], unparseable: [], assumptions: [] },
+      countedByUid: {}, // no own key "constructor" - naive countedByUid[uid] would read the inherited function
+    });
+    expect(report.lines).toHaveLength(1);
+    expect(report.lines[0].bucket).toBe("expected_not_counted");
+    expect(report.lines[0].bucket).not.toBe("variance");
+    expect(report.lines[0].countedQty).toBeUndefined();
+    expect(report.lines[0].delta).toBeUndefined();
+    expect(Number.isNaN(report.lines[0].delta as unknown as number)).toBe(false);
+  });
+
+  it("matched row with corpus uid \"toString\" and an explicit countedByUid entry of 0 still lands in variance (0-vs-undefined semantics preserved)", () => {
+    const m = matched("toString", { qty: 4 });
+    const report = buildReconcileReport({
+      matches: [m],
+      adapter: { uomReview: [], unparseable: [], assumptions: [] },
+      countedByUid: { toString: 0 }, // counted zero IS counted, not "absent"
+    });
+    expect(report.lines).toHaveLength(1);
+    expect(report.lines[0].bucket).toBe("variance");
+    expect(report.lines[0].countedQty).toBe(0);
+    expect(report.lines[0].delta).toBe(-4);
+  });
+
   it("never presents raw.location as a complete location list (carry-forward from Task 4 review)", () => {
     // qty on ExpectedInventoryRow is authoritative; raw.location only holds the LAST aggregated
     // row's location, so a reason string must not claim it is the complete location list.

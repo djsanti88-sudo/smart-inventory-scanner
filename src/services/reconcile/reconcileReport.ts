@@ -140,7 +140,12 @@ export function buildReconcileReport(input: BuildReconcileReportInput): Reconcil
 
   for (const [uid, group] of matchedByUid) {
     const { expectedQty, fields, reason } = mergeMatchedRows(uid, group);
-    const counted = countedByUid[uid];
+    // Guard against inherited Object.prototype keys (e.g. a corpus uid literally named
+    // "constructor" or "toString"): a plain bracket read on those returns the inherited
+    // function, not undefined, which would silently smuggle an uncounted row into `variance`
+    // with a NaN delta and defeat the AM-R8 scope boundary. hasOwnProperty forces a true
+    // own-key check regardless of the key's name (review finding).
+    const counted = Object.prototype.hasOwnProperty.call(countedByUid, uid) ? countedByUid[uid] : undefined;
 
     if (counted === undefined) {
       // AM-R8 scope boundary: NOT counted this session -> expected_not_counted, NEVER variance.
