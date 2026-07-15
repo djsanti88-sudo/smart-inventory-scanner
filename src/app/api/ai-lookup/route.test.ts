@@ -52,7 +52,7 @@ const AI_PROVIDER_HOSTS = ["generativelanguage.googleapis.com", "api.openai.com"
 
 describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "AI_LOOKUP_GET_RATE_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_LADDER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "GPT_LADDER_DAILY_USD", "GO_UPC_API_KEY", "GO_UPC_MONTHLY_LIMIT"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "AI_LOOKUP_GET_RATE_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "BRAVE_SEARCH_API_KEY", "AI_LOOKUP_COUNTER_FILE", "AI_LOOKUP_GPT_LADDER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "GPT_LADDER_DAILY_USD", "GO_UPC_API_KEY", "GO_UPC_MONTHLY_LIMIT"];
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
   let tmpGptLadderFile: string;
@@ -77,6 +77,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     delete process.env.GEMINI_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.FIRECRAWL_API_KEY;
+    delete process.env.BRAVE_SEARCH_API_KEY;
     delete process.env.AI_LOOKUP_KILL_SWITCH;
     delete process.env.TURSO_DATABASE_URL;
     delete process.env.TURSO_AUTH_TOKEN;
@@ -124,6 +125,11 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   // corpus-hit case, which never reaches Plan D's network door at all).
   it("daily spend cap blocks a genuine-unknown (paid-path) code with 429 daily_cap and makes ZERO paid provider calls", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // already at/over the cap
+    // L6 (Task 12c): the cap gate only fires when paid work is genuinely POSSIBLE (paidWorkPossible).
+    // A Brave key makes Fetch V2's paid discovery capable for any code shape, so the cap still has
+    // paid work to block. (NOT GO_UPC_API_KEY - a live goupc attempt writes a 30-day negative-cache
+    // entry into the shared per-file ladder-storage tmp dir and leaks into later tests on this code.)
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
     const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
     expect(res.status).toBe(429);
     expect((await res.json()).reasonCode).toBe("daily_cap");
@@ -137,6 +143,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   // a needs_review payload that silently skipped every rung without saying why.
   it("with the cap exhausted, a genuine-unknown code is blocked from the paid ladder (no rung executes)", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: paid work must be genuinely possible to block
     const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
     expect(res.status).toBe(429);
     const json = await res.json();
@@ -152,11 +159,23 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   // hit - see decode-corpus.test.ts "a corpus hit does NOT increment the daily-cap counter").
   it("a genuine-unknown (paid-path) decode DOES increment the daily-cap counter by exactly one", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: a key makes paid work genuinely possible -> slot charged
     const before = (await dailyUsedNow());
     const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
     expect(res.status).toBe(200);
     const after = (await dailyUsedNow());
     expect(after).toBe(before + 1);
+  }, 20000);
+
+  // L6 contract at route level (Task 12c, owner-ratified 2026-07-15): with ZERO provider keys, the
+  // "paid" ladder degrades to free doors + honest skips - that run must NOT eat a cap slot. The
+  // response still completes normally (never blocked, never charged).
+  it("L6: a fully KEYLESS genuine-unknown decode returns WITHOUT charging the daily-cap counter", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    // beforeEach already deleted every provider key - paidWorkPossible() is false for this code.
+    const res = await POST(makeRequest({ cleanCode: "111000222333", mode: "decode" }));
+    expect(res.status).toBe(200);
+    expect((await dailyUsedNow()), "a keyless run performs no paid work and must not consume a slot").toBe(0);
   }, 20000);
 
   it("legacy 'lookup' mode is ALSO bound by the daily cap (no bypass)", async () => {
@@ -197,6 +216,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   // route-wide check plus a duplicate inside the decode branch), halving the effective cap.
   it("one decode POST consumes exactly ONE daily-cap slot", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: a key makes paid work genuinely possible -> slot charged
     const res = await POST(makeRequest({ cleanCode: "111000222444", mode: "decode" }));
     expect(res.status).toBe(200);
     expect((await dailyUsedNow())).toBe(1);
@@ -207,6 +227,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   // product (the harness saw 109 "name mismatches" that were really empty 429 bodies).
   it("a cached repeat decode is FREE: no cap slot consumed and it still succeeds AT the cap", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "1";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: a key makes paid work genuinely possible -> slot charged
     const first = await POST(makeRequest({ cleanCode: "111000222555", mode: "decode" }));
     expect(first.status).toBe(200); // consumed the single slot
     const repeat = await POST(makeRequest({ cleanCode: "111000222555", mode: "decode" }));
@@ -970,6 +991,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
     it("(d) daily-cap counter is incremented EXACTLY once for a Plan-D-floor + all-miss-ladder request", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: a key makes paid work genuinely possible -> slot charged
       const res = await POST(makeRequest({ cleanCode: "111000222889", mode: "decode" }));
       expect(res.status).toBe(200);
       expect((await dailyUsedNow())).toBe(1);
@@ -977,6 +999,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
     it("(e) a subsequent identical request is served from cache with ZERO new daily-cap slots burned", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // L6: a key makes paid work genuinely possible -> slot charged
       const code = "111000222890";
       const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
       expect(first.status).toBe(200);
