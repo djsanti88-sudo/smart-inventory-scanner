@@ -13,6 +13,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:golden": "vitest run src/eval/goldenBaseline.test.ts",
     "test:e2e": "playwright test",
     "release:check": "node scripts/release-sentinel.mjs",
     "proof:local": "tsc --noEmit && vitest run",
