@@ -66,9 +66,48 @@ function barcodeTypeFor(gtin) {
   return "unknown";
 }
 
-/** Count non-empty (non-null/undefined/"") fields, matching the corpus completeness convention. */
+/**
+ * Count non-empty (non-null/undefined/"") fields, matching the corpus completeness convention.
+ * [AM-R2] `part_number_source` is a provenance tag added ONLY by field-level enrichment
+ * (see mergeRows' cross_source_duplicate branch) - it must NEVER count toward completeness,
+ * or enrichment could flip a future less_complete_duplicate decision it has no business
+ * influencing. Excluded here rather than ordering calls, so every call site is safe by
+ * construction regardless of when enrichment ran.
+ */
 function fieldCompleteness(row) {
-  return Object.values(row).filter((v) => v !== null && v !== undefined && v !== "").length;
+  return Object.entries(row).filter(
+    ([key, v]) => key !== "part_number_source" && v !== null && v !== undefined && v !== ""
+  ).length;
+}
+
+/**
+ * [AM-R2] Field-level enrichment: fill BLANK fields of the existing row from the guarded
+ * incoming candidate row, part number first, tagging its provenance. Existing non-blank fields
+ * are NEVER overwritten. Returns a new row object (never mutates `existingRow`); returns the
+ * same reference untouched when nothing was blank to fill.
+ */
+function enrichRow(existingRow, candidateRow) {
+  let changed = false;
+  const next = { ...existingRow };
+
+  const isBlank = (v) => v === null || v === undefined || v === "";
+
+  // Part number first (the root-cause field this fix exists to stop discarding).
+  if (isBlank(next.manufacturer_part_number) && !isBlank(candidateRow.manufacturer_part_number)) {
+    next.manufacturer_part_number = candidateRow.manufacturer_part_number;
+    next.part_number_source = candidateRow.source;
+    changed = true;
+  }
+
+  for (const [key, value] of Object.entries(candidateRow)) {
+    if (key === "manufacturer_part_number" || key === "source" || key === "current_status") continue;
+    if (isBlank(next[key]) && !isBlank(value)) {
+      next[key] = value;
+      changed = true;
+    }
+  }
+
+  return changed ? next : existingRow;
 }
 
 function toCorpusRow(tireRow) {
@@ -90,10 +129,14 @@ function toCorpusRow(tireRow) {
 /**
  * Merge guarded incoming TireRow[] into the existing CorpusRow[] corpus.
  * - Guard failures (invalid check digit / prefix conflict) are skipped with that reason.
- * - A GTIN already present from ANOTHER source: existing wins, skip "cross_source_duplicate".
+ * - A GTIN already present from ANOTHER source: existing row still WINS every non-blank field;
+ *   [AM-R2] field-level enrichment fills the existing row's BLANK fields from the guarded
+ *   incoming row (part number first, tagged with `part_number_source`). Skipped as
+ *   "cross_source_duplicate" either way (the incoming row is never added as its own row).
  * - A GTIN duplicated within discounttire (existing row already source:"discounttire"),
  *   or duplicated within this incoming batch: higher field-completeness wins; the loser is
- *   skipped as "less_complete_duplicate".
+ *   skipped as "less_complete_duplicate". `part_number_source` never counts toward completeness
+ *   (AM-R2), so enrichment on one row can never flip this decision for another.
  * Never mutates existing or incoming.
  */
 export function mergeRows(existing, incoming, prefixMap) {
@@ -120,7 +163,16 @@ export function mergeRows(existing, incoming, prefixMap) {
     }
 
     if (current.source !== "discounttire") {
-      // duplicate GTIN already present from ANOTHER source -> keep existing, never overwrite
+      // duplicate GTIN already present from ANOTHER source -> existing row still WINS every
+      // non-blank field, but [AM-R2] field-level enrichment fills the existing row's BLANK
+      // fields from the guarded incoming row (part number first), tagging provenance. The
+      // incoming row itself is still never added as its own row - recorded as a skip.
+      const enriched = enrichRow(current, candidate);
+      if (enriched !== current) {
+        const idx = merged.indexOf(current);
+        merged[idx] = enriched;
+        byBarcode.set(candidate.barcode, enriched);
+      }
       skipped.push({ row: tireRow, reason: "cross_source_duplicate" });
       continue;
     }
