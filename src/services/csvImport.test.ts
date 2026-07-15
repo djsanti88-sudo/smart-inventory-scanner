@@ -131,6 +131,55 @@ describe("parseCsvImport - header synonyms", () => {
     const { rows } = parseCsvImport(text);
     expect(rows[0].qty).toBeUndefined();
   });
+
+  it("maps brand, category, specs/specs_short, and location case-insensitively (QA Task 3)", () => {
+    const text = "name,sku,brand,category,specs,location\nWidget,SKU1,Acme,Tools,10mm,Aisle 3";
+    const { rows, errors } = parseCsvImport(text);
+    expect(errors).toHaveLength(0);
+    expect(rows[0]).toEqual({
+      name: "Widget",
+      sku: "SKU1",
+      brand: "Acme",
+      category: "Tools",
+      specs: "10mm",
+      location: "Aisle 3",
+    });
+  });
+
+  it("accepts specs_short as a synonym for specs", () => {
+    const text = "name,specs_short\nWidget,225/45R17";
+    const { rows } = parseCsvImport(text);
+    expect(rows[0].specs).toBe("225/45R17");
+  });
+
+  it("leaves brand/category/specs/location undefined when the columns are absent", () => {
+    const text = "name,sku\nWidget,SKU1";
+    const { rows } = parseCsvImport(text);
+    expect(rows[0].brand).toBeUndefined();
+    expect(rows[0].category).toBeUndefined();
+    expect(rows[0].specs).toBeUndefined();
+    expect(rows[0].location).toBeUndefined();
+  });
+});
+
+describe("parseCsvImport - unmapped-header warning (QA Task 3)", () => {
+  it("reports headers that map to no recognized field", () => {
+    const text = "name,sku,brand,supplier,notes\nWidget,SKU1,Acme,Acme Distribution,fragile";
+    const { unmappedHeaders } = parseCsvImport(text);
+    expect(unmappedHeaders).toEqual(["supplier", "notes"]);
+  });
+
+  it("reports an empty unmappedHeaders array when every header is recognized", () => {
+    const text = "name,sku,barcode,qty,brand,category,specs,location\nWidget,SKU1,111,2,Acme,Tools,10mm,Aisle 3";
+    const { unmappedHeaders } = parseCsvImport(text);
+    expect(unmappedHeaders).toEqual([]);
+  });
+
+  it("does not flag any recognized synonym (product/upc/ean/quantity/count/specs_short) as unmapped", () => {
+    const text = "product,upc,ean,quantity,specs_short\nWidget,111,222,5,10mm";
+    const { unmappedHeaders } = parseCsvImport(text);
+    expect(unmappedHeaders).toEqual([]);
+  });
 });
 
 describe("parseCsvImport - bad rows never throw", () => {

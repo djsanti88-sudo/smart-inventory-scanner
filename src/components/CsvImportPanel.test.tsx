@@ -79,6 +79,45 @@ describe("CsvImportPanel - file input + preview", () => {
   });
 });
 
+describe("CsvImportPanel - carries brand/category/specs/location into the created product (QA Task 3)", () => {
+  it("applies brand, category, specs, and location from the CSV row onto the created product", async () => {
+    const text = "name,sku,barcode,brand,category,specs,location\nWidget,SKU1,111111111,Acme,Tools,10mm,Aisle 3";
+    render(<CsvImportPanel />);
+    await selectFile(text);
+
+    await waitFor(() => expect(screen.getByTestId("csv-import-confirm")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("csv-import-confirm"));
+
+    await waitFor(() => expect(screen.getByTestId("csv-import-summary")).toBeInTheDocument());
+    const [product] = useScanStore.getState().products;
+    expect(product.brand).toBe("Acme");
+    expect(product.category).toBe("Tools");
+    expect(product.specsShort).toBe("10mm");
+    expect(product.location).toBe("Aisle 3");
+  });
+});
+
+describe("CsvImportPanel - unmapped-header warning (QA Task 3)", () => {
+  it("shows a warning listing columns that were not imported", async () => {
+    const text = "name,sku,supplier,notes\nWidget,SKU1,Acme Distribution,fragile";
+    render(<CsvImportPanel />);
+    await selectFile(text);
+
+    await waitFor(() => expect(screen.getByTestId("csv-import-unmapped-warning")).toBeInTheDocument());
+    expect(screen.getByTestId("csv-import-unmapped-warning")).toHaveTextContent("supplier");
+    expect(screen.getByTestId("csv-import-unmapped-warning")).toHaveTextContent("notes");
+  });
+
+  it("does not show the unmapped-header warning when every column is recognized", async () => {
+    const text = "name,sku,barcode,brand,category,specs,location\nWidget,SKU1,111,Acme,Tools,10mm,Aisle 3";
+    render(<CsvImportPanel />);
+    await selectFile(text);
+
+    await waitFor(() => expect(screen.getByTestId("csv-import-preview")).toBeInTheDocument());
+    expect(screen.queryByTestId("csv-import-unmapped-warning")).not.toBeInTheDocument();
+  });
+});
+
 describe("CsvImportPanel - explicit confirm required", () => {
   it("shows a confirm button labeled with the count of valid rows about to be applied", async () => {
     const text = "name,sku\nWidget A,SKU1\nWidget B,SKU2";

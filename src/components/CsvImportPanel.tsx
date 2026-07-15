@@ -60,9 +60,9 @@ function buildStoreImportTarget(): ImportTarget {
         id: `${nextId("prod-csvimport")}--${importId}`,
         businessId: state.businessId,
         name: row.name,
-        brand: "",
-        category: "",
-        specsShort: "",
+        brand: row.brand ?? "",
+        category: row.category ?? "",
+        specsShort: row.specs ?? "",
         specsFull: "",
         primarySku: row.sku ?? "",
         primaryBarcode: row.barcode ?? "",
@@ -73,7 +73,7 @@ function buildStoreImportTarget(): ImportTarget {
         aliases: row.barcode ? [row.barcode] : [],
         imageUrl: "",
         productUrl: "",
-        location: "",
+        location: row.location ?? "",
         notes: "",
         status: "active",
         source: "manual",
@@ -129,6 +129,7 @@ export function CsvImportPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [errors, setErrors] = useState<ImportError[]>([]);
+  const [unmappedHeaders, setUnmappedHeaders] = useState<string[]>([]);
   const [fileName, setFileName] = useState("");
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [parseErrorMsg, setParseErrorMsg] = useState("");
@@ -142,13 +143,15 @@ export function CsvImportPanel() {
     setParseErrorMsg("");
     try {
       const text = await file.text();
-      const { rows: parsedRows, errors: parsedErrors } = parseCsvImport(text);
+      const { rows: parsedRows, errors: parsedErrors, unmappedHeaders: parsedUnmapped } = parseCsvImport(text);
       setRows(parsedRows);
       setErrors(parsedErrors);
+      setUnmappedHeaders(parsedUnmapped);
       setFileName(file.name);
     } catch (err) {
       setRows([]);
       setErrors([]);
+      setUnmappedHeaders([]);
       setParseErrorMsg(`Could not read this file. ${err instanceof Error ? err.message : ""}`.trim());
     }
   }
@@ -220,6 +223,12 @@ export function CsvImportPanel() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {unmappedHeaders.length > 0 && (
+        <div data-testid="csv-import-unmapped-warning" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          These columns were not imported: {unmappedHeaders.join(", ")}
         </div>
       )}
 

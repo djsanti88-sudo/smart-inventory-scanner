@@ -231,6 +231,10 @@ export interface ImportRow {
   sku?: string;
   barcode?: string;
   qty?: number;
+  brand?: string;
+  category?: string;
+  specs?: string;
+  location?: string;
 }
 
 export interface ImportError {
@@ -279,21 +283,49 @@ function pickHeader(row: Record<string, string>, keys: string[]): string | undef
   return undefined;
 }
 
+// Recognized header synonyms for the onboarding import (mirrors buildProductImport's alias lists
+// above so both CSV import paths accept the same column names). Used both to pick each field's
+// value AND to compute which headers in the uploaded file were NOT recognized (QA Task 3: the
+// panel path previously silently dropped brand/category/specs/location - see unmappedHeaders below).
+const NAME_HEADERS = ["name", "product"];
+const SKU_HEADERS = ["sku"];
+const BARCODE_HEADERS = ["barcode", "upc", "ean"];
+const QTY_HEADERS = ["qty", "quantity", "count"];
+const BRAND_HEADERS = ["brand"];
+const CATEGORY_HEADERS = ["category"];
+const SPECS_HEADERS = ["specs", "specs_short"];
+const LOCATION_HEADERS = ["location"];
+const RECOGNIZED_HEADERS = new Set([
+  ...NAME_HEADERS,
+  ...SKU_HEADERS,
+  ...BARCODE_HEADERS,
+  ...QTY_HEADERS,
+  ...BRAND_HEADERS,
+  ...CATEGORY_HEADERS,
+  ...SPECS_HEADERS,
+  ...LOCATION_HEADERS,
+]);
+
 /**
  * Parse raw CSV text (untrusted) into ImportRow[] + ImportError[]. NEVER throws on bad data - a
  * malformed file, a missing name, or an unparseable qty are all collected as errors with 1-based
  * line numbers instead of aborting the whole import.
  */
-export function parseCsvImport(text: string): { rows: ImportRow[]; errors: ImportError[] } {
+export function parseCsvImport(text: string): { rows: ImportRow[]; errors: ImportError[]; unmappedHeaders: string[] } {
   const rows: ImportRow[] = [];
   const errors: ImportError[] = [];
 
-  if (!text || !text.trim()) return { rows, errors };
+  if (!text || !text.trim()) return { rows, errors, unmappedHeaders: [] };
 
   let records: Record<string, string>[];
+  let parsedHeaders: string[] = [];
   try {
     records = parseCsvSync(text, {
-      columns: (header: string[]) => header.map((h) => h.trim().toLowerCase()),
+      columns: (header: string[]) => {
+        const cols = header.map((h) => h.trim().toLowerCase());
+        parsedHeaders = cols;
+        return cols;
+      },
       skip_empty_lines: true,
       relax_column_count: true,
       relax_quotes: true,
@@ -304,8 +336,12 @@ export function parseCsvImport(text: string): { rows: ImportRow[]; errors: Impor
     // A truly unparseable file (e.g. an unterminated quote in strict mode) is reported as a single
     // error rather than thrown. relax_quotes above already recovers from most real-world messiness.
     errors.push({ line: 1, reason: `Could not parse this file as CSV: ${e instanceof Error ? e.message : "unknown error"}` });
-    return { rows, errors };
+    return { rows, errors, unmappedHeaders: [] };
   }
+
+  // QA Task 3: surface which uploaded columns have no recognized destination field, so the owner's
+  // own data (e.g. Brand/Category/Specs/Location) is never silently dropped without being told.
+  const unmappedHeaders = parsedHeaders.filter((h) => h && !RECOGNIZED_HEADERS.has(h));
 
   records.forEach((record, idx) => {
     const line = idx + 2; // header is line 1; first data record is line 2
@@ -315,10 +351,14 @@ export function parseCsvImport(text: string): { rows: ImportRow[]; errors: Impor
       sanitized[k] = sanitizeCell(typeof v === "string" ? v : String(v ?? ""));
     }
 
-    const name = pickHeader(sanitized, ["name", "product"]);
-    const sku = pickHeader(sanitized, ["sku"]);
-    const barcode = pickHeader(sanitized, ["barcode", "upc", "ean"]);
-    const qtyRaw = pickHeader(sanitized, ["qty", "quantity", "count"]);
+    const name = pickHeader(sanitized, NAME_HEADERS);
+    const sku = pickHeader(sanitized, SKU_HEADERS);
+    const barcode = pickHeader(sanitized, BARCODE_HEADERS);
+    const qtyRaw = pickHeader(sanitized, QTY_HEADERS);
+    const brand = pickHeader(sanitized, BRAND_HEADERS);
+    const category = pickHeader(sanitized, CATEGORY_HEADERS);
+    const specs = pickHeader(sanitized, SPECS_HEADERS);
+    const location = pickHeader(sanitized, LOCATION_HEADERS);
 
     if (!name) {
       errors.push({ line, reason: "Missing required field: name" });
@@ -339,10 +379,14 @@ export function parseCsvImport(text: string): { rows: ImportRow[]; errors: Impor
     if (sku) row.sku = sku;
     if (barcode) row.barcode = barcode;
     if (qty !== undefined) row.qty = qty;
+    if (brand) row.brand = brand;
+    if (category) row.category = category;
+    if (specs) row.specs = specs;
+    if (location) row.location = location;
     rows.push(row);
   });
 
-  return { rows, errors };
+  return { rows, errors, unmappedHeaders };
 }
 
 /**
