@@ -43,7 +43,9 @@ export function gptTierFor(exactCodeFound: boolean, confidence: number, productN
 }
 
 const promptFor = (code: string) =>
-  `Identify the product for barcode ${code}. Search the web. Return JSON only: ` +
+  `Identify the product for barcode ${code}. Search the web. ` +
+  `GTIN zero-padding variants of a code (the same digits with leading zeros added or removed) ` +
+  `are the SAME product - search the shortest form too. Return JSON only: ` +
   `{"brand":"","productName":"","category":"","specs":"","gtin":"","confidence":0.0,` +
   `"exactCodeFound":false,"basis":"","sourceUrls":[]}. ` +
   `If you find this exact code on a real page, set exactCodeFound true, copy the product ` +
@@ -88,13 +90,41 @@ export async function gptFromScratch(
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${deps.apiKey}` },
       body: JSON.stringify({
-        model: "gpt-5.5",
+        model: process.env.GPT_LADDER_MODEL?.trim() || "gpt-5.5",
         input: promptFor(code),
         tools: [{ type: "web_search", search_context_size: "low" }],
         reasoning: { effort: "low" },
         max_output_tokens: 6000,
         // 5 = the owner-set cap from the 21/21 probe (server-enforced by OpenAI).
         max_tool_calls: 5,
+        // G1 (owner-ratified 2026-07-15, AM-4): structured outputs via the Responses API
+        // text.format field - verified against current OpenAI docs (context7, migrate-to-responses
+        // guide) 2026-07-15: type "json_schema" + name + strict + schema is the documented shape.
+        // Schema-guaranteed JSON makes a non-JSON reply impossible from the API's side; the regex
+        // extraction below is KEPT as a belt-and-suspenders fallback, not removed.
+        text: {
+          format: {
+            type: "json_schema",
+            name: "product_identity",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["brand", "productName", "category", "specs", "gtin", "confidence", "exactCodeFound", "basis", "sourceUrls"],
+              properties: {
+                brand: { type: "string" },
+                productName: { type: "string" },
+                category: { type: "string" },
+                specs: { type: "string" },
+                gtin: { type: "string" },
+                confidence: { type: "number" },
+                exactCodeFound: { type: "boolean" },
+                basis: { type: "string" },
+                sourceUrls: { type: "array", items: { type: "string" } },
+              },
+            },
+          },
+        },
       }),
       signal: controller.signal,
     });
