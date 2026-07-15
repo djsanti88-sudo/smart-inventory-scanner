@@ -54,8 +54,10 @@ function normBrand(s: string | null | undefined): string {
   return (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-/** Tokenize a name into lowercased alphanumeric-with-trailing-plus tokens (the "+" is meaningful: R8 vs R8+). */
-function nameTokens(s: string | null | undefined): string[] {
+/** Tokenize a name into lowercased alphanumeric-with-trailing-plus tokens (the "+" is meaningful: R8 vs R8+).
+ *  Exported (Task 5, export-only, no logic change) for reuse by the reconcile identity matcher, which
+ *  must reuse this exact tokenizer rather than reimplement it (AM-R5). */
+export function nameTokens(s: string | null | undefined): string[] {
   return (s ?? "")
     .toLowerCase()
     // keep a trailing "+" attached to its token so "r8+" stays distinct from "r8"
@@ -65,8 +67,9 @@ function nameTokens(s: string | null | undefined): string[] {
     .filter((t) => t.length > 0 && t !== "+");
 }
 
-/** Token Jaccard similarity (intersection / union) over two token sets. 0 when both empty. */
-function jaccard(a: string[], b: string[]): number {
+/** Token Jaccard similarity (intersection / union) over two token sets. 0 when both empty.
+ *  Exported (Task 5, export-only, no logic change) for reuse by the reconcile identity matcher (AM-R5). */
+export function jaccard(a: string[], b: string[]): number {
   const sa = new Set(a);
   const sb = new Set(b);
   if (sa.size === 0 && sb.size === 0) return 0;
@@ -81,8 +84,10 @@ function jaccard(a: string[], b: string[]): number {
  * (e.g. {dimax, r8} vs {dimax, r8+}). Such a pair is a DIFFERENT product generation and must never
  * auto-link; it can at most be a suggestion. Detected by comparing the sets with every trailing "+"
  * stripped: if they become equal but were NOT equal with the "+" kept, a plus-generation difference exists.
+ *
+ * Exported (Task 5, export-only, no logic change) for reuse by the reconcile identity matcher (AM-R5).
  */
-function plusGenerationDiff(a: string[], b: string[]): boolean {
+export function plusGenerationDiff(a: string[], b: string[]): boolean {
   const strip = (t: string) => t.replace(/\+$/, "");
   const setEq = (x: string[], y: string[]) => {
     const sx = new Set(x);
