@@ -262,15 +262,49 @@ describe("matchExpectedRow", () => {
       sizeText: "245/65R17",
     });
     const cand = candidate({ uid: "u13", brand: "Michelin", name: "Defender LTX", sizeToken: "245/65R17", partNumber: "ABC123456" });
-    let receivedKey = "";
+    // "abc-123 456" also has a numeric-core shape (3-letter prefix + 6-digit core "123456"), so the
+    // matcher's affix-core fan-out (Task A2) queries a second key. Record every key queried instead of
+    // only the last, so this still proves the base key is normalized exactly like normPartKey.
+    const receivedKeys: string[] = [];
     const d = deps({
       lookupByPartNumber: (pn) => {
-        receivedKey = pn;
+        receivedKeys.push(pn);
         return pn === "ABC123456" ? [cand] : [];
       },
     });
     const result = matchExpectedRow(r, d);
-    expect(receivedKey).toBe("ABC123456");
+    expect(receivedKeys).toContain("ABC123456");
     expect(result.status).toBe("matched");
+  });
+
+  it("affix core: row PN NX18773 discovers a corpus core-18773 candidate, tagged viaAffixCore, suggestion-only", () => {
+    const r = row({ externalId: "E-affix", partNumbers: ["NX18773"], brand: "Nexen", sizeText: "265/70R17" });
+    const cand = candidate({ uid: "u-core", brand: "Nexen", name: "Roadian ATX", sizeToken: "265/70R17", partNumber: "18773", barcode: "0000000001" });
+    const d = deps({
+      // dep is a direct keyed map: only the CORE key "18773" is present, not the raw "NX18773".
+      lookupByPartNumber: (pn) => (pn === "18773" ? [cand] : []),
+    });
+    const result = matchExpectedRow(r, d);
+    expect(result.status).toBe("matched"); // matched == a candidate to confirm, never an attach
+    expect(result.viaAffixCore).toBe(true);
+    expect(result.reason).toMatch(/affix core|confirm the exact product/i);
+  });
+
+  it("exact base PN hit is NOT flagged viaAffixCore", () => {
+    const r = row({ externalId: "E-base", partNumbers: ["ABC123"], brand: "Michelin", sizeText: "245/65R17" });
+    const cand = candidate({ uid: "u1", brand: "Michelin", name: "Defender LTX", sizeToken: "245/65R17", partNumber: "ABC123" });
+    const d = deps({ lookupByPartNumber: (pn) => (pn === "ABC123" ? [cand] : []) });
+    const result = matchExpectedRow(r, d);
+    expect(result.status).toBe("matched");
+    expect(result.viaAffixCore).toBeFalsy();
+  });
+
+  it("affix core hit with CONFLICTING size stays ambiguous (core alone is not trusted)", () => {
+    const r = row({ externalId: "E-conf", partNumbers: ["15405N"], brand: "Nexen", sizeText: "205/75R15" });
+    const cand = candidate({ uid: "u-x", brand: "Michelin", name: "Primacy", sizeToken: "225/55R17", partNumber: "15405" });
+    const d = deps({ lookupByPartNumber: (pn) => (pn === "15405" ? [cand] : []) });
+    const result = matchExpectedRow(r, d);
+    expect(result.status).toBe("ambiguous");
+    expect(result.candidate).toBeUndefined();
   });
 });
