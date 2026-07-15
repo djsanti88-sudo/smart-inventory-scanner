@@ -5,7 +5,8 @@
 //   verified  = exactCodeFound && confidence >= 0.8 (owner auto-count rule)
 //   suggested = any other answer with a non-empty productName (shown as-is, human approves)
 //   none      = empty productName (honest-empty) / error / abort
-// This module is pure: fetch injected, no env reads.
+// This module is pure aside from one env read: fetch is injected, the API key is passed by the
+// caller, and GPT_LADDER_MODEL (G2, 2026-07-15) selects the model name only - never a secret.
 const IN_USD_PER_M = 5.0;
 const OUT_USD_PER_M = 30.0;
 const USD_PER_SEARCH = 0.01;
