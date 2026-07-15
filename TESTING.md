@@ -279,3 +279,39 @@ vitest 318 passed / 7 skipped; tsc clean; eslint clean; next build OK; playwrigh
   unchanged (production-off proof).
 - Gate run (2026-06-14): emulator 10/10; vitest 318 passed/10 skipped; tsc clean; eslint clean; next build
   OK; playwright 11/11.
+
+## Pay-once durability: decode-cache backup/restore (Task 20, 2026-07-15)
+
+A Turso (or local file store) `decode_cache` wipe would force re-paying every un-approved paid decode
+all over again - the archive keeps raw provider data but is not a lookup rung, and corpus write-back of
+AI guesses is out of scope by design (trust firewall: the corpus is ground truth, machine guesses must
+never become indistinguishable from it). The fix is a faithful dump/restore of the cache itself.
+
+- `src/server/decodeCacheBackup.ts` (pure, no I/O): `exportDecodeCache(rows)` serializes
+  `PersistedDecode[]` to JSON Lines (one JSON object per line); `parseBackup(jsonl)` parses it back with
+  per-line JSON.parse + shape validation - a corrupt or wrong-shape line is SKIPPED, never thrown, so
+  valid neighbor lines still survive. Unit tests (`decodeCacheBackup.test.ts`, 7 cases): round-trip
+  deep-equal, one-JSON-object-per-line, empty input, corrupt-JSON-line resilience, wrong-shape-line
+  resilience (empty code / bad kind / non-string payload or tier / non-number createdAt / missing field /
+  non-object JSON), embedded-newline-in-payload round-trip (JSON string escaping, not a literal line
+  break), and trailing blank lines at EOF.
+- `scripts/decode-cache-backup.mjs` (thin CLI, pure Node, `@libsql/client` imported only when
+  `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` are set):
+  - `node scripts/decode-cache-backup.mjs --dump` reads every row from Turso `decode_cache` (when
+    configured) or the local file store (`DECODE_CACHE_FILE` / `.decode-cache.json`), and writes
+    `backups/decode-cache-<YYYY-MM-DD>.jsonl`. `backups/` is gitignored (local ops artifact, contains
+    paid-decode payloads - never source).
+  - `node scripts/decode-cache-backup.mjs --restore <file>` reads the JSONL and upserts rows back:
+    Turso via `INSERT OR IGNORE` (checked per-row so an existing code is never overwritten), file store
+    via only-add-missing-keys. **Existing rows always win** - a restore can never overwrite a newer
+    decode. Prints parsed/inserted/skipped counts.
+  - Sunday cron note: `scripts/decode-cache-backup.mjs --dump` may run right after the DT-harvest job
+    (see Task 18's Windows Task Scheduler entry) so a fresh backup always exists before the next wipe
+    risk window.
+- Smoke test (local file store only, no Turso needed - see the Task 20 report for the exact transcript):
+  seed a temp `DECODE_CACHE_FILE` with 2 fake rows -> `--dump` -> delete one row from the temp file ->
+  `--restore` the dump -> both rows present again, and the surviving (never-deleted) row's payload and
+  `createdAt` are byte-identical to before the restore (proves existing rows are never touched, only
+  gaps are filled).
+- Gate run (2026-07-15, Task 20 only): `npx vitest run src/server/decodeCacheBackup.test.ts` 7/7 passed;
+  `npx tsc --noEmit` clean; CLI smoke exit 0.
