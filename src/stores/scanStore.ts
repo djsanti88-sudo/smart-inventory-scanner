@@ -21,6 +21,7 @@ import { normalizeCode } from "@/services/codeNormalizer";
 import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismatchGuard";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
+import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProduct } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
@@ -1427,7 +1428,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const settings = get().settings;
         const today = createdAt.slice(0, 10);
         const dailyCount = settings.lastResetDate === today ? settings.dailyLookupCount : 0;
-        const autoGate = evaluateAutoDecode({
+        let autoGate = evaluateAutoDecode({
           aiEnabled: settings.aiLookupEnabled,
           status: get().aiStatus,
           online: get().online,
@@ -1436,6 +1437,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           breaker: get().breaker,
           now: new Date(createdAt).getTime(),
         });
+        // A3 (owner-ratified 2026-07-15, narrowed by AM-2): a code whose GS1 check digit fails can
+        // never decode via any GTIN rung (Go-UPC/fetchV2/GPT all key off the code) - dispatching the
+        // ladder here only burns time and cap budget chasing a doomed lookup. Skip auto-decode
+        // entirely; the row stays a normal, aliasable needs_review row (never "decoding") with the
+        // additive misread reason already set by the resolver. Overriding here (rather than after
+        // row creation) keeps decodeStatus honest from the very first render - never "decoding" then
+        // silently reverted. A valid unknown GTIN is never affected by this check.
+        if (isLikelyMisreadGtin(cleaned.cleanCode)) {
+          autoGate = { allowed: false, reason: "Scan misread - decode was not attempted." };
+        }
 
         const existingOpen = get().needsReviewQueue.find(
           (r) => r.cleanCode === cleaned.cleanCode && r.status === "open",
@@ -1908,7 +1919,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           breaker: state.breaker,
           now: nowMs,
         });
-        if (autoGate.allowed) void get().liveDecode(reviewId);
+        // A3 (owner-ratified 2026-07-15): same misread gate as processScan's direct dispatch - a
+        // bad-check-digit code cannot decode via any GTIN rung even after a cloud-catalog miss.
+        if (autoGate.allowed && !isLikelyMisreadGtin(review.cleanCode)) void get().liveDecode(reviewId);
       },
 
       // Thin wrapper: enqueue the real work on the bounded decode queue (module-level, MAX_CONCURRENT_DECODES

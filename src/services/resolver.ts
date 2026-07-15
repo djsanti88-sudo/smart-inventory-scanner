@@ -2,6 +2,7 @@ import type { Alias, CleanedCode, Product, ResolverResult } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { resolveScanToProduct } from "@/services/aliasMatcher";
+import { isLikelyMisreadGtin } from "@/services/upc/misread";
 
 // The ProductResolver. DETERMINISTIC ONLY. It never calls AI and never returns a "suggested" or
 // "mock" identity. It returns "known" exclusively when the deterministic matcher hits an APPROVED
@@ -65,11 +66,19 @@ export function resolveScan(
   // NOT a public product barcode, so it can never be decoded from the open web - it must be resolved
   // against the seller's own Amazon inventory. B0 (ASIN) and other vendor labels keep the generic copy.
   const isFnsku = codeType === "vendor_label" && cleaned.cleanCode.trim().toUpperCase().startsWith("X0");
+  // A3/AM-2 (owner-ratified 2026-07-15): a GTIN-shaped code whose GS1 check digit fails is either a
+  // scanner misread OR a legitimate non-GS1 shape (in-store number-system-2 price-embedded UPC,
+  // ITF-14 wrapper, warehouse numeric) that fails the plain check digit BY DESIGN. The reason is
+  // ADDITIVE, never terminal - it names BOTH possibilities and the row stays a normal, aliasable
+  // needs_review row exactly like any other unknown code (no affordance removed).
+  const misread = isLikelyMisreadGtin(cleaned.cleanCode);
   const reason = isFnsku
     ? "Amazon fulfillment label (FNSKU). Not a public barcode - resolve via your Amazon inventory."
-    : codeType === "vendor_label"
-      ? "Vendor/Amazon label. Link it to a product once and it will count automatically after that."
-      : "No approved alias or verified product matches this code yet.";
+    : misread
+      ? "Barcode check digit fails - this may be a scanner misread (rescan to confirm) or a store-internal code. You can still link it to a product."
+      : codeType === "vendor_label"
+        ? "Vendor/Amazon label. Link it to a product once and it will count automatically after that."
+        : "No approved alias or verified product matches this code yet.";
 
   return {
     ...base,

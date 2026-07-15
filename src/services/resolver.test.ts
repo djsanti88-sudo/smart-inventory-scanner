@@ -147,3 +147,75 @@ describe("trust gates", () => {
     expect(r.productId).toBeNull();
   });
 });
+
+describe("A3/AM-2: bad-check-digit codes get an additive, non-terminal misread reason", () => {
+  it("an unknown GTIN-shaped code failing its check digit gets the misread reason and stays a normal needs_review row", () => {
+    const r = resolve("049000006345");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.reason).toContain("Barcode check digit fails");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("rescan");
+    expect(r.reason).toContain("store-internal code");
+    expect(r.reason).toContain("still link it to a product");
+  });
+
+  it("AM-2 case 1: a number-system-2 in-store UPC (12 digits starting with 2, bad plain GS1 check) is a normal aliasable needs_review row whose reason names BOTH possibilities", () => {
+    // 212345678900: GTIN-shaped, fails the plain GS1 check digit by design (in-store price-embedded
+    // code), exactly like a genuine scanner misread would. Verified via scripted check: isValidCheckDigit === false.
+    const r = resolve("212345678900");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.matchType).toBe("unknown");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("store-internal code");
+    expect(r.reason).toContain("You can still link it to a product");
+  });
+
+  it("AM-2 case 2: a 13-digit non-GS1 warehouse numeric is likewise a normal aliasable needs_review row with the additive reason", () => {
+    const r = resolve("9876543210981");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.matchType).toBe("unknown");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("store-internal code");
+  });
+
+  it("AM-2 case 3 (ITF-14 wrapper): a 14-digit code with a bad plain check digit is likewise a normal aliasable needs_review row with the additive reason", () => {
+    const r = resolve("18400000567895");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.matchType).toBe("unknown");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("store-internal code");
+  });
+
+  it("AM-2 case 4: an APPROVED alias for a bad-check-digit code still resolves Known (alias wins; reason is untouched)", () => {
+    const linked = alias({
+      cleanCode: "212345678900",
+      normalizedCode: "212345678900",
+      productId: "prod-coke",
+      approved: true,
+    });
+    const r = resolve("212345678900", products, [...aliases, linked]);
+    expect(r.resolverStatus).toBe("known");
+    expect(r.productId).toBe("prod-coke");
+    // The misread/additive copy only ever applies on the unknown branch - a known match's reason
+    // names the product match, never the misread language.
+    expect(r.reason).not.toContain("scanner misread");
+    expect(r.reason).not.toContain("Barcode check digit fails");
+  });
+
+  it("a code that is NOT GTIN-shaped (vendor label) never gets the misread reason", () => {
+    const r = resolve("X004DY7YUT");
+    expect(r.reason).not.toContain("scanner misread");
+    expect(r.reason).not.toContain("Barcode check digit fails");
+  });
+
+  it("a valid GTIN with correct check digit never gets the misread reason", () => {
+    const r = resolve("855724007602"); // seed regression case, still unknown but a VALID check digit
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.reason).not.toContain("scanner misread");
+    expect(r.reason).not.toContain("Barcode check digit fails");
+  });
+});
