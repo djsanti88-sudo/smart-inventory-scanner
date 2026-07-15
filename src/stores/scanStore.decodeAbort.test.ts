@@ -22,7 +22,9 @@ function openReview(store: ReturnType<typeof aiOnStore>, code: string) {
 describe("decodeOnce client-side abort (AM-1a)", () => {
   it("a fetch that never resolves is aborted after decodeBudgetMs + 7000ms; row stays needs_review with the honest background-still-working reason", async () => {
     const store = aiOnStore();
-    store.getState().updateSettings({ decodeBudgetMs: 1000 }); // timeout = 1000 + 7000 = 8000ms
+    // T17/AM-9: decodeBudgetMs is clamped into [5000, 8000] before use, so the floor (5000) is the
+    // smallest value that survives clamping unchanged -> timeout = 5000 + 7000 = 12000ms.
+    store.getState().updateSettings({ decodeBudgetMs: 5000 });
     const review = openReview(store, "086699998540");
 
     const calls: string[] = [];
@@ -41,8 +43,8 @@ describe("decodeOnce client-side abort (AM-1a)", () => {
     try {
       const p = store.getState().liveDecode(review.id);
       // Before the timeout: nothing has settled yet.
-      await vi.advanceTimersByTimeAsync(7_900);
-      // After the timeout (8000ms): the abort must have fired.
+      await vi.advanceTimersByTimeAsync(11_900);
+      // After the timeout (12000ms): the abort must have fired.
       await vi.advanceTimersByTimeAsync(200);
       await p;
     } finally {
@@ -64,7 +66,7 @@ describe("decodeOnce client-side abort (AM-1a)", () => {
 
   it("a fast-resolving fetch is completely unaffected by the abort timeout", async () => {
     const store = aiOnStore();
-    store.getState().updateSettings({ decodeBudgetMs: 1000 });
+    store.getState().updateSettings({ decodeBudgetMs: 5000 });
     const review = openReview(store, "086699998541");
 
     const original = globalThis.fetch;

@@ -22,6 +22,7 @@ import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismat
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
+import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProduct } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
@@ -381,7 +382,13 @@ export const DEFAULT_SETTINGS: Settings = {
   enableIdempotentSync: true,
   autoSuggestUnknowns: false,
   autoAddDecodedProducts: true,
-  decodeBudgetMs: 13000,
+  // AM-9 (2026-07-15): the server has always clamped decode budget to [5000, 8000] (owner cost rule
+  // 2026-06-28); this default previously drifted to 13000, which the server silently clamped down to
+  // 8000 on every request. New installs now get the real default. Existing installs with a persisted
+  // 13000 are NOT reset here (persist migrate would also wipe learned products/aliases per CLAUDE.md -
+  // never trigger that just to fix a settings number) - instead every read site below clamps at
+  // consumption time via clampDecodeBudgetMs, so a stale persisted value can never leave [5000, 8000].
+  decodeBudgetMs: DECODE_BUDGET_DEFAULT_MS,
   autoCatalogLearningEnabled: true,
   autoVerifyConfidenceThreshold: 80,
   scanContext: "tire", // Phase 9: default to Tires so the category firewall protects from day one (no setup)
@@ -2029,8 +2036,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // (DECODE_LADDER_TOTAL_MS, see pipeline.ts) room to finish and reply honestly before the
           // client gives up; the abort is a client-local giveup only - the server keeps computing and
           // caches its answer for the next scan, so nothing is lost.
+          // AM-9: clamp a possibly-stale persisted decodeBudgetMs (e.g. an old 13000 default) into the
+          // real [5000, 8000] server-enforced range before using it for anything client-side.
+          const clampedBudgetMs = clampDecodeBudgetMs(s.decodeBudgetMs);
           const abortController = new AbortController();
-          const abortTimer = setTimeout(() => abortController.abort(), (s.decodeBudgetMs ?? 8000) + 7000);
+          const abortTimer = setTimeout(() => abortController.abort(), clampedBudgetMs + 7000);
           const decodeOnce = async () => {
             let res: Response;
             try {
@@ -2046,7 +2056,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   codeType,
                   confidenceThreshold: 0.8,
                   allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: s.decodeBudgetMs ?? 8000,
+                  budgetMs: clampedBudgetMs,
                   scanContext,
                   brandPrefixHint,
                   autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
@@ -2081,7 +2091,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   mode: "decode", proRecheck: review.reopenedFromWrong === true,
                   rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
                   confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: s.decodeBudgetMs ?? 8000, scanContext, brandPrefixHint,
+                  budgetMs: clampedBudgetMs, scanContext, brandPrefixHint,
                 }),
               });
               if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);

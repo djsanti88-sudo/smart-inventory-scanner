@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
+import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
@@ -107,10 +108,10 @@ export default function SettingsPage() {
         <Row label="Max lookup wait (ms)">
           <input
             type="number"
-            min={5000}
-            max={20000}
+            min={DECODE_BUDGET_MIN_MS}
+            max={DECODE_BUDGET_MAX_MS}
             step={1000}
-            value={settings.decodeBudgetMs ?? 13000}
+            value={settings.decodeBudgetMs ?? DECODE_BUDGET_DEFAULT_MS}
             onChange={(e) => update({ decodeBudgetMs: Number(e.target.value) })}
             className="w-24 rounded border border-zinc-300 px-2 py-1 text-sm"
             data-testid="setting-decode-budget"
@@ -118,7 +119,7 @@ export default function SettingsPage() {
         </Row>
         <p className="text-xs text-zinc-500">
           How long a live decode may run before it gives up and routes the code to Needs Review
-          (never a partial guess). The server clamps this to between 5000 and 20000 ms.
+          (never a partial guess). The server clamps this to between 5000 and 8000 ms.
         </p>
         <p className="text-xs text-zinc-500">
           AI results are SUGGESTIONS a human approves. Even a &quot;Verified AI Decode&quot; (the app
