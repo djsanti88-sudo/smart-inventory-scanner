@@ -31,6 +31,33 @@ vi.mock("@/server/decodeCacheStore", async (importOriginal) => {
   return { ...actual, getPersistedDecode: vi.fn(actual.getPersistedDecode) };
 });
 
+// Task 21 (owner-ratified 2026-07-15): mock the learned-products tier's read/write so a test can drive
+// a synthetic learned hit (or assert a fresh write) without touching a real store. Real implementations
+// pass through by default; individual tests override with mockResolvedValueOnce / assert on the mock.
+const realLearned = vi.hoisted(() => ({
+  getLearnedProduct: undefined as unknown as typeof import("@/server/learnedProducts").getLearnedProduct,
+  upsertLearnedProduct: undefined as unknown as typeof import("@/server/learnedProducts").upsertLearnedProduct,
+}));
+vi.mock("@/server/learnedProducts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/learnedProducts")>();
+  realLearned.getLearnedProduct = actual.getLearnedProduct;
+  realLearned.upsertLearnedProduct = actual.upsertLearnedProduct;
+  return { ...actual, getLearnedProduct: vi.fn(actual.getLearnedProduct), upsertLearnedProduct: vi.fn(actual.upsertLearnedProduct) };
+});
+
+// Task 21 write-gate tests: mock the top-level fetchV2 engine call directly so a test can hand back a
+// controlled "verified" FetchV2Result (fetched_source-equivalent: exactCodeFound true, a chosen
+// winningSourceUrl) without driving the full discovery/association/scoring pipeline through a synthetic
+// page fixture. Real implementation passes through by default; the write-gate tests override it.
+const realFetchV2 = vi.hoisted(() => ({
+  fetchV2: undefined as unknown as typeof import("@/services/fetchV2/index").fetchV2,
+}));
+vi.mock("@/services/fetchV2/index", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/fetchV2/index")>();
+  realFetchV2.fetchV2 = actual.fetchV2;
+  return { ...actual, fetchV2: vi.fn(actual.fetchV2) };
+});
+
 // Task 8 (P1): the plain all-miss needs_review arm is only reachable for a PUBLIC code when Plan D's
 // resolveUnknownFast throws (its result is .catch(() => null)'d in the pipeline). Mock it so a P1 test
 // can drive a public, prefix-floored code into that arm and assert the floor-named result appears.
@@ -66,6 +93,9 @@ import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest, getPersistedDecode, type PersistedDecode } from "@/server/decodeCacheStore";
 import { resolveExactBarcode, resolveExactPartNumber, type CorpusDecodeResult } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
+import { getLearnedProduct, upsertLearnedProduct, __resetLearnedProductsForTest, type LearnedProductRow } from "@/server/learnedProducts";
+import { fetchV2 } from "@/services/fetchV2/index";
+import { makeResult } from "@/services/fetchV2/types";
 
 // Thin unit tests for the extracted decode pipeline (Task 2.4). They run with NO API keys and a fully
 // STUBBED global.fetch, so NO live provider call and NO real network can occur - every rung either
@@ -98,10 +128,13 @@ const ladderKvFile = () => path.join(os.tmpdir(), `ladder-storage-pipeline-test-
 // PAY-ONCE persistence assertions into the next test's (previously-passing tests never exercised L2
 // persistence, so this gap was latent until the PAY-ONCE suggestion-persist tests below).
 const decodeCacheTestFile = () => path.join(os.tmpdir(), `decode-cache-pipeline-test-${process.pid}.json`);
+// Task 21: isolate the learned-products file store the same way, so a test that exercises a REAL
+// (unmocked) upsertLearnedProduct write never touches the real repo-root .learned-products.json.
+const learnedProductsTestFile = () => path.join(os.tmpdir(), `learned-products-pipeline-test-${process.pid}.json`);
 
 describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE"];
+  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE"];
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -111,11 +144,16 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(resolveExactPartNumber).mockReset().mockImplementation(realImpls.resolveExactPartNumber);
     vi.mocked(getPersistedDecode).mockReset().mockImplementation(realImpls.getPersistedDecode);
     vi.mocked(resolveUnknownFast).mockReset().mockImplementation(realParallel.resolveUnknownFast);
+    vi.mocked(getLearnedProduct).mockReset().mockImplementation(realLearned.getLearnedProduct);
+    vi.mocked(upsertLearnedProduct).mockReset().mockImplementation(realLearned.upsertLearnedProduct);
+    vi.mocked(fetchV2).mockReset().mockImplementation(realFetchV2.fetchV2);
     __resetForTest();
     __resetDecodeCacheStoreForTest();
+    __resetLearnedProductsForTest();
     clearDecodeCache();
     try { fs.unlinkSync(ladderKvFile()); } catch {}
     try { fs.unlinkSync(decodeCacheTestFile()); } catch {}
+    try { fs.unlinkSync(learnedProductsTestFile()); } catch {}
     for (const k of keys) saved[k] = process.env[k];
     // Guards ACTIVE (not E2E) + NO provider keys (so every rung skips or misses; no real network).
     delete process.env.IS_E2E;
@@ -127,6 +165,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     delete process.env.TURSO_DATABASE_URL;
     delete process.env.TURSO_AUTH_TOKEN;
     process.env.DECODE_CACHE_FILE = decodeCacheTestFile();
+    process.env.LEARNED_PRODUCTS_FILE = learnedProductsTestFile();
     // Any stray outbound fetch resolves to a benign 404 - proves no live provider is required.
     fetchSpy = vi.fn(async () => new Response("not found", { status: 404 }));
     vi.stubGlobal("fetch", fetchSpy);
@@ -138,6 +177,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       else process.env[k] = saved[k];
     }
     try { fs.unlinkSync(decodeCacheTestFile()); } catch {}
+    try { fs.unlinkSync(learnedProductsTestFile()); } catch {}
     vi.unstubAllGlobals();
   });
 
@@ -709,5 +749,212 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     const steeringReason = (reasons ?? []).find((r) => r.rung === "free-steering")?.reason ?? "";
     expect(steeringReason).toContain("tire-prefix steering");
     expect(steeringReason).toContain("04501135");
+  });
+
+  // Task 21 (owner-ratified 2026-07-15): the learned-products tier peek runs right after the trusted
+  // tire/retail corpus misses, and returns an honest SUGGESTION (never verified) at the row's stored
+  // confidence. These tests mock resolveExactBarcode to miss (real corpus fixtures do not know this
+  // synthetic code) and getLearnedProduct to hit, isolating the learned-tier peek from every other rung.
+  describe("Task 21: learned-products tier peek", () => {
+    const LEARNED_CODE = "086699998538"; // Michelin-family GS1 prefix (086699), matches learnedProducts.test.ts fixtures
+
+    function makeLearnedRow(overrides: Partial<LearnedProductRow> = {}): LearnedProductRow {
+      return {
+        code: "0086699998538",
+        name: "Michelin Defender LTX M/S",
+        brand: "Michelin",
+        category: "tire",
+        specsShort: "275/60R20 115T",
+        specsFull: "275/60R20 115T",
+        confidence: 0.95,
+        sourceUrl: "https://www.walmart.com/ip/michelin-defender/12345",
+        evidenceStrength: "fetched_source",
+        prefixCheck: "prefix-corroborated: catalog dominant brand for this prefix is \"michelin\"",
+        createdAt: "2026-07-14T12:00:00.000Z",
+        ...overrides,
+      };
+    }
+
+    it("a learned hit returns 'suggested' (NEVER 'verified') at the row's stored confidence, with an honest reason naming the learned tier + source host + date", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null); // trusted corpus misses first
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(makeLearnedRow());
+
+      const outcome = await runDecodePipeline(makeReq(LEARNED_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      expect(outcome.payload.decision.confidence).toBe(0.95);
+      expect(outcome.payload.decision.reason).toContain("learned");
+      expect(outcome.payload.decision.reason).toContain("walmart.com");
+      expect(outcome.payload.decision.reason).toContain("2026-07-14");
+      expect(outcome.payload.providerNames).toContain("learned-products");
+      // No AI/paid provider was ever contacted for a learned-tier hit - it is a $0 replay.
+      expect(hitAnAiProvider()).toBe(false);
+    });
+
+    it("a learned hit never marks exactCodeEvidenceVerifiedByApp true (it is a replay, not a fresh app verification)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(makeLearnedRow());
+
+      const outcome = await runDecodePipeline(makeReq(LEARNED_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
+    });
+
+    it("the trusted tire corpus still wins when BOTH the corpus and a learned row exist for the same code (corpus is authoritative)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const corpusHit: CorpusDecodeResult = {
+        decision: {
+          status: "verified",
+          confidence: 0.97,
+          reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
+          evidenceStrength: "fetched_source",
+          exactCodeEvidenceVerifiedByApp: true,
+          crossCheck: { decision: "single_provider", confidence: 0.97, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+          corroborationPath: "corpus_exact_barcode",
+        },
+        results: [{ productName: "Michelin Defender LTX M/S 275/60R20 115T", brand: "Michelin", category: "Tire", specsShort: "275/60R20 115T", confidence: 0.97, needsHumanReview: false, sourceUrls: [], verifiedFacts: [], primaryBarcode: LEARNED_CODE } as unknown as CorpusDecodeResult["results"][number]],
+        evidences: [{ verified: true, strength: "fetched_source", matchedCode: LEARNED_CODE, matchedSources: ["tire_knowledge_corpus"], reason: "Exact code found in the trusted tire knowledge base." }],
+        providerNames: ["tire-corpus"],
+        path: "corpus_exact_barcode",
+      };
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(corpusHit);
+      // A learned row also exists, but must never even be consulted - the corpus peek returns first.
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(makeLearnedRow());
+
+      const outcome = await runDecodePipeline(makeReq(LEARNED_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.providerNames).toContain("tire-corpus");
+      expect(outcome.payload.decision.status).toBe("verified");
+      expect(vi.mocked(getLearnedProduct)).not.toHaveBeenCalled();
+    });
+
+    it("no learned row and no corpus hit falls through to the normal ladder (learned-tier peek is a pure pass-through miss)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.providerNames).not.toContain("learned-products");
+    });
+  });
+
+  // Task 21: the learned-tier WRITE only fires when shouldLearnDecode's full gate passes on a FRESH
+  // verified decode. These tests mock the top-level fetchV2 engine call directly to hand back a
+  // controlled "verified" result (fetched_source-equivalent: exactCodeFound true, a chosen
+  // winningSourceUrl) from either a trusted or untrusted host, and assert upsertLearnedProduct
+  // is/is not called - proving the write gate reads the winning source host honestly.
+  describe("Task 21: learned-products tier write gate", () => {
+    // A code whose GS1 prefix is Michelin-family (086699), so a decode naming brand "Michelin" is
+    // prefix-corroborated. Distinct 13-digit padding from the read-side fixture above so this test's
+    // FetchV2Cache/GoUpcGate module-singleton residue never collides with it.
+    const WRITE_TEST_CODE = "0086699912345";
+
+    function mockFetchV2VerifiedWin(sourceUrl: string) {
+      vi.mocked(fetchV2).mockResolvedValueOnce(
+        makeResult({
+          rawValue: WRITE_TEST_CODE,
+          outcome: "verified",
+          product: {
+            brand: "Michelin",
+            name: "Michelin Defender LTX M/S 275/60R20 115T",
+            model: "Defender LTX M/S",
+            partNumber: "",
+            size: "275/60R20 115T",
+            description: "",
+            category: "tire",
+            imageUrl: "",
+          },
+          evidence: {
+            exactCodeFound: true,
+            codeToProductProven: true,
+            sourceQuality: "strong",
+            sourceScore: 95,
+            identityScore: 1,
+            associationScore: 1,
+            finalConfidence: 0.95,
+            winningSourceUrl: sourceUrl,
+            winningSourceType: "strong_commercial",
+            codeLocation: "json_ld.gtin",
+            proofSummary: "exact code in a structured product record",
+          },
+          sourcesChecked: [sourceUrl],
+        }),
+      );
+    }
+
+    it("a verified fetchv2 win from a TRUSTED host that is prefix-corroborated WRITES a learned row", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      const trustedUrl = "https://www.walmart.com/ip/michelin-defender-ltx/12345";
+      mockFetchV2VerifiedWin(trustedUrl);
+
+      const outcome = await runDecodePipeline(makeReq(WRITE_TEST_CODE));
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("verified");
+
+      // Allow the fire-and-forget write's microtask to settle before asserting.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(vi.mocked(upsertLearnedProduct)).toHaveBeenCalled();
+      const written = vi.mocked(upsertLearnedProduct).mock.calls[0]?.[0];
+      expect(written?.brand).toBe("Michelin");
+      expect(written?.sourceUrl).toBe(trustedUrl);
+    });
+
+    it("the SAME verified fetchv2 win from an UNTRUSTED host does NOT write a learned row", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      const untrustedUrl = "https://randomtireblog.example.com/reviews/michelin-defender";
+      mockFetchV2VerifiedWin(untrustedUrl);
+
+      const outcome = await runDecodePipeline(makeReq("0086699954321")); // distinct code, own cache/module residue
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("verified"); // still verifies - the floor/learn gates are independent of decideDecode's own verify
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(vi.mocked(upsertLearnedProduct)).not.toHaveBeenCalled();
+    });
+
+    it("a verified fetchv2 win from a trusted host WITHOUT prefix corroboration (unmapped prefix) does NOT write", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const UNMAPPED_PREFIX_CODE = "0000000012347"; // no GS1 prefix data at all
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      vi.mocked(fetchV2).mockResolvedValueOnce(
+        makeResult({
+          rawValue: UNMAPPED_PREFIX_CODE,
+          outcome: "verified",
+          product: { brand: "Michelin", name: "Michelin Defender LTX M/S 275/60R20 115T", model: "Defender LTX M/S", partNumber: "", size: "275/60R20 115T", description: "", category: "tire", imageUrl: "" },
+          evidence: {
+            exactCodeFound: true, codeToProductProven: true, sourceQuality: "strong", sourceScore: 95,
+            identityScore: 1, associationScore: 1, finalConfidence: 0.95,
+            winningSourceUrl: "https://www.walmart.com/ip/x", winningSourceType: "strong_commercial",
+            codeLocation: "json_ld.gtin", proofSummary: "",
+          },
+          sourcesChecked: ["https://www.walmart.com/ip/x"],
+        }),
+      );
+
+      await runDecodePipeline(makeReq(UNMAPPED_PREFIX_CODE));
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(vi.mocked(upsertLearnedProduct)).not.toHaveBeenCalled();
+    });
   });
 });
