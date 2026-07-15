@@ -126,7 +126,7 @@ describe("catalog-first lookup (saves AI tokens; offline-first)", () => {
     } finally {
       restore();
     }
-    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // review stays open
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name === "Maybe Snack");
     expect(prov).toBeDefined();

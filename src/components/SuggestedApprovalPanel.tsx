@@ -13,7 +13,9 @@ import type { UnknownCodeReview } from "@/types";
 // time or many at once. This screen lives on /review only - it never touches the scan flow.
 
 function isSuggestedRow(r: UnknownCodeReview): boolean {
-  return r.status === "open" && r.hasSuggestion && !!r.suggestedProductName;
+  // Task 9b (owner-ratified 2026-07-14): PENDING inline suggestions (status "suggested") surface here
+  // too for end-of-session batch cleanup - approving one runs the exact same resolveUnknown core.
+  return (r.status === "open" || r.status === "suggested") && r.hasSuggestion && !!r.suggestedProductName;
 }
 
 // Read-only preview of the Build 2 structured identity (brand/model/size), computed from the
@@ -42,6 +44,9 @@ export function SuggestedApprovalPanel() {
   const allReviews = useScanStore((s) => s.needsReviewQueue);
   const batchApprove = useScanStore((s) => s.batchApprove);
   const resolveUnknown = useScanStore((s) => s.resolveUnknown);
+  const declineSuggestion = useScanStore((s) => s.declineSuggestion);
+  const reopenNeedsReview = useScanStore((s) => s.reopenNeedsReview);
+  const scanFeed = useScanStore((s) => s.scanFeed);
   const isPlatform = useIsPlatformOwner();
 
   const rows = useMemo(() => allReviews.filter(isSuggestedRow), [allReviews]);
@@ -64,7 +69,23 @@ export function SuggestedApprovalPanel() {
   };
 
   const handleReject = (id: string) => {
-    resolveUnknown(id, "ignore", {});
+    const r = allReviews.find((x) => x.id === id);
+    if (r?.status === "suggested") {
+      // Task 9b: rejecting a PENDING inline suggestion is the SAME decline action as the feed row's
+      // ✕ control (floor rename + creates the open review). Fall back to reopenNeedsReview when the
+      // feed row's suggestion field is gone (e.g. after a customer reload, which persists the review
+      // but strips the scan event's suggestion field).
+      const ev = scanFeed.find(
+        (e) =>
+          e.suggestion?.status === "pending" &&
+          ((e.cleanCode && e.cleanCode === r.cleanCode) ||
+            (e.matchedProductId && e.matchedProductId === r.provisionalProductId)),
+      );
+      if (ev) declineSuggestion(ev.id);
+      else reopenNeedsReview(r.cleanCode, "Suggestion declined by operator - needs a correct name");
+    } else {
+      resolveUnknown(id, "ignore", {});
+    }
     setSelected((prev) => prev.filter((x) => x !== id));
   };
 

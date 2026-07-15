@@ -718,7 +718,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
         { productName: "Camel Crush Box", brand: "Camel", upc: "049000111222", sourceUrls: ["https://gs1.org/x"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
-    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name.includes("Camel Crush"));
     expect(prov).toBeDefined();
@@ -1081,7 +1081,7 @@ describe("scanStore - auto-apply high-trust suggestions (owner order 2026-07-10)
     );
 
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
-    expect(review.status).toBe("open"); // unchanged legacy behavior below the 0.8 bar
+    expect(review.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().finalCounts).toHaveLength(1);
     // Below 0.8, current behavior still enriches the provisional row in place with the usable name
     // (pre-existing TASK 3 ENRICH behavior) - this test pins that this is UNCHANGED by the new rule.

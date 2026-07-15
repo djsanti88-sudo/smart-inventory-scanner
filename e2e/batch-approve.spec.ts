@@ -102,13 +102,15 @@ test("batch-approve: select all suggested rows, approve once, all counts land; r
   await expect(page.getByTestId("suggested-body").locator("tr")).toHaveCount(CODES.length);
   await page.screenshot({ path: `${PROOF}/01-suggested-pile.png`, fullPage: true });
 
-  // Capture the open suggested review ids up front for the direct store-level idempotency proof below.
+  // Capture the pending suggested review ids up front for the direct store-level idempotency proof
+  // below. owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b) - suggestion-bearing
+  // reviews are now parked at status "suggested" instead of "open"; the pile itself is unchanged.
   const reviewIds = await page.evaluate(() => {
     type Store = { getState: () => { needsReviewQueue: Array<{ id: string; status: string; hasSuggestion: boolean }> } };
     const w = window as unknown as { __scanStore: Store };
     return w.__scanStore
       .getState()
-      .needsReviewQueue.filter((r) => r.status === "open" && r.hasSuggestion)
+      .needsReviewQueue.filter((r) => (r.status === "open" || r.status === "suggested") && r.hasSuggestion)
       .map((r) => r.id);
   });
   expect(reviewIds).toHaveLength(CODES.length);

@@ -12,6 +12,8 @@ export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
   const getProduct = useScanStore((s) => s.getProduct);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
+  const approveSuggestion = useScanStore((s) => s.approveSuggestion);
+  const declineSuggestion = useScanStore((s) => s.declineSuggestion);
   const isPlatform = useIsPlatformOwner();
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
@@ -74,14 +76,20 @@ export function LiveScanFeed() {
                   suggestion?.suggestedPrimarySku ||
                   product?.primarySku ||
                   "-";
+                // Task 9b (owner-ratified 2026-07-14): the row's OWN inline suggestion (pending ->
+                // "(suggested, NN%)" + pointer-only approve/decline controls) takes precedence over the
+                // legacy review-derived tag so a row never shows two suggestion tags at once.
+                const inline = e.suggestion;
                 // Trust rule: an unconfirmed identity must stay visually distinct from a Verified match.
                 // confidence >= 0.8 -> neutral gray "unconfirmed"; confidence < 0.8 -> amber "(suggested)".
                 // Never render a suggestion with no tag at all.
-                const suggestionTag = suggestion
-                  ? suggestion.confidence >= 0.8
-                    ? "unconfirmed"
-                    : "(suggested)"
-                  : null;
+                const suggestionTag = inline
+                  ? null
+                  : suggestion
+                    ? suggestion.confidence >= 0.8
+                      ? "unconfirmed"
+                      : "(suggested)"
+                    : null;
                 // Same display priority as the name: real product brand wins, then the decode
                 // suggestion's brand, then whatever the provisional placeholder carries.
                 const displayBrand = prettifyBrand(
@@ -105,6 +113,42 @@ export function LiveScanFeed() {
                     <td className="px-4 py-3" data-testid={`feed-brand-${e.id}`}>{displayBrand || "-"}</td>
                     <td className="px-4 py-3" data-testid={`feed-product-${e.id}`}>
                       {displayName}
+                      {/* Task 9b: pending inline suggestion - honest confidence + pointer-only
+                          approve/decline. SCANNER SAFETY (non-negotiable): tabIndex={-1} and
+                          onMouseDown preventDefault so focus NEVER leaves #scanner-input; a scanner
+                          Enter burst can never trigger these controls. */}
+                      {inline && inline.status === "pending" ? (
+                        <span
+                          className="ml-1 inline-flex items-center gap-1 whitespace-nowrap align-middle text-xs text-amber-700"
+                          data-testid={`feed-suggestion-${e.id}`}
+                        >
+                          (suggested, {Math.round((inline.confidence ?? 0) * 100)}%)
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            onMouseDown={(me) => me.preventDefault()}
+                            onClick={() => approveSuggestion(e.id)}
+                            aria-label={`Approve ${inline.productName}`}
+                            title={`Approve ${inline.productName}`}
+                            data-testid={`approve-suggestion-${e.id}`}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-emerald-300 bg-emerald-50 font-semibold text-emerald-700 hover:bg-emerald-100"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            onMouseDown={(me) => me.preventDefault()}
+                            onClick={() => declineSuggestion(e.id)}
+                            aria-label="Not this product"
+                            title="Not this product"
+                            data-testid={`decline-suggestion-${e.id}`}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded border border-red-300 bg-red-50 font-semibold text-red-700 hover:bg-red-100"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ) : null}
                       {suggestionTag === "unconfirmed" ? (
                         <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
                       ) : suggestionTag === "(suggested)" ? (
