@@ -132,11 +132,16 @@ describe("lookupByExactPartNumber - affix-core fallback (Turso path)", () => {
     expect(row!.canonical_product_uid).toBe("uid-affix-2");
   });
 
-  it("a PN with no raw hit and no affix-core hit anywhere returns null (BH4120176, absent)", async () => {
+  it("a PN with no raw hit and no affix-core hit anywhere returns null (ZZ9999998ZZ, absent)", async () => {
+    // Was BH4120176 until the Point S pilot corpus apply (2026-07-15) legitimately added that
+    // exact barcode/PN to the real committed corpus (src/server/tire-knowledge/
+    // tireKnowledge.generated.json), which this test's fake Turso client does not mock — the
+    // lookup falls through to the real JSON as its final tier and now genuinely finds a row.
+    // Swapped to a fixture PN verified absent (raw AND affix-core) from the committed corpus.
     const client = fakeTursoClient({}, {});
     mockGetRetailTursoClient.mockResolvedValue(client);
 
-    const row = await lookupByExactPartNumber("BH4120176");
+    const row = await lookupByExactPartNumber("ZZ9999998ZZ");
     expect(row).toBeNull();
   });
 
@@ -230,10 +235,13 @@ describe("lookupByExactPartNumber - affix-core fallback (real SQLite path, RC2 n
   });
 
   it("a PN absent from SQLite (raw and affix-core) returns null", async () => {
+    // Was BH4120176 until the Point S pilot corpus apply (2026-07-15) legitimately added that
+    // barcode/PN to the real committed corpus JSON, which this test's in-memory SQLite fixture
+    // does not shadow — see the identical note on the fake-Turso suite above.
     db = buildRealTiresDb([{ barcode: "029142869886", canonical_product_uid: "uid-sqlite-other", manufacturer_part_number: "5551234" }]);
     mockGetKnowledgeDb.mockReturnValue(db);
 
-    const row = await lookupByExactPartNumber("BH4120176");
+    const row = await lookupByExactPartNumber("ZZ9999998ZZ");
     expect(row).toBeNull();
   });
 });
