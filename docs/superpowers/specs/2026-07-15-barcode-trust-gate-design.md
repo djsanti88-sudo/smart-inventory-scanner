@@ -324,6 +324,15 @@ fetched page and the other appears nowhere.
    real retailer evidence," with the free retailer structured-data path (tires.auto-class pages) as the
    first rung.
 
+### AM-12 — TOP-LEVEL LAW: every scan appears and counts (owner order, 2026-07-15)
+
+EVERY scanned code - known, unknown, misread, random, undecodable, gate-rejected - MUST immediately
+appear on the scan feed AND be counted in session totals (scan 10 = count 10, no exceptions). The
+gate's verdicts (including `rejected`) decide only the IDENTITY attached to the row and what may be
+STORED as identity; they never decide whether a scanned row appears or counts. An unidentifiable code
+counts as an "Unidentified item" row. This law is also recorded at top level in the project CLAUDE.md
+and binds Phase 2's count-separation work equally.
+
 ## Open items
 
 - Phase 2 spec review (provenance field, count separation, promotion machinery) after Phase 1 ships.

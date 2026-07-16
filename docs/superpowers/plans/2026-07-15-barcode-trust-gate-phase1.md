@@ -17,6 +17,10 @@
 
 ## Global Constraints
 
+- TOP-LEVEL LAW (owner order, 2026-07-15): EVERY scanned code - known, unknown, misread, random,
+  trust-gate-rejected - MUST appear on the scan feed AND count in session totals (scan 10 = count 10).
+  The gate decides IDENTITY only; it must NEVER suppress a scanned row from the feed or the count.
+  Any task change that makes a scanned code vanish from feed/totals is a defect.
 - Verdicts are exactly `rejected | suggested | verified`. There is NO `blocked` verdict (AM-11 supersedes it).
 - `pnDerived` is advisory ONLY: it never changes a verdict, never blocks, never counts, in either direction (AM-1 + AM-11). The enum is `"pn_derived" | "clean" | "cannot_assess"` - call sites must not conflate `cannot_assess` with `clean`.
 - The placeholder blocklist is the ONLY structural hard block: the `123456789012` family, all-same-digit codes (`0000000000000`, `9999999999999`, etc.) (AM-11.4).

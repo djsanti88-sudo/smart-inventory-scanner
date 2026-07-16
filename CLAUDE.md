@@ -19,6 +19,15 @@ SaaS later (every record is scoped by `businessId`).
 Not tied to one trade. Must work for tires, auto parts, supplements, tools, warehouse stock,
 retail, restaurant supplies, medical supplies, and any physical inventory.
 
+## TOP-LEVEL LAW: Every Scan Appears and Counts (owner order, 2026-07-15)
+EVERY scanned code - known, unknown, misread, random, undecodable, trust-gate-rejected - MUST
+immediately appear on the scan feed AND be counted in the session totals. Scan 10 = count 10, no
+exceptions. Decode, AI, firewalls, and the barcode trust gate only decide the IDENTITY attached to
+the row (verified / suggested / unidentified); they NEVER decide whether the row appears or counts.
+No gate, verdict, cap, breaker, or error may suppress a scanned row from the feed or the count. An
+unidentifiable code still counts as an "Unidentified item" row. Any change that makes a scanned code
+vanish from the feed or the totals is a defect, full stop.
+
 ## Tech Stack
 - Next.js 16 (App Router) + React 19 + TypeScript
 - Tailwind v4 (CSS-first, `@import "tailwindcss"`)
