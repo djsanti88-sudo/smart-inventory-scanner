@@ -71,6 +71,19 @@ vi.mock("@/services/ai/parallelResolve", async (importOriginal) => {
   return { ...actual, resolveUnknownFast: vi.fn(actual.resolveUnknownFast) };
 });
 
+// RETAIL-RUNG FIX: mock the retail knowledge index (pipeline.ts reaches it via a dynamic
+// `await import(...)`, so vi.mock intercepts that dynamic import exactly like a static one). Real
+// implementation passes through by default (importOriginal); a test drives a synthetic retail-corpus
+// row with mockResolvedValueOnce without touching a real SQLite file or a live Turso connection.
+const realRetail = vi.hoisted(() => ({
+  lookupRetailBarcodeAsync: undefined as unknown as typeof import("@/server/retail-knowledge/retailKnowledgeIndex").lookupRetailBarcodeAsync,
+}));
+vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/retail-knowledge/retailKnowledgeIndex")>();
+  realRetail.lookupRetailBarcodeAsync = actual.lookupRetailBarcodeAsync;
+  return { ...actual, lookupRetailBarcodeAsync: vi.fn(actual.lookupRetailBarcodeAsync) };
+});
+
 // Redirect ladderStorage() at a per-process tmp dir so the daily-cap / Go-UPC usage counters never
 // pollute the real repo working tree (identical to the route test's mock).
 vi.mock("@/server/upc/storage", async (importOriginal) => {
@@ -96,6 +109,7 @@ import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { getLearnedProduct, upsertLearnedProduct, __resetLearnedProductsForTest, type LearnedProductRow } from "@/server/learnedProducts";
 import { fetchV2 } from "@/services/fetchV2/index";
 import { makeResult } from "@/services/fetchV2/types";
+import { lookupRetailBarcodeAsync, __resetRetailKnowledgeCacheForTests } from "@/server/retail-knowledge/retailKnowledgeIndex";
 
 // Thin unit tests for the extracted decode pipeline (Task 2.4). They run with NO API keys and a fully
 // STUBBED global.fetch, so NO live provider call and NO real network can occur - every rung either
@@ -147,6 +161,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(getLearnedProduct).mockReset().mockImplementation(realLearned.getLearnedProduct);
     vi.mocked(upsertLearnedProduct).mockReset().mockImplementation(realLearned.upsertLearnedProduct);
     vi.mocked(fetchV2).mockReset().mockImplementation(realFetchV2.fetchV2);
+    vi.mocked(lookupRetailBarcodeAsync).mockReset().mockImplementation(realRetail.lookupRetailBarcodeAsync);
+    __resetRetailKnowledgeCacheForTests();
     __resetForTest();
     __resetDecodeCacheStoreForTest();
     __resetLearnedProductsForTest();
@@ -441,6 +457,12 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
   it("Z3: two encodings of one product share one cache identity (canonical GTIN cache key)", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap; the point is the shared key, not the block
+    // RETAIL RUNG-0 FIX: this fixture code happens to be a REAL hit in the local dev retail SQLite DB
+    // ("peanut butter creamy") - the new rung-0 retail settle would otherwise short-circuit BEFORE
+    // withDecodeCache is ever reached, and this test's spy would never see it. Force a retail miss so
+    // this test stays isolated to its actual concern (the cache-key identity), same as it already
+    // isolates itself from the tire corpus below.
+    vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue(null);
     const seen: string[] = [];
     const withDecodeCacheSpy = vi.spyOn(decodeCacheModule, "withDecodeCache");
     withDecodeCacheSpy.mockImplementation(async (key, _isSuccess, compute) => {
@@ -1109,6 +1131,209 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(outcome.payload.decision.status).not.toBe("verified");
       expect(outcome.payload.providerNames).toContain("tire-corpus");
       expect(hitAnAiProvider()).toBe(false);
+    });
+  });
+
+  // RETAIL RUNG-0 FIX (live-proven bug): 19/20 retail barcodes that EXIST in the 4M-row retail Turso
+  // corpus previously bypassed it entirely and fired a PAID Go-UPC call; one (EAN-8 "10000007", retail
+  // corpus = "Saumon fume Ecossais tranche main") settled as a WRONG "Verified from Go-UPC" identity (a
+  // beer). Root cause: the retail corpus was only ever peeked as a Plan D consensus VOTE (needs a
+  // second agreeing source), gated to isPublicBarcode (upc_a/ean_13/gtin_14 - EAN-8 is NOT one of
+  // those), so a lone retail-corpus hit could never settle by itself and an EAN-8 never even reached
+  // the peek. The fix: a GTIN-shaped code (isGtinShaped, includes EAN-8) with a usable retail-corpus
+  // name now settles at rung 0 (before the L2 cache, before the daily cap, before any paid rung) as a
+  // "suggested" decode - free, honest, and never auto-counting beyond the existing suggestion gate.
+  describe("RETAIL RUNG-0: retail corpus joins the free rung (incl. EAN-8) + paid-verified contradiction guard", () => {
+    const EAN_8_CODE = "10000007"; // the live-proven salmon/beer regression code
+    const RETAIL_EAN_13 = "4006381333931"; // reused fixture: valid EAN-13 shape elsewhere in this file
+
+    function mockRetailHit(row: { productName: string; brand: string; category?: string }) {
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: row.productName,
+        brand: row.brand,
+        category: row.category ?? "",
+        barcode: EAN_8_CODE,
+      });
+    }
+
+    it("EAN-8 with a mocked retail row settles at the free rung as a suggestion, honest reason, goupc NEVER called", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key"; // configured but must never be spent
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      mockRetailHit({ productName: "Saumon fume Ecossais tranche main", brand: "Some Brand" });
+      const goUpcSpy = fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("go-upc.com")) throw new Error("goupc must never be called for a retail-rung settle");
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", goUpcSpy);
+
+      const outcome = await runDecodePipeline(makeReq(EAN_8_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      expect(outcome.payload.results[0]?.productName).toBe("Saumon fume Ecossais tranche main");
+      expect(outcome.payload.reasonText || outcome.payload.decision.reason).toMatch(/retail product database/i);
+      // Customer-safe wording: no internal rung/provider jargon leaked into the reason.
+      expect(outcome.payload.decision.reason).not.toMatch(/turso|sqlite|rung/i);
+      expect(goUpcSpy.mock.calls.some(([u]) => String(u).includes("go-upc.com"))).toBe(false);
+      // Never charges the daily cap (a free rung-0 settle, like the tire corpus).
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("EAN-13 in the retail corpus settles the same way (paid rungs never called)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Organic Whole Milk 1 Gallon",
+        brand: "Some Dairy",
+        category: "Dairy",
+        barcode: RETAIL_EAN_13,
+      });
+
+      const outcome = await runDecodePipeline(makeReq(RETAIL_EAN_13));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.results[0]?.productName).toBe("Organic Whole Milk 1 Gallon");
+      expect(outcome.payload.decision.reason).toMatch(/retail product database/i);
+      expect(hitAnAiProvider()).toBe(false);
+    });
+
+    it("a retail row with a garbage name falls through (goupc reached), never settles garbage", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      // "Search For:10000007" is a barcode-site search-results title - isUsableProductName rejects it
+      // (SITE_BLOCKLIST + code-echo check), exactly the garbage-name guard used everywhere else.
+      mockRetailHit({ productName: "Search For:10000007", brand: "" });
+      const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("go-upc.com")) return new Response("not found", { status: 404 }); // reached, genuine miss
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchStub);
+
+      const outcome = await runDecodePipeline(makeReq(EAN_8_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // Never settled on the garbage retail name.
+      expect(outcome.payload.results.some((r) => r.productName === "Search For:10000007")).toBe(false);
+      // The ladder was actually reached (goupc rung ran, even though this EAN-8 has no valid GS1 check
+      // digit so goupc itself is gated out by isValidCheckDigit - the point is the retail rung did NOT
+      // short-circuit before the ladder).
+      const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+      expect(Array.isArray(reasons)).toBe(true);
+    });
+
+    it("a non-GTIN code never calls the retail lookup at all", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const VENDOR_LABEL_CODE = "X001234567"; // vendor_label shape, not GTIN-shaped
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(VENDOR_LABEL_CODE));
+
+      expect(vi.mocked(lookupRetailBarcodeAsync)).not.toHaveBeenCalled();
+    });
+
+    // THE SALMON/BEER REGRESSION (live-proven): a paid rung (Go-UPC here) self-reports "verified" for
+    // an identity that CONTRADICTS a retail-corpus row for the exact same code. Previously nothing
+    // cross-checked a paid "verified" against the retail corpus, so the wrong paid identity survived
+    // unchallenged all the way to the customer as "Verified from Go-UPC". The contradiction guard must
+    // downgrade this to conflict/needs_review, never verified.
+    describe("paid-verified contradiction guard", () => {
+      const CONTRADICT_GTIN = "900000000003"; // VALID_GTIN fixture used elsewhere: valid GS1 check digit
+
+      function stubGoUpcVerified(product: { name: string; brand: string }) {
+        fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes("go-upc.com")) {
+            return new Response(
+              JSON.stringify({ inferred: false, product: { name: product.name, brand: product.brand, category: "Food", specs: [] } }),
+              { status: 200 },
+            );
+          }
+          return new Response("not found", { status: 404 });
+        });
+        vi.stubGlobal("fetch", fetchSpy);
+      }
+
+      beforeEach(() => {
+        // Clear the shared 30-day Go-UPC negative-miss cache so this suite's fresh 200 hit is not
+        // short-circuited by an earlier test's miss entry for the same fixture code.
+        try { fs.unlinkSync(path.join(os.tmpdir(), `ladder-storage-pipeline-test-${process.pid}`, ".go-upc-miss-cache.json")); } catch {}
+      });
+
+      it("a paid-rung 'verified' that CONTRADICTS a retail-corpus row downgrades to conflict/needs_review, never verified (the salmon/beer bug)", async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+        process.env.GO_UPC_API_KEY = "test-key";
+        vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+        // The rung-0 retail lookup call MISSES (null) so the ladder is actually reached (this test
+        // targets the contradiction guard specifically, not the rung-0 settle) - but the LATER
+        // consensus-peek call inside computeDecode (same lookupRetailBarcodeAsync fn, called again once
+        // rung 0 has already missed) returns the retail corpus's SALMON row for this exact code, which
+        // is what the contradiction guard reads via `retailHit`.
+        vi.mocked(lookupRetailBarcodeAsync)
+          .mockResolvedValueOnce(null) // rung-0 call: miss, so the ladder runs
+          .mockResolvedValueOnce({
+            productName: "Saumon fume Ecossais tranche main",
+            brand: "Labeyrie",
+            category: "Fish",
+            barcode: CONTRADICT_GTIN,
+          }); // computeDecode's consensus-peek call: the retail row the guard cross-checks against
+        // ...Go-UPC (paid) self-reports a completely different, contradicting identity (a beer).
+        stubGoUpcVerified({ name: "Heineken Lager Beer 12-pack", brand: "Heineken" });
+
+        const outcome = await runDecodePipeline(makeReq(CONTRADICT_GTIN));
+
+        expect(outcome.kind).toBe("computed");
+        if (outcome.kind !== "computed") throw new Error("unreachable");
+        // Never the wrong "Verified from Go-UPC" identity that contradicts the retail corpus.
+        expect(outcome.payload.decision.status).not.toBe("verified");
+        expect(["conflict", "needs_review"]).toContain(outcome.payload.decision.status);
+        expect(outcome.payload.decision.reason).toMatch(/retail|disagree|conflict|contradict/i);
+      });
+
+      it("a paid-rung 'verified' that AGREES with the retail row passes through unchanged", async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+        process.env.GO_UPC_API_KEY = "test-key";
+        vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+        vi.mocked(lookupRetailBarcodeAsync)
+          .mockResolvedValueOnce(null) // rung-0 call: miss, so the ladder runs
+          .mockResolvedValueOnce({
+            productName: "Continental TrueContact Tour 235/60R18",
+            brand: "Continental",
+            category: "Tire",
+            barcode: CONTRADICT_GTIN,
+          }); // consensus-peek call: an AGREEING retail row
+        stubGoUpcVerified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
+
+        const outcome = await runDecodePipeline(makeReq(CONTRADICT_GTIN));
+
+        expect(outcome.kind).toBe("computed");
+        if (outcome.kind !== "computed") throw new Error("unreachable");
+        expect(outcome.payload.decision.status).toBe("verified");
+        expect(outcome.payload.results[0]?.productName).toBe("Continental TrueContact Tour 235/60R18");
+      });
+    });
+
+    it("cap/billing: the retail rung-0 settle never calls checkAndIncrementDaily / charges the daily cap", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "1"; // tiny cap - would immediately reveal a charge
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      mockRetailHit({ productName: "Saumon fume Ecossais tranche main", brand: "Labeyrie" });
+
+      const before = await readDailyUsed(await ladderStorage());
+      const outcome = await runDecodePipeline(makeReq(EAN_8_CODE));
+      const after = await readDailyUsed(await ladderStorage());
+
+      expect(outcome.kind).toBe("computed");
+      expect(after).toBe(before); // exactly unchanged - no charge on the free retail rung-0 path
     });
   });
 });

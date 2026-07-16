@@ -43,6 +43,7 @@ import { canonicalGtin, isGtinShaped } from "@/services/upc/gtin";
 import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
 import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, type LearnedProductRow } from "@/server/learnedProducts";
+import { crossCheck } from "@/services/ai/crossCheckEngine";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
@@ -175,6 +176,67 @@ function learnedPayload(
     reasonText: reason,
     timedOut: false,
     debug: { providersAttempted: ["learned-products"], evidenceStrengths: [row.evidenceStrength], sourceCounts: [row.sourceUrl ? 1 : 0], corroborationPath: "learned_products", aiCalled: false, pageFetched: false, cached: false, learnedTier: true },
+    sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+  };
+}
+
+// RETAIL RUNG-0 FIX (live-proven bug): the 4M-row retail Turso corpus is a FREE local-DB source that
+// belongs in rung 0 alongside the tire corpus, not buried as a Plan D consensus VOTE that a lone hit
+// could never settle by itself. Root cause of the live regression: (1) a retail-corpus hit alone never
+// settled (it needed a SECOND agreeing source inside resolveUnknownFast's cross-check), and (2) the
+// Plan D peek only ran for isPublicBarcode (upc_a/ean_13/gtin_14) - an EAN-8 code never even reached
+// it. Both gaps let 19/20 retail barcodes that exist in the corpus fall through to a paid Go-UPC call,
+// and one (EAN-8 "10000007", corpus name "Saumon fume Ecossais tranche main") settled as a WRONG
+// "Verified from Go-UPC" identity (a beer) because nothing cross-checked the paid claim against the
+// corpus. This mirrors corpusPayload's shape but reports "suggested" (never "verified" - a single
+// retail-DB row is honest grounding, not the app's own independently-verified exact-code evidence the
+// tire corpus provides), matching learnedPayload's review-first pattern. A >=0.8 suggestion still
+// auto-applies via the existing client-side shouldAutoApplySuggestion gate; this function only ever
+// hands back an honest suggestion, never a count decision.
+const RETAIL_RUNG_CONFIDENCE = 0.85;
+function retailPayload(
+  row: { productName: string; brand: string; category: string },
+  code: string,
+  rawCodeSanitized: string,
+  cleanCodeSanitized: string,
+): DecodePayload {
+  const reason = "Matched in the retail product database (exact barcode). No AI lookup needed.";
+  const result: AiLookupResult = {
+    ...emptyResult(),
+    productName: row.productName,
+    brand: row.brand,
+    category: row.category,
+    confidence: RETAIL_RUNG_CONFIDENCE,
+    needsHumanReview: true,
+    sourceUrls: [],
+    verifiedFacts: [`Retail product database: exact barcode ${code}`],
+  };
+  const evidence: EvidenceResult = {
+    verified: false,
+    strength: "none",
+    matchedCode: "",
+    matchedSources: [],
+    reason: "Retail-corpus replay: a single structured-DB row, not independently re-verified this scan.",
+  };
+  const decision: DecodeDecision = {
+    status: "suggested",
+    confidence: RETAIL_RUNG_CONFIDENCE,
+    reason,
+    evidenceStrength: "none",
+    exactCodeEvidenceVerifiedByApp: false,
+    crossCheck: { decision: "single_provider", confidence: RETAIL_RUNG_CONFIDENCE, reason: "Retail-corpus exact barcode (single source).", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+  };
+  return {
+    mode: "decode" as const,
+    providerNames: ["retail-corpus"],
+    results: [result],
+    evidences: [evidence],
+    providerStatuses: [{ provider: "retail-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
+    decision,
+    reasonCode: "ok",
+    reasonText: reason,
+    timedOut: false,
+    debug: { providersAttempted: ["retail-corpus"], evidenceStrengths: ["none"], sourceCounts: [0], corroborationPath: "retail_corpus_exact_barcode", aiCalled: false, pageFetched: false, cached: false },
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
   };
 }
@@ -453,6 +515,22 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false };
     }
 
+    // RETAIL RUNG-0 (live-proven bug fix): immediately after the tire corpus MISSES, for a GTIN-shaped
+    // code ONLY (retail is barcode-keyed - never fires for a PN/vendor-label/messy shape). A retail-
+    // corpus hit with a USABLE name settles here, BEFORE the L2 cache and BEFORE the daily cap, so it
+    // never charges a paid slot - exactly like the tire-corpus/learned-tier peeks above/below. A hit
+    // with a GARBAGE name (isUsableProductName rejects it - the same junk firewall every other rung
+    // reuses) does NOT settle: it falls through honestly to the rest of the pipeline instead of ever
+    // reporting garbage as a product.
+    if (gtinShaped) {
+      const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+      const retailRow = await lookupRetailBarcodeAsync(code);
+      if (retailRow && isUsableProductName(retailRow.productName)) {
+        appendDecodeOutcome({ settledBy: "retail-corpus", status: "suggested", reasons: [], sourceTier: null });
+        return { kind: "computed", payload: retailPayload(retailRow, code, rawCodeSanitized, cleanCodeSanitized), cached: false };
+      }
+    }
+
     // TASK 21 (owner-ratified 2026-07-15): LEARNED-PRODUCTS TIER PEEK, immediately after the trusted
     // tire/retail corpus MISSES (never before it - the trusted corpus is authoritative ground truth
     // and always wins). A learned hit NEVER reports "verified" - it is honestly a SUGGESTION at its
@@ -626,7 +704,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // corpus miss ("turso_miss") instead of both silently falling through to paid AI decode.
     let retailLookupStatus: string | undefined;
     let retailHit: { productName: string; brand: string } | null = null;
-    if (!e2eMode()) {
+    // RETAIL RUNG-0 FIX: gated to isGtinShaped(code) - retail is a barcode-keyed index (never a
+    // PN/vendor-label/messy shape). This is the SAME gate the new rung-0 settle above uses; a miss here
+    // means rung-0 already tried the exact same lookup and came back empty (or found a garbage name),
+    // so this is never a second network round-trip for a code that already settled at rung 0 - it only
+    // runs when computeDecode is reached at all, i.e. rung 0 already missed.
+    if (!e2eMode() && isGtinShaped(code)) {
       const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
       retailHit = await lookupRetailBarcodeAsync(code);
       retailLookupStatus = getLastRetailLookupStatus();
@@ -1072,7 +1155,35 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // Future-proof: a VERIFIED free win (no free rung emits one today). Terminal, no paid work.
       ladderRun = freeRun;
     }
-    const win = ladderRun.outcome?.payload as LadderPayload | undefined;
+    let win = ladderRun.outcome?.payload as LadderPayload | undefined;
+
+    // PAID-VERIFIED CONTRADICTION GUARD (live-proven bug: the salmon/beer regression). A paid rung
+    // (goupc/fetchv2/gpt) SELF-REPORTS "verified" for an identity; independently, the retail corpus
+    // (retailHit, looked up above) may hold its OWN row for this exact code. When the two CONTRADICT -
+    // different brand/name, reusing the same structural comparator (crossCheck) every other
+    // cross-provider check in this pipeline already uses - a paid "verified" claim must NEVER survive
+    // unchallenged: it downgrades to "conflict" with an honest, customer-safe reason naming the
+    // disagreement. An AGREEING retail row (or no retail row at all) changes nothing - this guard only
+    // ever downgrades, never upgrades or blocks an otherwise-clean verify.
+    if (win && win.decision.status === "verified" && retailHit) {
+      const retailAsResult: AiLookupResult = { ...emptyResult(), productName: retailHit.productName, brand: retailHit.brand };
+      const paidResult = win.results[0];
+      const cc = paidResult ? crossCheck(paidResult, retailAsResult) : null;
+      if (cc && cc.decision === "conflict") {
+        const reason = `The retail product database disagrees with this result (${cc.contradictions.join("; ")}). Routed to human review.`;
+        win = {
+          ...win,
+          decision: {
+            ...win.decision,
+            status: "conflict",
+            reason,
+            crossCheck: cc,
+          },
+          reasonCode: "needs_review",
+          reasonText: reason,
+        };
+      }
+    }
 
     // receiptState: only a GPT rung that genuinely ran + came back empty earns a permanent receipt.
     receiptState = gptLadderResult ? classifyReceipt(gptLadderResult) : { eligible: false };
