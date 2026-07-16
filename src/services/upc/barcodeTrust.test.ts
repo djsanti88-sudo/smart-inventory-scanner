@@ -67,6 +67,30 @@ describe("placeholder blocklist (the only structural hard block, AM-11.4)", () =
   it("exports the blocklist for the .mjs drift test", () => {
     expect(PLACEHOLDER_BARCODES.length).toBeGreaterThan(0);
   });
+
+  describe("zero-padded all-same-digit bypass (adversarial finding, CRITICAL)", () => {
+    // Each of these is GTIN-shaped with a VALID GS1 check digit, and canonicalizes
+    // (zero-strip) to an all-same-digit core - the same junk as a raw placeholder,
+    // just zero-padded to dodge the raw /^(\d)\1+$/ regex. A real GS1 allocation never
+    // has an all-same-digit significant core, so these must be rejected as placeholders
+    // even when a physical_scan ground truth is asserted.
+    it.each([
+      "000055555555",
+      "02222222222222",
+      "04444444444444",
+      "0555555555555",
+      "06666666666666",
+      "08888888888888",
+      "0000055555555",
+      "00000055555555",
+      "00555555555555",
+    ])("flags zero-padded placeholder %s and rejects even under physical_scan", (code) => {
+      expect(isPlaceholderBarcode(code)).toBe(true);
+      const g = gradeBarcode({ barcode: code, groundTruth: { kind: "physical_scan" } });
+      expect(g.verdict).toBe("rejected");
+      expect(g.placeholder).toBe(true);
+    });
+  });
 });
 
 describe("pnDerived annotation is ADVISORY and never changes the verdict (AM-11)", () => {
@@ -98,6 +122,28 @@ describe("pnDerived annotation is ADVISORY and never changes the verdict (AM-11)
     expect(pnDerivedAnnotation("40123455", "PN-000005")).toBe("clean");
     expect(pnDerivedAnnotation("40123455", "00000")).toBe("clean");
   });
+});
+
+describe("pnDerivedAnnotation is bounded against algorithmic DoS (adversarial finding, IMPORTANT)", () => {
+  it("returns cannot_assess (not pn_derived/clean) for a non-GTIN-shaped barcode, without the O(n^2) scan", () => {
+    // Not GTIN-shaped: gradeBarcode rejects it anyway, so the annotation is meaningless here.
+    expect(pnDerivedAnnotation("1".repeat(10000), "2".repeat(10000))).toBe("cannot_assess");
+  });
+  it("returns cannot_assess for an oversized part number (no real PN has 64+ digits)", () => {
+    const validGtin = "6959655468007";
+    expect(pnDerivedAnnotation(validGtin, "9".repeat(65))).toBe("cannot_assess");
+  });
+  it(
+    "gradeBarcode with a 10k-digit barcode and 10k-digit partNumber completes fast and rejects (DoS guard)",
+    () => {
+      const start = performance.now();
+      const g = gradeBarcode({ barcode: "1".repeat(10000), partNumber: "2".repeat(10000) });
+      const elapsedMs = performance.now() - start;
+      expect(elapsedMs).toBeLessThan(500);
+      expect(g.verdict).toBe("rejected");
+    },
+    60000,
+  );
 });
 
 describe("verdicts with ground truth (AM-3: re-checkable artifacts only)", () => {

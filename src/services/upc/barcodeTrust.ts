@@ -54,6 +54,14 @@ export function isPlaceholderBarcode(code: string): boolean {
   const t = (code ?? "").trim();
   if (!t) return false;
   if (/^(\d)\1+$/.test(t)) return true; // all-same-digit (0000000000000, 9999999999999, 00000000, ...)
+  // Zero-STRIPPED core: a zero-padded all-same-digit code (e.g. "000055555555", the canonical
+  // form of a blocked "55555555") defeats the raw regex above but strips to an all-same-digit
+  // (or empty, for all-zeros) significant core. No real GS1 allocation has an all-same-digit
+  // significant core, so this is a safe structural block, not a false-positive risk.
+  if (/^\d+$/.test(t)) {
+    const stripped = t.replace(/^0+/, "");
+    if (stripped === "" || /^(\d)\1*$/.test(stripped)) return true;
+  }
   if (PLACEHOLDER_BARCODES.includes(t)) return true;
   const canon = canonicalGtin(t);
   return canon !== null && PLACEHOLDER_CANONICALS.has(canon);
@@ -65,9 +73,15 @@ export function isPlaceholderBarcode(code: string): boolean {
  * the canonical (zero-stripped) form. NEVER changes a verdict - shown as context in review UI only.
  */
 export function pnDerivedAnnotation(barcode: string, partNumber?: string): PnDerived {
+  const raw = (barcode ?? "").trim();
+  // The annotation is only meaningful for a barcode gradeBarcode would otherwise assess; a
+  // non-GTIN-shaped code is rejected on shape regardless, so skip the expensive scan (DoS guard).
+  if (!isGtinShaped(raw)) return "cannot_assess";
   const pnDigits = (partNumber ?? "").replace(/\D/g, "");
   if (pnDigits.length < 5) return "cannot_assess";
-  const raw = (barcode ?? "").trim();
+  // No real part number has 64+ digits; cap the loop bound (body is already <= 13 digits from
+  // the GTIN-shape check above, so this bounds the nested scan to pn<=64 x body<=13, DoS guard).
+  if (pnDigits.length > 64) return "cannot_assess";
   const forms = new Set<string>();
   if (raw.length >= 2) forms.add(raw.slice(0, -1)); // payload without the check digit
   // Zero-stripped significant-digit form (not the zero-PADDED canonical form): a canonical
