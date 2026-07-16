@@ -1,0 +1,54 @@
+Task: for each tire below, find the manufacturer UPC / EAN / GTIN barcode (the number printed on the tire's box/label).
+Give the barcode as digits only, plus your confidence (high/med/low) and the source URL/site.
+IMPORTANT: only report a barcode you actually found published on a real retailer/manufacturer page. Do NOT construct or infer one from the SKU/pattern. If you cannot find a published barcode, say UNKNOWN.
+Format: <line#> | <part number> | <barcode or UNKNOWN> | <confidence> | <source URL/site>
+
+Part number  |  Description (brand model size)
+----------------------------------------------
+ 1. KH2265992  |  Kumho Crugen HP71 BSW 245/60R18 105T SL
+ 2. F-28074576  |  Falken Rubitrek A/T RBL 265/70R17 115T SL
+ 3. F-28827163  |  Falken Wildpeak H/T02 HD Cargo Van BSW 235/65R16C/E 121/119R
+ 4. F-28814046  |  Falken Sincera ST80 A/S BSW TL 185/60R15 84T SL
+ 5. F-28291662  |  Falken Sincera SN250 A/S 215/55R16 97H SL
+ 6. F-28844300  |  Falken Wildpeak A/T4W BSW 265/70R17 115T SL
+ 7. F-28813096  |  Falken Sincera ST80 A/S BSW 205/55R16 91H
+ 8. 1029842  |  Hankook Dynapro AT2 Extreme 265/70R17 115T SL
+ 9. 350180  |  Toyo Open Country R/T BSW 33X12.50R20LT/E 114Q
+10. F-28294889  |  Falken Sincera SN250 A/S BSW 225/55R18 98T SL
+11. 355440  |  Toyo Open Country A/T III BSW LT295/65R20 129S E
+12. H1021561  |  Hankook Dynapro HP2 RA33 BSW 235/45R19 95V SL
+13. F-28820711  |  Falken Wildpeak H/T02 BSW LT245/75R17 121S E
+14. F-28074060  |  Falken Rubitrek A/T RBL TL 275/60R20 115T SL
+15. F-28816838  |  Falken Sincera ST80 A/S BSW 185/65R15 88H SL
+16. F-28815505  |  Falken Sincera ST80 A/S BSW 225/65R17 102T SL
+17. F-28813572  |  Falken Sincera ST80 A/S BSW 195/65R15 91H SL
+18. F-28813510  |  Falken Sincera ST80 A/S 205/60R16 92H SL
+19. F-28074096  |  Falken Rubitrek A/T RBL 235/75R15 109T XL
+20. F-28847307  |  Falken Wildpeak A/T4W BSW 35X12.50R20/F 125R
+21. F-28070353  |  Falken Rubitrek A/T RBL LT265/75R16 123S E
+22. KH2290033  |  KUMHO Road Venture AT52 BSW 265/70R18 116T SL
+23. 03504430000  |  Continental PRO CONTACT MO FR 245/40R18 97V XL
+24. F-28817517  |  Falken Sincera ST80 A/S BSW 215/60R17 96T SL
+25. 360760  |  TOYO Open Country M/T BSW TL 33x12.50R17/E 120Q
+26. F-28074522  |  Falken Rubitrek A/T RBL 275/55R20 117T XL
+27. F-28074121  |  Falken Rubitrek A/T RBL 265/70R16 112T SL
+28. F-28291652  |  Falken Sincera SN250 A/S BSW 205/60R16 92H SL
+29. 356440  |  Toyo Open Country A/T III BSW P285/55R20 114T SL
+30. F-28811700  |  Falken Sincera ST80 A/S BSW 225/60R17 99T SL
+31. F-28827616  |  Falken Wildpeak H/T02 BSW TL LT235/80R17 120R E
+32. F-28070394  |  Falken Rubitrek A/T RBL TL LT285/70R17 121S E
+33. F-28816861  |  Falken Sincera ST80 A/S BSW 215/70R15 98T SL
+34. 20A032  |  Kenda Vezda UHP Max 275/40R20 106W XL
+35. F-28824713  |  Falken Wildpeak H/T02 BSW TL 255/65R17 110T SL
+36. F-28295334  |  Falken Sincera SN250 A/S BSW 225/45R17 94V XL
+37. F-28962495  |  Falken Ziex ZE960 A/S BSW TL 235/40R19 96V XL
+38. F-28074040  |  FALKEN Rubitrek A/T RBL 235/70R16 109T XL
+39. F-28814605  |  Falken Sincera ST80 A/S BSW 225/50R18 95T SL
+40. 356630  |  Toyo Open Country AT3 BSW P295/55R20 116T SL
+41. 110160109  |  YOKOHAMA ADVAN APEX V601 245/40R18 97Y XL
+42. KH2285573  |  KUMHO Solus TA51a BSW 235/55R17 99H SL
+43. 360310  |  TOYO Open Country M/T BSW 35X12.50R17/E 125Q
+44. F-28824254  |  Falken Wildpeak H/T02 HD Cargo Van BSW 185/60R15C/C 94/92T
+45. H1015413  |  HANKOOK VENTUS EVO2 V12 255/40R17 XL
+46. F-28711100  |  Falken WildPeak A/T Trail RBL 215/70R16 100H SL
+47. F-28962671  |  Falken Ziex ZE960 A/S BSW 205/50R16 87V SL
