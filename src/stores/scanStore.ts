@@ -2330,6 +2330,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             syncStatus: "pending",
             idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"),
             provisionalProductId: mintedPlaceholder?.id ?? null,
+            // QA Task 8 (owner-approved 2026-07-15): review-only "Did you mean <X>?" near-match SKU
+            // suggestion from the deterministic resolver (distance<=1, single candidate only - see
+            // resolver.ts findNearMatchSuggestion). Reuses the EXACT same one-tap "Link to <product>"
+            // UI/path as the identity-merge suggest_link (NeedsReviewTable's suggestedLinkProductId),
+            // which already routes exclusively through the human-approved link_existing action. This
+            // NEVER auto-counts and NEVER auto-aliases - resolverStatus/decodeStatus above are
+            // untouched (still a normal needs_review row awaiting a human).
+            suggestedLinkProductId: resolution.nearMatchSuggestion?.productId,
           };
           set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
           enqueueAndSync([
