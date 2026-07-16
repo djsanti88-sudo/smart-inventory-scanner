@@ -203,6 +203,32 @@ function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
 }
 
 /**
+ * BUG FIX (badge/reason contradiction, live-proven 115-code preview run): a raw decode `decision.reason`
+ * describes the SOURCE's own confidence tier ("Verified from the trusted tire knowledge base (exact
+ * barcode). No AI lookup needed.") - that text is only honest on a row actually badged "verified". The
+ * feed-row write site downgrades a raw "verified" decision.status to a "suggested" display badge the
+ * INSTANT the decode response lands (a raw verified decode still has to clear the app's own auto-count
+ * gate / resolveUnknown before it can honestly claim "Verified match" - see the "BUG FIX
+ * (verified-shows-Unidentified, burst report)" comment on the same write site). Without this, the row
+ * showed decodeStatus "suggested" (or a later "needs_review"/"conflict") while `reason` kept the raw
+ * "Verified...No AI lookup needed" claim - a direct contradiction the owner caught live. This function is
+ * the SINGLE choke point that reframes a verified-tier reason into an honest suggested-tier one whenever
+ * the displayed badge is not (or no longer) "verified". Never invents a new reason - reuses the same text,
+ * relabeled, so a corpus/trusted-source hit is still traceable, just described accurately for the tier
+ * actually shown. A non-"verified" raw decision's reason is already honest for its own tier and passes
+ * through unchanged.
+ */
+function honestReasonForBadge(rawReason: string | undefined | null, rawStatus: string | undefined, displayedBadge: string | undefined): string {
+  const reason = rawReason ?? "";
+  if (!reason) return reason;
+  if (rawStatus !== "verified" || displayedBadge === "verified") return reason;
+  // The source found an exact/strong match, but the app has not (yet, or ever) independently resolved it
+  // to a real counted product - state that honestly instead of echoing the source's own "Verified"/"No AI
+  // lookup needed" framing over a non-verified badge.
+  return `Matched from a trusted source (${reason.replace(/^Verified\s+/i, "").replace(/\.\s*No AI lookup needed\.?$/i, "")}). Needs confirmation before it counts as verified.`;
+}
+
+/**
  * What counts as "corroborated" for auto-count, shared by liveDecode + backgroundVerifyDeep so the rule
  * cannot drift. The app-verified exact code OR the internet_two_source_size path (brand from the strong GS1
  * prefix + two independent Internet sources agreeing on the size, set app-side by the route race). The
@@ -2255,18 +2281,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // case the row must keep showing its honest pending state, not a "Verified match" lie over the
             // unresolved "Unidentified item" placeholder. Only `markFeedRowVerified` - now called ONLY
             // after resolveUnknown actually resolves the review - is allowed to write "verified" here.
-            scanFeed: st.scanFeed.map((e) =>
-              e.cleanCode === review.cleanCode &&
-              (e.decodeStatus === "decoding" || e.decodeStatus === "needs_review" || e.decodeStatus === "suggested")
-                ? {
-                    ...e,
-                    decodeStatus: (decision?.status === "verified"
-                      ? "suggested"
-                      : (decision?.status ?? "needs_review")) as ScanEvent["decodeStatus"],
-                    reason: decision?.reason ?? e.reason,
-                  }
-                : e,
-            ),
+            scanFeed: st.scanFeed.map((e) => {
+              if (
+                e.cleanCode !== review.cleanCode ||
+                !(e.decodeStatus === "decoding" || e.decodeStatus === "needs_review" || e.decodeStatus === "suggested")
+              ) {
+                return e;
+              }
+              const displayedBadge = (decision?.status === "verified"
+                ? "suggested"
+                : (decision?.status ?? "needs_review")) as ScanEvent["decodeStatus"];
+              return {
+                ...e,
+                decodeStatus: displayedBadge,
+                // BADGE/REASON INVARIANT: never write a "Verified...No AI lookup needed" reason under a
+                // non-verified badge (see honestReasonForBadge above - the owner-caught contradiction).
+                reason: honestReasonForBadge(decision?.reason, decision?.status, displayedBadge) || e.reason,
+              };
+            }),
             aiLookupLogs: [mkLog("success", providerName, decision?.confidence ?? 0, recordSuccess()), ...st.aiLookupLogs],
             breaker: recordSuccess(),
             aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastProvider: providerName, lastFailureReason: "" },
