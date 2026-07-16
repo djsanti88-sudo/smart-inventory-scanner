@@ -12,6 +12,8 @@
 // semantic-firewall note). This module only parses and maps fields; it never executes or obeys
 // any text found inside a line.
 
+import { guardRow } from "./merge.mjs";
+
 /**
  * @typedef {{
  *   gtin: string,
@@ -35,16 +37,29 @@ function fieldCompleteness(row) {
 
 /**
  * Parse raw JSONL lines (one JSON object per line) into HarvestedLine objects, keeping only
- * lines that are valid JSON, have `guard === "ok"`, and a non-empty `gtin`. Blank lines and
+ * lines that are valid JSON, pass the guard, and have a non-empty `gtin`. Blank lines and
  * lines that fail to parse are skipped silently (worker files may have trailing newlines).
  * Within the resulting set, dedupes by gtin: when the same gtin appears more than once, the
  * entry with higher field-completeness wins (ties keep the first-seen entry).
  *
+ * The `guard` field in each raw line is a STALE stamp written ONCE at harvest time. To let a
+ * later corrected brand-family / prefix map recover rows that were only rejected as
+ * `prefix_conflict` under old rules, this function RE-EVALUATES guardRow LIVE for those rows
+ * when `options.prefixMap` is supplied - admitting them if they now pass. Rows stamped for a
+ * GENUINE reason (`invalid_check_digit`, a bad GS1 check digit that is prefixMap-independent and
+ * always bad) STAY dropped, and prefix_conflict rows that STILL conflict under current rules stay
+ * dropped. When no `options` (or no prefixMap) is given, behavior is the original strict
+ * `guard === "ok"` filter (a prefix_conflict row cannot be re-evaluated without a map, so it
+ * stays dropped) - fully backward compatible with existing callers.
+ *
  * @param {string[]} lines
+ * @param {{ prefixMap?: Record<string, string | string[]>, sameBrandFamily?: (a: string, b: string) => boolean }} [options]
  * @returns {HarvestedLine[]}
  */
-export function jsonlLinesToRows(lines) {
+export function jsonlLinesToRows(lines, options = {}) {
   const byGtin = new Map();
+  const { prefixMap, sameBrandFamily } = options || {};
+  const canReguard = prefixMap && typeof prefixMap === "object";
 
   for (const line of lines || []) {
     const trimmed = (line ?? "").trim();
@@ -57,7 +72,15 @@ export function jsonlLinesToRows(lines) {
       continue;
     }
     if (!parsed || typeof parsed !== "object") continue;
-    if (parsed.guard !== "ok") continue;
+
+    if (parsed.guard !== "ok") {
+      // Only a stale `prefix_conflict` stamp is eligible for live re-evaluation, and only when a
+      // prefixMap is available to re-evaluate against. Any other non-ok reason (e.g.
+      // invalid_check_digit) is a genuine, prefixMap-independent rejection and stays dropped.
+      if (!(canReguard && parsed.guard === "prefix_conflict")) continue;
+      const reguard = guardRow(parsed, prefixMap, sameBrandFamily);
+      if (!reguard.ok) continue; // still conflicts under current rules -> stays dropped
+    }
 
     const gtin = (parsed.gtin ?? "").toString().trim();
     if (!gtin) continue;
