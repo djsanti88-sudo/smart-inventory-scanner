@@ -1145,7 +1145,12 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // "suggested" decode - free, honest, and never auto-counting beyond the existing suggestion gate.
   describe("RETAIL RUNG-0: retail corpus joins the free rung (incl. EAN-8) + paid-verified contradiction guard", () => {
     const EAN_8_CODE = "10000007"; // the live-proven salmon/beer regression code
-    const RETAIL_EAN_13 = "4006381333931"; // reused fixture: valid EAN-13 shape elsewhere in this file
+    // QA HARDENING FIX #5: this fixture used to be "4006381333931" (a valid EAN-13 SHAPE) - but that
+    // exact value is a classic GS1 textbook EXAMPLE barcode, now correctly rejected by the example/
+    // test-row firewall regardless of the (real-looking) name/brand attached to it in this fixture.
+    // Swapped to a genuinely ordinary EAN-13 (Nutella's real-world GTIN shape) so this test still
+    // exercises "a normal EAN-13 settles at rung 0" without colliding with the new blocklist.
+    const RETAIL_EAN_13 = "3017620422003"; // ordinary EAN-13 shape, not a GS1 example / not blocklisted
 
     function mockRetailHit(row: { productName: string; brand: string; category?: string }) {
       vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
@@ -1371,6 +1376,105 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
       expect(outcome.kind).toBe("computed");
       expect(after).toBe(before); // exactly unchanged - no charge on the free retail rung-0 path
+    });
+  });
+
+  // QA HARDENING FIX #5 (live-proven bug): scanning textbook GS1 EXAMPLE barcodes returned a CONFIDENT
+  // "Matched in the retail product database" for FAKE demo/test products ingested verbatim from the
+  // crowdsourced Open Food Facts dump - 4006381333931 -> "Test Shopidoo", 0012345670121 -> brand
+  // "Healthyholics". Wrong identity is a failure; Unidentified is acceptable. The retail rung-0 settle
+  // (~line 528) must reject an example/test row and fall through to an honest no-match, while a NORMAL
+  // retail row must still settle exactly as before (regression protection).
+  describe("QA fix #5: retail rung-0 rejects example/test rows (wrong-identity firewall)", () => {
+    const EXAMPLE_EAN_13 = "4006381333931"; // classic GS1 textbook example, live-proven "Test Shopidoo"
+    const HEALTHYHOLICS_GTIN = "0012345670121"; // documented Healthyholics example GTIN
+    const NORMAL_EAN_13 = "3017620422003"; // ordinary GTIN-shaped code, not on any blocklist
+
+    it("an example-barcode retail row (4006381333931 / Test Shopidoo) does NOT settle at rung 0 as a match", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Test Shopidoo",
+        brand: "",
+        category: "",
+        barcode: EXAMPLE_EAN_13,
+      });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(EXAMPLE_EAN_13));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // Never the fake identity, on ANY path (rung-0 settle or otherwise).
+      expect(outcome.payload.results.some((r) => r.productName === "Test Shopidoo")).toBe(false);
+      expect(outcome.payload.decision.reason).not.toMatch(/test shopidoo/i);
+      // TOP-LEVEL LAW: the code still appears + counts as Unidentified - never silently dropped.
+      expect(outcome.payload.decision.status).not.toBe("verified");
+    });
+
+    it("a Healthyholics example-GTIN retail row (0012345670121) does NOT settle at rung 0 as a match", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Multivitamin Gummies",
+        brand: "Healthyholics",
+        category: "Supplements",
+        barcode: HEALTHYHOLICS_GTIN,
+      });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(HEALTHYHOLICS_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // The poisoned retail-corpus row must never settle as the RETAIL match (this task's actual scope:
+      // isUsableProductName / rung-0 / retailKnowledgeIndex / build script). A SEPARATE mechanism
+      // (prefixFloorName, driven by a different generated GS1-prefix->brand catalog, out of scope for
+      // this fix) may still honestly label an unresolved scan "Healthyholics / product unconfirmed" -
+      // that is explicitly documented as a naming aid that is NEVER marked verified, i.e. exactly the
+      // acceptable "Unidentified" behavior the top-level law asks for. Assert the RETAIL claim never
+      // fires and the result is never confidently verified - not that the brand string never appears.
+      expect(outcome.payload.decision.reason).not.toMatch(/matched in the retail product database/i);
+      expect(outcome.payload.results.some((r) => r.confidence >= 0.8 && r.brand === "Healthyholics")).toBe(false);
+      expect(outcome.payload.decision.status).not.toBe("verified");
+    });
+
+    it("the rejected-example reason stays HONEST (never leaks the blocklist / 'test row' reasoning)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Test Shopidoo",
+        brand: "",
+        category: "",
+        barcode: EXAMPLE_EAN_13,
+      });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(EXAMPLE_EAN_13));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.reason).not.toMatch(/example|blocklist|test.?row|demo/i);
+    });
+
+    it("REGRESSION: a NORMAL retail row (not example/test) still settles at rung 0 exactly as before", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Organic Whole Milk 1 Gallon",
+        brand: "Some Dairy",
+        category: "Dairy",
+        barcode: NORMAL_EAN_13,
+      });
+
+      const outcome = await runDecodePipeline(makeReq(NORMAL_EAN_13));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.results[0]?.productName).toBe("Organic Whole Milk 1 Gallon");
+      expect(outcome.payload.decision.reason).toMatch(/retail product database/i);
+      expect(hitAnAiProvider()).toBe(false);
     });
   });
 });

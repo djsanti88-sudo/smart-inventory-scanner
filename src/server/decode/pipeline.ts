@@ -2,7 +2,7 @@ import "server-only";
 import type { AiLookupResult, EvidenceResult, DecodeDecision } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
 import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
-import { decideDecode, isUsableProductName } from "@/services/ai/decode";
+import { decideDecode, isUsableProductName, isExampleOrTestRow } from "@/services/ai/decode";
 import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
@@ -522,10 +522,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // with a GARBAGE name (isUsableProductName rejects it - the same junk firewall every other rung
     // reuses) does NOT settle: it falls through honestly to the rest of the pipeline instead of ever
     // reporting garbage as a product.
+    //
+    // QA HARDENING FIX #5 (live-proven, 2026-07-16): the crowdsourced retail corpus also ingested
+    // literal GS1 TEXTBOOK EXAMPLE barcodes and demo/test rows verbatim (4006381333931 -> "Test
+    // Shopidoo", 0012345670121 -> brand "Healthyholics", etc.) - isUsableProductName never checked for
+    // these (its regexes target scrape-failure artifacts, not example barcodes or test brand names), so
+    // they surfaced as a CONFIDENT "Matched in the retail product database" wrong identity. Reject them
+    // here too, falling through to the rest of the pipeline exactly like a garbage name does - the code
+    // still appears + counts as Unidentified if nothing else resolves it; it just never reports a fake
+    // product with confidence.
     if (gtinShaped) {
       const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
       const retailRow = await lookupRetailBarcodeAsync(code);
-      if (retailRow && isUsableProductName(retailRow.productName)) {
+      if (retailRow && isUsableProductName(retailRow.productName) && !isExampleOrTestRow(retailRow.barcode, retailRow.productName, retailRow.brand)) {
         appendDecodeOutcome({ settledBy: "retail-corpus", status: "suggested", reasons: [], sourceTier: null });
         return { kind: "computed", payload: retailPayload(retailRow, code, rawCodeSanitized, cleanCodeSanitized), cached: false };
       }
@@ -711,8 +720,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // runs when computeDecode is reached at all, i.e. rung 0 already missed.
     if (!e2eMode() && isGtinShaped(code)) {
       const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
-      retailHit = await lookupRetailBarcodeAsync(code);
+      const rawRetailHit = await lookupRetailBarcodeAsync(code);
       retailLookupStatus = getLastRetailLookupStatus();
+      // QA HARDENING FIX #5: reject an example/test row (textbook GS1 example barcode, or a
+      // demo/placeholder name/brand) at THIS single source, so neither the Plan D `retailDb` consensus
+      // vote below nor the paid-verified contradiction guard further down ever sees a fake identity
+      // ("Test Shopidoo", brand "Healthyholics", etc.) - it is honestly treated as a retail-corpus miss.
+      retailHit = rawRetailHit && !isExampleOrTestRow(rawRetailHit.barcode, rawRetailHit.productName, rawRetailHit.brand) ? rawRetailHit : null;
       // The 4M-row Open Food Facts retail DB (Turso) is a FREE structured source. Its data is mostly right
       // but has some WRONG rows (glycine UPC 0737870166917 -> "Coconut oil"), so it is NO LONGER trusted
       // ALONE (that produced wrong Verified identities - the old Fix 5). Instead it is passed into the
@@ -1171,7 +1185,17 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // ignores it (isUsableProductName gate, ~line 528) - otherwise a poisoned retail row with junk text
     // but a plausible-but-wrong brand can structurally "disagree" via crossCheck and wrongly downgrade a
     // legitimate paid verify to needs_review/conflict (recall-only risk, but the pilot's core is tires).
-    if (win && win.decision.status === "verified" && retailHit && isUsableProductName(retailHit.productName)) {
+    //
+    // QA HARDENING FIX #5: a retailHit that is itself an example/test row (isExampleOrTestRow) must be
+    // ignored the same way - a fake "Test Shopidoo"/"Healthyholics" example row must never be allowed to
+    // downgrade a legitimate paid verify into a false conflict.
+    if (
+      win &&
+      win.decision.status === "verified" &&
+      retailHit &&
+      isUsableProductName(retailHit.productName) &&
+      !isExampleOrTestRow(code, retailHit.productName, retailHit.brand)
+    ) {
       const retailAsResult: AiLookupResult = { ...emptyResult(), productName: retailHit.productName, brand: retailHit.brand };
       const paidResult = win.results[0];
       const cc = paidResult ? crossCheck(paidResult, retailAsResult) : null;
