@@ -1,7 +1,10 @@
 # Barcode Trust Gate + Provenance — Design Spec
 
 **Date:** 2026-07-15
-**Status:** design approved in brainstorming (owner chose Approach A); awaiting spec review before writing the implementation plan.
+**Status:** REVISED v2 - spec review complete (3-angle review: code-grounding, adversarial, counting-model).
+Amendments AM-1..AM-10 below SUPERSEDE any conflicting text above them. Owner decisions ratified
+2026-07-15: next-physical-scan counting (AM-2), grandfather-with-later-audit (AM-5), two-phase build
+(AM-6). Ready for the implementation plan (Phase 1 only).
 
 ## Motivation
 
@@ -148,6 +151,136 @@ No entry point stores a barcode as trusted without a gate verdict; there is no b
 - Building new external verification providers (uses the existing EvidenceVerifier / decode ladder).
 - The Brave/Firecrawl efficiency test on the unmatched tires (separate, owner-gated task).
 
+## Amendments (v2, 2026-07-15) — SUPERSEDE conflicting text above
+
+Findings from the spec review (code-grounded verification + adversarial detector attack + counting-model
+trace). Each amendment is binding on the implementation plan.
+
+### AM-1 — The detector is defense-in-depth, never the permit (fixes review C1/I2/I3)
+
+The synthesized detector only ever ADDS blocks; it is never the reason an AI-origin barcode gets to
+count. A pure hallucination (valid check digit, real-looking prefix, NO part-number relationship, e.g.
+`8848119900017`) is invisible to the detector by construction, as is any fake for a letters-only part
+number (`BLACKHAWK-HT` has no digit run to embed). Therefore: "the detector did not fire" NEVER means
+"safe" — it means "no additional evidence of fabrication." Trust for AI-origin barcodes comes only from
+the confirmations in the promotion list, per AM-2.
+
+### AM-2 — Counting trigger is the NEXT PHYSICAL SCAN (owner decision; supersedes "counts on scan" §Counting)
+
+The traced reality of the pre-amendment wording: the decode ladder's own output called
+`resolveUnknown(..., applyToCount: true)`, which replays the SAME code it just decoded — the system
+re-scanning its own guess, with no independent confirming event. That self-replay is abolished for the
+suggested tier:
+
+- A decode/AI result alone only MINTS the `suggested`-provenance alias/product. It never counts itself.
+- The count is created by the NEXT physical scan event that matches the suggested alias — a real,
+  independent barcode read under the existing scanner-buffer model. That count carries the visible
+  `suggested` tag until promotion.
+- Note the same physical scan that first counts a suggested barcode is also the promotion trigger
+  ("physical scan matches the suggested barcode"): in the common case the first counted unit promotes
+  the identity to `verified` at the same moment. The suggested-tagged-count state is therefore
+  short-lived by design.
+- The Phase-7 verified auto-count path (status `verified`, app-verified exact-code evidence,
+  confidence >= 0.8, full specs, no firewall conflict) is UNCHANGED — that path's trust comes from
+  app-run evidence verification, not from the suggestion itself.
+
+### AM-3 — Provenance is re-derived inside the gate, never trusted from the caller (fixes review C2)
+
+`gradeBarcode` ALWAYS runs shape + check-digit + synthesized detection regardless of the claimed
+provenance. A synthesized-positive verdict blocks EVEN IF the caller claims `evidence_verified`
+(exception: AM-7 ground-truth carve-out). Unforgeability rules:
+
+- `evidence_verified` is only accepted when the gate is handed the actual `EvidenceVerifier` result
+  (the `EvidenceStrength` value from the app's own verification run) — never a bare string, and never
+  mapped from a provider's self-reported `exactCodeEvidence` (which the app already forbids trusting).
+- `physical_scan` is settable ONLY by the scanner input path (`processScan` capture). No code reachable
+  from the decode ladder or any import path may mint it.
+- `corpus_trusted` is settable ONLY by the grandfathering migration (AM-5), never at runtime.
+
+### AM-4 — Corrected wiring map (fixes the missed back door; supersedes §Wiring points)
+
+The four entry points, corrected against the real code:
+
+1. **CSV import — the REAL path is `src/services/csvImport.ts` (`buildProductImport`, ~:154-200)**, which
+   today mints `approved: true` aliases and `verified: true` products from any CSV cell with zero
+   validation. This is the live back door and MUST be gated (both the ExportMenu path and the
+   CsvImportPanel path — this repo's known two-pipelines trap). `shopwareCsvAdapter` parses no barcodes
+   and needs no gate itself; the reconcile flow is gated where its output mints an alias (which is
+   wiring point 2).
+2. **Alias approval — `resolveUnknown` in `src/stores/scanStore.ts`** (single convergent path,
+   including the batch-approve flips). One gate call here also covers the decode path's human approvals.
+3. **Corpus/backfill — `scripts/dt-harvest/apply.mjs` (`mergeIntoBarcodeIndex`, ~:170-211)** is the real
+   ungated corpus write (gate alongside the existing `guardRow` call). `backfill.mjs` only fills part
+   numbers onto existing barcodes and `scripts/pilot-backfill-worklist.mjs` is already review-gated with
+   no store write — neither is an entry point on its own; their outputs re-funnel through 1 or 2.
+4. **Decode / AI-suggestion — where `UnknownCodeReview` is constructed with `suggested*` code fields**
+   (pipeline), stamping the gate verdict next to the existing `evidenceStrength` stamp; plus AM-2's
+   removal of suggested-tier self-count.
+
+Every entry point stores a gate verdict before a barcode is stored or trusted; there is no back door.
+
+### AM-5 — Grandfather now, audit later (owner decision, ratified with the risk stated)
+
+The 78,202 corpus barcodes are grandfathered as `corpus_trusted` without re-validation, as originally
+specified. The review flagged this as the largest untested surface (the harvest history includes a known
+poisoning incident); the owner accepts that risk for now. The one-time report-only detector audit of the
+corpus is a NAMED follow-up backlog item (not "possible"), to be run before any future corpus-derived
+trust expansion (e.g. Turso sync to production).
+
+### AM-6 — Two-phase build (owner decision)
+
+- **Phase 1 (this plan):** `barcodeTrust.ts` (pure gate + synthesized detector, AM-8 params) + the
+  16-fake must-block fixture + gate wiring at ALL entry points in AM-4 + the AM-2 removal of
+  suggested-tier self-count. No data-model change beyond stamping verdicts on review items. This alone
+  kills the Gemini-Blackhawk class.
+- **Phase 2 (separate spec-reviewed plan):** the stored `provenance` field + persist migration
+  (AM-10), verified-vs-suggested count separation in the report layer (touches the count core and 40+
+  `.quantity` consumers — the heaviest piece), and the full promotion/demotion machinery (AM-9).
+
+### AM-7 — Ground truth is never blocked by the heuristic (fixes review I5 false positives)
+
+Real manufacturers legitimately encode catalog SKUs into GTIN item references. Therefore the
+synthesized flag blocks only NON-ground-truth provenances (`ai_suggested`, `manual_entry`, import
+paths). A barcode established by an actual physical scan, or app-verified by `EvidenceVerifier` at
+`fetched_source`/`grounding_chunk` strength, is NOT blocked by the embed heuristic — real evidence is
+exactly what distinguishes a legitimately SKU-encoding brand from a fabrication. Rescue rules for
+`blocked`: a physical scan OR an app-run EvidenceVerifier confirmation (strong strength) un-blocks. A
+"second independent source" can NEVER rescue a `blocked` code (two hallucinations can agree).
+
+### AM-8 — Detector parameters (fixes review I4/M1 ambiguity)
+
+- Normalization: compare digits-only (strip spaces/hyphens/letters from the PN; barcode is digits by
+  shape). Compare against BOTH the raw and the `canonicalGtin` (zero-stripped) forms of the barcode.
+- Match rule: a contiguous PN digit run of length >= 5 appearing inside the GTIN's payload
+  (prefix+item-reference, excluding the check digit). Runs shorter than 5 are statistically
+  meaningless (coincidental hits) and MUST NOT fire.
+- PN with fewer than 5 digits: the detector returns "cannot assess" (not synthesized, not clean) —
+  harmless under AM-1/AM-2 because detector silence never grants trust.
+- The detector result is a labeled enum (`synthesized | clean | cannot_assess`), not a bare boolean, so
+  call sites cannot conflate "didn't fire" with "safe."
+
+### AM-9 — Promotion/demotion state machine, explicit (fixes the coherence gaps; Phase 2)
+
+- `suggested -> verified`: any ONE of the four confirmations (unchanged).
+- `blocked -> verified`: ONLY physical scan or app-run EvidenceVerifier strong confirmation (AM-7).
+  Never a second source, never a human click alone (a human can send it to physical-verify, not verify it).
+- `rejected`: terminal (misread; re-scan produces a new event).
+- Demotion is its own transition, `verified -> suggested` (relabel, counts move from verified-qty to
+  suggested-qty) — distinct from rejecting a never-promoted suggestion, which removes/corrects its
+  suggested-tagged counts via the existing `markProductWrong`/`removeFromCount` semantics (reuse, do
+  not re-invent). Counts are never silently deleted; every transition emits the existing audit events.
+
+### AM-10 — Persist migration defaults (Phase 2, decided in writing before build)
+
+Additive migration only (version bump + migrate fn), NEVER a reset of learned data. Defaults for
+pre-existing rows: existing counts -> `physical_scan`-equivalent (they met the approved-alias/verified-
+product bar when scanned); existing `approved: true` aliases and `verified: true` products ->
+`corpus_trusted`-style grandfathering (the old data model cannot retroactively distinguish human
+approvals from AI auto-approvals; this is a stated best-effort decision, mirroring AM-5). The Phase 2
+plan restates these defaults for owner sign-off.
+
 ## Open items
 
-None — the three design decisions (counting-with-tag, grandfather, any-one-promotion) are resolved.
+- Phase 2 spec review (provenance field, count separation, promotion machinery) after Phase 1 ships.
+- Backlog (named, AM-5): one-time report-only detector audit of the 78k corpus before any
+  corpus-derived trust expansion.
