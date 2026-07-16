@@ -10,12 +10,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // this module only ever returns an honest suggestion.
 
 const mockLookupByExactPartNumber = vi.fn();
+const mockLookupByExactBarcode = vi.fn();
 vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/tire-knowledge/tireKnowledgeIndex")>();
-  return { ...actual, lookupByExactPartNumber: (pn: string) => mockLookupByExactPartNumber(pn) };
+  return {
+    ...actual,
+    lookupByExactPartNumber: (pn: string) => mockLookupByExactPartNumber(pn),
+    lookupByExactBarcode: (code: string) => mockLookupByExactBarcode(code),
+  };
 });
 
-import { resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { resolveExactPartNumber, resolveExactBarcode } from "@/server/tire-knowledge/TireKnowledgeProvider";
 
 const CORPUS_ROW = {
   canonical_product_uid: "uid-1",
@@ -116,5 +121,115 @@ describe("resolveExactPartNumber - confidence tiers (RC4)", () => {
     // Explicit ceiling: never verified, never above the affix-core tier's own confidence.
     expect(result!.decision.status).not.toBe("verified");
     expect(result!.decision.confidence).toBeLessThanOrEqual(0.8);
+  });
+});
+
+// BUG FIX (PN-resolved suggestion's barcode never carries through, owner-reported live on preview):
+// 78,201 of 78,223 real corpus rows store barcode_type as "upc"/"ean"/"gtin14" (the generator's actual
+// output convention), NOT "upc_a"/"ean_13"/"gtin_14" as the mapper's switch previously assumed. Every
+// one of those rows silently dropped its barcode into no field at all. Root-caused via a direct count
+// over tireKnowledge.generated.json (see pn-barcode-carry-report.md). Both conventions must map, and
+// primaryBarcode must ALWAYS carry the row's barcode when present, regardless of which type string.
+const KUMHO_ROW_REAL_CONVENTION = {
+  canonical_product_uid: "kumho_crugen_hp71_245_60r18_105_h_2265992",
+  brand: "kumho",
+  brand_normalized: "kumho",
+  model: "crugen_hp71",
+  model_normalized: "crugen hp71",
+  size: "245/60R18",
+  raw_size_text: "245/60R18",
+  load_index: "105",
+  speed_rating: "H",
+  load_range: "",
+  type: "touring",
+  season: "",
+  manufacturer_part_number: "2265992",
+  barcode: "8808956277338",
+  barcode_type: "ean", // real-world convention, NOT "ean_13"
+  confidence: "verified_1src_strong",
+  current_status: "active_retail",
+  usable_for: "auto_count_candidate",
+  field_completeness_score: "93",
+  missing_fields: "season",
+  source_count: 0,
+};
+
+describe("toResult barcode_type convention mismatch (real corpus uses upc/ean/gtin14, not upc_a/ean_13/gtin_14)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("PN lookup for KH2265992-class row with barcode_type 'ean' carries the barcode into result.ean AND result.primaryBarcode", async () => {
+    mockLookupByExactPartNumber.mockResolvedValueOnce(KUMHO_ROW_REAL_CONVENTION);
+    const result = await resolveExactPartNumber("KH2265992");
+
+    expect(result).not.toBeNull();
+    const decoded = result!.results[0];
+    expect(decoded.primaryBarcode).toBe("8808956277338");
+    expect(decoded.ean).toBe("8808956277338");
+    expect(decoded.upc).toBe("");
+    expect(decoded.gtin).toBe("");
+  });
+
+  it("barcode_type 'upc' (real convention) carries into result.upc AND result.primaryBarcode", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "848983006257", barcode_type: "upc" });
+    const result = await resolveExactBarcode("848983006257");
+
+    expect(result).not.toBeNull();
+    const decoded = result!.results[0];
+    expect(decoded.primaryBarcode).toBe("848983006257");
+    expect(decoded.upc).toBe("848983006257");
+    expect(decoded.ean).toBe("");
+    expect(decoded.gtin).toBe("");
+  });
+
+  it("barcode_type 'gtin14' (real convention) carries into result.gtin AND result.primaryBarcode", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "10848983006254", barcode_type: "gtin14" });
+    const result = await resolveExactBarcode("10848983006254");
+
+    expect(result).not.toBeNull();
+    const decoded = result!.results[0];
+    expect(decoded.primaryBarcode).toBe("10848983006254");
+    expect(decoded.gtin).toBe("10848983006254");
+    expect(decoded.upc).toBe("");
+    expect(decoded.ean).toBe("");
+  });
+
+  it("legacy 'upc_a' convention still works (backward compat)", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "029142869880", barcode_type: "upc_a" });
+    const result = await resolveExactBarcode("029142869880");
+
+    expect(result).not.toBeNull();
+    const decoded = result!.results[0];
+    expect(decoded.primaryBarcode).toBe("029142869880");
+    expect(decoded.upc).toBe("029142869880");
+  });
+
+  it("legacy 'ean_13' convention still works (backward compat)", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "8808956277338", barcode_type: "ean_13" });
+    const result = await resolveExactBarcode("8808956277338");
+
+    expect(result).not.toBeNull();
+    const decoded = result!.results[0];
+    expect(decoded.primaryBarcode).toBe("8808956277338");
+    expect(decoded.ean).toBe("8808956277338");
+  });
+
+  it("legacy 'gtin_14' convention still works (backward compat)", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "10848983006254", barcode_type: "gtin_14" });
+    const result = await resolveExactBarcode("10848983006254");
+
+    expect(result).not.toBeNull();
+    const decoded = result!.results[0];
+    expect(decoded.primaryBarcode).toBe("10848983006254");
+    expect(decoded.gtin).toBe("10848983006254");
+  });
+
+  it("primaryBarcode is ALWAYS set from the row's barcode even for an unrecognized barcode_type string", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "8808956277338", barcode_type: "something_new" });
+    const result = await resolveExactBarcode("8808956277338");
+
+    expect(result).not.toBeNull();
+    expect(result!.results[0].primaryBarcode).toBe("8808956277338");
   });
 });

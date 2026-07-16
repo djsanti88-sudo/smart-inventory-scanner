@@ -335,6 +335,29 @@ function scrubSuggestedBarcode(value: string | undefined, partNumber?: string): 
   return gradeBarcode({ barcode: v, partNumber }).verdict === "rejected" ? "" : v;
 }
 
+/** PN-BARCODE-CARRY (owner-reported: a PN-resolved suggestion's corpus barcode never carried through
+ *  to the counted provisional row). Decides whether a decode's suggested barcode may be carried onto
+ *  a provisional product's primaryBarcode. Guard rules:
+ *  1. Never clobber a REAL scanned barcode: only carries when the row's current primaryBarcode is
+ *     empty, OR equals the scanned cleanCode AND that cleanCode is not itself GTIN-shaped (i.e. it is
+ *     a PN/vendor-label placeholder the corpus may upgrade, never a physically-scanned barcode).
+ *  2. Must clear the same trust gate as the suggested* fields (scrubSuggestedBarcode /
+ *     gradeBarcode) - a bad-check-digit or rejected barcode is never carried.
+ *  Returns "" when the carry should NOT happen (caller keeps the existing value). */
+function carriedProvisionalBarcode(params: {
+  currentPrimaryBarcode: string;
+  scannedCleanCode: string;
+  scannedCodeType: string;
+  candidateBarcode: string | undefined;
+  partNumber?: string;
+}): string {
+  const current = (params.currentPrimaryBarcode ?? "").trim();
+  const scannedIsGtin = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(params.scannedCodeType);
+  const currentIsPlaceholder = current === "" || (current === params.scannedCleanCode.trim() && !scannedIsGtin);
+  if (!currentIsPlaceholder) return ""; // real scanned barcode already present - never clobber
+  return scrubSuggestedBarcode(params.candidateBarcode, params.partNumber);
+}
+
 /**
  * The exact SAME safe, non-hallucinated placeholder label `ensureProvisionalCount` mints for an
  * unresolved code ("Unidentified item (barcode/code CODE)", or a prefix-floor brand guess when the GS1
@@ -2414,10 +2437,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               )?.id;
               if (!provId) {
                 provId = `prod-${idFactory()}`;
+                // PN-BARCODE-CARRY: mint time - the scanned code itself is the only barcode so far
+                // (current primaryBarcode is empty, i.e. "" as far as carriedProvisionalBarcode is
+                // concerned), so a decode-provided barcode may carry through subject to the trust gate.
+                const mintedBarcode =
+                  carriedProvisionalBarcode({
+                    currentPrimaryBarcode: "",
+                    scannedCleanCode: code,
+                    scannedCodeType: codeType,
+                    candidateBarcode: best?.primaryBarcode,
+                    partNumber: best?.primarySku,
+                  }) || code;
                 const provProduct: Product = {
                   id: provId, businessId: cur.businessId, name: provName, brand: best?.brand || (floor?.brand ?? ""),
                   category: best?.category ?? "", specsShort: best?.specsShort ?? "", specsFull: best?.specsFull ?? "",
-                  primarySku: best?.primarySku ?? "", primaryBarcode: code, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
+                  primarySku: best?.primarySku ?? "", primaryBarcode: mintedBarcode, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
                   ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
                   productUrl: best?.productUrl ?? "", location: "", notes: "", status: "active", source: "ai_gemini",
                   confidence: decision?.confidence ?? 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
@@ -2441,6 +2475,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                           specsShort: best?.specsShort ?? p.specsShort,
                           specsFull: best?.specsFull ?? p.specsFull,
                           primarySku: p.primarySku || (best?.primarySku ?? ""),
+                          // PN-BARCODE-CARRY: upgrade the placeholder primaryBarcode (empty, or the
+                          // scanned PN itself) to the decode's corpus barcode - never a real scanned
+                          // GTIN (carriedProvisionalBarcode returns "" in that case, keeping p.primaryBarcode).
+                          primaryBarcode:
+                            carriedProvisionalBarcode({
+                              currentPrimaryBarcode: p.primaryBarcode,
+                              scannedCleanCode: code,
+                              scannedCodeType: codeType,
+                              candidateBarcode: best?.primaryBarcode,
+                              partNumber: best?.primarySku ?? p.primarySku,
+                            }) || p.primaryBarcode,
                           gtin: p.gtin || (best?.gtin ?? ""),
                           upc: p.upc || (best?.upc ?? ""),
                           ean: p.ean || (best?.ean ?? ""),
