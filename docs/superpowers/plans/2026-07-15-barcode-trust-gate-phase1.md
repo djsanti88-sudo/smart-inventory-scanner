@@ -941,7 +941,30 @@ git commit -m "feat(trust-gate): placeholder-barcode blocklist in dt-harvest gua
 
 ---
 
-### Task 6: Full gates + docs
+### Task 6: Multi-angle verification battery + docs (owner order: "test it properly from different angles")
+
+Beyond steps 1-3 below, this task REQUIRES four additional independent angles, each a separate subagent:
+
+**Angle A - Adversarial property probe (Opus):** a skeptic agent that tries to BREAK `gradeBarcode`
+with generated inputs (random digit strings, unicode/whitespace injection, 7/9/10/11/15-digit lengths,
+leading-zero storms, all placeholder variants zero-padded, PN edge cases: empty/digits-only/5-zeros/
+barcode-equals-PN) via a throwaway node script; any input that produces an inconsistent grade
+(e.g. verified without ground truth, placeholder passing, crash) is a finding.
+
+**Angle B - Browser proof of the TOP-LEVEL LAW (Playwright):** drive the real UI (dev server, mocked
+/api/ai-lookup per IS_E2E convention): (1) scan a RANDOM undecodable code -> row appears on the feed
+AND session total increments (the law, proven in the browser); (2) scan a bad-check-digit GTIN -> same;
+(3) CSV import with one bad-check-digit gtin row -> import completes, warning shown, good rows land.
+Screenshots to e2e/proof/.
+
+**Angle C - Test-quality review (pr-test-analyzer agent):** reviews the branch's NEW tests for
+coverage gaps (missed edge cases, vacuous assertions, over-mocking) - findings become fixes.
+
+**Angle D - Human-bot proof gate (project law):** run the relevant `npm run qa:bots:*` suites
+(scanner/alias/product-resolution changed -> the resolution + data bots at minimum) per
+docs/REVISION_GATE.md. Unit tests are NOT sufficient for handoff on these surfaces.
+
+**Files:**
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-07-15-barcode-trust-gate-design.md` (mark Phase 1 shipped in Status), `PROGRESS.md`, `TESTING.md`
