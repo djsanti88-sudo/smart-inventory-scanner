@@ -52,17 +52,42 @@ describe("Loop 5 CSV import (store)", () => {
     expect(ev?.resolverStatus).toBe("known");
   });
 
-  it("reports conflicts and does not reassign a code already mapped to a different product", async () => {
+  it("QA Task 7: re-importing an existing barcode refreshes the existing product's fields (never a hard conflict, never a new product)", async () => {
     const target = new RecordingTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true, loadBusinessData: emptyLoader, audit: () => {} });
     store.getState().setBusinessContext("biz-real", "user-real");
     await flush();
 
-    // First import claims 111222333 for product A.
+    // First import claims 111222333 for product "A".
     store.getState().importProductsCsv("name,barcode\nA,111222333");
     await flush();
-    // Second import tries to map the SAME code to a different product -> conflict, not applied.
+    // Second import re-uses the SAME barcode with a different name -> catalog semantics: refresh the
+    // existing product's descriptive fields, never mint a second product and never hard-discard.
     const summary = store.getState().importProductsCsv("name,barcode\nB,111222333");
+    await flush();
+
+    expect(summary.productsCreated).toBe(0);
+    expect(summary.conflicts).toHaveLength(0);
+    expect(summary.refreshed).toBe(1);
+
+    const products = store.getState().products;
+    expect(products).toHaveLength(1); // still exactly one product for this barcode, not two
+    expect(products[0].name).toBe("B"); // descriptive field refreshed from the re-import row
+  });
+
+  it("reports a genuine conflict when the row's sku points at a DIFFERENT existing product than the barcode owner", async () => {
+    const target = new RecordingTarget();
+    const store = createTestScanStore({ db: target, cloudBackend: true, loadBusinessData: emptyLoader, audit: () => {} });
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+
+    // Seed two independent products: A (barcode 111222333) and C (sku SKU-C, barcode 444555666).
+    store.getState().importProductsCsv("name,sku,barcode\nA,SKU-A,111222333\nC,SKU-C,444555666");
+    await flush();
+
+    // A row claims A's barcode but C's sku -> genuinely conflicting identity, must not be reassigned
+    // or silently merged into either product.
+    const summary = store.getState().importProductsCsv("name,sku,barcode\nImpostor,SKU-C,111222333");
     await flush();
 
     expect(summary.productsCreated).toBe(0);

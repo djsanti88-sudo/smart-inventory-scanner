@@ -40,14 +40,25 @@ function buildStoreImportTarget(): ImportTarget {
       const { products } = useScanStore.getState();
       return products.find((p) => p.primarySku === sku) ?? null;
     },
-    incrementQuantity: (productId) => {
-      // Quantity in this onboarding import means "how many units this row represents in the
-      // catalog", tracked here as a bump to the product's own count fields is out of scope for the
-      // Product entity (counts live on InventoryCount, session-scoped). For a catalog-only import we
-      // record the merge by touching updatedAt/updatedBy so the row is visibly refreshed.
+    refreshExistingProduct: (productId, row) => {
+      // QA Task 7 (owner decision, catalog semantics): a re-import of an existing barcode/sku
+      // refreshes the product's DESCRIPTIVE fields from the row - never quantity. Product has no
+      // qty field and InventoryCount (session-scoped counts) is never touched here. Only fields
+      // actually present on the row overwrite existing data; an empty CSV cell never blanks a field.
       useScanStore.setState((s) => ({
         products: s.products.map((p) =>
-          p.id === productId ? { ...p, updatedAt: new Date().toISOString(), updatedBy: "csv_import" } : p,
+          p.id === productId
+            ? {
+                ...p,
+                name: row.name || p.name,
+                brand: row.brand || p.brand,
+                category: row.category || p.category,
+                specsShort: row.specs || p.specsShort,
+                location: row.location || p.location,
+                updatedAt: new Date().toISOString(),
+                updatedBy: "csv_import",
+              }
+            : p,
         ),
       }));
     },
@@ -261,8 +272,9 @@ export function CsvImportPanel() {
       {summary && (
         <div data-testid="csv-import-summary" className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-800">
           Import complete. {summary.created} product{summary.created === 1 ? "" : "s"} created,{" "}
-          {summary.merged} merged into existing products, {summary.aliasesAdded} barcode
-          {summary.aliasesAdded === 1 ? "" : "s"} added, {summary.skipped} row{summary.skipped === 1 ? "" : "s"} skipped.
+          {summary.refreshed} matched existing product{summary.refreshed === 1 ? "" : "s"} (fields refreshed),{" "}
+          {summary.aliasesAdded} barcode{summary.aliasesAdded === 1 ? "" : "s"} added, {summary.skipped} row
+          {summary.skipped === 1 ? "" : "s"} skipped.
         </div>
       )}
     </div>

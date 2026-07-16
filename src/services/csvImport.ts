@@ -72,11 +72,24 @@ export interface ImportConflict {
   reason: string;
 }
 
+/**
+ * A row whose code already maps to an EXISTING product (QA Task 7, owner decision: catalog
+ * semantics, not quantity). Descriptive fields (name/brand/category/specsShort/location) are
+ * refreshed from the row; the code/alias itself is untouched. This is NOT a conflict - it is
+ * reported separately so summary copy can stay honest ("fields refreshed", never "merged").
+ */
+export interface ImportRefresh {
+  code: string;
+  productId: string;
+}
+
 export interface ProductImportPlan {
   products: Product[];
   aliases: Alias[];
   duplicates: string[]; // codes skipped (repeated within the import for the same product)
-  conflicts: ImportConflict[]; // codes NOT applied (already map to a different product)
+  conflicts: ImportConflict[]; // codes NOT applied (row conflicts with a DIFFERENT product's identity)
+  refreshed: ImportRefresh[]; // existing-product rows whose descriptive fields were refreshed
+  refreshedProducts: Product[]; // the resulting (updated) product records for `refreshed`, for the caller to apply
   rowsParsed: number;
 }
 
@@ -90,9 +103,15 @@ export interface BuildImportParams {
 }
 
 /**
- * Build products + approved aliases from parsed CSV rows. Pure + deterministic. Conflicting codes
- * (a code already mapped to a DIFFERENT product, whether pre-existing or earlier in this import) are
- * reported and NOT applied; a product with no usable (new) alias is not created.
+ * Build products + approved aliases from parsed CSV rows. Pure + deterministic.
+ *
+ * QA Task 7 (owner decision, catalog semantics): a row whose code already belongs to an EXISTING
+ * product is NOT a hard conflict. Its descriptive fields (name/brand/category/specsShort/location)
+ * are refreshed onto that existing product (via `refreshedProducts`, applied by the caller - this
+ * function stays pure/read-only over existingProducts) and reported in `refreshed`, never
+ * `conflicts`. A genuine conflict (a code claimed by TWO DIFFERENT products, whether within this
+ * file or against a different existing product than the row's other codes point to) is still
+ * reported and not applied.
  */
 export function buildProductImport(params: BuildImportParams): ProductImportPlan {
   const { rows, existingProducts, existingAliases, businessId, idFactory, now } = params;
@@ -102,12 +121,14 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
   for (const a of existingAliases) {
     if (a.approved && a.cleanCode) existingCodeOwner.set(a.cleanCode, a.productId);
   }
+  const existingProductById = new Map(existingProducts.map((p) => [p.id, p]));
   const existingNames = new Set(existingProducts.map((p) => p.name.trim().toLowerCase()).filter(Boolean));
 
   const products: Product[] = [];
   const aliases: Alias[] = [];
   const duplicates: string[] = [];
   const conflicts: ImportConflict[] = [];
+  const refreshed: ImportRefresh[] = [];
   const seenInFile = new Map<string, string>(); // cleanCode -> productId assigned in THIS import
 
   for (const row of rows) {
@@ -131,9 +152,24 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
       continue;
     }
 
+    // First pass (read-only): which DISTINCT existing products does this row's codes already touch?
+    // A row naming codes that belong to more than one distinct existing product is a genuine identity
+    // conflict (e.g. a barcode owned by product A but an sku owned by product C) - it must never be
+    // silently refreshed against either. Exactly one distinct existing product -> a normal re-import,
+    // refresh its descriptive fields.
+    const distinctExistingOwners = new Set<string>();
+    for (const raw of rawCodes) {
+      const cleanCode = cleanScanCode(raw).cleanCode;
+      if (!cleanCode) continue;
+      const existingOwner = existingCodeOwner.get(cleanCode);
+      if (existingOwner && existingProductById.has(existingOwner)) distinctExistingOwners.add(existingOwner);
+    }
+    const rowConflictsAcrossProducts = distinctExistingOwners.size > 1;
+
     const productId = `prod-import-${idFactory()}`;
     const rowAliases: Alias[] = [];
     const rowCleanCodes: string[] = [];
+    const refreshedProductIdsThisRow = new Set<string>(); // at most one refresh entry per product per row
 
     for (const raw of rawCodes) {
       const cleanCode = cleanScanCode(raw).cleanCode;
@@ -147,7 +183,18 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
       }
       const existingOwner = existingCodeOwner.get(cleanCode);
       if (existingOwner) {
-        conflicts.push({ code: cleanCode, reason: `code already maps to product ${existingOwner}` });
+        // Refresh only applies when the owning product record is actually resolvable AND the row's
+        // codes do not point at more than one distinct existing product. Otherwise (orphaned alias
+        // with no matching product record, or a genuine cross-product identity conflict) fall back
+        // to reporting a conflict, same as this path's behavior before this task.
+        if (!rowConflictsAcrossProducts && existingProductById.has(existingOwner)) {
+          if (!refreshedProductIdsThisRow.has(existingOwner)) {
+            refreshedProductIdsThisRow.add(existingOwner);
+            refreshed.push({ code: cleanCode, productId: existingOwner });
+          }
+        } else {
+          conflicts.push({ code: cleanCode, reason: `code already maps to product ${existingOwner}` });
+        }
         continue;
       }
 
@@ -174,7 +221,27 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
       seenInFile.set(cleanCode, productId);
     }
 
-    if (rowAliases.length === 0) continue; // every code conflicted -> no product created
+    // Apply the descriptive-field refresh for this row onto the existing product(s) it matched.
+    // Only fields actually present in the row are overwritten - an empty CSV cell never blanks out
+    // existing data.
+    for (const pid of refreshedProductIdsThisRow) {
+      const existing = existingProductById.get(pid);
+      if (!existing) continue;
+      // Store a fresh copy so the caller's existingProducts array is never mutated in place.
+      const updated: Product = {
+        ...existing,
+        name: name || existing.name,
+        brand: brand || existing.brand,
+        category: category || existing.category,
+        specsShort: specsShort || existing.specsShort,
+        location: location || existing.location,
+        updatedAt: now(),
+        updatedBy: "csv_import",
+      };
+      existingProductById.set(pid, updated);
+    }
+
+    if (rowAliases.length === 0) continue; // every code already belonged to an existing product (or conflicted) -> no NEW product created
 
     const product: Product = {
       id: productId,
@@ -208,7 +275,13 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
     aliases.push(...rowAliases);
   }
 
-  return { products, aliases, duplicates, conflicts, rowsParsed: rows.length };
+  // Only the products that were actually touched by a refresh are returned (not the full catalog),
+  // so the caller can apply a targeted patch rather than replacing its whole product list.
+  const refreshedProducts = [...new Set(refreshed.map((r) => r.productId))]
+    .map((pid) => existingProductById.get(pid))
+    .filter((p): p is Product => !!p);
+
+  return { products, aliases, duplicates, conflicts, refreshed, refreshedProducts, rowsParsed: rows.length };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -245,7 +318,13 @@ export interface ImportError {
 
 export interface ImportSummary {
   created: number;
-  merged: number;
+  /**
+   * QA Task 7 (owner decision, catalog semantics): existing-barcode/sku rows REFRESH the matched
+   * product's descriptive fields (name/brand/category/specsShort/location) - no quantity is ever
+   * added and InventoryCount is never touched. Named `refreshed`, not `merged`, so summary copy
+   * never implies a quantity change.
+   */
+  refreshed: number;
   aliasesAdded: number;
   skipped: number;
 }
@@ -401,8 +480,12 @@ export interface ImportTarget {
   /** The product currently using this exact SKU as its primarySku, or null. Used for conflict detection
    *  when a row's barcode is already claimed but the row's sku points at a DIFFERENT product. */
   findProductBySku: (sku: string) => Product | null;
-  /** Increment an existing product's quantity by delta (default 1 when the row omits qty). */
-  incrementQuantity: (productId: string, delta: number) => void;
+  /**
+   * Refresh an EXISTING product's descriptive fields (name/brand/category/specsShort/location) from
+   * the CSV row. Catalog semantics only (QA Task 7, owner decision): never adds quantity, never
+   * touches InventoryCount. Only fields actually present on the row should overwrite existing data.
+   */
+  refreshExistingProduct: (productId: string, row: ImportRow) => void;
   /** Create a new product from the row. importId is a stable per-import-run id for idempotency. */
   createProduct: (row: ImportRow, importId: string) => Product;
   /** Add an approved, source: csv_import alias for productId -> cleanCode. */
@@ -429,14 +512,15 @@ function hashImportContent(rows: ImportRow[]): string {
  * via a content-hash import id following the store's existing idempotency-key pattern (see
  * services/idempotency.ts - a key built once and reused, never regenerated per retry).
  *
- * Per row:
- *  - barcode matches an EXISTING approved alias -> merge: increment that product's quantity, do NOT
- *    touch/duplicate the alias.
+ * Per row (QA Task 7, owner decision - catalog semantics, no quantity):
+ *  - barcode matches an EXISTING approved alias -> refresh: update that product's descriptive fields
+ *    (name/brand/category/specsShort/location) from the row, do NOT touch/duplicate the alias, and
+ *    never add quantity or touch InventoryCount.
  *  - barcode present but unknown -> create a new product + an approved csv_import alias for it.
  *  - barcode already belongs to a product, but the row's sku points at a DIFFERENT existing product
  *    (a genuine re-pointing attempt) -> skipped, never silently repointed.
  *  - no barcode and no sku (nothing to key on) -> always create a new product. There is nothing to
- *    merge against or conflict with, and refusing to import a row with only a name would silently
+ *    refresh against or conflict with, and refusing to import a row with only a name would silently
  *    drop legitimate rows (e.g. non-barcoded shop goods) from the owner's own file.
  *
  * ASSUMPTION (documented, not yet owner-approved): this loop is NOT transactional. If target.* throws
@@ -449,7 +533,7 @@ function hashImportContent(rows: ImportRow[]): string {
  */
 export function applyCsvImport(rows: ImportRow[], target: ImportTarget): ImportSummary {
   const importId = hashImportContent(rows);
-  const summary: ImportSummary = { created: 0, merged: 0, aliasesAdded: 0, skipped: 0 };
+  const summary: ImportSummary = { created: 0, refreshed: 0, aliasesAdded: 0, skipped: 0 };
 
   if (target.hasImportRun(importId)) {
     summary.skipped = rows.length;
@@ -495,8 +579,8 @@ export function applyCsvImport(rows: ImportRow[], target: ImportTarget): ImportS
             continue;
           }
         }
-        target.incrementQuantity(existingByBarcode.id, row.qty ?? 1);
-        summary.merged += 1;
+        target.refreshExistingProduct(existingByBarcode.id, row);
+        summary.refreshed += 1;
         continue;
       }
 
@@ -508,13 +592,13 @@ export function applyCsvImport(rows: ImportRow[], target: ImportTarget): ImportS
       continue;
     }
 
-    // No barcode. If the sku matches an existing product, treat it as a merge (increment quantity)
-    // rather than minting a duplicate product for the same known item.
+    // No barcode. If the sku matches an existing product, refresh its descriptive fields rather
+    // than minting a duplicate product for the same known item (never adds quantity).
     if (row.sku) {
       const existingBySku = target.findProductBySku(row.sku);
       if (existingBySku) {
-        target.incrementQuantity(existingBySku.id, row.qty ?? 1);
-        summary.merged += 1;
+        target.refreshExistingProduct(existingBySku.id, row);
+        summary.refreshed += 1;
         continue;
       }
     }

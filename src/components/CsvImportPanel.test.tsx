@@ -152,6 +152,70 @@ describe("CsvImportPanel - explicit confirm required", () => {
   });
 });
 
+describe("CsvImportPanel - QA Task 7: re-import of an existing barcode refreshes fields, honest copy, never a quantity implication", () => {
+  it("importing file A then file B (same barcode, different name/brand) refreshes the existing product's descriptive fields and shows honest 'fields refreshed' copy", async () => {
+    const fileA = "name,sku,barcode,brand,category,specs,location\nWidget A,SKU1,111111111,OldBrand,OldCat,OldSpec,Old Aisle";
+    const fileB = "name,sku,barcode,brand,category,specs,location\nWidget A Updated,SKU1,111111111,NewBrand,NewCat,NewSpec,New Aisle";
+
+    // --- Import file A: creates the product. ---
+    const { unmount } = render(<CsvImportPanel />);
+    await selectFile(fileA, "a.csv");
+    await waitFor(() => expect(screen.getByTestId("csv-import-confirm")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("csv-import-confirm"));
+    await waitFor(() => expect(screen.getByTestId("csv-import-summary")).toBeInTheDocument());
+
+    expect(useScanStore.getState().products).toHaveLength(1);
+    expect(useScanStore.getState().products[0].brand).toBe("OldBrand");
+    unmount();
+
+    // --- Import file B: SAME barcode, different name/brand/category/specs/location. ---
+    render(<CsvImportPanel />);
+    await selectFile(fileB, "b.csv");
+    await waitFor(() => expect(screen.getByTestId("csv-import-confirm")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("csv-import-confirm"));
+    await waitFor(() => expect(screen.getByTestId("csv-import-summary")).toBeInTheDocument());
+
+    const { products } = useScanStore.getState();
+    expect(products).toHaveLength(1); // still exactly one product - never a duplicate
+    expect(products[0].name).toBe("Widget A Updated");
+    expect(products[0].brand).toBe("NewBrand");
+    expect(products[0].category).toBe("NewCat");
+    expect(products[0].specsShort).toBe("NewSpec");
+    expect(products[0].location).toBe("New Aisle");
+
+    // Honest copy: "matched existing product(s) (fields refreshed)" - no quantity implication anywhere.
+    const summaryText = screen.getByTestId("csv-import-summary").textContent ?? "";
+    expect(summaryText).toMatch(/matched existing product.*fields refreshed/i);
+    expect(summaryText).not.toMatch(/merged into existing/i);
+    expect(summaryText).not.toMatch(/quantity|qty/i);
+  });
+
+  it("idempotency: re-importing the exact same file (file B) a second time nets zero further changes", async () => {
+    const fileB = "name,sku,barcode,brand\nWidget A Updated,SKU1,111111111,NewBrand";
+
+    const { unmount } = render(<CsvImportPanel />);
+    await selectFile(fileB, "b.csv");
+    await waitFor(() => expect(screen.getByTestId("csv-import-confirm")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("csv-import-confirm"));
+    await waitFor(() => expect(screen.getByTestId("csv-import-summary")).toBeInTheDocument());
+
+    const afterFirst = JSON.parse(JSON.stringify(useScanStore.getState().products));
+    unmount();
+
+    // Re-upload the SAME file content again (fresh panel instance, simulating a re-upload).
+    render(<CsvImportPanel />);
+    await selectFile(fileB, "b.csv");
+    await waitFor(() => expect(screen.getByTestId("csv-import-confirm")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("csv-import-confirm"));
+    await waitFor(() => expect(screen.getByTestId("csv-import-summary")).toBeInTheDocument());
+
+    const afterSecond = useScanStore.getState().products;
+    expect(afterSecond).toHaveLength(1);
+    expect(afterSecond).toEqual(afterFirst); // net-zero change on the identical re-import
+    expect(screen.getByTestId("csv-import-summary")).toHaveTextContent("1 row skipped");
+  });
+});
+
 describe("CsvImportPanel - store-level double-apply is a true no-op (idempotent re-import)", () => {
   it("uploading and confirming the SAME fixture CSV twice writes products/aliases/quantities identically after both confirms (zero new writes on the second)", async () => {
     const text = "name,sku,barcode,qty\nWidget A,SKU1,111111111,5\nWidget B,SKU2,222222222,2";

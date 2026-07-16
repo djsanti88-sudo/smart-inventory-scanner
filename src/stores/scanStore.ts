@@ -85,6 +85,12 @@ export interface CsvImportSummary {
   aliasesCreated: number;
   duplicates: number;
   conflicts: ImportConflict[];
+  /**
+   * QA Task 7 (owner decision, catalog semantics): count of existing-barcode rows whose product had
+   * its descriptive fields (name/brand/category/specsShort/location) refreshed from the row. Never
+   * implies a quantity change - InventoryCount is untouched by a catalog re-import.
+   */
+  refreshed: number;
 }
 
 /** Snapshot of rows removed by a junk cleanup, so the action is fully reversible (Undo). */
@@ -4348,13 +4354,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           now,
         });
 
-        if (plan.products.length > 0 || plan.aliases.length > 0) {
-          set((s) => ({ products: [...s.products, ...plan.products], aliases: [...s.aliases, ...plan.aliases] }));
+        if (plan.products.length > 0 || plan.aliases.length > 0 || plan.refreshedProducts.length > 0) {
+          set((s) => {
+            const refreshedById = new Map(plan.refreshedProducts.map((p) => [p.id, p]));
+            return {
+              products: [
+                ...s.products.map((p) => refreshedById.get(p.id) ?? p),
+                ...plan.products,
+              ],
+              aliases: [...s.aliases, ...plan.aliases],
+            };
+          });
 
           // Queue idempotent SAVE_PRODUCT (each new product) BEFORE its aliases, then RESOLVE_ALIAS, so a
           // reloaded alias always references a persisted product. Same durable path Loop 4 proved.
+          // QA Task 7: a refreshed (existing-barcode) product is ALSO queued as SAVE_PRODUCT with the
+          // SAME id (idempotency key is id-based, so it upserts) - never a quantity change, only the
+          // descriptive fields buildProductImport already refreshed on plan.refreshedProducts.
           const items: PendingSyncItem[] = [];
-          for (const p of plan.products) {
+          for (const p of [...plan.products, ...plan.refreshedProducts]) {
             items.push(makeQueueItem({
               idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
               entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: p,
@@ -4382,6 +4400,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             aliasesCreated: plan.aliases.length,
             duplicates: plan.duplicates.length,
             conflicts: plan.conflicts.length,
+            refreshed: plan.refreshed.length,
           },
         });
 
@@ -4391,6 +4410,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           aliasesCreated: plan.aliases.length,
           duplicates: plan.duplicates.length,
           conflicts: plan.conflicts,
+          refreshed: plan.refreshed.length,
         };
       },
 
