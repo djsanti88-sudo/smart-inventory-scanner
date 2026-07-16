@@ -17,6 +17,12 @@ import { isLikelyMisreadGtin } from "@/services/upc/misread";
 //   4. Unknown / vendor label / weak     -> needs_review
 //   5. Ambiguous                         -> conflict
 
+// Mirrors csvImport.ts's MAX_FIELD_LENGTH. An unusually long scanned string is almost certainly a
+// scanner glitch (e.g. a stuck key repeating) rather than a real code, but the law is absolute: it
+// still MUST appear on the feed and count if unmatched, never be dropped. This only adds an honest,
+// additive reason - it never blocks resolution, never truncates the stored rawCode.
+const SCAN_LENGTH_CAP = 500;
+
 export function resolveScan(
   cleaned: CleanedCode,
   products: Product[],
@@ -72,13 +78,20 @@ export function resolveScan(
   // ADDITIVE, never terminal - it names BOTH possibilities and the row stays a normal, aliasable
   // needs_review row exactly like any other unknown code (no affordance removed).
   const misread = isLikelyMisreadGtin(cleaned.cleanCode);
-  const reason = isFnsku
-    ? "Amazon fulfillment label (FNSKU). Not a public barcode - resolve via your Amazon inventory."
-    : misread
-      ? "Barcode check digit fails - this may be a scanner misread (rescan to confirm) or a store-internal code. You can still link it to a product."
-      : codeType === "vendor_label"
-        ? "Vendor/Amazon label. Link it to a product once and it will count automatically after that."
-        : "No approved alias or verified product matches this code yet.";
+  // #8 (QA fix cluster): an over-cap length is an honest, ADDITIVE flag - it never replaces the
+  // normal reason, never blocks resolution, and never drops the scan (law: still appears + counts).
+  const isTooLong = cleaned.cleanCode.length > SCAN_LENGTH_CAP;
+  const lengthFlag = isTooLong
+    ? ` Unusually long code (over ${SCAN_LENGTH_CAP} characters) - may be a scan error.`
+    : "";
+  const reason =
+    (isFnsku
+      ? "Amazon fulfillment label (FNSKU). Not a public barcode - resolve via your Amazon inventory."
+      : misread
+        ? "Barcode check digit fails - this may be a scanner misread (rescan to confirm) or a store-internal code. You can still link it to a product."
+        : codeType === "vendor_label"
+          ? "Vendor/Amazon label. Link it to a product once and it will count automatically after that."
+          : "No approved alias or verified product matches this code yet.") + lengthFlag;
 
   return {
     ...base,
