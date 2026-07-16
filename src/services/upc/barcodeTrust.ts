@@ -70,8 +70,13 @@ export function pnDerivedAnnotation(barcode: string, partNumber?: string): PnDer
   const raw = (barcode ?? "").trim();
   const forms = new Set<string>();
   if (raw.length >= 2) forms.add(raw.slice(0, -1)); // payload without the check digit
-  const canon = canonicalGtin(raw);
-  if (canon) forms.add(canon.slice(0, -1));
+  // Zero-stripped significant-digit form (not the zero-PADDED canonical form): a canonical
+  // GTIN-14 left-pads short codes (e.g. an 8-digit EAN-8) with leading zeros, and those padding
+  // zeros can spuriously match a PN zero-run (e.g. "00000"). Stripping leading zeros instead
+  // recovers the embedded PN run for a 0-padded EAN-13-of-a-UPC without ever comparing against
+  // manufactured padding.
+  const stripped = raw.replace(/^0+/, "");
+  if (stripped.length >= 2 && stripped !== raw) forms.add(stripped.slice(0, -1));
   for (const body of forms) {
     for (let len = pnDigits.length; len >= 5; len--) {
       for (let i = 0; i + len <= pnDigits.length; i++) {
