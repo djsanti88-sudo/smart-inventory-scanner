@@ -46,6 +46,7 @@ import {
   type BreakerState,
 } from "@/services/circuitBreaker";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
+import { sanitizeCustomerReason } from "@/services/ai/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
@@ -2200,6 +2201,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             data = await decodeOnce();
           } finally {
             clearTimeout(abortTimer);
+          }
+          // BUG #14 (QA hardening 2026-07-16): CLIENT-SIDE defense in depth. The server already
+          // sanitizes reasonText/decision.reason (pipeline.ts) before responding, but this store must
+          // not trust that unconditionally - sanitize both here too, ONCE, right at the response
+          // boundary, so every downstream read (needsReviewQueue[].reason, scanFeed[].reason, the
+          // honestReasonForBadge composition below) is already clean. Honest hand-written prose (no
+          // vendor/service/model tokens) passes through unchanged; only a raw/internal string is
+          // replaced with an honest fixed fallback - never empty, never the raw value.
+          if (data.decision) {
+            data = { ...data, decision: { ...data.decision, reason: sanitizeCustomerReason(data.decision.reason ?? "", { status: data.decision.status }) } };
+          }
+          if (typeof data.reasonText === "string") {
+            data = { ...data, reasonText: sanitizeCustomerReason(data.reasonText, { status: data.decision?.status }) };
           }
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
