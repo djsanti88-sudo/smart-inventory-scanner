@@ -12,6 +12,7 @@ import {
   type TireKnowledgeRow,
 } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 
 // POST /api/reconcile/match (Task 7, Shop-Ware reconcile round).
 // Runs the pure identity matcher (Task 5) server-side, per row, against the LOCAL tire corpus
@@ -28,13 +29,6 @@ export const runtime = "nodejs";
 
 /** Hard row cap: reconcile feeds are shop catalogs (thousands), not unbounded uploads. */
 const MAX_ROWS = 20000;
-
-/** Mirror of the matcher's own part-number normalization (normPartKey semantics,
- *  tireKnowledgeIndex.ts:40-42): strip spaces/hyphens, uppercase. Used ONLY to pre-fetch the same
- *  keys the matcher will ask the dep for - the dep itself never normalizes. */
-function normPartKey(pn: string): string {
-  return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
-}
 
 /** Mirror of the matcher's rowSizeToken: size from sizeText, falling back to specs/model text. */
 function rowSizeToken(row: ExpectedInventoryRow): string {
@@ -99,9 +93,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   for (const row of rows) {
     for (const rawPn of row.partNumbers) {
-      const key = normPartKey(rawPn);
-      if (!key || pnCache.has(key)) continue;
-      pnCache.set(key, (await lookupAllByPartNumber(key)).map(toCandidate));
+      for (const key of tirePartNumberVariants(rawPn)) {
+        if (pnCache.has(key)) continue;
+        pnCache.set(key, (await lookupAllByPartNumber(key)).map(toCandidate));
+      }
     }
     const sizeToken = rowSizeToken(row);
     if (sizeToken && !sizeCache.has(sizeToken)) {

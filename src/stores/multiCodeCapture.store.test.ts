@@ -29,7 +29,7 @@ describe("multi-code capture on product creation", () => {
         category: "Tire",
         primaryBarcode: "700000000001",
         primarySku: "9988-7766", // the manufacturer part number / QR value (unique; not in seed)
-        gtin: "700000000099",
+        gtin: "700000000092",
       },
     });
 
@@ -40,12 +40,12 @@ describe("multi-code capture on product creation", () => {
     const codes = store.getState().aliases.filter((a) => a.productId === productId && a.approved).map((a) => a.cleanCode);
     expect(codes).toContain("700000000001");
     expect(codes).toContain("9988-7766");
-    expect(codes).toContain("700000000099");
+    expect(codes).toContain("700000000092");
 
     // 4. Scanning ANY of the codes resolves Known to the SAME product...
     const byBarcode = store.getState().processScan("700000000001");
     const byPartNumber = store.getState().processScan("9988-7766");
-    const byGtin = store.getState().processScan("700000000099");
+    const byGtin = store.getState().processScan("700000000092");
     expect(byBarcode?.resolverStatus).toBe("known");
     expect(byPartNumber?.resolverStatus).toBe("known");
     expect(byGtin?.resolverStatus).toBe("known");

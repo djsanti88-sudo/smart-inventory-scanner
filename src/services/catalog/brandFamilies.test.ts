@@ -83,6 +83,39 @@ describe("other evidenced corporate families", () => {
   });
 });
 
+describe("westlake / tireco et al families (95-row prefix_conflict recovery)", () => {
+  it("Tireco family: Milestar and Westlake are the same distributor block", () => {
+    // distributor-shared-prefix class: prefix 7588230 registers to milestar; 65 Westlake harvest
+    // rows were false-flagged as a prefix conflict. Same-family clears them.
+    expect(sameBrandFamily("westlake", "milestar")).toBe(true);
+    expect(sameBrandFamily("Milestar", "Westlake Tire")).toBe(true);
+  });
+
+  it("Linglong family: Green Max and Atlas are the same company", () => {
+    expect(sameBrandFamily("green max", "atlas")).toBe(true);
+    expect(sameBrandFamily("Atlas", "Green Max")).toBe(true);
+  });
+
+  it("Taskmaster family: Taskmaster, Provider and Diamondback share the distributor block", () => {
+    // prefix 8164560 registers to diamondback; 15 Taskmaster + 2 Provider rows were false-flagged.
+    expect(sameBrandFamily("taskmaster", "diamondback")).toBe(true);
+    expect(sameBrandFamily("provider", "diamondback")).toBe(true);
+    expect(sameBrandFamily("taskmaster", "provider")).toBe(true);
+  });
+
+  it("does NOT over-merge: new families stay distinct from each other and from unrelated brands", () => {
+    // A same-family firewall must never invent a relationship. Guard against an over-broad merge.
+    expect(sameBrandFamily("westlake", "atlas")).toBe(false); // Tireco vs Linglong
+    expect(sameBrandFamily("milestar", "diamondback")).toBe(false); // Tireco vs Taskmaster
+    expect(sameBrandFamily("westlake", "michelin")).toBe(false);
+    expect(sameBrandFamily("diamondback", "bridgestone")).toBe(false);
+    expect(sameBrandFamily("green max", "goodyear")).toBe(false);
+    // Westlake is NOT in the Carlstar family, and Milestar is NOT Bridgestone.
+    expect(sameBrandFamily("westlake", "carlstar")).toBe(false);
+    expect(sameBrandFamily("milestar", "firestone")).toBe(false);
+  });
+});
+
 describe("familyLabelFor (P5: family annotation for the prefix floor)", () => {
   it("maps a non-leader MEMBER brand to its family leader label", () => {
     // Leader is the FIRST entry of each FAMILIES group: Michelin group -> michelin;
@@ -91,6 +124,11 @@ describe("familyLabelFor (P5: family annotation for the prefix floor)", () => {
     expect(familyLabelFor("Cooper")).toBe("Goodyear family"); // Cooper is a member of the Goodyear group
     expect(familyLabelFor("General")).toBe("Continental family");
     expect(familyLabelFor("Firestone")).toBe("Bridgestone family");
+    // New recovery families: leader is the FIRST member listed.
+    expect(familyLabelFor("Westlake")).toBe("Milestar family");
+    expect(familyLabelFor("Atlas")).toBe("Green Max family");
+    expect(familyLabelFor("Provider")).toBe("Taskmaster family");
+    expect(familyLabelFor("Diamondback")).toBe("Taskmaster family");
   });
 
   it("returns null for a family LEADER (the leader carries no label)", () => {
@@ -101,7 +139,6 @@ describe("familyLabelFor (P5: family annotation for the prefix floor)", () => {
 
   it("returns null for an INDEPENDENT brand (in no family) and for empty input", () => {
     expect(familyLabelFor("Nokian")).toBeNull(); // not in any curated group
-    expect(familyLabelFor("Westlake")).toBeNull();
     expect(familyLabelFor("")).toBeNull();
   });
 

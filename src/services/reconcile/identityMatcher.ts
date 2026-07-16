@@ -26,6 +26,7 @@ import type { ExpectedInventoryRow } from "./types";
 import { sameBrandFamily } from "@/services/catalog/brandFamilies";
 import { nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { basePartNumberKey, tirePartNumberCore } from "@/services/catalog/tirePartNumber";
 
 export type MatchStatus = "matched" | "ambiguous" | "unmatched" | "non_tire";
 
@@ -50,6 +51,9 @@ export interface MatchResult {
   /** Matched rows with a corpus barcode (AM-R6): a SUGGESTION-GRADE barcode <-> part-number linkage.
    *  Data only - the matcher never writes this as an alias or touches any store. */
   linkageSuggestion?: { barcode: string; partNumber: string };
+  /** True when the ONLY part-number evidence came from an affix-stripped core key (owner correction 1):
+   *  the weakest tier, a discovery candidate that must be confirmed against the exact product, never attached. */
+  viaAffixCore?: boolean;
 }
 
 export interface MatcherDeps {
@@ -60,13 +64,6 @@ export interface MatcherDeps {
 }
 
 const JACCARD_THRESHOLD = 0.75;
-
-/** Normalize a part number for lookup: strip spaces/hyphens, uppercase. Mirrors normPartKey in
- *  src/server/tire-knowledge/tireKnowledgeIndex.ts:40-42 (same semantics, kept local so this pure
- *  matcher has zero server imports). */
-function normalizePartNumber(pn: string): string {
-  return (pn ?? "").toString().replace(/[ -]/g, "").trim().toUpperCase().replace(/\s/g, "");
-}
 
 /** Same brand-equality test the rest of the round uses: equal after brandFamilies' own normalization,
  *  or the two brands are members of the same curated company family. */
@@ -108,11 +105,22 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
 
   // --- Step 1: part-number hit (AM-R4) ---------------------------------------------------------
   const pnHits = new Map<string, CorpusCandidate>();
+  const baseHitUids = new Set<string>();
   for (const rawPn of row.partNumbers) {
-    const normalized = normalizePartNumber(rawPn);
-    if (!normalized) continue;
-    for (const hit of deps.lookupByPartNumber(normalized)) {
-      pnHits.set(hit.uid, hit);
+    const base = basePartNumberKey(rawPn);
+    if (base) {
+      for (const hit of deps.lookupByPartNumber(base)) {
+        pnHits.set(hit.uid, hit);
+        baseHitUids.add(hit.uid);
+      }
+    }
+    // Affix core is DISCOVERY-ONLY (owner correction 1): it may ADD a candidate but never outranks a
+    // base hit, and a core-only hit is tagged so it is never mistaken for exact identity.
+    const core = tirePartNumberCore(rawPn);
+    if (core) {
+      for (const hit of deps.lookupByPartNumber(core)) {
+        if (!pnHits.has(hit.uid)) pnHits.set(hit.uid, hit);
+      }
     }
   }
 
@@ -175,12 +183,15 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
     const reasonBits: string[] = [];
     if (brandCorroborated) reasonBits.push("brand corroborated");
     if (sizeCorroborated) reasonBits.push("size corroborated");
+    const viaAffixCore = !baseHitUids.has(hit.uid);
+    const coreNote = viaAffixCore ? " Candidate found via distributor-affix core - confirm the exact product before attaching." : "";
     return {
       row,
       status: "matched",
-      reason: `Part number hit for "${hit.brand} ${hit.name}" (${reasonBits.join(", ") || "corroborated"}).`,
+      reason: `Part number hit for "${hit.brand} ${hit.name}" (${reasonBits.join(", ") || "corroborated"}).${coreNote}`,
       candidate: hit,
       linkageSuggestion: buildLinkageSuggestion(hit, row),
+      viaAffixCore,
     };
   }
 
