@@ -2467,7 +2467,100 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   p.status !== "archived" &&
                   [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
               )?.id;
-              if (!provId) {
+              // BUG FIX (scan-order merge asymmetry, live-proven: barcode-then-PN left 2 rows while
+              // PN-then-barcode correctly merged into 1): `provId` above is almost always already this
+              // SCAN'S OWN placeholder - ensureProvisionalCount mints it synchronously at scan time
+              // (before decode ever runs), keyed on the literal scanned code. So an exact-code dedup miss
+              // against any OTHER product never happens here; every decode that reaches this branch (never
+              // "verified" - e.g. every corpus PN hit, which is a "suggested" decision by design) instead
+              // needs to check whether the DECODED identity (not the raw scanned code) matches an existing,
+              // already-verified product from an earlier scan of a DIFFERENT code for the SAME physical
+              // item (the barcode-first case: a distributor-prefixed PN's own canonical part number was
+              // never going to equal the scanned string). resolveUnknown's create_new path already runs
+              // findIdentityMerge for exactly this reason; this fast "decode-everything" branch never did.
+              // Reuse the SAME size-aware identity-merge primitive here - auto_link (canonical GTIN/barcode
+              // equality, tire size agreeing) merges deterministically into the existing product (its own
+              // fields are trusted and never overwritten by this weaker suggestion); anything fuzzier
+              // (suggest_link) is left alone (never guessed), matching resolveUnknown's own trust rule.
+              let mergeOrphanId: string | null = null;
+              let mergeTargetId: string | null = null;
+              if (best) {
+                const mergeCandidates = cur.products.filter(
+                  (p) => p.status !== "archived" && p.provisional !== true && p.id !== provId,
+                );
+                const merge = findIdentityMerge(mergeCandidates, {
+                  gtin: best.gtin ?? null,
+                  upc: best.upc ?? null,
+                  ean: best.ean ?? null,
+                  brand: best.brand ?? null,
+                  name: best.productName ?? null,
+                  specsShort: best.specsShort ?? null,
+                  specsFull: best.specsFull ?? null,
+                });
+                if (merge.kind === "auto_link" && countedIds.has(merge.productId) && merge.productId !== provId) {
+                  mergeTargetId = merge.productId;
+                  mergeOrphanId = provId ?? null; // this scan's own placeholder (if any) gets merged away
+                  provId = merge.productId;
+                  emitAudit({ entityType: "Product", entityId: merge.productId, action: "identity_merge_auto_link", metadata: { code } });
+                }
+              }
+              if (mergeTargetId) {
+                // BUG FIX (scan-order merge asymmetry): reuse the EXISTING verified product discovered
+                // above. Its fields are already correct and trusted - only add this code as a new alias
+                // (via the SAME buildAliasesForCodes helper resolveUnknown's own multi-code aliasing uses)
+                // so a future scan of the same code resolves deterministically. Never overwrite the
+                // existing product's name/brand/specs from this weaker (suggested-tier) decode.
+                const targetProduct = cur.products.find((p) => p.id === mergeTargetId);
+                if (targetProduct) {
+                  const built = buildAliasesForCodes({
+                    product: targetProduct,
+                    codes: [code],
+                    existingAliases: cur.aliases,
+                    businessId: cur.businessId,
+                    sessionId: cur.sessionId,
+                    idFactory,
+                    now,
+                    source: "ai_gemini",
+                    createdBy: "ai",
+                  });
+                  if (built.aliases.length > 0) {
+                    set((st) => ({
+                      aliases: [...st.aliases, ...built.aliases],
+                      pendingSyncQueue: [...st.pendingSyncQueue, ...built.queued],
+                    }));
+                  }
+                }
+                // If this scan already had its OWN provisional placeholder (minted synchronously by
+                // ensureProvisionalCount before this decode landed), transfer its retained count onto the
+                // merge target and remove the now-redundant placeholder row - the SAME orphan-transfer
+                // pattern resolveUnknown uses (never lose a count, never leave two rows for one identity).
+                if (mergeOrphanId && mergeOrphanId !== mergeTargetId) {
+                  const oid = mergeOrphanId;
+                  const targetId = mergeTargetId;
+                  set((st) => {
+                    const orphanRow = st.finalCounts.find((c) => c.productId === oid);
+                    const orphanQty = orphanRow?.quantity ?? 0;
+                    let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
+                    if (orphanQty > 0) {
+                      const targetRow = finalCounts.find((c) => c.productId === targetId);
+                      finalCounts = targetRow
+                        ? finalCounts.map((c) =>
+                            c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
+                          )
+                        : orphanRow
+                          ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
+                          : finalCounts;
+                    }
+                    return {
+                      products: st.products.filter((p) => p.id !== oid),
+                      finalCounts,
+                      scanFeed: st.scanFeed.map((e) =>
+                        e.matchedProductId === oid ? { ...e, matchedProductId: targetId } : e,
+                      ),
+                    };
+                  });
+                }
+              } else if (!provId) {
                 provId = `prod-${idFactory()}`;
                 // PN-BARCODE-CARRY: mint time - the scanned code itself is the only barcode so far
                 // (current primaryBarcode is empty, i.e. "" as far as carriedProvisionalBarcode is
@@ -2535,7 +2628,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // provisional product + qty on that feed row while keeping the "Suggested" badge.
               const ev = get().scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
               if (ev) {
-                const countEvent: ScanEvent = { ...ev, matchedProductId: provId, status: "known", quantityDelta: 1 };
+                const countEvent: ScanEvent = { ...ev, matchedProductId: provId!, status: "known", quantityDelta: 1 };
                 const { counts, count } = incrementInventoryCount(get().finalCounts, countEvent, idFactory);
                 set((st) => ({
                   finalCounts: counts,
@@ -3183,10 +3276,98 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             exactCodeEvidenceVerifiedByApp: Boolean(decision.exactCodeEvidenceVerifiedByApp),
           });
           if (autoSuggestApplied) {
-            const provId =
+            const ownProvId =
               review.provisionalProductId ??
               get().products.find((p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === review.cleanCode)?.id;
-            if (provId) {
+            // BUG FIX (scan-order merge asymmetry, same class as the fast-path decode-everything branch):
+            // before enriching THIS scan's own placeholder in place, check whether the decoded identity
+            // already matches a DIFFERENT, already-verified product (e.g. an earlier scan of this same
+            // physical item's barcode). Reuse the SAME size-aware findIdentityMerge primitive; auto_link
+            // only (never the fuzzy suggest_link - that stays a human decision, unchanged).
+            const countedIds = new Set(get().finalCounts.map((c) => c.productId));
+            let mergeTargetId: string | null = null;
+            if (best) {
+              const mergeCandidates = get().products.filter(
+                (p) => p.status !== "archived" && p.provisional !== true && p.id !== ownProvId,
+              );
+              const merge = findIdentityMerge(mergeCandidates, {
+                gtin: best.gtin ?? null,
+                upc: best.upc ?? null,
+                ean: best.ean ?? null,
+                brand: best.brand ?? null,
+                name: best.productName ?? null,
+                specsShort: best.specsShort ?? null,
+                specsFull: best.specsFull ?? null,
+              });
+              if (merge.kind === "auto_link" && countedIds.has(merge.productId) && merge.productId !== ownProvId) {
+                mergeTargetId = merge.productId;
+                emitAudit({ entityType: "Product", entityId: merge.productId, action: "identity_merge_auto_link", metadata: { code: review.cleanCode } });
+              }
+            }
+            if (mergeTargetId) {
+              const targetProduct = get().products.find((p) => p.id === mergeTargetId);
+              if (targetProduct) {
+                const built = buildAliasesForCodes({
+                  product: targetProduct,
+                  codes: [review.cleanCode],
+                  existingAliases: get().aliases,
+                  businessId: state.businessId,
+                  sessionId: state.sessionId,
+                  idFactory,
+                  now,
+                  source: "ai_gemini",
+                  createdBy: "ai",
+                });
+                if (built.aliases.length > 0) {
+                  set((st) => ({
+                    aliases: [...st.aliases, ...built.aliases],
+                    pendingSyncQueue: [...st.pendingSyncQueue, ...built.queued],
+                  }));
+                }
+              }
+              if (ownProvId && ownProvId !== mergeTargetId) {
+                const oid = ownProvId;
+                const targetId = mergeTargetId;
+                set((st) => {
+                  const orphanRow = st.finalCounts.find((c) => c.productId === oid);
+                  const orphanQty = orphanRow?.quantity ?? 0;
+                  let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
+                  if (orphanQty > 0) {
+                    const targetRow = finalCounts.find((c) => c.productId === targetId);
+                    finalCounts = targetRow
+                      ? finalCounts.map((c) =>
+                          c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
+                        )
+                      : orphanRow
+                        ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
+                        : finalCounts;
+                  }
+                  return {
+                    products: st.products.filter((p) => p.id !== oid),
+                    finalCounts,
+                    scanFeed: st.scanFeed.map((e) =>
+                      e.matchedProductId === oid
+                        ? { ...e, matchedProductId: targetId, decodeStatus: e.decodeStatus !== "verified" ? ("suggested" as const) : e.decodeStatus }
+                        : e,
+                    ),
+                    needsReviewQueue: st.needsReviewQueue.map((r) =>
+                      r.id === reviewId
+                        ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                        : r,
+                    ),
+                  };
+                });
+              } else {
+                set((st) => ({
+                  needsReviewQueue: st.needsReviewQueue.map((r) =>
+                    r.id === reviewId
+                      ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                      : r,
+                  ),
+                }));
+              }
+            } else if (ownProvId) {
+              const provId = ownProvId;
               set((st) => ({
                 products: st.products.map((p) =>
                   p.id === provId
