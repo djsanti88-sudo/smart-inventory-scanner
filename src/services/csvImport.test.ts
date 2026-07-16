@@ -86,6 +86,105 @@ describe("buildProductImport", () => {
 });
 
 // ------------------------------------------------------------------------------------------------
+// QA Task 7 (owner decision, catalog semantics): a row whose barcode already belongs to an existing
+// product REFRESHES that product's descriptive fields (name/brand/category/specsShort/location) -
+// it is NOT a hard "conflict" (the old ExportMenu-path bug), and it NEVER implies a quantity change.
+// ------------------------------------------------------------------------------------------------
+describe("buildProductImport - QA Task 7: existing-barcode row refreshes descriptive fields (not a conflict)", () => {
+  const existingProduct = (overrides: Partial<Product> = {}): Product => ({
+    id: "p-existing", businessId: "biz-1", name: "Old Name", brand: "OldBrand", category: "OldCat",
+    specsShort: "OldSpec", specsFull: "", primarySku: "", primaryBarcode: "111222333", gtin: "", upc: "",
+    ean: "", vendorCodes: [], aliases: ["111222333"], imageUrl: "", productUrl: "", location: "Old Aisle",
+    notes: "", status: "active", source: "manual", confidence: 1, verified: true,
+    createdAt: "t0", updatedAt: "t0", createdBy: "seed", updatedBy: "seed", ...overrides,
+  });
+  const existingAlias = (): Alias => ({
+    id: "a-existing", businessId: "biz-1", productId: "p-existing", rawCodeExample: "111222333",
+    cleanCode: "111222333", normalizedCode: "111222333", aliasType: "barcode", source: "manual",
+    confidence: 1, approved: true, createdAt: "t0", updatedAt: "t0", createdBy: "seed", lastSeenAt: "t0",
+    syncStatus: "synced", idempotencyKey: "k-existing",
+  });
+
+  it("refreshes name/brand/category/specs/location on the existing product instead of hard-discarding as a conflict", () => {
+    // File A already imported: product p-existing owns barcode 111222333. Now import File B: SAME
+    // barcode, DIFFERENT descriptive fields.
+    const rows = parseCsv(
+      "name,barcode,brand,category,specs,location\nNew Name,111222333,NewBrand,NewCat,NewSpec,New Aisle",
+    ).rows;
+    const plan = build(rows, [existingProduct()], [existingAlias()]);
+
+    expect(plan.conflicts).toHaveLength(0); // NEVER a conflict
+    expect(plan.products).toHaveLength(0); // no duplicate product minted
+    expect(plan.aliases).toHaveLength(0); // no duplicate alias
+    expect(plan.refreshed).toEqual([{ code: "111222333", productId: "p-existing" }]);
+    expect(plan.refreshedProducts).toHaveLength(1);
+    const [refreshedProduct] = plan.refreshedProducts;
+    expect(refreshedProduct.name).toBe("New Name");
+    expect(refreshedProduct.brand).toBe("NewBrand");
+    expect(refreshedProduct.category).toBe("NewCat");
+    expect(refreshedProduct.specsShort).toBe("NewSpec");
+    expect(refreshedProduct.location).toBe("New Aisle");
+  });
+
+  it("honest summary copy: importProductsCsv-facing plan reports refreshed, never a quantity/merge implication", () => {
+    const rows = parseCsv("name,barcode\nNew Name,111222333").rows;
+    const plan = build(rows, [existingProduct()], [existingAlias()]);
+    expect(plan.refreshed).toHaveLength(1);
+    // No field on the plan implies quantity - the type itself has no qty/count/increment shape.
+    expect(Object.keys(plan)).not.toContain("merged");
+    expect(Object.keys(plan)).not.toContain("quantityAdded");
+  });
+
+  it("idempotency: re-importing the SAME file twice against the same existing product nets the same single refresh each time, never accumulating conflicts or duplicate products", () => {
+    const rows = parseCsv("name,barcode,brand\nNew Name,111222333,NewBrand").rows;
+    let existing = [existingProduct()];
+    const aliases = [existingAlias()];
+
+    const first = build(rows, existing, aliases);
+    expect(first.refreshed).toHaveLength(1);
+    expect(first.conflicts).toHaveLength(0);
+    expect(first.products).toHaveLength(0);
+    existing = first.refreshedProducts; // simulate the caller applying the refresh
+
+    const second = build(rows, existing, aliases);
+    expect(second.refreshed).toHaveLength(1); // still refreshes (idempotent effect: same end field values)
+    expect(second.conflicts).toHaveLength(0);
+    expect(second.products).toHaveLength(0);
+    expect(second.refreshedProducts[0].name).toBe("New Name");
+    expect(second.refreshedProducts[0].brand).toBe("NewBrand");
+  });
+
+  it("does not blank an existing field when the re-import row omits it (empty cell never overwrites existing data)", () => {
+    const rows = parseCsv("name,barcode\nNew Name Only,111222333").rows;
+    const plan = build(rows, [existingProduct()], [existingAlias()]);
+    const [refreshedProduct] = plan.refreshedProducts;
+    expect(refreshedProduct.name).toBe("New Name Only");
+    expect(refreshedProduct.brand).toBe("OldBrand"); // untouched, row had no brand column
+    expect(refreshedProduct.category).toBe("OldCat");
+    expect(refreshedProduct.specsShort).toBe("OldSpec");
+    expect(refreshedProduct.location).toBe("Old Aisle");
+  });
+
+  it("still reports a genuine conflict when the row's OTHER code points at a DIFFERENT existing product", () => {
+    const otherProduct = existingProduct({ id: "p-other", primaryBarcode: "444555666", aliases: ["444555666"] });
+    const otherAlias: Alias = {
+      id: "a-other", businessId: "biz-1", productId: "p-other", rawCodeExample: "444555666",
+      cleanCode: "444555666", normalizedCode: "444555666", aliasType: "barcode", source: "manual",
+      confidence: 1, approved: true, createdAt: "t0", updatedAt: "t0", createdBy: "seed", lastSeenAt: "t0",
+      syncStatus: "synced", idempotencyKey: "k-other",
+    };
+    // Row's barcode belongs to p-existing, but its sku is a code already owned by p-other -> a real
+    // cross-product identity conflict, never silently refreshed against either product.
+    const rows = parseCsv("name,sku,barcode\nImpostor,444555666,111222333").rows;
+    const plan = build(rows, [existingProduct(), otherProduct], [existingAlias(), otherAlias]);
+
+    expect(plan.refreshed).toHaveLength(0);
+    expect(plan.products).toHaveLength(0);
+    expect(plan.conflicts.length).toBeGreaterThan(0);
+  });
+});
+
+// ------------------------------------------------------------------------------------------------
 // Task 3.6: onboarding CSV import (preview + explicit confirm). Separate, simpler API from the
 // existing Loop 5 buildProductImport above: parseCsvImport/applyCsvImport are what the new
 // CsvImportPanel onboarding UI uses. Uses csv-parse (moved to dependencies) instead of the
@@ -210,7 +309,7 @@ describe("parseCsvImport - semantic firewall sanitization", () => {
   });
 });
 
-describe("applyCsvImport - merge into existing product via approved alias", () => {
+describe("applyCsvImport - QA Task 7: refresh existing product's descriptive fields via approved alias (catalog semantics, no quantity)", () => {
   function makeTarget(products: Product[], aliases: Alias[]): { target: ImportTarget; products: Product[]; aliases: Alias[] } {
     const state = { products: [...products], aliases: [...aliases] };
     const target: ImportTarget = {
@@ -219,12 +318,26 @@ describe("applyCsvImport - merge into existing product via approved alias", () =
         return a ? state.products.find((p) => p.id === a.productId) ?? null : null;
       },
       findProductBySku: (sku) => state.products.find((p) => p.primarySku === sku) ?? null,
-      incrementQuantity: (productId, delta) => {
-        const p = state.products.find((x) => x.id === productId);
-        if (p) (p as unknown as { qty: number }).qty = ((p as unknown as { qty: number }).qty ?? 0) + delta;
+      refreshExistingProduct: (productId, row) => {
+        const idx = state.products.findIndex((p) => p.id === productId);
+        if (idx === -1) return;
+        const p = state.products[idx];
+        state.products[idx] = {
+          ...p,
+          name: row.name || p.name,
+          brand: row.brand ?? p.brand,
+          category: row.category ?? p.category,
+          specsShort: row.specs ?? p.specsShort,
+          location: row.location ?? p.location,
+          updatedAt: "refreshed",
+        } as Product;
       },
       createProduct: (row, importId) => {
-        const p = { id: `prod-${state.products.length + 1}`, name: row.name, primarySku: row.sku ?? "", qty: row.qty ?? 1, importId } as unknown as Product;
+        const p = {
+          id: `prod-${state.products.length + 1}`, name: row.name, primarySku: row.sku ?? "",
+          brand: row.brand ?? "", category: row.category ?? "", specsShort: row.specs ?? "",
+          location: row.location ?? "", importId,
+        } as unknown as Product;
         state.products.push(p);
         return p;
       },
@@ -242,38 +355,42 @@ describe("applyCsvImport - merge into existing product via approved alias", () =
     return { target, products: state.products, aliases: state.aliases };
   }
 
-  it("increments an existing product's quantity when the barcode matches an approved alias, without duplicating the alias", () => {
-    const existingProduct = { id: "p1", name: "Widget", primarySku: "SKU1", qty: 5 } as unknown as Product;
+  it("refreshes an existing product's descriptive fields when the barcode matches an approved alias, without duplicating the alias, and NEVER adds quantity", () => {
+    const existingProduct = { id: "p1", name: "Widget", brand: "OldBrand", primarySku: "SKU1" } as unknown as Product;
     const existingAlias: Alias = {
       id: "a1", businessId: "b", productId: "p1", rawCodeExample: "012345678905", cleanCode: "012345678905",
       normalizedCode: "012345678905", aliasType: "barcode", source: "manual", confidence: 1, approved: true,
       createdAt: "t", updatedAt: "t", createdBy: "seed", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k1",
     };
     const { target, products, aliases } = makeTarget([existingProduct], [existingAlias]);
-    const rows: ImportRow[] = [{ name: "Widget restock", barcode: "012345678905", qty: 4 }];
+    const rows: ImportRow[] = [{ name: "Widget Restocked", barcode: "012345678905", brand: "NewBrand" }];
 
     const summary = applyCsvImport(rows, target);
 
-    expect(summary).toEqual({ created: 0, merged: 1, aliasesAdded: 0, skipped: 0 });
-    expect((products[0] as unknown as { qty: number }).qty).toBe(9);
+    expect(summary).toEqual({ created: 0, refreshed: 1, aliasesAdded: 0, skipped: 0 });
+    expect(products[0].name).toBe("Widget Restocked");
+    expect(products[0].brand).toBe("NewBrand");
     expect(aliases).toHaveLength(1); // no duplicate alias created
+    // No quantity field exists on Product; nothing in the summary or product implies one was added.
+    expect(Object.keys(summary)).not.toContain("merged");
+    expect(Object.keys(summary)).not.toContain("qty");
   });
 
-  it("defaults qty to 1 when omitted on a merge row", () => {
-    const existingProduct = { id: "p1", name: "Widget", primarySku: "SKU1", qty: 5 } as unknown as Product;
+  it("a re-import row with only a name still refreshes (no qty column required - qty is not part of this semantics anymore)", () => {
+    const existingProduct = { id: "p1", name: "Widget", brand: "Acme", primarySku: "SKU1" } as unknown as Product;
     const existingAlias: Alias = {
       id: "a1", businessId: "b", productId: "p1", rawCodeExample: "999", cleanCode: "999",
       normalizedCode: "999", aliasType: "barcode", source: "manual", confidence: 1, approved: true,
       createdAt: "t", updatedAt: "t", createdBy: "seed", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k1",
     };
     const { target, products } = makeTarget([existingProduct], [existingAlias]);
-    const summary = applyCsvImport([{ name: "Widget", barcode: "999" }], target);
-    expect(summary.merged).toBe(1);
-    expect((products[0] as unknown as { qty: number }).qty).toBe(6);
+    const summary = applyCsvImport([{ name: "Widget Renamed", barcode: "999" }], target);
+    expect(summary.refreshed).toBe(1);
+    expect(products[0].name).toBe("Widget Renamed");
   });
 
-  it("normalizes a dashed/spaced CSV barcode via cleanScanCode so it merges into an existing product whose alias is the clean form (real scans always normalize)", () => {
-    const existingProduct = { id: "p1", name: "Widget", primarySku: "SKU1", qty: 5 } as unknown as Product;
+  it("normalizes a dashed/spaced CSV barcode via cleanScanCode so it refreshes the existing product whose alias is the clean form (real scans always normalize)", () => {
+    const existingProduct = { id: "p1", name: "Widget", primarySku: "SKU1" } as unknown as Product;
     // Alias as a REAL scan would have stored it: clean, no separators.
     const existingAlias: Alias = {
       id: "a1", businessId: "b", productId: "p1", rawCodeExample: "012345678905", cleanCode: "012345678905",
@@ -282,13 +399,48 @@ describe("applyCsvImport - merge into existing product via approved alias", () =
     };
     const { target, products, aliases } = makeTarget([existingProduct], [existingAlias]);
     // CSV row has the SAME code but with dashes, as a spreadsheet often prints it.
-    const rows: ImportRow[] = [{ name: "Widget restock", barcode: "012-345-678905", qty: 4 }];
+    const rows: ImportRow[] = [{ name: "Widget Restocked", barcode: "012-345-678905" }];
 
     const summary = applyCsvImport(rows, target);
 
-    expect(summary).toEqual({ created: 0, merged: 1, aliasesAdded: 0, skipped: 0 });
-    expect((products[0] as unknown as { qty: number }).qty).toBe(9);
-    expect(aliases).toHaveLength(1); // merged, not duplicated into a second product/alias
+    expect(summary).toEqual({ created: 0, refreshed: 1, aliasesAdded: 0, skipped: 0 });
+    expect(products[0].name).toBe("Widget Restocked");
+    expect(aliases).toHaveLength(1); // refreshed, not duplicated into a second product/alias
+  });
+
+  it("Task 4: a zero-padded 14-digit CSV barcode refreshes an existing product whose alias is stored at 12 digits", () => {
+    const existingProduct = { id: "p1", name: "Widget", primarySku: "SKU1" } as unknown as Product;
+    const existingAlias: Alias = {
+      id: "a1", businessId: "b", productId: "p1", rawCodeExample: "049000028911", cleanCode: "049000028911",
+      normalizedCode: "049000028911", aliasType: "barcode", source: "manual", confidence: 1, approved: true,
+      createdAt: "t", updatedAt: "t", createdBy: "seed", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k1",
+    };
+    const { target, products, aliases } = makeTarget([existingProduct], [existingAlias]);
+    const rows: ImportRow[] = [{ name: "Widget Restocked", barcode: "00049000028911" }];
+
+    const summary = applyCsvImport(rows, target);
+
+    expect(summary).toEqual({ created: 0, refreshed: 1, aliasesAdded: 0, skipped: 0 });
+    expect(products[0].name).toBe("Widget Restocked");
+    expect(aliases).toHaveLength(1); // refreshed into the existing 12-digit alias, never duplicated
+  });
+
+  it("Task 4 CASE-PACK NEGATIVE: a GTIN-14 case pack (non-zero indicator digit) does NOT refresh the unit product - it creates a separate product", () => {
+    const existingProduct = { id: "p1", name: "Widget (unit)", primarySku: "SKU1" } as unknown as Product;
+    const existingAlias: Alias = {
+      id: "a1", businessId: "b", productId: "p1", rawCodeExample: "049000028911", cleanCode: "049000028911",
+      normalizedCode: "049000028911", aliasType: "barcode", source: "manual", confidence: 1, approved: true,
+      createdAt: "t", updatedAt: "t", createdBy: "seed", lastSeenAt: "t", syncStatus: "synced", idempotencyKey: "k1",
+    };
+    const { target, products, aliases } = makeTarget([existingProduct], [existingAlias]);
+    // 10049000028918: indicator digit "1" -> a genuinely different case-pack product.
+    const rows: ImportRow[] = [{ name: "Widget (case of 10)", barcode: "10049000028918" }];
+
+    const summary = applyCsvImport(rows, target);
+
+    expect(summary).toEqual({ created: 1, refreshed: 0, aliasesAdded: 1, skipped: 0 });
+    expect(products[0].name).toBe("Widget (unit)"); // unit product untouched
+    expect(aliases).toHaveLength(2); // a new, separate alias for the case pack - never refreshed together
   });
 });
 
@@ -301,9 +453,10 @@ describe("applyCsvImport - stores the CLEAN code as the alias, not the raw dashe
         return a ? state.products.find((p) => p.id === a.productId) ?? null : null;
       },
       findProductBySku: (sku) => state.products.find((p) => p.primarySku === sku) ?? null,
-      incrementQuantity: (productId, delta) => {
-        const p = state.products.find((x) => x.id === productId);
-        if (p) (p as unknown as { qty: number }).qty = ((p as unknown as { qty: number }).qty ?? 0) + delta;
+      refreshExistingProduct: (productId, row) => {
+        state.products = state.products.map((p) =>
+          p.id === productId ? { ...p, name: row.name || p.name } : p,
+        );
       },
       createProduct: (row, importId) => {
         const p = { id: `prod-${state.products.length + 1}`, name: row.name, primarySku: row.sku ?? "", qty: row.qty ?? 1, importId } as unknown as Product;
@@ -343,9 +496,10 @@ describe("applyCsvImport - create new product + alias", () => {
         return a ? state.products.find((p) => p.id === a.productId) ?? null : null;
       },
       findProductBySku: (sku) => state.products.find((p) => p.primarySku === sku) ?? null,
-      incrementQuantity: (productId, delta) => {
-        const p = state.products.find((x) => x.id === productId);
-        if (p) (p as unknown as { qty: number }).qty = ((p as unknown as { qty: number }).qty ?? 0) + delta;
+      refreshExistingProduct: (productId, row) => {
+        state.products = state.products.map((p) =>
+          p.id === productId ? { ...p, name: row.name || p.name } : p,
+        );
       },
       createProduct: (row, importId) => {
         const p = { id: `prod-${state.products.length + 1}`, name: row.name, primarySku: row.sku ?? "", qty: row.qty ?? 1, importId } as unknown as Product;
@@ -370,7 +524,7 @@ describe("applyCsvImport - create new product + alias", () => {
     const { target, products, aliases } = makeTarget();
     const summary = applyCsvImport([{ name: "New Widget", barcode: "555666777", qty: 3 }], target);
 
-    expect(summary).toEqual({ created: 1, merged: 0, aliasesAdded: 1, skipped: 0 });
+    expect(summary).toEqual({ created: 1, refreshed: 0, aliasesAdded: 1, skipped: 0 });
     expect(products).toHaveLength(1);
     expect(products[0].name).toBe("New Widget");
     expect(aliases).toHaveLength(1);
@@ -398,9 +552,10 @@ describe("applyCsvImport - conflict never overwrites an existing alias", () => {
         return a ? state.products.find((p) => p.id === a.productId) ?? null : null;
       },
       findProductBySku: (sku) => state.products.find((p) => p.primarySku === sku) ?? null,
-      incrementQuantity: (productId, delta) => {
-        const p = state.products.find((x) => x.id === productId);
-        if (p) (p as unknown as { qty: number }).qty = ((p as unknown as { qty: number }).qty ?? 0) + delta;
+      refreshExistingProduct: (productId, row) => {
+        state.products = state.products.map((p) =>
+          p.id === productId ? { ...p, name: row.name || p.name } : p,
+        );
       },
       createProduct: (row, importId) => {
         const p = { id: `prod-new`, name: row.name, primarySku: row.sku ?? "", qty: row.qty ?? 1, importId } as unknown as Product;
@@ -433,11 +588,11 @@ describe("applyCsvImport - conflict never overwrites an existing alias", () => {
     const summary = applyCsvImport([{ name: "Impostor Widget", sku: "SKU-DIFFERENT", barcode: "777888999", qty: 9 }], target);
 
     expect(summary.skipped).toBe(1);
-    expect(summary.merged).toBe(0);
+    expect(summary.refreshed).toBe(0);
     expect(summary.created).toBe(0);
     expect(aliases).toHaveLength(1); // untouched, not repointed
     expect(aliases[0].productId).toBe("p-original");
-    expect((products[0] as unknown as { qty: number }).qty).toBe(5); // not incremented either
+    expect(products[0].name).toBe("Original Widget"); // not refreshed either - never touch a disputed product
   });
 });
 
@@ -450,9 +605,10 @@ describe("applyCsvImport - idempotent re-import", () => {
         return a ? state.products.find((p) => p.id === a.productId) ?? null : null;
       },
       findProductBySku: (sku) => state.products.find((p) => p.primarySku === sku) ?? null,
-      incrementQuantity: (productId, delta) => {
-        const p = state.products.find((x) => x.id === productId);
-        if (p) (p as unknown as { qty: number }).qty = ((p as unknown as { qty: number }).qty ?? 0) + delta;
+      refreshExistingProduct: (productId, row) => {
+        state.products = state.products.map((p) =>
+          p.id === productId ? { ...p, name: row.name || p.name } : p,
+        );
       },
       createProduct: (row, importId) => {
         const p = { id: `prod-${state.products.length + 1}`, name: row.name, primarySku: row.sku ?? "", qty: row.qty ?? 1, importId } as unknown as Product;
@@ -485,7 +641,7 @@ describe("applyCsvImport - idempotent re-import", () => {
     expect(aliases).toHaveLength(2);
 
     const second = applyCsvImport(rows, target);
-    expect(second).toEqual({ created: 0, merged: 0, aliasesAdded: 0, skipped: 2 });
+    expect(second).toEqual({ created: 0, refreshed: 0, aliasesAdded: 0, skipped: 2 });
     expect(products).toHaveLength(2); // no net-new data
     expect(aliases).toHaveLength(2);
   });
