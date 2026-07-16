@@ -1,10 +1,13 @@
 # Barcode Trust Gate + Provenance — Design Spec
 
 **Date:** 2026-07-15
-**Status:** REVISED v2 - spec review complete (3-angle review: code-grounding, adversarial, counting-model).
-Amendments AM-1..AM-10 below SUPERSEDE any conflicting text above them. Owner decisions ratified
-2026-07-15: next-physical-scan counting (AM-2), grandfather-with-later-audit (AM-5), two-phase build
-(AM-6). Ready for the implementation plan (Phase 1 only).
+**Status:** REVISED v3 - spec review complete (3-angle review: code-grounding, adversarial, counting-model)
+PLUS live-web ground truth (2026-07-15): Sailun/Blackhawk's REAL published UPCs embed the part number
+(6959655468007 = 695965 + last-6-of-PN 546800 + check 7, verbatim on tires.auto structured data).
+Amendments AM-1..AM-11 below SUPERSEDE any conflicting text above them; AM-11 supersedes the
+synthesized-detector-as-block wherever earlier text (including AM-6..AM-8) says otherwise. Owner
+decisions ratified 2026-07-15: next-physical-scan counting (AM-2), grandfather-with-later-audit (AM-5),
+two-phase build (AM-6). Ready for the implementation plan (Phase 1 only).
 
 ## Motivation
 
@@ -279,8 +282,52 @@ product bar when scanned); existing `approved: true` aliases and `verified: true
 approvals from AI auto-approvals; this is a stated best-effort decision, mirroring AM-5). The Phase 2
 plan restates these defaults for owner sign-off.
 
+### AM-11 — Synthesized detector DEMOTED to advisory signal; `blocked` is not a structural verdict
+### (live-web ground truth 2026-07-15; supersedes the detector-as-block everywhere, incl. AM-6..AM-8)
+
+**The fact:** Sailun/Blackhawk's real, published UPC scheme is corporate-prefix + last-6-of-part-number
++ check digit: `6959655468007` = `695965` + `546800` (from SKU 5546800V) + `7`, confirmed verbatim in
+tires.auto retailer structured data. "Payload embeds the PN" is a legitimate industry numbering
+practice, not a fabrication tell. The detector therefore cannot reliably DENY trust (this finding), just
+as it could never GRANT it (AM-1). Structure distinguishes nothing; evidence does. The thing that
+separates Gemini's phantom `8848111201761` from the real `6959655468007` is that one appears on a real
+fetched page and the other appears nowhere.
+
+**Design consequences:**
+
+1. The gate's verdicts collapse to three: `rejected` (not GTIN-shaped / bad check digit — unchanged,
+   absolute) | `suggested` (well-formed, non-ground-truth provenance) | `verified` (ground-truth
+   provenance per AM-3). The `blocked` verdict for PN-embedding is REMOVED.
+2. `isSynthesizedFromPartNumber` becomes an advisory annotation only (`pnDerived: true/false/
+   cannot_assess`, AM-8 normalization/threshold params kept for it): recorded on the grade and shown in
+   the review UI as context ("this code is PN-derived - a common legitimate scheme AND the common
+   fabrication pattern"). It never changes a verdict, never blocks, never counts, in either direction.
+3. Safety is carried entirely by AM-2 + AM-3 (this was already their job): a phantom barcode minted as
+   a `suggested` alias can never reach a count, because no physical tire will ever scan as that code and
+   no real page will ever evidence-verify it. It decays honestly in review as "no evidence found."
+   Batch-2-style real codes promote normally via physical scan or EvidenceVerifier.
+4. One structural hard-block DOES remain, because it has no legitimate counterexample: the
+   placeholder/dummy blocklist (the `123456789012` family, `0000000000000`, `9999999999999`) already
+   established in the QA round's corpus-sanitize work. That list is enumerated junk, not a heuristic.
+5. `synthesized_blocked` is removed from the Provenance enum. The provenance labels are:
+   `physical_scan` | `evidence_verified` | `corpus_trusted` | `ai_suggested` | `manual_entry`.
+6. Fixtures redefined:
+   - The 16 Gemini `8848…` barcodes: grade `suggested` with `pnDerived: true`; MUST never reach a
+     count or a verified promotion in the test flow (no evidence, no physical scan) — the safety
+     assertion moves from "blocked at the door" to "inert without evidence."
+   - The REAL `6959655468007` (Blackhawk BH5546800): grades `suggested` with `pnDerived: true`, and
+     MUST promote to `verified` on an app-run EvidenceVerifier confirmation — the false-positive
+     regression test this finding demands.
+   - Placeholder junk (`0000000000000` etc.): `rejected`/hard-blocked via the blocklist.
+7. The AM-5 corpus-audit backlog item is now EVIDENCE-based, not structural: a PN-embed scan of the
+   corpus would flag Sailun's entire legitimate catalog. The audit tool is "does this barcode appear in
+   real retailer evidence," with the free retailer structured-data path (tires.auto-class pages) as the
+   first rung.
+
 ## Open items
 
 - Phase 2 spec review (provenance field, count separation, promotion machinery) after Phase 1 ships.
-- Backlog (named, AM-5): one-time report-only detector audit of the 78k corpus before any
+- Backlog (AM-5 + AM-11.7): one-time report-only EVIDENCE audit of the 78k corpus before any
   corpus-derived trust expansion.
+- Separate task (other session, owner-gated): free retailer structured-data evidence pass over the
+  batch-2 Blackhawks and the ~57 sourced candidates.
