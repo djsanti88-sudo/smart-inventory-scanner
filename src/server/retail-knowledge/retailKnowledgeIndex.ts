@@ -7,6 +7,7 @@
 // Both return the same RetailLookupResult shape. If neither is available, returns null.
 
 import { getKnowledgeDb } from "@/server/knowledgeDb";
+import { isExampleOrTestRow } from "@/services/ai/decode";
 
 /** Generate zero-padded barcode variants (UPC-12, EAN-13, GTIN-14) for lookup normalization. */
 function barcodeVariants(code: string): string[] {
@@ -138,11 +139,23 @@ async function lookupTurso(code: string): Promise<RetailLookupResult | null> {
 // Public API
 // ---------------------------------------------------------------------------
 
+// DEFENSE IN DEPTH (QA hardening fix #5, 2026-07-16): the store itself (SQLite or Turso) may still hold
+// a poisoned textbook-GS1-example / demo row (ingested before the build-script filter shipped, or a
+// store not yet regenerated/purged). Reject it HERE too, not just at the pipeline read-time guard, so
+// lookupRetailBarcode(Async) itself never hands back a fake product even if a caller bypasses the
+// pipeline's own check. Returns null (an honest "not in the corpus"), never a special reason - the
+// blocklist itself must never leak past this module.
+function rejectIfExampleOrTestRow(result: RetailLookupResult | null): RetailLookupResult | null {
+  if (!result) return result;
+  if (isExampleOrTestRow(result.barcode, result.productName, result.brand)) return null;
+  return result;
+}
+
 /** Look up a barcode in the retail product index. Tries local SQLite first, then Turso. */
 export function lookupRetailBarcode(code: string): RetailLookupResult | null {
   // SQLite is synchronous and faster — try it first
   const sqliteResult = lookupSqlite(code);
-  if (sqliteResult) return sqliteResult;
+  if (sqliteResult) return rejectIfExampleOrTestRow(sqliteResult);
 
   // Turso is async but we need a sync return for the existing call site.
   // Return null here; the async version is used by the API route.
@@ -152,8 +165,9 @@ export function lookupRetailBarcode(code: string): RetailLookupResult | null {
 /** Async version for the API route — tries SQLite first, then Turso over the network. */
 export async function lookupRetailBarcodeAsync(code: string): Promise<RetailLookupResult | null> {
   const sqliteResult = lookupSqlite(code);
-  if (sqliteResult) return sqliteResult;
-  return lookupTurso(code);
+  if (sqliteResult) return rejectIfExampleOrTestRow(sqliteResult);
+  const tursoResult = await lookupTurso(code);
+  return rejectIfExampleOrTestRow(tursoResult);
 }
 
 /** For tests: reset caches so the next lookup re-initializes. */

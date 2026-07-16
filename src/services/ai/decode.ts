@@ -121,6 +121,77 @@ export function isUsableProductName(raw: string, code?: string): boolean {
   return true;
 }
 
+// --- Example/test-row firewall (QA hardening fix #5, 2026-07-16) -----------------------------
+// The 4M-row Open Food Facts retail corpus is a crowdsourced dump that includes literal GS1-standard
+// TEXTBOOK EXAMPLE barcodes and demo/placeholder rows contributed by testers, ingested VERBATIM by
+// scripts/build-retail-knowledge.mjs (which only checks barcode shape + name length - never checks for
+// a test/example row). Live-proven: 4006381333931 -> "Test Shopidoo", 5901234123457 -> "Sauce
+// chiltepin"/"La lumbre", 0012345670121/0012345674020/0012345674037 -> brand "Healthyholics", plus rows
+// literally named "Test"/"Fakeer"/"Fakewine"/"BrandTest". A confident retail-rung match on one of these
+// is a WRONG IDENTITY, which is worse than Unidentified. This is a READ-TIME guard (not a corpus edit):
+// it rejects the hit and falls through to an honest "no identity", never a leaked "test row" reason.
+
+// EXACT-VALUE barcode blocklist. Deliberately NOT a fuzzy prefix (e.g. never `/^0012345/`) - a fuzzy
+// prefix could suppress a real GTIN that happens to share the same leading digits. Every entry here is
+// either a well-known GS1/ISBN textbook example, a degenerate shape (all-zero/all-same-digit/fully
+// sequential), or one of the exact live-proven Healthyholics example codes.
+const EXAMPLE_BARCODE_BLOCKLIST = new Set<string>([
+  "012345678905", // classic GS1 UPC-A textbook example
+  "4006381333931", // classic GS1/GTIN EAN-13 textbook example ("Test Shopidoo")
+  "5901234123457", // classic GS1 EAN-13 textbook example ("Sauce chiltepin" / "La lumbre")
+  "0012345670121", // documented Healthyholics example GTIN
+  "0012345674020", // documented Healthyholics example GTIN
+  "0012345674037", // documented Healthyholics example GTIN
+]);
+
+/** Zero-pad `code` to 12/13/14 digits, mirroring retailKnowledgeIndex.ts's barcodeVariants so the same
+ *  normalized shapes that the retail lookup itself tries are checked against the blocklist. */
+function exampleBarcodeVariants(code: string): string[] {
+  const digits = code.replace(/\D/g, "");
+  if (!digits) return [];
+  const stripped = digits.replace(/^0+/, "") || "0";
+  const variants = new Set<string>([digits, stripped]);
+  for (const base of [digits, stripped]) {
+    if (base.length <= 14) variants.add(base.padStart(14, "0"));
+    if (base.length <= 13) variants.add(base.padStart(13, "0"));
+    if (base.length <= 12) variants.add(base.padStart(12, "0"));
+  }
+  return [...variants];
+}
+
+/** True for an all-zero, all-same-digit, or fully-sequential barcode shape (degenerate placeholder,
+ *  never a real product's GTIN). Checked on the raw digit string, not zero-padded variants, so a
+ *  genuinely short real code is never coincidentally caught by padding. */
+function isDegenerateBarcodeShape(digits: string): boolean {
+  if (!digits) return false;
+  if (/^0+$/.test(digits)) return true; // all-zero (any length 8-14)
+  if (/^(\d)\1+$/.test(digits)) return true; // all-same-digit (e.g. 1111111111111)
+  if (digits === "0123456789012" || digits === "1234567890128") return true; // fully sequential GS1 examples
+  return false;
+}
+
+// WHOLE-WORD strong test/demo markers. Word-boundary anchored so "Latest"/"Testarossa"/"contest"/
+// "attesting" never false-positive - only a standalone marker word matches.
+const TEST_NAME_PATTERN =
+  /\b(test|fakeer|fake ?wine|dummy|sample product|placeholder|brandtest|shopidoo)\b/i;
+
+/**
+ * True when a retail-corpus row is a textbook GS1 EXAMPLE barcode or a demo/test/placeholder row that
+ * must never be surfaced as a confident product match. Checks the barcode (exact-value blocklist +
+ * degenerate shapes, using the same zero-pad normalization the retail index itself uses) OR the name OR
+ * the brand (whole-word test/demo markers). Pure function: no I/O, no imports beyond what this module
+ * already has.
+ */
+export function isExampleOrTestRow(code: string, name: string, brand?: string): boolean {
+  const digits = (code ?? "").replace(/\D/g, "");
+  if (digits && isDegenerateBarcodeShape(digits)) return true;
+  const variants = exampleBarcodeVariants(code ?? "");
+  if (variants.some((v) => EXAMPLE_BARCODE_BLOCKLIST.has(v))) return true;
+  if (name && TEST_NAME_PATTERN.test(name)) return true;
+  if (brand && TEST_NAME_PATTERN.test(brand)) return true;
+  return false;
+}
+
 function identityOf(r: AiLookupResult, code?: string): string {
   const name = isUsableProductName(r.productName, code) ? cleanProductName(r.productName) : "";
   return `${name} ${r.brand}`.trim();

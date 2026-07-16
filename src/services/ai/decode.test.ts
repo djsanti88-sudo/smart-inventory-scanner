@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decideDecode, isUsableProductName, cleanProductName } from "@/services/ai/decode";
+import { decideDecode, isUsableProductName, cleanProductName, isExampleOrTestRow } from "@/services/ai/decode";
 import { emptyResult } from "@/services/ai/provider";
 import type { AiLookupResult, EvidenceResult } from "@/types";
 
@@ -127,6 +127,70 @@ describe("product-name quality gate (junk firewall)", () => {
     expect(isUsableProductName(cleaned)).toBe(true);
     // a non-hedge parenthetical (variant) is preserved
     expect(cleanProductName("BIC Classic Pocket Lighter (Texas)")).toContain("(Texas)");
+  });
+});
+
+describe("isExampleOrTestRow: rejects textbook GS1 example barcodes and demo/test rows (QA hardening fix #5)", () => {
+  // Live-proven bug: scanning these exact textbook GS1 example codes returned a CONFIDENT "Matched in
+  // the retail product database" for FAKE products ingested verbatim from the crowdsourced Open Food
+  // Facts dump - 4006381333931 -> "Test Shopidoo", 5901234123457 -> "Sauce chiltepin"/"La lumbre",
+  // 0012345670121/0012345674020/0012345674037 -> brand "Healthyholics", plus rows literally named
+  // "Test"/"Fakeer"/"Fakewine"/"BrandTest". Wrong identity is a failure; Unidentified is acceptable.
+
+  it("blocks the exact-value example/degenerate barcodes regardless of name/brand", () => {
+    const exampleCodes = [
+      "012345678905",
+      "4006381333931",
+      "5901234123457",
+      "00000000000",
+      "000000000000",
+      "0000000000000",
+      "0012345670121",
+      "0012345674020",
+      "0012345674037",
+    ];
+    for (const code of exampleCodes) {
+      expect(isExampleOrTestRow(code, "Some Perfectly Normal Product Name", "Some Real Brand"), code).toBe(true);
+    }
+  });
+
+  it("blocks the zero-padded variant of a blocklisted code (same normalization as retailKnowledgeIndex)", () => {
+    expect(isExampleOrTestRow("0012345678905", "Normal Product", "Real Brand")).toBe(true);
+  });
+
+  it("blocks a Healthyholics-branded row on its documented example code even with an innocuous name", () => {
+    expect(isExampleOrTestRow("0012345670121", "Multivitamin Gummies", "Healthyholics")).toBe(true);
+  });
+
+  it("blocks a name that is a whole-word test/demo marker even on an otherwise normal barcode", () => {
+    expect(isExampleOrTestRow("4006381333931", "Test Shopidoo", "")).toBe(true);
+    expect(isExampleOrTestRow("049000006346", "Test", "")).toBe(true);
+    expect(isExampleOrTestRow("049000006346", "Fakeer", "")).toBe(true);
+    expect(isExampleOrTestRow("049000006346", "Fakewine", "")).toBe(true);
+    expect(isExampleOrTestRow("049000006346", "BrandTest", "")).toBe(true);
+    expect(isExampleOrTestRow("049000006346", "Some Sauce", "BrandTest")).toBe(true);
+    expect(isExampleOrTestRow("5901234123457", "Sauce chiltepin", "La lumbre")).toBe(true);
+  });
+
+  it("blocks a brand that is a whole-word test/demo marker even with a normal name", () => {
+    expect(isExampleOrTestRow("049000006346", "Multivitamin Gummies", "Healthyholics Test")).toBe(true);
+  });
+
+  it("does NOT block a normal barcode + real name + real brand", () => {
+    expect(isExampleOrTestRow("049000006346", "Coca-Cola Classic 12 pack", "Coca-Cola")).toBe(false);
+    expect(isExampleOrTestRow("3017620422003", "Nutella Hazelnut Spread", "Ferrero")).toBe(false);
+  });
+
+  it("does NOT false-positive on words that merely contain a marker substring (whole-word only)", () => {
+    expect(isExampleOrTestRow("049000006346", "Latest Edition Energy Drink", "Monster")).toBe(false);
+    expect(isExampleOrTestRow("049000006346", "Contest Winner Cereal", "Kelloggs")).toBe(false);
+    expect(isExampleOrTestRow("049000006346", "Testarossa Wine", "")).toBe(false);
+    expect(isExampleOrTestRow("049000006346", "Attesting Notary Stamp", "")).toBe(false);
+  });
+
+  it("does NOT fuzzy-match a real GTIN that merely shares the 0012345 prefix", () => {
+    // Binding rule: exact-value blocklist only, never a fuzzy prefix (could suppress a real GTIN).
+    expect(isExampleOrTestRow("0012345699999", "Real Product Not An Example", "Real Brand")).toBe(false);
   });
 });
 

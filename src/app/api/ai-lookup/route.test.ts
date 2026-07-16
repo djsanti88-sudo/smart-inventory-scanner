@@ -981,12 +981,16 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       expect(json.providerNames).toContain("parallel:floor");
       expect(json.results[0].productName).toBe("Unidentified item (barcode 111000222888)");
       expect(json.decision.status).toBe("needs_review");
-      // Every rung's miss reason is listed (never silent about why the ladder didn't help).
+      // Every rung's miss reason is listed (never silent about why the ladder didn't help) - the raw
+      // chain lives in debug.ladderReasons (platform-only).
       expect(json.debug.ladderReasons).toBeDefined();
       const rungNames = (json.debug.ladderReasons as Array<{ rung: string; reason: string }>).map((r) => r.rung);
       expect(rungNames).toContain("fetchv2");
       expect(rungNames).toContain("gpt");
-      expect(json.reasonText).toMatch(/No rung resolved the code/);
+      // BUG #14 (QA hardening 2026-07-16): the CUSTOMER-facing reasonText must be honest and non-empty
+      // but must never leak the raw rung chain's provider/model names.
+      expect(json.reasonText.length).toBeGreaterThan(0);
+      expect(json.reasonText).not.toMatch(/fetchv2|gpt-5\.5|goupc|upcitemdb/i);
     }, 20000);
 
     it("(d) daily-cap counter is incremented EXACTLY once for a Plan-D-floor + all-miss-ladder request", async () => {
@@ -1010,5 +1014,78 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       expect(secondJson.debug.cached).toBe(true);
       expect((await dailyUsedNow()), "a cached repeat must not burn a second daily slot").toBe(1);
     }, 20000);
+  });
+
+  // BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): the CUSTOMER-facing PROSE fields
+  // (reasonText, decision.reason, results[].guesses - the free-text a scan row actually renders) must
+  // never leak raw vendor/service/model names ("upcitemdb", "openfoodfacts", "goupc"/"Go-UPC",
+  // "fetchv2"/"Fetch V2", "gpt-5.5") or internal skip-reason codes ("gpt_call_failed", "no_api_key",
+  // etc.). Structured metadata (providerNames, providerStatuses[].provider/errorCode) is NOT prose -
+  // the client's own logic keys off those exact strings (e.g. scanStore.ts's gptSkipEntry lookup for
+  // provider === "gpt-5.5-ladder") and is out of this bug's scope, same as debug.* (platform-only).
+  describe("BUG #14: no raw vendor/model names leak into customer-facing PROSE fields", () => {
+    const DENYLIST_RE = /upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|fetch v2|gpt[-_ ]?5\.5|gpt-5\.5-ladder|gpt_call_failed|gpt_aborted_at_cap|no_api_key|non_public_code_type|e2e_mode|budget_exceeded|prior_status_already_decided|\bladder\b|parallel:|tire-corpus|retail-corpus|learned-products/i;
+
+    /** Only the free-text fields a scan row actually renders to a customer. */
+    function proseFields(json: Record<string, unknown>): string[] {
+      const out: string[] = [];
+      if (typeof json.reasonText === "string") out.push(json.reasonText);
+      const decision = json.decision as { reason?: unknown } | undefined;
+      if (decision && typeof decision.reason === "string") out.push(decision.reason);
+      const results = Array.isArray(json.results) ? (json.results as Array<{ guesses?: unknown }>) : [];
+      for (const r of results) {
+        if (Array.isArray(r.guesses)) out.push(...r.guesses.filter((g): g is string => typeof g === "string"));
+      }
+      return out;
+    }
+
+    function assertProseClean(json: Record<string, unknown>) {
+      const strings = proseFields(json);
+      const leaks = strings.filter((s) => DENYLIST_RE.test(s));
+      expect(leaks, `leaked raw token(s) in a customer-facing prose field: ${JSON.stringify(leaks)}`).toEqual([]);
+      for (const s of strings) expect(s.length, "a customer-facing prose field must never be empty").toBeGreaterThan(0);
+    }
+
+    it("no-key all-miss response body (excluding debug) has no denylisted token", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const res = await POST(makeRequest({ cleanCode: "111000222901", mode: "decode" }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.decision.status).not.toBe("verified");
+      assertProseClean(json);
+      // Sanity: debug.* is exempt and DOES still carry the raw chain (proves the exemption is real,
+      // not just an accidentally-clean body).
+      const rawDebugString = JSON.stringify(json.debug);
+      expect(DENYLIST_RE.test(rawDebugString)).toBe(true);
+    }, 40000);
+
+    it("HTTP-500 GPT ladder failure (gpt_call_failed): response body (excluding debug) has no denylisted token", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-openai-key";
+      fetchSpy = vi.fn(async (url: string) => {
+        if (String(url).includes("api.openai.com/v1/responses")) {
+          return new Response("Internal Server Error", { status: 500 });
+        }
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      });
+      globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+      const res = await POST(makeRequest({ cleanCode: "111000222902", mode: "decode" }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.decision.status).not.toBe("verified");
+      // debug.gptLadderSkipReason legitimately carries the raw code for platform diagnosis.
+      expect(json.debug.gptLadderSkipReason).toBe("gpt_call_failed");
+      assertProseClean(json);
+    }, 40000);
+
+    it("no OpenAI key configured: response body (excluding debug) has no denylisted token", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      // beforeEach already deletes OPENAI_API_KEY.
+      const res = await POST(makeRequest({ cleanCode: "111000222903", mode: "decode" }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      assertProseClean(json);
+    }, 40000);
   });
 });

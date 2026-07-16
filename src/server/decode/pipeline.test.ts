@@ -304,9 +304,13 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
     expect(outcome.kind).toBe("computed");
     if (outcome.kind !== "computed") throw new Error("unreachable");
-    // Decision stays needs_review (never verified) and the reason keeps the full all-miss chain.
+    // Decision stays needs_review (never verified). BUG #14 (QA hardening 2026-07-16): the raw
+    // "No rung resolved the code. fetchv2: ...; gpt: ..." chain used to leak straight into customer-
+    // facing reasonText - it is now sanitized to an honest, token-free string; the raw chain still
+    // survives in debug.ladderReasons (asserted separately in the BUG #14 describe block below).
     expect(outcome.payload.decision.status).not.toBe("verified");
-    expect(outcome.payload.reasonText).toMatch(/No rung resolved the code/);
+    expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+    expect(outcome.payload.reasonText).not.toMatch(/fetchv2|gpt-5\.5|goupc|upcitemdb/i);
     // The floor names the row: one result, confidence 0.3, needs review, empty sourceUrls.
     const floorResult = outcome.payload.results.find((r) => /product unconfirmed/.test(r.productName));
     expect(floorResult).toBeTruthy();
@@ -1145,7 +1149,12 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // "suggested" decode - free, honest, and never auto-counting beyond the existing suggestion gate.
   describe("RETAIL RUNG-0: retail corpus joins the free rung (incl. EAN-8) + paid-verified contradiction guard", () => {
     const EAN_8_CODE = "10000007"; // the live-proven salmon/beer regression code
-    const RETAIL_EAN_13 = "4006381333931"; // reused fixture: valid EAN-13 shape elsewhere in this file
+    // QA HARDENING FIX #5: this fixture used to be "4006381333931" (a valid EAN-13 SHAPE) - but that
+    // exact value is a classic GS1 textbook EXAMPLE barcode, now correctly rejected by the example/
+    // test-row firewall regardless of the (real-looking) name/brand attached to it in this fixture.
+    // Swapped to a genuinely ordinary EAN-13 (Nutella's real-world GTIN shape) so this test still
+    // exercises "a normal EAN-13 settles at rung 0" without colliding with the new blocklist.
+    const RETAIL_EAN_13 = "3017620422003"; // ordinary EAN-13 shape, not a GS1 example / not blocklisted
 
     function mockRetailHit(row: { productName: string; brand: string; category?: string }) {
       vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
@@ -1371,6 +1380,294 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
       expect(outcome.kind).toBe("computed");
       expect(after).toBe(before); // exactly unchanged - no charge on the free retail rung-0 path
+    });
+  });
+
+  // QA HARDENING FIX #5 (live-proven bug): scanning textbook GS1 EXAMPLE barcodes returned a CONFIDENT
+  // "Matched in the retail product database" for FAKE demo/test products ingested verbatim from the
+  // crowdsourced Open Food Facts dump - 4006381333931 -> "Test Shopidoo", 0012345670121 -> brand
+  // "Healthyholics". Wrong identity is a failure; Unidentified is acceptable. The retail rung-0 settle
+  // (~line 528) must reject an example/test row and fall through to an honest no-match, while a NORMAL
+  // retail row must still settle exactly as before (regression protection).
+  describe("QA fix #5: retail rung-0 rejects example/test rows (wrong-identity firewall)", () => {
+    const EXAMPLE_EAN_13 = "4006381333931"; // classic GS1 textbook example, live-proven "Test Shopidoo"
+    const HEALTHYHOLICS_GTIN = "0012345670121"; // documented Healthyholics example GTIN
+    const NORMAL_EAN_13 = "3017620422003"; // ordinary GTIN-shaped code, not on any blocklist
+
+    it("an example-barcode retail row (4006381333931 / Test Shopidoo) does NOT settle at rung 0 as a match", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Test Shopidoo",
+        brand: "",
+        category: "",
+        barcode: EXAMPLE_EAN_13,
+      });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(EXAMPLE_EAN_13));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // Never the fake identity, on ANY path (rung-0 settle or otherwise).
+      expect(outcome.payload.results.some((r) => r.productName === "Test Shopidoo")).toBe(false);
+      expect(outcome.payload.decision.reason).not.toMatch(/test shopidoo/i);
+      // TOP-LEVEL LAW: the code still appears + counts as Unidentified - never silently dropped.
+      expect(outcome.payload.decision.status).not.toBe("verified");
+    });
+
+    it("a Healthyholics example-GTIN retail row (0012345670121) does NOT settle at rung 0 as a match", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Multivitamin Gummies",
+        brand: "Healthyholics",
+        category: "Supplements",
+        barcode: HEALTHYHOLICS_GTIN,
+      });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(HEALTHYHOLICS_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // The poisoned retail-corpus row must never settle as the RETAIL match (this task's actual scope:
+      // isUsableProductName / rung-0 / retailKnowledgeIndex / build script). A SEPARATE mechanism
+      // (prefixFloorName, driven by a different generated GS1-prefix->brand catalog, out of scope for
+      // this fix) may still honestly label an unresolved scan "Healthyholics / product unconfirmed" -
+      // that is explicitly documented as a naming aid that is NEVER marked verified, i.e. exactly the
+      // acceptable "Unidentified" behavior the top-level law asks for. Assert the RETAIL claim never
+      // fires and the result is never confidently verified - not that the brand string never appears.
+      expect(outcome.payload.decision.reason).not.toMatch(/matched in the retail product database/i);
+      expect(outcome.payload.results.some((r) => r.confidence >= 0.8 && r.brand === "Healthyholics")).toBe(false);
+      expect(outcome.payload.decision.status).not.toBe("verified");
+    });
+
+    it("the rejected-example reason stays HONEST (never leaks the blocklist / 'test row' reasoning)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Test Shopidoo",
+        brand: "",
+        category: "",
+        barcode: EXAMPLE_EAN_13,
+      });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(EXAMPLE_EAN_13));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.reason).not.toMatch(/example|blocklist|test.?row|demo/i);
+    });
+
+    it("REGRESSION: a NORMAL retail row (not example/test) still settles at rung 0 exactly as before", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Organic Whole Milk 1 Gallon",
+        brand: "Some Dairy",
+        category: "Dairy",
+        barcode: NORMAL_EAN_13,
+      });
+
+      const outcome = await runDecodePipeline(makeReq(NORMAL_EAN_13));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.results[0]?.productName).toBe("Organic Whole Milk 1 Gallon");
+      expect(outcome.payload.decision.reason).toMatch(/retail product database/i);
+      expect(hitAnAiProvider()).toBe(false);
+    });
+  });
+
+  // QA HARDENING FIX #6 (live-proven, 2026-07-16, companion to fix #5 above): a GTIN-shaped code whose
+  // GS1 check digit FAILS is a likely scanner misread (src/services/upc/misread.ts). Both
+  // resolveExactBarcode (tire corpus) and the retail rung-0 peek key off zero-pad barcode VARIANTS with
+  // no check-digit awareness, so a bad-check-digit code can coincidentally string-match a seeded
+  // corpus/retail row and settle a CONFIDENT wrong identity even when the row itself is a perfectly
+  // normal, non-example product name (unlike fix #5, which targets a KNOWN example/test row by exact
+  // value or name regardless of check digit). Wrong identity is failure; unknown is acceptable - a
+  // misread code must fall through honestly to the rest of the pipeline, never settle rung-0.
+  describe("QA fix #6: corpus/retail rungs skip misread (bad-check-digit) GTINs", () => {
+    const MISREAD_GTIN = "012345678900"; // GTIN-shaped, GS1 check digit FAILS (live-proven root cause code)
+    const VALID_GTIN = "3017620422003"; // ordinary GTIN-shaped code, valid check digit, not on any blocklist
+
+    function makeMisreadCorpusHit(): CorpusDecodeResult {
+      return {
+        decision: {
+          status: "verified",
+          confidence: 0.97,
+          reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
+          evidenceStrength: "fetched_source",
+          exactCodeEvidenceVerifiedByApp: true,
+          crossCheck: { decision: "single_provider", confidence: 0.97, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+          corroborationPath: "corpus_exact_barcode",
+        },
+        results: [{ productName: "Definitely Real Tire 235/60R18", brand: "RealBrand", category: "Tire", specsShort: "235/60R18", confidence: 0.97, needsHumanReview: false, sourceUrls: [], verifiedFacts: [], primaryBarcode: MISREAD_GTIN } as unknown as CorpusDecodeResult["results"][number]],
+        evidences: [{ verified: true, strength: "fetched_source", matchedCode: MISREAD_GTIN, matchedSources: ["tire_knowledge_corpus"], reason: "Exact code found in the trusted tire knowledge base." }],
+        providerNames: ["tire-corpus"],
+        path: "corpus_exact_barcode",
+      };
+    }
+
+    it("a misread GTIN with a seeded tire-corpus hit does NOT settle at the corpus rung - falls through honestly", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      // The corpus WOULD have a confident hit on this exact code (simulating a coincidental zero-pad-
+      // variant collision) - the misread gate must prevent it from ever being consulted/settling.
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(makeMisreadCorpusHit());
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(MISREAD_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.results.some((r) => r.productName === "Definitely Real Tire 235/60R18")).toBe(false);
+      expect(outcome.payload.decision.reason).not.toMatch(/definitely real tire/i);
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      // resolveExactBarcode itself is never even called for a misread code (behavioral proof, not just
+      // an outcome check) - the gate skips the call entirely rather than calling it and discarding.
+      expect(resolveExactBarcode).not.toHaveBeenCalled();
+    });
+
+    it("a misread GTIN with a seeded retail-corpus hit does NOT settle at rung 0 - falls through honestly", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Definitely Real Grocery Item",
+        brand: "RealBrand",
+        category: "Grocery",
+        barcode: MISREAD_GTIN,
+      });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(MISREAD_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.results.some((r) => r.productName === "Definitely Real Grocery Item")).toBe(false);
+      expect(outcome.payload.decision.reason).not.toMatch(/matched in the retail product database/i);
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      // lookupRetailBarcodeAsync itself is never even called for a misread code at rung 0.
+      expect(lookupRetailBarcodeAsync).not.toHaveBeenCalled();
+    });
+
+    it("REGRESSION: a VALID GTIN with a seeded tire-corpus hit still settles verified exactly as before", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const validHit: CorpusDecodeResult = {
+        ...makeMisreadCorpusHit(),
+        results: [{ ...makeMisreadCorpusHit().results[0], productName: "Michelin Defender T+H 235/60R18", primaryBarcode: VALID_GTIN }] as unknown as CorpusDecodeResult["results"],
+        evidences: [{ verified: true, strength: "fetched_source", matchedCode: VALID_GTIN, matchedSources: ["tire_knowledge_corpus"], reason: "Exact code found in the trusted tire knowledge base." }],
+      };
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(validHit);
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("verified");
+      expect(outcome.payload.results[0]?.productName).toBe("Michelin Defender T+H 235/60R18");
+      expect(resolveExactBarcode).toHaveBeenCalledWith(VALID_GTIN);
+    });
+
+    it("REGRESSION: a VALID GTIN retail row still settles at rung 0 exactly as before (composes with fix #5)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+        productName: "Organic Whole Milk 1 Gallon",
+        brand: "Some Dairy",
+        category: "Dairy",
+        barcode: VALID_GTIN,
+      });
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.results[0]?.productName).toBe("Organic Whole Milk 1 Gallon");
+      expect(lookupRetailBarcodeAsync).toHaveBeenCalledWith(VALID_GTIN);
+    });
+
+    it("REGRESSION: an alpha_sku code (never GTIN-shaped) still reaches resolveExactPartNumber - misread gate never touches it", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const ALPHA_SKU = "t432119"; // never GTIN-shaped -> isLikelyMisreadGtin is always false for it
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(resolveExactPartNumber).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(ALPHA_SKU));
+
+      expect(resolveExactPartNumber).toHaveBeenCalledWith(ALPHA_SKU);
+    });
+  });
+
+  // BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): reasonText and decision.reason are
+  // CUSTOMER-facing (they flow to needsReviewQueue[].reason / scanFeed[].reason and render verbatim on
+  // the UI). They must never leak raw vendor/service/model names or internal skip-reason codes. Raw
+  // values are allowed ONLY inside debug.* (platform-only, never rendered to a customer).
+  describe("BUG #14: customer-facing reasonText/decision.reason never leak raw vendor/model names", () => {
+    const DENYLIST_RE = /upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|fetch v2|gpt[-_ ]?5\.5|gpt-5\.5-ladder|gpt_call_failed|gpt_aborted_at_cap|no_api_key|non_public_code_type|e2e_mode|budget_exceeded|prior_status_already_decided|\bladder\b|parallel:|tire-corpus|retail-corpus|learned-products/i;
+
+    it("all-miss ladder: customer-facing reasonText and decision.reason are clean and non-empty (debug.ladderReasons keeps the raw chain)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const outcome = await runDecodePipeline(makeReq("111000222333"));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.reasonText)).toBe(false);
+      expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
+      // debug.ladderReasons is platform-only and MUST still carry the raw per-rung chain for diagnosis.
+      const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+      expect(Array.isArray(reasons)).toBe(true);
+      expect((reasons ?? []).some((r) => r.rung === "fetchv2")).toBe(true);
+    }, 30000);
+
+    it("free-rung settle (UPCitemdb hit): the raw provider name in the rung's own reason never reaches customer-facing reasonText/decision.reason", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      stubFreeRungFetch({ upcHit: true });
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.providerNames).toContain("upcitemdb"); // provider name IS allowed as structured metadata
+      expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.reasonText)).toBe(false);
+      expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
+    });
+
+    it("Go-UPC prefix-conflict settle: the raw 'Go-UPC brand ... conflicts with prefix owner' reason is sanitized to an honest customer-facing string", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-go-upc-key";
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("go-upc.com/api")) {
+          return new Response(
+            JSON.stringify({ code: "OK", product: { name: "Some Unrelated Brand Widget", brand: "UnrelatedBrand", barcode: VALID_GTIN } }),
+            { status: 200 },
+          );
+        }
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // Prove this actually exercised the Go-UPC settle (not a coincidental pass via some other path).
+      expect(outcome.payload.providerNames).toContain("go-upc");
+      expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.reasonText)).toBe(false);
+      expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
     });
   });
 });

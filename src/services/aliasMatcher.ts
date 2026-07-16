@@ -25,6 +25,20 @@ function uniq(values: string[]): string[] {
   return out;
 }
 
+/** Uppercase fold for CASE-INSENSITIVE comparison only. Never used to mutate stored/displayed
+ *  values - callers still store/echo the original cleanCode/rawCode untouched. A case-only
+ *  difference (e.g. scanned "t432119" vs a stored alias "T432119") is the SAME identity. */
+function foldCase(v: string | undefined | null): string {
+  return (v ?? "").toUpperCase();
+}
+
+/** True when any candidate equals `field`, case-insensitively. */
+function candidatesInclude(candidates: string[], field: string | undefined): boolean {
+  if (!field) return false;
+  const folded = foldCase(field);
+  return candidates.some((c) => foldCase(c) === folded);
+}
+
 /** Reduce a tier's hits to a resolution: 0 -> null, 1 distinct product -> match, >1 -> conflict. */
 function pickTier(
   hits: Array<{ productId: string; matchedOn: string }>,
@@ -56,20 +70,25 @@ export function matchAlias(
   const scoped = aliases.filter((a) => a.businessId === businessId && a.approved === true);
   const candidates = uniq([cleaned.cleanCode, ...cleaned.normalizedCandidates]);
 
-  // Tier 1: exact raw or exact clean code.
+  // Tier 1: exact raw or exact clean code. Case-insensitive: a case-only difference (scanned
+  // "t432119" vs stored "T432119") is the SAME identity, not a lower tier and not a miss.
   const exact = scoped
-    .filter((a) => a.rawCodeExample === cleaned.rawCode || a.cleanCode === cleaned.cleanCode)
+    .filter(
+      (a) =>
+        foldCase(a.rawCodeExample) === foldCase(cleaned.rawCode) ||
+        foldCase(a.cleanCode) === foldCase(cleaned.cleanCode),
+    )
     .map((a) => ({ productId: a.productId, matchedOn: a.cleanCode || a.rawCodeExample }));
   const exactRes = pickTier(exact, "exact_alias");
   if (exactRes) return exactRes;
 
-  // Tier 2: any normalized candidate equals a stored alias value.
+  // Tier 2: any normalized candidate equals a stored alias value, case-insensitively.
   const norm = scoped
     .filter(
       (a) =>
-        candidates.includes(a.cleanCode) ||
-        candidates.includes(a.normalizedCode) ||
-        candidates.includes(a.rawCodeExample),
+        candidatesInclude(candidates, a.cleanCode) ||
+        candidatesInclude(candidates, a.normalizedCode) ||
+        candidatesInclude(candidates, a.rawCodeExample),
     )
     .map((a) => ({ productId: a.productId, matchedOn: a.cleanCode || a.normalizedCode }));
   return pickTier(norm, "normalized_alias");
@@ -85,7 +104,7 @@ export function matchProductByIdentifiers(
   // products can never be matched by identifier - they must be human-approved first.
   const scoped = products.filter((p) => p.businessId === businessId && p.verified === true);
   const candidates = uniq([cleaned.cleanCode, ...cleaned.normalizedCandidates]);
-  const hit = (field: string | undefined) => !!field && candidates.includes(field);
+  const hit = (field: string | undefined) => candidatesInclude(candidates, field);
 
   const tiers: Array<{ type: MatchType; pick: (p: Product) => string | undefined }> = [
     { type: "primary_barcode", pick: (p) => p.primaryBarcode },
@@ -104,9 +123,13 @@ export function matchProductByIdentifiers(
   }
 
   // Also check vendorCodes as a low-priority identifier match (labeled normalized_alias-ish).
+  // Case-insensitive, same rationale as the tiers above.
   const vendorHits = scoped
-    .filter((p) => p.vendorCodes?.some((v) => candidates.includes(v)))
-    .map((p) => ({ productId: p.id, matchedOn: p.vendorCodes.find((v) => candidates.includes(v)) as string }));
+    .filter((p) => p.vendorCodes?.some((v) => candidatesInclude(candidates, v)))
+    .map((p) => ({
+      productId: p.id,
+      matchedOn: p.vendorCodes.find((v) => candidatesInclude(candidates, v)) as string,
+    }));
   return pickTier(vendorHits, "normalized_alias");
 }
 

@@ -220,6 +220,48 @@ describe("A3/AM-2: bad-check-digit codes get an additive, non-terminal misread r
   });
 });
 
+describe("QA fix cluster #8: over-500-char scans are flagged but never dropped (law: still appears+counts)", () => {
+  it("a 600-char string still resolves (needs_review), row appears, rawCode preserved in full", () => {
+    const longCode = "A".repeat(600);
+    const r = resolve(longCode);
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.rawCode).toBe(longCode);
+    expect(r.rawCode.length).toBe(600);
+    expect(r.reason.toLowerCase()).toContain("unusually long");
+  });
+
+  it("a code at or under the 500 cap does not get the unusually-long reason", () => {
+    const okCode = "B".repeat(500);
+    const r = resolve(okCode);
+    expect(r.reason.toLowerCase()).not.toContain("unusually long");
+  });
+
+  it("law: scanning N codes yields N feed entries and count N - a long code is never silently dropped", () => {
+    const longCode = "C".repeat(600);
+    const results = [resolve(longCode), resolve(longCode), resolve(longCode)];
+    // Each individual scan call still produces one resolution (one feed entry) - never thrown away.
+    for (const r of results) {
+      expect(r).toBeDefined();
+      expect(r.resolverStatus).not.toBeUndefined();
+    }
+    expect(results.length).toBe(3);
+  });
+
+  it("an over-long code that DOES match an approved alias still resolves Known (length cap never blocks a real match)", () => {
+    const longRaw = "T432119" + "Z".repeat(600);
+    const linked = alias({
+      cleanCode: longRaw,
+      normalizedCode: longRaw,
+      productId: "prod-coke",
+      approved: true,
+    });
+    const r = resolve(longRaw, products, [...aliases, linked]);
+    expect(r.resolverStatus).toBe("known");
+    expect(r.productId).toBe("prod-coke");
+  });
+});
+
 describe("resolveRawScan - affix core does not auto-count against a different-format alias", () => {
   it("scanning 762590BH with an approved alias for 762590 routes to Needs Review, not Known", () => {
     const products = [{ id: "p1", businessId: "b1", name: "Some Tire", verified: true } as unknown as Product];

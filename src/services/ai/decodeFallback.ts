@@ -25,6 +25,48 @@ export const REASON_TEXT: Record<string, string> = {
   search_provider_unavailable: "Not in the databases, and open-web fallback is unavailable (no Firecrawl key).",
 };
 
+// BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): the T2 REASON_TEXT map above is honest
+// prose but was never the only source of customer-facing reason text - raw per-rung reason strings
+// (UpcItemDbProvider/OpenFoodFactsProvider/GoUpcProvider, Fetch V2, the GPT ladder rung, and the
+// all-miss join in pipeline.ts) flow straight into reasonText/decision.reason and were rendered
+// verbatim on the scan feed / Needs Review row, leaking vendor/service/model names ("upcitemdb",
+// "openfoodfacts", "goupc"/"Go-UPC", "fetchv2"/"Fetch V2", "gpt-5.5") and internal skip-reason codes
+// ("gpt_call_failed", "no_api_key", etc.) to every role. sanitizeCustomerReason is the single choke
+// point every customer-facing reason must pass through before it leaves the server (and again
+// client-side as defense in depth) - debug.* is untouched and keeps the raw values for diagnosis.
+const CUSTOMER_REASON_DENYLIST =
+  /upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|fetch v2|gpt[-_ ]?5\.5|gpt-5\.5-ladder|gpt_call_failed|gpt_aborted_at_cap|no_api_key|non_public_code_type|e2e_mode|budget_exceeded|prior_status_already_decided|\bladder\b|parallel:|tire-corpus|retail-corpus|learned-products/i;
+
+/** Honest, token-free fallback shown whenever the raw reason is empty or leaks an internal name. */
+const HONEST_DEFAULT_REASON = "Could not confirm this item automatically. Review and confirm the details.";
+
+/** Context-specific honest fallbacks, reused from the existing scanStore honest-reason copy so a
+ *  sanitized reason still tells the customer roughly WHY (cap / offline / missing keys) when that
+ *  context is known, instead of always collapsing to the fully generic default. */
+const HONEST_CONTEXT_REASON: Record<string, string> = {
+  cap_blocked: "Daily AI lookup cap reached. Routed to Needs Review.",
+  offline: "Offline. Saved locally; AI was not called.",
+  missing_keys: "No API keys configured. Set them server-side, then retry live decode.",
+};
+
+/**
+ * Sanitize a decode reason string before it ever reaches a customer-facing field (reasonText,
+ * decision.reason, needsReviewQueue[].reason, scanFeed[].reason). LAW: never returns empty. Honest,
+ * hand-written prose (the REASON_TEXT map, the scanStore honest-context strings) contains none of the
+ * denylisted tokens, so it always passes through unchanged. A raw rung/provider/model name, an
+ * internal skip-reason code, or an empty string is replaced with an honest fixed fallback - never the
+ * raw value, never "".
+ */
+export function sanitizeCustomerReason(raw: string, ctx?: { status?: string }): string {
+  if (!raw || !raw.trim()) {
+    return (ctx?.status && HONEST_CONTEXT_REASON[ctx.status]) || HONEST_DEFAULT_REASON;
+  }
+  if (CUSTOMER_REASON_DENYLIST.test(raw)) {
+    return (ctx?.status && HONEST_CONTEXT_REASON[ctx.status]) || HONEST_DEFAULT_REASON;
+  }
+  return raw;
+}
+
 /** Map the final decode state to a SPECIFIC reason code (never the old generic message). */
 export function decodeReasonCode(a: {
   hasProduct: boolean;

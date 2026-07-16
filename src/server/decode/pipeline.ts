@@ -2,16 +2,17 @@ import "server-only";
 import type { AiLookupResult, EvidenceResult, DecodeDecision } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
 import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
-import { decideDecode, isUsableProductName } from "@/services/ai/decode";
+import { decideDecode, isUsableProductName, isExampleOrTestRow } from "@/services/ai/decode";
 import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
 import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { prefixFloorName } from "@/services/catalog/prefixFloor";
-import { decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
+import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefix, candidateKnownPrefixes } from "@/services/catalog/prefixIndex";
 import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
@@ -478,6 +479,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // recomputes ONCE after deploy (old rows are orphaned, never wrong - upsert re-fills canonically).
   const cacheKey = canonicalGtin(code) ?? code;
 
+  // QA HARDENING FIX #6 (live-proven, 2026-07-16): hoisted to the OUTER function scope (not a nested
+  // block) so every free-rung peek that keys off zero-pad barcode VARIANTS with no check-digit
+  // awareness - the tire-corpus peek AND both retail-corpus call sites (rung-0 above, and its twin
+  // inside computeDecode used for the Plan D consensus vote / contradiction guard) - shares the exact
+  // same gate. A GTIN-shaped code whose GS1 check digit FAILS is a likely scanner misread
+  // (src/services/upc/misread.ts, the same helper the client-side auto-decode gate uses); it can
+  // coincidentally string-match a seeded corpus/retail row and settle a CONFIDENT wrong identity - the
+  // live-proven root cause of a fabricated "Healthyholics"-style match on an invalid UPC. Never a
+  // misread for a non-GTIN shape (isLikelyMisreadGtin short-circuits false), so this never touches an
+  // alpha SKU / vendor label / PN lookup. A bad code falls through honestly to the rest of the pipeline
+  // (still appears + counts as Unidentified); a VALID GTIN is completely unaffected.
+  const misread = isLikelyMisreadGtin(code);
+
   // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST (Task 6: moved to the TOP of the pipeline, ahead of
   // the L2 persisted-decode peek below). An EXACT trusted-corpus barcode (or, for SKU-shaped codes, an
   // exact part number) resolves with NO AI call and NO page fetch - a FREE win. It must run BEFORE the
@@ -508,8 +522,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // digits - is excluded from the PN lookup regardless of what codeType happens to label it.
     // alpha_sku/vendor_label/numeric_sku/messy all still reach the PN lookup when NOT GTIN-shaped.
     const gtinShaped = isGtinShaped(code);
+    // `misread` (QA HARDENING FIX #6) is computed once at the top of runDecodePipeline - see there.
     const skuShaped = !gtinShaped && codeType !== "empty";
-    const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
+    const corpus = (!misread ? await resolveExactBarcode(code) : null) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
     if (corpus) {
       appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });
       return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false };
@@ -522,10 +537,25 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // with a GARBAGE name (isUsableProductName rejects it - the same junk firewall every other rung
     // reuses) does NOT settle: it falls through honestly to the rest of the pipeline instead of ever
     // reporting garbage as a product.
-    if (gtinShaped) {
+    //
+    // QA HARDENING FIX #5 (live-proven, 2026-07-16): the crowdsourced retail corpus also ingested
+    // literal GS1 TEXTBOOK EXAMPLE barcodes and demo/test rows verbatim (4006381333931 -> "Test
+    // Shopidoo", 0012345670121 -> brand "Healthyholics", etc.) - isUsableProductName never checked for
+    // these (its regexes target scrape-failure artifacts, not example barcodes or test brand names), so
+    // they surfaced as a CONFIDENT "Matched in the retail product database" wrong identity. Reject them
+    // here too, falling through to the rest of the pipeline exactly like a garbage name does - the code
+    // still appears + counts as Unidentified if nothing else resolves it; it just never reports a fake
+    // product with confidence.
+    //
+    // QA HARDENING FIX #6 (live-proven, 2026-07-16): compose with the misread gate above - a
+    // bad-check-digit GTIN must never settle a retail-corpus identity either, for the identical
+    // zero-pad-variant-collision reason. Both firewalls are independent and additive (fix #5 rejects a
+    // KNOWN example/test row by exact value or name; fix #6 rejects ANY row when the scanned code's own
+    // check digit is invalid, regardless of what the row's name/brand is).
+    if (gtinShaped && !misread) {
       const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
       const retailRow = await lookupRetailBarcodeAsync(code);
-      if (retailRow && isUsableProductName(retailRow.productName)) {
+      if (retailRow && isUsableProductName(retailRow.productName) && !isExampleOrTestRow(retailRow.barcode, retailRow.productName, retailRow.brand)) {
         appendDecodeOutcome({ settledBy: "retail-corpus", status: "suggested", reasons: [], sourceTier: null });
         return { kind: "computed", payload: retailPayload(retailRow, code, rawCodeSanitized, cleanCodeSanitized), cached: false };
       }
@@ -709,10 +739,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // means rung-0 already tried the exact same lookup and came back empty (or found a garbage name),
     // so this is never a second network round-trip for a code that already settled at rung 0 - it only
     // runs when computeDecode is reached at all, i.e. rung 0 already missed.
-    if (!e2eMode() && isGtinShaped(code)) {
+    // QA HARDENING FIX #6: also gated on `!misread` (hoisted outer-scope const, see top of
+    // runDecodePipeline) - this is the retail rung-0 peek's OWN twin (this file's comment above already
+    // called it out as "the SAME gate"), so it must never feed a misread code's coincidental row into
+    // the Plan D consensus vote or the paid-verified contradiction guard either.
+    if (!e2eMode() && isGtinShaped(code) && !misread) {
       const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
-      retailHit = await lookupRetailBarcodeAsync(code);
+      const rawRetailHit = await lookupRetailBarcodeAsync(code);
       retailLookupStatus = getLastRetailLookupStatus();
+      // QA HARDENING FIX #5: reject an example/test row (textbook GS1 example barcode, or a
+      // demo/placeholder name/brand) at THIS single source, so neither the Plan D `retailDb` consensus
+      // vote below nor the paid-verified contradiction guard further down ever sees a fake identity
+      // ("Test Shopidoo", brand "Healthyholics", etc.) - it is honestly treated as a retail-corpus miss.
+      retailHit = rawRetailHit && !isExampleOrTestRow(rawRetailHit.barcode, rawRetailHit.productName, rawRetailHit.brand) ? rawRetailHit : null;
       // The 4M-row Open Food Facts retail DB (Turso) is a FREE structured source. Its data is mostly right
       // but has some WRONG rows (glycine UPC 0737870166917 -> "Coconut oil"), so it is NO LONGER trusted
       // ALONE (that produced wrong Verified identities - the old Fix 5). Instead it is passed into the
@@ -1171,7 +1210,17 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // ignores it (isUsableProductName gate, ~line 528) - otherwise a poisoned retail row with junk text
     // but a plausible-but-wrong brand can structurally "disagree" via crossCheck and wrongly downgrade a
     // legitimate paid verify to needs_review/conflict (recall-only risk, but the pilot's core is tires).
-    if (win && win.decision.status === "verified" && retailHit && isUsableProductName(retailHit.productName)) {
+    //
+    // QA HARDENING FIX #5: a retailHit that is itself an example/test row (isExampleOrTestRow) must be
+    // ignored the same way - a fake "Test Shopidoo"/"Healthyholics" example row must never be allowed to
+    // downgrade a legitimate paid verify into a false conflict.
+    if (
+      win &&
+      win.decision.status === "verified" &&
+      retailHit &&
+      isUsableProductName(retailHit.productName) &&
+      !isExampleOrTestRow(code, retailHit.productName, retailHit.brand)
+    ) {
       const retailAsResult: AiLookupResult = { ...emptyResult(), productName: retailHit.productName, brand: retailHit.brand };
       const paidResult = win.results[0];
       const cc = paidResult ? crossCheck(paidResult, retailAsResult) : null;
@@ -1199,15 +1248,21 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // unfindable code is unchanged; a Plan D stash always records its own attempt in providerStatuses so
     // debug shows both what Plan D found AND what the ladder did with it.
     if (win) {
+      // BUG #14 (QA hardening 2026-07-16): every settled rung's reason (upcitemdb/openfoodfacts/go-upc/
+      // fetchv2/gpt) is raw, internal, provider-shaped text - sanitize BOTH the top-level reasonText and
+      // decision.reason (the two fields the client actually renders) before they leave the server. The
+      // raw per-rung chain still survives untouched in debug.ladderReasons for platform diagnosis.
+      const cleanReasonText = sanitizeCustomerReason(win.reasonText, { status: win.decision.status });
+      const cleanDecision = { ...win.decision, reason: sanitizeCustomerReason(win.decision.reason, { status: win.decision.status }) };
       return {
         mode: "decode" as const,
         providerNames: planDStash ? [...planDStash.providerNames, ...win.providerNames] : win.providerNames,
         results: win.results,
         evidences: win.evidences,
         providerStatuses: planDProviderStatusForStash ? [planDProviderStatusForStash, ...win.providerStatuses] : win.providerStatuses,
-        decision: win.decision,
+        decision: cleanDecision,
         reasonCode: win.reasonCode,
-        reasonText: win.reasonText,
+        reasonText: cleanReasonText,
         timedOut: false,
         debug: {
           providersAttempted: planDStash ? [...planDStash.providerNames, ...win.providerNames] : win.providerNames,
@@ -1231,13 +1286,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // the ladder's per-rung miss reasons into the reason text/providerStatuses/debug so nothing is
     // silent. Otherwise (non-public code, or Plan D itself found nothing to stash) emit the plain
     // needs_review whose reason lists every rung that came back empty (owner: never silent).
+    // BUG #14 (QA hardening 2026-07-16): allMissReason names every rung by its internal name and joins
+    // each rung's raw miss reason (provider names, internal skip-reason codes like "gpt_call_failed").
+    // It stays RAW here for debug.ladderReasons (below) and for building the merged customer text, but
+    // the value that actually reaches reasonText/decision.reason is always the SANITIZED one.
     const allMissReason = `No rung resolved the code. ${ladderRun.reasons.map((r) => `${r.rung}: ${r.reason}`).join("; ")}`;
+    const cleanAllMissReason = sanitizeCustomerReason(allMissReason);
     if (planDStash) {
       const mergedReasonText = `${planDStash.reasonText || planDStash.decision.reason || "Unresolved"}. ${allMissReason}`;
+      const cleanMergedReasonText = sanitizeCustomerReason(mergedReasonText, { status: planDStash.decision.status });
       return {
         ...planDStash,
-        reasonText: mergedReasonText,
-        decision: { ...planDStash.decision, reason: mergedReasonText },
+        reasonText: cleanMergedReasonText,
+        decision: { ...planDStash.decision, reason: cleanMergedReasonText },
         providerStatuses: [...planDStash.providerStatuses, ...ladderProviderStatuses],
         timedOut: false,
         debug: {
@@ -1269,9 +1330,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       results: nrResults,
       evidences: [],
       providerStatuses: ladderProviderStatuses,
-      decision: { ...nrDecision, reason: allMissReason },
+      decision: { ...nrDecision, reason: cleanAllMissReason },
       reasonCode: "no_result",
-      reasonText: allMissReason,
+      reasonText: cleanAllMissReason,
       timedOut: false,
       debug: {
         providersAttempted: ladderRun.reasons.map((r) => r.rung),
