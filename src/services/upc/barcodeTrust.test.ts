@@ -94,6 +94,10 @@ describe("pnDerived annotation is ADVISORY and never changes the verdict (AM-11)
     const ean13 = "0" + upc;
     expect(pnDerivedAnnotation(ean13, "5546800V")).toBe("pn_derived");
   });
+  it("padding zeros in the canonical form never match a PN zero-run (EAN-8 false-positive guard)", () => {
+    expect(pnDerivedAnnotation("40123455", "PN-000005")).toBe("clean");
+    expect(pnDerivedAnnotation("40123455", "00000")).toBe("clean");
+  });
 });
 
 describe("verdicts with ground truth (AM-3: re-checkable artifacts only)", () => {
