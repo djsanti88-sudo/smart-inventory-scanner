@@ -429,7 +429,14 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // CONSEQUENCE (accepted, Task 6): corpus hits no longer enter the L1 memory cache via withDecodeCache;
   // corpus lookup is ~0-150ms, which is acceptable.
   if (!e2eMode()) {
-    const skuShaped = codeType === "alpha_sku" || codeType === "vendor_label";
+    // RC3 (pilot PN recall fix): try the corpus PN lookup for every shape EXCEPT a GTIN barcode shape
+    // (upc_a/ean_13/gtin_14 - those are barcodes and belong to resolveExactBarcode above, never a part
+    // number). Shop part numbers are frequently ALL-NUMERIC (numeric_sku, e.g. "3415030603") or a messy
+    // vendor string ("275-30-20 ARROYO"), and previously never got a PN lookup attempt at all because
+    // the gate only fired for alpha_sku/vendor_label. This stays the same cheap local rung - no AI, no
+    // page fetch either way.
+    const gtinShaped = codeType === "upc_a" || codeType === "ean_13" || codeType === "gtin_14";
+    const skuShaped = !gtinShaped && codeType !== "empty";
     const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
     if (corpus) {
       appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });
