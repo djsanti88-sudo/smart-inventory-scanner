@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
+import { describe, it, expect, afterEach } from "vitest";
+import { buildPersistedScanState, persistAccessLevel, type PersistableScanState } from "@/stores/scanPersist";
+import { effectiveClientAccessLevel } from "@/services/security/roleAccess";
 
 // Sec-4 contract: a customer ("business") browser must NOT persist the reusable code database (aliases /
 // catalog / shop overrides / OTHER products' codes / provider+decode traces). P1 (2026-06-22): it MUST
@@ -114,5 +115,43 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     expect(rehydrated.every((r) => r.status === "open")).toBe(true);
     // Each rehydrated review keeps the cleanCode the approved alias is keyed on (approve+count works).
     expect(rehydrated.map((r) => r.cleanCode)).toEqual(["code-a", "code-b", "code-c"]);
+  });
+});
+
+// QA fix 2026-07-15 regression: the QA Task 6 local-runtime override (data-survival on the owner's own
+// no-login device) MUST live ONLY on the persist seam. It was originally folded into
+// effectiveClientAccessLevel - the SHARED UI role hint - which silently promoted every local UI render to
+// "platform", defeating the customer role-gating + Model/name customer-sanitization guarantee
+// (FinalCountTable role gating + Model-cell strip tests regressed from that). These two tests pin the
+// decoupling so it cannot regress again: persist survives, UI stays customer-gated - in the SAME (unit /
+// no cloud backend, no auth-bypass) runtime the FinalCountTable tests use.
+describe("QA Task 6 local-runtime override is persist-only, never the UI role hint (no regression)", () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_FIREBASE_BACKEND;
+    delete process.env.NEXT_PUBLIC_E2E_AUTH_BYPASS;
+    delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER;
+  });
+
+  it("local runtime (no cloud backend): PERSIST resolves platform so owner data survives reload", () => {
+    // no NEXT_PUBLIC_FIREBASE_BACKEND, no auth-bypass -> local owner device
+    expect(persistAccessLevel(null)).toBe("platform");
+    const p = buildPersistedScanState(makeState(), persistAccessLevel(null));
+    expect(p).toHaveProperty("aliases"); // owner's alias DB survives
+    expect(JSON.stringify(p)).toContain("0123456789012"); // product barcode survives
+  });
+
+  it("local runtime (no cloud backend): UI ROLE stays business for a non-owner identity (customer gated)", () => {
+    // Same runtime as the FinalCountTable customer tests: no platform-owner flag set.
+    expect(effectiveClientAccessLevel({ uid: null })).toBe("business");
+    expect(effectiveClientAccessLevel({ uid: "cust-1" })).toBe("business");
+    // The explicit E2E platform-owner flag still forces platform (mock Playwright specs).
+    process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
+    expect(effectiveClientAccessLevel({ uid: null })).toBe("platform");
+  });
+
+  it("real cloud backend: a signed-in customer PERSISTS at business (stripped), UI role business too", () => {
+    process.env.NEXT_PUBLIC_FIREBASE_BACKEND = "1";
+    expect(persistAccessLevel("cust-1")).toBe("business");
+    expect(effectiveClientAccessLevel({ uid: "cust-1" })).toBe("business");
   });
 });
