@@ -78,6 +78,35 @@ parent directory matches hundreds of unrelated test files (false green).
 NOTE: the blanket auto-add policy changed to confidence-gated auto-verify; suggested-without-exact-evidence now goes
 to Needs Review (updated autoDecode.test.ts, scanStore.test.ts, catalogFirst.test.ts, auto-decode.spec.ts).
 
+## 2026-07-15 QA fix round - gate results (worktree `C:/tmp/wt-qafix`, HEAD `2a1c9dc`)
+
+Full detail: `QA_FIX_REPORT_2026-07-15.md`. Summary:
+
+- `npx vitest run`: **2294 passed / 0 failed / 32 skipped** (231 test files passed + 8 skipped =
+  239). Confirms the prior `FinalCountTable.test.tsx` regression (introduced by Task 6, `3849402`,
+  fixed at `2a1c9dc`) is fully resolved - no failures anywhere in the suite.
+- `npx tsc --noEmit`: clean.
+- `npm run lint`: 40 errors / 38 warnings reported, ESLint exits 0. All findings verified against
+  `git diff --stat 74fabc8 2a1c9dc` (the 34 files this round touched) - **none** of the erroring
+  files were touched by this round; all are pre-existing debt in `scripts/*` one-off analysis
+  files and a few pre-existing `any`-typed test files. The `csvImport.ts` no-control-regex disable
+  warning is confirmed pre-existing.
+- Targeted Playwright (review queue + CSV import + scan), run with `IS_E2E=1` via the project's
+  mock-only `playwright.config.ts` (no live provider calls possible): `csv-import.spec.ts`,
+  `scan.spec.ts`, `scanner-focus.spec.ts`, `resolver.spec.ts`, `suggested-decode.spec.ts` (3
+  tests), `suggested-label.spec.ts`, `firewall.spec.ts`, `batch-approve.spec.ts`, plus
+  `auto-count-tire.spec.ts` for extra decode/review coverage - **11/11 passed**, 0 flaky, 0 rerun
+  needed.
+- New regression coverage added this round: `NeedsReviewTable.suggestLink.test.tsx`,
+  `csvImportReload.store.test.ts`, `gtinCanonical.store.test.ts`, `nearMatchSuggestion.store.test.ts`,
+  `corpusGarbage.test.ts`, `retailReadGuard.test.ts`, `parallelResolve.test.ts`, `textDistance.test.ts`,
+  `retailIngestRules.test.mjs`, plus 3 new tests in `scanPersist.test.ts` pinning the Task 6
+  regression fix seam (local-mode override applies to `persistAccessLevel` only, never to
+  `effectiveClientAccessLevel`).
+- Known limitation: Issue 4 (Save-count-snapshot) was NOT re-verified in this pass - the plan
+  defers it to a fresh preview build (owner judged the original finding was against a stale
+  preview); it already passes all 3 test layers on HEAD.
+
 ## Hotfix coverage (verified-decode fast path)
 - evidenceScoring: app-verified strong evidence bypasses the Tier-3 single-provider cap (>=80) and auto-verifies;
   fast path still respects conflict; exact-evidence-without-usable-name returns the explicit reason (evidenceScoring.test.ts)

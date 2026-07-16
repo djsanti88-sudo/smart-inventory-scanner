@@ -104,6 +104,38 @@ whole-branch review: READY). Full detail: `docs/superpowers/reports/2026-07-12-f
 - No keys in client code. No secrets committed. Automated tests never call live providers.
 - Wrong product identity is FAILURE; Unknown is ACCEPTABLE.
 
+## 2026-07-15 (later) - QA Fix Round: 8 fixes + 1 regression fix, gates GREEN
+
+Worktree `C:/tmp/wt-qafix`, branch `fix/qa-report-2026-07-15` (based on `74fabc8`), HEAD
+`2a1c9dc`. Full detail: `QA_FIX_REPORT_2026-07-15.md` (this worktree).
+
+- Root causes came from an 18-agent investigation (9 investigators + 9 adversarial verifiers),
+  all findings verified against code before any fix was written.
+- 8 TDD fixes landed, one commit each: dead "Approve suggestion" link button (Task 1, `01ed46e`);
+  raw rung/provider name leak in customer-facing scan reasons (Task 2, `70a6d7c`); CSV panel
+  dropped brand/category/specs/location + no unmapped-header warning (Task 3, `3e97748`); GTIN-14
+  leading-zero canonicalization (Task 4, `86c9c3d`); retail corpus poisoning + an EvidenceVerifier
+  bypass on the structured-DB consensus path, fixed locally without syncing Turso (Task 5,
+  `f959d3e`); open-access local-mode persistence so aliases/barcodes survive reload (Task 6,
+  `3849402`); CSV re-import now refreshes existing product fields with honest copy instead of a
+  silent conflict-drop or a fake quantity merge (Task 7, `339ed09`); review-only near-match SKU
+  suggestion, distance<=1, single-candidate only, never auto-counts (Task 8, `61e9cd6`).
+- **Regression caught and fixed**: Task 6 (`3849402`) folded its local-runtime override into
+  `effectiveClientAccessLevel` (the shared UI role hint), which leaked platform-only data (raw
+  alias DB, un-cleaned Model/name strings) into the customer UI and broke
+  `FinalCountTable.test.tsx` (2 tests). Fixed at `2a1c9dc` by scoping the override to the persist
+  seam only (`persistAccessLevel`); UI role gating and data-survival-on-reload are now decoupled.
+  3 new regression tests pin the seam.
+- **Gates, all green**: `npx vitest run` 2294 passed / 0 failed / 32 skipped (231 files passed + 8
+  skipped); `npx tsc --noEmit` clean; `npm run lint` 40 pre-existing errors / 38 pre-existing
+  warnings in files this round never touched (exit 0, non-blocking); targeted Playwright (review
+  queue + CSV import + scan + auto-count-tire) 11/11 passed, 0 flake, 0 rerun needed.
+- **Known limitations**: Issue 4 (Save-count-snapshot) intentionally NOT re-verified here - the
+  plan defers that to a fresh preview build, not a local chase (passes all 3 test layers on HEAD
+  already). Turso/production corpus data was not synced (Task 5 fix is local-DB-only by design).
+  Only a targeted Playwright subset ran, not the full E2E suite.
+- NO push, NO deploy. Owner reviews before merge/push.
+
 ## 2026-07-15 - Recall + Hardening Round SHIPPED (17 commits, f583ddd..9226f3d)
 Plan: docs/superpowers/plans/2026-07-15-recall-hardening-round.md (owner-ratified, 3-angle reviewed).
 Shipped: Z4+G2+G1 GPT rung upgrades; A3 misread gate; A4 outcome ledger; A6 conservative tire steering;
