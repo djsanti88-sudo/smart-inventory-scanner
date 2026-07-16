@@ -39,6 +39,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { guardRow } from "./lib/merge.mjs";
 import { jsonlLinesToRows, toCorpusRow } from "./lib/applyTransform.mjs";
+import { sameBrandFamily } from "./lib/brandFamilies.mjs";
 import { readTursoCredsFromEnvFile, upsertNewTiresToTurso } from "./lib/tursoUpsert.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -166,13 +167,15 @@ function canonicalUidFor(row) {
  * Mutates nothing passed in; returns a NEW barcodeIndex plus the same added/skipped shape
  * lib/merge.mjs's mergeRows() returns, so callers can print one consistent report either way.
  */
-function mergeIntoBarcodeIndex(barcodeIndex, harvestedRows, prefixMap) {
+function mergeIntoBarcodeIndex(barcodeIndex, harvestedRows, prefixMap, sameBrandFamily) {
   const nextIndex = { ...barcodeIndex };
   const skipped = [];
   let added = 0;
 
   for (const tireRow of harvestedRows) {
-    const guard = guardRow(tireRow, prefixMap);
+    // Forward the family firewall so a same-family brand is not a prefix conflict here either
+    // (mirrors jsonlLinesToRows / applyBackfill; keeps the recovery consistent on the apply path).
+    const guard = guardRow(tireRow, prefixMap, sameBrandFamily);
     if (!guard.ok) {
       skipped.push({ row: tireRow, reason: guard.reason });
       continue;
@@ -318,15 +321,19 @@ async function main() {
   console.log(`[dt-harvest apply] Reading ${files.length} harvest file(s):`);
   for (const f of files) console.log(`  ${f}`);
 
+  // Load the prefix map BEFORE the transform so jsonlLinesToRows can RE-EVALUATE stale
+  // prefix_conflict-stamped rows live against the current prefix map + brand-family firewall
+  // (same recovery seam as backfill-part-numbers.mjs; see brandFamilies.mjs).
+  const prefixMap = loadPrefixMap();
+
   const lines = readAllLines(files);
-  const harvestedRows = jsonlLinesToRows(lines);
+  const harvestedRows = jsonlLinesToRows(lines, { prefixMap, sameBrandFamily });
   console.log(`[dt-harvest apply] ${harvestedRows.length} guard-ok row(s) with a gtin after batch dedupe.`);
 
-  const prefixMap = loadPrefixMap();
   const corpus = loadCorpus();
   const beforeCount = Object.keys(corpus.barcodeIndex).length;
 
-  const { barcodeIndex: mergedIndex, added, skipped } = mergeIntoBarcodeIndex(corpus.barcodeIndex, harvestedRows, prefixMap);
+  const { barcodeIndex: mergedIndex, added, skipped } = mergeIntoBarcodeIndex(corpus.barcodeIndex, harvestedRows, prefixMap, sameBrandFamily);
   printReport(added, skipped);
 
   if (args.dryRun) {

@@ -36,14 +36,19 @@ function dedupeByGtinLastWins(harvestRows) {
  * @param {{ barcodeIndex: Record<string, object>, partNumberIndex: Record<string, string> }} corpus
  * @param {Array<object>} harvestRows - raw harvested TireRow-shaped objects (gtin, brand, model,
  *   size, loadIndex, speedRating, partNumber, ...).
- * @param {{ prefixMap: Record<string, string | string[]> }} options
+ * @param {{ prefixMap: Record<string, string | string[]>, sameBrandFamily?: (a: string, b: string) => boolean }} options
+ *   `sameBrandFamily` (optional): pure `(a,b)=>boolean` same-corporate-family check. When supplied,
+ *   it is forwarded to guardRow so a row whose brand is in the SAME family as the registered prefix
+ *   brand is NOT a prefix conflict (see merge.mjs/brandFamilies.mjs). This is what lets an
+ *   evidence-backed family recover a previously false-flagged prefix_conflict row into a PN fill.
+ *   When absent (default), behavior is unchanged: any different brand is a conflict / guard-rejected.
  * @returns {{ corpus: object, report: {
  *   filled: number, agreed: number,
  *   conflicts: Array<{ barcode: string, corpusPn: string, dtPn: string, brand: string, model: string, size: string }>,
  *   guardRejected: number, junkKeysDropped: number, junkFillsNotIndexed: number, noCorpusRow: number,
  * } }}
  */
-export function applyBackfill(corpus, harvestRows, { prefixMap } = {}) {
+export function applyBackfill(corpus, harvestRows, { prefixMap, sameBrandFamily } = {}) {
   const nextBarcodeIndex = { ...(corpus.barcodeIndex || {}) };
   const nextPartNumberIndex = { ...(corpus.partNumberIndex || {}) };
 
@@ -69,7 +74,7 @@ export function applyBackfill(corpus, harvestRows, { prefixMap } = {}) {
   const deduped = dedupeByGtinLastWins(harvestRows);
 
   for (const harvestRow of deduped) {
-    const guard = guardRow(harvestRow, prefixMap);
+    const guard = guardRow(harvestRow, prefixMap, sameBrandFamily);
     if (!guard.ok) {
       report.guardRejected += 1;
       continue;

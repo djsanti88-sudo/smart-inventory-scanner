@@ -16,6 +16,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyBackfill } from "./lib/backfill.mjs";
 import { jsonlLinesToRows } from "./lib/applyTransform.mjs";
+import { sameBrandFamily } from "./lib/brandFamilies.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = process.cwd();
@@ -97,14 +98,18 @@ async function main() {
   console.log(`[backfill-part-numbers] Reading ${files.length} harvest file(s):`);
   for (const f of files) console.log(`  ${f}`);
 
+  // Load the prefix map BEFORE the transform so jsonlLinesToRows can RE-EVALUATE stale
+  // prefix_conflict-stamped rows live against the current prefix map + brand-family firewall,
+  // recovering rows that were only rejected under old rules (see brandFamilies.mjs).
+  const prefixMap = loadPrefixMap();
+
   const lines = readAllLines(files);
-  const harvestRows = jsonlLinesToRows(lines);
+  const harvestRows = jsonlLinesToRows(lines, { prefixMap, sameBrandFamily });
   console.log(`[backfill-part-numbers] ${harvestRows.length} guard-ok row(s) with a gtin after batch dedupe.`);
 
-  const prefixMap = loadPrefixMap();
   const corpus = loadCorpus(args.corpusPath);
 
-  const { corpus: nextCorpus, report } = applyBackfill(corpus, harvestRows, { prefixMap });
+  const { corpus: nextCorpus, report } = applyBackfill(corpus, harvestRows, { prefixMap, sameBrandFamily });
   printReport(report);
 
   if (args.dryRun) {

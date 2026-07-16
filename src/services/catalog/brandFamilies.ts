@@ -50,6 +50,27 @@ const FAMILIES: readonly string[][] = [
   ["sumitomo", "falken", "ohtsu"],
   // Hankook owns Laufenn (its value line).
   ["hankook", "laufenn"],
+  // EVIDENCE CLASS: distributor-shared-prefix (NOT common ownership). Tireco Inc. owns Milestar
+  // (its own house brand, Nankang-made) and holds the exclusive US master-distribution agreement
+  // for Westlake (a Zhongce Rubber/China brand it does not manufacture). Both ship under Tireco's
+  // shared distributor GTIN block (prefix 7588230); Westlake also has its own separate prefix
+  // (7413170), confirming 7588230 is the shared block, not Westlake's sole identity. Recovers 65
+  // false-conflict harvest rows. Sources: tireco.com/our-brands/{westlake,milestar}/, Modern Tire
+  // Dealer (2012-10-17, "Tireco will sell Westlake tires in the U.S.").
+  ["milestar", "westlake"],
+  // EVIDENCE CLASS: common-ownership (same as Bridgestone/Firestone/Dayton). Shandong Linglong Tire
+  // Co owns both Green Max (its own in-house line) and Atlas (acquired / relaunched by Linglong
+  // Americas Inc. in 2009, produced by Shandong Linglong Tyre for North America). Recovers 1
+  // false-conflict harvest row (prefix 6959956).
+  ["green max", "atlas"],
+  // EVIDENCE CLASS: distributor-shared-prefix (NOT common ownership; same class as Carlstar+Carlisle
+  // above). Taskmaster Components is the US distributor: Provider (+ Provider HD) is its own house
+  // brand; Diamondback is manufactured by Triangle Tire USA and exclusively distributed by Taskmaster
+  // Components (confirmed independently by Modern Tire Dealer and Tire Review trade press). All three
+  // legitimately share Taskmaster's distributor GTIN block (prefix 8164560); grouping them is a
+  // shared-prefix statement, not a claim that Taskmaster IS a manufactured tire line. Recovers 17
+  // false-conflict harvest rows (15 Taskmaster + 2 Provider).
+  ["taskmaster", "provider", "diamondback"],
 ];
 
 /** Same brand-normalization as the firewall so lookups line up (lowercase, strip punctuation + noise). */
