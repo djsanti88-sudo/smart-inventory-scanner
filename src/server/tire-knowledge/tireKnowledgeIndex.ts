@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getKnowledgeDb } from "@/server/knowledgeDb";
 import { getTursoClient as getRetailTursoClient, type TursoClient } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import { lookupCandidates } from "@/services/upc/gtin";
+import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 
 // SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
 // The `server-only` import makes this a BUILD ERROR if imported from a client component.
@@ -89,7 +90,13 @@ function getStmtPartNumber() {
   const db = getKnowledgeDb();
   if (!db) return null;
   try {
-    _stmtPartNumber = db.prepare("SELECT * FROM tires WHERE manufacturer_part_number = ? LIMIT 1");
+    // RC2 (pilot PN recall): normalized-column compare, mirroring getStmtAllPartNumber (commit
+    // 19bf8b0). The caller always passes an already-normPartKey'd key (spaces + hyphens stripped,
+    // uppercased), but the stored column is RAW - without this a hyphenated/spaced PN silently
+    // misses on SQLite while Turso/JSON (both normalized) hit.
+    _stmtPartNumber = db.prepare(
+      "SELECT * FROM tires WHERE UPPER(REPLACE(REPLACE(manufacturer_part_number, ' ', ''), '-', '')) = ? LIMIT 1",
+    );
     return _stmtPartNumber;
   } catch { return null; }
 }
@@ -234,18 +241,56 @@ export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeR
   return null;
 }
 
-/** EXACT trusted manufacturer-part-number lookup. Same SQLite -> Turso -> JSON order as barcode lookup. */
+/**
+ * EXACT trusted manufacturer-part-number lookup. Same SQLite -> Turso -> JSON order as barcode
+ * lookup, but tries an ORDERED candidate key list per backend before moving to the next backend:
+ * [normPartKey(raw), ...affix-core variants that differ from it]. Shop part numbers carry
+ * distributor affixes the corpus never stores (KH2265992 vs corpus "2265992"; F-28074576 vs
+ * "28074576"). tirePartNumberVariants() (src/services/catalog/tirePartNumber.ts) already knows how
+ * to strip a leading/trailing distributor affix down to the numeric core - it is reused here so the
+ * scan-path lookup benefits from the exact same primitive the reconcile matcher already trusts.
+ *
+ * SAFETY: candidate keys are tried IN ORDER and the function returns on the FIRST hit, per backend.
+ * Because each individual tried key maps to at most one canonical product by construction (this is
+ * an EXACT keyed lookup, never a fan-out join), there is no scenario where two DIFFERENT candidate
+ * keys could both hit and disagree without the earlier (higher-trust, unaffixed) key already having
+ * returned first. If the affix-core key were ambiguous across products, that risk lives in the
+ * CALLER's confidence tier (TireKnowledgeProvider.resolveExactPartNumber grades a core-key hit lower
+ * than a raw-key hit) and in the reconcile matcher's separate multi-hit ambiguity check
+ * (lookupAllByPartNumber / matchExpectedRow) - this single-row EXACT lookup intentionally stays
+ * simple and stops at the first backend+key that answers.
+ */
 export async function lookupByExactPartNumber(partNumber: string): Promise<TireKnowledgeRow | null> {
-  const key = normPartKey(partNumber);
-  if (!key) return null;
+  const primary = normPartKey(partNumber);
+  if (!primary) return null;
+  // tirePartNumberVariants operates on the raw string (it does its own normalization internally);
+  // its first element is the same normPartKey-equivalent base, so de-dupe against `primary` and
+  // keep only variants that genuinely differ (the affix-core key).
+  const variants = tirePartNumberVariants(partNumber).filter((v) => v && v !== primary);
+  const candidates = [primary, ...variants];
+
   const stmt = getStmtPartNumber();
-  if (stmt) return (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
-  const tursoRow = await lookupPartNumberTurso(key);
-  if (tursoRow) return tursoRow;
+  if (stmt) {
+    for (const key of candidates) {
+      const row = (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
+      if (row) return row;
+    }
+    return null;
+  }
+
+  for (const key of candidates) {
+    const tursoRow = await lookupPartNumberTurso(key);
+    if (tursoRow) return tursoRow;
+  }
+
   const idx = getJsonIndex();
   if (!idx) return null;
-  const uid = idx.partNumberIndex[key];
-  return uid && _uidToRow ? (_uidToRow.get(uid) ?? null) : null;
+  for (const key of candidates) {
+    const uid = idx.partNumberIndex[key];
+    const row = uid && _uidToRow ? (_uidToRow.get(uid) ?? null) : null;
+    if (row) return row;
+  }
+  return null;
 }
 
 /** Turso: ALL rows for a normalized part number via a single join. Fail-safe: errors return []. */
