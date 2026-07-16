@@ -1165,7 +1165,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // unchallenged: it downgrades to "conflict" with an honest, customer-safe reason naming the
     // disagreement. An AGREEING retail row (or no retail row at all) changes nothing - this guard only
     // ever downgrades, never upgrades or blocks an otherwise-clean verify.
-    if (win && win.decision.status === "verified" && retailHit) {
+    //
+    // REVIEW FINDING FIX: a retailHit with a GARBAGE productName (barcode-site search-results title,
+    // scrape error title, run-on junk, etc.) must be ignored here exactly like the rung-0 settle above
+    // ignores it (isUsableProductName gate, ~line 528) - otherwise a poisoned retail row with junk text
+    // but a plausible-but-wrong brand can structurally "disagree" via crossCheck and wrongly downgrade a
+    // legitimate paid verify to needs_review/conflict (recall-only risk, but the pilot's core is tires).
+    if (win && win.decision.status === "verified" && retailHit && isUsableProductName(retailHit.productName)) {
       const retailAsResult: AiLookupResult = { ...emptyResult(), productName: retailHit.productName, brand: retailHit.brand };
       const paidResult = win.results[0];
       const cc = paidResult ? crossCheck(paidResult, retailAsResult) : null;
