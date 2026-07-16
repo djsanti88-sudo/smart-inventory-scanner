@@ -246,3 +246,93 @@ describe("A3/AM-2: bad-check-digit codes get an additive, non-terminal misread r
     expect(r.reason).not.toContain("Barcode check digit fails");
   });
 });
+
+describe("QA Task 8: review-only near-match SKU suggestion (distance<=1, single candidate)", () => {
+  // NOTE: the seed catalog already contains a real product (prod-nokian) with primarySku
+  // "T432119" - the plan's own worked example. These tests exercise it directly instead of
+  // re-seeding a colliding SKU (which would create a genuine two-candidate case and correctly
+  // suppress the suggestion). Isolation cases below use a distinct base code family (Q88xxxx)
+  // that does not collide with any seed primarySku/vendorCode/alias.
+
+  it("T432118 vs the seeded T432119 (prod-nokian) -> nearMatchSuggestion attached AND resolverStatus stays needs_review (never auto-counts)", () => {
+    const r = resolve("T432118");
+
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.matchType).toBe("unknown");
+    expect(r.nearMatchSuggestion).toBeDefined();
+    expect(r.nearMatchSuggestion!.productId).toBe("prod-nokian");
+    expect(r.nearMatchSuggestion!.distance).toBe(1);
+    expect(r.nearMatchSuggestion!.matchedOn).toBe("T432119");
+  });
+
+  it("matches against an approved alias cleanCode too (not just primarySku)", () => {
+    const seeded = product({ id: "prod-alias-match", name: "Aliased Widget", primarySku: "", verified: true });
+    const linked = alias({ cleanCode: "Q882119", normalizedCode: "Q882119", productId: "prod-alias-match", approved: true });
+    const r = resolve("Q882118", [...products, seeded], [...aliases, linked]);
+
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.nearMatchSuggestion).toBeDefined();
+    expect(r.nearMatchSuggestion!.productId).toBe("prod-alias-match");
+  });
+
+  it("matches against a product's vendorCodes too", () => {
+    const seeded = product({ id: "prod-vendor-match", name: "Vendor Widget", vendorCodes: ["Q882119"], verified: true });
+    const r = resolve("Q882118", [...products, seeded], aliases);
+
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.nearMatchSuggestion).toBeDefined();
+    expect(r.nearMatchSuggestion!.productId).toBe("prod-vendor-match");
+  });
+
+  it("TWO candidates within distance <= 1 -> NO suggestion (never guess between them)", () => {
+    const seededA = product({ id: "prod-a", name: "Widget A", primarySku: "Q882119", verified: true });
+    const seededB = product({ id: "prod-b", name: "Widget B", primarySku: "Q882117", verified: true });
+    const r = resolve("Q882118", [...products, seededA, seededB], aliases);
+
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.nearMatchSuggestion).toBeUndefined();
+  });
+
+  it("non-alpha_sku (pure numeric) codes are unaffected - never get a near-match suggestion", () => {
+    // A purely numeric unknown code near a numeric primarySku must not get this treatment; that
+    // class (GTIN canonicalization) is handled by Task 4, not here.
+    const seeded = product({ id: "prod-numeric", name: "Numeric Widget", primarySku: "882119", verified: true });
+    const r = resolve("882118", [...products, seeded], aliases);
+
+    expect(r.codeType).not.toBe("alpha_sku");
+    expect(r.nearMatchSuggestion).toBeUndefined();
+  });
+
+  it("no suggestion when distance is 2 or more (too far to guess)", () => {
+    const seeded = product({ id: "prod-far", name: "Far Widget", primarySku: "Q889999", verified: true });
+    const r = resolve("Q882118", [...products, seeded], aliases);
+
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.nearMatchSuggestion).toBeUndefined();
+  });
+
+  it("no suggestion for a short alpha_sku code (len < 5) even with a distance-1 candidate", () => {
+    const seeded = product({ id: "prod-short", name: "Short Widget", primarySku: "AB1D", verified: true });
+    const r = resolve("AB12", [...products, seeded], aliases); // len 4, distance 1 from AB1D
+    expect(r.codeType).toBe("alpha_sku");
+
+    expect(r.nearMatchSuggestion).toBeUndefined();
+  });
+
+  it("an UNVERIFIED product's primarySku never produces a suggestion (trust gate applies to suggestions too)", () => {
+    const unverified = product({ id: "prod-unverified", name: "Unverified Widget", primarySku: "Q882119", verified: false });
+    const r = resolve("Q882118", [...products, unverified], aliases);
+
+    expect(r.nearMatchSuggestion).toBeUndefined();
+  });
+
+  it("exact match distance 0 never surfaces as a near-match suggestion (that is a real Known match, handled elsewhere)", () => {
+    const seeded = product({ id: "prod-exact", name: "Exact Widget", primarySku: "Q882118", verified: true });
+    const r = resolve("Q882118", [...products, seeded], aliases);
+    // primarySku match resolves Known via the deterministic matcher tier, not via near-match.
+    expect(r.resolverStatus).toBe("known");
+    expect(r.nearMatchSuggestion).toBeUndefined();
+  });
+});

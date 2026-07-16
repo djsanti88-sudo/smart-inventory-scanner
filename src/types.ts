@@ -422,6 +422,18 @@ export interface ResolverResult {
   confidence: number; // 1 for a verified known match; 0 otherwise (deterministic only)
   reason: string;
   conflictProductIds?: string[];
+  // QA Task 8 (owner-approved 2026-07-15, review-only near-match SKU suggestion): set ONLY when
+  // resolverStatus is "needs_review" for an alpha_sku code (len >= 5) that is within Levenshtein
+  // distance <= 1 of EXACTLY ONE verified product's primarySku/vendorCodes or approved alias
+  // cleanCode. Two or more candidates within the bound means NO suggestion (never guess between
+  // them). This NEVER upgrades resolverStatus, NEVER auto-counts, and NEVER auto-creates an alias -
+  // it is purely a "Did you mean <X>?" hint for the Needs Review UI, applied only through the
+  // existing human-approved link_existing path.
+  nearMatchSuggestion?: {
+    productId: string;
+    matchedOn: string; // the specific code string it nearly matched (sku/vendorCode/alias)
+    distance: number;
+  };
 }
 
 /** Structured AI lookup result (also the JSON contract the AI provider must return). */
