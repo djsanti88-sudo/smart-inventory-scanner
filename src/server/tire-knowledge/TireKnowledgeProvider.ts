@@ -25,6 +25,33 @@ export interface CorpusDecodeResult {
 // these two tiers), so a low-trust row can never produce a corpus auto-count.
 const CONF: Record<string, number> = { verified_2src: 0.97, verified_1src_strong: 0.92 };
 
+// BUG FIX (PN-resolved suggestion's barcode never carried through, owner-reported live on preview):
+// the generator's REAL output convention for barcode_type is "upc"/"ean"/"gtin14" - 78,201 of 78,223
+// rows use it. Only 22 legacy rows use "upc_a"/"ean_13"/"gtin_14". The switch below previously only
+// recognized the legacy convention, so the row's barcode silently landed in NO result field for
+// almost every corpus row. Normalize both conventions here (one seam) and default any other
+// GTIN-shaped barcode_type value into the gtin field so a future generator convention still carries
+// through instead of silently dropping again.
+function barcodeField(row: TireKnowledgeRow): { upc: string; ean: string; gtin: string } {
+  const barcode = row.barcode || "";
+  if (!barcode) return { upc: "", ean: "", gtin: "" };
+  switch (row.barcode_type) {
+    case "upc":
+    case "upc_a":
+      return { upc: barcode, ean: "", gtin: "" };
+    case "ean":
+    case "ean_13":
+      return { upc: "", ean: barcode, gtin: "" };
+    case "gtin14":
+    case "gtin_14":
+      return { upc: "", ean: "", gtin: barcode };
+    default:
+      // Unrecognized/future barcode_type value: still carry the barcode (into gtin, the most
+      // general identifier field) rather than dropping it silently.
+      return { upc: "", ean: "", gtin: barcode };
+  }
+}
+
 function toResult(row: TireKnowledgeRow): AiLookupResult {
   const specs = [row.size, [row.load_index, row.speed_rating].filter(Boolean).join("")].filter(Boolean).join(" ").trim();
   // DISPLAY-ONLY prettify: the corpus stores model slugs ("wrangler_workhorse_at") and lowercase
@@ -32,6 +59,7 @@ function toResult(row: TireKnowledgeRow): AiLookupResult {
   const brand = prettifyBrand(row.brand);
   const model = prettifyProductName(row.model);
   const name = [brand, model, specs].filter(Boolean).join(" ").trim();
+  const { upc, ean, gtin } = barcodeField(row);
   return {
     ...emptyResult(),
     productName: name,
@@ -40,10 +68,12 @@ function toResult(row: TireKnowledgeRow): AiLookupResult {
     specsShort: specs,
     specsFull: row.raw_size_text || specs,
     primarySku: row.manufacturer_part_number || "",
-    primaryBarcode: row.barcode,
-    upc: row.barcode_type === "upc_a" ? row.barcode : "",
-    ean: row.barcode_type === "ean_13" ? row.barcode : "",
-    gtin: row.barcode_type === "gtin_14" ? row.barcode : "",
+    // ALWAYS carry the corpus row's barcode into primaryBarcode when present, regardless of which
+    // barcode_type convention the row uses - this is the field the client actually surfaces.
+    primaryBarcode: row.barcode || "",
+    upc,
+    ean,
+    gtin,
     confidence: CONF[row.confidence] ?? 0.92,
     // NOT a customer-facing source URL: the corpus carries no external source URLs into the runtime result,
     // so a customer decode response can never leak the global corpus's sources.
