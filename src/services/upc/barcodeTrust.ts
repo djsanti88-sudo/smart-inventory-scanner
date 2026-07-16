@@ -10,7 +10,7 @@
 // (6959655468007 = 695965 + last-6-of-PN + check). "Payload embeds the PN" is a legitimate industry
 // scheme AND the common fabrication pattern - so pnDerived is an ADVISORY annotation that never
 // changes a verdict in either direction. Evidence distinguishes real from phantom; structure cannot.
-import { isGtinShaped, isValidCheckDigit, canonicalGtin } from "./gtin";
+import { isGtinShaped, isValidCheckDigit, canonicalGtin, expandUpcE } from "./gtin";
 import type { EvidenceStrength } from "../../types";
 
 export type BarcodeVerdict = "rejected" | "suggested" | "verified";
@@ -106,10 +106,21 @@ const STRONG_EVIDENCE: readonly EvidenceStrength[] = ["grounding_chunk", "fetche
 export function gradeBarcode(input: BarcodeGradeInput): BarcodeGrade {
   const raw = (input.barcode ?? "").trim();
   const gtinShaped = isGtinShaped(raw);
-  const checkDigitValid = isValidCheckDigit(raw);
   const placeholder = isPlaceholderBarcode(raw);
   const canon = canonicalGtin(raw);
   const pnDerived = pnDerivedAnnotation(raw, input.partNumber);
+
+  // AM-check-digit / UPC-E (audit finding I2): an 8-digit code whose RAW check digit fails is
+  // not necessarily junk - it may be a zero-suppressed UPC-E whose check digit only validates
+  // after expansion (gtin.ts's expandUpcE / lookupCandidates already document and rely on this
+  // exact convention for lookup). Try expansion ONLY when the raw 8-digit check fails; a valid
+  // EAN-8 stays EAN-8 (never overridden), matching lookupCandidates' order.
+  let checkDigitValid = isValidCheckDigit(raw);
+  let upcEExpanded = false;
+  if (gtinShaped && !checkDigitValid && /^\d{8}$/.test(raw) && expandUpcE(raw) !== null) {
+    checkDigitValid = true;
+    upcEExpanded = true;
+  }
 
   const base = { checkDigitValid, gtinShaped, placeholder, pnDerived, canonicalGtin: canon };
 
@@ -145,6 +156,8 @@ export function gradeBarcode(input: BarcodeGradeInput): BarcodeGrade {
   return {
     ...base,
     verdict: "suggested",
-    reason: "Well-formed but unverified; counts only after a physical scan or app-verified evidence",
+    reason: upcEExpanded
+      ? "Well-formed UPC-E (zero-suppressed, expands to a valid check digit); counts only after a physical scan or app-verified evidence"
+      : "Well-formed but unverified; counts only after a physical scan or app-verified evidence",
   };
 }

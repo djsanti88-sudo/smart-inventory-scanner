@@ -83,4 +83,52 @@ describe("resolveUnknown gates identity barcode fields (AM-4.2)", () => {
     expect(upgraded.upc).toBe("6959655468007");
     expect(store.getState().products.filter((p) => p.aliases.includes("PN-TG-3")).length).toBe(1);
   });
+
+  it("law at N=10 (audit finding I1): scanning the same resolved code 10 times counts exactly 10, one product, one alias", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().processScan("PN-TG-N10");
+    const r = store.getState().needsReviewQueue.find(
+      (rr) => rr.cleanCode === "PN-TG-N10" && rr.status === "open",
+    )!.id;
+
+    // Resolve with a rejected gtin in the payload (same pattern as the other tests): the
+    // resolution itself is scan #1 (processScan already counted it via the provisional row,
+    // and resolveUnknown upgrades that same row in place - see the provisional-upgrade test above).
+    store.getState().resolveUnknown(r, "create_new", {
+      applyToCount: true,
+      origin: "human",
+      newProduct: {
+        name: "Law N10 Tire",
+        brand: "Blackhawk",
+        gtin: "8848111201762", // WRONG check digit - must be blanked, must never block counting
+        upc: "6959655468007",
+      },
+    });
+
+    const productAfterResolve = store.getState().products.find((p) => p.name === "Law N10 Tire")!;
+    expect(productAfterResolve).toBeTruthy();
+    expect(
+      store.getState().finalCounts.find((c) => c.productId === productAfterResolve.id)?.quantity,
+    ).toBe(1);
+
+    // Scan the now-resolved (aliased) code 9 more times -> deterministic match, no more review.
+    for (let i = 0; i < 9; i++) {
+      store.getState().processScan("PN-TG-N10");
+    }
+
+    const finalProducts = store.getState().products.filter((p) => p.aliases.includes("PN-TG-N10"));
+    expect(finalProducts).toHaveLength(1);
+    const product = finalProducts[0];
+    expect(product.gtin).toBe(""); // still blanked - the gate holds at N>1 too
+    expect(product.upc).toBe("6959655468007");
+
+    const count = store.getState().finalCounts.find((c) => c.productId === product.id);
+    expect(count?.quantity).toBe(10);
+
+    const aliasesForCode = store
+      .getState()
+      .products.flatMap((p) => p.aliases)
+      .filter((a) => a === "PN-TG-N10");
+    expect(aliasesForCode).toHaveLength(1); // exactly one alias for this code, never duplicated
+  });
 });

@@ -79,4 +79,13 @@ describe("CSV import trust gate (the csvImport back door, AM-4.1)", () => {
     expect(out.products[0].upc).toBe("6959655468007");
     expect(out.conflicts.some((c) => c.reason.startsWith("barcode rejected:"))).toBe(true);
   });
+
+  it("a row with an empty gtin and a valid upc produces zero barcode-rejected conflicts (audit finding M2)", () => {
+    const out = buildProductImport({
+      ...base,
+      idFactory: idFactoryFrom(),
+      rows: [{ name: "X", gtin: "", upc: "6959655468007" }],
+    });
+    expect(out.conflicts.filter((c) => c.reason.startsWith("barcode rejected:"))).toHaveLength(0);
+  });
 });
