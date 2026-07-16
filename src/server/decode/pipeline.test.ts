@@ -957,4 +957,125 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(vi.mocked(upsertLearnedProduct)).not.toHaveBeenCalled();
     });
   });
+
+  // RC3 (pilot PN recall fix): the corpus part-number lookup used to only run for codeType
+  // alpha_sku|vendor_label. Shop part numbers are frequently ALL-NUMERIC (numeric_sku, e.g.
+  // "3415030603") or a messy vendor string ("275-30-20 ARROYO") and never got a PN lookup attempt at
+  // all. This gate must now ALSO try resolveExactPartNumber for numeric_sku and messy shapes, while
+  // NEVER trying it for a GTIN shape (upc_a/ean_13/gtin_14) - those are barcodes, not part numbers,
+  // and resolveExactBarcode (not resolveExactPartNumber) is the correct rung for them.
+  describe("RC3: PN-lookup gate reaches numeric_sku and messy shapes, never GTIN shapes", () => {
+    it("a numeric_sku code reaches resolveExactPartNumber (gate-reaches-lookup, not corpus hit)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const NUMERIC_SKU_CODE = "3415030603"; // 10 digits: not 12/13/14, so detectCodeType -> numeric_sku
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(NUMERIC_SKU_CODE));
+
+      expect(vi.mocked(resolveExactPartNumber)).toHaveBeenCalledWith(NUMERIC_SKU_CODE);
+    });
+
+    it("a messy vendor-string code reaches resolveExactPartNumber", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const MESSY_CODE = "275-30-20 ARROYO"; // has a space -> detectCodeType -> messy
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(MESSY_CODE));
+
+      expect(vi.mocked(resolveExactPartNumber)).toHaveBeenCalledWith(MESSY_CODE);
+    });
+
+    it("an alpha_sku code still reaches resolveExactPartNumber (no regression on the existing gate)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const ALPHA_SKU_CODE = "KH2265992";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(ALPHA_SKU_CODE));
+
+      expect(vi.mocked(resolveExactPartNumber)).toHaveBeenCalledWith(ALPHA_SKU_CODE);
+    });
+
+    it("a vendor_label code still reaches resolveExactPartNumber (no regression on the existing gate)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const VENDOR_LABEL_CODE = "X001234567"; // matches VENDOR_LABEL shape
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(VENDOR_LABEL_CODE));
+
+      expect(vi.mocked(resolveExactPartNumber)).toHaveBeenCalledWith(VENDOR_LABEL_CODE);
+    });
+
+    it("a upc_a GTIN-shaped code NEVER reaches resolveExactPartNumber", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(VALID_GTIN)); // 12/13/14-digit fixture already used elsewhere in this file
+
+      expect(vi.mocked(resolveExactPartNumber)).not.toHaveBeenCalled();
+    });
+
+    it("an ean_13 GTIN-shaped code NEVER reaches resolveExactPartNumber", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const EAN_13_CODE = "4006381333931";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(EAN_13_CODE));
+
+      expect(vi.mocked(resolveExactPartNumber)).not.toHaveBeenCalled();
+    });
+
+    it("a gtin_14 GTIN-shaped code NEVER reaches resolveExactPartNumber", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const GTIN_14_CODE = "10036381333930";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(GTIN_14_CODE));
+
+      expect(vi.mocked(resolveExactPartNumber)).not.toHaveBeenCalled();
+    });
+
+    it("a numeric_sku PN suggestion from the corpus is honored end-to-end (not just gate-reached)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const NUMERIC_SKU_CODE = "3415030603";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      const pnHit: CorpusDecodeResult = {
+        decision: {
+          status: "suggested",
+          confidence: 0.85,
+          reason: "Matched by part number in the tire knowledge base. Confirm before counting (part numbers are not unique like barcodes).",
+          evidenceStrength: "fetched_source",
+          exactCodeEvidenceVerifiedByApp: false,
+          crossCheck: { decision: "single_provider", confidence: 0.85, reason: "Trusted corpus exact part number.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+        },
+        results: [{ productName: "Some Tire 265/70R17", brand: "Some", category: "Tire", specsShort: "265/70R17", confidence: 0.85, needsHumanReview: false, sourceUrls: [], verifiedFacts: [], primarySku: NUMERIC_SKU_CODE } as unknown as CorpusDecodeResult["results"][number]],
+        evidences: [{ verified: true, strength: "fetched_source", matchedCode: NUMERIC_SKU_CODE, matchedSources: ["tire_knowledge_corpus"], reason: "Exact code found in the trusted tire knowledge base." }],
+        providerNames: ["tire-corpus"],
+        path: "corpus_exact_part_number",
+      };
+      vi.mocked(resolveExactPartNumber).mockResolvedValueOnce(pnHit);
+
+      const outcome = await runDecodePipeline(makeReq(NUMERIC_SKU_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      expect(outcome.payload.providerNames).toContain("tire-corpus");
+      expect(hitAnAiProvider()).toBe(false);
+    });
+  });
 });
