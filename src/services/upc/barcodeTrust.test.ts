@@ -1,5 +1,7 @@
 // src/services/upc/barcodeTrust.test.ts
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   gradeBarcode,
   isPlaceholderBarcode,
@@ -194,5 +196,25 @@ describe("the 16-phantom fixture: inert without evidence (AM-11.6)", () => {
       expect(g.pnDerived).toBe("pn_derived");
       expect(g.checkDigitValid).toBe(true);
     }
+  });
+});
+
+describe("placeholder blocklist drift guard (.mjs mirror)", () => {
+  // scripts/dt-harvest/lib/placeholderBarcodes.mjs is a hand-maintained mirror of this file's
+  // PLACEHOLDER_BARCODES (plain node cannot import this TS module into the harvest pipeline - see
+  // brandFamilies.mjs for the established pattern). This test keeps the two lists byte-for-byte
+  // identical so a future edit to one without the other fails loudly instead of silently drifting.
+  it("the .mjs mirror contains exactly the same list", () => {
+    const mjs = readFileSync(
+      join(__dirname, "../../../scripts/dt-harvest/lib/placeholderBarcodes.mjs"),
+      "utf8",
+    );
+    for (const code of PLACEHOLDER_BARCODES) {
+      expect(mjs).toContain(`"${code}"`);
+    }
+    // and no extras: count the quoted 8-14 digit literals in the mirror's list block
+    const listBlock = mjs.slice(mjs.indexOf("PLACEHOLDER_BARCODES"), mjs.indexOf("]"));
+    const literals = listBlock.match(/"\d{8,14}"/g) ?? [];
+    expect(literals.length).toBe(PLACEHOLDER_BARCODES.length);
   });
 });

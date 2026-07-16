@@ -80,6 +80,13 @@ describe("guardRow", () => {
     const result = guardRow(tireRow({ brand: "  FALKEN  " }), prefixMap);
     expect(result).toEqual({ ok: true });
   });
+
+  it("rejects an all-zeros GTIN as a placeholder barcode, not a valid check digit (AM-11.4)", () => {
+    // "0000000000000" PASSES the GS1 mod-10 check digit (sum 0, check 0) - the placeholder
+    // blocklist is the only thing that stops this junk value from entering the corpus.
+    const result = guardRow(tireRow({ gtin: "0000000000000" }), {});
+    expect(result).toEqual({ ok: false, reason: "placeholder_barcode" });
+  });
 });
 
 describe("mergeRows", () => {
