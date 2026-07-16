@@ -1048,6 +1048,39 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(vi.mocked(resolveExactPartNumber)).not.toHaveBeenCalled();
     });
 
+    // REVIEW FINDING (Important, EAN-8 hole): detectCodeType has no ean_8 bucket, so an 8-digit code
+    // falls through the DIGITS_ONLY length checks straight to "numeric_sku" - the SAME codeType string
+    // as a genuine numeric shop part number. The old gate (`codeType === "upc_a" || "ean_13" ||
+    // "gtin_14"`) therefore let a real EAN-8 BARCODE through to resolveExactPartNumber, where it could
+    // coincidentally match an unrelated 7-8 digit tire part number and produce a wrong-product
+    // suggestion on a real barcode. isGtinShaped(code) (src/services/upc/gtin.ts) already treats
+    // `^\d{8}$` as GTIN-shaped for exactly this reason; the gate must ask isGtinShaped, not the
+    // codeType label, so EVERY GTIN-shaped code (8/12/13/14 digits) is excluded regardless of what
+    // detectCodeType happens to call it.
+    it("an 8-digit EAN-8-shaped code NEVER reaches resolveExactPartNumber (EAN-8 hole, review finding)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const EAN_8_CODE = "40054061"; // 8 digits: detectCodeType mislabels this "numeric_sku"
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(EAN_8_CODE));
+
+      expect(vi.mocked(resolveExactPartNumber)).not.toHaveBeenCalled();
+    });
+
+    it("a genuine 10-digit numeric_sku code STILL reaches resolveExactPartNumber (regression: not GTIN-shaped)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const NUMERIC_SKU_CODE_10 = "3415030603"; // 10 digits: not 8/12/13/14, so not GTIN-shaped
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      stubFreeRungFetch({ upcHit: false });
+
+      await runDecodePipeline(makeReq(NUMERIC_SKU_CODE_10));
+
+      expect(vi.mocked(resolveExactPartNumber)).toHaveBeenCalledWith(NUMERIC_SKU_CODE_10);
+    });
+
     it("a numeric_sku PN suggestion from the corpus is honored end-to-end (not just gate-reached)", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       const NUMERIC_SKU_CODE = "3415030603";

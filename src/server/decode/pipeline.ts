@@ -39,7 +39,7 @@ import { brocadeLookup } from "@/services/fetchV2/sources/brocade";
 import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
 import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult } from "@/server/upc/ladder";
-import { canonicalGtin } from "@/services/upc/gtin";
+import { canonicalGtin, isGtinShaped } from "@/services/upc/gtin";
 import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
 import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, type LearnedProductRow } from "@/server/learnedProducts";
@@ -435,7 +435,17 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // vendor string ("275-30-20 ARROYO"), and previously never got a PN lookup attempt at all because
     // the gate only fired for alpha_sku/vendor_label. This stays the same cheap local rung - no AI, no
     // page fetch either way.
-    const gtinShaped = codeType === "upc_a" || codeType === "ean_13" || codeType === "gtin_14";
+    //
+    // REVIEW FIX (Important, EAN-8 hole): the gate USED TO check codeType string labels directly
+    // ("upc_a" | "ean_13" | "gtin_14"), but detectCodeType has no ean_8 bucket - an 8-digit EAN-8
+    // barcode falls through to "numeric_sku", the SAME label a genuine numeric shop part number gets.
+    // That let a real EAN-8 that missed the barcode corpus reach resolveExactPartNumber and
+    // coincidentally match an unrelated 7-8 digit tire part number: a wrong-product suggestion on a
+    // real barcode. Gate on isGtinShaped(code) instead (already treats ^\d{8}$ and ^\d{12,14}$ as
+    // barcode-shaped, see src/services/upc/gtin.ts) so EVERY GTIN-shaped code - 8, 12, 13, or 14
+    // digits - is excluded from the PN lookup regardless of what codeType happens to label it.
+    // alpha_sku/vendor_label/numeric_sku/messy all still reach the PN lookup when NOT GTIN-shaped.
+    const gtinShaped = isGtinShaped(code);
     const skuShaped = !gtinShaped && codeType !== "empty";
     const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
     if (corpus) {
