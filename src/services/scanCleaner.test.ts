@@ -37,6 +37,41 @@ describe("buildNormalizedCandidates", () => {
   });
 });
 
+describe("buildNormalizedCandidates - AIM symbology prefix strip (QA fix cluster #3)", () => {
+  it("promotes the AIM-prefix-stripped form to the front for ]C1", () => {
+    const out = buildNormalizedCandidates("]C1T432119");
+    expect(out[0]).toBe("T432119");
+    expect(out).toContain("]C1T432119");
+  });
+
+  it("strips other common AIM symbology ids: ]C0 ]E0 ]A0 ]I0 ]Q3 ]d2", () => {
+    for (const prefix of ["]C0", "]E0", "]A0", "]I0", "]Q3", "]d2"]) {
+      const out = buildNormalizedCandidates(`${prefix}T432119`);
+      expect(out[0]).toBe("T432119");
+    }
+  });
+
+  it("never replaces the original candidate, only adds the stripped form", () => {
+    const out = buildNormalizedCandidates("]C1T432119");
+    expect(out).toContain("]C1T432119");
+    expect(out).toContain("T432119");
+  });
+
+  it("cleanScanCode preserves rawCode exactly for an AIM-prefixed scan", () => {
+    const r = cleanScanCode("]C1T432119");
+    expect(r.rawCode).toBe("]C1T432119");
+    expect(r.cleanCode).toBe("]C1T432119");
+    expect(r.normalizedCandidates[0]).toBe("T432119");
+  });
+
+  it("does not strip when the bracket is not followed by a valid AIM prefix shape (letter+alnum)", () => {
+    // ']' followed by a symbol (not letter+alnum) is not a recognized AIM prefix; left alone.
+    const out = buildNormalizedCandidates("]-T432119");
+    expect(out[0]).toBe("]-T432119");
+    expect(out).not.toContain("T432119");
+  });
+});
+
 describe("buildNormalizedCandidates - affix core stays OUT of the auto-count path (owner correction 1)", () => {
   it("does NOT emit a bare affix-stripped core as a deterministic candidate", () => {
     // 762590BH must not silently become 762590: a generic core is discovery-only, not auto-count.

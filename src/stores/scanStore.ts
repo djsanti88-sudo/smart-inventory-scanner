@@ -46,6 +46,7 @@ import {
   type BreakerState,
 } from "@/services/circuitBreaker";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
+import { sanitizeCustomerReason } from "@/services/ai/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
@@ -73,6 +74,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
+import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
@@ -1541,7 +1543,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // additive misread reason already set by the resolver. Overriding here (rather than after
         // row creation) keeps decodeStatus honest from the very first render - never "decoding" then
         // silently reverted. A valid unknown GTIN is never affected by this check.
-        if (isLikelyMisreadGtin(cleaned.cleanCode)) {
+        // QA HARDENING FIX #6 (live-proven): captured once and reused below at the catalog-first seam -
+        // a misread code must never mint a fabricated identity there either (see that call site).
+        const misread = isLikelyMisreadGtin(cleaned.cleanCode);
+        if (misread) {
           autoGate = { allowed: false, reason: "Scan misread - decode was not attempted." };
         }
 
@@ -1638,8 +1643,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // CATALOG-FIRST (offline-first, saves AI tokens): private shop override -> verified shared
           // catalog. A verified hit resolves + counts with NO AI, even with no key / offline. AI only
           // runs on a miss or a weak/conflicting catalog hit.
+          // QA HARDENING FIX #6 (live-proven, 2026-07-16): a misread (bad-check-digit) GTIN must NEVER
+          // attach a fabricated identity here either. `codeSet.has(entry.normalizedBarcode)` in
+          // localCatalogProvider.ts has no check-digit awareness, so a bad code that happens to
+          // string-match a seeded catalog entry's normalizedBarcode (e.g. a coincidental zero-pad
+          // collision) would otherwise mint a named product via resolveUnknown("create_new",
+          // {origin:"catalog"}) - the exact bug that attached "Healthyholics" to an invalid UPC. Skip
+          // computing `decision` entirely when misread (cleaner than gating the `if` below): this also
+          // avoids polluting the catalog's timesScanned/observeScan bookkeeping with a bad-code hit.
+          // The row already fell through to needs_review with the honest misread reason set above.
           const codes = [cleaned.cleanCode, ...cleaned.normalizedCandidates];
-          const decision = decideLookup(get().catalog, get().shopOverrides, codes, businessId);
+          const decision = misread
+            ? { source: "none" as const, hit: null, shouldResolveWithoutAi: false, shouldTryAi: true }
+            : decideLookup(get().catalog, get().shopOverrides, codes, businessId);
           // Phase 8C: a verified-catalog / shop-override hit is also a NON-AI auto-count path - apply the
           // same context firewall. A clearly non-tire hit in tire context must not shortcut-count; let it
           // fall through to the AI decode path (where the firewall + human review handle it).
@@ -2186,6 +2202,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             data = await decodeOnce();
           } finally {
             clearTimeout(abortTimer);
+          }
+          // BUG #14 (QA hardening 2026-07-16): CLIENT-SIDE defense in depth. The server already
+          // sanitizes reasonText/decision.reason (pipeline.ts) before responding, but this store must
+          // not trust that unconditionally - sanitize both here too, ONCE, right at the response
+          // boundary, so every downstream read (needsReviewQueue[].reason, scanFeed[].reason, the
+          // honestReasonForBadge composition below) is already clean. Honest hand-written prose (no
+          // vendor/service/model tokens) passes through unchanged; only a raw/internal string is
+          // replaced with an honest fixed fallback - never empty, never the raw value.
+          if (data.decision) {
+            data = { ...data, decision: { ...data.decision, reason: sanitizeCustomerReason(data.decision.reason ?? "", { status: data.decision.status }) } };
+          }
+          if (typeof data.reasonText === "string") {
+            data = { ...data, reasonText: sanitizeCustomerReason(data.reasonText, { status: data.decision?.status }) };
           }
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
@@ -5094,7 +5123,13 @@ export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
     version: 7,
-    storage: createJSONStorage(() => localStorage),
+    // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
+    // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
+    // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
+    // until localStorage was cleared). This wrapper fails SOFT (never throws out of a scan) and COALESCES
+    // the ~6 writes/scan into one per tick (flushed on pagehide/visibilitychange so nothing is lost).
+    // See scanPersistStorage.ts. IndexedDB migration remains the recommended architectural follow-up.
+    storage: createJSONStorage(() => createCoalescedFailSoftStorage(() => localStorage)),
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable

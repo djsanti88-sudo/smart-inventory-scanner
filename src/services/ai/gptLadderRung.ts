@@ -64,14 +64,21 @@ export function shouldRunGptRung(i: GptRungInput): { run: boolean; skipReason: s
   return { run: true, skipReason: "" };
 }
 
-const GPT_LADDER_REASON = "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)";
-const GPT_LADDER_SUGGEST_REASON = "gpt-5.5 from-scratch: best guess shown as returned (owner trust rule)";
+// BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): these used to name the model
+// ("gpt-5.5 from-scratch: ...") in customer-facing decision.reason text. The model name is
+// gratuitous here - the honest, token-free wording below still says exactly what matters: the
+// identity was self-reported by the exact code, or is a best guess, and (for the exact-code case)
+// is an auto-count candidate.
+const GPT_LADDER_REASON = "Exact code self-reported by the source - auto-count candidate.";
+const GPT_LADDER_SUGGEST_REASON = "Best guess based on available evidence - review before confirming.";
 
 function crossCheckSingleProvider(confidence: number): CrossCheckResult {
   return {
     decision: "single_provider",
     confidence,
-    reason: "gpt-5.5 ladder rung: single provider, no second AI to cross-check",
+    // Token-free (QA #14 sweep): this crossCheck reason rides in the raw API payload; keep it free
+    // of internal rung/model names as defense-in-depth even though no UI currently renders it.
+    reason: "single provider - no second source to cross-check",
     brandSimilarity: 0,
     nameSimilarity: 0,
     contradictions: [],
