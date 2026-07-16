@@ -8,6 +8,7 @@ import {
   pnDerivedAnnotation,
   PLACEHOLDER_BARCODES,
 } from "./barcodeTrust";
+import { isValidCheckDigit } from "./gtin";
 
 /** GS1 mod-10 check digit for a payload (all digits EXCEPT the check). */
 function checkDigitFor(payload: string): string {
@@ -196,6 +197,57 @@ describe("the 16-phantom fixture: inert without evidence (AM-11.6)", () => {
       expect(g.pnDerived).toBe("pn_derived");
       expect(g.checkDigitValid).toBe(true);
     }
+  });
+});
+
+describe("UPC-E expansion validates 8-digit labels (audit finding I2)", () => {
+  // "04252614" is a REAL zero-suppressed UPC-E: its raw 8-digit GS1 check digit FAILS
+  // (isValidCheckDigit("04252614") === false, verified by node probe), but expandUpcE("04252614")
+  // returns "042100005264" (a valid-check UPC-A) - so the code IS legitimately GTIN-shaped, its
+  // check digit only validates after zero-suppression expansion, exactly the case gtin.ts's
+  // lookupCandidates already documents and handles for lookup. gradeBarcode must not reject it.
+  it("an 8-digit code whose raw check fails but expands via UPC-E grades suggested, checkDigitValid true", () => {
+    const g = gradeBarcode({ barcode: "04252614" });
+    expect(g.verdict).toBe("suggested");
+    expect(g.checkDigitValid).toBe(true);
+    expect(g.gtinShaped).toBe(true);
+  });
+  it("a truly invalid 8-digit code (raw check fails AND UPC-E expansion fails) still rejects", () => {
+    // "12345678": isValidCheckDigit false as raw EAN-8, expandUpcE also returns null (verified by
+    // node probe) - there is no legitimate reading of this code, so it must still be rejected.
+    const g = gradeBarcode({ barcode: "12345678" });
+    expect(g.verdict).toBe("rejected");
+    expect(g.checkDigitValid).toBe(false);
+  });
+  it("an 8-digit code with a VALID raw EAN-8 check digit stays graded as EAN-8 (regression, no UPC-E override)", () => {
+    // Payload "4006381" + computed GS1 check digit = "40063812": a valid EAN-8 whose leading
+    // digit (4) is outside the UPC-E number-system range (0/1), so it is unambiguously EAN-8,
+    // never eligible for UPC-E expansion in the first place.
+    const validEan8 = "40063812";
+    expect(isValidCheckDigit(validEan8)).toBe(true);
+    const g = gradeBarcode({ barcode: validEan8 });
+    expect(g.verdict).toBe("suggested");
+    expect(g.checkDigitValid).toBe(true);
+  });
+});
+
+describe("GTIN-14 case pack preserves the indicator digit (audit finding I3)", () => {
+  it("a valid-check GTIN-14 with indicator digit 1 (case pack) grades suggested and keeps the full 14-digit canonical form", () => {
+    const g = gradeBarcode({ barcode: "10012345678902" });
+    expect(g.verdict).toBe("suggested");
+    expect(g.placeholder).toBe(false);
+    expect(g.checkDigitValid).toBe(true);
+    // NOT collapsed to the unit GTIN ("00012345678905" or similar) - the indicator digit survives.
+    expect(g.canonicalGtin).toBe("10012345678902");
+  });
+});
+
+describe("edge-case pins (audit findings M2/M3)", () => {
+  it("gradeBarcode({barcode: ''}) does not throw and rejects with a non-empty reason", () => {
+    expect(() => gradeBarcode({ barcode: "" })).not.toThrow();
+    const g = gradeBarcode({ barcode: "" });
+    expect(g.verdict).toBe("rejected");
+    expect(g.reason.length).toBeGreaterThan(0);
   });
 });
 
