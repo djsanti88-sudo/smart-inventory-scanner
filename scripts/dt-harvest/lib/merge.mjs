@@ -1,8 +1,11 @@
 // scripts/dt-harvest/lib/merge.mjs
 // Poison guard + cross-source-safe merge for the Discount Tire harvest (Task 3).
-// Pure, no imports beyond this file. Untrusted scraped rows never enter the corpus
-// with a bad GTIN check digit or a brand that conflicts with a known single-brand
-// GS1 prefix, and a duplicate GTIN from another source is never silently overwritten.
+// Pure, no imports beyond this file (and the placeholder-barcode mirror below). Untrusted
+// scraped rows never enter the corpus with a bad GTIN check digit, an enumerated placeholder/
+// dummy barcode, or a brand that conflicts with a known single-brand GS1 prefix, and a
+// duplicate GTIN from another source is never silently overwritten.
+
+import { isPlaceholderBarcode } from "./placeholderBarcodes.mjs";
 
 /** GS1 mod-10 check digit over the full code (last digit is the check digit).
  * Logic shape mirrors src/services/upc/gtin.ts isValidCheckDigit (reference only, not imported).
@@ -31,8 +34,16 @@ function normalizeBrand(b) {
  * True when the barcode's 7-digit GS1 company prefix maps to a known brand list
  * AND row.brand is not (case/whitespace-insensitively) one of those brands.
  * Unknown/unmapped prefixes and empty brands never conflict.
+ *
+ * `sameBrandFamily` (optional): a pure `(a, b) => boolean` that returns true when two brands
+ * belong to the SAME corporate family (see src/services/catalog/brandFamilies.ts). When supplied,
+ * a brand that differs from the registered prefix brand does NOT conflict if the two are the same
+ * family - this is what lets a corrected family later recover a previously-conflicting row. When
+ * absent (default), behavior is unchanged: any different brand conflicts. Injected rather than
+ * imported because this .mjs pipeline cannot import the server-only TS family table (same pattern
+ * as backfill.mjs's normPartKey reimplementation).
  */
-function hasPrefixConflict(gtin, brand, prefixMap) {
+function hasPrefixConflict(gtin, brand, prefixMap, sameBrandFamily) {
   const digits = (gtin || "").replace(/\D/g, "");
   if (digits.length < 7) return false;
   const prefix = digits.slice(0, 7);
@@ -41,18 +52,34 @@ function hasPrefixConflict(gtin, brand, prefixMap) {
   const expectedBrands = (Array.isArray(expected) ? expected : [expected]).map(normalizeBrand);
   const got = normalizeBrand(brand);
   if (!got) return false;
-  return !expectedBrands.includes(got);
+  if (expectedBrands.includes(got)) return false;
+  // Not a literal brand match: it is still NOT a conflict if the row's brand is in the same
+  // corporate family as any registered brand for this prefix.
+  if (typeof sameBrandFamily === "function") {
+    for (const expectedBrand of expectedBrands) {
+      if (sameBrandFamily(expectedBrand, got)) return false;
+    }
+  }
+  return true;
 }
 
 /**
- * Reject invalid GS1 check digits and catalog-derived brand-prefix conflicts.
+ * Reject invalid GS1 check digits, enumerated placeholder/dummy barcodes, and catalog-derived
+ * brand-prefix conflicts.
  * prefixMap: Record<sevenDigitPrefix, brand | brand[]>.
+ * sameBrandFamily (optional): `(a, b) => boolean` same-corporate-family check; when provided,
+ *   a same-family brand does not trigger a prefix conflict (see hasPrefixConflict).
  */
-export function guardRow(row, prefixMap) {
+export function guardRow(row, prefixMap, sameBrandFamily) {
   if (!isValidCheckDigit(row?.gtin)) {
     return { ok: false, reason: "invalid_check_digit" };
   }
-  if (hasPrefixConflict(row.gtin, row.brand, prefixMap)) {
+  // Placeholder/dummy barcodes (e.g. all-zeros) can PASS the GS1 check digit, so this check must
+  // run independently of it, not as a subset (AM-11.4).
+  if (isPlaceholderBarcode(row?.gtin)) {
+    return { ok: false, reason: "placeholder_barcode" };
+  }
+  if (hasPrefixConflict(row.gtin, row.brand, prefixMap, sameBrandFamily)) {
     return { ok: false, reason: "prefix_conflict" };
   }
   return { ok: true };

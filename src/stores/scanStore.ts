@@ -22,6 +22,7 @@ import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismat
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
+import { gradeBarcode } from "@/services/upc/barcodeTrust";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProduct } from "@/services/aliasMatcher";
@@ -308,6 +309,30 @@ function isWeakGuess(review: UnknownCodeReview, np: Partial<Product>): boolean {
     [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
     (review.sourceUrls?.length ?? 0) > 0;
   return acceptingSuggestion && !suggestionHasRealEvidence;
+}
+
+/** TRUST GATE (spec v3 AM-4.2): rejected barcode identity fields are blanked, never stored. This is
+ *  the single choke point for both resolveUnknown minting sites (provisional upgrade + fresh mint) -
+ *  a phantom/misread barcode never becomes searchable/trusted product identity. The scanned cleanCode
+ *  alias is NOT gated here (physically scanned; vendor labels must keep aliasing - Resolver Trust Rules
+ *  unchanged). Blanking a field never blocks minting, counting, or alias teaching. */
+function gateIdentityBarcodeFields(
+  np: { gtin?: string; upc?: string; ean?: string; primarySku?: string },
+): { gtin: string; upc: string; ean: string } {
+  const gate = (v?: string): string => {
+    const value = (v ?? "").trim();
+    if (!value) return "";
+    return gradeBarcode({ barcode: value, partNumber: np.primarySku }).verdict === "rejected" ? "" : value;
+  };
+  return { gtin: gate(np.gtin), upc: gate(np.upc), ean: gate(np.ean) };
+}
+
+/** Defense in depth (AM-4.4): a decode-provided barcode field that fails the trust gate is scrubbed
+ *  from the review's suggested* fields so no approve path can launder it into identity. */
+function scrubSuggestedBarcode(value: string | undefined, partNumber?: string): string {
+  const v = (value ?? "").trim();
+  if (!v) return "";
+  return gradeBarcode({ barcode: v, partNumber }).verdict === "rejected" ? "" : v;
 }
 
 /**
@@ -1831,10 +1856,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     suggestedSpecsShort: result.specsShort,
                     suggestedSpecsFull: result.specsFull,
                     suggestedPrimarySku: result.primarySku,
-                    suggestedPrimaryBarcode: result.primaryBarcode,
-                    suggestedGtin: result.gtin,
-                    suggestedUpc: result.upc,
-                    suggestedEan: result.ean,
+                    suggestedPrimaryBarcode: scrubSuggestedBarcode(result.primaryBarcode, result.primarySku),
+                    suggestedGtin: scrubSuggestedBarcode(result.gtin, result.primarySku),
+                    suggestedUpc: scrubSuggestedBarcode(result.upc, result.primarySku),
+                    suggestedEan: scrubSuggestedBarcode(result.ean, result.primarySku),
                     suggestedImageUrl: result.imageUrl,
                     suggestedProductUrl: result.productUrl,
                     suggestedAliases: result.aliases,
@@ -2152,6 +2177,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const gptSkipNote = gptSkipEntry?.errorCode ? `gpt-5.5-ladder skipped: ${gptSkipEntry.errorCode}` : "";
           const decodeNoteUpdate = gptSkipNote || undefined;
 
+          const suggestedPartNumberForGate = tireFields?.partNumber ?? best?.primarySku;
           const suggestionFields = {
                 suggestedProductName: tireFields?.description || (best?.productName ?? ""),
                 suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
@@ -2159,10 +2185,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 suggestedSpecsShort: tireFields?.size ?? best?.specsShort ?? "",
                 suggestedSpecsFull: best?.specsFull ?? "",
                 suggestedPrimarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
-                suggestedPrimaryBarcode: best?.primaryBarcode ?? "",
-                suggestedGtin: best?.gtin ?? "",
-                suggestedUpc: best?.upc ?? "",
-                suggestedEan: best?.ean ?? "",
+                suggestedPrimaryBarcode: scrubSuggestedBarcode(best?.primaryBarcode, suggestedPartNumberForGate),
+                suggestedGtin: scrubSuggestedBarcode(best?.gtin, suggestedPartNumberForGate),
+                suggestedUpc: scrubSuggestedBarcode(best?.upc, suggestedPartNumberForGate),
+                suggestedEan: scrubSuggestedBarcode(best?.ean, suggestedPartNumberForGate),
                 suggestedImageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
                 suggestedProductUrl: best?.productUrl ?? "",
                 suggestedAliases: best?.aliases ?? [],
@@ -3389,9 +3415,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               specsFull: np.specsFull ?? orphan.specsFull,
               primarySku: np.primarySku ?? orphan.primarySku,
               primaryBarcode: orphan.primaryBarcode || review.cleanCode,
-              gtin: np.gtin ?? orphan.gtin,
-              upc: np.upc ?? orphan.upc,
-              ean: np.ean ?? orphan.ean,
+              ...(function () {
+                const gated = gateIdentityBarcodeFields(np);
+                return {
+                  gtin: np.gtin !== undefined ? gated.gtin : orphan.gtin,
+                  upc: np.upc !== undefined ? gated.upc : orphan.upc,
+                  ean: np.ean !== undefined ? gated.ean : orphan.ean,
+                };
+              })(),
               vendorCodes: orphan.vendorCodes ?? [],
               aliases: [review.cleanCode],
               imageUrl: np.imageUrl ?? orphan.imageUrl,
@@ -3434,9 +3465,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // Identity = the scanned code, so the product's primaryBarcode and its first approved alias
               // agree (prevents the alias-miss -> identifier-conflict -> re-decode -> duplicate cascade).
               primaryBarcode: review.cleanCode,
-              gtin: np.gtin ?? "",
-              upc: np.upc ?? "",
-              ean: np.ean ?? "",
+              ...gateIdentityBarcodeFields(np),
               vendorCodes: [],
               aliases: [review.cleanCode],
               imageUrl: np.imageUrl ?? "",
@@ -4293,8 +4322,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             patch({
               correctionRecheckStatus: status, correctionRecheckedAt: now(),
               suggestedProductName: best.productName, suggestedBrand: best.brand, suggestedCategory: best.category,
-              suggestedSpecsShort: best.specsShort, suggestedPrimarySku: best.primarySku, suggestedPrimaryBarcode: best.primaryBarcode,
-              suggestedGtin: best.gtin, suggestedUpc: best.upc, suggestedEan: best.ean, suggestedAliases: best.aliases ?? [],
+              suggestedSpecsShort: best.specsShort, suggestedPrimarySku: best.primarySku,
+              suggestedPrimaryBarcode: scrubSuggestedBarcode(best.primaryBarcode, best.primarySku),
+              suggestedGtin: scrubSuggestedBarcode(best.gtin, best.primarySku),
+              suggestedUpc: scrubSuggestedBarcode(best.upc, best.primarySku),
+              suggestedEan: scrubSuggestedBarcode(best.ean, best.primarySku),
+              suggestedAliases: best.aliases ?? [],
               sourceUrls: best.sourceUrls ?? [], verifiedFacts: best.verifiedFacts ?? [], guesses: best.guesses ?? [],
               hasSuggestion: true, decodeStatus: "verified", confidence: decision?.confidence ?? best.confidence ?? 0,
               evidenceStrength: decision?.evidenceStrength ?? "none", exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),

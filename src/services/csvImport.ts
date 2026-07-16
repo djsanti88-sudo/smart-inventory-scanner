@@ -2,6 +2,8 @@ import type { Alias, Product } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { parse as parseCsvSync } from "csv-parse/sync";
+import { gradeBarcode } from "@/services/upc/barcodeTrust";
+import { isGtinShaped } from "@/services/upc/gtin";
 
 // Deterministic CSV import (MVP). Pure functions (no React, no next/*). Treats ALL CSV content as
 // UNTRUSTED data (semantic firewall): it is parsed as data, never interpreted as instructions.
@@ -123,8 +125,43 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
     const vendorRaw = pick(row, ["vendor_codes", "vendor", "vendor_code"]);
     const vendorCodes = vendorRaw ? vendorRaw.split(/[|;]/).map((v) => v.trim()).filter(Boolean) : [];
 
+    // TRUST GATE (spec v3 AM-4.1): gtin/upc/ean columns must be valid GTINs; primary_barcode is
+    // rejected only when GTIN-shaped-with-bad-check-digit or a placeholder (a physical label may
+    // legitimately be a non-GTIN vendor code). Rejected values never become aliases OR product
+    // identity fields. sku/vendor codes are not barcodes and are never graded.
+    const rejectedCodes = new Set<string>();
+    const gateStrict = (value: string, field: string): string => {
+      if (!value) return value;
+      const grade = gradeBarcode({ barcode: value, partNumber: primarySku });
+      if (grade.verdict === "rejected") {
+        conflicts.push({ code: value, reason: `barcode rejected: ${grade.reason} (${field})` });
+        rejectedCodes.add(value);
+        return "";
+      }
+      return value;
+    };
+    const gatePhysicalLabel = (value: string): string => {
+      if (!value || !isGtinShaped(value)) {
+        // non-GTIN label: only the placeholder blocklist applies
+        const grade = value ? gradeBarcode({ barcode: value }) : null;
+        if (grade?.placeholder) {
+          conflicts.push({ code: value, reason: `barcode rejected: ${grade.reason} (barcode)` });
+          rejectedCodes.add(value);
+          return "";
+        }
+        return value;
+      }
+      return gateStrict(value, "barcode");
+    };
+    const gatedGtin = gateStrict(gtin, "gtin");
+    const gatedUpc = gateStrict(upc, "upc");
+    const gatedEan = gateStrict(ean, "ean");
+    const gatedPrimaryBarcode = gatePhysicalLabel(primaryBarcode);
+
     // Candidate scannable codes for this row (dedup raw, preserve order).
-    const rawCodes = [primarySku, primaryBarcode, gtin, upc, ean, ...vendorCodes].filter(Boolean);
+    const rawCodes = [primarySku, gatedPrimaryBarcode, gatedGtin, gatedUpc, gatedEan, ...vendorCodes]
+      .filter(Boolean)
+      .filter((c) => !rejectedCodes.has(c));
     if (rawCodes.length === 0) {
       conflicts.push({ code: name || "(row)", reason: "no scannable code (sku/barcode/gtin/upc/ean/vendor) in row" });
       continue;
@@ -184,10 +221,10 @@ export function buildProductImport(params: BuildImportParams): ProductImportPlan
       specsShort,
       specsFull: "",
       primarySku,
-      primaryBarcode,
-      gtin,
-      upc,
-      ean,
+      primaryBarcode: gatedPrimaryBarcode,
+      gtin: gatedGtin,
+      upc: gatedUpc,
+      ean: gatedEan,
       vendorCodes,
       aliases: rowCleanCodes,
       imageUrl: "",
