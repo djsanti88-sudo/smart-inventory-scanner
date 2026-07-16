@@ -327,6 +327,14 @@ function gateIdentityBarcodeFields(
   return { gtin: gate(np.gtin), upc: gate(np.upc), ean: gate(np.ean) };
 }
 
+/** Defense in depth (AM-4.4): a decode-provided barcode field that fails the trust gate is scrubbed
+ *  from the review's suggested* fields so no approve path can launder it into identity. */
+function scrubSuggestedBarcode(value: string | undefined, partNumber?: string): string {
+  const v = (value ?? "").trim();
+  if (!v) return "";
+  return gradeBarcode({ barcode: v, partNumber }).verdict === "rejected" ? "" : v;
+}
+
 /**
  * The exact SAME safe, non-hallucinated placeholder label `ensureProvisionalCount` mints for an
  * unresolved code ("Unidentified item (barcode/code CODE)", or a prefix-floor brand guess when the GS1
@@ -1848,10 +1856,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     suggestedSpecsShort: result.specsShort,
                     suggestedSpecsFull: result.specsFull,
                     suggestedPrimarySku: result.primarySku,
-                    suggestedPrimaryBarcode: result.primaryBarcode,
-                    suggestedGtin: result.gtin,
-                    suggestedUpc: result.upc,
-                    suggestedEan: result.ean,
+                    suggestedPrimaryBarcode: scrubSuggestedBarcode(result.primaryBarcode, result.primarySku),
+                    suggestedGtin: scrubSuggestedBarcode(result.gtin, result.primarySku),
+                    suggestedUpc: scrubSuggestedBarcode(result.upc, result.primarySku),
+                    suggestedEan: scrubSuggestedBarcode(result.ean, result.primarySku),
                     suggestedImageUrl: result.imageUrl,
                     suggestedProductUrl: result.productUrl,
                     suggestedAliases: result.aliases,
@@ -2169,6 +2177,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const gptSkipNote = gptSkipEntry?.errorCode ? `gpt-5.5-ladder skipped: ${gptSkipEntry.errorCode}` : "";
           const decodeNoteUpdate = gptSkipNote || undefined;
 
+          const suggestedPartNumberForGate = tireFields?.partNumber ?? best?.primarySku;
           const suggestionFields = {
                 suggestedProductName: tireFields?.description || (best?.productName ?? ""),
                 suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
@@ -2176,10 +2185,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 suggestedSpecsShort: tireFields?.size ?? best?.specsShort ?? "",
                 suggestedSpecsFull: best?.specsFull ?? "",
                 suggestedPrimarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
-                suggestedPrimaryBarcode: best?.primaryBarcode ?? "",
-                suggestedGtin: best?.gtin ?? "",
-                suggestedUpc: best?.upc ?? "",
-                suggestedEan: best?.ean ?? "",
+                suggestedPrimaryBarcode: scrubSuggestedBarcode(best?.primaryBarcode, suggestedPartNumberForGate),
+                suggestedGtin: scrubSuggestedBarcode(best?.gtin, suggestedPartNumberForGate),
+                suggestedUpc: scrubSuggestedBarcode(best?.upc, suggestedPartNumberForGate),
+                suggestedEan: scrubSuggestedBarcode(best?.ean, suggestedPartNumberForGate),
                 suggestedImageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
                 suggestedProductUrl: best?.productUrl ?? "",
                 suggestedAliases: best?.aliases ?? [],
@@ -4313,8 +4322,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             patch({
               correctionRecheckStatus: status, correctionRecheckedAt: now(),
               suggestedProductName: best.productName, suggestedBrand: best.brand, suggestedCategory: best.category,
-              suggestedSpecsShort: best.specsShort, suggestedPrimarySku: best.primarySku, suggestedPrimaryBarcode: best.primaryBarcode,
-              suggestedGtin: best.gtin, suggestedUpc: best.upc, suggestedEan: best.ean, suggestedAliases: best.aliases ?? [],
+              suggestedSpecsShort: best.specsShort, suggestedPrimarySku: best.primarySku,
+              suggestedPrimaryBarcode: scrubSuggestedBarcode(best.primaryBarcode, best.primarySku),
+              suggestedGtin: scrubSuggestedBarcode(best.gtin, best.primarySku),
+              suggestedUpc: scrubSuggestedBarcode(best.upc, best.primarySku),
+              suggestedEan: scrubSuggestedBarcode(best.ean, best.primarySku),
+              suggestedAliases: best.aliases ?? [],
               sourceUrls: best.sourceUrls ?? [], verifiedFacts: best.verifiedFacts ?? [], guesses: best.guesses ?? [],
               hasSuggestion: true, decodeStatus: "verified", confidence: decision?.confidence ?? best.confidence ?? 0,
               evidenceStrength: decision?.evidenceStrength ?? "none", exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
