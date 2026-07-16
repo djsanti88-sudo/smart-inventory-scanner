@@ -98,10 +98,10 @@ describe("cross-identifier matching for a confirmed product (req 1)", () => {
     store.getState().resolveUnknown(reviewIdFor(store, "700000000020"), "create_new", {
       applyToCount: false,
       origin: "human",
-      newProduct: { name: "MultiCode Widget", primaryBarcode: "700000000020", primarySku: "PNX-77", gtin: "700000000021" },
+      newProduct: { name: "MultiCode Widget", primaryBarcode: "700000000020", primarySku: "PNX-77", gtin: "700000000023" },
     });
     const pid = store.getState().products.find((p) => p.name === "MultiCode Widget")!.id;
-    for (const code of ["700000000020", "PNX-77", "700000000021"]) {
+    for (const code of ["700000000020", "PNX-77", "700000000023"]) {
       expect(store.getState().processScan(code)?.matchedProductId).toBe(pid);
     }
   });
