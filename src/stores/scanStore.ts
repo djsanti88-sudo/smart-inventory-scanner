@@ -1541,7 +1541,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // additive misread reason already set by the resolver. Overriding here (rather than after
         // row creation) keeps decodeStatus honest from the very first render - never "decoding" then
         // silently reverted. A valid unknown GTIN is never affected by this check.
-        if (isLikelyMisreadGtin(cleaned.cleanCode)) {
+        // QA HARDENING FIX #6 (live-proven): captured once and reused below at the catalog-first seam -
+        // a misread code must never mint a fabricated identity there either (see that call site).
+        const misread = isLikelyMisreadGtin(cleaned.cleanCode);
+        if (misread) {
           autoGate = { allowed: false, reason: "Scan misread - decode was not attempted." };
         }
 
@@ -1638,8 +1641,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // CATALOG-FIRST (offline-first, saves AI tokens): private shop override -> verified shared
           // catalog. A verified hit resolves + counts with NO AI, even with no key / offline. AI only
           // runs on a miss or a weak/conflicting catalog hit.
+          // QA HARDENING FIX #6 (live-proven, 2026-07-16): a misread (bad-check-digit) GTIN must NEVER
+          // attach a fabricated identity here either. `codeSet.has(entry.normalizedBarcode)` in
+          // localCatalogProvider.ts has no check-digit awareness, so a bad code that happens to
+          // string-match a seeded catalog entry's normalizedBarcode (e.g. a coincidental zero-pad
+          // collision) would otherwise mint a named product via resolveUnknown("create_new",
+          // {origin:"catalog"}) - the exact bug that attached "Healthyholics" to an invalid UPC. Skip
+          // computing `decision` entirely when misread (cleaner than gating the `if` below): this also
+          // avoids polluting the catalog's timesScanned/observeScan bookkeeping with a bad-code hit.
+          // The row already fell through to needs_review with the honest misread reason set above.
           const codes = [cleaned.cleanCode, ...cleaned.normalizedCandidates];
-          const decision = decideLookup(get().catalog, get().shopOverrides, codes, businessId);
+          const decision = misread
+            ? { source: "none" as const, hit: null, shouldResolveWithoutAi: false, shouldTryAi: true }
+            : decideLookup(get().catalog, get().shopOverrides, codes, businessId);
           // Phase 8C: a verified-catalog / shop-override hit is also a NON-AI auto-count path - apply the
           // same context firewall. A clearly non-tire hit in tire context must not shortcut-count; let it
           // fall through to the AI decode path (where the firewall + human review handle it).
