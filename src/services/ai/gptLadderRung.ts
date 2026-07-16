@@ -76,7 +76,9 @@ function crossCheckSingleProvider(confidence: number): CrossCheckResult {
   return {
     decision: "single_provider",
     confidence,
-    reason: "gpt-5.5 ladder rung: single provider, no second AI to cross-check",
+    // Token-free (QA #14 sweep): this crossCheck reason rides in the raw API payload; keep it free
+    // of internal rung/model names as defense-in-depth even though no UI currently renders it.
+    reason: "single provider - no second source to cross-check",
     brandSimilarity: 0,
     nameSimilarity: 0,
     contradictions: [],
