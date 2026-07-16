@@ -87,10 +87,18 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     expect(feed).toHaveLength(1);
     // What the customer needs to ACT on the review survives:
     expect(reviews[0]).toMatchObject({ id: "r1", cleanCode: "999", suggestedProductName: "Generic Tire", suggestedBrand: "Acme", reason: "Check this", status: "open" });
-    // Their own scan feed row survives (product/qty/status) but WITHOUT the raw code: a matched feed row's
-    // code->product mapping is a slice of the reusable DB and must not persist to a customer browser (Sec-4).
-    expect(feed[0]).toMatchObject({ id: "s1", status: "needs_review", syncStatus: "pending" });
-    expect(feed[0].cleanCode).toBeUndefined();
+    // Their own scan feed row survives (product/qty/status) INCLUDING the shop's own scanned code: the
+    // shop's own scan of its own barcode is the shop's own data (QA fix #15 - audit trail must not lose
+    // what was physically scanned on the label after a reload). Needs Review already kept cleanCode at
+    // this same access level; this makes scanFeed symmetric with it.
+    expect(feed[0]).toMatchObject({ id: "s1", status: "needs_review", syncStatus: "pending", cleanCode: "999" });
+    // But every OTHER reusable/decode-internal field on that same event stays stripped - the firewall
+    // narrowing is exactly one field wide (cleanCode), nothing else leaked.
+    expect(feed[0].rawCode).toBeUndefined();
+    expect(feed[0].normalizedCandidates).toBeUndefined();
+    expect(feed[0].matchType).toBeUndefined();
+    expect(feed[0].decodeNote).toBeUndefined();
+    expect(feed[0].syncError).toBeUndefined();
   });
 
   it("platform: full local view persisted (legacy unchanged)", () => {
