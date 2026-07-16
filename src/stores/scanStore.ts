@@ -74,6 +74,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
+import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
@@ -5122,7 +5123,13 @@ export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
     version: 7,
-    storage: createJSONStorage(() => localStorage),
+    // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
+    // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
+    // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
+    // until localStorage was cleared). This wrapper fails SOFT (never throws out of a scan) and COALESCES
+    // the ~6 writes/scan into one per tick (flushed on pagehide/visibilitychange so nothing is lost).
+    // See scanPersistStorage.ts. IndexedDB migration remains the recommended architectural follow-up.
+    storage: createJSONStorage(() => createCoalescedFailSoftStorage(() => localStorage)),
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable

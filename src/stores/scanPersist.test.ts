@@ -109,6 +109,39 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     expect(blob).toContain("778899001122"); // platform keeps decode-discovered codes
   });
 
+  it("caps ONLY the append-only diagnostic arrays (syncedScanEventIds, feedbackEvents), never customer data (#16)", () => {
+    // Finding #16 mitigation (c): the persisted blob grew unbounded because append-only diagnostic
+    // ledgers were serialized in full on every scan. Cap them to a bounded ring (newest kept), the
+    // same way countSnapshots/feedback already cap. CUSTOMER DATA (scanFeed / finalCounts /
+    // needsReviewQueue / pendingSyncQueue) must NEVER be capped - that would lose counts / unfinished
+    // review work / unsynced writes (TOP-LEVEL LAW).
+    const s = makeState();
+    s.syncedScanEventIds = Array.from({ length: 5000 }, (_, i) => `e-${i}`);
+    s.feedbackEvents = Array.from({ length: 5000 }, (_, i) => ({ id: `f-${i}`, code: `${i}` }));
+    // Large customer data that must survive uncapped:
+    s.scanFeed = Array.from({ length: 3000 }, (_, i) => ({ id: `s-${i}`, status: "counted", syncStatus: "synced", cleanCode: `${i}` }));
+    s.finalCounts = Array.from({ length: 3000 }, (_, i) => ({ id: `c-${i}`, productId: `p-${i}`, quantity: 1, aliasesSeen: [] }));
+    s.needsReviewQueue = Array.from({ length: 400 }, (_, i) => ({ id: `r-${i}`, cleanCode: `${i}`, reason: "x", status: "open", createdAt: "t", idempotencyKey: `k-${i}` }));
+    s.pendingSyncQueue = Array.from({ length: 400 }, (_, i) => ({ id: `q-${i}`, status: "pending" }));
+
+    // Platform level exercises the full (unstripped) view - diagnostic arrays present there too.
+    const p = buildPersistedScanState(s, "platform");
+
+    // Diagnostic ledgers are bounded and keep the NEWEST entries.
+    const synced = p.syncedScanEventIds as string[];
+    const feedback = p.feedbackEvents as Array<Record<string, unknown>>;
+    expect(synced.length).toBeLessThanOrEqual(1000);
+    expect(synced[synced.length - 1]).toBe("e-4999"); // newest retained
+    expect(feedback.length).toBeLessThanOrEqual(500);
+    expect((feedback[feedback.length - 1] as { id: string }).id).toBe("f-4999");
+
+    // Customer data is NOT capped - every row survives.
+    expect((p.scanFeed as unknown[]).length).toBe(3000);
+    expect((p.finalCounts as unknown[]).length).toBe(3000);
+    expect((p.needsReviewQueue as unknown[]).length).toBe(400);
+    expect((p.pendingSyncQueue as unknown[]).length).toBe(400);
+  });
+
   it("round-trip: 3 open customer reviews persist + rehydrate as 3 open + approvable", () => {
     const s = makeState();
     s.needsReviewQueue = ["a", "b", "c"].map((n) => ({
