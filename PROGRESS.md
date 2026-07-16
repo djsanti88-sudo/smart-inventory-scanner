@@ -2,7 +2,31 @@
 
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
-> Last updated: 2026-07-12.
+> Last updated: 2026-07-15.
+
+## 2026-07-15 barcode trust gate Phase 1 (COMPLETE, merge owner-gated)
+
+Branch `feat/barcode-trust-gate` (12 commits off fix/westlake-prefix-recovery). Spec:
+`docs/superpowers/specs/2026-07-15-barcode-trust-gate-design.md` (v3, AM-1..AM-12). Plan:
+`docs/superpowers/plans/2026-07-15-barcode-trust-gate-phase1.md`. Subagent-driven TDD, per-task
+reviews, Opus final whole-branch review: READY TO MERGE (0 Critical/Important).
+
+- TOP-LEVEL LAW recorded (owner order): every scanned code appears on the feed AND counts
+  (scan 10 = count 10); gates decide identity only - see CLAUDE.md TOP-LEVEL LAW section.
+- `src/services/upc/barcodeTrust.ts`: pure gate, verdicts rejected/suggested/verified, advisory
+  pnDerived (structure never grants or denies trust - Sailun's real UPCs embed the PN), placeholder
+  blocklist (only structural hard block), verified only via re-checkable ground truth.
+- Wired: csvImport buildProductImport (the ungated approved:true back door), resolveUnknown minting
+  (single choke point), decode suggestion scrub, dt-harvest guardRow (+ .mjs mirror + drift test).
+- AM-2 pins: suggested tier never self-counts (scanGates.ts byte-identical, pinned by tests).
+- Multi-angle verification (owner order): adversarial fuzz (50k inputs - found+fixed a Critical
+  zero-padded placeholder bypass + a pnDerived DoS), browser law proof (e2e/trust-gate-law.spec.ts
+  3/3 + screenshots), test-quality audit (found+fixed a real UPC-E recall bug: 8-digit labels now
+  expansion-validate), qa:bots:tire + qa:bots:data (2/2, mock backend).
+- Gates: vitest 2353/0 (32 skip), tsc 0, lint = pre-existing scripts/ debt only.
+- Deferred Minors: .mjs/TS isPlaceholderBarcode parity fuzz; import-layer UPC-E test (live-probed OK).
+- NOT pushed, NOT merged - owner gate. Phase 2 (provenance persistence, count split, promotion) is a
+  separate spec-reviewed round.
 
 ## 2026-07-12 free-work plan (COMPLETE)
 
