@@ -1321,6 +1321,43 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         expect(outcome.payload.decision.status).toBe("verified");
         expect(outcome.payload.results[0]?.productName).toBe("Continental TrueContact Tour 235/60R18");
       });
+
+      // REVIEW FINDING: the contradiction guard consumed `retailHit` WITHOUT the same isUsableProductName
+      // gate the rung-0 settle (line ~528 above) already applies. A poisoned retail row can carry a
+      // GARBAGE name (a barcode-site search-results title, a scrape error title, run-on junk over the
+      // 120-char cap, etc.) alongside a plausible-but-wrong BRAND for the same GTIN. Reusing that garbage
+      // name as `retailAsResult.productName` (unfiltered) can pass crossCheck's brand-mismatch check and
+      // wrongly downgrade an otherwise-clean paid "verified" to needs_review/conflict - a recall-only risk,
+      // but harmful in the tire-pilot core. The fix: the guard must ignore a retailHit whose productName
+      // fails isUsableProductName, exactly like the rung-0 settle does.
+      it("a paid-rung 'verified' is NOT downgraded when the retail row has a GARBAGE name (guard ignores it, isUsableProductName gate)", async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+        process.env.GO_UPC_API_KEY = "test-key";
+        vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+        // Run-on junk over isUsableProductName's 120-char cap, so it is rejected regardless of the
+        // SITE_BLOCKLIST/PLACEHOLDER checks - a garbage name by length alone (fails isUsableProductName).
+        const GARBAGE_NAME =
+          "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggggggggg hhhhhhhhhh iiiiiiiiii jjjjjjjjjj kkkkkkkkkk lllllllllll";
+        vi.mocked(lookupRetailBarcodeAsync)
+          .mockResolvedValueOnce(null) // rung-0 call: miss, so the ladder runs
+          .mockResolvedValueOnce({
+            // Plausible-but-WRONG brand for this GTIN (would structurally conflict with Continental if
+            // the guard did not reject the garbage name first).
+            productName: GARBAGE_NAME,
+            brand: "Michelin",
+            category: "Tire",
+            barcode: CONTRADICT_GTIN,
+          });
+        stubGoUpcVerified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
+
+        const outcome = await runDecodePipeline(makeReq(CONTRADICT_GTIN));
+
+        expect(outcome.kind).toBe("computed");
+        if (outcome.kind !== "computed") throw new Error("unreachable");
+        // The guard must be INERT here: the paid verify passes through unchanged.
+        expect(outcome.payload.decision.status).toBe("verified");
+        expect(outcome.payload.results[0]?.productName).toBe("Continental TrueContact Tour 235/60R18");
+      });
     });
 
     it("cap/billing: the retail rung-0 settle never calls checkAndIncrementDaily / charges the daily cap", async () => {

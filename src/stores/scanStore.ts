@@ -2488,6 +2488,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 const mergeCandidates = cur.products.filter(
                   (p) => p.status !== "archived" && p.provisional !== true && p.id !== provId,
                 );
+                // NOTE: deliberately OMITS primaryBarcode - canonicalOf (identityMerge.ts) reads it, and a
+                // carried/decoded barcode must never become a merge key here (probe-B footgun); only the
+                // decoded identity fields below are trusted for matching.
                 const merge = findIdentityMerge(mergeCandidates, {
                   gtin: best.gtin ?? null,
                   upc: best.upc ?? null,
@@ -3290,6 +3293,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               const mergeCandidates = get().products.filter(
                 (p) => p.status !== "archived" && p.provisional !== true && p.id !== ownProvId,
               );
+              // NOTE: deliberately OMITS primaryBarcode - canonicalOf (identityMerge.ts) reads it, and a
+              // carried/decoded barcode must never become a merge key here (probe-B footgun); only the
+              // decoded identity fields below are trusted for matching.
               const merge = findIdentityMerge(mergeCandidates, {
                 gtin: best.gtin ?? null,
                 upc: best.upc ?? null,
