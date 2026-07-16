@@ -96,4 +96,25 @@ describe("resolveExactPartNumber - confidence tiers (RC4)", () => {
     const result = await resolveExactPartNumber("KH2265992");
     expect(result!.decision.reason.toLowerCase()).toContain("prefix");
   });
+
+  // MINOR PIN (review finding): an affix-core-tier hit is the WEAKEST PN tier this module ever returns
+  // (0.8, the exact floor of the store's >=0.8 auto-apply-suggestion gate in scanGates.ts). Pin the
+  // ceiling explicitly so a future change to this module cannot accidentally let a core-only match
+  // escalate past a suggestion - it must stay exactly {status: "suggested", confidence: 0.8,
+  // exactCodeEvidenceVerifiedByApp: false}, never "verified", never a higher confidence, and never an
+  // app-verified exact-code claim (a PN match has no barcode evidence to verify).
+  it("MINOR PIN: an affix-core-tier match can never escalate beyond a suggestion (status/confidence/verified-flag ceiling)", async () => {
+    mockLookupByExactPartNumber.mockResolvedValueOnce(CORPUS_ROW);
+    const result = await resolveExactPartNumber("KH2265992"); // affix-core hit: "KH2265992" -> core "2265992"
+
+    expect(result).not.toBeNull();
+    expect(result!.decision).toMatchObject({
+      status: "suggested",
+      confidence: 0.8,
+      exactCodeEvidenceVerifiedByApp: false,
+    });
+    // Explicit ceiling: never verified, never above the affix-core tier's own confidence.
+    expect(result!.decision.status).not.toBe("verified");
+    expect(result!.decision.confidence).toBeLessThanOrEqual(0.8);
+  });
 });
