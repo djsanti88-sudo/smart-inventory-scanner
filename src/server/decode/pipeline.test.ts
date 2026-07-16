@@ -304,9 +304,13 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
     expect(outcome.kind).toBe("computed");
     if (outcome.kind !== "computed") throw new Error("unreachable");
-    // Decision stays needs_review (never verified) and the reason keeps the full all-miss chain.
+    // Decision stays needs_review (never verified). BUG #14 (QA hardening 2026-07-16): the raw
+    // "No rung resolved the code. fetchv2: ...; gpt: ..." chain used to leak straight into customer-
+    // facing reasonText - it is now sanitized to an honest, token-free string; the raw chain still
+    // survives in debug.ladderReasons (asserted separately in the BUG #14 describe block below).
     expect(outcome.payload.decision.status).not.toBe("verified");
-    expect(outcome.payload.reasonText).toMatch(/No rung resolved the code/);
+    expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+    expect(outcome.payload.reasonText).not.toMatch(/fetchv2|gpt-5\.5|goupc|upcitemdb/i);
     // The floor names the row: one result, confidence 0.3, needs review, empty sourceUrls.
     const floorResult = outcome.payload.results.find((r) => /product unconfirmed/.test(r.productName));
     expect(floorResult).toBeTruthy();
@@ -1596,6 +1600,74 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       await runDecodePipeline(makeReq(ALPHA_SKU));
 
       expect(resolveExactPartNumber).toHaveBeenCalledWith(ALPHA_SKU);
+    });
+  });
+
+  // BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): reasonText and decision.reason are
+  // CUSTOMER-facing (they flow to needsReviewQueue[].reason / scanFeed[].reason and render verbatim on
+  // the UI). They must never leak raw vendor/service/model names or internal skip-reason codes. Raw
+  // values are allowed ONLY inside debug.* (platform-only, never rendered to a customer).
+  describe("BUG #14: customer-facing reasonText/decision.reason never leak raw vendor/model names", () => {
+    const DENYLIST_RE = /upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|fetch v2|gpt[-_ ]?5\.5|gpt-5\.5-ladder|gpt_call_failed|gpt_aborted_at_cap|no_api_key|non_public_code_type|e2e_mode|budget_exceeded|prior_status_already_decided|\bladder\b|parallel:|tire-corpus|retail-corpus|learned-products/i;
+
+    it("all-miss ladder: customer-facing reasonText and decision.reason are clean and non-empty (debug.ladderReasons keeps the raw chain)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      const outcome = await runDecodePipeline(makeReq("111000222333"));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.reasonText)).toBe(false);
+      expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
+      // debug.ladderReasons is platform-only and MUST still carry the raw per-rung chain for diagnosis.
+      const reasons = outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined;
+      expect(Array.isArray(reasons)).toBe(true);
+      expect((reasons ?? []).some((r) => r.rung === "fetchv2")).toBe(true);
+    }, 30000);
+
+    it("free-rung settle (UPCitemdb hit): the raw provider name in the rung's own reason never reaches customer-facing reasonText/decision.reason", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      stubFreeRungFetch({ upcHit: true });
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.providerNames).toContain("upcitemdb"); // provider name IS allowed as structured metadata
+      expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.reasonText)).toBe(false);
+      expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
+    });
+
+    it("Go-UPC prefix-conflict settle: the raw 'Go-UPC brand ... conflicts with prefix owner' reason is sanitized to an honest customer-facing string", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-go-upc-key";
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("go-upc.com/api")) {
+          return new Response(
+            JSON.stringify({ code: "OK", product: { name: "Some Unrelated Brand Widget", brand: "UnrelatedBrand", barcode: VALID_GTIN } }),
+            { status: 200 },
+          );
+        }
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // Prove this actually exercised the Go-UPC settle (not a coincidental pass via some other path).
+      expect(outcome.payload.providerNames).toContain("go-upc");
+      expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.reasonText)).toBe(false);
+      expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
+      expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
     });
   });
 });

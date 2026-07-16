@@ -9,7 +9,7 @@ import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteG
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { prefixFloorName } from "@/services/catalog/prefixFloor";
-import { decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
+import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
@@ -1248,15 +1248,21 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // unfindable code is unchanged; a Plan D stash always records its own attempt in providerStatuses so
     // debug shows both what Plan D found AND what the ladder did with it.
     if (win) {
+      // BUG #14 (QA hardening 2026-07-16): every settled rung's reason (upcitemdb/openfoodfacts/go-upc/
+      // fetchv2/gpt) is raw, internal, provider-shaped text - sanitize BOTH the top-level reasonText and
+      // decision.reason (the two fields the client actually renders) before they leave the server. The
+      // raw per-rung chain still survives untouched in debug.ladderReasons for platform diagnosis.
+      const cleanReasonText = sanitizeCustomerReason(win.reasonText, { status: win.decision.status });
+      const cleanDecision = { ...win.decision, reason: sanitizeCustomerReason(win.decision.reason, { status: win.decision.status }) };
       return {
         mode: "decode" as const,
         providerNames: planDStash ? [...planDStash.providerNames, ...win.providerNames] : win.providerNames,
         results: win.results,
         evidences: win.evidences,
         providerStatuses: planDProviderStatusForStash ? [planDProviderStatusForStash, ...win.providerStatuses] : win.providerStatuses,
-        decision: win.decision,
+        decision: cleanDecision,
         reasonCode: win.reasonCode,
-        reasonText: win.reasonText,
+        reasonText: cleanReasonText,
         timedOut: false,
         debug: {
           providersAttempted: planDStash ? [...planDStash.providerNames, ...win.providerNames] : win.providerNames,
@@ -1280,13 +1286,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // the ladder's per-rung miss reasons into the reason text/providerStatuses/debug so nothing is
     // silent. Otherwise (non-public code, or Plan D itself found nothing to stash) emit the plain
     // needs_review whose reason lists every rung that came back empty (owner: never silent).
+    // BUG #14 (QA hardening 2026-07-16): allMissReason names every rung by its internal name and joins
+    // each rung's raw miss reason (provider names, internal skip-reason codes like "gpt_call_failed").
+    // It stays RAW here for debug.ladderReasons (below) and for building the merged customer text, but
+    // the value that actually reaches reasonText/decision.reason is always the SANITIZED one.
     const allMissReason = `No rung resolved the code. ${ladderRun.reasons.map((r) => `${r.rung}: ${r.reason}`).join("; ")}`;
+    const cleanAllMissReason = sanitizeCustomerReason(allMissReason);
     if (planDStash) {
       const mergedReasonText = `${planDStash.reasonText || planDStash.decision.reason || "Unresolved"}. ${allMissReason}`;
+      const cleanMergedReasonText = sanitizeCustomerReason(mergedReasonText, { status: planDStash.decision.status });
       return {
         ...planDStash,
-        reasonText: mergedReasonText,
-        decision: { ...planDStash.decision, reason: mergedReasonText },
+        reasonText: cleanMergedReasonText,
+        decision: { ...planDStash.decision, reason: cleanMergedReasonText },
         providerStatuses: [...planDStash.providerStatuses, ...ladderProviderStatuses],
         timedOut: false,
         debug: {
@@ -1318,9 +1330,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       results: nrResults,
       evidences: [],
       providerStatuses: ladderProviderStatuses,
-      decision: { ...nrDecision, reason: allMissReason },
+      decision: { ...nrDecision, reason: cleanAllMissReason },
       reasonCode: "no_result",
-      reasonText: allMissReason,
+      reasonText: cleanAllMissReason,
       timedOut: false,
       debug: {
         providersAttempted: ladderRun.reasons.map((r) => r.rung),

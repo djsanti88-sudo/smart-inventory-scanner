@@ -215,3 +215,31 @@ describe("gptResultToDecodePayload", () => {
 
 // capTierForFirewall was DELETED (owner order 2026-07-06, "no questioning their answers"):
 // GPT's verified self-report is no longer downgraded by the prefix firewall.
+
+// BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): decision.reason for a verified or
+// suggested GPT-ladder settle used to hardcode "gpt-5.5 from-scratch: ..." - the model name is
+// gratuitous customer-facing text and must never appear on a scan row. The reason must still be
+// honest (it should explain the row is a self-reported / best-guess identity, review-first).
+describe("gptResultToDecodePayload decision.reason is token-free (BUG #14)", () => {
+  const DENYLIST_RE = /upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|fetch v2|gpt[-_ ]?5\.5|gpt-5\.5-ladder|gpt_call_failed|gpt_aborted_at_cap|no_api_key|non_public_code_type|e2e_mode|budget_exceeded|prior_status_already_decided|\bladder\b|parallel:|tire-corpus|retail-corpus|learned-products/i;
+
+  test("verified decision.reason names no vendor/model token and is non-empty", () => {
+    const r = gptResult({
+      tier: "verified", brand: "Falken", productName: "Falken Wildpeak A/T3W 265/70R17",
+      gtin: "848983006257", confidence: 0.92, exactCodeFound: true, basis: "exact code on tirerack page",
+    });
+    const payload = gptResultToDecodePayload(r, "848983006257")!;
+    expect(payload.decision.reason.length).toBeGreaterThan(0);
+    expect(DENYLIST_RE.test(payload.decision.reason)).toBe(false);
+  });
+
+  test("suggested decision.reason names no vendor/model token and is non-empty", () => {
+    const r = gptResult({
+      tier: "suggested", brand: "Michelin", productName: "Michelin Defender 225/65R17",
+      confidence: 0.6, exactCodeFound: false, basis: "partial prefix match",
+    });
+    const payload = gptResultToDecodePayload(r, "049000028904")!;
+    expect(payload.decision.reason.length).toBeGreaterThan(0);
+    expect(DENYLIST_RE.test(payload.decision.reason)).toBe(false);
+  });
+});
