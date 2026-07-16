@@ -1,8 +1,11 @@
 // scripts/dt-harvest/lib/merge.mjs
 // Poison guard + cross-source-safe merge for the Discount Tire harvest (Task 3).
-// Pure, no imports beyond this file. Untrusted scraped rows never enter the corpus
-// with a bad GTIN check digit or a brand that conflicts with a known single-brand
-// GS1 prefix, and a duplicate GTIN from another source is never silently overwritten.
+// Pure, no imports beyond this file (and the placeholder-barcode mirror below). Untrusted
+// scraped rows never enter the corpus with a bad GTIN check digit, an enumerated placeholder/
+// dummy barcode, or a brand that conflicts with a known single-brand GS1 prefix, and a
+// duplicate GTIN from another source is never silently overwritten.
+
+import { isPlaceholderBarcode } from "./placeholderBarcodes.mjs";
 
 /** GS1 mod-10 check digit over the full code (last digit is the check digit).
  * Logic shape mirrors src/services/upc/gtin.ts isValidCheckDigit (reference only, not imported).
@@ -61,7 +64,8 @@ function hasPrefixConflict(gtin, brand, prefixMap, sameBrandFamily) {
 }
 
 /**
- * Reject invalid GS1 check digits and catalog-derived brand-prefix conflicts.
+ * Reject invalid GS1 check digits, enumerated placeholder/dummy barcodes, and catalog-derived
+ * brand-prefix conflicts.
  * prefixMap: Record<sevenDigitPrefix, brand | brand[]>.
  * sameBrandFamily (optional): `(a, b) => boolean` same-corporate-family check; when provided,
  *   a same-family brand does not trigger a prefix conflict (see hasPrefixConflict).
@@ -69,6 +73,11 @@ function hasPrefixConflict(gtin, brand, prefixMap, sameBrandFamily) {
 export function guardRow(row, prefixMap, sameBrandFamily) {
   if (!isValidCheckDigit(row?.gtin)) {
     return { ok: false, reason: "invalid_check_digit" };
+  }
+  // Placeholder/dummy barcodes (e.g. all-zeros) can PASS the GS1 check digit, so this check must
+  // run independently of it, not as a subset (AM-11.4).
+  if (isPlaceholderBarcode(row?.gtin)) {
+    return { ok: false, reason: "placeholder_barcode" };
   }
   if (hasPrefixConflict(row.gtin, row.brand, prefixMap, sameBrandFamily)) {
     return { ok: false, reason: "prefix_conflict" };
