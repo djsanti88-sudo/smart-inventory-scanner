@@ -122,6 +122,33 @@ describe("applyBackfill", () => {
     expect(result.barcodeIndex[INVALID_UPC]).toBeUndefined();
   });
 
+  it("forwards sameBrandFamily so a same-family prefix conflict FILLS instead of guard-rejecting", () => {
+    // The Westlake recovery seam: prefix 8489830 is registered to a different brand ("registered"),
+    // but the harvest row's brand ("sibling") is in the SAME family. Without the family fn this is a
+    // prefix_conflict (guard-rejected); with it, the row is admitted and its blank PN is filled.
+    const prefixMap = { [VALID_UPC.slice(0, 7)]: ["registered"] };
+    const sameBrandFamily = (a: string, b: string) => {
+      const fam = new Set(["registered", "sibling"]);
+      const na = (a || "").toLowerCase();
+      const nb = (b || "").toLowerCase();
+      return na === nb || (fam.has(na) && fam.has(nb));
+    };
+    const corpus = makeCorpus([corpusRow({ manufacturer_part_number: "", brand: "sibling" })]);
+    const siblingRow = harvestRow({ brand: "sibling" });
+
+    // Without the family fn: the differing brand is a prefix conflict -> guard-rejected, no fill.
+    const rejected = applyBackfill(corpus, [siblingRow], { prefixMap }) as BackfillResult;
+    expect(rejected.report.guardRejected).toBe(1);
+    expect(rejected.report.filled).toBe(0);
+
+    // With the family fn: same family clears the conflict -> the blank PN is filled.
+    const recovered = applyBackfill(corpus, [siblingRow], { prefixMap, sameBrandFamily }) as BackfillResult;
+    expect(recovered.report.guardRejected).toBe(0);
+    expect(recovered.report.filled).toBe(1);
+    expect(recovered.corpus.barcodeIndex[VALID_UPC].manufacturer_part_number).toBe("28034300");
+    expect(recovered.corpus.barcodeIndex[VALID_UPC].part_number_source).toBe("discounttire");
+  });
+
   it("fills the row but never indexes a normPartKey with length <= 4 (AM-R1)", () => {
     const corpus = makeCorpus([corpusRow({ manufacturer_part_number: "" })]);
     const { corpus: result, report } = applyBackfill(corpus, [harvestRow({ partNumber: "AB12" })], { prefixMap: {} }) as BackfillResult;
