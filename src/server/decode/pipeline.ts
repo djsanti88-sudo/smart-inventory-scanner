@@ -12,6 +12,7 @@ import { prefixFloorName } from "@/services/catalog/prefixFloor";
 import { decodeReasonCode, REASON_TEXT } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefix, candidateKnownPrefixes } from "@/services/catalog/prefixIndex";
 import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
@@ -478,6 +479,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // recomputes ONCE after deploy (old rows are orphaned, never wrong - upsert re-fills canonically).
   const cacheKey = canonicalGtin(code) ?? code;
 
+  // QA HARDENING FIX #6 (live-proven, 2026-07-16): hoisted to the OUTER function scope (not a nested
+  // block) so every free-rung peek that keys off zero-pad barcode VARIANTS with no check-digit
+  // awareness - the tire-corpus peek AND both retail-corpus call sites (rung-0 above, and its twin
+  // inside computeDecode used for the Plan D consensus vote / contradiction guard) - shares the exact
+  // same gate. A GTIN-shaped code whose GS1 check digit FAILS is a likely scanner misread
+  // (src/services/upc/misread.ts, the same helper the client-side auto-decode gate uses); it can
+  // coincidentally string-match a seeded corpus/retail row and settle a CONFIDENT wrong identity - the
+  // live-proven root cause of a fabricated "Healthyholics"-style match on an invalid UPC. Never a
+  // misread for a non-GTIN shape (isLikelyMisreadGtin short-circuits false), so this never touches an
+  // alpha SKU / vendor label / PN lookup. A bad code falls through honestly to the rest of the pipeline
+  // (still appears + counts as Unidentified); a VALID GTIN is completely unaffected.
+  const misread = isLikelyMisreadGtin(code);
+
   // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST (Task 6: moved to the TOP of the pipeline, ahead of
   // the L2 persisted-decode peek below). An EXACT trusted-corpus barcode (or, for SKU-shaped codes, an
   // exact part number) resolves with NO AI call and NO page fetch - a FREE win. It must run BEFORE the
@@ -508,8 +522,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // digits - is excluded from the PN lookup regardless of what codeType happens to label it.
     // alpha_sku/vendor_label/numeric_sku/messy all still reach the PN lookup when NOT GTIN-shaped.
     const gtinShaped = isGtinShaped(code);
+    // `misread` (QA HARDENING FIX #6) is computed once at the top of runDecodePipeline - see there.
     const skuShaped = !gtinShaped && codeType !== "empty";
-    const corpus = (await resolveExactBarcode(code)) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
+    const corpus = (!misread ? await resolveExactBarcode(code) : null) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
     if (corpus) {
       appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });
       return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false };
@@ -531,7 +546,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // here too, falling through to the rest of the pipeline exactly like a garbage name does - the code
     // still appears + counts as Unidentified if nothing else resolves it; it just never reports a fake
     // product with confidence.
-    if (gtinShaped) {
+    //
+    // QA HARDENING FIX #6 (live-proven, 2026-07-16): compose with the misread gate above - a
+    // bad-check-digit GTIN must never settle a retail-corpus identity either, for the identical
+    // zero-pad-variant-collision reason. Both firewalls are independent and additive (fix #5 rejects a
+    // KNOWN example/test row by exact value or name; fix #6 rejects ANY row when the scanned code's own
+    // check digit is invalid, regardless of what the row's name/brand is).
+    if (gtinShaped && !misread) {
       const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
       const retailRow = await lookupRetailBarcodeAsync(code);
       if (retailRow && isUsableProductName(retailRow.productName) && !isExampleOrTestRow(retailRow.barcode, retailRow.productName, retailRow.brand)) {
@@ -718,7 +739,11 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // means rung-0 already tried the exact same lookup and came back empty (or found a garbage name),
     // so this is never a second network round-trip for a code that already settled at rung 0 - it only
     // runs when computeDecode is reached at all, i.e. rung 0 already missed.
-    if (!e2eMode() && isGtinShaped(code)) {
+    // QA HARDENING FIX #6: also gated on `!misread` (hoisted outer-scope const, see top of
+    // runDecodePipeline) - this is the retail rung-0 peek's OWN twin (this file's comment above already
+    // called it out as "the SAME gate"), so it must never feed a misread code's coincidental row into
+    // the Plan D consensus vote or the paid-verified contradiction guard either.
+    if (!e2eMode() && isGtinShaped(code) && !misread) {
       const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
       const rawRetailHit = await lookupRetailBarcodeAsync(code);
       retailLookupStatus = getLastRetailLookupStatus();
