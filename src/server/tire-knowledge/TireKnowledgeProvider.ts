@@ -3,6 +3,7 @@ import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
 import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
@@ -78,23 +79,46 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
   return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode" };
 }
 
+// RC4 (owner-ratified, pilot PN recall): "if only the distributor affix differs and the digits are
+// identical, approve" - a part-number identity match is high-trust. 0.85 when the scanned PN matches
+// the corpus's manufacturer_part_number exactly (modulo space/hyphen normalization only); 0.8 when
+// only the affix-stripped numeric core matched (a distributor prefix/suffix was removed to get
+// there). Both tiers clear the >=0.8 auto-apply-suggestion gate elsewhere, but NEITHER ever reaches
+// "verified" here - a PN match has no barcode evidence, so it stays a suggestion the human/UI can
+// approve or decline on the counted row.
+const PLAIN_PN_CONFIDENCE = 0.85;
+const AFFIX_CORE_PN_CONFIDENCE = 0.8;
+
 /**
  * EXACT trusted manufacturer-part-number resolution. Returns a SUGGESTED decode (deterministic identity,
- * routed to Needs Review for human confirmation) by default - part numbers are not globally unique like
- * barcodes, so auto-counting them silently is unsafe (Phase 4: "if policy is unclear, route to Needs
- * Review"). No AI, no page fetch.
+ * routed to Needs Review / suggestion-row confirmation) - part numbers are not globally unique like
+ * barcodes, so this NEVER returns "verified" and NEVER marks exactCodeEvidenceVerifiedByApp true. No AI,
+ * no page fetch.
  */
 export async function resolveExactPartNumber(partNumber: string): Promise<CorpusDecodeResult | null> {
   const row = await lookupByExactPartNumber(partNumber);
   if (!row) return null;
   const result = toResult(row);
+
+  // Determine which tier applies by comparing the scanned PN's plain normalized key against the
+  // corpus row's own normalized key. If they match, the raw key was the hit (no affix stripped). If
+  // they differ, lookupByExactPartNumber only could have hit via the affix-core variant.
+  const scannedPlainKey = basePartNumberKey(partNumber);
+  const corpusPlainKey = basePartNumberKey(row.manufacturer_part_number);
+  const isAffixCoreHit = scannedPlainKey !== corpusPlainKey;
+
+  const confidence = isAffixCoreHit ? AFFIX_CORE_PN_CONFIDENCE : PLAIN_PN_CONFIDENCE;
+  const reason = isAffixCoreHit
+    ? "Matched by part number in the tire knowledge base (distributor prefix stripped). Confirm before counting (part numbers are not unique like barcodes)."
+    : "Matched by part number in the tire knowledge base. Confirm before counting (part numbers are not unique like barcodes).";
+
   const decision: DecodeDecision = {
     status: "suggested",
-    confidence: 0.6,
-    reason: "Matched a part number in the trusted tire knowledge base. Confirm before counting (part numbers are not unique like barcodes).",
+    confidence,
+    reason,
     evidenceStrength: "fetched_source",
     exactCodeEvidenceVerifiedByApp: false,
-    crossCheck: { decision: "single_provider", confidence: 0.6, reason: "Trusted corpus exact part number.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+    crossCheck: { decision: "single_provider", confidence, reason: "Trusted corpus exact part number.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
   };
   return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_part_number" };
 }
