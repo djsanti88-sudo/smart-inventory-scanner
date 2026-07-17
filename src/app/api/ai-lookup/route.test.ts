@@ -506,7 +506,10 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const code = "111000222780"; // public UPC whose prefix maps to nothing -> Plan D unresolved floor
+    // QA round-2: a VALID-check-digit UPC whose prefix maps to nothing -> Plan D unresolved floor. This
+    // test exercises the receipt cache/replay machinery, NOT misread handling - the SEAM 1 misread guard
+    // now re-runs (never replays) a bad-check-digit code, so this anchor must be genuinely valid.
+    const code = "111000222702";
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect(first.status).toBe(200);
     const firstJson = await first.json();
@@ -536,7 +539,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   it("Task 4: forceRetry bypasses AND overwrites a permanent receipt, re-running providers and burning a fresh daily slot", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     process.env.OPENAI_API_KEY = "test-openai-key";
-    const code = "111000222781";
+    const code = "111000222719"; // QA round-2: valid check digit (tests forceRetry/receipt machinery, not misread)
     let openaiCallCount = 0;
     const verifiedBody = responsesBody({
       brand: "Acme", productName: "Acme Retry Widget", specs: "", gtin: "",
@@ -611,7 +614,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const code = "111000222905";
+    const code = "111000222900"; // QA round-2: valid check digit (tests verified-result cache replay, not misread)
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect((await first.json()).decision.status).toBe("verified");
     const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
