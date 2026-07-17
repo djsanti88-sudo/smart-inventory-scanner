@@ -10,6 +10,8 @@ import type { CodeType } from "@/types";
 import { decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { lookupPrefix } from "@/services/catalog/prefixIndex";
 import { familyLabelFor } from "@/services/catalog/brandFamilies";
+import { isLikelyMisreadGtin } from "@/services/upc/misread";
+import { isExampleOrTestRow } from "@/services/ai/decode";
 
 export interface PrefixFloorResult {
   /** Display name for the provisional row, e.g. "Coca-Cola / product unconfirmed", or with a corporate
@@ -32,6 +34,17 @@ function titleCase(s: string): string {
  * callers must fall back to the existing safe "Unidentified item" placeholder in that case.
  */
 export function prefixFloorName(code: string, codeType: CodeType): PrefixFloorResult | null {
+  // QA ROUND-2 SEAM 3 (live-proven bypass, 2026-07-16): the prefix floor must give NO brand to a
+  // scanner-MISREAD GTIN (bad GS1 check digit) or a textbook GS1 EXAMPLE / demo / test barcode. Both
+  // classes previously leaked a confident fabricated brand ("Healthyholics / product unconfirmed")
+  // onto every surface (count row, scan feed, review, decline) because this is the single chokepoint
+  // all five scanStore call sites funnel through. Wrong identity is FAILURE; unknown is acceptable -
+  // so we fall through to null here and the caller keeps its honest "Unidentified item" placeholder
+  // (the code still appears + counts, it just carries no brand). isExampleOrTestRow is checked on the
+  // code alone (no decode result yet, so name/brand are ""); it catches the exact-value example
+  // blocklist and degenerate barcode shapes. Both helpers are pure and client-safe (misread.ts has no
+  // deps beyond gtin.ts; decode.ts is already client-imported by scanStore for isUsableProductName).
+  if (isLikelyMisreadGtin(code) || isExampleOrTestRow(code, "", "")) return null;
   const struct = decodeBarcodeStructure(code, codeType);
   if (!struct.candidateCompanyPrefix) return null;
   const entry = lookupPrefix(code);

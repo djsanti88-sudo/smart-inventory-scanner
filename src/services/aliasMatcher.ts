@@ -27,9 +27,15 @@ function uniq(values: string[]): string[] {
 
 /** Uppercase fold for CASE-INSENSITIVE comparison only. Never used to mutate stored/displayed
  *  values - callers still store/echo the original cleanCode/rawCode untouched. A case-only
- *  difference (e.g. scanned "t432119" vs a stored alias "T432119") is the SAME identity. */
+ *  difference (e.g. scanned "t432119" vs a stored alias "T432119") is the SAME identity.
+ *
+ *  QA ROUND-2 (unit-adversarial): folds ASCII letters ONLY. `.toUpperCase()` EXPANDS certain
+ *  non-ASCII codepoints ("straße".toUpperCase() === "STRASSE"), which could collapse a scanned
+ *  "straße" into an unrelated "STRASSE" SKU - a codepoint-expansion false merge. Mapping only [a-z]
+ *  keeps every non-ASCII byte a single, untouched codepoint, so it can never expand into different
+ *  ASCII. Plain ASCII case-insensitivity (the only kind real barcode/SKU codes need) is preserved. */
 function foldCase(v: string | undefined | null): string {
-  return (v ?? "").toUpperCase();
+  return (v ?? "").replace(/[a-z]/g, (c) => c.toUpperCase());
 }
 
 /** True when any candidate equals `field`, case-insensitively. */

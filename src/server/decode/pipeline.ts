@@ -601,13 +601,41 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // verified/suggested decode; a "no_result_receipt" replays the prior unresolved shape so the
   // ladder is never re-run for a code it has already exhausted (owner rule: no auto-retry - only
   // forceRetry above bypasses this). A corrupted stored payload degrades to a miss (recompute).
+  // Parse the persisted payload ONCE - reused both by the SEAM 1 re-validation just below and by the
+  // replay return further down (never double-parsed).
+  let parsedPayload: Record<string, unknown> | null = null;
   if (persistedHit) {
-    let parsedPayload: Record<string, unknown> | null = null;
     try {
       parsedPayload = JSON.parse(persistedHit.payload);
     } catch {
       parsedPayload = null;
     }
+  }
+
+  // QA ROUND-2 SEAM 1 (live-proven bypass, 2026-07-16): a persisted "result" hit was replayed VERBATIM
+  // with NO misread/example re-check, so a poisoned cache entry (a textbook GS1 EXAMPLE barcode, or a
+  // scanner-MISREAD GTIN with a bad check digit) that had earlier been stored as a confident "verified"
+  // identity kept being served as an identity - bypassing the round-1 rung-0 seam guards entirely.
+  // Re-validate here: for a "result" hit, read the cached identity (results[0].productName/brand) and,
+  // if the code is a misread OR that identity is an example/test row, treat the hit as a cache MISS
+  // (null it) so control falls through to the honest recompute / rung-0 guards. A misread code also
+  // nulls a "no_result_receipt" hit (it must recompute rather than replay a stale unresolved shape).
+  // A LEGIT cached decode is untouched and still replays at zero cost - the cache stays fast for the
+  // codes it should serve; only poisoned example/misread entries are rejected.
+  if (persistedHit) {
+    if (misread) {
+      persistedHit = null;
+    } else if (persistedHit.kind === "result" && parsedPayload) {
+      const cachedResults = parsedPayload.results as Array<{ productName?: string; brand?: string }> | undefined;
+      const cachedProductName = cachedResults?.[0]?.productName;
+      const cachedBrand = cachedResults?.[0]?.brand;
+      if (isExampleOrTestRow(code, cachedProductName ?? "", cachedBrand)) {
+        persistedHit = null;
+      }
+    }
+  }
+
+  if (persistedHit) {
     if (parsedPayload) {
       const priorDebug = (parsedPayload.debug as Record<string, unknown> | undefined) ?? {};
       appendDecodeOutcome({

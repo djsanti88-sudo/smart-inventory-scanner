@@ -51,7 +51,7 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
     // Prefix 5603344 has a real prefixIndex dominant ("general", a Continental-family member), so the
     // floor names it "General (Continental family) / product unconfirmed". The cap block must keep that
     // brand-confident name on the row/review AND keep the honest, non-retry-promising cap reason.
-    const code = "5603344000017";
+    const code = "5603344000016"; // valid GS1 check digit (a real scanned code from this prefix would have one)
     const review = openReview(store, code);
 
     const original = globalThis.fetch;

@@ -132,6 +132,23 @@ describe("case-insensitive matching (QA fix cluster #1): a case-only difference 
     expect(r.matchType).toBe("unknown");
     expect(r.productId).toBeNull();
   });
+
+  // QA ROUND-2 EXTRA (unit-adversarial): foldCase used `.toUpperCase()`, which EXPANDS certain
+  // non-ASCII codepoints ("straße".toUpperCase() === "STRASSE"). That let a scanned "straße" wrongly
+  // merge into an unrelated product whose primarySku is "STRASSE" - a codepoint-expansion false merge.
+  // The fix folds ASCII letters ONLY, leaving non-ASCII bytes untouched, so a single non-ASCII char can
+  // never expand into different ASCII. Plain ASCII case-insensitivity for real SKUs must still work.
+  it("eszett: 'straße' does NOT merge with an unrelated 'STRASSE' alias (no codepoint expansion)", () => {
+    const p = makeProduct({ id: "sz", primarySku: "STRASSE" });
+    const r = matchProductByIdentifiers(cleanScanCode("straße"), [p], DEMO_BUSINESS_ID);
+    expect(r).toBeNull();
+  });
+
+  it("eszett fix preserves plain ASCII case-insensitive SKU matching ('t432119' vs 'T432119')", () => {
+    const p = makeProduct({ id: "ascii-case", primarySku: "T432119" });
+    expect(matchProductByIdentifiers(cleanScanCode("t432119"), [p], DEMO_BUSINESS_ID)?.productId).toBe("ascii-case");
+    expect(matchProductByIdentifiers(cleanScanCode("T432119"), [p], DEMO_BUSINESS_ID)?.productId).toBe("ascii-case");
+  });
 });
 
 describe("conflict handling and scoping", () => {
