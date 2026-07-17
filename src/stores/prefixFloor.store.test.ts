@@ -44,3 +44,57 @@ describe("prefix floor - never an empty row when the GS1 prefix maps to a known 
     expect(prod!.verified).toBe(false);
   });
 });
+
+// QA ROUND-2 SEAM 3 (live-proven bypass, 2026-07-16): the prefix floor gave a confident fabricated
+// brand ("Healthyholics / product unconfirmed") to a scanner-MISREAD GTIN (bad GS1 check digit) and to
+// textbook GS1 EXAMPLE barcodes. TOP-LEVEL LAW: the code STILL appears + counts as "Unidentified item"
+// (no scan is lost) - it just carries NO fabricated identity. The name/brand must agree across every
+// surface (count row + scan feed provisional product) - no brand anywhere.
+describe("prefix floor - no fabricated brand for misread/example codes (three surfaces agree)", () => {
+  it("a misread GTIN (bad check digit) counts as 'Unidentified item', brand '', NO 'Healthyholics'", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false }); // synchronous provisional count path
+    store.getState().processScan("012345678900"); // prefix maps to Healthyholics, but check digit FAILS
+
+    // LAW: it still appears and still counts.
+    expect(totalCount(store)).toBe(1);
+    const prod = store.getState().products.find((p) => p.primaryBarcode === "012345678900");
+    expect(prod, "a provisional product must exist for the scanned code").toBeDefined();
+    // No fabricated identity: honest Unidentified placeholder + empty brand.
+    expect(prod!.name).toBe("Unidentified item (code 012345678900)");
+    expect(prod!.name).not.toMatch(/Healthyholics/i);
+    expect(prod!.brand).toBe("");
+    expect(prod!.verified).toBe(false);
+    expect(prod!.provisional).toBe(true);
+
+    // Feed surface agrees - no brand leaked into the scan feed reason/name either.
+    const ev = store.getState().scanFeed.find((e) => e.cleanCode === "012345678900");
+    expect(ev).toBeDefined();
+    expect(JSON.stringify(ev)).not.toMatch(/Healthyholics/i);
+  });
+
+  it("a textbook GS1 EXAMPLE barcode counts as 'Unidentified item', brand '', no fabricated identity", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    store.getState().processScan("0012345670121"); // documented Healthyholics EXAMPLE GTIN (valid check digit)
+
+    expect(totalCount(store)).toBe(1);
+    const prod = store.getState().products.find((p) => p.primaryBarcode === "0012345670121");
+    expect(prod, "a provisional product must exist for the scanned code").toBeDefined();
+    expect(prod!.name).toMatch(/^Unidentified item/);
+    expect(prod!.name).not.toMatch(/Healthyholics/i);
+    expect(prod!.brand).toBe("");
+    expect(prod!.verified).toBe(false);
+  });
+
+  it("REGRESSION: a legitimate code with a real prefix STILL gets its confident floor brand", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    store.getState().processScan("051596000004"); // valid check digit, real prefix, not an example
+
+    expect(totalCount(store)).toBe(1);
+    const prod = store.getState().products.find((p) => p.primaryBarcode === "051596000004");
+    expect(prod!.name).toBe("United Solutions / product unconfirmed");
+    expect(prod!.brand).toBe("United Solutions");
+  });
+});
