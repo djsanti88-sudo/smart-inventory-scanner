@@ -263,7 +263,9 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // has a REAL prefixIndex dominant ("general", a Continental-family member), so prefixFloorName names
   // it "General (Continental family) / product unconfirmed". It is deliberately absent from every free
   // corpus/DB fixture, so it reaches the paid ladder (P2) or the all-miss return (P1).
-  const FLOORED_GTIN = "5603344000017";
+  // QA round-2: uses a VALID GS1 check digit - the SEAM 3 misread guard now suppresses the floor for
+  // bad-check-digit GTINs, and a real scanned code from this prefix would carry a valid check digit.
+  const FLOORED_GTIN = "5603344000016";
 
   it("P2: a cap-blocked decode still carries the prefix floor (never a fully-unknown 429)", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted -> paid ladder is blocked
@@ -357,6 +359,70 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     if (out.kind !== "computed") throw new Error("unreachable");
     expect(out.payload.providerNames).toContain("tire-corpus");
     expect(out.payload.decision.status).toBe("verified");
+  });
+
+  // QA ROUND-2 SEAM 1 (live-proven bypass, 2026-07-16): the persisted-cache short-circuit replayed a
+  // stored "result" VERBATIM - a poisoned cache entry (a textbook GS1 EXAMPLE barcode or a scanner-
+  // MISREAD GTIN that had earlier been cached as a confident "verified" identity) short-circuited BEFORE
+  // any misread/example re-check, so it kept fabricating an identity even after the round-1 rung-0 seam
+  // guards. FIX: re-validate a "result" cache hit; if the code is a misread OR the cached identity is an
+  // example/test row, treat it as a cache MISS (recompute honestly). A LEGIT cached verified code must
+  // still replay verified at zero cost (cache speed preserved).
+  function makeCachedResult(code: string, productName: string, brand: string, status = "verified"): PersistedDecode {
+    const body = {
+      mode: "decode",
+      providerNames: ["go-upc"],
+      results: [{ productName, brand, category: "", confidence: 0.97, needsHumanReview: false, sourceUrls: [], verifiedFacts: [], primaryBarcode: code }],
+      evidences: [{ verified: true, strength: "fetched_source", matchedCode: code, matchedSources: ["cache"], reason: "cached" }],
+      decision: { status, confidence: 0.97, reason: "cached prior decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true },
+      reasonCode: "verified",
+      reasonText: "cached prior decode",
+      debug: { ladderPath: "goupc" },
+    };
+    return { code, kind: "result", payload: JSON.stringify(body), tier: status, sourceTier: "paid_rung", createdAt: Date.now() - 3600_000 };
+  }
+
+  it("SEAM 1: a poisoned EXAMPLE code cached as 'verified' is NOT replayed verified (falls through honestly)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    // 4006381333931 is a textbook GS1 EXAMPLE barcode ("Test Shopidoo") on the blocklist. A prior run
+    // wrongly cached it as a confident "verified" identity - it must NOT be served verified now.
+    vi.mocked(getPersistedDecode).mockResolvedValueOnce(makeCachedResult("4006381333931", "Test Shopidoo", "Shopidoo"));
+
+    const out = await runDecodePipeline(makeReq("4006381333931"));
+    expect(out.kind).not.toBe("persisted"); // the poisoned cache hit was rejected, not replayed
+    if (out.kind === "computed") {
+      expect(out.payload.decision.status).not.toBe("verified");
+      expect(JSON.stringify(out.payload.results)).not.toMatch(/Shopidoo/i);
+    }
+  }, 30000);
+
+  it("SEAM 1: a MISREAD code cached as 'verified' is NOT replayed verified (bad check digit)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    // 012345678900 is UPC-A-shaped but its GS1 check digit FAILS -> a likely scanner misread. Even a
+    // cached "verified" identity for it must not be served.
+    vi.mocked(getPersistedDecode).mockResolvedValueOnce(makeCachedResult("012345678900", "Fabricated Product", "Healthyholics"));
+
+    const out = await runDecodePipeline(makeReq("012345678900"));
+    expect(out.kind).not.toBe("persisted");
+    if (out.kind === "computed") {
+      expect(out.payload.decision.status).not.toBe("verified");
+      expect(JSON.stringify(out.payload.results)).not.toMatch(/Healthyholics/i);
+    }
+  }, 30000);
+
+  it("SEAM 1 REGRESSION: a LEGIT cached verified code STILL replays verified at zero cost (cache speed preserved)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    // A real, non-example, valid-check-digit code cached as verified must replay from the cache verbatim.
+    vi.mocked(getPersistedDecode).mockResolvedValueOnce(makeCachedResult("00900000000003", "Falken Wildpeak A/T3W 265/70R17", "Falken"));
+
+    const out = await runDecodePipeline(makeReq("900000000003"));
+    expect(out.kind).toBe("persisted"); // replayed from cache, no recompute
+    if (out.kind === "persisted") {
+      expect((out.body.decision as { status?: string }).status).toBe("verified");
+      expect(JSON.stringify(out.body.results)).toMatch(/Falken/i);
+    }
+    // No paid provider was contacted - the cache replay is free.
+    expect(hitAnAiProvider()).toBe(false);
   });
 
   // FREE-RUNGS-OUTSIDE-THE-PAID-CAP (bug fix, 2026-07-12 review): UPCitemdb / Open Food Facts must
