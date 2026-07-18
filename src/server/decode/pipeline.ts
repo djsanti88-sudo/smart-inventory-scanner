@@ -492,6 +492,18 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // (still appears + counts as Unidentified); a VALID GTIN is completely unaffected.
   const misread = isLikelyMisreadGtin(code);
 
+  // QA ROUND-3 FIX #5 (live-proven bypass on 1bfa6fe): a documentation/example GTIN with a VALID GS1
+  // check digit (4006381333931 "Test Shopidoo", 5901234123457, 012345678905 - all on
+  // EXAMPLE_BARCODE_BLOCKLIST, plus every degenerate all-zero/all-same/sequential shape) passes the
+  // round-2 misread guard (its check digit is valid, so isLikelyMisreadGtin is false) and, when the free
+  // rung-0 corpus/retail/learned peeks all correctly reject it, previously ESCALATED to the LIVE PAID
+  // Go-UPC rung - which returns verified-strength junk for these textbook codes and auto-counted a
+  // fabricated identity. Computed once here (mirroring `misread`) with the CODE-ONLY signature
+  // (isExampleOrTestRow(code, "", "") checks the degenerate-shape + blocklist paths, never a name/brand),
+  // and read at the paid-ladder entry inside computeDecode to STOP the ladder before any paid rung runs.
+  // A non-example code is completely unaffected (this is a KNOWN-blocklist / degenerate-shape gate only).
+  const isExample = isExampleOrTestRow(code, "", "");
+
   // SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE FIRST (Task 6: moved to the TOP of the pipeline, ahead of
   // the L2 persisted-decode peek below). An EXACT trusted-corpus barcode (or, for SKU-shaped codes, an
   // exact part number) resolves with NO AI call and NO page fetch - a FREE win. It must run BEFORE the
@@ -750,6 +762,43 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // real product, a repeat scan in this server returns instantly with NO AI/Firecrawl spend. Only a
   // SUCCESS (a usable product) is cached - a failure stays retryable. Skipped under E2E (mock-only).
   const computeDecode = async (): Promise<DecodePayload> => {
+    // QA ROUND-3 FIX #5 (live-proven bypass, PRE-PAID-RUNG GATE): computeDecode is only ever reached
+    // after the outer free rung-0 corpus/retail/learned peeks have MISSED (they now reject example/test
+    // rows via round-1). If the scanned CODE itself is a known documentation/example barcode or a
+    // degenerate placeholder shape (isExample, computed once at the top of runDecodePipeline), STOP here
+    // - BEFORE Plan D's internal paid legs and BEFORE the first paid ladder rung (goupc). It settles an
+    // honest, no-identity needs_review: the code still appears + counts as an Unidentified row (TOP-LEVEL
+    // LAW), never a fabricated verified/suggested identity, and no paid provider is ever consulted (owner
+    // is cost-sensitive). This is the PRIMARY fix; a defense-in-depth guard at the paid-rung SETTLE point
+    // (see the isExampleOrTestRow check on the ladder win below) catches any path this pre-gate misses.
+    if (isExample) {
+      const reason = sanitizeCustomerReason(
+        "This looks like an example or test barcode, not a real product. Enter the item manually if needed.",
+        { status: "needs_review" },
+      );
+      const decision: DecodeDecision = {
+        status: "needs_review",
+        confidence: 0,
+        reason,
+        evidenceStrength: "none",
+        exactCodeEvidenceVerifiedByApp: false,
+        crossCheck: { decision: "single_provider", confidence: 0, reason: "Example/test barcode - not looked up.", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+      };
+      return {
+        mode: "decode" as const,
+        providerNames: ["example-gate"],
+        results: [],
+        evidences: [],
+        providerStatuses: [{ provider: "example-gate", status: "skipped" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false, errorCode: "example_or_test_barcode" }],
+        decision,
+        reasonCode: "no_result",
+        reasonText: reason,
+        timedOut: false,
+        debug: { providersAttempted: ["example-gate"], evidenceStrengths: [], sourceCounts: [], corroborationPath: "example_or_test_barcode", ladderPath: "none", ladderReasons: [{ rung: "example-gate", reason: "example/test barcode - paid rungs skipped" }], aiCalled: false, pageFetched: false, cached: false },
+        sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+      };
+    }
+
     // Task 6: the SERVER-ONLY DETERMINISTIC TIRE KNOWLEDGE peek that used to sit here has moved to the
     // TOP of runDecodePipeline (ahead of the L2 persisted-decode peek) so a corpus hit can heal a stale
     // no_result_receipt. computeDecode is only ever reached on a corpus MISS now, so no corpus check
@@ -1223,6 +1272,30 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       ladderRun = freeRun;
     }
     let win = ladderRun.outcome?.payload as LadderPayload | undefined;
+
+    // QA ROUND-3 FIX #5 DEFENSE-IN-DEPTH (secondary to the pre-paid-rung gate at the top of
+    // computeDecode): if any paid rung STILL settled a decode whose CODE or decoded identity is an
+    // example/test row, never let it stand as verified/suggested. This catches an example code that
+    // reached a paid rung via a path the pre-gate missed (e.g. a future rung added ahead of the gate,
+    // or a non-blocklisted example the model itself names as a "test"/"sample" product). It only ever
+    // DOWNGRADES to needs_review with an honest reason - never upgrades or blocks a legitimate result.
+    if (win && (win.decision.status === "verified" || win.decision.status === "suggested")) {
+      const winResult = win.results[0];
+      if (isExampleOrTestRow(code, winResult?.productName ?? "", winResult?.brand)) {
+        const reason = sanitizeCustomerReason(
+          "This looks like an example or test barcode, not a real product. Enter the item manually if needed.",
+          { status: "needs_review" },
+        );
+        win = {
+          ...win,
+          results: [],
+          evidences: [],
+          decision: { ...win.decision, status: "needs_review", confidence: 0, reason, exactCodeEvidenceVerifiedByApp: false },
+          reasonCode: "no_result",
+          reasonText: reason,
+        };
+      }
+    }
 
     // PAID-VERIFIED CONTRADICTION GUARD (live-proven bug: the salmon/beer regression). A paid rung
     // (goupc/fetchv2/gpt) SELF-REPORTS "verified" for an identity; independently, the retail corpus
