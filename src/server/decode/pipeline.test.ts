@@ -1509,7 +1509,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(outcome.payload.decision.status).not.toBe("verified");
     });
 
-    it("the rejected-example reason stays HONEST (never leaks the blocklist / 'test row' reasoning)", async () => {
+    it("the rejected-example reason stays HONEST (never leaks the blocklist / 'test row' INTERNAL reasoning)", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
       vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
@@ -1524,7 +1524,12 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
       expect(outcome.kind).toBe("computed");
       if (outcome.kind !== "computed") throw new Error("unreachable");
-      expect(outcome.payload.decision.reason).not.toMatch(/example|blocklist|test.?row|demo/i);
+      // QA ROUND-3 #5 (owner-ratified reason): the example-gate now surfaces an explicit customer-safe
+      // sentence ("This looks like an example or test barcode, not a real product. Enter the item
+      // manually if needed.") - the plain words "example"/"test barcode" in a customer sentence are
+      // honest, NOT a leak. The anti-leak gate here now forbids only the INTERNAL mechanism tokens
+      // (blocklist, "test row", demo, the fake product name) - never the customer-facing phrasing.
+      expect(outcome.payload.decision.reason).not.toMatch(/blocklist|test.?row|demo|test shopidoo/i);
     });
 
     it("REGRESSION: a NORMAL retail row (not example/test) still settles at rung 0 exactly as before", async () => {
@@ -1735,5 +1740,151 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
       expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
     });
+  });
+
+  // QA ROUND-3 #5 (live-proven bypass on 1bfa6fe): the FREE rung-0 guards (round-1) and the L2 cache
+  // re-validation (round-2) correctly reject example/test barcodes, but a code with a VALID GS1 check
+  // digit that is nonetheless a documentation/example GTIN (4006381333931 / 5901234123457 /
+  // 012345678905, all on EXAMPLE_BARCODE_BLOCKLIST) still ESCALATED to the LIVE PAID Go-UPC rung, which
+  // returns verified-strength junk for these textbook codes ("Stabilo"/"Renault"/"Castrol") and the app
+  // auto-counted it. FIX: a PRE-PAID-RUNG gate stops the ladder before any paid rung runs for a known
+  // example/test code, settling an honest no-identity needs_review (never verified/suggested), saving
+  // the paid call too. The code STILL appears + counts as Unidentified (TOP-LEVEL LAW).
+  describe("QA round-3 #5: example/test barcodes never reach a paid rung or settle verified", () => {
+    // Local denylist copy (the BUG #14 describe's DENYLIST_RE is scoped to that block): the honest
+    // example-gate reason must never leak an internal rung/provider/skip-code token.
+    const DENYLIST_RE = /upcitemdb|openfoodfacts|goupc|go-upc|fetchv2|fetch v2|gpt[-_ ]?5\.5|gpt-5\.5-ladder|gpt_call_failed|gpt_aborted_at_cap|no_api_key|non_public_code_type|e2e_mode|budget_exceeded|prior_status_already_decided|\bladder\b|parallel:|tire-corpus|retail-corpus|learned-products/i;
+    const GOUPC_API = "go-upc.com/api";
+    // The 3 live-proven example codes. All have VALID GS1 check digits (so the round-2 misread guard
+    // does NOT catch them - this gate is what does), and all are on EXAMPLE_BARCODE_BLOCKLIST.
+    const EXAMPLE_CODES = ["4006381333931", "5901234123457", "012345678905"] as const;
+
+    // A fetch stub that WOULD return a verified Go-UPC identity if the paid rung ever ran, plus a
+    // verified UPCitemdb / Open Food Facts hit - so if ANY provider is consulted for an example code
+    // the test would see a fabricated identity or a paid host call. The gate must make sure it doesn't.
+    function stubEverythingWouldVerify(code: string) {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("go-upc.com")) {
+          return new Response(
+            JSON.stringify({ inferred: false, product: { name: "Fabricated Example Product", brand: "FabricatedBrand", category: "Misc", barcode: code, specs: [] } }),
+            { status: 200 },
+          );
+        }
+        if (url.includes(UPCITEMDB_HOST)) {
+          return new Response(JSON.stringify({ code: "OK", items: [{ title: "Fabricated Example Product", brand: "FabricatedBrand", category: "Misc" }] }), { status: 200 });
+        }
+        if (url.includes(OFF_HOST)) {
+          return new Response(JSON.stringify({ status: 1, product: { product_name: "Fabricated Example Product", brands: "FabricatedBrand" } }), { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    }
+
+    const paidGoUpcCalls = () => fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => u.includes(GOUPC_API));
+
+    for (const code of EXAMPLE_CODES) {
+      it(`${code}: the paid Go-UPC rung is NEVER called and the decode never settles verified/suggested`, async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap; the point is the pre-gate, not a block
+        process.env.GO_UPC_API_KEY = "test-key"; // Go-UPC is genuinely payable - the gate must still stop it
+        process.env.OPENAI_API_KEY = "test-key"; // GPT rung genuinely runnable too - must also be gated out
+        stubEverythingWouldVerify(code);
+
+        const outcome = await runDecodePipeline(makeReq(code));
+
+        expect(outcome.kind).toBe("computed");
+        if (outcome.kind !== "computed") throw new Error("unreachable");
+        // The PAID Go-UPC API endpoint was NEVER contacted for an example code.
+        expect(paidGoUpcCalls()).toHaveLength(0);
+        // No paid AI provider host was contacted at all.
+        expect(hitAnAiProvider()).toBe(false);
+        // The decode never settles verified OR suggested - it is an honest no-identity needs_review.
+        expect(outcome.payload.decision.status).not.toBe("verified");
+        expect(outcome.payload.decision.status).not.toBe("suggested");
+        // No fabricated identity leaked into the results.
+        expect(JSON.stringify(outcome.payload.results)).not.toMatch(/Fabricated|FabricatedBrand/i);
+        // An honest, non-empty, customer-safe reason is set (no internal rung/denylist tokens; #14 intact).
+        expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+        expect(outcome.payload.reasonText).not.toMatch(/fetchv2|gpt-5\.5|goupc|upcitemdb|openfoodfacts/i);
+        expect(DENYLIST_RE.test(outcome.payload.reasonText)).toBe(false);
+        expect(outcome.payload.decision.reason.length).toBeGreaterThan(0);
+        expect(DENYLIST_RE.test(outcome.payload.decision.reason)).toBe(false);
+      }, 30000);
+    }
+
+    it("TOP-LEVEL LAW: an example code still produces a COUNTABLE Unidentified row (appears + counts)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      stubEverythingWouldVerify("4006381333931");
+
+      const outcome = await runDecodePipeline(makeReq("4006381333931"));
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // The pipeline returns a settled decode payload (mode "decode") the client renders + counts as an
+      // Unidentified row - it is NOT a cap block, NOT a persisted receipt, NOT a thrown error.
+      expect(outcome.payload.mode).toBe("decode");
+      expect(outcome.payload.decision.status).not.toBe("verified");
+    }, 30000);
+
+    it("DEFENSE-IN-DEPTH: a paid-rung result whose decoded NAME is a test/sample product is not settled verified (code not on blocklist, so the pre-gate misses it)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      // VALID_GTIN is NOT on EXAMPLE_BARCODE_BLOCKLIST, so the pre-paid-rung gate does NOT fire and the
+      // code genuinely reaches the paid Go-UPC rung. Go-UPC returns a VERIFIED-strength result whose
+      // NAME contains a whole-word test/sample marker ("sample product") - isExampleOrTestRow(code,
+      // name, brand) is true on the identity even though it is false on the code alone. The
+      // defense-in-depth guard at the paid-rung settle must downgrade it out of verified/suggested.
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes("go-upc.com")) {
+          return new Response(
+            JSON.stringify({ inferred: false, product: { name: "Acme Sample Product 12oz", brand: "Acme", category: "Misc", barcode: VALID_GTIN, specs: [] } }),
+            { status: 200 },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // The pre-gate did NOT fire (code is not blocklisted) - the paid Go-UPC rung genuinely ran...
+      const rungs = (outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined ?? []).map((r) => r.rung);
+      expect(rungs).toContain("goupc");
+      // ...but the defense-in-depth guard downgraded the test-named identity out of verified/suggested.
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      expect(outcome.payload.decision.status).not.toBe("suggested");
+      expect(JSON.stringify(outcome.payload.results)).not.toMatch(/Sample Product/i);
+      expect(outcome.payload.reasonText.length).toBeGreaterThan(0);
+    }, 30000);
+
+    it("REGRESSION: a NORMAL valid corpus-miss GTIN STILL runs the paid Go-UPC rung (gate only affects example codes)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      // VALID_GTIN "900000000003" is a real-shaped, valid-check-digit, non-example code absent from every
+      // fixture, so it misses the free corpus/retail/learned peeks and reaches the paid ladder as before.
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 }); // genuine miss, but the CALL happened
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      const rungs = (outcome.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined ?? []).map((r) => r.rung);
+      // The paid Go-UPC rung genuinely RAN for a normal code (proving the gate did not over-fire).
+      expect(rungs).toContain("goupc");
+      expect(fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => u.includes(GOUPC_API)).length).toBeGreaterThan(0);
+    }, 30000);
   });
 });
