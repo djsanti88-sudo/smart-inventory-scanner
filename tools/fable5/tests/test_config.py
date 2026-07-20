@@ -32,6 +32,27 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.checks[0].check_id, "unit")
             self.assertEqual(config.checks[0].resource, "light")
 
+    def test_default_docs_files_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "fable5.toml").write_text(MINIMAL_CONFIG, encoding="utf-8")
+            config = load_config(root)
+            self.assertEqual(
+                config.docs_files,
+                ["CLAUDE.md", "docs/ARCHITECTURE.md", "docs/COMMANDS.md"],
+            )
+
+    def test_custom_docs_files_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            custom = MINIMAL_CONFIG + """
+[docs]
+files = ["README.md", "docs/GUIDE.md"]
+"""
+            (root / "fable5.toml").write_text(custom, encoding="utf-8")
+            config = load_config(root)
+            self.assertEqual(config.docs_files, ["README.md", "docs/GUIDE.md"])
+
     def test_rejects_duplicate_check_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -19,6 +19,7 @@ from .discovery import (
     select_agents,
     workspace_fingerprint,
 )
+from .docs_check import check_docs
 from .experts import run_experts
 from .models import RunReport
 from .plan_review import render_plan_markdown, review_plan
@@ -114,6 +115,7 @@ async def _run(root: Path, config: FableConfig, config_path: Path, args: argpars
             only=set(args.only) if args.only else None,
             dry_run=args.dry_run,
         )
+        results.extend(check_docs(root, config.docs_files, set(inventory.package_scripts)))
         if args.with_experts:
             print(
                 f"Launching {len(agents)} Fable expert review(s) with "
