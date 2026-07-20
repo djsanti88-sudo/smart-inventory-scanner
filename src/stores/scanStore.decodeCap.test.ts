@@ -46,6 +46,34 @@ describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
     expect(calls.filter((u) => u.includes("/api/ai-lookup")).length).toBe(1); // no retry on daily_cap
   });
 
+  it("account_daily_cap 429 (F4): no retry, honest ACCOUNT-scoped reason, exactly one fetch call", async () => {
+    const store = aiOnStore();
+    const review = openReview(store, "086699998540");
+
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: string) => {
+      calls.push(String(url));
+      return new Response(
+        JSON.stringify({ error: "Your daily AI lookup cap is reached (500/500).", reasonCode: "account_daily_cap" }),
+        { status: 429 }
+      );
+    }) as unknown as typeof fetch;
+
+    try {
+      await store.getState().liveDecode(review.id);
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    const r = store.getState().needsReviewQueue.find((q) => q.id === review.id);
+    // Account-scoped honest copy - NOT a generic retry-promising "provider error", NOT the global cap copy.
+    expect(r?.reason).toContain("Your account's daily AI lookup cap is reached");
+    expect(r?.reason).toContain("Retry after the cap resets");
+    expect(r?.reason).not.toContain("provider error");
+    expect(calls.filter((u) => u.includes("/api/ai-lookup")).length).toBe(1); // no retry on account cap
+  });
+
   it("daily_cap 429 WITH a known prefix: the row is named by the prefix floor, reason stays the honest cap copy (P2)", async () => {
     const store = aiOnStore();
     // Prefix 5603344 has a real prefixIndex dominant ("general", a Continental-family member), so the

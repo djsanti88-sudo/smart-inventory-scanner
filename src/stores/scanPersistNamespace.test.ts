@@ -18,10 +18,33 @@ describe("persistKeyForUid", () => {
 });
 
 describe("hasLegacyBlob", () => {
-  it("reports whether the legacy global blob exists", () => {
+  it("is false when no legacy blob exists at all", () => {
     const s = new MemStorage();
     expect(hasLegacyBlob(s as unknown as Storage)).toBe(false);
+  });
+
+  it("N2: is FALSE for an effectively-empty blob (sign-out residue: no scans/counts/reviews)", () => {
+    const s = new MemStorage();
+    // What resetForSignOut's wipe write deposits: session/snapshot residue but empty tenant collections.
+    s.setItem(
+      "sis-scan-v1",
+      JSON.stringify({ state: { scanFeed: [], finalCounts: [], needsReviewQueue: [], sessionId: "", currentSession: null }, version: 8 }),
+    );
+    expect(hasLegacyBlob(s as unknown as Storage)).toBe(false);
+    // Also false for a bare "{}" (no state, nothing to adopt).
     s.setItem("sis-scan-v1", "{}");
+    expect(hasLegacyBlob(s as unknown as Storage)).toBe(false);
+  });
+
+  it("N2: is TRUE when the blob carries real tenant data (any of scans / counts / reviews)", () => {
+    const s = new MemStorage();
+    s.setItem("sis-scan-v1", JSON.stringify({ state: { scanFeed: [{ id: "e1" }], finalCounts: [], needsReviewQueue: [] }, version: 8 }));
+    expect(hasLegacyBlob(s as unknown as Storage)).toBe(true);
+  });
+
+  it("N2: stays TRUE (conservative) for a present-but-unreadable blob", () => {
+    const s = new MemStorage();
+    s.setItem("sis-scan-v1", "{not valid json");
     expect(hasLegacyBlob(s as unknown as Storage)).toBe(true);
   });
 });

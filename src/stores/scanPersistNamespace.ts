@@ -8,9 +8,28 @@ export function persistKeyForUid(uid: string | null): string {
   return uid ? `sis-scan-${uid}` : LEGACY_KEY;
 }
 
-/** Whether the legacy pre-account global blob exists on this browser (drives the adopt banner). */
+/**
+ * Whether the legacy pre-account global blob holds MEANINGFUL tenant data worth adopting (drives the
+ * adopt banner). N2: sign-out's wipe write deposits an effectively-empty blob (session/snapshot residue
+ * only, no scans/counts/reviews) into sis-scan-v1, which used to make the banner appear on a browser with
+ * nothing to adopt. So a blob that parses cleanly but has empty-or-absent scanFeed AND finalCounts AND
+ * needsReviewQueue is treated as ABSENT. Conservative on failure: a missing key, or a blob that cannot be
+ * parsed, still counts as present (we never suppress the banner for something we could not inspect).
+ */
 export function hasLegacyBlob(storage: Storage): boolean {
-  return storage.getItem(LEGACY_KEY) !== null;
+  const raw = storage.getItem(LEGACY_KEY);
+  if (raw === null) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return true; // unreadable but present: conservatively surface it rather than silently hide it
+  }
+  const state = (parsed as { state?: { scanFeed?: unknown[]; finalCounts?: unknown[]; needsReviewQueue?: unknown[] } })?.state;
+  const hasScans = Array.isArray(state?.scanFeed) && state.scanFeed.length > 0;
+  const hasCounts = Array.isArray(state?.finalCounts) && state.finalCounts.length > 0;
+  const hasReviews = Array.isArray(state?.needsReviewQueue) && state.needsReviewQueue.length > 0;
+  return hasScans || hasCounts || hasReviews;
 }
 
 /**

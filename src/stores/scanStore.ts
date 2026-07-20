@@ -120,15 +120,20 @@ export interface ProductDeleteBackup {
  * promise a retry that will never happen.
  */
 export class DailyCapReachedError extends Error {
-  readonly reasonCode = "daily_cap" as const;
+  readonly reasonCode: "daily_cap" | "account_daily_cap";
   /** P2 (Task 8): the $0 prefix floor the server threaded through the 429 body when the GS1 company
    *  prefix knows the company, so the cap-blocked row is named "<Brand> / product unconfirmed" instead
    *  of a bare "Unidentified item". Undefined when the code has no known prefix (unchanged behavior). */
   readonly floor?: PrefixFloorResult;
-  constructor(message = "Daily AI lookup cap reached", floor?: PrefixFloorResult) {
+  /** F1/F4: distinguishes the GLOBAL server cap ("daily_cap") from the PER-ACCOUNT cap
+   *  ("account_daily_cap", route.ts:311/331) so the row can carry the honest, account-specific copy. */
+  readonly accountScoped: boolean;
+  constructor(message = "Daily AI lookup cap reached", floor?: PrefixFloorResult, accountScoped = false) {
     super(message);
     this.name = "DailyCapReachedError";
     this.floor = floor;
+    this.accountScoped = accountScoped;
+    this.reasonCode = accountScoped ? "account_daily_cap" : "daily_cap";
   }
 }
 
@@ -541,6 +546,11 @@ export interface ScanState {
   setHasHydrated: (v: boolean) => void;
   /** Set the signed-in business context (Firebase backend). Enables cloud sync + drains the queue. */
   setBusinessContext: (businessId: string, userId: string) => void;
+  /** Pre-sign-out drain guard (F1): if the pending-sync queue is non-empty, attempt one awaited cloud
+   *  drain (wrapped so a network failure cannot throw out of sign-out), then return how many items STILL
+   *  could not sync. Returns 0 for an empty queue without touching the drain. The UI uses the count to
+   *  decide the honest confirm copy - resetForSignOut itself stays a full, unconditional wipe. */
+  prepareSignOut: () => Promise<number>;
   /** Sign-out: wipes tenant state to the anon baseline, clears the selected-business key, removes the
    *  signed-out user's per-uid localStorage key, and re-points persist at the anon key. */
   resetForSignOut: () => void;
@@ -1166,6 +1176,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
       },
 
+      prepareSignOut: async () => {
+        // F1: never destroy unsynced work silently. An empty queue is the common case - return 0 WITHOUT
+        // invoking the drain at all (no needless network on a clean sign-out). Otherwise attempt exactly
+        // one awaited drain via the established retry path (force=true so an offline flag does not skip
+        // it), then report how many items STILL could not sync so the UI can warn honestly. The whole
+        // drain is wrapped so a network/provider failure can never throw out of the sign-out handler.
+        if (get().pendingSyncQueue.length === 0) return 0;
+        try {
+          // Cloud path: syncPendingCloud returns the awaitable mutex-chained drain. Mock/local path:
+          // syncPending(true) is synchronous, so there is nothing to await - the queue is already
+          // reconciled by the time this returns. Either way we then re-read the queue length.
+          if (cloudBackend) {
+            await syncPendingCloud(true);
+          } else {
+            get().syncPending(true);
+          }
+        } catch {
+          // Swallow: a failed drain must not abort sign-out. The count below reflects what survived.
+        }
+        return get().pendingSyncQueue.length;
+      },
+
       resetForSignOut: () => {
         // Capture identity BEFORE the reset wipes it: the per-uid key must be removed and the persist
         // middleware re-pointed to the anon key, or the fail-soft coalesced storage would simply
@@ -1199,6 +1231,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           pendingSyncQueue: [],
           syncedScanEventIds: [],
           lastSyncError: null,
+          // N2: the wipe write also deposits tenant-scoped SESSION IDENTITY + variance SNAPSHOTS into the
+          // persisted blob. Clear them too so a signed-out browser holds no residue of the prior tenant's
+          // session/report data (and does not spuriously look "non-empty" to hasLegacyBlob). countSnapshots
+          // is the variance ring buffer; currentSession/sessionId are the active-session identity.
+          // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
+          countSnapshots: [],
+          currentSession: null,
+          sessionId: "",
         });
         if (typeof window !== "undefined" && window.localStorage) {
           try {
@@ -2301,6 +2341,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               const body = await res.json().catch(() => ({}) as { reasonCode?: string; floor?: PrefixFloorResult });
               // P2: thread the server's $0 prefix floor into the error so the cap-blocked row is named
               // "<Brand> / product unconfirmed" from the GS1 company prefix, not a bare "Unidentified item".
+              // F4: the per-account cap (route.ts:311/331) is a distinct 429 the client must ALSO honor -
+              // it is not a self-inflicted rate limit, so it must NOT retry. Route it to Needs Review with
+              // its own honest account-scoped copy (accountScoped=true drives the message below).
+              if (body?.reasonCode === "account_daily_cap") throw new DailyCapReachedError(undefined, body?.floor, true);
               if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError(undefined, body?.floor);
               const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
               await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
@@ -2964,7 +3008,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // existing generic copy unchanged.
           const failReason =
             e instanceof DailyCapReachedError
-              ? "Daily AI lookup cap reached. This scan is saved and counted as unverified. Retry after the cap resets."
+              ? e.accountScoped
+                ? "Your account's daily AI lookup cap is reached. This scan is saved and counted as unverified. Retry after the cap resets."
+                : "Daily AI lookup cap reached. This scan is saved and counted as unverified. Retry after the cap resets."
               : e instanceof DecodeAbortedError
                 ? "Decode is taking longer than expected - it keeps working in the background; check Needs Review shortly"
                 : `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${

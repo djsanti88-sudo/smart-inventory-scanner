@@ -58,7 +58,18 @@ export default function BusinessPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-zinc-900">Your businesses</h1>
         <button
-          onClick={async () => { useScanStore.getState().resetForSignOut(); await signOut(); router.replace("/login"); }}
+          onClick={async () => {
+            // F1: attempt one awaited drain first, then warn HONESTLY if unsynced work would be lost.
+            const left = await useScanStore.getState().prepareSignOut();
+            const message =
+              left === 0
+                ? "Log out now? Your counts are saved - you can sign back in any time to keep going."
+                : `${left} scan${left === 1 ? "" : "s"} could not sync to the cloud yet. Signing out now will discard ${left === 1 ? "it" : "them"} permanently. Sign out anyway?`;
+            if (!window.confirm(message)) return; // cancel aborts sign-out entirely: no reset, no signOut
+            useScanStore.getState().resetForSignOut();
+            await signOut();
+            router.replace("/login");
+          }}
           className="text-sm text-zinc-500 hover:underline"
           data-testid="sign-out"
         >
