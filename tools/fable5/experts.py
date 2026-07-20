@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -10,7 +11,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .ledger import (
+    apply_run,
+    fingerprint_for,
+    get_cached_response,
+    next_run,
+    open_ledger,
+    put_cached_response,
+)
 from .models import CheckResult
+from .verify import CallBudget, VerifiedFinding, verify_findings
 
 # Belt-and-suspenders budget cap on every expert call. A stray metered API key must never be
 # able to run up an unbounded bill through this path; see docs/reviews/BILLING_TRUTH.md.
@@ -20,11 +30,29 @@ _MAX_BUDGET_USD = "0.50"
 # `claude auth status` call in tests. Never set in production code paths.
 _AUTH_STATUS_CMD_ENV = "FABLE5_AUTH_STATUS_CMD"
 
+# Test seam: point this env var at a stub command (split on spaces) to replace the real `claude`
+# executable + fixed flags in build_claude_command (and the refute command builder in verify.py).
+# The per-call args (model, prompt, effort, etc.) are still appended after the override. Never set
+# in production code paths; see the matching _AUTH_STATUS_CMD_ENV seam above.
+_CLAUDE_CMD_ENV = "FABLE5_CLAUDE_CMD"
+
+# Per-run ceiling on total AI calls (expert calls + individual refutes + the batched refute +
+# escalation calls, combined). Shared across every angle in a run via a single CallBudget.
+_PER_RUN_CALL_CEILING = 30
+
+# Every AI-call ceiling that gets tripped mid-run must record this exact, honest reason string
+# (never a silent drop). Kept as one constant so experts.py and verify.py stay byte-identical.
+CEILING_REASON = "AI call ceiling reached; partial review"
+
 
 def build_claude_command(agent: str, model: str, prompt: str, effort: str = "high") -> list[str]:
-    executable = shutil.which("claude") or "claude"
+    override = os.environ.get(_CLAUDE_CMD_ENV)
+    if override:
+        base = override.split(" ")
+    else:
+        base = [shutil.which("claude") or "claude"]
     return [
-        executable,
+        *base,
         "--print",
         "--agent",
         agent,
@@ -43,6 +71,85 @@ def build_claude_command(agent: str, model: str, prompt: str, effort: str = "hig
         _MAX_BUDGET_USD,
         prompt,
     ]
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One structured finding returned by an expert agent, per the JSON findings contract.
+
+    This is intentionally a DIFFERENT type from `models.Finding` (the unrelated plan-review
+    finding shape). Keeping two same-named-but-different Finding classes in separate modules is
+    the correct, intended resolution here: verify.py and ledger.py import THIS one.
+    """
+
+    severity: str
+    file: str
+    line: int
+    claim: str
+    evidence: str
+    fix: str
+    confidence: float
+
+
+def _clamp_confidence(value: object) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        number = 0.0
+    return max(0.0, min(1.0, number))
+
+
+_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", re.DOTALL)
+
+
+def _strip_code_fences(text: str) -> str:
+    stripped = text.strip()
+    match = _FENCE_RE.match(stripped)
+    if match:
+        return match.group(1).strip()
+    return stripped
+
+
+def parse_findings(envelope_result_text: str) -> list[Finding] | None:
+    """Parse the JSON findings contract out of an expert's raw result text.
+
+    Strips markdown code fences before json.loads. Returns None on ANY parse failure (missing
+    "findings" key, invalid JSON even after fence-strip, wrong types) so the caller can mark the
+    angle "warning"/"unparseable output" with 0 findings - never a silent pass.
+    """
+    candidate = _strip_code_fences(envelope_result_text)
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    raw_findings = payload.get("findings")
+    if not isinstance(raw_findings, list):
+        return None
+    findings: list[Finding] = []
+    for item in raw_findings:
+        if not isinstance(item, dict):
+            return None
+        severity = item.get("severity")
+        if severity not in {"blocker", "major", "minor"}:
+            severity = "minor"
+        try:
+            line = int(item.get("line", 0))
+        except (TypeError, ValueError):
+            line = 0
+        findings.append(
+            Finding(
+                severity=severity,
+                file=str(item.get("file", "")),
+                line=line,
+                claim=str(item.get("claim", "")),
+                evidence=str(item.get("evidence", "")),
+                fix=str(item.get("fix", "")),
+                confidence=_clamp_confidence(item.get("confidence", 0.0)),
+            )
+        )
+    return findings
 
 
 @dataclass(frozen=True)
@@ -155,6 +262,13 @@ Changed files:
 
 Deterministic evidence:
 {evidence}
+
+Respond ONLY with a single JSON object matching this exact contract, and nothing else (no prose
+before or after, no extra keys):
+{{"findings": [{{"severity": "blocker|major|minor", "file": "<repo path>", "line": <int>,
+"claim": "<one sentence>", "evidence": "<quote/line refs>", "fix": "<smallest safe fix>",
+"confidence": <0..1>}}]}}
+If you found nothing, respond with {{"findings": []}}.
 """
 
 
@@ -179,6 +293,109 @@ def _success_reason(envelope: Envelope, *, allow_paid: bool) -> tuple[str, str]:
     return "passed", f"Fable expert completed; {tokens}"
 
 
+def _findings_status_and_reason(
+    confirmed: list[VerifiedFinding],
+    contested: list[VerifiedFinding],
+    unverified: list[VerifiedFinding],
+    suppressed_count: int,
+    promotions_count: int,
+) -> tuple[str, str]:
+    confirmed_blockers = [item for item in confirmed if item.severity == "blocker"]
+    parts = []
+    if confirmed_blockers:
+        parts.append(f"{len(confirmed)} confirmed ({len(confirmed_blockers)} blocker)")
+    else:
+        parts.append(f"{len(confirmed)} confirmed")
+    if contested:
+        parts.append(f"{len(contested)} contested")
+    if suppressed_count:
+        parts.append(f"{suppressed_count} suppressed")
+    if unverified:
+        parts.append(f"{len(unverified)} unverified")
+    reason = "findings: " + ", ".join(parts)
+    if promotions_count:
+        reason += f", promotions: {promotions_count}"
+    if confirmed_blockers:
+        return "failed", reason
+    if confirmed or contested or unverified:
+        return "warning", reason
+    return "passed", reason
+
+
+async def _apply_findings_pipeline(
+    *,
+    report_dir: Path,
+    agent: str,
+    findings: list[Finding],
+    prompt: str,
+    call_budget: CallBudget,
+    ledger_conn,
+    run_no: int,
+) -> tuple[str, str]:
+    """Verify findings, apply the ledger, write report_dir/findings/<agent>.json, and return
+    the (status, reason) pair that overrides the plain success reason for this angle."""
+    verified = await verify_findings(findings, prompt, call_budget)
+    stamped = [
+        VerifiedFinding(
+            severity=item.severity,
+            file=item.file,
+            line=item.line,
+            claim=item.claim,
+            evidence=item.evidence,
+            fix=item.fix,
+            confidence=item.confidence,
+            verified_status=item.verified_status,
+            refute_reason=item.refute_reason,
+            angle=agent,
+        )
+        for item in verified
+    ]
+
+    findings_dir = report_dir / "findings"
+    findings_dir.mkdir(parents=True, exist_ok=True)
+    findings_path = findings_dir / f"{agent}.json"
+    findings_path.write_text(
+        json.dumps([_verified_to_dict(item) for item in stamped], indent=2),
+        encoding="utf-8",
+    )
+
+    outcome = apply_run(ledger_conn, run_no, stamped)
+    contested_fingerprints = set(outcome.contested)
+    confirmed = [item for item in stamped if item.verified_status == "confirmed"]
+    contested_items = [
+        item
+        for item in stamped
+        if fingerprint_for(item.angle, item.file, item.claim) in contested_fingerprints
+    ]
+    unverified_items = [
+        item
+        for item in stamped
+        if item.verified_status in {"unverified", "degraded", "skipped"}
+    ]
+    return _findings_status_and_reason(
+        confirmed,
+        contested_items,
+        unverified_items,
+        len(outcome.suppressed),
+        len(outcome.promotions),
+    )
+
+
+def _verified_to_dict(item: VerifiedFinding) -> dict[str, object]:
+    return {
+        "severity": item.severity,
+        "file": item.file,
+        "line": item.line,
+        "claim": item.claim,
+        "evidence": item.evidence,
+        "fix": item.fix,
+        "confidence": item.confidence,
+        "verified_status": item.verified_status,
+        "refute_reason": item.refute_reason,
+        "angle": item.angle,
+    }
+
+
 async def _run_one(
     *,
     root: Path,
@@ -191,6 +408,9 @@ async def _run_one(
     dry_run: bool,
     allow_paid: bool = False,
     effort: str = "high",
+    ledger_conn=None,
+    run_no: int = 0,
+    call_budget: CallBudget | None = None,
 ) -> CheckResult:
     command = build_claude_command(agent, model, prompt, effort=effort)
     started_at = datetime.now(timezone.utc).isoformat()
@@ -219,35 +439,80 @@ async def _run_one(
     log_path = report_dir / "logs" / f"expert-{agent}.json"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-    async with semaphore:
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=root,
-            env=_environment(),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            creationflags=creationflags,
-            start_new_session=os.name != "nt",
-        )
-        try:
-            output_bytes, _ = await asyncio.wait_for(
-                process.communicate(), timeout=timeout_seconds
+
+    cached_output: str | None = None
+    if ledger_conn is not None:
+        cached_output = get_cached_response(ledger_conn, agent, prompt)
+
+    if cached_output is not None:
+        output = cached_output
+        exit_code = 0
+        timeout_reason = ""
+        from_cache = True
+    else:
+        from_cache = False
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        async with semaphore:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=root,
+                env=_environment(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                creationflags=creationflags,
+                start_new_session=os.name != "nt",
             )
-            timeout_reason = ""
-        except TimeoutError:
-            process.kill()
-            output_bytes, _ = await process.communicate()
-            timeout_reason = f"Timed out after {timeout_seconds} seconds"
-    output = output_bytes.decode("utf-8", errors="replace")
+            try:
+                output_bytes, _ = await asyncio.wait_for(
+                    process.communicate(), timeout=timeout_seconds
+                )
+                timeout_reason = ""
+            except TimeoutError:
+                process.kill()
+                output_bytes, _ = await process.communicate()
+                timeout_reason = f"Timed out after {timeout_seconds} seconds"
+        output = output_bytes.decode("utf-8", errors="replace")
+        exit_code = process.returncode
+
     log_path.write_text(output, encoding="utf-8")
     duration = time.perf_counter() - started
     if timeout_reason:
         status, reason = "warning", timeout_reason
-    elif process.returncode == 0:
-        status, reason = _success_reason(parse_envelope(output), allow_paid=allow_paid)
+    elif exit_code == 0:
+        envelope = parse_envelope(output)
+        status, reason = _success_reason(envelope, allow_paid=allow_paid)
+        if status == "passed":
+            findings = parse_findings(envelope.result_text)
+            if findings is None:
+                status, reason = "warning", "unparseable output"
+            else:
+                # A paid call that was explicitly allowed still owes the owner a visible cost
+                # note (Paid API Cost Truth Rule): preserve it even though the findings pipeline
+                # replaces the rest of the success reason.
+                cost_note = ""
+                if envelope.cost_usd is not None and envelope.cost_usd > 0:
+                    cost_note = f"; cost_usd={envelope.cost_usd}; true spend = provider console"
+                if (
+                    not from_cache
+                    and ledger_conn is not None
+                    and (envelope.cost_usd is None or envelope.cost_usd == 0)
+                ):
+                    put_cached_response(ledger_conn, agent, prompt, output)
+                if ledger_conn is not None and call_budget is not None:
+                    status, reason = await _apply_findings_pipeline(
+                        report_dir=report_dir,
+                        agent=agent,
+                        findings=findings,
+                        prompt=prompt,
+                        call_budget=call_budget,
+                        ledger_conn=ledger_conn,
+                        run_no=run_no,
+                    )
+                reason = f"{reason}{cost_note}"
+                if from_cache:
+                    reason = f"{reason} (cached)"
     else:
-        status, reason = "warning", f"Claude CLI exited with code {process.returncode}"
+        status, reason = "warning", f"Claude CLI exited with code {exit_code}"
     return CheckResult(
         check_id=f"expert-{agent}",
         description=f"{agent} review using Claude {model}",
@@ -256,10 +521,11 @@ async def _run_one(
         command=safe_command,
         started_at=started_at,
         duration_seconds=round(duration, 3),
-        exit_code=process.returncode,
+        exit_code=exit_code,
         reason=reason,
         log_path=str(log_path),
         output_tail=output[-65536:],
+        cached=from_cache,
     )
 
 
@@ -295,22 +561,32 @@ async def run_experts(
             for agent in agents
         ]
     semaphore = asyncio.Semaphore(max(1, workers))
-    tasks = [
-        asyncio.create_task(
-            _run_one(
-                root=root,
-                report_dir=report_dir,
-                agent=agent,
-                model=model,
-                prompt=_prompt(agent, changed_files, deterministic_results),
-                timeout_seconds=timeout_seconds,
-                semaphore=semaphore,
-                dry_run=dry_run,
-                allow_paid=allow_paid,
-                effort=effort,
+    ledger_conn = None if dry_run else open_ledger(root)
+    call_budget = CallBudget(remaining=_PER_RUN_CALL_CEILING)
+    try:
+        run_no = 0 if ledger_conn is None else next_run(ledger_conn)
+        tasks = [
+            asyncio.create_task(
+                _run_one(
+                    root=root,
+                    report_dir=report_dir,
+                    agent=agent,
+                    model=model,
+                    prompt=_prompt(agent, changed_files, deterministic_results),
+                    timeout_seconds=timeout_seconds,
+                    semaphore=semaphore,
+                    dry_run=dry_run,
+                    allow_paid=allow_paid,
+                    effort=effort,
+                    ledger_conn=ledger_conn,
+                    run_no=run_no,
+                    call_budget=call_budget,
+                )
             )
-        )
-        for agent in agents
-    ]
-    return list(await asyncio.gather(*tasks)) if tasks else []
+            for agent in agents
+        ]
+        return list(await asyncio.gather(*tasks)) if tasks else []
+    finally:
+        if ledger_conn is not None:
+            ledger_conn.close()
 
