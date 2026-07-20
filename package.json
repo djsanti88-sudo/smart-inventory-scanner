@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "test:golden": "vitest run src/eval/goldenBaseline.test.ts",
     "test:corpus-drift": "vitest run src/server/tire-knowledge/corpusDrift.test.ts",
+    "test:ledger": "vitest run src/stores/ledgerInvariants.store.test.ts src/stores/unknownEnqueue.store.test.ts src/stores/mergeUnion.store.test.ts src/stores/markWrongTransfer.store.test.ts src/stores/provenanceTier.store.test.ts src/stores/goldenClasses.store.test.ts src/services/inventory.replay.test.ts src/server/upc/ladderTimeout.test.ts",
     "test:e2e": "playwright test",
     "release:check": "node scripts/release-sentinel.mjs",
     "proof:local": "tsc --noEmit && vitest run",
