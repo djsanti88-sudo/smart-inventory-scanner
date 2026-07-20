@@ -15,6 +15,11 @@ vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", () => ({
   candidatesBySizeToken: (token: string) => mockBySize(token),
 }));
 
+const mockRetailLookup = vi.fn();
+vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", () => ({
+  lookupRetailBarcodeAsync: (code: string) => mockRetailLookup(code),
+}));
+
 import { POST } from "@/app/api/reconcile/match/route";
 
 const CORPUS_ROW = {
@@ -54,6 +59,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLookupAll.mockResolvedValue([]);
   mockBySize.mockResolvedValue([]);
+  mockRetailLookup.mockResolvedValue(null);
 });
 
 describe("POST /api/reconcile/match - validation (400 on garbage)", () => {
@@ -126,6 +132,32 @@ describe("POST /api/reconcile/match - matching through the mocked local corpus",
     const body = await res.json();
     expect(body.matches[0].status).toBe("unmatched");
     expect(body.matches[0].reason).toBeTruthy();
+  });
+
+  it("adds exact retail-corpus evidence to a non-tire barcode row", async () => {
+    mockRetailLookup.mockResolvedValue({
+      productName: "Sparkling Water",
+      brand: "Acme",
+      category: "Beverages",
+      barcode: "012345678905",
+    });
+    const res = await POST(makeRequest({ rows: [validRow({
+      externalId: "012345678905",
+      partNumbers: ["012345678905"],
+      brand: "Acme",
+      model: "Sparkling Water",
+      sizeText: undefined,
+      specs: "Beverages",
+      barcode: "012345678905",
+    })] }));
+    const body = await res.json();
+    expect(mockRetailLookup).toHaveBeenCalledWith("012345678905");
+    expect(body.matches[0].retailCatalogMatch).toEqual({
+      productName: "Sparkling Water",
+      brand: "Acme",
+      category: "Beverages",
+      barcode: "012345678905",
+    });
   });
 });
 

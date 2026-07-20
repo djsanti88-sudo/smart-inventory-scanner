@@ -24,7 +24,7 @@
 
 import type { ExpectedInventoryRow } from "./types";
 import { sameBrandFamily } from "@/services/catalog/brandFamilies";
-import { nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
+import { IDENTITY_JACCARD_THRESHOLD, nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { basePartNumberKey, tirePartNumberCore } from "@/services/catalog/tirePartNumber";
 
@@ -46,6 +46,10 @@ export interface MatchResult {
   reason: string;
   /** Only set when `status === "matched"`. */
   candidate?: CorpusCandidate;
+  /** Deterministic similarity in [0,1]. Exact corroborated PN hits are 1. `null` or unset means
+   *  not applicable (e.g. ambiguous/unmatched), matching `ImportPreviewRow.confidence` in importSchema.ts. */
+  confidence?: number | null;
+  matchBasis?: "part_number_exact" | "part_number_affix_core" | "identity_jaccard";
   /** Set when `status === "ambiguous"` and there is more than one colliding candidate. */
   candidates?: CorpusCandidate[];
   /** Matched rows with a corpus barcode (AM-R6): a SUGGESTION-GRADE barcode <-> part-number linkage.
@@ -62,8 +66,6 @@ export interface MatcherDeps {
   /** Candidates sharing a brand (or its family) and an exact tire size token, for the identity path. */
   candidatesByBrandSize(brand: string | undefined, sizeToken: string): CorpusCandidate[];
 }
-
-const JACCARD_THRESHOLD = 0.75;
 
 /** Same brand-equality test the rest of the round uses: equal after brandFamilies' own normalization,
  *  or the two brands are members of the same curated company family. */
@@ -188,6 +190,8 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
     return {
       row,
       status: "matched",
+      confidence: 1,
+      matchBasis: viaAffixCore ? "part_number_affix_core" : "part_number_exact",
       reason: `Part number hit for "${hit.brand} ${hit.name}" (${reasonBits.join(", ") || "corroborated"}).${coreNote}`,
       candidate: hit,
       linkageSuggestion: buildLinkageSuggestion(hit, row),
@@ -200,22 +204,24 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
     const rowTokens = nameTokens(row.model ?? "");
     const candidates = deps.candidatesByBrandSize(row.brand, rowSize);
 
-    const identityMatches: CorpusCandidate[] = [];
+    const identityMatches: Array<{ candidate: CorpusCandidate; confidence: number }> = [];
     for (const cand of candidates) {
       if (cand.sizeToken !== rowSize) continue;
       if (!brandsCorroborate(row.brand, cand.brand)) continue;
       const candTokens = nameTokens(cand.name);
       const sim = jaccard(rowTokens, candTokens);
-      if (sim < JACCARD_THRESHOLD) continue;
+      if (sim < IDENTITY_JACCARD_THRESHOLD) continue;
       if (plusGenerationDiff(rowTokens, candTokens)) continue; // R8 vs R8+ - different product, never match here.
-      identityMatches.push(cand);
+      identityMatches.push({ candidate: cand, confidence: sim });
     }
 
     if (identityMatches.length === 1) {
-      const cand = identityMatches[0];
+      const { candidate: cand, confidence } = identityMatches[0];
       return {
         row,
         status: "matched",
+        confidence,
+        matchBasis: "identity_jaccard",
         reason: `Identity match on size ${rowSize}, brand "${cand.brand}", and model name similarity to "${cand.name}".`,
         candidate: cand,
         linkageSuggestion: buildLinkageSuggestion(cand, row),
@@ -226,8 +232,9 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
       return {
         row,
         status: "ambiguous",
-        reason: `Identity match on size ${rowSize} and brand matches ${identityMatches.length} different corpus products (${identityMatches.map((c) => c.name).join(", ")}); cannot pick one safely.`,
-        candidates: identityMatches,
+        reason: `Identity match on size ${rowSize} and brand matches ${identityMatches.length} different corpus products (${identityMatches.map((c) => c.candidate.name).join(", ")}); cannot pick one safely.`,
+        confidence: Math.max(...identityMatches.map((entry) => entry.confidence)),
+        candidates: identityMatches.map((entry) => entry.candidate),
       };
     }
   }

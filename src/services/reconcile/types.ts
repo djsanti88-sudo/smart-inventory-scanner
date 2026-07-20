@@ -11,6 +11,9 @@ export interface ExpectedInventoryRow {
   model?: string;
   sizeText?: string;
   specs?: string;
+  barcode?: string;
+  name?: string;
+  category?: string;
   /** PHYSICAL ON-HAND quantity, summed across locations (AM-R3). */
   qty: number;
   /** Sanitized surviving columns only. NEVER includes price/cost fields. */

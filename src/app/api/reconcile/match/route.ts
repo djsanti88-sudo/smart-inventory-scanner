@@ -13,6 +13,7 @@ import {
 } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
+import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 
 // POST /api/reconcile/match (Task 7, Shop-Ware reconcile round).
 // Runs the pure identity matcher (Task 5) server-side, per row, against the LOCAL tire corpus
@@ -107,7 +108,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       lookupByPartNumber: (normalizedPn) => pnCache.get(normalizedPn) ?? [],
       candidatesByBrandSize: (_brand, token) => sizeCache.get(token) ?? [],
     };
-    matches.push(matchExpectedRow(row, deps));
+    const match = matchExpectedRow(row, deps);
+    if (match.status === "non_tire" && row.barcode) {
+      const retailCatalogMatch = await lookupRetailBarcodeAsync(row.barcode);
+      matches.push(retailCatalogMatch ? { ...match, retailCatalogMatch } : match);
+    } else {
+      matches.push(match);
+    }
   }
 
   return NextResponse.json({ matches });

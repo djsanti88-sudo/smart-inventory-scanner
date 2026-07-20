@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { matchExpectedRow, type CorpusCandidate, type MatcherDeps } from "./identityMatcher";
 import type { ExpectedInventoryRow } from "./types";
+import { IDENTITY_JACCARD_THRESHOLD } from "@/services/catalog/identityMerge";
 
 // Task 5 (AM-R4/AM-R5, spec 2026-07-15-shopware-reconcile-pn-fill-design.md, matcher section):
 // resolution order per row:
@@ -30,6 +31,25 @@ function deps(over: Partial<MatcherDeps> = {}): MatcherDeps {
 }
 
 describe("matchExpectedRow", () => {
+  it("reports exact PN confidence and the canonical token threshold", () => {
+    const exact = matchExpectedRow(row({ externalId: "E-conf1", partNumbers: ["ABC-1"], brand: "Acme", sizeText: "225/45R18" }), {
+      lookupByPartNumber: () => [{ uid: "a", brand: "Acme", name: "Road", sizeToken: "225/45R18" }],
+      candidatesByBrandSize: () => [],
+    });
+    expect(exact.confidence).toBe(1);
+    expect(exact.matchBasis).toBe("part_number_exact");
+
+    // "Road Sport Elite Touring XL" vs "Road Sport Elite Touring": intersection 4 / union 5 = 0.8,
+    // clearing IDENTITY_JACCARD_THRESHOLD (0.75) without tripping the plusGenerationDiff guard.
+    const token = matchExpectedRow(row({ externalId: "E-conf2", partNumbers: ["MISS"], brand: "Acme", model: "Road Sport Elite Touring XL", sizeText: "225/45R18" }), {
+      lookupByPartNumber: () => [],
+      candidatesByBrandSize: () => [{ uid: "b", brand: "Acme", name: "Road Sport Elite Touring", sizeToken: "225/45R18" }],
+    });
+    expect(token.status).toBe("matched");
+    expect(token.matchBasis).toBe("identity_jaccard");
+    expect(token.confidence).toBeGreaterThanOrEqual(IDENTITY_JACCARD_THRESHOLD);
+  });
+
   it("case 1: unique PN hit + brand equal + size equal -> matched", () => {
     const r = row({
       externalId: "E1",

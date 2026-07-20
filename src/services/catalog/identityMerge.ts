@@ -79,6 +79,11 @@ export function jaccard(a: string[], b: string[]): number {
   return union === 0 ? 0 : inter / union;
 }
 
+/** Binding Jaccard threshold for Phase 4 (Global Constraints): the single canonical similarity
+ *  cutoff for identity-token matching. Both the Stage A matcher (reconcile/identityMatcher.ts) and
+ *  the Stage B fuzzy-matching follow-up consume this one export; never redeclare a second literal. */
+export const IDENTITY_JACCARD_THRESHOLD = 0.75;
+
 /**
  * The plus-generation guard: true when the two token sets differ ONLY by a trailing "+" on some token
  * (e.g. {dimax, r8} vs {dimax, r8+}). Such a pair is a DIFFERENT product generation and must never
@@ -164,7 +169,7 @@ export function findIdentityMerge(existing: IdentityCandidate[], decoded: Decode
       const existingTokens = nameTokens(nameOf(p));
       const sim = jaccard(decodedTokens, existingTokens);
       const plusDiff = plusGenerationDiff(decodedTokens, existingTokens);
-      if (sim >= 0.75 || plusDiff) {
+      if (sim >= IDENTITY_JACCARD_THRESHOLD || plusDiff) {
         // plusDiff (R8 vs R8+) always routes to suggest, never auto - even at Jaccard 1.0 with "+" stripped.
         suggestion ??= { kind: "suggest_link", productId: p.id };
       }
