@@ -72,4 +72,23 @@ describe("D7: per-rung hard timeout aborts an in-flight rung", () => {
     expect(JSON.stringify(r.reasons)).toBe(reasonsSnapshot);
     expect(r.settledBy).toBe(settledBySnapshot);
   });
+
+  it("a rung that THROWS a genuine exception records its real error message, not the aborted-timeout label", async () => {
+    const boom: LadderRung = {
+      name: "boom",
+      run: async () => {
+        throw new Error("upstream 500: provider unreachable");
+      },
+    };
+    const nextRung: LadderRung = { name: "next", run: async () => settled("next verified") };
+
+    const p = runLadder("049000006346", [boom, nextRung], { perRungTimeoutMs: 5000, now: () => Date.now() });
+    await vi.runAllTimersAsync();
+    const r = await p;
+
+    expect(r.reasons[0].rung).toBe("boom");
+    expect(r.reasons[0].reason).toBe("error: upstream 500: provider unreachable");
+    expect(r.reasons[0].reason).not.toMatch(/aborted/i);
+    expect(r.settledBy).toBe("next");
+  });
 });

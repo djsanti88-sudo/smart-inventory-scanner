@@ -58,6 +58,16 @@ export interface RunLadderOpts {
   perRungTimeoutMs?: number;
 }
 
+/** Internal sentinel used ONLY to mark the budget-timer rejection in runLadder's Promise.race, so the
+ *  catch block can tell "the ladder gave up waiting" apart from a genuine exception thrown by r.run()
+ *  itself. Never thrown by rung code - a rung's own errors are plain Error (or whatever it throws). */
+class LadderRungTimeoutError extends Error {
+  constructor() {
+    super("ladder-rung-timeout");
+    this.name = "LadderRungTimeoutError";
+  }
+}
+
 /**
  * Run rungs in order until one settles. The first settled outcome stops the ladder; every rung that
  * ran contributes its reason (in order). An all-miss ladder returns no `settledBy`/`outcome` and a
@@ -104,16 +114,26 @@ export async function runLadder(_code: string, rungs: LadderRung[], opts: RunLad
         const abortedPromise = new Promise<never>((_res, reject) => {
           timer = setTimeout(() => {
             controller.abort();
-            reject(new Error("ladder-rung-timeout"));
+            reject(new LadderRungTimeoutError());
           }, budgetMs);
         });
         outcome = await Promise.race([r.run({ signal: controller.signal }), abortedPromise]);
       } else {
         outcome = await r.run({ signal: controller.signal });
       }
-    } catch {
-      // Timeout OR the rung itself threw after abort: record an honest "aborted" reason and move on.
-      reasons.push({ rung: r.name, reason: `aborted: rung exceeded its budget (${budgetMs ?? "unbounded"}ms) - DECODE_LADDER_RUNG_MS / DECODE_LADDER_TOTAL_MS` });
+    } catch (err) {
+      if (err instanceof LadderRungTimeoutError) {
+        // The budget timer fired first: the ladder gave up WAITING on this rung (it may still be
+        // running server-side - see the D7 doc comment above). Keep the existing honest wording.
+        reasons.push({ rung: r.name, reason: `aborted: rung exceeded its budget (${budgetMs ?? "unbounded"}ms) - DECODE_LADDER_RUNG_MS / DECODE_LADDER_TOTAL_MS` });
+      } else {
+        // A genuine exception from r.run() itself (network error, thrown bug, etc) - NOT a timeout.
+        // Record the real message so needs_review shows the actual failure instead of a false
+        // "aborted" label that would misattribute a real bug to the budget clock.
+        const message = err instanceof Error ? err.message : String(err);
+        const truncated = message.length > 200 ? `${message.slice(0, 200)}...` : message;
+        reasons.push({ rung: r.name, reason: `error: ${truncated}` });
+      }
       continue;
     } finally {
       if (timer) clearTimeout(timer);
