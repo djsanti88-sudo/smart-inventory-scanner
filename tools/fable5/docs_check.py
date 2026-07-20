@@ -8,8 +8,12 @@ from .models import CheckResult
 
 
 _BACKTICK_SPAN = re.compile(r"`([^`\n]+)`")
-_NPM_RUN = re.compile(r"npm run ([A-Za-z0-9_:.\-]+)")
+_NPM_RUN = re.compile(r"npm run ([A-Za-z0-9_:.\-]+)(\[?)")
 _MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+_HTTP_VERBS = ("GET", "POST", "PUT", "PATCH", "DELETE")
+_HTTP_ROUTE_PREFIX = re.compile(
+    r"^(?:" + "|".join(_HTTP_VERBS) + r")(?:/(?:" + "|".join(_HTTP_VERBS) + r"))*(?:\s|/)"
+)
 
 _DEFAULT_PROGRESS_NOTE = "PROGRESS.md lags the newest plan (allowed by doctrine)"
 
@@ -26,6 +30,15 @@ def _looks_like_path_span(span: str) -> bool:
     if "<" in span or ">" in span:
         return False
     if "://" in span:
+        return False
+    if any(char.isspace() for char in span):
+        # Full shell-command lines (e.g. "node scripts/foo.mjs", "npx playwright
+        # test e2e/x.spec.ts") - the path token is not the whole span, so it is
+        # not checkable as a single path reference.
+        return False
+    if _HTTP_ROUTE_PREFIX.match(span):
+        # HTTP route spans (e.g. "POST /api/x", "GET/POST /api/x") are not
+        # filesystem paths.
         return False
     if "/" in span:
         return True
@@ -47,6 +60,11 @@ def _dead_npm_scripts(text: str, package_scripts: set[str]) -> list[str]:
     dead: list[str] = []
     for match in _NPM_RUN.finditer(text):
         script = match.group(1)
+        followed_by_bracket = match.group(2) == "["
+        if followed_by_bracket:
+            # Bracket-alternation syntax (e.g. "npm run qa:bots[:tire|:security|...]")
+            # is documentation shorthand, not a literal script name - not checkable.
+            continue
         if script not in package_scripts:
             dead.append(f"npm run {script}")
     return dead
@@ -103,6 +121,7 @@ def check_docs(root: Path, files: list[str], package_scripts: set[str]) -> list[
         issues.extend(f"dead path `{span}`" for span in dead_paths)
         issues.extend(f"dead script `{script}`" for script in dead_scripts)
         issues.extend(f"broken link `{target}`" for target in broken_links)
+        issues = list(dict.fromkeys(issues))  # dedupe, preserve first-seen order
 
         progress_note = ""
         if filename == "PROGRESS.md":

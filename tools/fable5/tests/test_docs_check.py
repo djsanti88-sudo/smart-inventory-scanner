@@ -191,6 +191,77 @@ class DocsCheckTests(unittest.TestCase):
                 "docs-staleness:B.md",
             ])
 
+    def test_bracket_alternation_npm_span_is_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "README.md").write_text(
+                "Run `npm run qa:bots[:tire|:security|:ux|:data|...]` for bot proof.\n",
+                encoding="utf-8",
+            )
+
+            results = check_docs(root, ["README.md"], {"qa:bots:tire", "qa:bots:security"})
+
+            result = results[0]
+            self.assertEqual(result.status, "passed")
+            self.assertNotIn("qa:bots:", result.reason)
+
+    def test_shell_command_span_is_not_flagged_as_dead_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "README.md").write_text(
+                "Run `node scripts/create-god-account.mjs` to provision.\n"
+                "Run `npx playwright test e2e/scan.spec.ts` for one spec.\n",
+                encoding="utf-8",
+            )
+
+            results = check_docs(root, ["README.md"], set())
+
+            result = results[0]
+            self.assertEqual(result.status, "passed")
+
+    def test_http_route_span_is_not_flagged_as_dead_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "README.md").write_text(
+                "`POST /api/ai-lookup` starts a decode.\n"
+                "`GET/POST /api/ai-lookup` reports config too.\n",
+                encoding="utf-8",
+            )
+
+            results = check_docs(root, ["README.md"], set())
+
+            result = results[0]
+            self.assertEqual(result.status, "passed")
+
+    def test_plain_dead_path_is_still_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "README.md").write_text(
+                "See `src/services/missing_thing.ts` for details.\n", encoding="utf-8"
+            )
+
+            results = check_docs(root, ["README.md"], set())
+
+            result = results[0]
+            self.assertEqual(result.status, "warning")
+            self.assertIn("src/services/missing_thing.ts", result.reason)
+
+    def test_duplicate_dead_reference_appears_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "README.md").write_text(
+                "See `src/services/missing_thing.ts` here and again "
+                "`src/services/missing_thing.ts` there.\n",
+                encoding="utf-8",
+            )
+
+            results = check_docs(root, ["README.md"], set())
+
+            result = results[0]
+            self.assertEqual(result.status, "warning")
+            occurrences = result.reason.count("src/services/missing_thing.ts")
+            self.assertEqual(occurrences, 1)
+
     def test_never_returns_failed_status(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
