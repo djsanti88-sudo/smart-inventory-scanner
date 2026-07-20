@@ -5,25 +5,22 @@ import Link from "next/link";
 import { useScanStore } from "@/stores/scanStore";
 import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
-import { isOpenAccess } from "@/services/auth/authMode";
+import { isLiveAuth } from "@/services/auth/authMode";
+import { hasLegacyBlob, persistKeyForUid } from "@/stores/scanPersistNamespace";
 
-// Wires the REAL signed-in business context into the scan/count workflow (Firebase backend only).
-// On mount it resolves the authenticated user + the selected business and verifies a real membership,
-// then calls setBusinessContext(businessId, userId) exactly once. No fake/default businessId or userId
-// is ever used. It renders the scan UI only once the business's data has loaded (so a scan never runs
-// against an empty catalog); otherwise it shows a clear message. The mock/local path is untouched
-// (renders children directly). This is mount-time wiring only - it does NOT touch the scanner hot path,
-// decode, barcode buffer, cache, Firecrawl, or count idempotency.
+// Wires the REAL signed-in business context into the scan/count workflow (live mode + Firebase backend).
+// On mount it resolves the authenticated user + the selected business and verifies a real membership.
+// If this browser still holds the pre-account legacy blob (sis-scan-v1) and the user has no per-uid
+// key yet, it STOPS and asks the owner whether to adopt that data - adoption is an explicit choice,
+// never an automatic first-sign-in inheritance (shared-browser hazard). Then it re-points persist to
+// the per-uid key and calls setBusinessContext exactly once. The mock path renders children directly.
 export function BusinessContextGate({ children }: { children: React.ReactNode }) {
-  // Open access mode: skip the entire Firebase business-context flow even if the Firebase backend is
-  // configured. The mock/local path runs instead - no login, no business selection, no Firebase sync.
-  // Owner rule: open to the public until login is re-enabled.
-  const openAccess = isOpenAccess();
-  const cloud = !openAccess && isFirebaseBackend();
+  const cloud = isLiveAuth() && isFirebaseBackend();
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const setBusinessContext = useScanStore((s) => s.setBusinessContext);
-  const [status, setStatus] = useState<"resolving" | "no-user" | "no-business" | "ready">("resolving");
+  const [status, setStatus] = useState<"resolving" | "no-user" | "no-business" | "adopt-choice" | "ready">("resolving");
+  const [pendingCtx, setPendingCtx] = useState<{ businessId: string; uid: string } | null>(null);
 
   useEffect(() => {
     if (!cloud) return; // mock/local path: nothing to wire (context + data already "ready")
@@ -39,7 +36,17 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
       const membership = selected ? memberships.find((m) => m.businessId === selected) : undefined;
       if (!membership) { setStatus("no-business"); return; }
 
-      // Real authenticated user + real membership -> safe to set the context.
+      // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
+      const legacy = typeof window !== "undefined" && hasLegacyBlob(window.localStorage);
+      const alreadyOwn =
+        typeof window !== "undefined" && window.localStorage.getItem(persistKeyForUid(user.uid)) !== null;
+      if (legacy && !alreadyOwn) {
+        setPendingCtx({ businessId: membership.businessId, uid: user.uid });
+        setStatus("adopt-choice");
+        return;
+      }
+
+      useScanStore.getState().rehydrateForUid(user.uid);
       setBusinessContext(membership.businessId, user.uid);
       setStatus("ready");
     })();
@@ -47,6 +54,40 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
   }, [cloud, setBusinessContext]);
 
   if (!cloud) return <>{children}</>;
+
+  if (status === "adopt-choice" && pendingCtx) {
+    return (
+      <div data-testid="adopt-banner" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        This device has local scan data saved from before sign-in. Adopt it into your account, or leave it and start fresh.
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            data-testid="adopt-data"
+            onClick={() => {
+              useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
+              setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
+              setStatus("ready");
+            }}
+            className="inline-flex min-h-[40px] items-center rounded-lg bg-amber-600 px-3 font-medium text-white hover:bg-amber-700"
+          >
+            Adopt it into my account
+          </button>
+          <button
+            type="button"
+            data-testid="skip-adopt"
+            onClick={() => {
+              useScanStore.getState().rehydrateForUid(pendingCtx.uid);
+              setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
+              setStatus("ready");
+            }}
+            className="inline-flex min-h-[40px] items-center rounded-lg border border-amber-400 px-3 font-medium hover:bg-amber-100"
+          >
+            Start fresh (leave it)
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Needs a signed-in user or a selected business: a clear, actionable message (no fake context).
   if (status === "no-user" || status === "no-business") {

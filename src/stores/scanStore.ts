@@ -76,6 +76,8 @@ import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
+import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
+import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
@@ -539,6 +541,13 @@ export interface ScanState {
   setHasHydrated: (v: boolean) => void;
   /** Set the signed-in business context (Firebase backend). Enables cloud sync + drains the queue. */
   setBusinessContext: (businessId: string, userId: string) => void;
+  /** Sign-out: wipes tenant state to the anon baseline, clears the selected-business key, removes the
+   *  signed-out user's per-uid localStorage key, and re-points persist at the anon key. */
+  resetForSignOut: () => void;
+  /** Re-point persist at this uid's key and rehydrate (no legacy-blob migration). */
+  rehydrateForUid: (uid: string) => void;
+  /** Owner-initiated: migrate the legacy pre-account blob into this uid's key, then rehydrate. */
+  adoptLegacyLocalData: (uid: string) => void;
   startSession: (name: string, location: string) => void;
   /** Mark the current session completed (status=completed, completedAt set) and persist it. */
   finishSession: () => void;
@@ -1155,6 +1164,69 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         } else {
           get().syncPending(); // drain anything queued now that we have a real business context
         }
+      },
+
+      resetForSignOut: () => {
+        // Capture identity BEFORE the reset wipes it: the per-uid key must be removed and the persist
+        // middleware re-pointed to the anon key, or the fail-soft coalesced storage would simply
+        // rewrite sis-scan-<uid> on the next tick and the "cleared" state would leak right back.
+        const uid = get().userId;
+        const cleared = emptyTenantState();
+        set({
+          businessId: DEMO_BUSINESS_ID,
+          userId: null,
+          businessContextReady: !cloudBackend,
+          businessDataLoaded: !cloudBackend,
+          scanFeed: cleared.scanFeed,
+          finalCounts: cleared.finalCounts,
+          needsReviewQueue: cleared.needsReviewQueue,
+          settings: cleared.settings,
+          pendingSyncQueue: [],
+          syncedScanEventIds: [],
+          lastSyncError: null,
+        });
+        if (typeof window !== "undefined" && window.localStorage) {
+          try {
+            clearSelectedBusinessId(); // sis-selected-business-v1 is NOT uid-namespaced: explicit clear
+            if (uid) window.localStorage.removeItem(persistKeyForUid(uid));
+          } catch {
+            // ignore storage errors: the in-memory reset above already holds
+          }
+        }
+        // Re-point persist at the anon key. Firebase's own SDK auth persistence is cleared by
+        // fbSignOut (auth.ts:66-69) in the UI sign-out handlers - that call is the authority for
+        // SDK state; this action owns only app state. Guarded on deps.persistName so the
+        // non-persisted test store (createTestScanStore, persistName: null) never touches the
+        // module-level app store.
+        if (deps.persistName) {
+          const persistApi = (useScanStore as unknown as {
+            persist?: { setOptions: (o: { name: string }) => void };
+          }).persist;
+          if (persistApi) persistApi.setOptions({ name: persistKeyForUid(null) });
+        }
+      },
+
+      rehydrateForUid: (uid: string) => {
+        if (typeof window === "undefined" || !window.localStorage) return;
+        // Re-point storage at this uid's key and rehydrate from it. NO legacy migration here:
+        // adopting the pre-account blob is an explicit owner action (adoptLegacyLocalData), never an
+        // automatic side effect of signing in (shared-browser inheritance hazard).
+        if (!deps.persistName) return; // non-persisted test store: nothing to re-point
+        const persistApi = (useScanStore as unknown as {
+          persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
+        }).persist;
+        if (persistApi) {
+          persistApi.setOptions({ name: persistKeyForUid(uid) });
+          void persistApi.rehydrate();
+        }
+      },
+
+      adoptLegacyLocalData: (uid: string) => {
+        if (typeof window === "undefined" || !window.localStorage) return;
+        // OWNER-INITIATED adopt: copy sis-scan-v1 into this uid's key (normalizing quantityDelta:0),
+        // DELETE the legacy blob, then hydrate from the adopted key.
+        migrateLegacyBlobOnce(uid, window.localStorage);
+        get().rehydrateForUid(uid);
       },
 
       recordFeedback: (type, payload) =>
