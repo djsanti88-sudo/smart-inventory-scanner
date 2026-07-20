@@ -83,6 +83,16 @@ export type AiCircuitState = "closed" | "open" | "half_open";
 // Core entities
 // ----------------------------------------------------------------------------------------------
 
+// Provenance of a product's identity, from birth. P2's resolver tier interface reads this to rank
+// tenant truth vs master truth; Phase 1 defaults every provisional mint to "provisional". Optional
+// so older persisted rows (no tier yet) fall back to undefined = treat as lowest trust.
+export type ProvenanceTier =
+  | "provisional"
+  | "ai_suggested"
+  | "ladder_verified_strong"
+  | "corpus_verified"
+  | "human_verified";
+
 export interface Product {
   id: string;
   businessId: string;
@@ -114,6 +124,7 @@ export interface Product {
   // (which flips provisional->false, verified->true, + creates the approved alias). Distinguishes it from an
   // ORPHANED verified product (verified lost on persist reset) which must still re-alias via resolveUnknown.
   provisional?: boolean;
+  provenanceTier?: ProvenanceTier;
   // Build 2 (product-name polish): fields split out of `name` by the deterministic structurer
   // (src/services/polish/structurer.ts) or, as a fallback, the LLM polish path. All optional so
   // older persisted products (no structuring run yet) fall back to `brand` / `name` at display time.

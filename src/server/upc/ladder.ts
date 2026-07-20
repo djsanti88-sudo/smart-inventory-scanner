@@ -23,9 +23,14 @@ export interface RungOutcome {
   reason: string;
 }
 
+export interface RunLadderContext {
+  /** Aborts when this rung exceeds its per-rung timeout OR the total wall-clock ceiling. */
+  signal: AbortSignal;
+}
+
 export interface LadderRung {
   name: string;
-  run: () => Promise<RungOutcome>;
+  run: (ctx: RunLadderContext) => Promise<RungOutcome>;
 }
 
 export interface LadderResult {
@@ -44,6 +49,23 @@ export interface RunLadderOpts {
   deadlineAt?: number;
   /** Clock override for tests. Defaults to `Date.now`. */
   now?: () => number;
+  /** Per-rung hard timeout (ms). A rung that does not settle within this window (or before the total
+   *  deadlineAt, whichever is sooner) is abandoned: its AbortController fires, an "aborted" reason is
+   *  recorded, and the ladder moves on or settles best-so-far. NOTE the honest scope: the LADDER stops
+   *  waiting - the rung's own underlying fetch may keep running server-side until its provider-level
+   *  timeout (signal threading into every provider fetch is a deferred follow-up). Omit BOTH this and
+   *  deadlineAt for the legacy unbounded behavior. */
+  perRungTimeoutMs?: number;
+}
+
+/** Internal sentinel used ONLY to mark the budget-timer rejection in runLadder's Promise.race, so the
+ *  catch block can tell "the ladder gave up waiting" apart from a genuine exception thrown by r.run()
+ *  itself. Never thrown by rung code - a rung's own errors are plain Error (or whatever it throws). */
+class LadderRungTimeoutError extends Error {
+  constructor() {
+    super("ladder-rung-timeout");
+    this.name = "LadderRungTimeoutError";
+  }
 }
 
 /**
@@ -52,10 +74,18 @@ export interface RunLadderOpts {
  * full reason list.
  *
  * L2 (owner-reported 36-70s blocking decodes, AM-1): when `opts.deadlineAt` is passed, the deadline
- * is checked BEFORE each rung starts - never mid-flight. A rung already running is NEVER aborted
- * here (each rung owns its own internal timeout); this only stops NEW rungs from starting once the
- * request-scoped budget is spent. Every skipped rung still records an honest reason so the
- * needs_review response can say exactly why it never got a full answer.
+ * is checked BEFORE each rung starts - never mid-flight. Every skipped rung still records an honest
+ * reason so the needs_review response can say exactly why it never got a full answer.
+ *
+ * D7 (owner-reported 36-70s blocking decodes, same class as L2 but for a rung already in flight): a
+ * started rung is raced against an AbortController that fires at min(perRungTimeoutMs, remaining
+ * wall-clock to deadlineAt). If the rung does not settle within that budget, the ladder stops WAITING
+ * on it, records an "aborted" reason, and moves on (or settles best-so-far if it was the last rung).
+ * Honest scope: the LADDER stops waiting - the abandoned rung's own underlying network call may keep
+ * running server-side until its own provider-level timeout; threading the abort signal into every
+ * provider fetch is a deferred follow-up, not part of this guarantee. A rung that resolves AFTER the
+ * ladder has already moved on (late resolve) cannot mutate the returned result - the race's loser is
+ * simply never awaited again.
  */
 export async function runLadder(_code: string, rungs: LadderRung[], opts: RunLadderOpts = {}): Promise<LadderResult> {
   const now = opts.now ?? Date.now;
@@ -65,7 +95,49 @@ export async function runLadder(_code: string, rungs: LadderRung[], opts: RunLad
       reasons.push({ rung: r.name, reason: "skipped: ladder deadline reached (DECODE_LADDER_TOTAL_MS)" });
       continue;
     }
-    const outcome = await r.run();
+    // Per-rung hard budget = min(perRungTimeout, remaining wall-clock to the total deadline). The
+    // ladder stops WAITING on an in-flight rung at this budget - the D7 fix: a started rung is no
+    // longer an unbounded await (the abandoned rung's own network call may still run server-side
+    // until its provider timeout; the ladder result is already settled and immune to it - see the
+    // late-resolve guard test). When neither a per-rung timeout nor a deadline is set, the rung runs
+    // unbounded (legacy behavior, fully backward compatible).
+    const controller = new AbortController();
+    const budgets: number[] = [];
+    if (opts.perRungTimeoutMs !== undefined) budgets.push(opts.perRungTimeoutMs);
+    if (opts.deadlineAt !== undefined) budgets.push(Math.max(0, opts.deadlineAt - now()));
+    const budgetMs = budgets.length > 0 ? Math.min(...budgets) : undefined;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let outcome: RungOutcome;
+    try {
+      if (budgetMs !== undefined) {
+        const abortedPromise = new Promise<never>((_res, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(new LadderRungTimeoutError());
+          }, budgetMs);
+        });
+        outcome = await Promise.race([r.run({ signal: controller.signal }), abortedPromise]);
+      } else {
+        outcome = await r.run({ signal: controller.signal });
+      }
+    } catch (err) {
+      if (err instanceof LadderRungTimeoutError) {
+        // The budget timer fired first: the ladder gave up WAITING on this rung (it may still be
+        // running server-side - see the D7 doc comment above). Keep the existing honest wording.
+        reasons.push({ rung: r.name, reason: `aborted: rung exceeded its budget (${budgetMs ?? "unbounded"}ms) - DECODE_LADDER_RUNG_MS / DECODE_LADDER_TOTAL_MS` });
+      } else {
+        // A genuine exception from r.run() itself (network error, thrown bug, etc) - NOT a timeout.
+        // Record the real message so needs_review shows the actual failure instead of a false
+        // "aborted" label that would misattribute a real bug to the budget clock.
+        const message = err instanceof Error ? err.message : String(err);
+        const truncated = message.length > 200 ? `${message.slice(0, 200)}...` : message;
+        reasons.push({ rung: r.name, reason: `error: ${truncated}` });
+      }
+      continue;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     reasons.push({ rung: r.name, reason: outcome.reason });
     if (outcome.settled) {
       return { settledBy: r.name, outcome, reasons };

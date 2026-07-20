@@ -190,7 +190,10 @@ describe("L2 total ladder deadline (owner-reported 36-70s blocking decodes, AM-1
     expect(r.reasons.map((x) => x.rung)).toEqual(["slow", "second", "third"]);
     expect(r.reasons[1].reason).toContain("skipped: ladder deadline reached (DECODE_LADDER_TOTAL_MS)");
     expect(r.reasons[2].reason).toContain("skipped: ladder deadline reached (DECODE_LADDER_TOTAL_MS)");
-    // A rung already in flight is NEVER aborted mid-run - "slow" still ran to completion.
+    // D7: an in-flight rung now races an abort timer, but "slow" settles synchronously (real time)
+    // well inside its budget (deadlineAt - now = 40_000ms of real wall-clock), so it still runs to
+    // completion here - only a rung that genuinely outlives its budget gets aborted (see
+    // ladderTimeout.test.ts).
     expect(r.reasons[0]).toEqual({ rung: "slow", reason: "miss after 50s" });
   });
 
