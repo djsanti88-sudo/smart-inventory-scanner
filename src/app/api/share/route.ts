@@ -9,6 +9,7 @@ import { buildBossReport } from "@/services/reports/bossReport";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
+import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 
 export const runtime = "nodejs";
 
@@ -41,7 +42,9 @@ function json(body: unknown, status = 200): NextResponse {
 }
 
 // Mints an expiring, read-only Boss Report snapshot. Live mode authenticates the caller and checks
-// membership before minting. Mock mode and IS_E2E=1 are the explicit credential-free demo paths.
+// membership before minting. The credential-free demo paths are mock mode or the hardened
+// isAuthBypassEnabled gate, which is false in production before any flag is read (a stray IS_E2E in
+// production can never open this).
 export async function POST(request: NextRequest) {
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declaredLength) && declaredLength > MAX_SHARE_SNAPSHOT_BYTES) {
@@ -75,7 +78,7 @@ export async function POST(request: NextRequest) {
   }
 
   const requestedBusinessId = stringField(body.businessId);
-  const authBypass = process.env.IS_E2E === "1" || !isLiveAuth();
+  const authBypass = isAuthBypassEnabled() || !isLiveAuth();
   if (!authBypass) {
     const idToken = stringField(body.idToken);
     if (!idToken) return json({ error: "Sign in required." }, 401);

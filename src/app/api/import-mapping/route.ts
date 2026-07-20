@@ -4,6 +4,7 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { isLiveAuth } from "@/services/auth/authMode";
+import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import type { ColumnMapping } from "@/services/importSchema";
 import {
@@ -28,9 +29,10 @@ function authConfigurationError(error: unknown): boolean {
 }
 
 // Live mode verifies the caller's ID token and businessMembers membership before any read/write.
-// IS_E2E=1 or mock mode is the explicit, documented credential-free bypass used by demos and tests.
+// The credential-free bypass is mock mode or the hardened test/demo gate (isAuthBypassEnabled), which
+// short-circuits to false in production before reading any flag - a stray IS_E2E can never open this.
 async function authorize(businessId: string, idToken: string): Promise<NextResponse | null> {
-  if (process.env.IS_E2E === "1" || !isLiveAuth()) return null;
+  if (isAuthBypassEnabled() || !isLiveAuth()) return null;
   if (!idToken) return json({ error: "Sign in required." }, 401);
   let uid: string;
   try {
