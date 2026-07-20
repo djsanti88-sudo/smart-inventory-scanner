@@ -50,6 +50,7 @@ describe.skipIf(!ready)("Firestore rules - tenant isolation (authenticated users
       await setDoc(doc(db, ...sub(BIZ_A, "settings", "setA")), { businessId: BIZ_A });
       await setDoc(doc(db, ...sub(BIZ_A, "auditLog", "auA")), { businessId: BIZ_A, action: "seed" });
       await setDoc(doc(db, "catalogEntries", "c1"), { normalizedBarcode: "111" });
+      await setDoc(doc(db, "retailCatalogEntries", "r1"), { normalizedBarcode: "333" });
     });
   });
 
@@ -112,6 +113,20 @@ describe.skipIf(!ready)("Firestore rules - tenant isolation (authenticated users
   it("catalogEntries: any signed-in user reads; client writes are denied (server-only)", async () => {
     await assertSucceeds(getDoc(doc(bDb(), "catalogEntries", "c1")));
     await assertFails(setDoc(doc(bDb(), "catalogEntries", "c2"), { normalizedBarcode: "222" }));
+  });
+
+  it("retailCatalogEntries: signed-in read allowed; create/update/delete all denied client-side", async () => {
+    await assertSucceeds(getDoc(doc(bDb(), "retailCatalogEntries", "r1")));
+    await assertFails(setDoc(doc(bDb(), "retailCatalogEntries", "r2"), { normalizedBarcode: "222" }));
+    await assertFails(updateDoc(doc(bDb(), "retailCatalogEntries", "r1"), { productName: "tampered" }));
+    await assertFails(deleteDoc(doc(bDb(), "retailCatalogEntries", "r1")));
+  });
+
+  it("catalogEntries: even a business OWNER cannot write/update/delete the master append surface", async () => {
+    // userA owns BIZ_A - tenant authority must confer ZERO master-store authority (invariant #4).
+    await assertFails(setDoc(doc(aDb(), "catalogEntries", "c2"), { provenanceTier: "ladder_verified_strong" }));
+    await assertFails(updateDoc(doc(aDb(), "catalogEntries", "c1"), { provenanceTier: "corpus_verified" }));
+    await assertFails(deleteDoc(doc(aDb(), "catalogEntries", "c1")));
   });
 
   it("userProfiles: a user reads/writes only their own", async () => {
