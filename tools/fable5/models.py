@@ -25,6 +25,8 @@ class PlanReview:
     findings: tuple[Finding, ...] = ()
     sections_found: tuple[str, ...] = ()
     referenced_scripts: tuple[str, ...] = ()
+    criteria_audited: int = 0
+    missing_proofs: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
