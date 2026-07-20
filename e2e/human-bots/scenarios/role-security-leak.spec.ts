@@ -6,15 +6,21 @@ import { resolve } from "node:path";
 // (mock/auth-bypass = business level; this suite does NOT set NEXT_PUBLIC_E2E_PLATFORM_OWNER) and inspects
 // which sensitive internal fields the customer browser can see or holds locally. The P0 customer
 // data-protection foundation has LANDED (Sec-1/2/3 UI+export hiding; Sec-4 localStorage split; Sec-5
-// server resolution), so this bot now ASSERTS the customer browser holds NO reusable code database
-// (no alias cleanCode/normalizedCode, no global catalog) and shows no code columns - a hard regression
-// guard. It still writes its report for the audit trail.
+// server resolution), so this bot now ASSERTS the customer browser holds NO reusable code->product
+// alias/catalog DATABASE and shows no code columns - a hard regression guard.
+//
+// Scope note (2026-07-20, aligned with dec0384b + QA fix #15 + scanPersist.test.ts): the customer's OWN
+// scanFeed/needsReviewQueue rows are DELIBERATELY allowed to keep their own cleanCode (the shop's own scan
+// of its own label is the shop's own data, not a foreign tenant's/the reusable alias DB - it must survive
+// reload as an audit trail). What must NEVER appear is the reusable "aliases" array itself (many-codes ->
+// one-product mappings) or the shared "catalog" array - those are the actual P0 leaks. It still writes its
+// report for the audit trail.
 
 const PROOF = "e2e/proof/agent-bots/security";
 const OUT = "reports/agent-bots/latest";
 
 const SENSITIVE_TERMS = ["Gemini", "OpenAI", "Firecrawl", "AI lookup", "AI decode", "provider", "prompt", "decode trace", "source url", "evidence"];
-const SENSITIVE_STORE_KEYS = ["aliases", "catalog", "normalizedCode", "cleanCode", "gtin", "upc", "ean", "sourceUrls", "rawCodeExample"];
+const SENSITIVE_STORE_KEYS = ["aliases", "catalog", "normalizedCode", "gtin", "upc", "ean", "sourceUrls", "rawCodeExample"];
 
 async function scan(page: Page, code: string) {
   const i = page.getByTestId("scanner-input");
@@ -35,8 +41,22 @@ test("SecurityLeakBot: report sensitive-field exposure to a customer browser (sa
   const storeDump = await page.evaluate(() => {
     try { return window.localStorage.getItem("sis-scan-v1") || ""; } catch { return ""; }
   });
-  const aliasCount = (storeDump.match(/"cleanCode"/g) || []).length;
-  const catalogPresent = /"catalog"\s*:/.test(storeDump);
+  // The P0 leak is the reusable code->product ALIAS DATABASE (the "aliases" array: many-codes-to-one-
+  // product mappings any code could look up) or the shared "catalog" array - not the shop's own cleanCode
+  // on its OWN scanFeed/needsReviewQueue rows, which is a deliberate, unit-tested exception (dec0384b, QA
+  // fix #15, scanPersist.test.ts) so a customer's own audit trail survives reload. Parse the JSON and
+  // check the actual "aliases" field rather than grepping "cleanCode" across the whole blob.
+  let aliasCount = 0;
+  let catalogPresent = false;
+  try {
+    const parsed = JSON.parse(storeDump || "{}");
+    const state = (parsed.state ?? parsed) as Record<string, unknown>;
+    const aliasesArr = Array.isArray(state.aliases) ? (state.aliases as unknown[]) : [];
+    aliasCount = aliasesArr.length;
+    catalogPresent = Array.isArray(state.catalog) && (state.catalog as unknown[]).length > 0;
+  } catch {
+    // Malformed/empty localStorage - no alias DB present either way.
+  }
   if (aliasCount > 0) {
     findings.push({ surface: "localStorage (sis-scan-v1)", finding: "Customer browser holds the alias database (cleanCode/normalizedCode values)", severity: "P0", detail: `~${aliasCount} alias code entries persisted client-side` });
   }
