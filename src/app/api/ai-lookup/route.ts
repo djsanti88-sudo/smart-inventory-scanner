@@ -21,6 +21,7 @@ import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
 import { readDailyUsedForAccount, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
+import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -66,6 +67,45 @@ function lookupChain(primary: string): AiProvider[] {
 // escalationProviders) and the page-reader factory (pageReader) are DELETED. The decode ladder is
 // now Go-UPC -> Fetch V2 -> GPT-5.5 (see the POST handler); Gemini is out of decode entirely. The
 // legacy `lookup` mode still uses createGeminiProvider via selectProvider/lookupChain (back-compat).
+
+// P5b Task 2 (master-truth write hook, GC7/GC8): shared helper fired on ANY decode outcome branch
+// that carries a settled DecodeDecision passing the Task-1 trust gate - a FRESH compute
+// (`kind:"computed"`) or a PERSISTED/L2-replay hit (`kind:"persisted"`, its body is the same
+// DecodePayload shape spread with cache debug flags). NEVER fired on `kind:"cap_blocked"` (no
+// decision was ever settled). Fire-and-forget: never awaited into the HTTP response, never lets a
+// rejection escape (masterAppend.ts already swallows its own errors into "error", this is a second,
+// cheap safety net). Skipped under e2eMode()/IS_E2E (GC7) and behind a default-ON feature flag so a
+// single env var can kill the whole write path without a deploy.
+function maybeAppendMasterCatalogEntry(payloadLike: {
+  sanitizedInput?: { cleanCodeSanitized?: string; rawCodeSanitized?: string };
+  decision?: { status?: string; exactCodeEvidenceVerifiedByApp?: boolean; confidence?: number };
+  results?: Array<{ productName?: string; brand?: string; category?: string }>;
+}, fallbackCode: string, codeType: string): void {
+  if (e2eMode()) return;
+  if (process.env.MASTER_CATALOG_APPEND === "0") return;
+  const decision = payloadLike.decision;
+  if (!decision) return;
+  const normalizedBarcode = payloadLike.sanitizedInput?.cleanCodeSanitized || fallbackCode;
+  const winningResult = payloadLike.results?.[0];
+  const entry = buildMasterCatalogEntry({
+    normalizedBarcode,
+    codeType,
+    decision: {
+      status: decision.status ?? "",
+      exactCodeEvidenceVerifiedByApp: decision.exactCodeEvidenceVerifiedByApp,
+      confidence: decision.confidence,
+    },
+    identity: {
+      name: winningResult?.productName,
+      brand: winningResult?.brand,
+      category: winningResult?.category,
+    },
+  });
+  if (!entry) return;
+  void appendMasterCatalogEntry(entry).catch(() => {
+    /* GC7: an append failure must never affect the decode response */
+  });
+}
 
 // GET reports which keys/flags are configured. NO secrets are returned (booleans + names only),
 // so the client can decide whether to auto-decode and show exactly which keys are missing.
@@ -355,6 +395,14 @@ export async function POST(request: Request) {
       budgetMs: typeof body.budgetMs === "number" ? clampDecodeBudgetMs(body.budgetMs) : undefined,
     });
     if (outcome.kind === "persisted") {
+      // P5b Task 2: a persisted/L2-replay hit still carries a settled decision - the idempotent
+      // transactional upsert (GC6) makes replaying this append harmless and keeps the master catalog
+      // fresh even when the ladder itself was never re-run for this request.
+      maybeAppendMasterCatalogEntry(
+        outcome.body as { sanitizedInput?: { cleanCodeSanitized?: string }; decision?: { status?: string; exactCodeEvidenceVerifiedByApp?: boolean; confidence?: number }; results?: Array<{ productName?: string; brand?: string; category?: string }> },
+        code,
+        codeType,
+      );
       return Response.json(outcome.body);
     }
     if (outcome.kind === "cap_blocked") {
@@ -362,6 +410,7 @@ export async function POST(request: Request) {
       // carrying the $0 prefix floor (P2) when the GS1 prefix knows the company, so the client names the
       // row "<Brand> / product unconfirmed" instead of a bare "Unidentified item". Absent (undefined)
       // when the code isn't a public barcode or the prefix maps to no confident brand - unchanged there.
+      // NEVER fires the master-append hook here (GC7/review F4): no decision was ever settled.
       return Response.json({ error: outcome.message, reasonCode: "daily_cap", floor: outcome.floor }, { status: 429 });
     }
     // computed: echo the L1/L2 `cached` flag into debug exactly as before. The per-account charge
@@ -370,6 +419,8 @@ export async function POST(request: Request) {
     if (authedBusinessId && outcome.paidComputeCharged && !e2eMode()) {
       await chargeDailySlotForAccount(await ladderStorage(), authedBusinessId);
     }
+    // P5b Task 2: fresh-compute branch - the other qualifying outcome (fresh AND persisted replay).
+    maybeAppendMasterCatalogEntry(outcome.payload, code, codeType);
     return Response.json({ ...outcome.payload, debug: { ...outcome.payload.debug, cached: outcome.cached } });
   }
 

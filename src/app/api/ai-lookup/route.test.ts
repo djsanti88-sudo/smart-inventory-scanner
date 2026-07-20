@@ -7,6 +7,17 @@ import fs from "node:fs";
 // The route imports server-only modules (groundedSpecFinder). Stub the marker so it can load in vitest.
 vi.mock("server-only", () => ({}));
 
+// P5b Task 2: this suite exercises real "verified"/app-verified decode outcomes (GPT ladder, tire
+// corpus) with IS_E2E deliberately unset (testing the route's OWN abuse guards). Without this mock the
+// route's fire-and-forget master-append hook would call the real Admin SDK (getAdminDb) on every such
+// outcome, producing unhandled "Could not load the default credentials" rejections - TEST SAFETY: no
+// automated test may reach live Firestore. Stubbed to a no-op; the hook's own wiring/gating is proven
+// separately in route.masterAppend.test.ts.
+vi.mock("@/server/catalog/masterAppend", () => ({
+  buildMasterCatalogEntry: () => null,
+  appendMasterCatalogEntry: async () => "skipped_human" as const,
+}));
+
 // TASK T8b: route.ts calls `ladderStorage()` (no dir arg) which defaults to `process.cwd()` - the REAL
 // repo root. A Go-UPC rung that genuinely hits writes a usage counter via that storage, which would
 // pollute the actual repo working tree on every test run. Redirect ladderStorage() at a per-process tmp
