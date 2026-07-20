@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 import { signOut } from "@/lib/auth";
+import { isLiveAuth } from "@/services/auth/authMode";
 
 // App navigation. Shows an open-review count badge so unknown codes are obvious but not disruptive.
 export function Nav() {
@@ -47,7 +48,7 @@ export function Nav() {
             </Link>
           );
         })}
-        {process.env.NEXT_PUBLIC_REQUIRE_LOGIN === "1" && (
+        {isLiveAuth() && (
           <button
             type="button"
             onClick={async () => {

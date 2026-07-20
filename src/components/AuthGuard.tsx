@@ -3,14 +3,15 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSession, onAuthChange, isAuthBypassEnabled } from "@/lib/auth";
+import { isOpenAccess } from "@/services/auth/authMode";
 
 // Client-side gate for protected pages. Checks a real Firebase auth session (async) and redirects to /login
 // when there is none. The E2E/test bypass (isAuthBypassEnabled) keeps existing Playwright specs green
 // and is impossible in production.
 //
-// Open access by default until login is re-enabled. Set NEXT_PUBLIC_REQUIRE_LOGIN=1 to restore the
-// login wall. This does NOT remove any login code — it's a reversible flag.
-const OPEN_ACCESS = process.env.NEXT_PUBLIC_REQUIRE_LOGIN !== "1";
+// Open access by default until login is re-enabled. Set NEXT_PUBLIC_AUTH_MODE=live to restore the
+// login wall. This does NOT remove any login code - it's a reversible flag.
+const OPEN_ACCESS = isOpenAccess();
 
 type GateState = "loading" | "authed" | "anon";
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useScanStore } from "@/stores/scanStore";
 import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
+import { isOpenAccess } from "@/services/auth/authMode";
 
 // Wires the REAL signed-in business context into the scan/count workflow (Firebase backend only).
 // On mount it resolves the authenticated user + the selected business and verifies a real membership,
@@ -15,9 +16,9 @@ import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness
 // decode, barcode buffer, cache, Firecrawl, or count idempotency.
 export function BusinessContextGate({ children }: { children: React.ReactNode }) {
   // Open access mode: skip the entire Firebase business-context flow even if the Firebase backend is
-  // configured. The mock/local path runs instead — no login, no business selection, no Firebase sync.
+  // configured. The mock/local path runs instead - no login, no business selection, no Firebase sync.
   // Owner rule: open to the public until login is re-enabled.
-  const openAccess = process.env.NEXT_PUBLIC_REQUIRE_LOGIN !== "1";
+  const openAccess = isOpenAccess();
   const cloud = !openAccess && isFirebaseBackend();
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
