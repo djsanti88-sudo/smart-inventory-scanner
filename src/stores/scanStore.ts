@@ -739,6 +739,41 @@ function makeQueueItem(params: {
   };
 }
 
+// D3 FIX (shared by ALL THREE orphan-transfer sites: runLiveDecodeOnce's fast-decode auto-link merge,
+// backgroundVerifyDeep's deep-verify merge, and resolveUnknown's merge): move an orphan placeholder's
+// count onto the merge target, UNIONING the anti-double-count ledger fields (scanEventIds / aliasesSeen /
+// appliedIdempotencyKeys) so orphan history survives the merge and a replayed event id stays a no-op.
+// Deduped unions keep a repeated merge idempotent. Pure: returns a new array, never mutates. A null
+// targetId (or a zero-quantity orphan) just drops the orphan row - identical to each site's old behavior.
+function transferOrphanCount(
+  finalCounts: InventoryCount[],
+  oid: string,
+  targetId: string | null,
+  nowIso: string,
+): InventoryCount[] {
+  const orphanRow = finalCounts.find((c) => c.productId === oid);
+  const orphanQty = orphanRow?.quantity ?? 0;
+  let next = finalCounts.filter((c) => c.productId !== oid);
+  if (targetId && orphanRow && orphanQty > 0) {
+    const targetRow = next.find((c) => c.productId === targetId);
+    next = targetRow
+      ? next.map((c) =>
+          c.productId === targetId
+            ? {
+                ...c,
+                quantity: c.quantity + orphanQty,
+                scanEventIds: Array.from(new Set([...c.scanEventIds, ...orphanRow.scanEventIds])),
+                aliasesSeen: Array.from(new Set([...c.aliasesSeen, ...orphanRow.aliasesSeen])),
+                appliedIdempotencyKeys: Array.from(new Set([...c.appliedIdempotencyKeys, ...orphanRow.appliedIdempotencyKeys])),
+                updatedAt: nowIso,
+              }
+            : c,
+        )
+      : [...next, { ...orphanRow, productId: targetId, updatedAt: nowIso }];
+  }
+  return next;
+}
+
 /**
  * Multi-code: build an APPROVED alias for every OTHER scannable code on a product (part number / SKU /
  * GTIN / UPC / EAN / vendor codes), beyond the code(s) already aliased. This is what makes a tire's
@@ -2569,28 +2604,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 if (mergeOrphanId && mergeOrphanId !== mergeTargetId) {
                   const oid = mergeOrphanId;
                   const targetId = mergeTargetId;
-                  set((st) => {
-                    const orphanRow = st.finalCounts.find((c) => c.productId === oid);
-                    const orphanQty = orphanRow?.quantity ?? 0;
-                    let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
-                    if (orphanQty > 0) {
-                      const targetRow = finalCounts.find((c) => c.productId === targetId);
-                      finalCounts = targetRow
-                        ? finalCounts.map((c) =>
-                            c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
-                          )
-                        : orphanRow
-                          ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
-                          : finalCounts;
-                    }
-                    return {
-                      products: st.products.filter((p) => p.id !== oid),
-                      finalCounts,
-                      scanFeed: st.scanFeed.map((e) =>
-                        e.matchedProductId === oid ? { ...e, matchedProductId: targetId } : e,
-                      ),
-                    };
-                  });
+                  set((st) => ({
+                    products: st.products.filter((p) => p.id !== oid),
+                    finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
+                    scanFeed: st.scanFeed.map((e) =>
+                      e.matchedProductId === oid ? { ...e, matchedProductId: targetId } : e,
+                    ),
+                  }));
                 }
               } else if (!provId) {
                 provId = `prod-${idFactory()}`;
@@ -3393,19 +3413,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 const oid = ownProvId;
                 const targetId = mergeTargetId;
                 set((st) => {
-                  const orphanRow = st.finalCounts.find((c) => c.productId === oid);
-                  const orphanQty = orphanRow?.quantity ?? 0;
-                  let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
-                  if (orphanQty > 0) {
-                    const targetRow = finalCounts.find((c) => c.productId === targetId);
-                    finalCounts = targetRow
-                      ? finalCounts.map((c) =>
-                          c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
-                        )
-                      : orphanRow
-                        ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
-                        : finalCounts;
-                  }
+                  const finalCounts = transferOrphanCount(st.finalCounts, oid, targetId, now());
                   return {
                     products: st.products.filter((p) => p.id !== oid),
                     finalCounts,
@@ -3915,27 +3923,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (removeOrphanId) {
           const oid = removeOrphanId;
           const targetId = orphanTransferTargetId;
-          set((st) => {
-            const orphanRow = st.finalCounts.find((c) => c.productId === oid);
-            const orphanQty = orphanRow?.quantity ?? 0;
-            let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
-            if (targetId && orphanQty > 0) {
-              const targetRow = finalCounts.find((c) => c.productId === targetId);
-              finalCounts = targetRow
-                ? finalCounts.map((c) =>
-                    c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
-                  )
-                : orphanRow
-                  ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
-                  : finalCounts;
-            }
-            return {
-              finalCounts,
-              scanFeed: st.scanFeed.map((e) =>
-                e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
-              ),
-            };
-          });
+          set((st) => ({
+            finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
+            scanFeed: st.scanFeed.map((e) =>
+              e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
+            ),
+          }));
         }
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
