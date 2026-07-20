@@ -26,6 +26,7 @@ from .plan_review import render_plan_markdown, review_plan
 from .report import write_report
 from .risk import classify, expert_tier
 from .scheduler import SafetyPolicy, run_checks
+from .verdict import decide, exit_code, prune_old_runs, write_latest
 
 
 def _path_from_root(root: Path, value: str | None) -> Path | None:
@@ -72,10 +73,22 @@ def _plan(root: Path, config: FableConfig, args: argparse.Namespace) -> int:
         )
         (output / "plan-review.md").write_text(markdown, encoding="utf-8")
         print(f"Evidence: {output}")
-    return 0 if review.verdict == "ready" else 1
+    if review.verdict == "ready":
+        return 0
+    return 2 if review.verdict == "blocked" else 1
 
 
 async def _run(root: Path, config: FableConfig, config_path: Path, args: argparse.Namespace) -> int:
+    try:
+        return await _run_inner(root, config, config_path, args)
+    except Exception as error:  # noqa: BLE001 - engine error path must never masquerade as PASS/BLOCK
+        print(f"ENGINE ERROR: {error}")
+        return 1
+
+
+async def _run_inner(
+    root: Path, config: FableConfig, config_path: Path, args: argparse.Namespace
+) -> int:
     valid_gates = sorted({gate for check in config.checks for gate in check.gates})
     if args.gate not in valid_gates:
         raise ValueError(f"Unknown gate {args.gate!r}; choose one of: {', '.join(valid_gates)}")
@@ -179,13 +192,21 @@ async def _run(root: Path, config: FableConfig, config_path: Path, args: argpars
         risk_tags=sorted(profile.tags),
     )
     write_report(report, report_dir, root)
-    failed = [result for result in results if result.status == "failed" and result.blocking]
-    plan_blocked = bool(plan_result and plan_result.verdict == "blocked")
+    verdict = decide(results, plan_result)
     print(
-        f"RESULT: {'BLOCKED' if failed or plan_blocked else 'PASS'} | "
-        f"failed={len(failed)} | report={report_dir / 'report.html'}"
+        f"RESULT: {verdict.status} | blockers={len(verdict.reasons)} | "
+        f"report={report_dir / 'report.md'}"
     )
-    return 1 if failed or plan_blocked else 0
+    write_latest(
+        root=root,
+        verdict=verdict,
+        run_id=run_id,
+        report_dir=report_dir,
+        run_started_at=started.isoformat(),
+        cost_note="subscription; true spend = provider console",
+    )
+    prune_old_runs(root / config.reports_dir)
+    return exit_code(verdict)
 
 
 def build_parser() -> argparse.ArgumentParser:
