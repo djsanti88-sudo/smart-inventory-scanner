@@ -4661,6 +4661,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   normalizedCandidates: [],
                   matchedProductId: provRow.id,
                   matchType: "unknown",
+                  // status "known" (counted) + resolverStatus "needs_review" (identity unresolved) is
+                  // the deliberate pairing for a counted-but-unidentified row: the transferred quantity
+                  // must land on the ledger now, while identity stays open for human resolution.
                   status: "known",
                   resolverStatus: "needs_review",
                   codeType: detectCodeType(code),
