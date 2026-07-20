@@ -1,4 +1,4 @@
-import { type Firestore, doc, runTransaction, serverTimestamp } from "firebase/firestore";
+import { type Firestore, collection, doc, getDocs, orderBy, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview, Product, InventorySession } from "@/types";
 import type { SyncResult, FailureMode, IncrementPayload } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
@@ -28,6 +28,19 @@ export class FirebaseSyncTarget implements SyncTarget {
     if (!this.opts.emulator) {
       throw new Error("FirebaseSyncTarget.reset() is disabled against the real Firebase cloud (no destructive reset).");
     }
+  }
+
+  /**
+   * Phase 3: one-shot read of every ScanEvent for a session, oldest first. NOT part of the
+   * transactional apply() - this is a plain query, matching loadBusinessData's one-shot getDocs
+   * pattern (businessDataLoader.ts:27-33), not a live listener (no onSnapshot anywhere in this repo
+   * by design - see the sync scout's Trap C on why a naive listener-replace is unsafe).
+   */
+  async getScanEventsBySession(businessId: string, sessionId: string): Promise<ScanEvent[]> {
+    const col = collection(this.db, COLLECTIONS.businesses, businessId, COLLECTIONS.scanEvents);
+    const q = query(col, where("sessionId", "==", sessionId), orderBy("createdAt", "asc"));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => d.data() as ScanEvent);
   }
 
   async apply(item: PendingSyncItem): Promise<SyncResult> {

@@ -130,4 +130,13 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
     expect((await t.apply({ ...incItem("k", "e", 1), businessId: "" })).ok).toBe(false);
     expect((await t.apply({ ...incItem("", "e", 1), idempotencyKey: "" })).ok).toBe(false);
   });
+
+  it("getScanEventsBySession returns only this session's events, oldest first", async () => {
+    const t = target();
+    await t.apply({ ...incItem("gs1", "gev1", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "gev1", businessId: BIZ, sessionId: SID, cleanCode: "111", createdAt: "2026-07-19T16:00:00.000Z" } });
+    await t.apply({ ...incItem("gs2", "gev2", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "gev2", businessId: BIZ, sessionId: SID, cleanCode: "222", createdAt: "2026-07-19T16:05:00.000Z" } });
+    await t.apply({ ...incItem("gs3", "gev3", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "gev3", businessId: BIZ, sessionId: "other-session", cleanCode: "333", createdAt: "2026-07-19T16:01:00.000Z" } });
+    const events = await t.getScanEventsBySession!(BIZ, SID);
+    expect(events.map((e) => e.id)).toEqual(["gev1", "gev2"]);
+  });
 });

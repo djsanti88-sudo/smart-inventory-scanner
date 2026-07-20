@@ -190,6 +190,12 @@ export class MockDb {
   getSessionCounts(sessionId: string): ServerCount[] {
     return Object.values(this.state.counts).filter((c) => c.sessionId === sessionId);
   }
+  /** Every ScanEvent for one business+session, oldest first (Phase 3 session timeline). */
+  getScanEventsBySession(businessId: string, sessionId: string): ScanEvent[] {
+    return Object.values(this.state.scanEvents)
+      .filter((e) => e.businessId === businessId && e.sessionId === sessionId)
+      .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+  }
   snapshot(): MockDbState {
     return JSON.parse(JSON.stringify(this.state));
   }
