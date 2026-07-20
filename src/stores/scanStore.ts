@@ -2951,15 +2951,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           id: provId, businessId: st0.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
           specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
           aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
-          confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+          confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
         };
         const ev = st0.scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
         let counts = st0.finalCounts;
         let qty = 0;
-        if (ev) {
-          const r = incrementInventoryCount(counts, { ...ev, matchedProductId: provId, status: "known", quantityDelta: 1 }, idFactory);
+        let countId: string | null = null;
+        const countedEvent = ev
+          ? { ...ev, matchedProductId: provId, status: "known" as const, quantityDelta: 1 }
+          : null;
+        if (countedEvent) {
+          const r = incrementInventoryCount(counts, countedEvent, idFactory);
           counts = r.counts;
           qty = r.count.quantity;
+          countId = r.count.id;
         }
         set((st) => ({
           products: [...st.products, provProduct],
@@ -2990,12 +2995,36 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // documented "Decoding -> Verified / Suggested / Conflict / Needs review" UI stays visible;
                   // only stamp "suggested" when there is no decode in flight.
                   decodeStatus: e.decodeStatus === "decoding" ? "decoding" : "suggested",
-                  syncStatus: "synced" as const,
+                  // D1 FIX: the stored feed event and the counted delta are the SAME FACT - the row a
+                  // provisional count was applied from must carry the delta it contributed (North-star #2:
+                  // sum(feed deltas) === quantity). And the fake optimistic "synced" stamp is GONE: the
+                  // row's syncStatus is derived from pendingSyncQueue membership (see the reconcile at
+                  // scanStore.ts:907-922) and only reads "synced" after a real sync ack.
+                  quantityDelta: 1,
                   reason: e.reason || reason,
                 }
               : e,
           ),
         }));
+        // D1 FIX: a provisional count is real inventory. Enqueue its ledger writes through the SAME sync
+        // queue mechanism every counted scan uses. SAVE_SCAN_EVENT + INCREMENT_COUNT mirror the countable
+        // branch's two ops (scanStore.ts:1397-1422); SAVE_PRODUCT for the freshly minted provisional is a
+        // NEW op on the scan path (precedent: resolveUnknown's SAVE_PRODUCT enqueue, :3912-3930). The
+        // INCREMENT_COUNT key is the event's own key minted in processScan - reused verbatim, never
+        // regenerated (Idempotent Sync Rules).
+        if (countedEvent && countId) {
+          const bId = st0.businessId;
+          const sId = st0.sessionId;
+          const incPayload: IncrementPayload = {
+            businessId: bId, sessionId: sId, productId: provId, scanEventId: countedEvent.id,
+            quantityDelta: 1, idempotencyKey: countedEvent.idempotencyKey,
+          };
+          enqueueAndSync([
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, provId, "SAVE_PRODUCT"), scanEventId: null }),
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT"), scanEventId: countedEvent.id }),
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
+          ]);
+        }
       },
 
       markFeedRowVerified: (cleanCode, reason) => {
