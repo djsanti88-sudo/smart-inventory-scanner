@@ -516,6 +516,32 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(exactUrls.length).toBeLessThanOrEqual(1);
   });
 
+  // E1 (efficiency audit, 2026-07-20): the retail knowledge index (lookupRetailBarcodeAsync) was queried
+  // TWICE per request on a rung-0-retail-miss decode path - once by the outer rung-0 retail peek and AGAIN
+  // by computeDecode's own consensus/contradiction retail peek, for the IDENTICAL code that just missed.
+  // Both hit the same Turso/SQLite index; the second is a provably wasted DB round-trip on every miss path
+  // (the ONLY way computeDecode is reached). This mirrors the D8/D8b UPCitemdb thread-through: rung-0's
+  // retail result is now threaded into computeDecode, which reuses it instead of re-querying. Behavior is
+  // IDENTICAL (the deterministic index returns the same row for the same code either way) - just one fewer
+  // query. On a genuine rung-0 retail MISS a GTIN-shaped code must call lookupRetailBarcodeAsync AT MOST
+  // ONCE across the whole request. Pre-fix this was 2.
+  it("E1: on a rung-0 retail MISS, lookupRetailBarcodeAsync is called AT MOST ONCE per request (no duplicate consensus re-query)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // ensure the paid ladder / Plan D genuinely runs
+    vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null); // trusted tire corpus misses first
+    vi.mocked(getLearnedProduct).mockResolvedValueOnce(null); // learned tier misses too
+    // Retail index MISSES (null) - so the ladder + Plan D consensus run; the second (now-removed) peek
+    // would previously have re-queried the identical code here.
+    vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue(null);
+    stubFreeRungFetch({ upcHit: false }); // both free rungs miss so the pipeline reaches Plan D + paid phase
+
+    const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+    expect(outcome.kind).toBe("computed");
+    // The retail index (deterministic per code) is queried AT MOST ONCE for the whole request.
+    expect(vi.mocked(lookupRetailBarcodeAsync).mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
   it("cap available + free rungs MISS -> paid charge happens EXACTLY ONCE, paid rungs run, and reasons chain is free-phase-then-paid-phase", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap
     // L6 (Task 12c): the total-miss cap charge now only fires when paidWorkPossible() is true. A Brave
@@ -1494,47 +1520,54 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         );
       }
 
-      it("a paid-rung 'verified' that CONTRADICTS a retail-corpus row downgrades to conflict/needs_review, never verified (the salmon/beer bug)", async () => {
+      // E1 REFRAME (efficiency audit, 2026-07-20): under the single-retail-query model the salmon/beer
+      // protection lands EARLIER and STRONGER than the downstream contradiction guard. The retail index is
+      // deterministic: for one code it returns ONE row. If that row is a USABLE "Saumon fume" identity, the
+      // rung-0 retail peek SETTLES it as a $0 "suggested" salmon and the paid ladder never runs at all - so
+      // the wrong paid "Heineken verified" identity is never even produced, let alone shown to the customer.
+      // (The old double-query test could only reach the contradiction guard by mocking rung-0 to MISS while
+      // a SECOND call returned salmon - a scenario impossible against the real deterministic index, since
+      // any row usable enough to trip the guard is also usable enough to settle rung 0. E1 removes that
+      // second query; this test now asserts the real, stronger single-call protection.) The downstream
+      // contradiction guard remains as defense-in-depth for the not-usable-row edge (asserted inert below).
+      it("the salmon/beer regression is prevented at rung 0: a usable retail row settles as suggested, the paid 'verified' beer identity never runs", async () => {
         process.env.AI_LOOKUP_DAILY_LIMIT = "100";
         vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
-        // The rung-0 retail lookup call MISSES (null) so the ladder is actually reached (this test
-        // targets the contradiction guard specifically, not the rung-0 settle) - but the LATER
-        // consensus-peek call inside computeDecode (same lookupRetailBarcodeAsync fn, called again once
-        // rung 0 has already missed) returns the retail corpus's SALMON row for this exact code, which
-        // is what the contradiction guard reads via `retailHit`.
-        vi.mocked(lookupRetailBarcodeAsync)
-          .mockResolvedValueOnce(null) // rung-0 call: miss, so the ladder runs
-          .mockResolvedValueOnce({
-            productName: "Saumon fume Ecossais tranche main",
-            brand: "Labeyrie",
-            category: "Fish",
-            barcode: CONTRADICT_GTIN,
-          }); // computeDecode's consensus-peek call: the retail row the guard cross-checks against
-        // ...Fetch V2 (paid) self-reports a completely different, contradicting identity (a beer).
+        // ONE deterministic retail row for this code (the SALMON identity), reused by both peeks via E1.
+        vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+          productName: "Saumon fume Ecossais tranche main",
+          brand: "Labeyrie",
+          category: "Fish",
+          barcode: CONTRADICT_GTIN,
+        });
+        // Fetch V2 (paid) WOULD self-report a contradicting beer if the ladder ran - it must NOT run.
         stubFetchV2Verified({ name: "Heineken Lager Beer 12-pack", brand: "Heineken" });
-        stubFreeRungFetch({ upcHit: false }); // free rungs miss so the ladder reaches the paid fetchv2 mock
+        stubFreeRungFetch({ upcHit: false });
 
         const outcome = await runDecodePipeline(makeReq(CONTRADICT_GTIN));
 
         expect(outcome.kind).toBe("computed");
         if (outcome.kind !== "computed") throw new Error("unreachable");
-        // Never the wrong "Verified" identity that contradicts the retail corpus.
+        // Never the wrong "Verified" beer - the retail row settled first as an honest suggestion.
         expect(outcome.payload.decision.status).not.toBe("verified");
-        expect(["conflict", "needs_review"]).toContain(outcome.payload.decision.status);
-        expect(outcome.payload.decision.reason).toMatch(/retail|disagree|conflict|contradict/i);
+        expect(outcome.payload.decision.status).toBe("suggested");
+        expect(outcome.payload.results[0]?.productName).toBe("Saumon fume Ecossais tranche main");
+        expect(outcome.payload.results.some((r) => /heineken/i.test(r.productName))).toBe(false);
+        // The paid Fetch V2 mock was never consumed (rung-0 settled first).
+        expect(vi.mocked(fetchV2)).not.toHaveBeenCalled();
+        // Retail index queried exactly once (E1: no duplicate consensus re-query).
+        expect(vi.mocked(lookupRetailBarcodeAsync).mock.calls.length).toBe(1);
       });
 
-      it("a paid-rung 'verified' that AGREES with the retail row passes through unchanged", async () => {
+      it("a usable retail row settling at rung 0 is the SAME whether or not it agrees with any paid identity (paid ladder never runs)", async () => {
         process.env.AI_LOOKUP_DAILY_LIMIT = "100";
         vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
-        vi.mocked(lookupRetailBarcodeAsync)
-          .mockResolvedValueOnce(null) // rung-0 call: miss, so the ladder runs
-          .mockResolvedValueOnce({
-            productName: "Continental TrueContact Tour 235/60R18",
-            brand: "Continental",
-            category: "Tire",
-            barcode: CONTRADICT_GTIN,
-          }); // consensus-peek call: an AGREEING retail row
+        vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+          productName: "Continental TrueContact Tour 235/60R18",
+          brand: "Continental",
+          category: "Tire",
+          barcode: CONTRADICT_GTIN,
+        });
         stubFetchV2Verified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
         stubFreeRungFetch({ upcHit: false });
 
@@ -1542,8 +1575,11 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
         expect(outcome.kind).toBe("computed");
         if (outcome.kind !== "computed") throw new Error("unreachable");
-        expect(outcome.payload.decision.status).toBe("verified");
+        // The usable retail row settles at rung 0 as a $0 suggestion; the paid ladder never runs.
+        expect(outcome.payload.decision.status).toBe("suggested");
         expect(outcome.payload.results[0]?.productName).toBe("Continental TrueContact Tour 235/60R18");
+        expect(vi.mocked(fetchV2)).not.toHaveBeenCalled();
+        expect(vi.mocked(lookupRetailBarcodeAsync).mock.calls.length).toBe(1);
       });
 
       // REVIEW FINDING: the contradiction guard consumed `retailHit` WITHOUT the same isUsableProductName
@@ -1561,16 +1597,18 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         // SITE_BLOCKLIST/PLACEHOLDER checks - a garbage name by length alone (fails isUsableProductName).
         const GARBAGE_NAME =
           "aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggggggggg hhhhhhhhhh iiiiiiiiii jjjjjjjjjj kkkkkkkkkk lllllllllll";
-        vi.mocked(lookupRetailBarcodeAsync)
-          .mockResolvedValueOnce(null) // rung-0 call: miss, so the ladder runs
-          .mockResolvedValueOnce({
-            // Plausible-but-WRONG brand for this GTIN (would structurally conflict with Continental if
-            // the guard did not reject the garbage name first).
-            productName: GARBAGE_NAME,
-            brand: "Michelin",
-            category: "Tire",
-            barcode: CONTRADICT_GTIN,
-          });
+        // E1: ONE deterministic retail row. The GARBAGE name fails isUsableProductName, so the rung-0
+        // retail peek does NOT settle it (the ladder runs, reaching the paid Fetch V2 verify), and the
+        // SAME row is threaded to the contradiction guard, which must ALSO ignore it (isUsableProductName
+        // gate) rather than let its plausible-but-wrong brand structurally downgrade a clean paid verify.
+        vi.mocked(lookupRetailBarcodeAsync).mockResolvedValue({
+          // Plausible-but-WRONG brand for this GTIN (would structurally conflict with Continental if
+          // the guard did not reject the garbage name first).
+          productName: GARBAGE_NAME,
+          brand: "Michelin",
+          category: "Tire",
+          barcode: CONTRADICT_GTIN,
+        });
         stubFetchV2Verified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
         stubFreeRungFetch({ upcHit: false });
 

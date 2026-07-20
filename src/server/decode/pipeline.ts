@@ -507,6 +507,22 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // (still appears + counts as Unidentified); a VALID GTIN is completely unaffected.
   const misread = isLikelyMisreadGtin(code);
 
+  // E1 (efficiency audit, 2026-07-20): thread the rung-0 retail peek's result INTO computeDecode so its
+  // own retail peek (Plan D consensus vote + the paid-verified contradiction guard) reuses it instead of
+  // re-querying lookupRetailBarcodeAsync a SECOND time for the identical code that just missed at rung 0.
+  // This mirrors the D8 upcItemDbResult / upcItemDbExactTried thread-through below EXACTLY: the rung-0
+  // retail peek (further down in runDecodePipeline) is GTIN-gated on the SAME `!e2eMode() && isGtinShaped
+  // && !misread` predicate computeDecode's peek uses, and computeDecode is ONLY ever reached on a rung-0
+  // MISS - so by the time computeDecode's retail peek would run, rung 0 has ALWAYS already performed the
+  // exact same lookup (or was gated out identically). `rung0RetailTried` is true ONLY when rung 0
+  // genuinely ran the exact-code lookup (e2e skip / non-GTIN / misread never set it), so on any path where
+  // rung 0 did NOT look retail up, computeDecode still does its own lookup (finding rule (b)). The full
+  // row (barcode/productName/brand) plus the last-lookup status are threaded so BOTH the retailDb
+  // consensus vote and the retailLookup debug field are preserved byte-for-byte.
+  let rung0RetailRow: { productName: string; brand: string; barcode: string } | null = null;
+  let rung0RetailStatus: string | undefined;
+  let rung0RetailTried = false;
+
   // QA ROUND-3 FIX #5 (live-proven bypass on 1bfa6fe): a documentation/example GTIN with a VALID GS1
   // check digit (4006381333931 "Test Shopidoo", 5901234123457, 012345678905 - all on
   // EXAMPLE_BARCODE_BLOCKLIST, plus every degenerate all-zero/all-same/sequential shape) passes the
@@ -580,8 +596,15 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // KNOWN example/test row by exact value or name; fix #6 rejects ANY row when the scanned code's own
     // check digit is invalid, regardless of what the row's name/brand is).
     if (gtinShaped && !misread) {
-      const { lookupRetailBarcodeAsync } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+      const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
       const retailRow = await lookupRetailBarcodeAsync(code);
+      // E1: capture the RAW row + status for computeDecode's peek to reuse - the retail index is never
+      // queried twice for the same request. This is the raw pre-filter row (computeDecode applies its own
+      // example/usable filters downstream exactly as before), and `rung0RetailTried` records that rung 0
+      // genuinely performed the exact-code lookup so computeDecode may safely skip its own second query.
+      rung0RetailRow = retailRow;
+      rung0RetailStatus = getLastRetailLookupStatus();
+      rung0RetailTried = true;
       if (retailRow && isUsableProductName(retailRow.productName) && !isExampleOrTestRow(retailRow.barcode, retailRow.productName, retailRow.brand)) {
         appendDecodeOutcome({ settledBy: "retail-corpus", status: "suggested", reasons: [], sourceTier: null });
         return { kind: "computed", payload: retailPayload(retailRow, code, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
@@ -838,9 +861,23 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // called it out as "the SAME gate"), so it must never feed a misread code's coincidental row into
     // the Plan D consensus vote or the paid-verified contradiction guard either.
     if (!e2eMode() && isGtinShaped(code) && !misread) {
-      const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
-      const rawRetailHit = await lookupRetailBarcodeAsync(code);
-      retailLookupStatus = getLastRetailLookupStatus();
+      // E1: REUSE the rung-0 retail peek's result instead of re-querying the identical code a second time.
+      // The rung-0 peek is GTIN-gated on the EXACT same `!e2eMode() && isGtinShaped && !misread` predicate
+      // as this block, and computeDecode is only ever reached on a rung-0 MISS - so when control gets here,
+      // rung 0 has ALWAYS already performed this exact lookup (rung0RetailTried === true), and the
+      // deterministic index would return the identical row. Only when rung 0 did NOT genuinely try the
+      // exact-code lookup (rung0RetailTried false - a defensive case that this predicate makes unreachable
+      // today, kept per finding rule (b)) do we fall back to our own query. This is the retail twin of the
+      // D8 upcItemDbResult / upcItemDbExactTried thread-through.
+      let rawRetailHit: { productName: string; brand: string; barcode: string } | null;
+      if (rung0RetailTried) {
+        rawRetailHit = rung0RetailRow;
+        retailLookupStatus = rung0RetailStatus;
+      } else {
+        const { lookupRetailBarcodeAsync, getLastRetailLookupStatus } = await import("@/server/retail-knowledge/retailKnowledgeIndex");
+        rawRetailHit = await lookupRetailBarcodeAsync(code);
+        retailLookupStatus = getLastRetailLookupStatus();
+      }
       // QA HARDENING FIX #5: reject an example/test row (textbook GS1 example barcode, or a
       // demo/placeholder name/brand) at THIS single source, so neither the Plan D `retailDb` consensus
       // vote below nor the paid-verified contradiction guard further down ever sees a fake identity
