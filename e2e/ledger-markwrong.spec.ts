@@ -6,16 +6,21 @@ import { test, expect, type Page } from "./fixtures";
 // holds through the REAL browser (store state AND rendered DOM), at desktop and 390px phone
 // viewports. Screenshots: e2e/proof/ledger-markwrong-desktop.png, e2e/proof/ledger-markwrong-phone.png.
 //
-// Scenario note: this seeds a VERIFIED product with an APPROVED alias (via the store handle, same
-// shape as src/stores/markWrongTransfer.store.test.ts's seedKnown helper) so both scans resolve
-// "known" and count against it deterministically - this is the exact scenario Task 5's D2 fix was
-// built and unit-proven against. A scan of a genuinely UNRESOLVED code lands on a PROVISIONAL
-// placeholder instead (minted by ensureProvisionalCount on first scan); marking THAT provisional
-// wrong hits a separate, still-open gap where markWrong's own repoint step can match the OLD
-// provisional instead of the newly-minted one (both satisfy `provisional === true` with the same
-// primaryBarcode, and the lookup is an unordered `.find`), inflating the total. That gap is
-// documented in the Task 9 report and is out of this task's scope (proof spec only, not a
-// scanStore.ts fix) - see .superpowers/sdd/task-9-report.md.
+// Scenario 1 seeds a VERIFIED product with an APPROVED alias (via the store handle, same shape as
+// src/stores/markWrongTransfer.store.test.ts's seedKnown helper) so both scans resolve "known" and
+// count against it deterministically - the exact scenario Task 5's D2 fix was built and unit-proven
+// against.
+//
+// Scenario 2 (provisional-wrong): a scan of a genuinely UNRESOLVED code lands on a PROVISIONAL
+// placeholder (minted by ensureProvisionalCount on first scan); marking THAT provisional wrong used
+// to hit a real inflation bug (found by this task's browser proof, documented in
+// .superpowers/sdd/task-9-report.md): markWrong's repoint step re-derived "the" provisional via an
+// unordered products.find on primaryBarcode, which could match the OLD marked-wrong provisional
+// (its primaryBarcode is never blanked) instead of the newly-minted one - counting the same
+// physical scans on two rows and inflating the total 2 -> 3. That gap is NOW FIXED (the mint target
+// id comes from ensureProvisionalCount's own return, id-keyed and excluding the marked-wrong
+// product) and LOCKED here browser-side plus unit-side in markWrongTransfer.store.test.ts
+// ("PROVISIONAL-WRONG (Task 9 finding)").
 
 const AI_OFF = {
   liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
@@ -136,5 +141,62 @@ for (const vp of [
     await expect(page.getByTestId(`qty-${provisionalId}`)).toHaveText(/2/);
 
     await page.screenshot({ path: `e2e/proof/ledger-markwrong-${vp.name}.png`, fullPage: true });
+  });
+
+  test(`markWrong on a PROVISIONAL keeps total constant - Task 9 inflation locked (${vp.name})`, async ({ page }) => {
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    await page.route("**/api/ai-lookup", async (route) => {
+      if (route.request().method() === "GET") return route.fulfill({ json: AI_OFF });
+      return route.fulfill({ json: {} });
+    });
+    await page.goto("/login");
+    await page.getByTestId("login-button").click();
+    await page.waitForURL("**/scan");
+    await expect(page.getByTestId("scanner-input")).toBeFocused();
+
+    // NO seeding: scan a genuinely unknown, corpus-free code twice. The first scan mints an
+    // Unidentified provisional via ensureProvisionalCount and counts; the second counts against it.
+    const UNKNOWN_CODE = "697662129691";
+    await scan(page, UNKNOWN_CODE);
+    await scan(page, UNKNOWN_CODE);
+    await expect.poll(() => totalCounted(page), { message: "two unknown scans counted" }).toBe(2);
+
+    // Grab the provisional the scans counted against.
+    const oldProvId = await page.evaluate((code: string) => {
+      type State = {
+        products: Array<{ id: string; provisional?: boolean; status?: string; primaryBarcode?: string }>;
+      };
+      const w = window as unknown as { __scanStore: { getState: () => State } };
+      const p = w.__scanStore.getState().products.find(
+        (x) => x.provisional === true && x.status !== "archived" && x.primaryBarcode === code,
+      );
+      return p?.id ?? "";
+    }, UNKNOWN_CODE);
+    expect(oldProvId).not.toBe("");
+    await expect(page.getByTestId(`qty-${oldProvId}`)).toHaveText(/2/);
+
+    // Mark the PROVISIONAL itself wrong - the exact scenario that used to inflate 2 -> 3.
+    await page.evaluate(async (id: string) => {
+      type Store = { getState: () => { markWrong: (pid: string, o?: { reason?: string }) => Promise<string | null> } };
+      const w = window as unknown as { __scanStore: Store };
+      await w.__scanStore.getState().markWrong(id, { reason: "e2e provisional-wrong proof" });
+    }, oldProvId);
+
+    // STORE invariant: total unchanged (the bug made this 3).
+    await expect.poll(() => totalCounted(page), { message: "total invariant across provisional markWrong" }).toBe(2);
+
+    // The old provisional never regains a count row; a NEW provisional carries the full 2.
+    await expect(page.getByTestId(`count-row-${oldProvId}`)).toHaveCount(0);
+    await expect(page.getByTestId("final-count-body").locator('tr[data-testid^="count-row-"]')).toHaveCount(1);
+    const newProvId = await page.evaluate(() => {
+      type Store = { getState: () => { finalCounts: Array<{ productId: string }> } };
+      const w = window as unknown as { __scanStore: Store };
+      return w.__scanStore.getState().finalCounts[0]?.productId ?? "";
+    });
+    expect(newProvId).not.toBe("");
+    expect(newProvId).not.toBe(oldProvId);
+    await expect(page.getByTestId(`qty-${newProvId}`)).toHaveText(/2/);
+
+    await page.screenshot({ path: `e2e/proof/ledger-markwrong-provisional-${vp.name}.png`, fullPage: true });
   });
 }
