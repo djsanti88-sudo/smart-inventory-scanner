@@ -133,7 +133,7 @@ export function UniversalImportPanel({
         />
         {sheet && <span className="text-sm text-zinc-600">{sheet.fileName}</span>}
       </div>
-      {error && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="import-error">{error}</p>}
+      {error && <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="import-error">{error}</p>}
       {mappingMode && sheet && (
         <div className="flex flex-col gap-3" data-testid="column-mapping">
           <h3 className="font-semibold">Map the columns we saw</h3>
@@ -177,8 +177,8 @@ export function UniversalImportPanel({
           {!summary && <button type="button" data-testid="import-apply" disabled={busy} onClick={() => void apply()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply {preview.total} rows</button>}
         </div>
       )}
-      {summary && <p className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900" data-testid="import-summary">Applied {summary.applied}. Needs Review {summary.queuedForReview}. Rejected {summary.rejected}.</p>}
-      {busy && <p className="text-sm text-zinc-600">Working...</p>}
+      {summary && <p aria-live="polite" className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900" data-testid="import-summary">Applied {summary.applied}. Needs Review {summary.queuedForReview}. Rejected {summary.rejected}.</p>}
+      {busy && <p aria-live="polite" className="text-sm text-zinc-600">Working...</p>}
     </section>
   );
 }

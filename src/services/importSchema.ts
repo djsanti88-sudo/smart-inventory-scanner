@@ -33,7 +33,6 @@ export interface UniversalSheet {
   rows: string[][];
   headerRowIndex: number;
   sourceSignature: string;
-  seenRows: string[][];
 }
 
 export interface MappedImportRow {

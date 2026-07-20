@@ -2,7 +2,68 @@
 
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
-> Last updated: 2026-07-15.
+> Last updated: 2026-07-20.
+
+## 2026-07-20 Phase 4 Stage A: Universal Import (ship gate COMPLETE, merge owner-gated)
+
+Branch `feat/decode-ladder-goupc`. Plan: `docs/superpowers/plans/2026-07-20-phase4-universal-import.md`
+(11 tasks). Commits `0e050ab..23e3465` (Task 1-11 range; the orchestrator fills the final range once
+Task 11's proof artifacts are committed). Full Task 11 report: `.superpowers/sdd/p4-task-11-report.md`.
+
+Stage A end to end: upload a CSV/TSV/XLSX file on `/products` -> deterministic column mapping
+(header synonyms, then content inference, then manual mapping with per-account memory) -> a preview
+classified against the local tire + retail corpus (`part_number_exact` / identity-Jaccard / retail
+barcode / review / reject) -> an explicit Apply that counts exact matches through the real ledger
+(`applyUniversalImport`, aggregated by code so duplicate rows in one file never double-count) and
+routes everything else to Needs Review -> the imported quantity is visible on the Boss Report.
+
+### AC table
+
+| AC | Status | Evidence |
+|---|---|---|
+| AC1 (deterministic shaping: read, infer, map, signature) | Satisfied | `importFixtureBattery.test.ts` (6 tests) over 4 real fixtures (Shop-Ware CSV, reordered/renamed TSV, nonsense-header CSV forcing manual mapping, a real OOXML xlsx decoded from base64) |
+| AC2 (fuzzy fallback tuning beyond the shipped Jaccard threshold) | Deferred to P4b | Out of Stage A scope per the 2026-07-20 plan's Stage A/B split; the identity-Jaccard path itself is already live in `identityMatcher.ts` and exercised by the e2e spec's "review" row, but broader fuzzy-match tuning work is P4b |
+| AC3 (mapping memory persists and re-applies) | Satisfied | `mappingMemoryRoundtrip.test.ts` (I7 proof, 3 tests): PUT/GET round trip via the real `getImportMappingMemory`/`putImportMappingMemory` exports on a mock KV seam, remembered mapping re-validates against the same file's headers, cross-business isolation proven |
+| AC4 (perf: whole shaping chain under 10s at scale) | Satisfied | `importPerf.test.ts`: 5000-row matrix through infer -> map -> preview end to end, asserted `< 10_000` ms (actual: low tens of ms) |
+| AC5 Stage A (real UI end to end: upload through Apply, count reaches the Boss Report) | Satisfied | `e2e/phase4-universal-import.spec.ts`, 2/2 passing (desktop 1280x800 + phone 390x844), 6 screenshots in `e2e/proof/p4-*.png` |
+| AC5 fuzzy half (UI proof of a fuzzy-tier auto-suggestion, not just review) | Deferred to P4b | Same Stage A/B boundary as AC2; the e2e spec does prove a non-exact row correctly routes to review, just not a fuzzy-tier "exact-but-not-PN" UI path |
+
+### Demo screenshots (`e2e/proof/`)
+
+- `p4-preview-desktop.png` / `p4-preview-phone.png` - upload result: "Matched 1 of 2 automatically", 1
+  exact (real corpus part-number hit) + 1 review (no tire signal), reasons shown per row.
+- `p4-applied-desktop.png` / `p4-applied-phone.png` - post-Apply summary banner.
+- `p4-report-desktop.png` / `p4-report-phone.png` - Boss Report after import: "Total items: 6" and
+  "Top variances: wildpeak_a_t3w: +6", proving the imported quantity reached the real ledger and the
+  P3 report page, not just the import panel's own state.
+
+### Known limits (unchanged from Tasks 1-10, restated here for the ship-gate record)
+
+- Legacy binary `.xls` is rejected with an actionable message ("Save it as .xlsx or .csv.") pending an
+  owner-approved BIFF parser choice - `universalFileReader.ts` workbookMatrix's catch branch.
+- Import mapping memory reuses the `ladder_kv` Turso table (`src/server/upc/storage.ts`) rather than a
+  dedicated table - functionally correct and tenant-scoped by key, but sharing a KV namespace with
+  decode-ladder usage data is a deferred cleanup, not a Stage A blocker.
+
+### Contract corrections found while writing the ship gate (Task 11)
+
+The task brief's guessed contracts differed from committed source in two places; both were followed
+per SOURCE:
+
+1. `src/server/importMappingMemory.ts` exports `getImportMappingMemory`/`putImportMappingMemory`
+   (business-scoped, KV-backed), not `loadMapping`/`saveMapping` - those names exist only as local
+   wrapper closures inside `UniversalImportPanelContainer.tsx` that call the `/api/import-mapping`
+   route, which itself calls the real exports server-side.
+2. The seed file `src/server/tire-knowledge/seed/tire_corpus_seed.csv` is pre-generation source data,
+   NOT what the runtime loads. The actual runtime corpus is
+   `src/server/knowledge.generated.db` (SQLite, `tires`/`retail` tables). Fixture part numbers were
+   picked by querying that DB directly and confirmed live against `/api/reconcile/match` on a
+   throwaway local dev server before being finalized: Cooper Discoverer A/T3 (manufacturer_part_number
+   `90000002732`, size `LT265/70R17`) and Falken Wildpeak A/T3W (manufacturer_part_number `28030703`,
+   size `LT275/70R18`). No production gap - the route and corpus both work correctly; the seed CSV is
+   just not the deployed data source.
+
+No production source was edited for Task 11 (proof-only: fixtures, unit tests, e2e, this checkpoint).
 
 ## 2026-07-15 barcode trust gate Phase 1 (COMPLETE, merge owner-gated)
 

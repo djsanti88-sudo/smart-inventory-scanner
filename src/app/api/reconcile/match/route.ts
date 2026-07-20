@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import {
   matchExpectedRow,
   type CorpusCandidate,
-  type MatchResult,
   type MatcherDeps,
 } from "@/services/reconcile/identityMatcher";
 import type { ExpectedInventoryRow } from "@/services/reconcile/types";
@@ -14,12 +13,11 @@ import {
 import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
+import type { PreviewMatchResult } from "@/services/universalImportPreview";
 
 // Preview result = a MatchResult optionally enriched with the exact retail-corpus hit for a non-tire
-// row (the "identified from the 4M-product catalog" badge). Widened so the enriched push typechecks.
-type PreviewMatchResult = MatchResult & {
-  retailCatalogMatch?: NonNullable<Awaited<ReturnType<typeof lookupRetailBarcodeAsync>>>;
-};
+// row (the "identified from the 4M-product catalog" badge). Shared with universalImportPreview.ts,
+// which builds the ImportPreview from this same route's response.
 
 // POST /api/reconcile/match (Task 7, Shop-Ware reconcile round).
 // Runs the pure identity matcher (Task 5) server-side, per row, against the LOCAL tire corpus

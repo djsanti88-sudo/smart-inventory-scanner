@@ -118,6 +118,5 @@ export async function readUniversalFile(file: UploadFileLike): Promise<Universal
     rows,
     headerRowIndex: inference.headerRowIndex,
     sourceSignature: buildSourceSignature(inference.headers),
-    seenRows: matrix.slice(0, inference.headerRowIndex + 4),
   };
 }

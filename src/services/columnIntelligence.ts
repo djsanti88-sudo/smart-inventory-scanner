@@ -33,7 +33,6 @@ export interface ColumnInference {
   mapping: ColumnMapping;
   confidence: "high" | "low";
   source: MappingSource;
-  seenHeaders: string[];
   reasons: string[];
 }
 
@@ -133,7 +132,6 @@ export function inferColumnMapping(matrix: string[][]): ColumnInference {
     mapping,
     confidence,
     source,
-    seenHeaders: headers,
     reasons,
   };
 }

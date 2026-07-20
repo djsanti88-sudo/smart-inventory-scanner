@@ -22,7 +22,7 @@ export function UniversalImportPanelContainer() {
     const idToken = await token();
     const query = new URLSearchParams({ businessId, sourceSignature, ...(idToken ? { idToken } : {}) });
     const response = await fetch(`/api/import-mapping?${query.toString()}`, { cache: "no-store" });
-    if (!response.ok) return null;
+    if (!response.ok) throw new Error("Could not load the remembered column mapping.");
     return (await response.json() as { mapping: ColumnMapping | null }).mapping;
   }
 

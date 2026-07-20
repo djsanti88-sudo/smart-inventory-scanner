@@ -17,7 +17,6 @@ const sheet: UniversalSheet = {
   ],
   headerRowIndex: 0,
   sourceSignature: "source-1",
-  seenRows: [],
 };
 
 describe("universalImportPreview", () => {

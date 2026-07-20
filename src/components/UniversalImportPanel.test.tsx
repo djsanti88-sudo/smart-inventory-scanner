@@ -16,7 +16,6 @@ const nonsenseSheet: UniversalSheet = {
   rows: [["ABC-1", "Acme", "Road", "225/45R18", "7"]],
   headerRowIndex: 0,
   sourceSignature: "source-nonsense",
-  seenRows: [["Alpha", "Beta", "Gamma", "Delta", "Echo"], ["ABC-1", "Acme", "Road", "225/45R18", "7"]],
 };
 
 function props() {
@@ -48,6 +47,7 @@ describe("UniversalImportPanel", () => {
     expect(screen.getByTestId("column-mapping")).toHaveTextContent("ABC-1");
     expect(handlers.onApply).not.toHaveBeenCalled();
     expect(handlers.saveMapping).not.toHaveBeenCalled();
+    expect(screen.getByTestId("import-error")).toHaveAttribute("role", "alert");
   });
 
   it("previews after manual mapping and writes only after Apply", async () => {
@@ -73,5 +73,6 @@ describe("UniversalImportPanel", () => {
       size: 3,
       quantity: 4,
     });
+    expect(await screen.findByTestId("import-summary")).toHaveAttribute("aria-live", "polite");
   });
 });
