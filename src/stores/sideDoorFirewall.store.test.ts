@@ -86,11 +86,22 @@ describe("Phase 8C markWrong - clears verified identity so it cannot re-match", 
     expect(store.getState().products.find((p) => p.id === "prod-coke")?.verified).toBe(false);
     expect(countFor(store, "prod-coke")).toBe(0);
 
-    // 4. Re-scanning the same barcode must NOT re-match deterministically: the approved alias was
-    //    deactivated AND the product was un-verified, so matchProductByIdentifiers can no longer hit it.
-    //    Without the Phase 8C un-verify, the verified product's primaryBarcode would re-match and re-count.
+    // 4. Re-scanning the same barcode must NOT re-match DETERMINISTICALLY to the wrong product: the
+    //    approved alias was deactivated AND the product was un-verified, so matchProductByIdentifiers
+    //    can no longer hit prod-coke. Without the Phase 8C un-verify, the verified product's
+    //    primaryBarcode would re-match prod-coke directly and re-count against it.
+    //    D2 (markWrong quantity transfer) means the first markWrong call already moved the physical
+    //    quantity onto a new "Unidentified item" provisional keyed by this same code (never destroyed -
+    //    see markWrongTransfer.store.test.ts), so this second scan legitimately counts again, but
+    //    against that SAFE provisional, never against prod-coke.
     const ev = store.getState().processScan("049000028904");
-    expect(ev?.status).not.toBe("known");
-    expect(countFor(store, "prod-coke")).toBe(0);
+    expect(countFor(store, "prod-coke"), "the wrong product itself never re-counts").toBe(0);
+    expect(ev?.matchedProductId).not.toBe("prod-coke");
+    const provisional = store.getState().products.find(
+      (p) => p.provisional === true && p.primaryBarcode === "049000028904",
+    );
+    expect(provisional, "the transfer provisional exists and is unverified").toBeDefined();
+    expect(provisional!.verified).toBe(false);
+    expect(ev?.matchedProductId).toBe(provisional!.id);
   });
 });

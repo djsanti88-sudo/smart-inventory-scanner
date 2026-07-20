@@ -574,8 +574,12 @@ export interface ScanState {
   applyDecodeFallback: (reviewId: string, reason: string) => void;
   /** Idempotent primitive: count one provisional row for `code` (create it if absent), keyed by an
    *  already-existing scan-feed row. Safe to call any number of times for the same code (never double
-   *  counts). Used synchronously by processScan and by applyDecodeFallback. */
-  ensureProvisionalCount: (code: string, reason: string) => void;
+   *  counts). Used synchronously by processScan and by applyDecodeFallback. Returns the product id the
+   *  code is counted under: the already-counted product on the idempotent-hit path, else the freshly
+   *  minted provisional's id. markWrong depends on this return to target the CORRECT provisional when
+   *  the marked-wrong product is itself a provisional sharing the same primaryBarcode (Task 9 finding:
+   *  an unordered products.find could pick the OLD provisional and inflate the total). */
+  ensureProvisionalCount: (code: string, reason: string) => string;
   /** Flip every not-yet-resolved scan-feed row for `cleanCode` to the "verified" decode badge (shared by
    *  the 4 auto-verify / catalog-hit sites so their badge-flip guard cannot drift). A row already counted
    *  synchronously is status "known" (not "resolved"), so it is still flipped; a row already "verified" or
@@ -737,6 +741,41 @@ function makeQueueItem(params: {
     idempotencyKey: params.idempotencyKey,
     scanEventId: params.scanEventId,
   };
+}
+
+// D3 FIX (shared by ALL THREE orphan-transfer sites: runLiveDecodeOnce's fast-decode auto-link merge,
+// backgroundVerifyDeep's deep-verify merge, and resolveUnknown's merge): move an orphan placeholder's
+// count onto the merge target, UNIONING the anti-double-count ledger fields (scanEventIds / aliasesSeen /
+// appliedIdempotencyKeys) so orphan history survives the merge and a replayed event id stays a no-op.
+// Deduped unions keep a repeated merge idempotent. Pure: returns a new array, never mutates. A null
+// targetId (or a zero-quantity orphan) just drops the orphan row - identical to each site's old behavior.
+function transferOrphanCount(
+  finalCounts: InventoryCount[],
+  oid: string,
+  targetId: string | null,
+  nowIso: string,
+): InventoryCount[] {
+  const orphanRow = finalCounts.find((c) => c.productId === oid);
+  const orphanQty = orphanRow?.quantity ?? 0;
+  let next = finalCounts.filter((c) => c.productId !== oid);
+  if (targetId && orphanRow && orphanQty > 0) {
+    const targetRow = next.find((c) => c.productId === targetId);
+    next = targetRow
+      ? next.map((c) =>
+          c.productId === targetId
+            ? {
+                ...c,
+                quantity: c.quantity + orphanQty,
+                scanEventIds: Array.from(new Set([...c.scanEventIds, ...orphanRow.scanEventIds])),
+                aliasesSeen: Array.from(new Set([...c.aliasesSeen, ...orphanRow.aliasesSeen])),
+                appliedIdempotencyKeys: Array.from(new Set([...c.appliedIdempotencyKeys, ...orphanRow.appliedIdempotencyKeys])),
+                updatedAt: nowIso,
+              }
+            : c,
+        )
+      : [...next, { ...orphanRow, productId: targetId, updatedAt: nowIso }];
+  }
+  return next;
 }
 
 /**
@@ -2569,28 +2608,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 if (mergeOrphanId && mergeOrphanId !== mergeTargetId) {
                   const oid = mergeOrphanId;
                   const targetId = mergeTargetId;
-                  set((st) => {
-                    const orphanRow = st.finalCounts.find((c) => c.productId === oid);
-                    const orphanQty = orphanRow?.quantity ?? 0;
-                    let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
-                    if (orphanQty > 0) {
-                      const targetRow = finalCounts.find((c) => c.productId === targetId);
-                      finalCounts = targetRow
-                        ? finalCounts.map((c) =>
-                            c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
-                          )
-                        : orphanRow
-                          ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
-                          : finalCounts;
-                    }
-                    return {
-                      products: st.products.filter((p) => p.id !== oid),
-                      finalCounts,
-                      scanFeed: st.scanFeed.map((e) =>
-                        e.matchedProductId === oid ? { ...e, matchedProductId: targetId } : e,
-                      ),
-                    };
-                  });
+                  set((st) => ({
+                    products: st.products.filter((p) => p.id !== oid),
+                    finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
+                    scanFeed: st.scanFeed.map((e) =>
+                      e.matchedProductId === oid ? { ...e, matchedProductId: targetId } : e,
+                    ),
+                  }));
                 }
               } else if (!provId) {
                 provId = `prod-${idFactory()}`;
@@ -2611,7 +2635,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   primarySku: best?.primarySku ?? "", primaryBarcode: mintedBarcode, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
                   ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
                   productUrl: best?.productUrl ?? "", location: "", notes: "", status: "active", source: "ai_gemini",
-                  confidence: decision?.confidence ?? 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+                  confidence: decision?.confidence ?? 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
                 };
                 set((st) => ({ products: [...st.products, provProduct] }));
                 emitAudit({ entityType: "Product", entityId: provId, action: "product_created", metadata: { code, origin: "ai_suggested_provisional" } });
@@ -2884,7 +2908,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               id: provId, businessId: cur.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
               specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
               aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
-              confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+              confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
             };
             set((st) => ({ products: [...st.products, provProduct] }));
           }
@@ -2936,7 +2960,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             p.status !== "archived" &&
             [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
         );
-        if (existing) return;
+        if (existing) return existing.id;
         // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
         // anatomy here (no decode response). PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a
         // known brand, in which case the row states the brand with confidence and flags the product
@@ -2951,15 +2975,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           id: provId, businessId: st0.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
           specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
           aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
-          confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+          confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
         };
         const ev = st0.scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
         let counts = st0.finalCounts;
         let qty = 0;
-        if (ev) {
-          const r = incrementInventoryCount(counts, { ...ev, matchedProductId: provId, status: "known", quantityDelta: 1 }, idFactory);
+        let countId: string | null = null;
+        const countedEvent = ev
+          ? { ...ev, matchedProductId: provId, status: "known" as const, quantityDelta: 1 }
+          : null;
+        if (countedEvent) {
+          const r = incrementInventoryCount(counts, countedEvent, idFactory);
           counts = r.counts;
           qty = r.count.quantity;
+          countId = r.count.id;
         }
         set((st) => ({
           products: [...st.products, provProduct],
@@ -2990,12 +3019,37 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // documented "Decoding -> Verified / Suggested / Conflict / Needs review" UI stays visible;
                   // only stamp "suggested" when there is no decode in flight.
                   decodeStatus: e.decodeStatus === "decoding" ? "decoding" : "suggested",
-                  syncStatus: "synced" as const,
+                  // D1 FIX: the stored feed event and the counted delta are the SAME FACT - the row a
+                  // provisional count was applied from must carry the delta it contributed (North-star #2:
+                  // sum(feed deltas) === quantity). And the fake optimistic "synced" stamp is GONE: the
+                  // row's syncStatus is derived from pendingSyncQueue membership (see the reconcile at
+                  // scanStore.ts:907-922) and only reads "synced" after a real sync ack.
+                  quantityDelta: 1,
                   reason: e.reason || reason,
                 }
               : e,
           ),
         }));
+        // D1 FIX: a provisional count is real inventory. Enqueue its ledger writes through the SAME sync
+        // queue mechanism every counted scan uses. SAVE_SCAN_EVENT + INCREMENT_COUNT mirror the countable
+        // branch's two ops (scanStore.ts:1397-1422); SAVE_PRODUCT for the freshly minted provisional is a
+        // NEW op on the scan path (precedent: resolveUnknown's SAVE_PRODUCT enqueue, :3912-3930). The
+        // INCREMENT_COUNT key is the event's own key minted in processScan - reused verbatim, never
+        // regenerated (Idempotent Sync Rules).
+        if (countedEvent && countId) {
+          const bId = st0.businessId;
+          const sId = st0.sessionId;
+          const incPayload: IncrementPayload = {
+            businessId: bId, sessionId: sId, productId: provId, scanEventId: countedEvent.id,
+            quantityDelta: 1, idempotencyKey: countedEvent.idempotencyKey,
+          };
+          enqueueAndSync([
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, provId, "SAVE_PRODUCT"), scanEventId: null }),
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT"), scanEventId: countedEvent.id }),
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
+          ]);
+        }
+        return provId;
       },
 
       markFeedRowVerified: (cleanCode, reason) => {
@@ -3364,19 +3418,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 const oid = ownProvId;
                 const targetId = mergeTargetId;
                 set((st) => {
-                  const orphanRow = st.finalCounts.find((c) => c.productId === oid);
-                  const orphanQty = orphanRow?.quantity ?? 0;
-                  let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
-                  if (orphanQty > 0) {
-                    const targetRow = finalCounts.find((c) => c.productId === targetId);
-                    finalCounts = targetRow
-                      ? finalCounts.map((c) =>
-                          c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
-                        )
-                      : orphanRow
-                        ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
-                        : finalCounts;
-                  }
+                  const finalCounts = transferOrphanCount(st.finalCounts, oid, targetId, now());
                   return {
                     products: st.products.filter((p) => p.id !== oid),
                     finalCounts,
@@ -3886,27 +3928,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (removeOrphanId) {
           const oid = removeOrphanId;
           const targetId = orphanTransferTargetId;
-          set((st) => {
-            const orphanRow = st.finalCounts.find((c) => c.productId === oid);
-            const orphanQty = orphanRow?.quantity ?? 0;
-            let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
-            if (targetId && orphanQty > 0) {
-              const targetRow = finalCounts.find((c) => c.productId === targetId);
-              finalCounts = targetRow
-                ? finalCounts.map((c) =>
-                    c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
-                  )
-                : orphanRow
-                  ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
-                  : finalCounts;
-            }
-            return {
-              finalCounts,
-              scanFeed: st.scanFeed.map((e) =>
-                e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
-              ),
-            };
-          });
+          set((st) => ({
+            finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
+            scanFeed: st.scanFeed.map((e) =>
+              e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
+            ),
+          }));
         }
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
@@ -4558,13 +4585,122 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               : e,
           ),
         }));
-        // 3. Remove the session count (product + now-deactivated aliases are kept for audit/repair).
+        // 3. Transfer the wrong product's physical quantity to a SAFE "Unidentified item" provisional
+        //    keyed by the representative scanned code, then reopen review. Total physical quantity is
+        //    INVARIANT across any identity correction (North-star #2): the items are still on the
+        //    shelf; only their identity was wrong.
+        const code = seenCodes[0] || product?.primaryBarcode || "";
         if (count) {
+          const wrongQty = count.quantity;
+          // (a) Remove the wrong count row FIRST. ensureProvisionalCount's idempotency guard
+          //     (scanStore.ts:2952) short-circuits when any CURRENTLY-COUNTED product carries this
+          //     code in its identifier fields - the wrong product still does (step 1b un-verifies but
+          //     does not blank primaryBarcode). Its `counted` set is built from finalCounts, so removing
+          //     the row here is what lets the mint below proceed.
           set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.productId !== productId) }));
-          emitAudit({ entityType: "InventoryCount", entityId: count.id, action: "count_removed", metadata: { productId, quantity: count.quantity, reason: "marked_wrong" } });
+          if (code && wrongQty > 0) {
+            // (b) Mint + count the Unidentified provisional off the first reopened feed row (step 2
+            //     already reset the wrong product's rows to matchedProductId: null / needs_review, which
+            //     is exactly the shape ensureProvisionalCount's feed lookup matches). Task 2's D1 repair
+            //     makes this mint enqueue SAVE_PRODUCT + SAVE_SCAN_EVENT + INCREMENT_COUNT too.
+            //     TASK 9 FIX (provisional-wrong inflation): the mint target id comes from
+            //     ensureProvisionalCount's own return, NEVER re-derived via an unordered
+            //     products.find on primaryBarcode. When the marked-wrong product is ITSELF a
+            //     provisional, the old find matched it (its primaryBarcode is never blanked) and the
+            //     repoint loop re-counted the same physical scans on the OLD row while the mint had
+            //     already counted one event on the NEW row - inflating the total. The id-keyed lookup
+            //     below is deterministic; excluding productId is defense in depth so the repoint can
+            //     never target the product being corrected away from.
+            const mintedId = get().ensureProvisionalCount(code, `Marked wrong - re-identify. Previous match "${product?.name ?? ""}" removed.`);
+            const provRow = get().products.find(
+              (p) => p.id === mintedId && p.id !== productId && p.provisional === true && p.status !== "archived",
+            );
+            if (provRow) {
+              // (c) Repoint every REMAINING reopened feed event for this code onto the provisional and
+              //     apply each through the ledger (incrementInventoryCount dedupes by event id), stamping
+              //     the same-fact quantityDelta: 1 on the row. The transferred quantity is carried by
+              //     REAL events - the ledger replay reproduces it exactly (North-star #2).
+              const pending = get().scanFeed.filter(
+                (e) => e.cleanCode === code && e.matchedProductId === null && e.status === "needs_review",
+              );
+              for (const ev2 of pending) {
+                const stNow = get();
+                const cur = stNow.finalCounts.find((c) => c.productId === provRow.id);
+                if (cur?.scanEventIds.includes(ev2.id)) continue;
+                const r = incrementInventoryCount(
+                  stNow.finalCounts,
+                  { ...ev2, matchedProductId: provRow.id, status: "known", quantityDelta: 1 },
+                  idFactory,
+                );
+                set((s2) => ({
+                  finalCounts: r.counts,
+                  scanFeed: s2.scanFeed.map((e) =>
+                    e.id === ev2.id
+                      ? { ...e, matchedProductId: provRow.id, status: "known" as const, quantityDelta: 1, quantityAfterScan: r.count.quantity }
+                      : e,
+                  ),
+                }));
+              }
+              // (d) Feed-trim safety net: if the wrong count carried MORE events than the current feed
+              //     exposes (a persist-trimmed feed), carry the residual on a SYNTHETIC BACKING EVENT
+              //     appended to the feed and applied through the ledger - NEVER a naked quantity bump.
+              //     replayLedgerCounts rebuilds counts from feed events only, so a bare `quantity +=`
+              //     would be quantity no replay can reproduce - the exact invariant this phase exists
+              //     to guarantee. On a complete feed (every unit test + normal sessions) the repoint
+              //     loop above accounts for everything, missing is 0, and this mints nothing.
+              const applied = get().finalCounts.find((c) => c.productId === provRow.id)?.quantity ?? 0;
+              const missing = wrongQty - applied;
+              if (missing > 0) {
+                const residualId = idFactory();
+                const residualEvent: ScanEvent = {
+                  id: residualId,
+                  businessId: state.businessId,
+                  sessionId: state.sessionId,
+                  rawCode: code,
+                  cleanCode: code,
+                  normalizedCandidates: [],
+                  matchedProductId: provRow.id,
+                  matchType: "unknown",
+                  // status "known" (counted) + resolverStatus "needs_review" (identity unresolved) is
+                  // the deliberate pairing for a counted-but-unidentified row: the transferred quantity
+                  // must land on the ledger now, while identity stays open for human resolution.
+                  status: "known",
+                  resolverStatus: "needs_review",
+                  codeType: detectCodeType(code),
+                  reason: "markWrong residual repoint (feed trimmed by persist).",
+                  quantityDelta: missing,
+                  quantityAfterScan: 0,
+                  createdAt: now(),
+                  source: "scan",
+                  notes: "markWrong residual repoint (feed trimmed by persist).",
+                  syncStatus: "pending",
+                  syncError: null,
+                  idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, residualId, "INCREMENT_COUNT"),
+                };
+                const rr = incrementInventoryCount(get().finalCounts, residualEvent, idFactory);
+                residualEvent.quantityAfterScan = rr.count.quantity;
+                set((s2) => ({
+                  scanFeed: [residualEvent, ...s2.scanFeed],
+                  finalCounts: rr.counts,
+                }));
+                // Enqueue the synthetic event like any counted scan (SAVE_SCAN_EVENT + INCREMENT_COUNT).
+                // Without this, the derived syncStatus reconcile (scanStore.ts:907-922) would report an
+                // event absent from pendingSyncQueue as "synced" - re-minting the exact fake-synced
+                // class Task 2 killed. No SAVE_PRODUCT here: ensureProvisionalCount already enqueued it.
+                const residualInc: IncrementPayload = {
+                  businessId: state.businessId, sessionId: state.sessionId, productId: provRow.id,
+                  scanEventId: residualId, quantityDelta: missing, idempotencyKey: residualEvent.idempotencyKey,
+                };
+                enqueueAndSync([
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "ScanEvent", entityId: residualId, operation: "SAVE_SCAN_EVENT", payload: residualEvent, idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, residualId, "SAVE_SCAN_EVENT"), scanEventId: residualId }),
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "InventoryCount", entityId: rr.count.id, operation: "INCREMENT_COUNT", payload: residualInc, idempotencyKey: residualEvent.idempotencyKey, scanEventId: residualId }),
+                ]);
+              }
+            }
+          }
+          emitAudit({ entityType: "InventoryCount", entityId: count.id, action: "count_transferred", metadata: { productId, quantity: wrongQty, toCode: code, reason: "marked_wrong" } });
         }
         // 4. Reopen Needs Review for the representative scanned code.
-        const code = seenCodes[0] || product?.primaryBarcode || "";
         const reviewId = code
           ? get().reopenNeedsReview(code, `Marked wrong by owner. Previous match ${product?.name ? `"${product.name}"` : ""} removed - re-identify the product.`)
           : null;
