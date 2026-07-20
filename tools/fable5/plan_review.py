@@ -15,7 +15,9 @@ class Criterion:
     line: int
 
 
-GOALS_HEADING_PATTERN = re.compile(r"^##.*(Goals|Success criteria)", re.IGNORECASE)
+GOALS_HEADING_PATTERN = re.compile(
+    r"^##.*((?<!non-)(?<!non )Goals|Success criteria)", re.IGNORECASE
+)
 BACKTICK_SPAN_PATTERN = re.compile(r"`([^`\n]+)`")
 KNOWN_FILE_EXTENSIONS = (
     ".md", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".json", ".toml",
@@ -209,6 +211,23 @@ def audit_proofs(
                     )
                 continue
 
+            # Bare command token: no path shape, no recognized command prefix. It still
+            # counts as a proof ref (the criterion is not "without proof method"), but this
+            # tool cannot verify it, so surface a non-blocking informational finding.
+            findings.append(
+                Finding(
+                    code="unverifiable-proof-ref",
+                    severity="info",
+                    title="Unverifiable proof ref",
+                    detail=f"Line {criterion.line}: \"{criterion.text}\" references "
+                    f"`{ref}`, which is not a recognized command or path and cannot be "
+                    "automatically verified.",
+                    evidence=ref,
+                    recommendation="Confirm this proof method manually, or rephrase it as "
+                    "a known npm/npx/node/python command or an existing file path.",
+                )
+            )
+
     return findings
 
 
@@ -304,9 +323,10 @@ def review_plan(path: Path, root: Path) -> PlanReview:
     criteria = extract_criteria(text)
     proof_findings = audit_proofs(criteria, root, known_scripts)
     findings.extend(proof_findings)
-    missing_proofs = [finding.detail for finding in proof_findings]
-    if proof_findings:
-        penalty += min(20, len(proof_findings) * 5)
+    blocking_proof_findings = [f for f in proof_findings if f.severity != "info"]
+    missing_proofs = [finding.detail for finding in blocking_proof_findings]
+    if blocking_proof_findings:
+        penalty += min(20, len(blocking_proof_findings) * 5)
 
     score = max(0, 100 - penalty)
     verdict = "ready" if score >= 85 else "revise" if score >= 65 else "blocked"

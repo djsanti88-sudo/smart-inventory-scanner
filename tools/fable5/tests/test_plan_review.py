@@ -126,6 +126,35 @@ class ExtractCriteriaTests(unittest.TestCase):
         text = "## Problem / Context\nNo goals heading here.\n"
         self.assertEqual(extract_criteria(text), [])
 
+    def test_non_goals_before_real_goals_does_not_hijack_section(self) -> None:
+        # A "## Non-Goals" heading appearing before the real Goals section must not be
+        # mistaken for it: the real criteria must still be parsed, and no Non-Goals
+        # bullet may be flagged as a criterion.
+        text = (
+            "## Non-Goals\n"
+            "- Do not build a mobile app.\n"
+            "- Do not touch billing.\n\n"
+            "## Goals / Success criteria\n"
+            "- All tests pass. Proof: `npm run test`.\n"
+        )
+        criteria = extract_criteria(text)
+        self.assertEqual(len(criteria), 1)
+        self.assertEqual(criteria[0].text, "All tests pass. Proof: `npm run test`.")
+        for criterion in criteria:
+            self.assertNotIn("mobile app", criterion.text)
+            self.assertNotIn("billing", criterion.text)
+
+    def test_out_of_scope_non_goals_heading_does_not_match_goals_pattern(self) -> None:
+        text = (
+            "## Out of scope / Non-goals\n"
+            "- Do not touch production.\n\n"
+            "## Success criteria\n"
+            "- Ship it. Proof: `npm run test`.\n"
+        )
+        criteria = extract_criteria(text)
+        self.assertEqual(len(criteria), 1)
+        self.assertEqual(criteria[0].text, "Ship it. Proof: `npm run test`.")
+
 
 class AuditProofsTests(unittest.TestCase):
     def test_missing_npm_script_is_a_finding(self) -> None:
@@ -166,6 +195,31 @@ class AuditProofsTests(unittest.TestCase):
         ]
         findings = audit_proofs(criteria, REPO_ROOT, set())
         self.assertTrue(any(f.code == "missing-plan-proof" for f in findings))
+
+    def test_bare_command_ref_is_not_missing_proof_but_gets_info_finding(self) -> None:
+        # A bare command token with no path shape and no recognized command prefix
+        # (npm run / npx / node / python) still counts as SOME proof ref, so the
+        # criterion must not be treated as having no proof method. It is unverifiable
+        # by this tool though, so it should surface as a non-blocking info finding.
+        criteria = [
+            Criterion(text="Reviewer runs the tool", proof_refs=["review-plan"], line=9),
+        ]
+        findings = audit_proofs(criteria, REPO_ROOT, set())
+        self.assertFalse(any(f.code == "criterion-without-proof" for f in findings))
+        self.assertFalse(any(f.code == "missing-plan-proof" for f in findings))
+        info_findings = [f for f in findings if f.severity == "info"]
+        self.assertEqual(len(info_findings), 1)
+        self.assertEqual(info_findings[0].code, "unverifiable-proof-ref")
+        self.assertIn("unverifiable proof ref", info_findings[0].title.lower())
+        self.assertIn("review-plan", info_findings[0].detail)
+
+    def test_bare_command_ref_does_not_flip_verdict_to_blocked(self) -> None:
+        criteria = [
+            Criterion(text="Reviewer runs the tool", proof_refs=["selftest"], line=9),
+        ]
+        findings = audit_proofs(criteria, REPO_ROOT, set())
+        missing_proofs = [f.detail for f in findings if f.code != "unverifiable-proof-ref"]
+        self.assertEqual(missing_proofs, [])
 
 
 class ReviewPlanProofAuditTests(unittest.TestCase):
