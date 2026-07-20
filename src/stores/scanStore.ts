@@ -1611,6 +1611,37 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         ) {
           return; // idempotent: this device's session is still fresh and active, reuse it
         }
+        // ADOPT an UNCLAIMED active session still within the window (a legacy/default/mock session with
+        // no deviceId): claim it for this device and KEEP its counts, instead of rotating to a fresh
+        // session and wiping the visible finalCounts. Rotating-with-wipe is correct only for a genuinely
+        // new session (none active), a DIFFERENT device's session, or one past the inactivity window.
+        // Without this, ensureAutoSession on scan-page mount would erase a hydrated in-progress count.
+        if (cur && cur.status === "active" && !cur.deviceId) {
+          const startedMs = Date.parse(cur.startedAt);
+          const withinWindow =
+            !Number.isNaN(startedMs) &&
+            (Date.parse(nowIso) - startedMs) / 60000 <= AUTO_SESSION_INACTIVITY_MINUTES;
+          if (withinWindow) {
+            const adopted: InventorySession = { ...cur, deviceId };
+            set({ currentSession: adopted });
+            enqueueAndSync([
+              makeQueueItem({
+                idFactory,
+                now,
+                businessId: adopted.businessId,
+                sessionId: adopted.id,
+                entityType: "CountSession",
+                entityId: adopted.id,
+                operation: "SAVE_SESSION",
+                payload: adopted,
+                idempotencyKey: buildIdempotencyKey(adopted.businessId, adopted.id, `${adopted.id}-adopted-${deviceId}`, "SAVE_SESSION"),
+                scanEventId: null,
+              }),
+            ]);
+            emitAudit({ entityType: "CountSession", entityId: adopted.id, action: "session_adopted", metadata: { deviceId } });
+            return;
+          }
+        }
         const id = `session-${idFactory()}`;
         const businessId = get().businessId;
         const session: InventorySession = {

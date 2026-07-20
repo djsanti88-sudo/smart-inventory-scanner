@@ -53,4 +53,26 @@ describe("ensureAutoSession", () => {
     const result = store.getState().processScan("012345678905");
     expect(result).toBeNull();
   });
+
+  it("ADOPTS an unclaimed active in-window session (no deviceId) and PRESERVES its counts instead of rotating", () => {
+    // Regression: a hydrated pre-Phase-3 / mock session has no deviceId. On scan-page mount
+    // ensureAutoSession must claim it for this device and keep its finalCounts, not open a fresh
+    // session and wipe the visible in-progress count (caught by e2e cleanup.spec).
+    const store = createTestScanStore({ now: () => "2026-07-19T16:00:00.000Z" });
+    store.setState({
+      sessionId: "session-legacy",
+      currentSession: {
+        id: "session-legacy", businessId: "demo-business", name: "Default Session", location: "Main",
+        status: "active", startedAt: "2026-07-19T15:55:00.000Z", completedAt: null, createdBy: "demo",
+        notes: "", syncStatus: "synced",
+      } as never,
+      finalCounts: [{ productId: "p-good", quantity: 3 } as never],
+    });
+    store.getState().ensureAutoSession();
+    const s = store.getState();
+    expect(s.currentSession!.id).toBe("session-legacy"); // adopted, NOT rotated to a new id
+    expect(s.currentSession!.deviceId).toBeTruthy(); // now claimed by this device
+    expect(s.finalCounts).toHaveLength(1); // counts preserved, NOT wiped
+    expect(s.finalCounts[0].quantity).toBe(3);
+  });
 });
