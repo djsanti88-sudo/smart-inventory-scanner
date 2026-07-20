@@ -30,9 +30,12 @@ export function resolveScan(
   businessId: string,
 ): ResolverResult {
   const codeType = detectCodeType(cleaned.cleanCode);
-  // P5/D5: route through the cross-tier-conflict-aware resolver. Master slot is empty until P5b
-  // supplies the real tenant-vs-master feed (corpus/catalogEntries); the tenant-only outcome is
-  // unchanged today, but a future master feed plugs in here without re-touching this call site.
+  // P5/D5: route through the cross-tier-conflict-aware resolver. Master slot is empty here on
+  // purpose (GC2: this module stays pure/sync, no I/O). Phase 5b (Task 4) wired the real
+  // tenant-vs-master feed into the ASYNC path only: scanStore.ts cloudCatalogResolve (~:2460),
+  // after a master-catalog entry is fetched, via services/catalog/masterCandidates.ts. This sync
+  // call site is unaffected and stays masterCandidates: [] (GC10: the server path is also unwired
+  // this phase - documented gap, not an oversight).
   const resolution = resolveScanToProductTiered(cleaned, { products, aliases, masterCandidates: [] }, businessId);
 
   const base = {

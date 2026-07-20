@@ -11,6 +11,7 @@ import type {
   InventorySession,
   PendingSyncItem,
   Product,
+  ProvenanceTier,
   ScanEvent,
   Settings,
   SyncOperation,
@@ -62,6 +63,7 @@ import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/pref
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
+import { toMasterCandidates } from "@/services/catalog/masterCandidates";
 import {
   canAutoCount,
   shouldAutoApplySuggestion,
@@ -2467,6 +2469,56 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const review = get().needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
 
+        // Phase 5b Task 4 (AC4/GC1/GC9): before applying a master-catalog hit, check whether the
+        // master identity DISAGREES with a tenant product this account already has resolvable for
+        // this code. toMasterCandidates only ever emits a non-empty candidate when a tenant
+        // candidate existed first (GC1 hard invariant) - see masterCandidates.ts. Agreement or no
+        // tenant candidate falls through to existing behavior, byte-identical.
+        if (entry && entry.masterId) {
+          const cleanedForCandidates = { rawCode: review.rawCode, cleanCode: review.cleanCode, normalizedCandidates: review.normalizedCandidates };
+          const master = get();
+          const masterCandidates = toMasterCandidates(
+            { masterId: entry.masterId, name: entry.name, brand: entry.brand, masterProvenanceTier: entry.masterProvenanceTier },
+            master.products,
+            master.aliases,
+            cleanedForCandidates,
+            master.businessId,
+          );
+          const loneMasterCandidate = masterCandidates.length > 0 && masterCandidates.every((c) => c.productId.startsWith("master:"));
+          if (loneMasterCandidate) {
+            // HARD INVARIANT (GC1/review F3): toMasterCandidates guarantees this only happens when a
+            // tenant candidate already resolved for this code (it never emits a lone "master:"
+            // candidate for a code with zero tenant candidates). Dev-assert the invariant holds;
+            // never throw in prod (a violated assumption here must never crash a scan).
+            if (process.env.NODE_ENV !== "production") {
+              const tenantOnlyCheck = resolveScanToProductTiered(cleanedForCandidates, { products: master.products, aliases: master.aliases, masterCandidates: [] }, master.businessId);
+              if (!tenantOnlyCheck.productId) {
+                throw new Error("toMasterCandidates invariant violated: lone master: candidate with no tenant-origin candidate");
+              }
+            }
+            const tiered = resolveScanToProductTiered(cleanedForCandidates, { products: master.products, aliases: master.aliases, masterCandidates }, master.businessId);
+            if (tiered.matchType === "conflict") {
+              const conflictReasonText = "Cross-tier conflict: master catalog identity disagrees with this account's product";
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) => (r.id === reviewId ? { ...r, reason: conflictReasonText } : r)),
+                // Match by cleanCode + not-yet-resolved (same guard shape as markFeedRowVerified above) -
+                // the row here is the scan's own provisional placeholder (status "known" against that
+                // placeholder, per TOP-LEVEL LAW), never a real approved-alias match: the review is still
+                // open, so this code has no trusted resolution yet.
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.status !== "resolved"
+                    ? { ...e, decodeStatus: "needs_review" as const, reason: conflictReasonText }
+                    : e,
+                ),
+              }));
+              // Identity-only outcome (GC9/TOP-LEVEL LAW): the row already appeared and counted
+              // synchronously before this async resolve ran. Skip the enrichment apply below entirely
+              // - never overwrite a disagreeing tenant identity with the master's.
+              return;
+            }
+          }
+        }
+
         const scanContext = get().settings.scanContext ?? "any";
         if (entry && entry.verificationStatus === "verified") {
           // Build a CatalogHit for the Phase-8C identity-context firewall check.
@@ -4091,9 +4143,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               .map((c) => (c ?? "").trim())
               .filter(Boolean),
           )];
-          // P5/D5: use the cross-tier-conflict-aware resolver here too (master slot empty until P5b) so a
-          // code that conflicts across tiers (e.g. an approved alias for one product vs. a verified
-          // identifier for another) is never silently dedup-merged into a single product row.
+          // P5/D5: use the cross-tier-conflict-aware resolver here too so a code that conflicts across
+          // tiers (e.g. an approved alias for one product vs. a verified identifier for another) is
+          // never silently dedup-merged into a single product row. Master slot stays empty on purpose
+          // (GC2/AC6): this dedup guard is a sync helper inside resolveUnknown, not the async
+          // cloudCatalogResolve enrichment path where Phase 5b (Task 4, ~scanStore.ts:2460) wires the
+          // real tenant-vs-master conflict feed via services/catalog/masterCandidates.ts.
           const matchedIds = new Set<string>();
           for (const codeStr of identityCodes) {
             const res = resolveScanToProductTiered(
@@ -5841,11 +5896,18 @@ const appDeps: ScanStoreDeps = {
         const nowIso = new Date().toISOString();
         // toStoreEntry: map the minimal db/types.ts CatalogEntry shape -> the full catalogTypes CatalogEntry
         // shape that the store/resolver expects, via sanitizeCatalogEntry (fills in all required defaults).
-        const toStoreEntry = (raw: { id: string; normalizedBarcode: string; name?: string; brand?: string; category?: string; verificationStatus?: string }) =>
-          sanitizeCatalogEntry(
+        // Phase 5b Task 4 (GC4 boundary): also pass raw.id / raw.provenanceTier through onto the store
+        // entry's optional masterId/masterProvenanceTier fields, so cloudCatalogResolve can build master
+        // candidates for the cross-tier conflict check below. Purely additive - every other reader of
+        // this shape ignores the two new optional fields.
+        const toStoreEntry = (raw: { id: string; normalizedBarcode: string; name?: string; brand?: string; category?: string; verificationStatus?: string; provenanceTier?: ProvenanceTier }) => ({
+          ...sanitizeCatalogEntry(
             { barcode: raw.normalizedBarcode, normalizedBarcode: raw.normalizedBarcode, name: raw.name ?? "", brand: raw.brand, category: raw.category },
             { now: nowIso, verificationStatus: raw.verificationStatus === "verified" ? "verified" : raw.verificationStatus === "conflict" ? "conflict" : "pending", verifiedBy: null, by: "trusted_source" },
-          );
+          ),
+          masterId: raw.id,
+          masterProvenanceTier: raw.provenanceTier,
+        });
         let firstAny: CatalogEntry | null = null;
         for (const code of codes) {
           try {
