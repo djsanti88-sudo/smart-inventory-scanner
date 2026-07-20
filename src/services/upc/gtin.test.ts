@@ -27,6 +27,12 @@ describe("gtin utilities", () => {
     expect(v).toContain("0848983006257");
     expect(v).toContain("00848983006257");
   });
+  it("REGRESSION LOCK (D5 #6): gtinVariants on a 14-digit case-pack code (indicator digit >= 1) NEVER emits a 12/13-digit form - a case pack can never be treated as its inner unit code", () => {
+    // 10016000507255: indicator digit 1, case pack of unit 016000507255.
+    const v = gtinVariants("10016000507255");
+    expect(v.some((c) => c.length === 12 || c.length === 13)).toBe(false);
+    expect(v).toEqual(["10016000507255"]);
+  });
   it("validates GS1 check digits", () => {
     expect(isValidCheckDigit("036000291452")).toBe(true);  // real UPC-A
     expect(isValidCheckDigit("036000291453")).toBe(false); // last digit off by one

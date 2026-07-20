@@ -140,6 +140,45 @@ export function matchProductByIdentifiers(
 }
 
 /**
+ * Same field tiers as matchProductByIdentifiers, but collects hits from EVERY tier instead of
+ * early-returning at the first one that resolves. Used only by resolveScanToProductTiered (D5),
+ * which must see a lower-priority-tier disagreement even when a higher-priority tier already hit.
+ * Same trust gate as matchProductByIdentifiers: only verified products' identifiers participate.
+ */
+function collectAllIdentifierHits(
+  cleaned: CleanedCode,
+  products: Product[],
+  businessId: string,
+): Array<{ productId: string; matchType: MatchType; matchedOn: string }> {
+  const scoped = products.filter((p) => p.businessId === businessId && p.verified === true);
+  const candidates = uniq([cleaned.cleanCode, ...cleaned.normalizedCandidates]);
+  const hit = (field: string | undefined) => candidatesInclude(candidates, field);
+
+  const tiers: Array<{ type: MatchType; pick: (p: Product) => string | undefined }> = [
+    { type: "primary_barcode", pick: (p) => p.primaryBarcode },
+    { type: "primary_sku", pick: (p) => p.primarySku },
+    { type: "gtin", pick: (p) => p.gtin },
+    { type: "upc", pick: (p) => p.upc },
+    { type: "ean", pick: (p) => p.ean },
+  ];
+
+  const out: Array<{ productId: string; matchType: MatchType; matchedOn: string }> = [];
+  for (const tier of tiers) {
+    for (const p of scoped) {
+      const field = tier.pick(p);
+      if (hit(field)) out.push({ productId: p.id, matchType: tier.type, matchedOn: field as string });
+    }
+  }
+
+  for (const p of scoped) {
+    const vendorHit = p.vendorCodes?.find((v) => candidatesInclude(candidates, v));
+    if (vendorHit) out.push({ productId: p.id, matchType: "normalized_alias", matchedOn: vendorHit });
+  }
+
+  return out;
+}
+
+/**
  * Full resolution: alias table first, then product identifier fields. Returns "unknown" when
  * nothing matches (caller routes to Needs Review) and "conflict" when a tier is ambiguous.
  */
@@ -163,20 +202,94 @@ export function needsReview(resolution: ScanResolution): boolean {
   return resolution.matchType === "unknown" || resolution.matchType === "conflict";
 }
 
-// Resolver tier interface (P2). Presents tenant truth (the account's own products/aliases) and, in a
-// slot, master truth (corpus/catalogEntries candidates carrying a provenanceTier). In P2 the master slot
-// is CARRIED but not compared - it exists so P5 can add cross-tier conflict detection (D5) without
-// re-plumbing callers. P2 outcome is identical to resolveScanToProduct (tenant tiers only, short-circuit
-// preserved). Do NOT add conflict logic here; that is P5.
+// Resolver tier interface (P2, cross-tier conflict logic added P5/D5). Presents tenant truth (the
+// account's own products/aliases) and, in a slot, master truth (corpus/catalogEntries candidates
+// carrying a provenanceTier). The master slot stays EMPTY in production until P5b supplies a real
+// feed; this function's collect-all-then-conflict logic is proven here with synthetic candidates.
 export type MasterCandidate = { productId: string; matchedOn: string; provenanceTier: ProvenanceTier };
 export type TierInput = { products: Product[]; aliases: Alias[]; masterCandidates?: MasterCandidate[] };
 
+// Tier priority, highest to lowest, ONLY used to pick the reported matchType/matchedOn when every
+// tier that produced a hit agrees on the SAME product (never used to break a genuine disagreement -
+// any distinct productId anywhere is a conflict, full stop).
+const TIER_RESULT_PRIORITY: ScanResolution["matchType"][] = [
+  "exact_alias",
+  "normalized_alias",
+  "primary_barcode",
+  "primary_sku",
+  "gtin",
+  "upc",
+  "ean",
+];
+
+/**
+ * D5: collect ALL trusted matches across tiers (alias table, product identifiers, and any supplied
+ * master candidates) before deciding known-vs-conflict. Never short-circuits at the first non-null
+ * tier - a code that resolves cleanly within one tier can still disagree with another tier, and that
+ * disagreement MUST become a conflict, never a silent first-match guess.
+ *
+ *   0 distinct productIds  -> fall through to the existing no-match ("unknown") shape.
+ *   1 distinct productId   -> known; matchType/matchedOn taken from the highest-priority tier that
+ *                             produced it (tier priority applies ONLY when every tier agrees).
+ *   >1 distinct productIds -> conflict, productId null, conflictProductIds sorted-unique.
+ *
+ * Does NOT weaken the underlying trust gates: matchAlias/matchProductByIdentifiers still only ever
+ * consider `alias.approved === true` / `product.verified === true` records.
+ */
 export function resolveScanToProductTiered(
   cleaned: CleanedCode,
   input: TierInput,
   businessId: string,
 ): ScanResolution {
-  // P2: tenant-only resolution, unchanged. masterCandidates intentionally unused until P5 (D5).
-  void input.masterCandidates;
-  return resolveScanToProduct(cleaned, input.products, input.aliases, businessId);
+  const aliasRes = matchAlias(cleaned, input.aliases, businessId);
+
+  // Candidate hits, each carrying the matchType/matchedOn that would apply IF this were the only
+  // tier that resolved. A same-tier conflict (matchAlias already collapsed a tier's own ambiguity
+  // into "conflict") contributes ALL of its conflicting productIds (never just one), so a same-tier
+  // ambiguity is never silently dropped when merged with other tiers. Identifier-tier hits are
+  // collected from EVERY field tier (not just the first that resolves), so a lower-priority tier's
+  // disagreement with a higher-priority tier is never missed.
+  const candidates: Array<{ productId: string; matchType: ScanResolution["matchType"]; matchedOn: string | null }> = [];
+
+  const addResolution = (res: ScanResolution | null) => {
+    if (!res) return;
+    if (res.matchType === "conflict") {
+      for (const pid of res.conflictProductIds ?? []) {
+        candidates.push({ productId: pid, matchType: "conflict", matchedOn: null });
+      }
+      return;
+    }
+    if (res.productId) candidates.push({ productId: res.productId, matchType: res.matchType, matchedOn: res.matchedOn });
+  };
+
+  addResolution(aliasRes);
+  for (const idHit of collectAllIdentifierHits(cleaned, input.products, businessId)) {
+    candidates.push(idHit);
+  }
+  for (const mc of input.masterCandidates ?? []) {
+    candidates.push({ productId: mc.productId, matchType: mc.provenanceTier === "human_verified" ? "exact_alias" : "gtin", matchedOn: mc.matchedOn });
+  }
+
+  const distinctProductIds = uniq(candidates.map((c) => c.productId));
+
+  if (distinctProductIds.length === 0) return NO_MATCH;
+
+  if (distinctProductIds.length === 1) {
+    const productId = distinctProductIds[0];
+    // Every tier agrees on this product - pick the highest-priority matchType/matchedOn among the
+    // tiers that actually produced a (non-conflict) hit for it.
+    const hitsForProduct = candidates.filter((c) => c.productId === productId && c.matchType !== "conflict");
+    let best = hitsForProduct[0] ?? candidates.find((c) => c.productId === productId)!;
+    for (const c of hitsForProduct) {
+      if (TIER_RESULT_PRIORITY.indexOf(c.matchType) < TIER_RESULT_PRIORITY.indexOf(best.matchType)) best = c;
+    }
+    return { matchType: best.matchType, productId, matchedOn: best.matchedOn };
+  }
+
+  return {
+    matchType: "conflict",
+    productId: null,
+    matchedOn: null,
+    conflictProductIds: distinctProductIds.slice().sort(),
+  };
 }

@@ -25,7 +25,7 @@ import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { gradeBarcode } from "@/services/upc/barcodeTrust";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
-import { resolveScanToProduct } from "@/services/aliasMatcher";
+import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
@@ -4064,9 +4064,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               .map((c) => (c ?? "").trim())
               .filter(Boolean),
           )];
+          // P5/D5: use the cross-tier-conflict-aware resolver here too (master slot empty until P5b) so a
+          // code that conflicts across tiers (e.g. an approved alias for one product vs. a verified
+          // identifier for another) is never silently dedup-merged into a single product row.
           const matchedIds = new Set<string>();
           for (const codeStr of identityCodes) {
-            const res = resolveScanToProduct(cleanScanCode(codeStr), state.products, state.aliases, state.businessId);
+            const res = resolveScanToProductTiered(
+              cleanScanCode(codeStr),
+              { products: state.products, aliases: state.aliases, masterCandidates: [] },
+              state.businessId,
+            );
             if (res.matchType === "conflict") (res.conflictProductIds ?? []).forEach((id) => matchedIds.add(id));
             else if (res.productId) matchedIds.add(res.productId);
           }

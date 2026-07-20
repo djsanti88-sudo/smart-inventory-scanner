@@ -1,7 +1,7 @@
 import type { Alias, CleanedCode, Product, ResolverResult } from "@/types";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { resolveScanToProduct } from "@/services/aliasMatcher";
+import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 
 // The ProductResolver. DETERMINISTIC ONLY. It never calls AI and never returns a "suggested" or
@@ -30,7 +30,10 @@ export function resolveScan(
   businessId: string,
 ): ResolverResult {
   const codeType = detectCodeType(cleaned.cleanCode);
-  const resolution = resolveScanToProduct(cleaned, products, aliases, businessId);
+  // P5/D5: route through the cross-tier-conflict-aware resolver. Master slot is empty until P5b
+  // supplies the real tenant-vs-master feed (corpus/catalogEntries); the tenant-only outcome is
+  // unchanged today, but a future master feed plugs in here without re-touching this call site.
+  const resolution = resolveScanToProductTiered(cleaned, { products, aliases, masterCandidates: [] }, businessId);
 
   const base = {
     rawCode: cleaned.rawCode,

@@ -28,8 +28,19 @@ describe("buildNormalizedCandidates", () => {
     expect(buildNormalizedCandidates("2881-6861")).toEqual(["2881-6861", "28816861"]);
   });
 
-  it("returns a single candidate when nothing to normalize", () => {
-    expect(buildNormalizedCandidates("28816861")).toEqual(["28816861"]);
+  it("returns a single candidate when nothing to normalize and the code is not GTIN-shaped", () => {
+    expect(buildNormalizedCandidates("FL-820-S".replace(/-/g, ""))).toEqual(["FL820S"]);
+  });
+
+  it("D5: an 8-digit GTIN-shaped code also gets its zero-padded 12/13/14-digit variants (padded-GTIN equivalence)", () => {
+    const out = buildNormalizedCandidates("28816861");
+    expect(out).toContain("28816861");
+    expect(out).toContain("000028816861");
+    expect(out).toContain("0000028816861");
+    expect(out).toContain("00000028816861");
+    // The pre-GTIN-padding "most normalized" candidate stays anchored LAST so callers reading the
+    // final element (csvImport.ts) as the identity to store/look up are unaffected by the new variants.
+    expect(out[out.length - 1]).toBe("28816861");
   });
 
   it("is empty for an empty string", () => {
