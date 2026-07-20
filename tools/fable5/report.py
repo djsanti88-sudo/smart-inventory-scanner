@@ -5,12 +5,36 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from .models import RunReport
+from .models import CheckResult, RunReport
 from .plan_review import render_plan_markdown
+from .verdict import UNTRUSTED_BANNER, redact_secrets
 
 
 def _summary(report: RunReport) -> Counter[str]:
     return Counter(result.status for result in report.results)
+
+
+def _ledger_status(result: CheckResult) -> str:
+    if result.cached or "cache" in (result.reason or "").lower():
+        return "cached"
+    return result.status
+
+
+def _render_checked_table(report: RunReport) -> list[str]:
+    lines = [
+        "## What was checked",
+        "",
+        "| Check | Status | Reason | Duration |",
+        "| --- | --- | --- | --- |",
+    ]
+    for result in report.results:
+        reason = (result.reason or "-").replace("|", "\\|").replace("\n", " ")
+        lines.append(
+            f"| {result.check_id} | {_ledger_status(result)} | {reason} | "
+            f"{result.duration_seconds:.1f}s |"
+        )
+    lines.append("")
+    return lines
 
 
 def render_markdown(report: RunReport) -> str:
@@ -32,6 +56,7 @@ def render_markdown(report: RunReport) -> str:
     ]
     if report.plan_review:
         lines.extend([render_plan_markdown(report.plan_review), ""])
+    lines.extend(_render_checked_table(report))
     lines.extend(["## Check evidence", ""])
     for result in report.results:
         cache_label = " (cached)" if result.cached else ""
@@ -140,15 +165,54 @@ def render_expert_packet(report: RunReport, root: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_fix_packet(report: RunReport) -> str | None:
+    findings = [
+        result for result in report.results if result.status in {"failed", "warning"}
+    ]
+    if not findings:
+        return None
+    lines = [
+        "# Fable 5 Fix Packet",
+        "",
+        f"Git: `{report.git_head}`",
+        "",
+        UNTRUSTED_BANNER,
+        "",
+    ]
+    for result in findings:
+        lines.extend(
+            [
+                f"## {result.check_id}",
+                "",
+                "```",
+                f"status: {result.status}",
+                "```",
+                "",
+                "```",
+                result.reason or result.description,
+                "```",
+                "",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def write_report(report: RunReport, report_dir: Path, root: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "run.json").write_text(
         json.dumps(report.to_dict(), indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    (report_dir / "report.md").write_text(render_markdown(report), encoding="utf-8")
+    (report_dir / "report.md").write_text(
+        redact_secrets(render_markdown(report)), encoding="utf-8"
+    )
     (report_dir / "report.html").write_text(render_html(report), encoding="utf-8")
     (report_dir / "expert-packet.md").write_text(
         render_expert_packet(report, root), encoding="utf-8"
     )
+    fix_packet = render_fix_packet(report)
+    if fix_packet is not None:
+        (report_dir / "fix-packet.md").write_text(
+            redact_secrets(fix_packet), encoding="utf-8"
+        )
 
