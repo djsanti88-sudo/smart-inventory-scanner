@@ -1,5 +1,6 @@
 import { parse as parseCsvSync } from "csv-parse/sync";
 import type { AdapterResult, ExpectedInventoryRow } from "@/services/reconcile/types";
+import { sanitizeCell } from "@/services/csvImport";
 
 // Shop-Ware CSV adapter (Task 4, AM-R3). Pure, deterministic; NEVER throws on bad input. Uploaded
 // CSV content is UNTRUSTED data (semantic firewall): every cell is parsed as plain text, never
@@ -8,13 +9,27 @@ import type { AdapterResult, ExpectedInventoryRow } from "@/services/reconcile/t
 // Column mapping is isolated in ONE exported const so the real Shop-Ware export (once seen) plugs
 // in as a header-alias tweak here, without touching parsing/aggregation logic below.
 export const SHOPWARE_COLUMN_MAP = {
-  partNumber: ["part_number", "part number", "part_no", "sku"],
+  partNumber: [
+    "part_number",
+    "part number",
+    "part_no",
+    "sku",
+    "part_#",
+    "part #",
+    "pn",
+    "item_no.",
+    "item no.",
+    "item_no",
+    "item no",
+    "mfg_part_number",
+    "mfg part number",
+  ],
   aliasPartNumbers: ["alias_part_numbers", "alias part numbers", "alt_part_numbers"],
   brand: ["brand", "make"],
   model: ["model"],
   size: ["size", "tire_size"],
   specs: ["specs", "description"],
-  qtyOnHand: ["qty_on_hand", "quantity_on_hand", "qty on hand", "on_hand"],
+  qtyOnHand: ["qty_on_hand", "quantity_on_hand", "qty on hand", "on_hand", "qoh"],
   qtyAvailable: ["qty_available", "quantity_available", "qty available", "available"],
   location: ["location", "bin"],
   unit: ["unit", "uom"],
@@ -62,7 +77,7 @@ export function parseShopwareCsv(fileText: string): AdapterResult {
   try {
     records = parseCsvSync(fileText, {
       columns: (header: string[]) => {
-        headers = header.map((h) => h.trim().toLowerCase().replace(/\s+/g, "_"));
+        headers = header.map((h) => sanitizeCell(h).toLowerCase().replace(/\s+/g, "_"));
         return headers;
       },
       skip_empty_lines: true,
@@ -96,7 +111,10 @@ export function parseShopwareCsv(fileText: string): AdapterResult {
   const priceCostKeys = new Set(headers.filter((h) => SHOPWARE_COLUMN_MAP.priceCostColumns.includes(h as never)));
 
   if (!partNumberKey) {
-    unparseable.push({ line: 1, reason: "Missing required column: part number." });
+    unparseable.push({
+      line: 1,
+      reason: `Missing required column: part number. Seen: ${headers.join(", ") || "(none)"}.`,
+    });
     return { rows, uomReview, unparseable, assumptions };
   }
   if (!unitKey) {
@@ -112,15 +130,18 @@ export function parseShopwareCsv(fileText: string): AdapterResult {
 
   records.forEach((record, idx) => {
     const line = idx + 2; // header is line 1; first data record is line 2
+    const sanitizedRecord = Object.fromEntries(
+      Object.entries(record).map(([key, value]) => [key, sanitizeCell(String(value ?? ""))]),
+    );
 
-    const partNumber = (record[partNumberKey] ?? "").trim();
+    const partNumber = sanitizedRecord[partNumberKey] ?? "";
     if (!partNumber) {
       unparseable.push({ line, reason: "Missing required field: part number." });
       return;
     }
 
-    const onHand = qtyOnHandKey ? parseQty(record[qtyOnHandKey]) : undefined;
-    const available = qtyAvailableKey ? parseQty(record[qtyAvailableKey]) : undefined;
+    const onHand = qtyOnHandKey ? parseQty(sanitizedRecord[qtyOnHandKey]) : undefined;
+    const available = qtyAvailableKey ? parseQty(sanitizedRecord[qtyAvailableKey]) : undefined;
     // AM-R3: on-hand (physical) preferred over available when both exist.
     const qty = onHand ?? available;
     if (qty === undefined) {
@@ -128,15 +149,15 @@ export function parseShopwareCsv(fileText: string): AdapterResult {
       return;
     }
 
-    const aliasRaw = aliasKey ? (record[aliasKey] ?? "").trim() : "";
+    const aliasRaw = aliasKey ? sanitizedRecord[aliasKey] ?? "" : "";
     const aliasPartNumbers = aliasRaw ? aliasRaw.split(/[|;]/).map((v) => v.trim()).filter(Boolean) : [];
 
-    const unitValue = unitKey ? (record[unitKey] ?? "").trim() : "";
+    const unitValue = unitKey ? sanitizedRecord[unitKey] ?? "" : "";
     const nonEachUnit = unitValue !== "" && unitValue.toLowerCase() !== "each";
 
     // raw: every surviving column EXCEPT price/cost columns, never included regardless of mapping.
     const raw: Record<string, string> = {};
-    for (const [key, value] of Object.entries(record)) {
+    for (const [key, value] of Object.entries(sanitizedRecord)) {
       if (priceCostKeys.has(key)) continue;
       raw[key] = value;
     }
@@ -156,10 +177,10 @@ export function parseShopwareCsv(fileText: string): AdapterResult {
     const expectedRow: ExpectedInventoryRow = {
       externalId: partNumber,
       partNumbers,
-      brand: brandKey ? (record[brandKey] || undefined) : undefined,
-      model: modelKey ? (record[modelKey] || undefined) : undefined,
-      sizeText: sizeKey ? (record[sizeKey] || undefined) : undefined,
-      specs: specsKey ? (record[specsKey] || undefined) : undefined,
+      brand: brandKey ? sanitizedRecord[brandKey] || undefined : undefined,
+      model: modelKey ? sanitizedRecord[modelKey] || undefined : undefined,
+      sizeText: sizeKey ? sanitizedRecord[sizeKey] || undefined : undefined,
+      specs: specsKey ? sanitizedRecord[specsKey] || undefined : undefined,
       qty,
       raw,
     };

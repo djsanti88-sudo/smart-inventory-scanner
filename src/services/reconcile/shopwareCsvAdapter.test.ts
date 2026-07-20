@@ -98,4 +98,38 @@ describe("parseShopwareCsv", () => {
 
     expect(() => parseShopwareCsv("not,a,real\nheader\nfile")).not.toThrow();
   });
+
+  it.each(["Part #", "PN", "Item No.", "Mfg Part Number"])(
+    "accepts the D9 part-number header %s and reports the seen columns",
+    (header) => {
+      const result = parseShopwareCsv(`${header},Make,Model,Tire Size,QOH\nABC-1,Acme,Road,225/45R18,7\n`);
+      expect(result.unparseable).toEqual([]);
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].externalId).toBe("ABC-1");
+      expect(result.rows[0].brand).toBe("Acme");
+      expect(result.rows[0].qty).toBe(7);
+    },
+  );
+
+  it("shows every normalized header when the required identity column is absent", () => {
+    const result = parseShopwareCsv("Alpha,Beta,Gamma\none,two,three\n");
+    expect(result.unparseable).toEqual([
+      {
+        line: 1,
+        reason: "Missing required column: part number. Seen: alpha, beta, gamma.",
+      },
+    ]);
+  });
+
+  it("sanitizes every surviving raw cell and every mapped field", () => {
+    const long = "x".repeat(600);
+    const result = parseShopwareCsv(
+      `PN,Make,Model,QOH,Notes,Cost\nABC-1,=2+2,@model,3,${long},=99\n`,
+    );
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].brand).toBe("'=2+2");
+    expect(result.rows[0].model).toBe("'@model");
+    expect(result.rows[0].raw.notes).toHaveLength(500);
+    expect(result.rows[0].raw.cost).toBeUndefined();
+  });
 });

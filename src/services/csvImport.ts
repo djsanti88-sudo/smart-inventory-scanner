@@ -282,10 +282,10 @@ export interface ImportSummary {
   skipped: number;
 }
 
-const MAX_FIELD_LENGTH = 500;
+export const MAX_FIELD_LENGTH = 500;
 
 /** Strip control characters (\x00-\x1F except \t, and \x7F) that have no place in product data. */
-function stripControlChars(value: string): string {
+export function stripControlChars(value: string): string {
   // eslint-disable-next-line no-control-regex
   return value.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 }
@@ -295,13 +295,13 @@ function stripControlChars(value: string): string {
  * formula when the export is later opened in Excel/Sheets. Prefix with a single quote (the standard
  * "force text" defusal) rather than deleting the content, so the original value stays legible.
  */
-function defuseFormulaInjection(value: string): string {
+export function defuseFormulaInjection(value: string): string {
   if (/^[=+\-@]/.test(value)) return `'${value}`;
   return value;
 }
 
 /** Full untrusted-cell sanitizer: control-char strip -> length cap -> formula defusal. */
-function sanitizeCell(raw: string): string {
+export function sanitizeCell(raw: string): string {
   const stripped = stripControlChars(raw).trim();
   const capped = stripped.length > MAX_FIELD_LENGTH ? stripped.slice(0, MAX_FIELD_LENGTH) : stripped;
   return defuseFormulaInjection(capped);
