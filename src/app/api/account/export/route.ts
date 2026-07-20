@@ -1,0 +1,192 @@
+import "server-only";
+
+import { NextRequest, NextResponse } from "next/server";
+import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { isLiveAuth } from "@/services/auth/authMode";
+import { isAuthBypassEnabled } from "@/services/auth/authBypass";
+import { intEnv } from "@/services/security/aiSpendGuard";
+
+export const runtime = "nodejs";
+
+// D1 (Phase 6): full-account data export. Auth pattern mirrors src/app/api/share/route.ts:80-111
+// (verify Firebase ID token + business membership before touching any tenant data). On success,
+// walks every tenant-scoped Firestore collection for the caller's businessId and returns ONE JSON
+// bundle. Deliberately EXCLUDES master/shared collections (catalogEntries) - those are the shared
+// corpus, never a single tenant's data (CLAUDE.md invariant re: catalogEntries).
+//
+// Scope note: JSON bundle only. CSV-per-collection (csvExport.ts builders) was considered but
+// skipped for this task - those builders are shaped around in-memory Zustand session state, not raw
+// Firestore documents, and reusing them here would couple this server route to client-side store
+// shapes. A CSV projection can be layered on top of this JSON bundle later without re-deriving the
+// tenant walk.
+
+type ExportRequestBody = {
+  businessId?: unknown;
+  idToken?: unknown;
+};
+
+function stringField(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function authConfigurationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(
+    message,
+  );
+}
+
+function json(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
+// Tenant-scoped subcollections that live at businesses/{businessId}/{collection} per
+// repositories.ts:42-43. Deliberately excludes COLLECTIONS.businesses (the parent doc itself is
+// handled separately), COLLECTIONS.userProfiles / businessMembers (top-level, handled separately
+// below, filtered to this business/user), and COLLECTIONS.catalogEntries (shared master corpus -
+// never a single tenant's export).
+const TENANT_SUBCOLLECTIONS: readonly string[] = [
+  COLLECTIONS.products,
+  COLLECTIONS.aliases,
+  COLLECTIONS.countSessions,
+  COLLECTIONS.inventoryCounts,
+  COLLECTIONS.scanEvents,
+  COLLECTIONS.unknownCodeReviews,
+  COLLECTIONS.settings,
+  COLLECTIONS.shopOverrides,
+  COLLECTIONS.auditLog,
+];
+
+type CollectionResult = {
+  count: number;
+  truncated: boolean;
+  docs: Record<string, unknown>[];
+};
+
+async function exportCollection(
+  businessId: string,
+  name: string,
+  maxDocs: number,
+): Promise<CollectionResult> {
+  const snap = await getAdminDb()
+    .collection(`${COLLECTIONS.businesses}/${businessId}/${name}`)
+    .limit(maxDocs + 1)
+    .get();
+  const docs = snap.docs.slice(0, maxDocs).map((d) => ({ id: d.id, ...d.data() }));
+  return {
+    count: docs.length,
+    truncated: snap.docs.length > maxDocs,
+    docs,
+  };
+}
+
+export async function POST(request: NextRequest) {
+  let body: ExportRequestBody;
+  try {
+    const parsed = (await request.json()) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Invalid body shape");
+    }
+    body = parsed as ExportRequestBody;
+  } catch {
+    return json({ error: "Invalid request body." }, 400);
+  }
+
+  const requestedBusinessId = stringField(body.businessId);
+  const authBypass = isAuthBypassEnabled() || !isLiveAuth();
+
+  let uid: string | null = null;
+
+  if (!authBypass) {
+    const idToken = stringField(body.idToken);
+    if (!idToken) return json({ error: "Sign in required." }, 401);
+    if (!requestedBusinessId) return json({ error: "Missing businessId." }, 400);
+
+    try {
+      const decoded = await getAdminAuth().verifyIdToken(idToken);
+      uid = decoded.uid;
+    } catch (error) {
+      if (authConfigurationError(error)) {
+        return json({ error: "Server auth is not configured." }, 503);
+      }
+      return json({ error: "Invalid or expired sign-in." }, 401);
+    }
+
+    try {
+      const member = await getAdminDb()
+        .doc(`${COLLECTIONS.businessMembers}/${memberDocId(requestedBusinessId, uid)}`)
+        .get();
+      if (!member.exists) {
+        // Honest-reason 403 without leaking whether requestedBusinessId even exists.
+        return json({ error: "Not a member of this business." }, 403);
+      }
+    } catch (error) {
+      if (authConfigurationError(error)) {
+        return json({ error: "Server auth is not configured." }, 503);
+      }
+      return json({ error: "Could not verify business membership." }, 503);
+    }
+  }
+
+  // SECURITY: in authBypass mode (mock auth / E2E) there is NO membership verification, so a
+  // caller-supplied businessId must NEVER be honored - a full-account export is bulk data egress,
+  // and the same Firestore project can hold real tenant data while the app runs mock-auth.
+  // Hard-pin bypass exports to the demo tenant; only a verified member reaches requestedBusinessId.
+  const businessId = authBypass ? "demo-business" : requestedBusinessId;
+  const maxDocs = intEnv(process.env.ACCOUNT_EXPORT_MAX_DOCS, 50000);
+
+  const collections: Record<string, { count: number; truncated: boolean; docs: unknown[] }> = {};
+
+  try {
+    for (const name of TENANT_SUBCOLLECTIONS) {
+      collections[name] = await exportCollection(businessId, name, maxDocs);
+    }
+
+    // businesses/{businessId} root doc itself.
+    const businessDoc = await getAdminDb().doc(`${COLLECTIONS.businesses}/${businessId}`).get();
+    collections[COLLECTIONS.businesses] = {
+      count: businessDoc.exists ? 1 : 0,
+      truncated: false,
+      docs: businessDoc.exists ? [{ id: businessDoc.id, ...businessDoc.data() }] : [],
+    };
+
+    // businessMembers: top-level collection, filtered to this business only.
+    const membersSnap = await getAdminDb()
+      .collection(COLLECTIONS.businessMembers)
+      .where("businessId", "==", businessId)
+      .limit(maxDocs + 1)
+      .get();
+    const memberDocs = membersSnap.docs.slice(0, maxDocs).map((d) => ({ id: d.id, ...d.data() }));
+    collections[COLLECTIONS.businessMembers] = {
+      count: memberDocs.length,
+      truncated: membersSnap.docs.length > maxDocs,
+      docs: memberDocs,
+    };
+
+    // userProfiles: top-level collection. Filtered to the caller's own profile only (never another
+    // member's profile) - in authBypass/demo mode there is no uid, so this section is omitted.
+    if (uid) {
+      const profileDoc = await getAdminDb().doc(`${COLLECTIONS.userProfiles}/${uid}`).get();
+      collections[COLLECTIONS.userProfiles] = {
+        count: profileDoc.exists ? 1 : 0,
+        truncated: false,
+        docs: profileDoc.exists ? [{ id: profileDoc.id, ...profileDoc.data() }] : [],
+      };
+    }
+  } catch (error) {
+    if (authConfigurationError(error)) {
+      return json({ error: "Server auth is not configured." }, 503);
+    }
+    return json({ error: "Export failed while reading tenant data." }, 500);
+  }
+
+  return json({
+    exportedAt: new Date().toISOString(),
+    businessId,
+    collections,
+  });
+}
