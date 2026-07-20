@@ -154,3 +154,4 @@ scripts/polish-eval-results.json
 # scripts/pilot-backfill-worklist.mjs, never source (review-gated CANDIDATE output, not an
 # attachment; owner review happens against the freshly generated file each run).
 docs/pilot/point-s-backfill-worklist.csv
+.ladder-kv.json
