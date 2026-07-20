@@ -88,6 +88,10 @@ __pycache__/
 *.log
 data/**/*.lock
 
+# Fable 5 generated state and latest-review pointer
+/.fable5/
+/docs/reviews/LATEST.json
+
 # Nested auto-generated Playwright HTML report (root /playwright-report already ignored above)
 reports/**/playwright-report/
 
