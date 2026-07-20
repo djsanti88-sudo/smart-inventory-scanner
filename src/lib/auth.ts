@@ -6,6 +6,9 @@ import {
   createUserWithEmailAndPassword,
   signOut as fbSignOut,
   onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import { doc, setDoc, getDocs, query, collection, where, serverTimestamp } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "@/lib/firebaseClient";
@@ -57,6 +60,27 @@ export async function signUp(email: string, password: string): Promise<{ error: 
   try {
     const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
     await ensureUserProfile(cred.user);
+    return { error: null };
+  } catch (e) {
+    return { error: message(e) };
+  }
+}
+
+/** Google sign-in via popup. On success, ensures the user's profile doc exists (same as email sign-up). */
+export async function signInWithGoogle(): Promise<{ error: string | null }> {
+  try {
+    const cred = await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
+    await ensureUserProfile(cred.user);
+    return { error: null };
+  } catch (e) {
+    return { error: message(e) };
+  }
+}
+
+/** Send a Firebase password-reset email. Errors (e.g. unknown address) are returned, not thrown. */
+export async function sendResetEmail(email: string): Promise<{ error: string | null }> {
+  try {
+    await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
     return { error: null };
   } catch (e) {
     return { error: message(e) };
