@@ -310,13 +310,44 @@ export async function recordGptLadderSpend(
   const key = gptLadderKey(date);
 
   if (opts.storage) {
+    const centsKey = GPT_SPEND_CENTS_PREFIX + date;
+    const tenthCentsDelta = usdToTenthCents(usd);
     try {
-      const centsKey = GPT_SPEND_CENTS_PREFIX + date;
-      await opts.storage.incrementBy(centsKey, usdToTenthCents(usd));
+      await opts.storage.incrementBy(centsKey, tenthCentsDelta);
       return;
-    } catch (err) {
-      console.warn("[recordGptLadderSpend] storage error, falling back to file/memory:", err);
-      // fall through to the file/memory path below
+    } catch {
+      // FINDING A (P6 fix wave, cost-truth): a transient error on the WRITE alone (while reads still hit
+      // the durable Turso counter) permanently undercounts real spend if we silently reroute this call's
+      // dollars to the file (a documented no-op on Vercel's read-only FS). RETRY the atomic incrementBy
+      // ONCE before falling back, then, if the durable write still fails, do the file fallback AND emit a
+      // structured, single-line-JSON divergence event so the undercount is owner-visible, not a silent warn.
+      //
+      // ACCEPTED TRADE-OFF (adjudicated, agy review 2026-07-20): if the FIRST incrementBy succeeded
+      // server-side but the client saw a timeout, this retry adds the delta AGAIN - a rare ack-lost
+      // OVERCOUNT. Deliberate: the cost-truth rule is "never UNDERcount actual spend"; overcounting the
+      // $/day guard just stops the GPT rung early (conservative direction - no money lost), so we do
+      // not attempt idempotent dedup here.
+      try {
+        await opts.storage.incrementBy(centsKey, tenthCentsDelta);
+        return;
+      } catch (retryErr) {
+        // Structured divergence signal. aiSpendGuard is a pure service (no server-only import allowed by
+        // project law), so we emit the same shape logServerEvent would - a single-line JSON via
+        // console.error - instead of importing the server logger and violating the service/server boundary.
+        console.error(
+          JSON.stringify({
+            src: "scanbin",
+            route: "aiSpendGuard.recordGptLadderSpend",
+            event: "spend_write_diverged",
+            tenthCentsDelta,
+            dateKey: date,
+            ts: new Date().toISOString(),
+            detail: "durable GPT-ladder spend write failed twice; rerouted to file fallback (may no-op on read-only FS)",
+          })
+        );
+        console.warn("[recordGptLadderSpend] storage error, falling back to file/memory:", retryErr);
+        // fall through to the file/memory path below
+      }
     }
   }
 

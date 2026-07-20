@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   __resetForTest,
   checkGptLadderBudget,
@@ -258,6 +258,76 @@ describe("GPT ladder dollar guard (durable, storage-backed)", () => {
     await Promise.all(Array.from({ length: 20 }, () => recordGptLadderSpend(0.01, { dateKey, storage })));
     const r = await checkGptLadderBudget({ capUsd: 10, dateKey, storage, worstCaseUsd: 0 });
     expect(r.spentUsd).toBeCloseTo(0.2, 5);
+  });
+});
+
+// FINDING A (P6 fix wave): recordGptLadderSpend (write) and checkGptLadderBudget (read) each
+// independently caught their own storage error and fell back to the file guard. A transient error on
+// ONLY the write silently rerouted that call's spend to the file (a documented no-op on Vercel's
+// read-only FS) while subsequent reads saw only the durable Turso counter -> real spend permanently
+// undercounted with only a warn. The fix: on a write failure, RETRY the atomic incrementBy ONCE; if it
+// STILL fails, do the file fallback AND emit a structured "spend_write_diverged" event (single-line
+// JSON via console.error) carrying the tenth-cent delta, so divergence is owner-visible, not silent.
+describe("GPT ladder $-guard write divergence (Finding A)", () => {
+  beforeEach(() => {
+    __resetForTest();
+  });
+
+  /** incrementBy that throws the first `failTimes` calls, then succeeds (serialized counter). */
+  function flakyIncrementByStorage(failTimes: number) {
+    const m = new Map<string, string>();
+    let calls = 0;
+    return {
+      attempts: () => calls,
+      async get(k: string) { return m.get(k) ?? null; },
+      async set(k: string, v: string) { m.set(k, v); },
+      async increment(k: string) { const n = Number(m.get(k) ?? "0") + 1; m.set(k, String(n)); return n; },
+      async incrementBy(k: string, delta: number): Promise<number> {
+        calls += 1;
+        if (calls <= failTimes) throw new Error("storage write unavailable");
+        const n = Number(m.get(k) ?? "0") + delta;
+        m.set(k, String(n));
+        return n;
+      },
+    };
+  }
+
+  test("write fails once then succeeds on retry: durable counter correct, NO divergence event", async () => {
+    const storage = flakyIncrementByStorage(1);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await recordGptLadderSpend(0.5, { dateKey: "retry-ok-d1", storage });
+      // Two incrementBy attempts: one failure, one success (the retry landed durably).
+      expect(storage.attempts()).toBe(2);
+      const r = await checkGptLadderBudget({ capUsd: 10, dateKey: "retry-ok-d1", storage, worstCaseUsd: 0 });
+      expect(r.spentUsd).toBeCloseTo(0.5, 5); // durable counter has the spend
+      const diverged = errSpy.mock.calls.some((c) => String(c[0]).includes("spend_write_diverged"));
+      expect(diverged).toBe(false); // retry succeeded -> no divergence
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  test("write fails twice: retry attempted, file fallback fires, structured divergence event emitted", async () => {
+    const file = tmpFile();
+    const storage = flakyIncrementByStorage(2); // both the initial write and the single retry fail
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await recordGptLadderSpend(0.5, { dateKey: "diverge-d1", file, storage });
+      // Exactly two durable attempts: the initial write + ONE retry (never a third).
+      expect(storage.attempts()).toBe(2);
+      // Fell back to the file adapter - a plain file-only read confirms the spend landed there.
+      const r = await checkGptLadderBudget({ capUsd: 10, dateKey: "diverge-d1", file, worstCaseUsd: 0 });
+      expect(r.spentUsd).toBeCloseTo(0.5, 5);
+      // A structured, single-line JSON divergence event was emitted carrying the tenth-cent delta (500).
+      const divergedCall = errSpy.mock.calls.find((c) => String(c[0]).includes("spend_write_diverged"));
+      expect(divergedCall).toBeDefined();
+      const payload = JSON.parse(String(divergedCall![0]));
+      expect(payload.event).toBe("spend_write_diverged");
+      expect(payload.tenthCentsDelta).toBe(500); // 0.5 USD -> 500 tenth-of-a-cent units
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });
 

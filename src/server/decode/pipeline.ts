@@ -17,7 +17,7 @@ import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefix, candidateKnownPrefixes } from "@/services/catalog/prefixIndex";
 import { evaluatePrefixFirewall } from "@/services/catalog/prefixFirewall";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
-import { readDailyUsed, chargeDailySlot, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
+import { readDailyUsed, chargeDailySlot, chargeDailySlotForAccount, intEnv, checkGptLadderBudget, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
 import { gptFromScratch, type GptFromScratchResult, GPT_LADDER_WORST_CASE_USD } from "@/services/ai/gptFromScratch";
 import { shouldRunGptRung, gptResultToDecodePayload } from "@/services/ai/gptLadderRung";
 import { getPersistedDecode, persistDecode, type PersistedDecode } from "@/server/decodeCacheStore";
@@ -1301,6 +1301,17 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const used = await readDailyUsed(ladderStore);
       if (used >= limit) throw new DailyCapExceededError(used, limit);
       await chargeDailySlot(ladderStore, { limit });
+      // FINDING B (P6 fix wave, accounting symmetry): the per-account charge now happens HERE, at the
+      // SAME site as the global charge, immediately after it - not later at the route on a clean return.
+      // Pre-fix the route charged the account slot only after runDecodePipeline resolved successfully, so
+      // a paid rung that threw AFTER this point left the global counter charged but the account counter
+      // untouched -> permanent drift on the exception path. Charging both together here makes them
+      // exception-consistent: either the pair advances or (on a cap block above) neither does. L12
+      // preserved - still exactly one global + one account charge per genuine paid compute, now at one
+      // site. Anonymous traffic (no authedBusinessId) charges only the global slot, exactly as before.
+      if (capContext?.authedBusinessId) {
+        await chargeDailySlotForAccount(ladderStore, capContext.authedBusinessId);
+      }
       paidComputeCharged = true;
     };
 

@@ -134,13 +134,21 @@ export async function GET(request: Request) {
       "local";
     // B1: durable, storage-backed rate limiting (LadderStorage - Turso in production, so a
     // multi-instance deployment shares one real counter instead of each instance's own in-memory bucket).
-    const rl = await checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120), storage: await ladderStorage() });
-    if (!rl.allowed) {
-      logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
-      return Response.json(
-        { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
-      );
+    //
+    // FINDING C (P6 fix wave): wrapped fail-open so a storage INIT throw (`await ladderStorage()` itself
+    // rejecting) never turns the status endpoint into a raw 500 - it logs rate_limit_unavailable and falls
+    // through unthrottled, matching the export route's pattern and the POST handler below.
+    try {
+      const rl = await checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120), storage: await ladderStorage() });
+      if (!rl.allowed) {
+        logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+        return Response.json(
+          { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+          { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+        );
+      }
+    } catch {
+      logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
     }
   }
   const geminiConfigured = !!process.env.GEMINI_API_KEY;
@@ -230,13 +238,24 @@ export async function POST(request: Request) {
       request.headers.get("x-real-ip") ||
       "local";
     // B1: durable, storage-backed rate limiting - see the GET handler's comment above.
-    const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
-    if (!rl.allowed) {
-      logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
-      return Response.json(
-        { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
-      );
+    //
+    // FINDING C (P6 fix wave): the whole rate-limit block is wrapped so a storage INIT throw (e.g.
+    // Turso/libsql unreachable) never crashes the request into a raw 500 - it logs rate_limit_unavailable
+    // and falls through WITHOUT rate limiting instead, mirroring the export route's now-standard fail-open
+    // pattern (src/app/api/account/export/route.ts). checkRateLimit already fails open on a storage error
+    // once storage is in hand; this closes the remaining hole where `await ladderStorage()` ITSELF throws
+    // before checkRateLimit is even called. A storage hiccup must never take the whole app down.
+    try {
+      const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
+      if (!rl.allowed) {
+        logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+        return Response.json(
+          { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+          { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+        );
+      }
+    } catch {
+      logServerEvent({ route: "/api/ai-lookup", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
     }
   }
 
@@ -495,12 +514,12 @@ export async function POST(request: Request) {
       });
       return Response.json({ error: outcome.message, reasonCode: "daily_cap", floor: outcome.floor }, { status: 429 });
     }
-    // computed: echo the L1/L2 `cached` flag into debug exactly as before. The per-account charge
-    // rides paidComputeCharged - the pipeline's own single global-charge signal - so a FREE rung-0
-    // corpus/retail/learned hit (also kind:"computed", cached:false) never bills the account (L12).
-    if (authedBusinessId && outcome.paidComputeCharged && !e2eMode()) {
-      await chargeDailySlotForAccount(await ladderStorage(), authedBusinessId);
-    }
+    // computed: echo the L1/L2 `cached` flag into debug exactly as before. FINDING B (P6 fix wave): the
+    // per-account charge USED to happen here, gated on outcome.paidComputeCharged, AFTER the pipeline
+    // returned cleanly. That left the global and account counters out of sync whenever a paid rung threw
+    // after the global charge. The per-account charge now fires INSIDE chargePaidSlot (pipeline.ts),
+    // right after the global charge, so the two always move together and stay exception-consistent. This
+    // route no longer post-charges the account - the pipeline owns BOTH charges at one site (L12 intact).
     // P5b Task 2: fresh-compute branch - the other qualifying outcome (fresh AND persisted replay).
     maybeAppendMasterCatalogEntry(outcome.payload, code, codeType);
     return Response.json({ ...outcome.payload, debug: { ...outcome.payload.debug, cached: outcome.cached } });

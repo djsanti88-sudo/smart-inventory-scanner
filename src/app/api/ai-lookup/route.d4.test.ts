@@ -81,14 +81,22 @@ describe("ai-lookup D4 live-mode trust", () => {
     expect(arg.codeType).not.toBe("upc"); // "TX100-PN" is not a UPC; server recompute wins over the client claim
   });
 
-  it("per-account charge fires ONLY on paidComputeCharged (free rung-0 hit never charges the account)", async () => {
+  // FINDING B (P6 fix wave): the per-account DECODE charge moved OUT of this route and INTO the
+  // pipeline's chargePaidSlot (charged together with the global slot, at one exception-consistent site).
+  // The route therefore no longer post-charges the account on the decode path - it delegates BOTH charges
+  // to runDecodePipeline. With the pipeline mocked here, the route must NOT call chargeDailySlotForAccount
+  // regardless of paidComputeCharged (charge symmetry is proven end-to-end in route.chargeSymmetry.test.ts
+  // and the real-counter happy path in route.a2.test.ts).
+  it("decode route delegates the per-account charge to the pipeline (never post-charges it here)", async () => {
     const { POST } = await import("./route");
     runDecodePipeline.mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: false });
     await POST(decodeReq());
-    expect(chargeDailySlotForAccount).not.toHaveBeenCalled(); // computed but FREE (corpus/retail/learned)
+    expect(chargeDailySlotForAccount).not.toHaveBeenCalled(); // free rung-0 hit: pipeline charged nothing
 
     runDecodePipeline.mockResolvedValue({ kind: "computed", payload: { debug: {} }, cached: false, paidComputeCharged: true });
     await POST(decodeReq());
-    expect(chargeDailySlotForAccount).toHaveBeenCalledOnce(); // genuine paid compute: exactly one account charge
+    // Even on a genuine paid compute, the ROUTE does not charge the account - the pipeline already did,
+    // inside chargePaidSlot, alongside the global charge. No double-charge, no route-level post-charge.
+    expect(chargeDailySlotForAccount).not.toHaveBeenCalled();
   });
 });
