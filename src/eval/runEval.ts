@@ -42,6 +42,10 @@ export interface EvalSummary {
   falseAutoCountRatePct: number; // of items that should NOT, how many wrongly did (MUST be 0)
   /** Of labeled rows with an expectedStatus, how many were wrongly scored "verified" (MUST be 0). */
   falseAutoVerifiedRatePct: number;
+  /** Denominator behind falseAutoVerifiedRatePct: count of rows with an expectedStatus. Exposed so a
+   *  pct()-based 0% invariant can be asserted non-vacuous (pct(n,0) === 0, so an empty labeled set would
+   *  otherwise silently "pass" the falseAutoVerifiedRatePct === 0 gate even with zero rows scored). */
+  labeledClassCount: number;
   /** Of labeled rows whose expectedStatus is "suggested", how many the gate scored as "suggested" too. */
   suggestedPrecisionPct: number;
   specsExtractedPct: number; // of tires, how many had full size+load+speed
@@ -172,6 +176,7 @@ export function runEval(
     autoCountRatePct: pct(shouldAuto.filter((r) => r.autoCount).length, shouldAuto.length),
     falseAutoCountRatePct: pct(shouldNot.filter((r) => r.autoCount).length, shouldNot.length),
     falseAutoVerifiedRatePct: pct(labeledClasses.filter((r) => r.falseAutoVerified).length, labeledClasses.length),
+    labeledClassCount: labeledClasses.length,
     suggestedPrecisionPct: pct(shouldBeSuggested.filter((r) => r.decision === "suggested").length, shouldBeSuggested.length),
     specsExtractedPct: pct(tires.filter((r) => r.specsOk).length, tires.length),
   };

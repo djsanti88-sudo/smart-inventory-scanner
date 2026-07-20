@@ -73,11 +73,11 @@ export const CLASS_DATASET: EvalLabel[] = [
     note: "learned tier is a suggestion by construction, never verified",
   },
   {
-    code: "corpus-retail-hit-should-stay-verified",
-    expectedBrand: "Coca-Cola",
-    expectedType: "non_tire",
+    code: "tire-corpus-hit-stays-verified",
+    expectedBrand: "Michelin",
+    expectedType: "tire",
     shouldAutoCount: true,
     expectedStatus: "verified",
-    note: "AC5: corpus/retail-corpus hit must still auto-verify unchanged",
+    note: "AC5: a GENUINE tire-corpus exact-barcode hit (the only real auto-verify tier) must still auto-verify unchanged; the retail-corpus tier can never emit verified",
   },
 ];

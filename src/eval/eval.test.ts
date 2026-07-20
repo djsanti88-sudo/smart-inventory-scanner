@@ -47,7 +47,7 @@ describe("decode eval harness: per-class labeled precision gates (post-D6-demoti
     { code: "gpt-self-report-on-vendor-shape", expectedStatus: "suggested", label: "GPT self-report on a vendor/SKU shape must never mint verified" },
     { code: "app-verified-exact-should-stay-verified", expectedStatus: "verified", label: "App-verified exact-code evidence (AC5) must still auto-verify unchanged" },
     { code: "learned-tier-should-stay-suggested", expectedStatus: "suggested", label: "Learned tier stays a suggestion, never verified" },
-    { code: "corpus-retail-hit-should-stay-verified", expectedStatus: "verified", label: "Corpus/retail-corpus hit (AC5) must still auto-verify unchanged" },
+    { code: "tire-corpus-hit-stays-verified", expectedStatus: "verified", label: "Genuine tire-corpus exact-barcode hit (AC5) must still auto-verify unchanged" },
   ];
 
   it.each(classCases)("$label ($code -> $expectedStatus)", ({ code, expectedStatus }) => {
@@ -59,6 +59,10 @@ describe("decode eval harness: per-class labeled precision gates (post-D6-demoti
   });
 
   it("HARD INVARIANT: falseAutoVerifiedRatePct is 0% across every labeled class (a suggestion can never be scored as verified when it should be suggested)", () => {
+    // Guard the invariant's denominator: pct(n, d) returns 0 when d === 0, so a 0% pass is meaningless
+    // (and silently vacuous) unless there is at least one labeled-class row actually being scored. Without
+    // this, trimming CLASS_DATASET down to zero labeled rows would still show "0%" and pass.
+    expect(report.summary.labeledClassCount, "labeled-class denominator must be > 0 or the 0% invariant below is vacuous").toBeGreaterThan(0);
     expect(report.summary.falseAutoVerifiedRatePct).toBe(0);
   });
 

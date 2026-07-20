@@ -146,18 +146,23 @@ export const FIXTURES: Record<string, DecodeFixture> = {
       crossCheck: { decision: "single_provider", confidence: 0.85, reason: "single provider - no second source to cross-check", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
     },
   },
-  // AC5 fence: corpus/retail-corpus hit must still auto-verify exactly as before.
-  "corpus-retail-hit-should-stay-verified": {
-    result: { ...emptyResult(), productName: "Coca-Cola Classic 12oz Can", brand: "Coca-Cola", category: "Beverage", confidence: 0.98, sourceUrls: [] },
+  // AC5 fence: a GENUINE tire-corpus exact-barcode hit must still auto-verify exactly as before. Mirrors
+  // TireKnowledgeProvider.ts resolveExactBarcode's decision VERBATIM (reason/evidenceStrength/
+  // corroborationPath) - the retail-corpus tier (pipeline.ts retailPayload, see its :192-196 comment)
+  // ALWAYS emits "suggested"/"none" and can never emit "verified", so a "corpus-retail" fixture claiming
+  // verified was fabricated, not representative of any real tier. This fixture proves the REAL gate still
+  // passes a genuine corpus-verified decision, not a hand-built stand-in.
+  "tire-corpus-hit-stays-verified": {
+    result: { ...emptyResult(), productName: "Michelin Defender LTX M/S 275/55R20 113T", brand: "Michelin", category: "Tire", specsShort: "275/55R20 113T", confidence: 0.92, sourceUrls: [] },
     fetchedSourceText: "",
     decision: {
       status: "verified",
-      confidence: 0.98,
-      reason: "corpus exact barcode match",
+      confidence: 0.92,
+      reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
       evidenceStrength: "fetched_source",
       exactCodeEvidenceVerifiedByApp: true,
       corroborationPath: "corpus_exact_barcode",
-      crossCheck: { decision: "single_provider", confidence: 0.98, reason: "single provider - no second source to cross-check", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+      crossCheck: { decision: "single_provider", confidence: 0.92, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
     },
   },
 };
