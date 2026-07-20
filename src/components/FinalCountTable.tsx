@@ -341,6 +341,23 @@ function CountRow({
               placeholder="Location"
               className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
             />
+            {isPlatform && (
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                aria-label="unit cost"
+                data-testid={`edit-unit-cost-${product.id}`}
+                defaultValue={product.unitCost ?? ""}
+                placeholder="Unit cost"
+                onBlur={(e) => {
+                  const value = e.target.value.trim();
+                  const parsed = value ? Number(value) : undefined;
+                  correctProduct(product.id, { unitCost: Number.isFinite(parsed) ? parsed : undefined });
+                }}
+                className="min-h-[36px] w-24 rounded border border-zinc-300 px-2 text-sm"
+              />
+            )}
             <div className="flex gap-2">
               <button type="button" data-testid={`correct-save-${product.id}`} onClick={onSave} className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 text-base font-medium text-white hover:bg-blue-700 active:scale-95">
                 Save

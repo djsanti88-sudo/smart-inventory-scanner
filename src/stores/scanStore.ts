@@ -94,6 +94,55 @@ export interface CsvImportSummary {
   conflicts: ImportConflict[];
 }
 
+const UNIT_COST_HEADERS = ["unit_cost", "unit cost", "cost", "unitcost"];
+
+function parseUnitCost(row: Record<string, string>): number | undefined {
+  for (const key of Object.keys(row)) {
+    if (UNIT_COST_HEADERS.includes(key.trim().toLowerCase())) {
+      const raw = row[key]?.trim();
+      if (!raw) continue;
+      const value = Number(raw);
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  return undefined;
+}
+
+function importedRowCodes(row: Record<string, string>): Set<string> {
+  const vendorRaw = row.vendor_codes || row.vendor || row.vendor_code || "";
+  const values = [
+    row.sku,
+    row.primary_sku,
+    row.barcode,
+    row.primary_barcode,
+    row.gtin,
+    row.upc,
+    row.ean,
+    ...vendorRaw.split(/[|;]/),
+  ];
+  const codes = new Set<string>();
+  for (const raw of values) {
+    if (!raw?.trim()) continue;
+    const cleaned = cleanScanCode(raw);
+    if (cleaned.cleanCode) codes.add(cleaned.cleanCode);
+    for (const candidate of cleaned.normalizedCandidates) codes.add(candidate);
+  }
+  return codes;
+}
+
+function applyImportedUnitCosts(rows: Record<string, string>[], products: Product[]): void {
+  const costsByCode = new Map<string, number>();
+  for (const row of rows) {
+    const unitCost = parseUnitCost(row);
+    if (unitCost === undefined) continue;
+    for (const code of importedRowCodes(row)) costsByCode.set(code, unitCost);
+  }
+  for (const product of products) {
+    const unitCost = product.aliases.map((code) => costsByCode.get(code)).find((value) => value !== undefined);
+    if (unitCost !== undefined) product.unitCost = unitCost;
+  }
+}
+
 /** Snapshot of rows removed by a junk cleanup, so the action is fully reversible (Undo). */
 export interface CleanupBackup {
   removedCounts: InventoryCount[];
@@ -711,10 +760,10 @@ export interface ScanState {
   moveAlias: (aliasId: string, toProductId: string) => void;
   /** Phase 6: remove a product's count from the current session only (keeps product + aliases). Audited. */
   removeFromCount: (productId: string) => void;
-  /** Phase 6: edit safe product fields (name/brand/category/specs/sku/image/location). No alias trust change. */
+  /** Phase 6: edit safe product fields (name/brand/category/specs/sku/image/location/unit cost). No alias trust change. */
   correctProduct: (
     productId: string,
-    fields: Partial<Pick<Product, "name" | "brand" | "category" | "specsShort" | "specsFull" | "primarySku" | "imageUrl" | "location">>,
+    fields: Partial<Pick<Product, "name" | "brand" | "category" | "specsShort" | "specsFull" | "primarySku" | "imageUrl" | "location" | "unitCost">>,
   ) => void;
   /** Phase 6: mark a counted product wrong - deactivate its scanned-code aliases, remove the session count,
    *  reopen Needs Review for the code, and request a Gemini Pro correction recheck. Returns the reopened review id. */
@@ -4840,8 +4889,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!product) return;
         // Whitelist editable, product-facing fields only. Alias trust (approved/verified) is NEVER touched here.
         const safe: Partial<Product> = {};
-        for (const k of ["name", "brand", "category", "specsShort", "specsFull", "primarySku", "imageUrl", "location"] as const) {
-          if (fields[k] !== undefined) safe[k] = fields[k];
+        for (const k of ["name", "brand", "category", "specsShort", "specsFull", "primarySku", "imageUrl", "location", "unitCost"] as const) {
+          if (k === "unitCost") {
+            if (Object.hasOwn(fields, k)) safe.unitCost = fields.unitCost;
+          } else if (fields[k] !== undefined) {
+            safe[k] = fields[k];
+          }
         }
         const updated: Product = { ...product, ...safe, updatedAt: now(), updatedBy: "human" };
         // Task 4: a human editing the name or brand is a PERMANENT correction - stamp structuredBy
@@ -5162,6 +5215,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           idFactory,
           now,
         });
+        applyImportedUnitCosts(rows, plan.products);
 
         if (plan.products.length > 0 || plan.aliases.length > 0) {
           set((s) => ({ products: [...s.products, ...plan.products], aliases: [...s.aliases, ...plan.aliases] }));

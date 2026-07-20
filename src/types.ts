@@ -112,6 +112,9 @@ export interface Product {
   productUrl: string;
   location: string;
   notes: string;
+  /** Phase 3: optional owner-entered per-unit cost for Boss Report inventory value. Platform/owner
+   *  scoped - NEVER sent to AI (sanitizer strips it) and never in a customer-safe export/persist path. */
+  unitCost?: number;
   status: "active" | "archived";
   source: Source;
   confidence: number; // 0..1
