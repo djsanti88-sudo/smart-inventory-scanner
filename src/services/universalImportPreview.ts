@@ -1,6 +1,19 @@
 import type { ColumnMapping, ImportPreview, ImportPreviewRow, ImportPreviewStatus, MappedImportRow, MappingSource, RetailCatalogMatch, UniversalSheet } from "@/services/importSchema";
 import type { MatchResult } from "@/services/reconcile/identityMatcher";
 
+/**
+ * User-facing warning when a multi-tab workbook had more than one non-empty worksheet. Only the first
+ * non-empty sheet is imported; this names it and the non-empty sheets that were NOT imported, so the
+ * data gap is never silent. Returns "" when nothing was skipped (single-sheet or delimited files).
+ */
+export function describeSkippedSheets(sheet: UniversalSheet): string {
+  const skipped = sheet.skippedSheets ?? [];
+  if (skipped.length === 0) return "";
+  const imported = sheet.importedSheetName ?? "the first sheet";
+  const others = skipped.map((s) => `"${s.name}" (${s.rowCount} rows)`).join(", ");
+  return `Imported sheet "${imported}". ${others} ${skipped.length === 1 ? "was" : "were"} not imported; upload it separately if needed.`;
+}
+
 const SENSITIVE_HEADER = /(^|[ _-])(cost|price|retail|msrp|margin)([ _-]|$)/i;
 
 // Upper bound for a single import row's quantity. A real shop's on-hand count for one SKU never

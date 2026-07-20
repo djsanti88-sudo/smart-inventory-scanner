@@ -26,6 +26,11 @@ export interface UploadFileLike {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 
+export interface SkippedSheet {
+  name: string;
+  rowCount: number;
+}
+
 export interface UniversalSheet {
   fileName: string;
   kind: UploadKind;
@@ -33,6 +38,11 @@ export interface UniversalSheet {
   rows: string[][];
   headerRowIndex: number;
   sourceSignature: string;
+  // Multi-tab workbooks: only the first non-empty worksheet is imported. importedSheetName names it;
+  // skippedSheets lists any OTHER non-empty worksheets that were NOT imported (never silently dropped).
+  // Empty for delimited files and single-sheet workbooks. undefined only on legacy/synthetic sheets.
+  importedSheetName?: string;
+  skippedSheets?: SkippedSheet[];
 }
 
 export interface MappedImportRow {

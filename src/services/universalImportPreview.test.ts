@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { UniversalSheet } from "@/services/importSchema";
 import {
   buildImportPreview,
+  describeSkippedSheets,
   mapUniversalRows,
   MAX_IMPORT_QUANTITY,
   type PreviewMatchResult,
@@ -202,5 +203,31 @@ describe("universalImportPreview", () => {
     }], "header");
     expect(preview.rows[0].status).toBe("fuzzy");
     expect(preview.exact).toBe(0);
+  });
+
+  it("surfaces a non-silent warning naming the imported sheet and the sheets that were skipped", () => {
+    const multiSheet: UniversalSheet = {
+      ...sheet,
+      importedSheetName: "Inventory",
+      skippedSheets: [
+        { name: "Warehouse B", rowCount: 12 },
+        { name: "Summary", rowCount: 3 },
+      ],
+    };
+    const warning = describeSkippedSheets(multiSheet);
+    expect(warning).toContain("Inventory");
+    expect(warning).toContain("Warehouse B");
+    expect(warning).toContain("12");
+    expect(warning).toContain("Summary");
+    expect(warning).toContain("3");
+    expect(warning).toMatch(/not imported/i);
+    expect(warning).toMatch(/separately/i);
+    // No em or en dash in user-facing copy.
+    expect(warning).not.toMatch(/[–—]/);
+  });
+
+  it("returns no warning when the sheet has no skipped sheets", () => {
+    expect(describeSkippedSheets(sheet)).toBe("");
+    expect(describeSkippedSheets({ ...sheet, skippedSheets: [] })).toBe("");
   });
 });

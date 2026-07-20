@@ -4,6 +4,7 @@ import { inferColumnMapping } from "@/services/columnIntelligence";
 import { sanitizeCell } from "@/services/csvImport";
 import {
   buildSourceSignature,
+  type SkippedSheet,
   type UniversalSheet,
   type UploadFileLike,
   type UploadKind,
@@ -70,7 +71,13 @@ function excelCellText(value: unknown): string {
   return String(value);
 }
 
-async function workbookMatrix(file: UploadFileLike, kind: UploadKind): Promise<string[][]> {
+interface WorkbookMatrix {
+  matrix: string[][];
+  importedSheetName?: string;
+  skippedSheets: SkippedSheet[];
+}
+
+async function workbookMatrix(file: UploadFileLike, kind: UploadKind): Promise<WorkbookMatrix> {
   const ExcelJS = (await import("exceljs")).default;
   const workbook = new ExcelJS.Workbook();
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -90,8 +97,17 @@ async function workbookMatrix(file: UploadFileLike, kind: UploadKind): Promise<s
     }
     throw new Error(`Could not read this XLSX workbook: ${error instanceof Error ? error.message : "unknown error"}`);
   }
-  const worksheet = workbook.worksheets.find((candidate) => candidate.rowCount > 0);
-  if (!worksheet) return [];
+  // Only NON-EMPTY worksheets carry data. We import the FIRST one (byte-identical to the historic
+  // single-sheet behavior) and never auto-merge the rest (that could concatenate unrelated tabs).
+  // Any OTHER non-empty worksheet is a genuine data gap, so it is surfaced as a warning, never dropped
+  // silently. Empty sheets (summary/cover tabs with no rows) are not data and are not warned about.
+  const nonEmpty = workbook.worksheets.filter((candidate) => candidate.rowCount > 0);
+  const worksheet = nonEmpty[0];
+  if (!worksheet) return { matrix: [], skippedSheets: [] };
+  const skippedSheets: SkippedSheet[] = nonEmpty.slice(1).map((sheet) => ({
+    name: sheet.name,
+    rowCount: sheet.rowCount,
+  }));
   const matrix: string[][] = [];
   for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
     const row: string[] = [];
@@ -100,14 +116,22 @@ async function workbookMatrix(file: UploadFileLike, kind: UploadKind): Promise<s
     }
     matrix.push(row);
   }
-  return matrix;
+  return { matrix, importedSheetName: worksheet.name, skippedSheets };
 }
 
 export async function readUniversalFile(file: UploadFileLike): Promise<UniversalSheet> {
   const kind = extension(file.name);
-  const matrix = kind === "csv" || kind === "tsv"
-    ? delimitedMatrix(await file.text(), kind)
-    : await workbookMatrix(file, kind);
+  let matrix: string[][];
+  let importedSheetName: string | undefined;
+  let skippedSheets: SkippedSheet[] = [];
+  if (kind === "csv" || kind === "tsv") {
+    matrix = delimitedMatrix(await file.text(), kind);
+  } else {
+    const workbook = await workbookMatrix(file, kind);
+    matrix = workbook.matrix;
+    importedSheetName = workbook.importedSheetName;
+    skippedSheets = workbook.skippedSheets;
+  }
   if (!matrix.some(hasData)) throw new Error("The uploaded file is empty.");
   const inference = inferColumnMapping(matrix);
   const rows = matrix.slice(inference.headerRowIndex + 1).filter(hasData);
@@ -118,5 +142,7 @@ export async function readUniversalFile(file: UploadFileLike): Promise<Universal
     rows,
     headerRowIndex: inference.headerRowIndex,
     sourceSignature: buildSourceSignature(inference.headers),
+    importedSheetName,
+    skippedSheets,
   };
 }

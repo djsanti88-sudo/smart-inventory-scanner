@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { IMPORT_FIELD_ORDER, type ColumnMapping, type ImportPreview, type ImportPreviewRow, type MappedImportRow, type UniversalImportApplySummary, type UniversalSheet, type UploadFileLike } from "@/services/importSchema";
 import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
 import { readUniversalFile } from "@/services/universalFileReader";
-import { buildImportPreview, mapUniversalRows, type PreviewMatchResult } from "@/services/universalImportPreview";
+import { buildImportPreview, describeSkippedSheets, mapUniversalRows, type PreviewMatchResult } from "@/services/universalImportPreview";
 
 const PREVIEW_LIMIT = 20;
 
@@ -134,6 +134,9 @@ export function UniversalImportPanel({
         {sheet && <span className="text-sm text-zinc-600">{sheet.fileName}</span>}
       </div>
       {error && <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="import-error">{error}</p>}
+      {sheet && describeSkippedSheets(sheet) && (
+        <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="import-skipped-sheets">{describeSkippedSheets(sheet)}</p>
+      )}
       {mappingMode && sheet && (
         <div className="flex flex-col gap-3" data-testid="column-mapping">
           <h3 className="font-semibold">Map the columns we saw</h3>

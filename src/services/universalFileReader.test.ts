@@ -53,6 +53,70 @@ describe("readUniversalFile", () => {
     expect(sheet.rows[0]).toEqual(["ABC-1", "'=4", "3"]);
   });
 
+  it("warns when a workbook has more than one non-empty worksheet, importing the first", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const first = workbook.addWorksheet("Inventory");
+    first.addRow(["PN", "Make", "QOH"]);
+    first.addRow(["ABC-1", "Acme", 7]);
+    const second = workbook.addWorksheet("Warehouse B");
+    second.addRow(["PN", "Make", "QOH"]);
+    second.addRow(["ZZZ-9", "Beta", 3]);
+    second.addRow(["ZZZ-8", "Beta", 4]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+    const sheet = await readUniversalFile(file);
+    // First non-empty sheet is imported byte-for-byte the same as before.
+    expect(sheet.rows).toEqual([["ABC-1", "Acme", "7"]]);
+    // The other non-empty sheet is surfaced, never silently dropped.
+    expect(sheet.importedSheetName).toBe("Inventory");
+    expect(sheet.skippedSheets).toEqual([{ name: "Warehouse B", rowCount: 3 }]);
+  });
+
+  it("does not warn for a single-sheet workbook (happy path unchanged)", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Inventory");
+    worksheet.addRow(["PN", "Make", "QOH"]);
+    worksheet.addRow(["ABC-1", "Acme", 7]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+    const sheet = await readUniversalFile(file);
+    expect(sheet.rows).toEqual([["ABC-1", "Acme", "7"]]);
+    expect(sheet.skippedSheets).toEqual([]);
+  });
+
+  it("imports the data sheet and does not warn about an empty leading sheet", async () => {
+    const workbook = new ExcelJS.Workbook();
+    workbook.addWorksheet("Cover"); // empty, no rows
+    const data = workbook.addWorksheet("Data");
+    data.addRow(["PN", "Make", "QOH"]);
+    data.addRow(["ABC-1", "Acme", 7]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+    const sheet = await readUniversalFile(file);
+    expect(sheet.rows).toEqual([["ABC-1", "Acme", "7"]]);
+    expect(sheet.importedSheetName).toBe("Data");
+    // The empty leading sheet is NOT a skipped-data warning (only non-empty extras count).
+    expect(sheet.skippedSheets).toEqual([]);
+  });
+
   it("accepts OOXML bytes with an .xls filename but rejects genuine legacy BIFF honestly", async () => {
     const workbook = new ExcelJS.Workbook();
     workbook.addWorksheet("Inventory").addRow(["PN", "QOH"]);
