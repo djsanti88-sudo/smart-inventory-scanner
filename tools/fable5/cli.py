@@ -32,6 +32,7 @@ from .risk import classify, expert_tier
 from .runlock import acquire, release
 from .scheduler import SafetyPolicy, run_checks
 from .selftest import run_selftest
+from .stress import StressFixtureError, StressSafetyError, execute_stress
 from .verdict import decide, exit_code, prune_old_runs, write_latest
 
 
@@ -65,6 +66,8 @@ def _personas_requested(args: argparse.Namespace) -> bool:
 
 def _hook_triggered_refusal(args: argparse.Namespace) -> str | None:
     """Return a refusal message if a hook-triggered run requested a refused flag."""
+    if getattr(args, "command", "") == "stress":
+        return "hook-triggered runs are deterministic-only: stress refused"
     if _personas_requested(args):
         return "hook-triggered runs are deterministic-only: --personas refused"
     for attribute, flag in _HOOK_REFUSED_FLAGS:
@@ -130,6 +133,32 @@ def _selftest(root: Path) -> int:
     passed = sum(result.status == "passed" for result in results)
     print(f"Selftest: {passed}/{len(results)} canaries detected")
     return 0 if passed == len(results) else 1
+
+
+def _stress(root: Path, args: argparse.Namespace) -> int:
+    if _is_hook_triggered():
+        refusal = _hook_triggered_refusal(args)
+        if refusal:
+            print(f"REFUSED: {refusal}")
+            return 3
+    try:
+        result = execute_stress(
+            root=root,
+            target=args.target,
+            intensity=args.intensity,
+            allow_cloud=args.allow_cloud,
+            unknown_scans=args.unknown_scans,
+        )
+    except StressSafetyError as error:
+        print(f"REFUSED: {error}")
+        return 3
+    except StressFixtureError as error:
+        print(f"ENGINE ERROR: {error}")
+        return 1
+    if result.stdout:
+        print(result.stdout)
+    print(f"Stress report: {result.report_path}")
+    return result.returncode
 
 
 async def _run(root: Path, config: FableConfig, config_path: Path, args: argparse.Namespace) -> int:
@@ -390,6 +419,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("selftest", help="Seed isolated defects and prove each detector catches one.")
 
+    stress = subparsers.add_parser(
+        "stress", help="Run the fail-closed preview stress battery. Never runs automatically."
+    )
+    stress.add_argument("--target", required=True, help="Explicit localhost or preview URL.")
+    stress.add_argument(
+        "--intensity",
+        choices=("light", "standard", "heavy"),
+        default="standard",
+    )
+    stress.add_argument(
+        "--allow-cloud",
+        action="store_true",
+        help="Explicitly authorize a non-localhost target for this run.",
+    )
+    stress.add_argument(
+        "--unknown-scans",
+        type=int,
+        default=0,
+        help="Explicit unknown scan count, default 0 and hard-capped at 5.",
+    )
+
     run = subparsers.add_parser(
         "review-build", aliases=["run"], help="Run the configured evidence arsenal concurrently."
     )
@@ -451,6 +501,8 @@ def main(argv: list[str] | None = None) -> int:
             return _plan(root, config, args)
         if args.command == "selftest":
             return _selftest(root)
+        if args.command == "stress":
+            return _stress(root, args)
         if args.command in {"review-build", "run"}:
             return asyncio.run(_run(root, config, config_path, args))
         parser.error(f"Unsupported command: {args.command}")
