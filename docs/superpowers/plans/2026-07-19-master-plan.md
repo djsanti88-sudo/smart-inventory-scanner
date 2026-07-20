@@ -116,6 +116,8 @@
 
 ---
 
+> **P1 handoff note (final-review finding, 2026-07-19):** before ANY runtime feed replay/reconcile is wired (P3 sync work), bump the scanStore persist version with a `quantityDelta` normalization/backfill - legacy v7 localStorage carries provisional feed rows with a literal `quantityDelta: 0` (pre-D1), and `applyScanEventOnce`'s `?? 1` does not correct a non-nullish 0. Inert today (replay is test-only); a real landmine the moment P3 replays feeds against server truth.
+
 ## Phase 3 — Sessions, Cross-Device Sync, Locations & the Boss Report (the demo-that-closes)
 
 **Why third:** This phase IS the demo: scan -> count live -> coverage line -> session log -> report link. Needs P1 (trustworthy deltas) and P2 (whose sessions).
