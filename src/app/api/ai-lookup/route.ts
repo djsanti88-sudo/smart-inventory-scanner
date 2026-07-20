@@ -16,6 +16,11 @@ import { ladderStorage } from "@/server/upc/storage";
 // legacy 'lookup' back-compat path, and the GET status endpoint. e2eMode is shared from the pipeline.
 import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
+import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { isLiveAuth } from "@/services/auth/authMode";
+import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
+import { readDailyUsedForAccount, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -36,6 +41,7 @@ const OPENAI_DECODE_MODEL = process.env.OPENAI_DECODE_MODEL || "gpt-5"; // pro e
 // normal/manual use with a key present (the "manual / LIVE_AI_TEST" path).
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs"; // Admin SDK requires the Node runtime (same as resolve-scan/route.ts:25)
 
 function selectProvider(name: string): AiProvider {
   switch (name) {
@@ -192,6 +198,10 @@ export async function POST(request: Request) {
     // Task 4 (owner manual override): bypasses a permanent no_result_receipt AND overwrites it once the
     // fresh compute finishes. Also forces a fresh compute past the in-memory L1 cache (forceRefresh).
     forceRetry?: boolean;
+    // D4 (live-mode auth): the caller's Firebase ID token + the businessId they claim membership in.
+    // Ignored entirely in mock mode (today's open-demo behavior is unchanged).
+    idToken?: string;
+    businessId?: string;
   };
   try {
     body = await request.json();
@@ -199,21 +209,75 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  // LIVE-MODE AUTH (D4). In mock mode this whole block is skipped, so the open-demo behavior and every
+  // existing test are unchanged. In live mode the caller must present a verified Firebase ID token and a
+  // businessId they are a member of - identical pattern to resolve-scan/route.ts. ORDERING CONTRACT
+  // (locked by route.d4.test.ts): this gate completes BEFORE any quota read or charge, global or
+  // per-account - a 401/403 request must never touch a counter key.
+  let authedBusinessId: string | null = null;
+  if (isLiveAuth() && !e2eMode()) {
+    const idToken = (body as { idToken?: string }).idToken ?? "";
+    const bizId = (body as { businessId?: string }).businessId ?? "";
+    if (!idToken.trim()) {
+      return Response.json({ error: "Sign in required.", reasonCode: "unauthenticated" }, { status: 401 });
+    }
+    if (!bizId.trim()) {
+      return Response.json({ error: "Missing businessId.", reasonCode: "no_business" }, { status: 400 });
+    }
+    let uid = "";
+    try {
+      const decoded = await getAdminAuth().verifyIdToken(idToken);
+      uid = decoded.uid;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(msg)) {
+        return Response.json({ error: "Server auth is not configured.", reasonCode: "auth_unavailable" }, { status: 503 });
+      }
+      return Response.json({ error: "Invalid or expired sign-in.", reasonCode: "bad_token" }, { status: 401 });
+    }
+    const member = await getAdminDb().doc(`${COLLECTIONS.businessMembers}/${memberDocId(bizId, uid)}`).get();
+    if (!member.exists) {
+      return Response.json({ error: "Not a member of this business.", reasonCode: "not_member" }, { status: 403 });
+    }
+    authedBusinessId = bizId;
+  }
+
   // Defense in depth: sanitize again on the server before anything reaches a provider.
   const rawCodeSanitized = sanitizeForAiLookup(body.rawCode ?? "").clean;
   const cleanCodeSanitized = sanitizeForAiLookup(body.cleanCode ?? "").clean;
   const code = cleanCodeSanitized || rawCodeSanitized;
-  const codeType = (body.codeType as ReturnType<typeof detectCodeType>) || detectCodeType(code);
+  // D4: never trust the client's codeType. Always recompute from the sanitized code server-side.
+  const codeType = detectCodeType(code);
   // W3 (v1.0.0): app-derived GS1 numbering-authority region hint for PUBLIC barcodes (null otherwise).
   // NON-AUTHORITATIVE prompt context only - it never changes resolver truth, alias approval, auto-count,
   // or evidence thresholds, and is never placed in untrusted scraped text.
   const gs1RegionHint = formatGs1Hint(code, codeType) ?? undefined;
+  // D4 (full surface): scanContext and autoCountNonPublicWithEvidence are DECISION inputs, not hints.
+  // scanContext === "tire" unlocks three extra auto-verify paths in decideDecode (decode.ts:285/304/323)
+  // and allowNonPublicAutoCount unlocks nonPublicTrustedVerified (decode.ts:269) - the ladder-1225
+  // hallucinated-auto-count class. LIVE mode: server policy decides, the client's values are ignored
+  // (AI_LIVE_SCAN_CONTEXT=tire opts a deployment into the tire context; default "any" unlocks nothing;
+  // AI_ALLOW_NONPUBLIC_AUTOCOUNT=1 opts into non-public auto-count; default off). MOCK mode: the client
+  // hint is honored exactly as today (validated to the known set), so the demo substrate is unchanged.
+  const SCAN_CONTEXTS = new Set(["any", "tire"]);
+  const clientScanContext =
+    typeof body.scanContext === "string" && SCAN_CONTEXTS.has(body.scanContext)
+      ? (body.scanContext as "any" | "tire")
+      : undefined;
+  const scanContext: "any" | "tire" | undefined =
+    isLiveAuth() && !e2eMode()
+      ? (process.env.AI_LIVE_SCAN_CONTEXT === "tire" ? "tire" : "any")
+      : clientScanContext;
+  const allowNonPublicAutoCount =
+    isLiveAuth() && !e2eMode()
+      ? process.env.AI_ALLOW_NONPUBLIC_AUTOCOUNT === "1"
+      : body.autoCountNonPublicWithEvidence !== false;
   const req = {
     rawCodeSanitized,
     cleanCodeSanitized,
     allowImageSuggestions: body.allowImageSuggestions ?? false,
     gs1RegionHint,
-    scanContext: body.scanContext,
+    scanContext,
     brandPrefixHint: body.brandPrefixHint,
   };
 
@@ -238,13 +302,37 @@ export async function POST(request: Request) {
         { status: 429 }
       );
     }
+    // Per-account cap layered on the global cap: same gate, same single charge point (L12).
+    if (authedBusinessId) {
+      const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
+      const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, limit);
+      if (acctUsed >= acctLimit) {
+        return Response.json(
+          { error: `Your daily AI lookup cap is reached (${acctUsed}/${acctLimit}).`, reasonCode: "account_daily_cap" },
+          { status: 429 }
+        );
+      }
+    }
     await chargeDailySlot(ladderStore, { limit });
+    if (authedBusinessId) await chargeDailySlotForAccount(ladderStore, authedBusinessId);
   }
 
   if (isDecodeMode) {
-    const threshold = body.confidenceThreshold ?? 0.8;
-    // Option 3 (owner): non-public codes auto-verify from a single trusted source unless explicitly disabled.
-    const allowNonPublicAutoCount = body.autoCountNonPublicWithEvidence !== false;
+    const threshold = clampConfidenceThreshold(body.confidenceThreshold);
+
+    // Per-account decode cap: read-only gate (the pipeline owns the single global charge). The
+    // account counter is charged below ONLY when the pipeline reports a genuine paid compute.
+    if (authedBusinessId && !e2eMode()) {
+      const ladderStore = await ladderStorage();
+      const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
+      const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500));
+      if (acctUsed >= acctLimit) {
+        return Response.json(
+          { error: `Your daily AI lookup cap is reached (${acctUsed}/${acctLimit}).`, reasonCode: "account_daily_cap" },
+          { status: 429 }
+        );
+      }
+    }
 
     // DECODE PIPELINE (Task 2.4): the entire cost-ordered ladder + cache/cap machinery lives in
     // @/server/decode/pipeline now. This handler only parses/sanitizes the request and shapes the
@@ -257,7 +345,7 @@ export async function POST(request: Request) {
       threshold,
       allowNonPublicAutoCount,
       forceRetry,
-      scanContext: body.scanContext,
+      scanContext,
       mockGptLadder: body.mockGptLadder,
       // Server-side clamp (review hardening 2026-07-15): the client already clamps, but a hand-crafted
       // request must not be able to stretch the ladder deadline via a huge budgetMs.
@@ -273,7 +361,12 @@ export async function POST(request: Request) {
       // when the code isn't a public barcode or the prefix maps to no confident brand - unchanged there.
       return Response.json({ error: outcome.message, reasonCode: "daily_cap", floor: outcome.floor }, { status: 429 });
     }
-    // computed: echo the L1/L2 `cached` flag into debug exactly as before.
+    // computed: echo the L1/L2 `cached` flag into debug exactly as before. The per-account charge
+    // rides paidComputeCharged - the pipeline's own single global-charge signal - so a FREE rung-0
+    // corpus/retail/learned hit (also kind:"computed", cached:false) never bills the account (L12).
+    if (authedBusinessId && outcome.paidComputeCharged && !e2eMode()) {
+      await chargeDailySlotForAccount(await ladderStorage(), authedBusinessId);
+    }
     return Response.json({ ...outcome.payload, debug: { ...outcome.payload.debug, cached: outcome.cached } });
   }
 

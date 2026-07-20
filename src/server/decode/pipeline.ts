@@ -407,7 +407,7 @@ export interface DecodePayload {
 export type DecodePipelineResult =
   | { kind: "persisted"; body: Record<string, unknown> }
   | { kind: "cap_blocked"; message: string; floor?: import("@/services/catalog/prefixFloor").PrefixFloorResult }
-  | { kind: "computed"; payload: DecodePayload; cached: boolean };
+  | { kind: "computed"; payload: DecodePayload; cached: boolean; paidComputeCharged: boolean };
 
 /**
  * Run the full decode pipeline for one request. Encapsulates the L1/L2 cache peek, the free
@@ -423,6 +423,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // and the full ladder -- every exit this request can take. Consumed by Task 12b's ladder deadline
   // wiring too (see AM-10 serialization note: this task lands first).
   const decodeStartedAt = Date.now();
+
+  // L12 (per-account charge signal): true only once the pipeline's ONE genuine global paid charge has
+  // fired (chargePaidSlot -> chargeDailySlot, below). Free rung-0 corpus/retail/learned hits return
+  // kind:"computed" with this still false - `cached:false` is NOT a paid signal (those rungs are $0).
+  // The route gates its own per-account chargeDailySlotForAccount on this flag, never on `!cached`.
+  let paidComputeCharged = false;
 
   // L2 total ladder deadline (AM-1(b), owner-reported 36-70s blocking decodes): ONE request-scoped
   // deadline, derived once, passed to EVERY runLadder call below (free run, escalation Go-UPC-only
@@ -539,7 +545,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     const corpus = (!misread ? await resolveExactBarcode(code) : null) ?? (skuShaped ? await resolveExactPartNumber(code) : null);
     if (corpus) {
       appendDecodeOutcome({ settledBy: "tire-corpus", status: corpus.decision.status, reasons: [], sourceTier: null });
-      return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false };
+      return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
     }
 
     // RETAIL RUNG-0 (live-proven bug fix): immediately after the tire corpus MISSES, for a GTIN-shaped
@@ -569,7 +575,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const retailRow = await lookupRetailBarcodeAsync(code);
       if (retailRow && isUsableProductName(retailRow.productName) && !isExampleOrTestRow(retailRow.barcode, retailRow.productName, retailRow.brand)) {
         appendDecodeOutcome({ settledBy: "retail-corpus", status: "suggested", reasons: [], sourceTier: null });
-        return { kind: "computed", payload: retailPayload(retailRow, code, rawCodeSanitized, cleanCodeSanitized), cached: false };
+        return { kind: "computed", payload: retailPayload(retailRow, code, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
       }
     }
 
@@ -583,7 +589,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     const learned = await getLearnedProduct(cacheKey);
     if (learned) {
       appendDecodeOutcome({ settledBy: "learned-products", status: "suggested", reasons: [], sourceTier: null });
-      return { kind: "computed", payload: learnedPayload(learned, rawCodeSanitized, cleanCodeSanitized), cached: false };
+      return { kind: "computed", payload: learnedPayload(learned, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
     }
   }
 
@@ -1227,6 +1233,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const used = await readDailyUsed(ladderStore);
       if (used >= limit) throw new DailyCapExceededError(used, limit);
       await chargeDailySlot(ladderStore, { limit });
+      paidComputeCharged = true;
     };
 
     let ladderRun: LadderResult;
@@ -1592,5 +1599,5 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     }
   }
 
-  return { kind: "computed", payload, cached };
+  return { kind: "computed", payload, cached, paidComputeCharged };
 }
