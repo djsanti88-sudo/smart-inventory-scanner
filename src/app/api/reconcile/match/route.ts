@@ -15,6 +15,12 @@ import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 
+// Preview result = a MatchResult optionally enriched with the exact retail-corpus hit for a non-tire
+// row (the "identified from the 4M-product catalog" badge). Widened so the enriched push typechecks.
+type PreviewMatchResult = MatchResult & {
+  retailCatalogMatch?: NonNullable<Awaited<ReturnType<typeof lookupRetailBarcodeAsync>>>;
+};
+
 // POST /api/reconcile/match (Task 7, Shop-Ware reconcile round).
 // Runs the pure identity matcher (Task 5) server-side, per row, against the LOCAL tire corpus
 // only: SQLite / Turso / committed JSON via tireKnowledgeIndex. NO API keys, NO paid calls, NO
@@ -59,7 +65,7 @@ function isValidRow(v: unknown): v is ExpectedInventoryRow {
   if (typeof r.externalId !== "string") return false;
   if (!isStringArray(r.partNumbers)) return false;
   if (typeof r.qty !== "number" || !Number.isFinite(r.qty)) return false;
-  for (const key of ["brand", "model", "sizeText", "specs"]) {
+  for (const key of ["brand", "model", "sizeText", "specs", "barcode", "name", "category"]) {
     if (r[key] !== undefined && typeof r[key] !== "string") return false;
   }
   return true;
@@ -90,7 +96,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   // Pre-fetch every key the matcher can ask for, cached across rows (feeds repeat sizes/PNs).
   const pnCache = new Map<string, CorpusCandidate[]>();
   const sizeCache = new Map<string, CorpusCandidate[]>();
-  const matches: MatchResult[] = [];
+  const matches: PreviewMatchResult[] = [];
 
   for (const row of rows) {
     for (const rawPn of row.partNumbers) {

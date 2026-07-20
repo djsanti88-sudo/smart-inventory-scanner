@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Stage order:** Tasks 1 through 12 are Stage A. Stage A is independently shippable and must pass Task 12 before Tasks 13 through 15 begin. No Stage B tuning may block a Stage A release.
+- **Stage order (this plan = Stage A only):** Tasks 1 through 11 ARE this plan (Tasks 1-10 implementation, Task 11 the ship + proof gate). There are no Tasks 12-15. Stage A is independently shippable; Stage B is the separate P4b follow-up. No Stage B tuning may block a Stage A release.
 - **Binding threshold T:** `0.75`, grounded in `src/services/reconcile/identityMatcher.ts:66` and the existing literal used by `findIdentityMerge` in `src/services/catalog/identityMerge.ts:167`. Task 7 exports `IDENTITY_JACCARD_THRESHOLD = 0.75` from the canonical identity-merge module and makes both existing consumers import it. Stage B imports it and does not create a third threshold literal.
 - **Canonical Jaccard:** only `jaccard(a: string[], b: string[]): number`, `nameTokens(s: string | null | undefined): string[]`, and `plusGenerationDiff(a: string[], b: string[]): boolean` from `src/services/catalog/identityMerge.ts` are canonical for Phase 4. The independent `jaccard` functions in `src/services/ai/crossCheckEngine.ts` and `src/services/fetchV2/siblingGuard.ts` remain untouched. This is a landmine: `identityMerge.ts` returns `0` for empty/empty, while `siblingGuard.ts` returns `1`. Unifying them is out of scope.
 - **Resolver trust invariant:** wrong identity is failure and ambiguity is acceptable. Every product-identity fuzzy match, including a score at or above `0.75`, is suggestion data only until a human confirms it. Every fuzzy score below `0.75`, every tie, every affix-core-only match, and every conflicting corroboration routes to Needs Review. No fuzzy row receives `approved: true` during Apply. Exact human-upload rows retain the current `approved: true`, `verified: true` behavior through `resolveUnknown` with `origin: "human"`.
@@ -20,7 +20,7 @@
 - **ExcelJS read reality:** `package.json` contains `exceljs: ^4.4.0`, and `node_modules/exceljs/README.md` documents `workbook.xlsx.load(data)` for XLSX only. Task 4 introduces the first repository read path. A true legacy BIFF `.xls` file is not silently claimed as supported; it gets the exact error `Legacy binary .xls is not supported by installed ExcelJS 4.4.0. Save it as .xlsx or .csv.` Supporting genuine BIFF remains a flagged unknown requiring an owner-approved parser decision. An OOXML payload named `.xls` is accepted because content, not the suffix, is passed to `workbook.xlsx.load`.
 - **Mapping memory decision:** choose Turso KV, wrapped by `src/server/importMappingMemory.ts`, using `LadderStorage.get/set` and key `import_mapping::<businessId>::<sourceSignature>`. Firestore is not chosen because the current default and demo backend is mock, while Firestore-only memory would disappear from that path. localStorage is not chosen because it is per browser rather than per account. The namespaced Turso/file seam works in mock and live modes, remains outside inventory truth, and preserves per-account keys. The API route still verifies membership in live mode. Reusing `ladder_kv` is an acknowledged semantic compromise; a dedicated table is deferred until mapping volume or retention warrants it.
 - **Monolith containment:** Tasks 1 through 10 create isolated modules or touch narrow existing files. Task 11 is the only Stage A task that edits the approximately 5,700-line `src/stores/scanStore.ts`; it is ordered last among Stage A implementation tasks and adds only optional import review context, `resolveImportReview`, and one idempotent bulk-quantity ledger event.
-- **Persist migration law:** the actual store is `name: "sis-scan-v1"`, `version: 8`, with `scanStoreMigrate(persisted, version)` at `src/stores/scanStore.ts:5685` and the version at `src/stores/scanStore.ts:5733`. Task 11 bumps to version 9 because `UnknownCodeReview.importQuantity` and `UnknownCodeReview.importEventId` are persisted. Its migration preserves the v8 rule at `src/stores/scanStore.ts:5703`: transform only keys the blob already carries, never inject absent arrays or settings into a partial blob. `countSnapshots` remains the one documented unconditional exception at line 5721.
+- **Persist migration law:** the actual store is `name: "sis-scan-v1"`, `version: 8`, with `scanStoreMigrate(persisted, version)` at `src/stores/scanStore.ts:5685` and the version at `src/stores/scanStore.ts:5733`. Task 10 (the sole monolith edit) bumps to version 9 because `UnknownCodeReview.importQuantity` is persisted. Its migration preserves the v8 rule at `src/stores/scanStore.ts:5703`: transform only keys the blob already carries, never inject absent arrays or settings into a partial blob. `countSnapshots` remains the one documented unconditional exception at line 5721.
 - **Performance:** parsing, mapping, matching supplied in-memory match results, and constructing a 5,000-row preview must complete in less than `10_000` ms locally. The performance test excludes Apply and external network latency, which are not import processing.
 - **Limits already grounded in code:** `MAX_FIELD_LENGTH = 500`, `PREVIEW_LIMIT = 20`, and reconcile route `MAX_ROWS = 20000`. The mapping API body cap reuses the existing share-route value `32 * 1024` bytes.
 - **No paid or live calls:** automated tests mock retail/Turso/Firebase access and never call paid providers. Phase 4 does not call `/api/ai-lookup`.
@@ -30,20 +30,18 @@
 
 ## Track and dependency map
 
+This plan is exactly 11 tasks. There are NO Tasks 12-15 in this file.
+
 | Track | Tasks | Dependency |
 |---|---|---|
 | Stage A foundation | 1, then 2, 3, and 5 in parallel | Task 1 first |
 | Stage A ingestion | 4 after 2 and 3; 6 after 1 and 5 | Disjoint files |
-| Stage A preview | 7 and 8 in parallel after 3 and 4 | Disjoint files |
-| Stage A UI | 9 after 6, 7, and 8 | No scanStore edit |
-| Stage A legacy and scale | 10 after 3, 4, and 7 | Shared header intelligence plus 5,000-row proof |
-| Stage A inventory bridge | 11 after 9 and 10 | Sole monolith edit, ordered last |
-| Stage A ship gate | 12 after 11 | Blocking gate before Stage B |
-| Stage B edit distance | 13 after Task 12 | Strictly after Stage A ships |
-| Stage B fuzzy matcher | 14 after Task 13 | Pure matcher and fixture tuning |
-| Stage B integration and handoff | 15 after Task 14 | Reconcile, E2E, polish, final proof |
+| Stage A preview | 7 and 8 in parallel after 3 and 4 | Disjoint files (8 consumes Task 7's ExpectedInventoryRow.barcode type) |
+| Stage A UI | 9 after 6, 7, and 8 | Creates UniversalImportPanel; no scanStore edit |
+| Stage A inventory bridge | 10 after 9 | Sole monolith edit (scanStore + products page + container), ordered last among implementation |
+| Stage A ship gate | 11 after 10 | Final proof + handoff for THIS plan |
 
-Tasks 13 through 15 are present in this file but are blocked on the Task 12 Stage A gate. They reuse the `ImportPreviewStatus "fuzzy"` slot, the canonical `jaccard` and `nameTokens` from `identityMerge.ts`, `IDENTITY_JACCARD_THRESHOLD` from Task 7, and `prefixBrandConflict` for non-tire brand safety. No fuzzy row ever auto-approves.
+Stage B (typo-tolerant fuzzy matching + combined handoff) is a SEPARATE follow-up plan (`2026-07-20-phase4b-fuzzy-matching.md`), authored and executed only after Task 11 passes. It reuses this plan's `ImportPreviewStatus "fuzzy"` slot, the canonical `jaccard`/`nameTokens` from `identityMerge.ts`, `IDENTITY_JACCARD_THRESHOLD` (Task 7), and `prefixBrandConflict` for non-tire brand safety, and adds net-new character-level edit distance - all behind the review-first guard (no fuzzy row ever auto-approves).
 
 ---
 
@@ -363,1826 +361,7 @@ Expected: FAIL because `PN`, `Part #`, `Item No.`, and `Mfg Part Number` are out
 @@
 -    const onHand = qtyOnHandKey ? parseQty(record[qtyOnHandKey]) : undefined;
 -    const available = qtyAvailableKey ? parseQty(record[qtyAvailableKey]) : undefined;
-+    const onHand = qtyOnHandKey ? parseQty(sanitizedRecord[qtyOnHandKey]) : undefined;
-+    const available = qtyAvailableKey ? parseQty(sanitizedRecord[qtyAvailableKey]) : undefined;
-@@
--    const aliasRaw = aliasKey ? (record[aliasKey] ?? "").trim() : "";
-+    const aliasRaw = aliasKey ? sanitizedRecord[aliasKey] ?? "" : "";
-@@
--    const unitValue = unitKey ? (record[unitKey] ?? "").trim() : "";
-+    const unitValue = unitKey ? sanitizedRecord[unitKey] ?? "" : "";
-@@
--    for (const [key, value] of Object.entries(record)) {
-+    for (const [key, value] of Object.entries(sanitizedRecord)) {
-@@
--      brand: brandKey ? (record[brandKey] || undefined) : undefined,
--      model: modelKey ? (record[modelKey] || undefined) : undefined,
--      sizeText: sizeKey ? (record[sizeKey] || undefined) : undefined,
--      specs: specsKey ? (record[specsKey] || undefined) : undefined,
-+      brand: brandKey ? sanitizedRecord[brandKey] || undefined : undefined,
-+      model: modelKey ? sanitizedRecord[modelKey] || undefined : undefined,
-+      sizeText: sizeKey ? sanitizedRecord[sizeKey] || undefined : undefined,
-+      specs: specsKey ? sanitizedRecord[specsKey] || undefined : undefined,
-*** End Patch
-```
-
-- [ ] **Step 4: Run focused and adjacent sanitizer tests**
-
-Run: `npx vitest run src/services/reconcile/shopwareCsvAdapter.test.ts src/services/csvImport.test.ts src/services/csvImport.trustGate.test.ts`
-
-Expected: PASS, including all four D9 header examples, seen-header error copy, 500-character cap, and formula defusal.
-
----
-
-## Task 3: Build deterministic column intelligence and manual mapping validation
-
-**Stage:** A
-
-**Files:**
-
-- Create: `src/services/columnIntelligence.ts`
-- Test: `src/services/columnIntelligence.test.ts`
-
-**Interfaces:**
-
-- Consumes: sanitized `string[][]` matrices.
-- Produces: `ColumnInference`, `HEADER_SYNONYMS`, `normalizeImportHeader(value: string): string`, `inferColumnMapping(matrix: string[][]): ColumnInference`, and `validateManualMapping(headers: string[], mapping: ColumnMapping): { ok: true } | { ok: false; errors: string[] }`.
-
-- [ ] **Step 1: Write the complete failing test**
-
-```typescript
-// src/services/columnIntelligence.test.ts
-import { describe, expect, it } from "vitest";
-import {
-  inferColumnMapping,
-  normalizeImportHeader,
-  validateManualMapping,
-} from "@/services/columnIntelligence";
-
-describe("columnIntelligence", () => {
-  it("normalizes the boss-export header examples without fuzzy product matching", () => {
-    expect(normalizeImportHeader("Part #")).toBe("part number");
-    expect(normalizeImportHeader(" PN ")).toBe("pn");
-    expect(normalizeImportHeader("Item No.")).toBe("item no");
-    expect(normalizeImportHeader("Mfg Part Number")).toBe("mfg part number");
-  });
-
-  it("finds a header after blank and title rows and maps PN / Make / Model / Tire Size / QOH", () => {
-    const result = inferColumnMapping([
-      ["", "", "", "", ""],
-      ["Inventory export", "", "", "", ""],
-      ["PN", "Make", "Model", "Tire Size", "QOH"],
-      ["ABC-1", "Acme", "Road", "225/45R18", "7"],
-    ]);
-    expect(result.headerRowIndex).toBe(2);
-    expect(result.mapping).toEqual({
-      partNumber: 0,
-      brand: 1,
-      model: 2,
-      size: 3,
-      quantity: 4,
-    });
-    expect(result.confidence).toBe("high");
-    expect(result.source).toBe("header");
-  });
-
-  it("uses conservative content inference but keeps nonsense headers low confidence", () => {
-    const result = inferColumnMapping([
-      ["Alpha", "Beta", "Gamma"],
-      ["012345678905", "225/45R18", "7"],
-      ["036000291452", "235/45R18", "8"],
-    ]);
-    expect(result.mapping).toMatchObject({ barcode: 0, size: 1, quantity: 2 });
-    expect(result.confidence).toBe("low");
-    expect(result.source).toBe("content");
-  });
-
-  it("rejects duplicate manual assignments and requires identity plus quantity", () => {
-    expect(validateManualMapping(["A", "B"], { partNumber: 0, quantity: 0 })).toEqual({
-      ok: false,
-      errors: ["One source column cannot be assigned to more than one field."],
-    });
-    expect(validateManualMapping(["A", "B"], { brand: 0, quantity: 1 })).toEqual({
-      ok: false,
-      errors: ["Map at least one identity field: part number, barcode, or name."],
-    });
-  });
-});
-```
-
-- [ ] **Step 2: Run the focused test and verify the expected failure**
-
-Run: `npx vitest run src/services/columnIntelligence.test.ts`
-
-Expected: FAIL with `Cannot find module '@/services/columnIntelligence'`.
-
-- [ ] **Step 3: Create the complete implementation**
-
-```typescript
-// src/services/columnIntelligence.ts
-import { tireSizeToken } from "@/services/ai/tireSpecs";
-import { sanitizeCell } from "@/services/csvImport";
-import type { ColumnMapping, ImportField, MappingSource } from "@/services/importSchema";
-import { isGtinShaped } from "@/services/upc/gtin";
-
-export const HEADER_SYNONYMS: Readonly<Record<ImportField, readonly string[]>> = {
-  partNumber: [
-    "part number",
-    "part no",
-    "part",
-    "pn",
-    "item no",
-    "item number",
-    "mfg part number",
-    "manufacturer part number",
-    "sku",
-    "primary sku",
-  ],
-  brand: ["brand", "make", "manufacturer", "mfr"],
-  model: ["model", "product", "description", "item description", "product name"],
-  size: ["size", "tire size", "tyre size"],
-  quantity: ["qty", "quantity", "count", "qoh", "quantity on hand", "qty on hand", "on hand"],
-  uom: ["unit", "uom", "unit of measure"],
-  barcode: ["barcode", "primary barcode", "upc", "ean", "gtin"],
-  name: ["name", "product name", "item name"],
-  category: ["category", "department", "product category"],
-};
-
-export interface ColumnInference {
-  headerRowIndex: number;
-  headers: string[];
-  mapping: ColumnMapping;
-  confidence: "high" | "low";
-  source: MappingSource;
-  seenHeaders: string[];
-  reasons: string[];
-}
-
-export function normalizeImportHeader(value: string): string {
-  return sanitizeCell(value)
-    .toLowerCase()
-    .replace(/#/g, " number ")
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
-
-function fieldForHeader(value: string): ImportField | undefined {
-  const normalized = normalizeImportHeader(value);
-  return (Object.keys(HEADER_SYNONYMS) as ImportField[]).find((field) =>
-    HEADER_SYNONYMS[field].includes(normalized),
-  );
-}
-
-function nonBlank(row: string[]): boolean {
-  return row.some((cell) => cell.trim() !== "");
-}
-
-function headerScore(row: string[]): number {
-  return new Set(row.map(fieldForHeader).filter((field): field is ImportField => Boolean(field))).size;
-}
-
-function valuesForColumn(rows: string[][], index: number): string[] {
-  return rows.map((row) => row[index] ?? "").map((value) => value.trim()).filter(Boolean);
-}
-
-function allQuantities(values: string[]): boolean {
-  return values.length > 0 && values.every((value) => {
-    const parsed = Number(value);
-    return Number.isSafeInteger(parsed) && parsed >= 0;
-  });
-}
-
-function allSizes(values: string[]): boolean {
-  return values.length > 0 && values.every((value) => tireSizeToken({ productName: value }) !== "");
-}
-
-function allBarcodes(values: string[]): boolean {
-  return values.length > 0 && values.every((value) => isGtinShaped(value));
-}
-
-export function inferColumnMapping(matrix: string[][]): ColumnInference {
-  const candidateRows = matrix
-    .map((row, index) => ({ row, index, score: headerScore(row) }))
-    .filter(({ row }) => nonBlank(row));
-  const first = candidateRows[0] ?? { row: [], index: 0, score: 0 };
-  const header = candidateRows.reduce((best, current) => current.score > best.score ? current : best, first);
-  const headers = header.row.map(sanitizeCell);
-  const mapping: ColumnMapping = {};
-  const reasons: string[] = [];
-
-  headers.forEach((value, index) => {
-    const field = fieldForHeader(value);
-    if (field !== undefined && mapping[field] === undefined) mapping[field] = index;
-  });
-
-  const dataRows = matrix.slice(header.index + 1).filter(nonBlank);
-  const used = new Set(Object.values(mapping).filter((value): value is number => value !== undefined));
-  const inferred: Array<[ImportField, (values: string[]) => boolean]> = [
-    ["quantity", allQuantities],
-    ["size", allSizes],
-    ["barcode", allBarcodes],
-  ];
-
-  for (const [field, predicate] of inferred) {
-    if (mapping[field] !== undefined) continue;
-    const matches = headers
-      .map((_, index) => index)
-      .filter((index) => !used.has(index) && predicate(valuesForColumn(dataRows, index)));
-    if (matches.length === 1) {
-      mapping[field] = matches[0];
-      used.add(matches[0]);
-      reasons.push(`${field} inferred from cell content.`);
-    }
-  }
-
-  const hasIdentity = mapping.partNumber !== undefined || mapping.barcode !== undefined || mapping.name !== undefined;
-  const hasQuantity = mapping.quantity !== undefined;
-  const source: MappingSource = header.score > 0 ? "header" : "content";
-  const confidence = source === "header" && hasIdentity && hasQuantity ? "high" : "low";
-  if (!hasIdentity) reasons.push("No identity column was recognized.");
-  if (!hasQuantity) reasons.push("No quantity column was recognized.");
-  if (confidence === "low") reasons.push(`Seen headers: ${headers.join(", ") || "(none)"}.`);
-
-  return {
-    headerRowIndex: header.index,
-    headers,
-    mapping,
-    confidence,
-    source,
-    seenHeaders: headers,
-    reasons,
-  };
-}
-
-export function validateManualMapping(
-  headers: string[],
-  mapping: ColumnMapping,
-): { ok: true } | { ok: false; errors: string[] } {
-  const assigned = Object.values(mapping).filter((value): value is number => value !== undefined);
-  if (new Set(assigned).size !== assigned.length) {
-    return { ok: false, errors: ["One source column cannot be assigned to more than one field."] };
-  }
-  if (assigned.some((index) => index < 0 || index >= headers.length)) {
-    return { ok: false, errors: ["A mapped column is outside the uploaded file."] };
-  }
-  if (mapping.partNumber === undefined && mapping.barcode === undefined && mapping.name === undefined) {
-    return { ok: false, errors: ["Map at least one identity field: part number, barcode, or name."] };
-  }
-  if (mapping.quantity === undefined) {
-    return { ok: false, errors: ["Map the quantity field before previewing."] };
-  }
-  return { ok: true };
-}
-```
-
-- [ ] **Step 4: Run the focused test**
-
-Run: `npx vitest run src/services/columnIntelligence.test.ts`
-
-Expected: PASS, 4 tests. The nonsense-header case remains low confidence and therefore must render the mapping UI.
-
----
-
-## Task 4: Add the net-new lazy ExcelJS read path and universal file reader
-
-**Stage:** A
-
-**Files:**
-
-- Create: `src/services/universalFileReader.ts`
-- Test: `src/services/universalFileReader.test.ts`
-
-**Interfaces:**
-
-- Consumes: `UploadFileLike`, `sanitizeCell(raw)`, `inferColumnMapping(matrix)`, and `buildSourceSignature(headers)`.
-- Produces: `readUniversalFile(file: UploadFileLike): Promise<UniversalSheet>` and `detectDelimitedSeparator(text: string): "," | "\t" | ";" | "|"`.
-
-- [ ] **Step 1: Write the complete failing tests**
-
-```typescript
-// src/services/universalFileReader.test.ts
-import { describe, expect, it } from "vitest";
-import ExcelJS from "exceljs";
-import { readUniversalFile } from "@/services/universalFileReader";
-import type { UploadFileLike } from "@/services/importSchema";
-
-function textFile(name: string, content: string): UploadFileLike {
-  const bytes = new TextEncoder().encode(content);
-  return {
-    name,
-    type: "text/plain",
-    text: async () => content,
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  };
-}
-
-describe("readUniversalFile", () => {
-  it("reads BOM CSV with blank and title rows plus a semicolon delimiter", async () => {
-    const sheet = await readUniversalFile(textFile(
-      "inventory.csv",
-      "\uFEFF;;;;\nInventory export;;;;\nPN;Make;Model;Tire Size;QOH\nABC-1;Acme;Road;225/45R18;7\n",
-    ));
-    expect(sheet.kind).toBe("csv");
-    expect(sheet.headerRowIndex).toBe(2);
-    expect(sheet.headers).toEqual(["PN", "Make", "Model", "Tire Size", "QOH"]);
-    expect(sheet.rows).toEqual([["ABC-1", "Acme", "Road", "225/45R18", "7"]]);
-  });
-
-  it("reads TSV and sanitizes every cell", async () => {
-    const sheet = await readUniversalFile(textFile(
-      "inventory.tsv",
-      "PN\tMake\tQOH\nABC-1\t=2+2\t3\n",
-    ));
-    expect(sheet.kind).toBe("tsv");
-    expect(sheet.rows[0][1]).toBe("'=2+2");
-  });
-
-  it("lazy-loads an XLSX workbook and sanitizes formula results", async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Inventory");
-    worksheet.addRow(["PN", "Make", "QOH"]);
-    worksheet.addRow(["ABC-1", { formula: "2+2", result: "=4" }, 3]);
-    const buffer = await workbook.xlsx.writeBuffer();
-    const bytes = new Uint8Array(buffer);
-    const file: UploadFileLike = {
-      name: "inventory.xlsx",
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      text: async () => "",
-      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-    };
-    const sheet = await readUniversalFile(file);
-    expect(sheet.kind).toBe("xlsx");
-    expect(sheet.rows[0]).toEqual(["ABC-1", "'=4", "3"]);
-  });
-
-  it("accepts OOXML bytes with an .xls filename but rejects genuine legacy BIFF honestly", async () => {
-    const workbook = new ExcelJS.Workbook();
-    workbook.addWorksheet("Inventory").addRow(["PN", "QOH"]);
-    const buffer = await workbook.xlsx.writeBuffer();
-    const bytes = new Uint8Array(buffer);
-    const renamed: UploadFileLike = {
-      name: "inventory.xls",
-      text: async () => "",
-      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-    };
-    await expect(readUniversalFile(renamed)).resolves.toMatchObject({ kind: "xls" });
-
-    const biffBytes = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
-    const biff: UploadFileLike = {
-      name: "legacy.xls",
-      type: "application/vnd.ms-excel",
-      text: async () => "",
-      arrayBuffer: async () => biffBytes.buffer.slice(
-        biffBytes.byteOffset,
-        biffBytes.byteOffset + biffBytes.byteLength,
-      ),
-    };
-    await expect(readUniversalFile(biff)).rejects.toThrow(
-      "Legacy binary .xls is not supported by installed ExcelJS 4.4.0. Save it as .xlsx or .csv.",
-    );
-  });
-});
-```
-
-- [ ] **Step 2: Run the focused test and verify the expected failure**
-
-Run: `npx vitest run src/services/universalFileReader.test.ts`
-
-Expected: FAIL with `Cannot find module '@/services/universalFileReader'`.
-
-- [ ] **Step 3: Create the complete reader**
-
-```typescript
-// src/services/universalFileReader.ts
-import { parse as parseCsvSync } from "csv-parse/sync";
-import { inferColumnMapping } from "@/services/columnIntelligence";
-import { sanitizeCell } from "@/services/csvImport";
-import {
-  buildSourceSignature,
-  type UniversalSheet,
-  type UploadFileLike,
-  type UploadKind,
-} from "@/services/importSchema";
-
-const DELIMITERS = [",", "\t", ";", "|"] as const;
-
-export function detectDelimitedSeparator(text: string): (typeof DELIMITERS)[number] {
-  const line = text.replace(/^\uFEFF/, "").split(/\r?\n/).find((value) => value.trim() !== "") ?? "";
-  let quoted = false;
-  const counts = new Map<(typeof DELIMITERS)[number], number>(DELIMITERS.map((value) => [value, 0]));
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    if (char === '"') {
-      if (quoted && line[index + 1] === '"') index += 1;
-      else quoted = !quoted;
-      continue;
-    }
-    if (!quoted && DELIMITERS.includes(char as (typeof DELIMITERS)[number])) {
-      const delimiter = char as (typeof DELIMITERS)[number];
-      counts.set(delimiter, (counts.get(delimiter) ?? 0) + 1);
-    }
-  }
-  return DELIMITERS.reduce((best, current) =>
-    (counts.get(current) ?? 0) > (counts.get(best) ?? 0) ? current : best,
-  ",");
-}
-
-function extension(name: string): UploadKind {
-  const suffix = name.trim().toLowerCase().split(".").pop();
-  if (suffix === "csv" || suffix === "tsv" || suffix === "xlsx" || suffix === "xls") return suffix;
-  throw new Error("Choose a .csv, .tsv, .xlsx, or .xls file.");
-}
-
-function hasData(row: string[]): boolean {
-  return row.some((cell) => cell.trim() !== "");
-}
-
-function delimitedMatrix(text: string, kind: UploadKind): string[][] {
-  const delimiter = kind === "tsv" ? "\t" : detectDelimitedSeparator(text);
-  const records = parseCsvSync(text, {
-    delimiter,
-    bom: true,
-    relax_column_count: true,
-    relax_quotes: true,
-    skip_empty_lines: false,
-  }) as unknown[][];
-  return records.map((row) => row.map((cell) => sanitizeCell(String(cell ?? ""))));
-}
-
-function excelCellText(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value !== "object") return String(value);
-  const record = value as Record<string, unknown>;
-  if (record.result !== undefined) return String(record.result ?? "");
-  if (Array.isArray(record.richText)) {
-    return record.richText
-      .map((part) => typeof part === "object" && part !== null ? String((part as { text?: unknown }).text ?? "") : "")
-      .join("");
-  }
-  if (record.text !== undefined) return String(record.text ?? "");
-  if (record.hyperlink !== undefined) return String(record.text ?? record.hyperlink ?? "");
-  return String(value);
-}
-
-async function workbookMatrix(file: UploadFileLike, kind: UploadKind): Promise<string[][]> {
-  const ExcelJS = (await import("exceljs")).default;
-  const workbook = new ExcelJS.Workbook();
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  try {
-    await workbook.xlsx.load(bytes as unknown as Buffer);
-  } catch (error) {
-    if (kind === "xls") {
-      throw new Error(
-        "Legacy binary .xls is not supported by installed ExcelJS 4.4.0. Save it as .xlsx or .csv.",
-      );
-    }
-    throw new Error(`Could not read this XLSX workbook: ${error instanceof Error ? error.message : "unknown error"}`);
-  }
-  const worksheet = workbook.worksheets.find((candidate) => candidate.rowCount > 0);
-  if (!worksheet) return [];
-  const matrix: string[][] = [];
-  for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
-    const row: string[] = [];
-    for (let columnNumber = 1; columnNumber <= worksheet.columnCount; columnNumber += 1) {
-      row.push(sanitizeCell(excelCellText(worksheet.getRow(rowNumber).getCell(columnNumber).value)));
-    }
-    matrix.push(row);
-  }
-  return matrix;
-}
-
-export async function readUniversalFile(file: UploadFileLike): Promise<UniversalSheet> {
-  const kind = extension(file.name);
-  const matrix = kind === "csv" || kind === "tsv"
-    ? delimitedMatrix(await file.text(), kind)
-    : await workbookMatrix(file, kind);
-  if (!matrix.some(hasData)) throw new Error("The uploaded file is empty.");
-  const inference = inferColumnMapping(matrix);
-  const rows = matrix.slice(inference.headerRowIndex + 1).filter(hasData);
-  return {
-    fileName: file.name,
-    kind,
-    headers: inference.headers,
-    rows,
-    headerRowIndex: inference.headerRowIndex,
-    sourceSignature: buildSourceSignature(inference.headers),
-    seenRows: matrix.slice(0, inference.headerRowIndex + 4),
-  };
-}
-```
-
-- [ ] **Step 4: Run the focused tests**
-
-Run: `npx vitest run src/services/universalFileReader.test.ts src/services/columnIntelligence.test.ts`
-
-Expected: PASS, including CSV, TSV, XLSX, renamed OOXML `.xls`, sanitizer, leading-row, and honest BIFF rejection cases.
-
----
-
-## Task 5: Implement per-account mapping memory on the Turso KV seam
-
-**Stage:** A
-
-**Files:**
-
-- Create: `src/server/importMappingMemory.ts`
-- Test: `src/server/importMappingMemory.test.ts`
-
-**Interfaces:**
-
-- Consumes: `LadderStorage.get(key): Promise<string | null>`, `LadderStorage.set(key, value): Promise<void>`, `businessId`, `sourceSignature`, and `ColumnMapping`.
-- Produces: `ImportMappingMemoryRecord`, `mappingMemoryKey(businessId: string, sourceSignature: string): string`, `getImportMappingMemory(businessId: string, sourceSignature: string, storage?: MappingKv): Promise<ImportMappingMemoryRecord | null>`, and `putImportMappingMemory(record: ImportMappingMemoryRecord, storage?: MappingKv): Promise<void>`.
-
-- [ ] **Step 1: Write the complete failing test**
-
-```typescript
-// src/server/importMappingMemory.test.ts
-// @vitest-environment node
-import { describe, expect, it, vi } from "vitest";
-import {
-  getImportMappingMemory,
-  mappingMemoryKey,
-  putImportMappingMemory,
-  type MappingKv,
-} from "@/server/importMappingMemory";
-
-vi.mock("server-only", () => ({}));
-
-function memoryKv(): MappingKv {
-  const values = new Map<string, string>();
-  return {
-    get: async (key) => values.get(key) ?? null,
-    set: async (key, value) => void values.set(key, value),
-  };
-}
-
-describe("importMappingMemory", () => {
-  it("scopes the key by business and source signature", () => {
-    expect(mappingMemoryKey("biz-a", "source-1")).toBe("import_mapping::biz-a::source-1");
-    expect(mappingMemoryKey("biz-b", "source-1")).not.toBe(mappingMemoryKey("biz-a", "source-1"));
-  });
-
-  it("round-trips a valid mapping", async () => {
-    const storage = memoryKv();
-    await putImportMappingMemory({
-      businessId: "biz-a",
-      sourceSignature: "source-1",
-      mapping: { partNumber: 0, quantity: 4 },
-      updatedAt: "2026-07-20T12:00:00.000Z",
-    }, storage);
-    await expect(getImportMappingMemory("biz-a", "source-1", storage)).resolves.toEqual({
-      businessId: "biz-a",
-      sourceSignature: "source-1",
-      mapping: { partNumber: 0, quantity: 4 },
-      updatedAt: "2026-07-20T12:00:00.000Z",
-    });
-  });
-
-  it("fails closed on corrupt or cross-account records", async () => {
-    const corrupt: MappingKv = {
-      get: async () => JSON.stringify({ businessId: "biz-b", sourceSignature: "source-1", mapping: {} }),
-      set: async () => undefined,
-    };
-    await expect(getImportMappingMemory("biz-a", "source-1", corrupt)).resolves.toBeNull();
-  });
-});
-```
-
-- [ ] **Step 2: Run the focused test and verify the expected failure**
-
-Run: `npx vitest run src/server/importMappingMemory.test.ts`
-
-Expected: FAIL with `Cannot find module '@/server/importMappingMemory'`.
-
-- [ ] **Step 3: Create the complete server-only store**
-
-```typescript
-// src/server/importMappingMemory.ts
-import "server-only";
-
-import type { ColumnMapping, ImportField } from "@/services/importSchema";
-import { IMPORT_FIELD_ORDER } from "@/services/importSchema";
-import { ladderStorage, type LadderStorage } from "@/server/upc/storage";
-
-export type MappingKv = Pick<LadderStorage, "get" | "set">;
-
-export interface ImportMappingMemoryRecord {
-  businessId: string;
-  sourceSignature: string;
-  mapping: ColumnMapping;
-  updatedAt: string;
-}
-
-export function mappingMemoryKey(businessId: string, sourceSignature: string): string {
-  return `import_mapping::${businessId}::${sourceSignature}`;
-}
-
-function validMapping(value: unknown): value is ColumnMapping {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  return Object.entries(value as Record<string, unknown>).every(([key, index]) =>
-    IMPORT_FIELD_ORDER.includes(key as ImportField) && Number.isSafeInteger(index) && Number(index) >= 0,
-  );
-}
-
-function validRecord(value: unknown): value is ImportMappingMemoryRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.businessId === "string"
-    && typeof record.sourceSignature === "string"
-    && typeof record.updatedAt === "string"
-    && validMapping(record.mapping);
-}
-
-export async function getImportMappingMemory(
-  businessId: string,
-  sourceSignature: string,
-  storage?: MappingKv,
-): Promise<ImportMappingMemoryRecord | null> {
-  const kv = storage ?? await ladderStorage();
-  const raw = await kv.get(mappingMemoryKey(businessId, sourceSignature));
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!validRecord(parsed)) return null;
-    if (parsed.businessId !== businessId || parsed.sourceSignature !== sourceSignature) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export async function putImportMappingMemory(
-  record: ImportMappingMemoryRecord,
-  storage?: MappingKv,
-): Promise<void> {
-  if (!record.businessId || !record.sourceSignature || !validMapping(record.mapping)) {
-    throw new Error("Invalid import mapping memory record.");
-  }
-  const kv = storage ?? await ladderStorage();
-  await kv.set(mappingMemoryKey(record.businessId, record.sourceSignature), JSON.stringify(record));
-}
-```
-
-- [ ] **Step 4: Run the focused test**
-
-Run: `npx vitest run src/server/importMappingMemory.test.ts`
-
-Expected: PASS, 3 tests, with no Turso credentials and no network call.
-
----
-## Task 6: Expose mapping memory through an authenticated read and delayed-write route
-
-**Stage:** A
-
-**Files:**
-
-- Create: `src/app/api/import-mapping/route.ts`
-- Test: `src/app/api/import-mapping/route.test.ts`
-
-**Interfaces:**
-
-- Consumes: GET query fields `businessId`, `sourceSignature`, optional `idToken`; PUT JSON `{ businessId: string; sourceSignature: string; mapping: ColumnMapping; idToken?: string }`.
-- Produces: `GET(request: NextRequest): Promise<NextResponse>` and `PUT(request: NextRequest): Promise<NextResponse>`; live mode verifies membership at `businessMembers/{businessId}_{uid}`, mock/E2E mode uses the existing explicit bypass convention.
-
-- [ ] **Step 1: Write the complete failing route test**
-
-```typescript
-// src/app/api/import-mapping/route.test.ts
-// @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-vi.mock("server-only", () => ({}));
-
-const getMemory = vi.fn();
-const putMemory = vi.fn();
-vi.mock("@/server/importMappingMemory", () => ({
-  getImportMappingMemory: (...args: unknown[]) => getMemory(...args),
-  putImportMappingMemory: (...args: unknown[]) => putMemory(...args),
-}));
-vi.mock("@/services/auth/authMode", () => ({ isLiveAuth: () => false }));
-vi.mock("@/lib/firebaseAdmin", () => ({
-  getAdminAuth: () => ({ verifyIdToken: vi.fn() }),
-  getAdminDb: () => ({ doc: vi.fn() }),
-}));
-
-import { GET, PUT } from "@/app/api/import-mapping/route";
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  getMemory.mockResolvedValue(null);
-  putMemory.mockResolvedValue(undefined);
-});
-
-describe("/api/import-mapping", () => {
-  it("returns a remembered mapping for the requested account and signature", async () => {
-    getMemory.mockResolvedValue({
-      businessId: "biz-a",
-      sourceSignature: "source-1",
-      mapping: { partNumber: 0, quantity: 4 },
-      updatedAt: "2026-07-20T12:00:00.000Z",
-    });
-    const request = new Request(
-      "http://localhost/api/import-mapping?businessId=biz-a&sourceSignature=source-1",
-    );
-    const response = await GET(request as never);
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({ mapping: { partNumber: 0, quantity: 4 } });
-  });
-
-  it("returns null when no mapping is remembered", async () => {
-    const request = new Request(
-      "http://localhost/api/import-mapping?businessId=biz-a&sourceSignature=source-1",
-    );
-    const response = await GET(request as never);
-    await expect(response.json()).resolves.toEqual({ mapping: null });
-  });
-
-  it("writes a mapping only through PUT", async () => {
-    const request = new Request("http://localhost/api/import-mapping", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        businessId: "biz-a",
-        sourceSignature: "source-1",
-        mapping: { partNumber: 0, quantity: 4 },
-      }),
-    });
-    const response = await PUT(request as never);
-    expect(response.status).toBe(200);
-    expect(putMemory).toHaveBeenCalledWith(expect.objectContaining({
-      businessId: "biz-a",
-      sourceSignature: "source-1",
-      mapping: { partNumber: 0, quantity: 4 },
-    }));
-  });
-
-  it("rejects missing scope and oversized bodies before storage", async () => {
-    const missing = await PUT(new Request("http://localhost/api/import-mapping", {
-      method: "PUT",
-      body: JSON.stringify({ mapping: {} }),
-    }) as never);
-    expect(missing.status).toBe(400);
-
-    const oversized = await PUT(new Request("http://localhost/api/import-mapping", {
-      method: "PUT",
-      headers: { "content-length": String(32 * 1024 + 1) },
-      body: "{}",
-    }) as never);
-    expect(oversized.status).toBe(413);
-    expect(putMemory).not.toHaveBeenCalled();
-  });
-});
-```
-
-- [ ] **Step 2: Run the route test and verify the expected failure**
-
-Run: `npx vitest run src/app/api/import-mapping/route.test.ts`
-
-Expected: FAIL with `Cannot find module '@/app/api/import-mapping/route'`.
-
-- [ ] **Step 3: Create the complete Route Handler**
-
-```typescript
-// src/app/api/import-mapping/route.ts
-import "server-only";
-
-import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { isLiveAuth } from "@/services/auth/authMode";
-import { COLLECTIONS, memberDocId } from "@/services/db/types";
-import type { ColumnMapping } from "@/services/importSchema";
-import {
-  getImportMappingMemory,
-  putImportMappingMemory,
-} from "@/server/importMappingMemory";
-
-export const runtime = "nodejs";
-const MAX_MAPPING_BODY_BYTES = 32 * 1024;
-
-function json(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function authConfigurationError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(message);
-}
-
-async function authorize(businessId: string, idToken: string): Promise<NextResponse | null> {
-  if (process.env.IS_E2E === "1" || !isLiveAuth()) return null;
-  if (!idToken) return json({ error: "Sign in required." }, 401);
-  let uid: string;
-  try {
-    uid = (await getAdminAuth().verifyIdToken(idToken)).uid;
-  } catch (error) {
-    if (authConfigurationError(error)) return json({ error: "Server auth is not configured." }, 503);
-    return json({ error: "Invalid or expired sign-in." }, 401);
-  }
-  try {
-    const member = await getAdminDb()
-      .doc(`${COLLECTIONS.businessMembers}/${memberDocId(businessId, uid)}`)
-      .get();
-    return member.exists ? null : json({ error: "Not a member of this business." }, 403);
-  } catch (error) {
-    if (authConfigurationError(error)) return json({ error: "Server auth is not configured." }, 503);
-    return json({ error: "Could not verify business membership." }, 503);
-  }
-}
-
-export async function GET(request: NextRequest): Promise<NextResponse> {
-  const businessId = text(request.nextUrl.searchParams.get("businessId"));
-  const sourceSignature = text(request.nextUrl.searchParams.get("sourceSignature"));
-  const idToken = text(request.nextUrl.searchParams.get("idToken"));
-  if (!businessId || !sourceSignature) {
-    return json({ error: "businessId and sourceSignature are required." }, 400);
-  }
-  const denied = await authorize(businessId, idToken);
-  if (denied) return denied;
-  const record = await getImportMappingMemory(businessId, sourceSignature);
-  return json({ mapping: record?.mapping ?? null });
-}
-
-export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > MAX_MAPPING_BODY_BYTES) {
-    return json({ error: "Import mapping must be 32KB or smaller." }, 413);
-  }
-  const raw = await request.text().catch(() => "");
-  if (new TextEncoder().encode(raw).byteLength > MAX_MAPPING_BODY_BYTES) {
-    return json({ error: "Import mapping must be 32KB or smaller." }, 413);
-  }
-  let body: { businessId?: unknown; sourceSignature?: unknown; mapping?: unknown; idToken?: unknown };
-  try {
-    body = JSON.parse(raw) as typeof body;
-  } catch {
-    return json({ error: "Invalid request body." }, 400);
-  }
-  const businessId = text(body.businessId);
-  const sourceSignature = text(body.sourceSignature);
-  const idToken = text(body.idToken);
-  if (!businessId || !sourceSignature || !body.mapping || typeof body.mapping !== "object") {
-    return json({ error: "businessId, sourceSignature, and mapping are required." }, 400);
-  }
-  const denied = await authorize(businessId, idToken);
-  if (denied) return denied;
-  await putImportMappingMemory({
-    businessId,
-    sourceSignature,
-    mapping: body.mapping as ColumnMapping,
-    updatedAt: new Date().toISOString(),
-  });
-  return json({ ok: true });
-}
-```
-
-- [ ] **Step 4: Run the route and store tests**
-
-Run: `npx vitest run src/app/api/import-mapping/route.test.ts src/server/importMappingMemory.test.ts`
-
-Expected: PASS. GET is read-only; PUT is the only mapping-memory write path.
-
----
-
-## Task 7: Map rows, expose matcher confidence, and build the Stage A preview
-
-**Stage:** A
-
-**Files:**
-
-- Create: `src/services/universalImportPreview.ts`
-- Test: `src/services/universalImportPreview.test.ts`
-- Modify: `src/services/reconcile/types.ts`
-- Modify: `src/services/catalog/identityMerge.ts`
-- Modify: `src/services/reconcile/identityMatcher.ts`
-- Test: `src/services/reconcile/identityMatcher.test.ts`
-
-**Interfaces:**
-
-- Consumes: `UniversalSheet`, `ColumnMapping`, `MappingSource`, and one `PreviewMatchResult` for each mapped row.
-- Produces: `MappingResult`, `PreviewMatchResult`, `mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping): MappingResult`, `buildImportPreview(mapped: MappingResult, matches: PreviewMatchResult[], mappingSource: MappingSource): ImportPreview`, exported `IDENTITY_JACCARD_THRESHOLD = 0.75` in `identityMerge.ts`, and optional `MatchResult.confidence` and `MatchResult.matchBasis`.
-
-- [ ] **Step 1: Write the complete failing preview tests**
-
-```typescript
-// src/services/universalImportPreview.test.ts
-import { describe, expect, it } from "vitest";
-import type { UniversalSheet } from "@/services/importSchema";
-import {
-  buildImportPreview,
-  mapUniversalRows,
-  type PreviewMatchResult,
-} from "@/services/universalImportPreview";
-
-const sheet: UniversalSheet = {
-  fileName: "boss.csv",
-  kind: "csv",
-  headers: ["PN", "Make", "Model", "Tire Size", "QOH", "Cost"],
-  rows: [
-    ["ABC-1", "Acme", "Road", "225/45R18", "7", "99"],
-    ["ABC-2", "Acme", "Road+", "225/45R18", "2", "88"],
-    ["ABC-3", "Acme", "Road", "225/45R18", "bad", "77"],
-  ],
-  headerRowIndex: 0,
-  sourceSignature: "source-1",
-  seenRows: [],
-};
-
-describe("universalImportPreview", () => {
-  it("maps sanitized rows, excludes cost, and rejects an invalid quantity", () => {
-    const result = mapUniversalRows(sheet, {
-      partNumber: 0,
-      brand: 1,
-      model: 2,
-      size: 3,
-      quantity: 4,
-    });
-    expect(result.rows).toHaveLength(2);
-    expect(result.rejected).toHaveLength(1);
-    expect(result.rows[0].expected.raw.cost).toBeUndefined();
-    expect(result.rows[0].quantity).toBe(7);
-  });
-
-  it("auto-applies only corroborated exact PN hits and routes token matches to fuzzy review", () => {
-    const mapped = mapUniversalRows(sheet, {
-      partNumber: 0,
-      brand: 1,
-      model: 2,
-      size: 3,
-      quantity: 4,
-    });
-    const matches: PreviewMatchResult[] = [
-      {
-        row: mapped.rows[0].expected,
-        status: "matched",
-        reason: "Part number hit for exact candidate.",
-        confidence: 1,
-        matchBasis: "part_number_exact",
-        candidate: { uid: "uid-1", brand: "Acme", name: "Road" },
-      },
-      {
-        row: mapped.rows[1].expected,
-        status: "matched",
-        reason: "Identity match on size and model name similarity.",
-        confidence: 0.75,
-        matchBasis: "identity_jaccard",
-        candidate: { uid: "uid-2", brand: "Acme", name: "Road Plus" },
-      },
-    ];
-    const preview = buildImportPreview(mapped, matches, "header");
-    expect(preview).toMatchObject({ total: 3, exact: 1, fuzzy: 1, review: 0, reject: 1 });
-    expect(preview.headline).toBe("Matched 1 of 3 automatically");
-    expect(preview.rows[1].status).toBe("fuzzy");
-  });
-
-  it("keeps ambiguous and affix-core candidates out of automatic apply", () => {
-    const mapped = mapUniversalRows({ ...sheet, rows: [sheet.rows[0]] }, {
-      partNumber: 0,
-      brand: 1,
-      model: 2,
-      size: 3,
-      quantity: 4,
-    });
-    const ambiguous: PreviewMatchResult = {
-      row: mapped.rows[0].expected,
-      status: "ambiguous",
-      reason: "Two candidates.",
-      confidence: null,
-      candidates: [
-        { uid: "a", brand: "Acme", name: "Road" },
-        { uid: "b", brand: "Acme", name: "Road" },
-      ],
-    };
-    expect(buildImportPreview(mapped, [ambiguous], "header").rows[0].status).toBe("review");
-
-    const affix: PreviewMatchResult = {
-      row: mapped.rows[0].expected,
-      status: "matched",
-      reason: "Part number hit through affix core.",
-      confidence: 1,
-      matchBasis: "part_number_affix_core",
-      candidate: { uid: "a", brand: "Acme", name: "Road" },
-      viaAffixCore: true,
-    };
-    expect(buildImportPreview(mapped, [affix], "header").rows[0].status).toBe("fuzzy");
-  });
-});
-```
-
-- [ ] **Step 2: Run the tests and verify the expected failures**
-
-Run: `npx vitest run src/services/universalImportPreview.test.ts src/services/reconcile/identityMatcher.test.ts`
-
-Expected: FAIL because the preview module and `MatchResult.confidence` do not exist.
-
-- [ ] **Step 3: Apply the complete type and matcher patch**
-
-```diff
-*** Begin Patch
-*** Update File: src/services/reconcile/types.ts
-@@
-   specs?: string;
-+  barcode?: string;
-+  name?: string;
-+  category?: string;
-*** Update File: src/services/catalog/identityMerge.ts
-@@
- export function jaccard(a: string[], b: string[]): number {
-@@
- }
-+
-+export const IDENTITY_JACCARD_THRESHOLD = 0.75;
-@@
--      if (sim >= 0.75 || plusDiff) {
-+      if (sim >= IDENTITY_JACCARD_THRESHOLD || plusDiff) {
-*** Update File: src/services/reconcile/identityMatcher.ts
-@@
--import { nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
-+import { IDENTITY_JACCARD_THRESHOLD, nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
-@@
- export interface MatchResult {
-@@
-   reason: string;
-+  /** Deterministic similarity in [0,1]. Exact corroborated PN hits are 1. */
-+  confidence?: number;
-+  matchBasis?: "part_number_exact" | "part_number_affix_core" | "identity_jaccard";
-@@
--const JACCARD_THRESHOLD = 0.75;
-@@
-       return {
-         row,
-         status: "matched",
-+        confidence: 1,
-+        matchBasis: viaAffixCore ? "part_number_affix_core" : "part_number_exact",
-         reason: `Part number hit for "${hit.brand} ${hit.name}" (${reasonBits.join(", ") || "corroborated"}).${coreNote}`,
-@@
--    const identityMatches: CorpusCandidate[] = [];
-+    const identityMatches: Array<{ candidate: CorpusCandidate; confidence: number }> = [];
-@@
--      if (sim < JACCARD_THRESHOLD) continue;
-+      if (sim < IDENTITY_JACCARD_THRESHOLD) continue;
-@@
--      identityMatches.push(cand);
-+      identityMatches.push({ candidate: cand, confidence: sim });
-@@
--      const cand = identityMatches[0];
-+      const { candidate: cand, confidence } = identityMatches[0];
-       return {
-         row,
-         status: "matched",
-+        confidence,
-+        matchBasis: "identity_jaccard",
-@@
--        reason: `Identity match on size ${rowSize} and brand matches ${identityMatches.length} different corpus products (${identityMatches.map((c) => c.name).join(", ")}); cannot pick one safely.`,
--        candidates: identityMatches,
-+        reason: `Identity match on size ${rowSize} and brand matches ${identityMatches.length} different corpus products (${identityMatches.map((c) => c.candidate.name).join(", ")}); cannot pick one safely.`,
-+        confidence: Math.max(...identityMatches.map((entry) => entry.confidence)),
-+        candidates: identityMatches.map((entry) => entry.candidate),
-*** Update File: src/services/reconcile/identityMatcher.test.ts
-@@
-+import { IDENTITY_JACCARD_THRESHOLD } from "@/services/catalog/identityMerge";
-@@
- describe("matchExpectedRow", () => {
-+  it("reports exact PN confidence and the canonical token threshold", () => {
-+    const exact = matchExpectedRow(row({ partNumbers: ["ABC-1"], brand: "Acme", sizeText: "225/45R18" }), {
-+      lookupByPartNumber: () => [{ uid: "a", brand: "Acme", name: "Road", sizeToken: "225/45R18" }],
-+      candidatesByBrandSize: () => [],
-+    });
-+    expect(exact.confidence).toBe(1);
-+    expect(exact.matchBasis).toBe("part_number_exact");
-+
-+    const token = matchExpectedRow(row({ partNumbers: ["MISS"], brand: "Acme", model: "Road Sport XL", sizeText: "225/45R18" }), {
-+      lookupByPartNumber: () => [],
-+      candidatesByBrandSize: () => [{ uid: "b", brand: "Acme", name: "Road Sport", sizeToken: "225/45R18" }],
-+    });
-+    expect(token.status).toBe("matched");
-+    expect(token.matchBasis).toBe("identity_jaccard");
-+    expect(token.confidence).toBeGreaterThanOrEqual(IDENTITY_JACCARD_THRESHOLD);
-+  });
-*** End Patch
-```
-
-- [ ] **Step 4: Create the complete preview module**
-
-```typescript
-// src/services/universalImportPreview.ts
-import type { ColumnMapping, ImportPreview, ImportPreviewRow, MappedImportRow, MappingSource, RetailCatalogMatch, UniversalSheet } from "@/services/importSchema";
-import type { MatchResult } from "@/services/reconcile/identityMatcher";
-
-const SENSITIVE_HEADER = /(^|[ _-])(cost|price|retail|msrp|margin)([ _-]|$)/i;
-
-export interface PreviewMatchResult extends MatchResult {
-  retailCatalogMatch?: RetailCatalogMatch;
-}
-
-export interface MappingResult {
-  rows: MappedImportRow[];
-  heldForReview: ImportPreviewRow[];
-  rejected: ImportPreviewRow[];
-}
-
-function cell(row: string[], mapping: ColumnMapping, field: keyof ColumnMapping): string {
-  const index = mapping[field];
-  return index === undefined ? "" : row[index] ?? "";
-}
-
-function displayName(row: Omit<MappedImportRow, "expected">): string {
-  return row.name || [row.brand, row.model, row.size].filter(Boolean).join(" ") || row.partNumber || row.barcode;
-}
-
-export function mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping): MappingResult {
-  const rows: MappedImportRow[] = [];
-  const heldForReview: ImportPreviewRow[] = [];
-  const rejected: ImportPreviewRow[] = [];
-  sheet.rows.forEach((sourceCells, rowIndex) => {
-    const line = sheet.headerRowIndex + rowIndex + 2;
-    const quantityText = cell(sourceCells, mapping, "quantity");
-    const quantity = Number(quantityText);
-    if (!Number.isSafeInteger(quantity) || quantity < 0) {
-      rejected.push({ source: null, line, status: "reject", reason: `Quantity "${quantityText}" is not a non-negative whole number.`, confidence: null });
-      return;
-    }
-    const base = {
-      line,
-      partNumber: cell(sourceCells, mapping, "partNumber"),
-      barcode: cell(sourceCells, mapping, "barcode"),
-      name: cell(sourceCells, mapping, "name"),
-      brand: cell(sourceCells, mapping, "brand"),
-      model: cell(sourceCells, mapping, "model"),
-      size: cell(sourceCells, mapping, "size"),
-      category: cell(sourceCells, mapping, "category"),
-      quantity,
-      uom: cell(sourceCells, mapping, "uom"),
-    };
-    const identity = base.partNumber || base.barcode || base.name;
-    if (!identity) {
-      rejected.push({ source: null, line, status: "reject", reason: "No part number, barcode, or name was found on this row.", confidence: null });
-      return;
-    }
-    const raw = Object.fromEntries(
-      sheet.headers
-        .map((header, index) => [header, sourceCells[index] ?? ""] as const)
-        .filter(([header]) => !SENSITIVE_HEADER.test(header)),
-    );
-    const mapped: MappedImportRow = {
-      ...base,
-      expected: {
-        externalId: identity,
-        partNumbers: [...new Set([base.partNumber, base.barcode].filter(Boolean))],
-        brand: base.brand || undefined,
-        model: base.model || undefined,
-        sizeText: base.size || undefined,
-        specs: displayName(base),
-        barcode: base.barcode || undefined,
-        name: displayName(base),
-        category: base.category || undefined,
-        qty: quantity,
-        raw,
-      },
-    };
-    if (mapped.uom && mapped.uom.toLowerCase() !== "each") {
-      heldForReview.push({ source: mapped, line, status: "review", reason: `Unit "${mapped.uom}" requires review; only each is applied automatically.`, confidence: null });
-      return;
-    }
-    rows.push(mapped);
-  });
-  return { rows, heldForReview, rejected };
-}
-
-function statusForMatch(match: PreviewMatchResult, mappingSource: MappingSource): ImportPreviewStatus {
-  // RESOLVER-TRUST LAW: only a genuine exact identity is ever "exact" (which Task 10 auto-counts).
-  // A miss (unmatched), an ambiguous match, or any non-exact outcome MUST route to review - wrong or
-  // absent identity auto-counting is the project's top forbidden failure; unknown is acceptable.
-  // mappingSource must NEVER be able to promote a non-match to "exact".
-  void mappingSource;
-  if (match.status === "matched") {
-    return match.matchBasis === "part_number_exact" ? "exact" : "fuzzy";
-  }
-  if (match.status === "non_tire" && match.retailCatalogMatch) return "exact";
-  return "review";
-}
-
-export function buildImportPreview(
-  mapped: MappingResult,
-  matches: PreviewMatchResult[],
-  mappingSource: MappingSource,
-): ImportPreview {
-  if (matches.length !== mapped.rows.length) {
-    throw new Error(`Matcher returned ${matches.length} results for ${mapped.rows.length} rows.`);
-  }
-  const matchedRows = mapped.rows.map((source, index): ImportPreviewRow => {
-    const match = matches[index];
-    const status = statusForMatch(match, mappingSource);
-    const reason = match.retailCatalogMatch
-      ? `identified from the 4M-product catalog: ${match.retailCatalogMatch.productName}`
-      : match.reason;
-    return {
-      source,
-      line: source.line,
-      status,
-      reason,
-      confidence: match.confidence ?? (status === "exact" ? 1 : null),
-      candidate: match.candidate,
-      retailCatalogMatch: match.retailCatalogMatch,
-    };
-  });
-  const rows = [...matchedRows, ...mapped.heldForReview, ...mapped.rejected].sort((a, b) => a.line - b.line);
-  const count = (status: ImportPreviewStatus) => rows.filter((row) => row.status === status).length;
-  const exact = count("exact");
-  return {
-    rows,
-    total: rows.length,
-    exact,
-    fuzzy: count("fuzzy"),
-    review: count("review"),
-    reject: count("reject"),
-    headline: `Matched ${exact} of ${rows.length} automatically`,
-  };
-}
-```
-
-- [ ] **Step 5: Run the focused tests**
-
-Run: `npx vitest run src/services/universalImportPreview.test.ts src/services/reconcile/identityMatcher.test.ts`
-
-Expected: PASS. The exact row is auto-applicable; Jaccard identity and affix-core rows are fuzzy review data only.
-
----
-
-## Task 8: Enrich non-tire rows with exact retail-corpus evidence
-
-**Stage:** A
-
-**Files:**
-
-- Modify: `src/app/api/reconcile/match/route.ts`
-- Test: `src/app/api/reconcile/match/route.test.ts`
-
-**Interfaces:**
-
-- Consumes: `ExpectedInventoryRow.barcode?: string` and `lookupRetailBarcodeAsync(code: string): Promise<RetailLookupResult | null>`.
-- Produces: each route result may carry `retailCatalogMatch: { productName: string; brand: string; category: string; barcode: string }`; the route never reads `getLastRetailLookupStatus()`, avoiding its module-level race.
-
-- [ ] **Step 1: Add the complete failing mock and test**
-
-```typescript
-// Add beside the existing route-test mocks in src/app/api/reconcile/match/route.test.ts
-const mockRetailLookup = vi.fn();
-vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", () => ({
-  lookupRetailBarcodeAsync: (code: string) => mockRetailLookup(code),
-}));
-
-// Add inside beforeEach()
-  mockRetailLookup.mockResolvedValue(null);
-
-// Append inside the route matching describe block
-  it("adds exact retail-corpus evidence to a non-tire barcode row", async () => {
-    mockRetailLookup.mockResolvedValue({
-      productName: "Sparkling Water",
-      brand: "Acme",
-      category: "Beverages",
-      barcode: "012345678905",
-    });
-    const res = await POST(makeRequest({ rows: [validRow({
-      externalId: "012345678905",
-      partNumbers: ["012345678905"],
-      brand: "Acme",
-      model: "Sparkling Water",
-      sizeText: undefined,
-      specs: "Beverages",
-      barcode: "012345678905",
-    })] }));
-    const body = await res.json();
-    expect(mockRetailLookup).toHaveBeenCalledWith("012345678905");
-    expect(body.matches[0].retailCatalogMatch).toEqual({
-      productName: "Sparkling Water",
-      brand: "Acme",
-      category: "Beverages",
-      barcode: "012345678905",
-    });
-  });
-```
-
-- [ ] **Step 2: Run the route test and verify the expected failure**
-
-Run: `npx vitest run src/app/api/reconcile/match/route.test.ts -t "adds exact retail-corpus evidence"`
-
-Expected: FAIL because `lookupRetailBarcodeAsync` is not called and `retailCatalogMatch` is absent.
-
-- [ ] **Step 3: Apply the complete route patch**
-
-```diff
-*** Begin Patch
-*** Update File: src/app/api/reconcile/match/route.ts
-@@
- import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
-+import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
-@@
--    matches.push(matchExpectedRow(row, deps));
-+    const match = matchExpectedRow(row, deps);
-+    if (match.status === "non_tire" && row.barcode) {
-+      const retailCatalogMatch = await lookupRetailBarcodeAsync(row.barcode);
-+      matches.push(retailCatalogMatch ? { ...match, retailCatalogMatch } : match);
-+    } else {
-+      matches.push(match);
-+    }
-*** End Patch
-```
-
-- [ ] **Step 4: Run the full route test**
-
-Run: `npx vitest run src/app/api/reconcile/match/route.test.ts`
-
-Expected: PASS. Non-tire exact catalog rows carry the badge payload, and no test calls a real corpus or network.
-
----
-
-## Task 9: Build the read-only mapping and preview screen
-
-**Stage:** A
-
-**Files:**
-
-- Create: `src/components/UniversalImportPanel.tsx`
-- Test: `src/components/UniversalImportPanel.test.tsx`
-
-**Interfaces:**
-
-- Consumes props `readFile(file)`, `loadMapping(sourceSignature)`, `saveMapping(sourceSignature, mapping)`, `matchRows(rows)`, and `onApply(rows)`; no store import is allowed in this file.
-- Produces: `UniversalImportPanel(props: UniversalImportPanelProps)`, mapping UI with actual headers and sample values, preview buckets, exact headline, explicit Apply, and delayed mapping save.
-
-- [ ] **Step 1: Write the complete failing component test**
-
-```tsx
-// src/components/UniversalImportPanel.test.tsx
-// @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { UniversalImportPanel } from "@/components/UniversalImportPanel";
-import type { UniversalSheet } from "@/services/importSchema";
-
-const nonsenseSheet: UniversalSheet = {
-  fileName: "nonsense.csv",
-  kind: "csv",
-  headers: ["Alpha", "Beta", "Gamma", "Delta", "Echo"],
-  rows: [["ABC-1", "Acme", "Road", "225/45R18", "7"]],
-  headerRowIndex: 0,
-  sourceSignature: "source-nonsense",
-  seenRows: [["Alpha", "Beta", "Gamma", "Delta", "Echo"], ["ABC-1", "Acme", "Road", "225/45R18", "7"]],
-};
-
-function props() {
-  return {
-    readFile: vi.fn().mockResolvedValue(nonsenseSheet),
-    loadMapping: vi.fn().mockResolvedValue(null),
-    saveMapping: vi.fn().mockResolvedValue(undefined),
-    matchRows: vi.fn().mockImplementation(async (rows) => rows.map((row: { expected: unknown }) => ({
-      row: row.expected,
-      status: "unmatched",
-      reason: "No corpus match.",
-    }))),
-    onApply: vi.fn().mockResolvedValue({ applied: 1, queuedForReview: 0, rejected: 0 }),
-  };
-}
-
-describe("UniversalImportPanel", () => {
-  it("shows actual headers and sample values for a low-confidence file without applying anything", async () => {
-    const handlers = props();
-    render(<UniversalImportPanel {...handlers} />);
-    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "nonsense.csv")] } });
-    expect(await screen.findByTestId("column-mapping")).toHaveTextContent("Alpha");
-    expect(screen.getByTestId("column-mapping")).toHaveTextContent("ABC-1");
-    expect(handlers.onApply).not.toHaveBeenCalled();
-    expect(handlers.saveMapping).not.toHaveBeenCalled();
-  });
-
-  it("previews after manual mapping and writes only after Apply", async () => {
-    const handlers = props();
-    render(<UniversalImportPanel {...handlers} />);
-    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "nonsense.csv")] } });
-    await screen.findByTestId("column-mapping");
-    fireEvent.change(screen.getByLabelText("Part number column"), { target: { value: "0" } });
-    fireEvent.change(screen.getByLabelText("Brand column"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Model column"), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText("Size column"), { target: { value: "3" } });
-    fireEvent.change(screen.getByLabelText("Quantity column"), { target: { value: "4" } });
-    fireEvent.click(screen.getByRole("button", { name: "Preview mapped file" }));
-    expect(await screen.findByTestId("import-headline")).toHaveTextContent("Matched 1 of 1 automatically");
-    expect(handlers.onApply).not.toHaveBeenCalled();
-    expect(handlers.saveMapping).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Apply 1 rows" }));
-    await waitFor(() => expect(handlers.onApply).toHaveBeenCalledTimes(1));
-    expect(handlers.saveMapping).toHaveBeenCalledWith("source-nonsense", {
-      partNumber: 0,
-      brand: 1,
-      model: 2,
-      size: 3,
-      quantity: 4,
-    });
-  });
-});
-```
-
-- [ ] **Step 2: Run the focused test and verify the expected failure**
-
-Run: `npx vitest run src/components/UniversalImportPanel.test.tsx`
-
-Expected: FAIL with `Cannot find module '@/components/UniversalImportPanel'`.
-
-- [ ] **Step 3: Create the complete component**
-
-```tsx
-// src/components/UniversalImportPanel.tsx
-"use client";
-
-import { useRef, useState } from "react";
-import { IMPORT_FIELD_ORDER, type ColumnMapping, type ImportPreview, type ImportPreviewRow, type MappedImportRow, type UniversalImportApplySummary, type UniversalSheet, type UploadFileLike } from "@/services/importSchema";
-import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
-import { readUniversalFile } from "@/services/universalFileReader";
-import { buildImportPreview, mapUniversalRows, type PreviewMatchResult } from "@/services/universalImportPreview";
-
-const PREVIEW_LIMIT = 20;
-
-export interface UniversalImportPanelProps {
-  readFile?: (file: UploadFileLike) => Promise<UniversalSheet>;
-  loadMapping(sourceSignature: string): Promise<ColumnMapping | null>;
-  saveMapping(sourceSignature: string, mapping: ColumnMapping): Promise<void>;
-  matchRows(rows: MappedImportRow[]): Promise<PreviewMatchResult[]>;
-  onApply(rows: ImportPreviewRow[]): Promise<UniversalImportApplySummary> | UniversalImportApplySummary;
-}
-
-const FIELD_LABELS: Record<(typeof IMPORT_FIELD_ORDER)[number], string> = {
-  partNumber: "Part number",
-  brand: "Brand",
-  model: "Model",
-  size: "Size",
-  quantity: "Quantity",
-  uom: "Unit",
-  barcode: "Barcode",
-  name: "Name",
-  category: "Category",
-};
-
-export function UniversalImportPanel({
-  readFile = readUniversalFile,
-  loadMapping,
-  saveMapping,
-  matchRows,
-  onApply,
-}: UniversalImportPanelProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [sheet, setSheet] = useState<UniversalSheet | null>(null);
-  const [mapping, setMapping] = useState<ColumnMapping>({});
-  const [mappingMode, setMappingMode] = useState(false);
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [summary, setSummary] = useState<UniversalImportApplySummary | null>(null);
-
-  async function previewWith(nextSheet: UniversalSheet, nextMapping: ColumnMapping, source: "header" | "content" | "manual" | "remembered") {
-    const validation = validateManualMapping(nextSheet.headers, nextMapping);
-    if (!validation.ok) {
-      setError(`${validation.errors.join(" ")} Seen headers: ${nextSheet.headers.join(", ") || "(none)"}.`);
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const mapped = mapUniversalRows(nextSheet, nextMapping);
-      const matches = await matchRows(mapped.rows);
-      setPreview(buildImportPreview(mapped, matches, source));
-      setMapping(nextMapping);
-      setMappingMode(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not build the import preview.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onFile(file: File | undefined) {
-    if (!file) return;
-    setBusy(true);
-    setError("");
-    setPreview(null);
-    setSummary(null);
-    try {
-      const nextSheet = await readFile(file);
-      setSheet(nextSheet);
-      const remembered = await loadMapping(nextSheet.sourceSignature);
-      if (remembered) {
-        await previewWith(nextSheet, remembered, "remembered");
-        return;
-      }
-      const inferred = inferColumnMapping([nextSheet.headers, ...nextSheet.rows]);
-      setMapping(inferred.mapping);
-      if (inferred.confidence === "high") {
-        await previewWith(nextSheet, inferred.mapping, "header");
-      } else {
-        setMappingMode(true);
-        setError(inferred.reasons.join(" "));
-      }
-    } catch (cause) {
-      setSheet(null);
-      setError(cause instanceof Error ? cause.message : "Could not read this file.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function apply() {
-    if (!sheet || !preview) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await onApply(preview.rows);
-      setSummary(result);
-      await saveMapping(sheet.sourceSignature, mapping);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not apply this import.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-4" data-testid="universal-import-panel">
-      <div>
-        <h2 className="text-lg font-semibold text-zinc-900">Universal inventory import</h2>
-        <p className="text-sm text-zinc-600">Choose CSV, TSV, XLSX, or XLS. Nothing changes until you press Apply.</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => inputRef.current?.click()} className="min-h-[44px] rounded-lg border border-zinc-300 px-4 font-medium">Choose file</button>
-        <input
-          ref={inputRef}
-          className="hidden"
-          type="file"
-          accept=".csv,.tsv,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          data-testid="universal-import-file"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            void onFile(file);
-          }}
-        />
-        {sheet && <span className="text-sm text-zinc-600">{sheet.fileName}</span>}
-      </div>
-      {error && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="import-error">{error}</p>}
-      {mappingMode && sheet && (
-        <div className="flex flex-col gap-3" data-testid="column-mapping">
-          <h3 className="font-semibold">Map the columns we saw</h3>
-          <div className="overflow-auto">
-            <table className="w-full text-left text-sm">
-              <thead><tr>{sheet.headers.map((header, index) => <th key={`${header}-${index}`} className="px-2 py-1">{header || `(blank ${index + 1})`}</th>)}</tr></thead>
-              <tbody>{sheet.rows.slice(0, 3).map((row, rowIndex) => <tr key={rowIndex}>{sheet.headers.map((_, index) => <td key={index} className="px-2 py-1">{row[index] || "-"}</td>)}</tr>)}</tbody>
-            </table>
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {IMPORT_FIELD_ORDER.map((field) => (
-              <label key={field} className="flex flex-col gap-1 text-sm">
-                {FIELD_LABELS[field]}
-                <select
-                  aria-label={`${FIELD_LABELS[field]} column`}
-                  value={mapping[field] ?? ""}
-                  onChange={(event) => setMapping((current) => ({ ...current, [field]: event.target.value === "" ? undefined : Number(event.target.value) }))}
-                  className="min-h-[44px] rounded border border-zinc-300 px-2"
-                >
-                  <option value="">Not mapped</option>
-                  {sheet.headers.map((header, index) => <option key={`${header}-${index}`} value={index}>{header || `(blank ${index + 1})`}</option>)}
-                </select>
-              </label>
-            ))}
-          </div>
-          <button type="button" disabled={busy} onClick={() => void previewWith(sheet, mapping, "manual")} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Preview mapped file</button>
-        </div>
-      )}
-      {preview && (
-        <div className="flex flex-col gap-3" data-testid="import-preview">
-          <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-4">
-            <p className="text-xl font-bold text-emerald-900" data-testid="import-headline">{preview.headline}</p>
-            <p className="text-sm text-emerald-800">{preview.exact} exact, {preview.fuzzy} fuzzy, {preview.review} review, {preview.reject} rejected</p>
-          </div>
-          <div className="overflow-auto">
-            <table className="w-full text-left text-sm">
-              <thead><tr><th className="px-2 py-2">Line</th><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Result</th><th className="px-2 py-2">Why</th></tr></thead>
-              <tbody>{preview.rows.slice(0, PREVIEW_LIMIT).map((row) => <tr key={row.line} className="border-t border-zinc-100"><td className="px-2 py-2">{row.line}</td><td className="px-2 py-2">{row.source?.expected.name ?? row.source?.partNumber ?? "Unreadable row"}</td><td className="px-2 py-2">{row.source?.quantity ?? "-"}</td><td className="px-2 py-2 font-medium">{row.status}</td><td className="px-2 py-2">{row.reason}{row.confidence !== null ? ` (${Math.round(row.confidence * 100)}%)` : ""}</td></tr>)}</tbody>
-            </table>
-          </div>
-          {!summary && <button type="button" data-testid="import-apply" disabled={busy} onClick={() => void apply()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply {preview.total} rows</button>}
-        </div>
-      )}
-      {summary && <p className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900" data-testid="import-summary">Applied {summary.applied}. Needs Review {summary.queuedForReview}. Rejected {summary.rejected}.</p>}
-      {busy && <p className="text-sm text-zinc-600">Working...</p>}
-    </section>
-  );
-}
-```
-
-- [ ] **Step 4: Run the focused component test**
-
-Run: `npx vitest run src/components/UniversalImportPanel.test.tsx`
-
-Expected: PASS, 2 tests. Before Apply, both `onApply` and `saveMapping` have zero calls.
-
----
-
-## Task 10: Add the import quantity resolution variant and wire the products page
-
-**Stage:** A
-
-**Monolith warning:** This is the only Stage A edit to `src/stores/scanStore.ts`. It is intentionally ordered after every pure service and the read-only UI.
-
-**Files:**
-
-- Modify: `src/types.ts`
-- Modify: `src/services/security/sensitiveFields.ts`
-- Modify: `src/stores/scanStore.ts`
-- Modify: `src/stores/scanStoreMigrate.test.ts`
-- Create: `src/stores/universalImport.store.test.ts`
-- Modify: `src/components/NeedsReviewTable.tsx`
-- Create: `src/components/UniversalImportPanelContainer.tsx`
-- Modify: `src/app/(app)/products/page.tsx`
-
-**Interfaces:**
-
-- Consumes: `ImportPreviewRow[]`, `ImportReviewContext`, existing `reopenNeedsReview`, `resolveUnknown`, `processScan`, and `snapshotCount`.
-- Produces: optional persisted `UnknownCodeReview.importQuantity?: number`; `reopenNeedsReview(cleanCode: string, reason: string, importContext?: ImportReviewContext): string | null`; `applyUniversalImport(rows: ImportPreviewRow[]): UniversalImportApplySummary`; exact Apply resolves with `origin: "human"`; fuzzy Apply creates review only; later human confirmation applies the full stored quantity.
-
-- [ ] **Step 1: Write the complete store regression test**
-
-```typescript
-// src/stores/universalImport.store.test.ts
-import { describe, expect, it } from "vitest";
-import { createTestScanStore } from "@/stores/scanStore";
-import type { ImportPreviewRow } from "@/services/importSchema";
-
-function previewRow(status: "exact" | "fuzzy", code: string, quantity: number): ImportPreviewRow {
-  return {
-    line: 2,
-    status,
-    reason: status === "exact" ? "Part number hit for exact candidate." : "Character-level fuzzy candidate.",
-    confidence: status === "exact" ? 1 : 0.8,
-    candidate: { uid: `uid-${code}`, brand: "Acme", name: "Road", partNumber: code },
-    source: {
-      line: 2,
-      partNumber: code,
-      barcode: "",
-      name: "",
-      brand: "Acme",
-      model: "Road",
-      size: "225/45R18",
-      category: "Tires",
-      quantity,
-      uom: "each",
-      expected: {
-        externalId: code,
-        partNumbers: [code],
-        brand: "Acme",
-        model: "Road",
-        sizeText: "225/45R18",
-        qty: quantity,
-        raw: {},
-      },
-    },
-  };
-}
-
-describe("applyUniversalImport", () => {
-  it("does not write until called, then exact rows approve and apply the full quantity", () => {
-    const store = createTestScanStore();
-    const before = store.getState();
-    expect(before.finalCounts).toEqual([]);
-    expect(before.needsReviewQueue).toEqual([]);
-    const summary = before.applyUniversalImport([previewRow("exact", "PN-EXACT-1", 3)]);
-    expect(summary).toEqual({ applied: 1, queuedForReview: 0, rejected: 0 });
-    const after = store.getState();
-    expect(after.aliases.some((alias) => alias.cleanCode === "PN-EXACT-1" && alias.approved)).toBe(true);
-    expect(after.finalCounts.reduce((sum, count) => sum + count.quantity, 0)).toBe(3);
-    expect(after.countSnapshots).toHaveLength(2);
-  });
-
-  it("routes fuzzy rows to Needs Review without alias or quantity, then human confirmation applies quantity", () => {
-    const store = createTestScanStore();
-    const summary = store.getState().applyUniversalImport([previewRow("fuzzy", "PN-FUZZY-1", 4)]);
-    expect(summary).toEqual({ applied: 0, queuedForReview: 1, rejected: 0 });
-    let state = store.getState();
-    const review = state.needsReviewQueue.find((item) => item.cleanCode === "PN-FUZZY-1");
-    expect(review?.importQuantity).toBe(4);
-    expect(state.aliases.some((alias) => alias.cleanCode === "PN-FUZZY-1")).toBe(false);
-    expect(state.finalCounts).toEqual([]);
-
-    state.resolveUnknown(review!.id, "create_new", {
-      origin: "human",
-      applyToCount: true,
-      newProduct: { name: review!.suggestedProductName, brand: review!.suggestedBrand },
-    });
-    state = store.getState();
-    expect(state.aliases.some((alias) => alias.cleanCode === "PN-FUZZY-1" && alias.approved)).toBe(true);
-    expect(state.finalCounts.reduce((sum, count) => sum + count.quantity, 0)).toBe(4);
-  });
-});
-```
-
-- [ ] **Step 2: Run the store test and verify the expected failure**
-
-Run: `npx vitest run src/stores/universalImport.store.test.ts`
-
-Expected: FAIL because `ScanState.applyUniversalImport` and `UnknownCodeReview.importQuantity` do not exist.
-
-- [ ] **Step 3: Apply the complete contract, persistence, monolith, and resolution patch**
-
-```diff
-*** Begin Patch
-*** Update File: src/types.ts
-@@
- export interface UnknownCodeReview {
-@@
-   provisionalProductId?: string | null;
-+  /** Phase 4 import-only quantity. Absent for scans and reconcile links. A fuzzy import row keeps
-+   *  this quantity pending until an explicit human confirmation applies it. */
-+  importQuantity?: number;
- }
-*** Update File: src/services/security/sensitiveFields.ts
-@@
-   "provisionalProductId",
-+  "importQuantity",
- ] as const;
-*** Update File: src/stores/scanStore.ts
-@@
- import type { AiStatus } from "@/types";
-+import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/services/importSchema";
-@@
-   reopenNeedsReview: (cleanCode: string, reason: string) => string | null;
-+  applyUniversalImport: (rows: ImportPreviewRow[]) => UniversalImportApplySummary;
-@@
--  reopenNeedsReview: (cleanCode: string, reason: string) => string | null;
-+  reopenNeedsReview: (cleanCode: string, reason: string, importContext?: ImportReviewContext) => string | null;
-@@
--      reopenNeedsReview: (cleanCode, reason) => {
-+      reopenNeedsReview: (cleanCode, reason, importContext) => {
-@@
-                     correctionRecheckStatus: undefined, correctionRecheckedAt: null, correctionRecheckMissingKeys: undefined,
-                     reopenedFromWrong: true,
-+                    importQuantity: importContext?.importQuantity,
-+                    suggestedProductName: importContext?.suggestion?.name ?? "",
-+                    suggestedBrand: importContext?.suggestion?.brand ?? "",
-+                    suggestedCategory: importContext?.suggestion?.category ?? "",
-+                    suggestedSpecsShort: importContext?.suggestion?.specsShort ?? "",
-+                    suggestedPrimarySku: importContext?.suggestion?.primarySku ?? "",
-+                    suggestedPrimaryBarcode: importContext?.suggestion?.primaryBarcode ?? "",
-+                    hasSuggestion: Boolean(importContext?.suggestion),
-                   }
-@@
-           syncStatus: "pending", idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, id, "SAVE_UNKNOWN_SCAN"),
-+          importQuantity: importContext?.importQuantity,
-+          ...(importContext?.suggestion ? {
-+            suggestedProductName: importContext.suggestion.name,
-+            suggestedBrand: importContext.suggestion.brand,
-+            suggestedCategory: importContext.suggestion.category,
-+            suggestedSpecsShort: importContext.suggestion.specsShort,
-+            suggestedPrimarySku: importContext.suggestion.primarySku,
-+            suggestedPrimaryBarcode: importContext.suggestion.primaryBarcode,
-+            hasSuggestion: true,
-+          } : {}),
-         };
-@@
--        if (payload.applyToCount && !weakGuessProduct && !approvingProvisional) {
--          get().processScan(review.rawCode || review.cleanCode);
-+        if (payload.applyToCount && !weakGuessProduct && !approvingProvisional) {
-+          const applications = review.importQuantity ?? 1;
-+          if (!Number.isSafeInteger(applications) || applications < 0) return;
-+          for (let index = 0; index < applications; index += 1) {
-+            get().processScan(review.rawCode || review.cleanCode);
-+          }
-         } else {
-           get().syncPending();
-         }
-       },
-+
-+      applyUniversalImport: (rows) => {
-+        get().ensureAutoSession();
-+        if (!get().currentSession || get().currentSession?.status !== "active") {
-+          throw new Error("Start or unlock an active session before applying this import.");
-+        }
-+        const summary: UniversalImportApplySummary = { applied: 0, queuedForReview: 0, rejected: 0 };
-+        get().snapshotCount("Before universal import");
-+        for (const preview of rows) {
-+          if (preview.status === "reject" || !preview.source) {
-+            summary.rejected += 1;
-+            continue;
-+          }
-+          const source = preview.source;
-+          const code = source.barcode || source.partNumber || source.name;
-+          const suggestion = {
-+            name: preview.retailCatalogMatch?.productName || preview.candidate?.name || source.expected.name || code,
-+            brand: preview.retailCatalogMatch?.brand || preview.candidate?.brand || source.brand,
-+            category: preview.retailCatalogMatch?.category || source.category,
++    const onHand = qtyOnHandKey ? parseQty(sanitizedRec…18611 tokens truncated….category || source.category,
 +            specsShort: [source.model, source.size].filter(Boolean).join(" "),
 +            primarySku: source.partNumber,
 +            primaryBarcode: source.barcode,
@@ -2534,3 +713,1576 @@ git commit -m "test(phase4): Stage A ship gate - fixture battery, 5000-row perf,
 - **Landmines honored.** Canonical `jaccard` from `identityMerge.ts` only; `JACCARD_THRESHOLD` single export (Task 7); every imported cell through `sanitizeCell` including the previously-uncovered Shop-Ware path (Task 2); fuzzy never auto-approves (enforced now by there being no fuzzy path in Stage A, and carried into P4b); Turso KV mapping memory works in mock and live; persist bumped to v9 with the v8 no-inject-absent-keys migrate rule preserved (Task 10); OOXML-named-`.xls` accepted by content, true BIFF `.xls` rejected with exact actionable copy (Task 4). No em or en dash. No new paid or AI call.
 - **Type consistency.** `ImportField` / `ColumnMapping` / `MappingSource` (Task 1) flow unchanged through Tasks 3, 6, 9; `ImportPreview` / `ImportPreviewRow` / `ImportPreviewStatus` (Task 1) produced by Task 7, consumed by Tasks 9 and 10; `applyUniversalImport(rows: ImportPreviewRow[]): UniversalImportApplySummary` and `UnknownCodeReview.importQuantity` (Task 10) consumed by the Task 11 e2e. `readUniversalFile` / `buildSourceSignature` / `sanitizeCell` (Tasks 2, 4) consumed by the Task 11 battery.
 - **Execution note (orchestrator).** Codex authored Tasks 6-10; Opus authored Task 11, reordered the file to sequential 1-11, and reconciled the Global Constraints and dependency map to a Stage-A-only scope. A full Codex adversarial review of the whole plan runs before execution.
+
+## Task 10: Unify all three import paths and pin Stage A performance
+
+**Stage:** A
+
+**Parallel boundary:** Run after Tasks 1 through 4, in parallel with Tasks 5, 6, 8, and 9. This task alone owns the legacy adapter edits and import service fixtures.
+
+**Design ruling encoded:** Delete the D9 four-string part-number list and make all three existing import paths consume the shared header vocabulary. Measure the 5,000-row, 10-second target across file read, inference, row mapping, matcher-result shaping, and preview construction.
+
+**Files:**
+
+- Modify: src/services/columnIntelligence.ts
+- Modify: src/services/csvImport.ts
+- Modify: src/services/reconcile/shopwareCsvAdapter.ts
+- Test: src/services/csvImport.test.ts
+- Test: src/services/reconcile/shopwareCsvAdapter.test.ts
+- Create: src/services/fixtures/import/shopware.csv
+- Create: src/services/fixtures/import/reordered-renamed.tsv
+- Create: src/services/fixtures/import/nonsense-headers.csv
+- Create: src/services/universalImport.stageA.test.ts
+- Create: src/services/universalImport.performance.test.ts
+
+**Interfaces:**
+
+- Consumes: HEADER_SYNONYMS, normalizeImportHeader(value: string): string, sanitizeCell(raw: string): string, readUniversalFile(file: UploadFileLike): Promise<UniversalSheet>, inferColumnMapping(matrix: string[][]): ColumnInference, mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping): MappingResult, and buildImportPreview(mapped: MappingResult, matches: PreviewMatchResult[], mappingSource: MappingSource): ImportPreview.
+- Produces: importFieldForHeader(value: string): ImportField | undefined, pickImportedField(row: Record<string, string>, field: ImportField): string, a Shop-Ware adapter with no SHOPWARE_COLUMN_MAP.partNumber list, and the complete performance guard.
+
+- [ ] **Step 1: Create the complete text fixtures**
+
+~~~csv
+# src/services/fixtures/import/shopware.csv
+PN,Make,Model,Tire Size,QOH,UOM,Cost
+ABC-1,Acme,Road,225/45R18,7,each,99
+ABC-2,Acme,Road Plus,225/45R18,2,each,105
+ABC-3,=Formula Brand,@Formula Model,225/45R18,1,each,88
+~~~
+
+~~~text
+# src/services/fixtures/import/reordered-renamed.tsv
+Ignore Me	QOH	Tire Size	Model	Make	Item No.
+junk	4	225/45R18	Road	Acme	ABC-1
+junk	3	245/40R18	Road Sport	Acme	ABC-4
+~~~
+
+~~~csv
+# src/services/fixtures/import/nonsense-headers.csv
+aaa,bbb,ccc,ddd
+ABC-9,Acme,Road,6
+~~~
+
+- [ ] **Step 2: Write the complete fixture and performance tests**
+
+~~~typescript
+// src/services/universalImport.stageA.test.ts
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
+import { readUniversalFile } from "@/services/universalFileReader";
+
+const root = join(process.cwd(), "src", "services", "fixtures", "import");
+
+function fixture(name: string, type: string) {
+  const bytes = readFileSync(join(root, name));
+  return {
+    name,
+    type,
+    text: async () => bytes.toString("utf8"),
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  };
+}
+
+describe("Stage A fixture battery", () => {
+  it("maps Shop-Ware core fields without format-specific code", async () => {
+    const sheet = await readUniversalFile(fixture("shopware.csv", "text/csv"));
+    const inferred = inferColumnMapping([sheet.headers, ...sheet.rows]);
+    expect(inferred.mapping).toMatchObject({
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      size: 3,
+      quantity: 4,
+      uom: 5,
+    });
+    expect(sheet.rows[2][1]).toBe("'=Formula Brand");
+    expect(sheet.rows[2][2]).toBe("'@Formula Model");
+  });
+
+  it("maps reordered TSV columns and ignores the extra column", async () => {
+    const sheet = await readUniversalFile(fixture("reordered-renamed.tsv", "text/tab-separated-values"));
+    const inferred = inferColumnMapping([sheet.headers, ...sheet.rows]);
+    expect(inferred.mapping).toMatchObject({
+      quantity: 1,
+      size: 2,
+      model: 3,
+      brand: 4,
+      partNumber: 5,
+    });
+    expect(Object.values(inferred.mapping)).not.toContain(0);
+  });
+
+  it("forces a valid manual map for nonsense headers", async () => {
+    const sheet = await readUniversalFile(fixture("nonsense-headers.csv", "text/csv"));
+    const inferred = inferColumnMapping([sheet.headers, ...sheet.rows]);
+    expect(inferred.confidence).toBe("low");
+    expect(validateManualMapping(sheet.headers, {
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      quantity: 3,
+    })).toEqual({ ok: true });
+  });
+});
+~~~
+
+~~~typescript
+// src/services/universalImport.performance.test.ts
+import { describe, expect, it } from "vitest";
+import { inferColumnMapping } from "@/services/columnIntelligence";
+import type { PreviewMatchResult } from "@/services/universalImportPreview";
+import { buildImportPreview, mapUniversalRows } from "@/services/universalImportPreview";
+import { readUniversalFile } from "@/services/universalFileReader";
+
+describe("universal import performance", () => {
+  it("processes 5,000 rows to preview in less than 10 seconds", async () => {
+    const header = "PN,Make,Model,Tire Size,QOH";
+    const rows = Array.from({ length: 5_000 }, (_, index) =>
+      ["PN-" + index, "Acme", "Road " + index, "225/45R18", "4"].join(","),
+    );
+    const csv = [header, ...rows].join("\n");
+    const file = {
+      name: "five-thousand.csv",
+      type: "text/csv",
+      text: async () => csv,
+      arrayBuffer: async () => new TextEncoder().encode(csv).buffer,
+    };
+    const startedAt = performance.now();
+    const sheet = await readUniversalFile(file);
+    const inferred = inferColumnMapping([sheet.headers, ...sheet.rows]);
+    const mapped = mapUniversalRows(sheet, inferred.mapping);
+    const matches: PreviewMatchResult[] = mapped.rows.map((row) => ({
+      row: row.expected,
+      status: "matched",
+      reason: "Part number hit for exact candidate.",
+      confidence: 1,
+      matchBasis: "part_number_exact",
+      candidate: { uid: "candidate-" + row.line, brand: row.brand, name: row.model },
+    }));
+    const preview = buildImportPreview(mapped, matches, inferred.source);
+    const elapsedMs = performance.now() - startedAt;
+    expect(preview.total).toBe(5_000);
+    expect(preview.exact).toBe(5_000);
+    expect(preview.headline).toBe("Matched 5000 of 5000 automatically");
+    expect(elapsedMs).toBeLessThan(10_000);
+  }, 12_000);
+});
+~~~
+
+- [ ] **Step 3: Run the tests and verify the expected failures**
+
+Run: npx vitest run src/services/universalImport.stageA.test.ts src/services/universalImport.performance.test.ts
+
+Expected: FAIL because importFieldForHeader is private and the legacy adapters do not share it.
+
+- [ ] **Step 4: Apply the complete shared-header patch**
+
+~~~diff
+*** Begin Patch
+*** Update File: src/services/columnIntelligence.ts
+@@
+-function fieldForHeader(value: string): ImportField | undefined {
++export function importFieldForHeader(value: string): ImportField | undefined {
+   const normalized = normalizeImportHeader(value);
+   return (Object.keys(HEADER_SYNONYMS) as ImportField[]).find((field) =>
+     HEADER_SYNONYMS[field].includes(normalized),
+   );
+ }
++
++export function pickImportedField(row: Record<string, string>, field: ImportField): string {
++  for (const [header, value] of Object.entries(row)) {
++    if (importFieldForHeader(header) === field && value.trim() !== "") return value;
++  }
++  return "";
++}
+@@
+-  return row.filter((cell) => fieldForHeader(cell)).length;
++  return row.filter((cell) => importFieldForHeader(cell)).length;
+@@
+-    const field = fieldForHeader(header);
++    const field = importFieldForHeader(header);
+*** Update File: src/services/csvImport.ts
+@@
+ import { isGtinShaped } from "@/services/catalog/barcodeGrade";
++import { pickImportedField } from "@/services/columnIntelligence";
+@@
+-    const name = pick(row, ["name", "product_name"]);
+-    const brand = pick(row, ["brand"]);
+-    const category = pick(row, ["category"]);
++    const name = pickImportedField(row, "name");
++    const brand = pickImportedField(row, "brand");
++    const category = pickImportedField(row, "category");
+@@
+-    const primarySku = pick(row, ["sku", "primary_sku"]);
+-    const primaryBarcode = pick(row, ["barcode", "primary_barcode"]);
++    const primarySku = pickImportedField(row, "partNumber");
++    const primaryBarcode = pickImportedField(row, "barcode");
+*** Update File: src/services/reconcile/shopwareCsvAdapter.ts
+@@
+ import { sanitizeCell } from "@/services/csvImport";
++import { importFieldForHeader } from "@/services/columnIntelligence";
+@@
+-  partNumber: [
+-    "part_number",
+-    "part number",
+-    "part_no",
+-    "sku",
+-    "part_#",
+-    "part #",
+-    "pn",
+-    "item_no.",
+-    "item no.",
+-    "item_no",
+-    "item no",
+-    "mfg_part_number",
+-    "mfg part number",
+-  ],
+@@
+ function findHeaderKey(headers: string[], candidates: readonly string[]): string | undefined {
+@@
+ }
++
++function findUniversalHeader(
++  headers: string[],
++  field: "partNumber" | "brand" | "model" | "size" | "quantity" | "uom",
++): string | undefined {
++  return headers.find((header) => importFieldForHeader(header) === field);
++}
+@@
+-  const partNumberKey = findHeaderKey(headers, SHOPWARE_COLUMN_MAP.partNumber);
++  const partNumberKey = findUniversalHeader(headers, "partNumber");
+@@
+-  const brandKey = findHeaderKey(headers, SHOPWARE_COLUMN_MAP.brand);
+-  const modelKey = findHeaderKey(headers, SHOPWARE_COLUMN_MAP.model);
+-  const sizeKey = findHeaderKey(headers, SHOPWARE_COLUMN_MAP.size);
++  const brandKey = findUniversalHeader(headers, "brand");
++  const modelKey = findUniversalHeader(headers, "model");
++  const sizeKey = findUniversalHeader(headers, "size");
+@@
+-  const qtyOnHandKey = findHeaderKey(headers, SHOPWARE_COLUMN_MAP.qtyOnHand);
++  const qtyOnHandKey = findUniversalHeader(headers, "quantity");
+@@
+-  const unitKey = findHeaderKey(headers, SHOPWARE_COLUMN_MAP.unit);
++  const unitKey = findUniversalHeader(headers, "uom");
+*** End Patch
+~~~
+
+Shop-Ware-only alias part numbers, available quantity fallback, specs, location, and cost filtering stay in SHOPWARE_COLUMN_MAP. Only shared identity, QOH, and UOM fields move to the universal vocabulary.
+
+- [ ] **Step 5: Run focused and adjacent tests**
+
+Run: npx vitest run src/services/universalImport.stageA.test.ts src/services/universalImport.performance.test.ts src/services/csvImport.test.ts src/services/csvImport.trustGate.test.ts src/services/reconcile/shopwareCsvAdapter.test.ts
+
+Expected: PASS. The four-name list is gone, all three paths accept the same core headers, and the full 5,000-row preview takes less than 10,000 ms.
+
+---
+
+## Task 11: Add the quantity-aware import resolution variant and wire Apply
+
+**Stage:** A
+
+**Depends on:** Tasks 1 through 10.
+
+**Monolith warning:** This is the only Stage A edit to src/stores/scanStore.ts. It runs after pure and server work. No unrelated monolith cleanup is allowed.
+
+**Design rulings encoded:** Preview state cannot call this action. Exact human-upload rows retain approved: true. Fuzzy and ambiguous rows create Needs Review only. resolveImportReview is separate from reconcile confirm-link because import rows carry quantity. New persisted fields follow scanStoreMigrate(persisted: unknown, version: number): unknown at src/stores/scanStore.ts:5685 and its v8 no-inject-absent-keys rule at line 5703; current persist version 8 is at line 5733.
+
+**Files:**
+
+- Modify: src/services/importSchema.ts
+- Modify: src/types.ts
+- Modify: src/services/security/sensitiveFields.ts
+- Modify: src/stores/scanStore.ts
+- Modify: src/stores/scanStoreMigrate.test.ts
+- Create: src/stores/universalImport.store.test.ts
+- Modify: src/components/NeedsReviewTable.tsx
+- Create: src/components/UniversalImportPanelContainer.tsx
+- Modify: src/app/(app)/products/page.tsx
+
+**Interfaces:**
+
+- Consumes: ImportPreviewRow[], reopenNeedsReview(cleanCode: string, reason: string): string | null, resolveUnknown(reviewId: string, action: ResolveUnknownAction, payload: ResolveUnknownPayload): void, processScan(rawCode: string): void, and snapshotCount(label: string): CountSnapshot.
+- Produces: UnknownCodeReview.importQuantity?: number, UnknownCodeReview.importEventId?: string, ImportReviewContext.importEventId: string, reopenNeedsReview(cleanCode: string, reason: string, importContext?: ImportReviewContext): string | null, resolveImportReview(reviewId: string, action: "create_new" | "link_existing", payload: ResolveUnknownPayload): void, and applyUniversalImport(rows: ImportPreviewRow[]): UniversalImportApplySummary.
+
+- [ ] **Step 1: Write the complete store regression test**
+
+~~~typescript
+// src/stores/universalImport.store.test.ts
+import { describe, expect, it } from "vitest";
+import type { ImportPreviewRow } from "@/services/importSchema";
+import { createTestScanStore } from "@/stores/scanStore";
+
+function row(status: "exact" | "fuzzy" | "review", code: string, quantity: number): ImportPreviewRow {
+  return {
+    line: 2,
+    status,
+    reason: status === "exact" ? "Exact uploaded identity." : "Candidate needs review.",
+    confidence: status === "exact" ? 1 : 0.8,
+    candidate: { uid: "candidate-" + code, brand: "Acme", name: "Road", partNumber: code },
+    source: {
+      line: 2,
+      expected: {
+        externalId: code,
+        partNumbers: [code],
+        brand: "Acme",
+        model: "Road",
+        sizeText: "225/45R18",
+        qty: quantity,
+        raw: {},
+      },
+      partNumber: code,
+      barcode: "",
+      name: "",
+      brand: "Acme",
+      model: "Road",
+      size: "225/45R18",
+      category: "Tires",
+      quantity,
+      uom: "each",
+    },
+  };
+}
+
+describe("universal import store bridge", () => {
+  it("does not mutate state while preview data merely exists", () => {
+    const store = createTestScanStore();
+    expect([row("exact", "PN-1", 3)]).toHaveLength(1);
+    expect(store.getState().aliases).toEqual([]);
+    expect(store.getState().finalCounts).toEqual([]);
+    expect(store.getState().needsReviewQueue).toEqual([]);
+    expect(store.getState().countSnapshots).toEqual([]);
+  });
+
+  it("applies an exact human row with approved alias and full quantity", () => {
+    const store = createTestScanStore();
+    expect(store.getState().applyUniversalImport([row("exact", "PN-1", 3)])).toEqual({
+      applied: 1,
+      queuedForReview: 0,
+      rejected: 0,
+    });
+    expect(store.getState().aliases).toContainEqual(expect.objectContaining({
+      cleanCode: "PN-1",
+      approved: true,
+    }));
+    expect(store.getState().finalCounts.reduce((sum, item) => sum + item.quantity, 0)).toBe(3);
+    expect(store.getState().countSnapshots.map((item) => item.label)).toEqual([
+      "Before universal import",
+      "After universal import",
+    ]);
+  });
+
+  it("stages fuzzy quantity with no alias or count", () => {
+    const store = createTestScanStore();
+    expect(store.getState().applyUniversalImport([row("fuzzy", "PN-2", 4)])).toEqual({
+      applied: 0,
+      queuedForReview: 1,
+      rejected: 0,
+    });
+    expect(store.getState().needsReviewQueue).toContainEqual(expect.objectContaining({
+      cleanCode: "PN-2",
+      importQuantity: 4,
+      importEventId: expect.any(String),
+      status: "open",
+    }));
+    expect(store.getState().aliases).toEqual([]);
+    expect(store.getState().finalCounts).toEqual([]);
+  });
+
+  it("applies stored quantity only through resolveImportReview", () => {
+    const store = createTestScanStore();
+    store.getState().applyUniversalImport([row("review", "PN-3", 5)]);
+    const review = store.getState().needsReviewQueue.find((item) => item.cleanCode === "PN-3");
+    store.getState().resolveImportReview(review!.id, "create_new", {
+      origin: "human",
+      applyToCount: false,
+      newProduct: {
+        name: "Acme Road",
+        brand: "Acme",
+        category: "Tires",
+        specsShort: "225/45R18",
+        primarySku: "PN-3",
+        primaryBarcode: "PN-3",
+      },
+    });
+    expect(store.getState().aliases).toContainEqual(expect.objectContaining({
+      cleanCode: "PN-3",
+      approved: true,
+    }));
+    expect(store.getState().finalCounts.reduce((sum, item) => sum + item.quantity, 0)).toBe(5);
+  });
+});
+~~~
+
+- [ ] **Step 2: Run the test and verify the expected failure**
+
+Run: npx vitest run src/stores/universalImport.store.test.ts
+
+Expected: FAIL because the import-specific persisted fields and actions do not exist.
+
+- [ ] **Step 3: Apply the complete contract and monolith patch**
+
+~~~diff
+*** Begin Patch
+*** Update File: src/services/importSchema.ts
+@@
+ export interface ImportReviewContext {
+   importQuantity: number;
++  importEventId: string;
+   suggestion?: {
+*** Update File: src/types.ts
+@@
+ export interface UnknownCodeReview {
+@@
+   provisionalProductId?: string | null;
++  importQuantity?: number;
++  importEventId?: string;
+ }
+*** Update File: src/services/security/sensitiveFields.ts
+@@
+   "provisionalProductId",
++  "importQuantity",
++  "importEventId",
+ ] as const;
+*** Update File: src/stores/scanStore.ts
+@@
+ import type { AiStatus } from "@/types";
++import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/services/importSchema";
++import { buildSourceSignature } from "@/services/importSchema";
+@@
+-  reopenNeedsReview: (cleanCode: string, reason: string) => string | null;
++  reopenNeedsReview: (cleanCode: string, reason: string, importContext?: ImportReviewContext) => string | null;
++  resolveImportReview: (
++    reviewId: string,
++    action: "create_new" | "link_existing",
++    payload: ResolveUnknownPayload,
++  ) => void;
++  applyUniversalImport: (rows: ImportPreviewRow[]) => UniversalImportApplySummary;
+@@
+-      reopenNeedsReview: (cleanCode, reason) => {
++      reopenNeedsReview: (cleanCode, reason, importContext) => {
+@@
+                     reopenedFromWrong: true,
++                    importQuantity: importContext?.importQuantity,
++                    importEventId: importContext?.importEventId,
+                   }
+@@
+           idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, id, "SAVE_UNKNOWN_SCAN"),
++          importQuantity: importContext?.importQuantity,
++          importEventId: importContext?.importEventId,
+         };
+@@
+       resolveUnknown: (reviewId, action, payload) => {
+@@
+       },
++
++      resolveImportReview: (reviewId, action, payload) => {
++        const review = get().needsReviewQueue.find((item) => item.id === reviewId);
++        if (
++          !review ||
++          review.status !== "open" ||
++          review.importQuantity === undefined ||
++          !Number.isSafeInteger(review.importQuantity) ||
++          review.importQuantity < 0 ||
++          !review.importEventId
++        ) return;
++        get().resolveUnknown(reviewId, action, {
++          ...payload,
++          origin: "human",
++          applyToCount: false,
++        });
++        if (get().needsReviewQueue.find((item) => item.id === reviewId)?.status !== "resolved") return;
++        for (let index = 0; index < review.importQuantity; index += 1) {
++          get().processScan(review.rawCode || review.cleanCode);
++        }
++      },
++
++      applyUniversalImport: (rows) => {
++        get().ensureAutoSession();
++        if (!get().currentSession || get().currentSession?.status !== "active") {
++          throw new Error("Start or unlock an active session before applying this import.");
++        }
++        const summary: UniversalImportApplySummary = { applied: 0, queuedForReview: 0, rejected: 0 };
++        get().snapshotCount("Before universal import");
++        for (const preview of rows) {
++          if (preview.status === "reject" || !preview.source) {
++            summary.rejected += 1;
++            continue;
++          }
++          const source = preview.source;
++          const code = source.barcode || source.partNumber || source.name;
++          const suggestion = {
++            name: preview.retailCatalogMatch?.productName || preview.candidate?.name || source.expected.name || code,
++            brand: preview.retailCatalogMatch?.brand || preview.candidate?.brand || source.brand,
++            category: preview.retailCatalogMatch?.category || source.category,
++            specsShort: [source.model, source.size].filter(Boolean).join(" "),
++            primarySku: source.partNumber,
++            primaryBarcode: source.barcode,
++          };
++          const importEventId = buildSourceSignature([
++            code,
++            String(source.line),
++            String(source.quantity),
++            source.brand,
++            source.model,
++            source.size,
++          ]);
++          const reviewId = get().reopenNeedsReview(code, preview.reason, {
++            importQuantity: source.quantity,
++            importEventId,
++            suggestion,
++          });
++          if (!reviewId) {
++            summary.rejected += 1;
++            continue;
++          }
++          if (preview.status !== "exact") {
++            summary.queuedForReview += 1;
++            continue;
++          }
++          get().resolveImportReview(reviewId, "create_new", {
++            origin: "human",
++            applyToCount: false,
++            newProduct: {
++              name: suggestion.name,
++              brand: suggestion.brand,
++              category: suggestion.category,
++              specsShort: suggestion.specsShort,
++              primarySku: suggestion.primarySku,
++              primaryBarcode: suggestion.primaryBarcode || code,
++            },
++          });
++          if (get().needsReviewQueue.find((item) => item.id === reviewId)?.status === "resolved") {
++            summary.applied += 1;
++          } else {
++            summary.queuedForReview += 1;
++          }
++        }
++        get().snapshotCount("After universal import");
++        return summary;
++      },
+@@
+-  // Non-destructive branch (v5..v7 -> v8): transform ONLY keys the persisted blob actually carries.
++  // Non-destructive branch (v5..v8 -> v9): transform ONLY keys the persisted blob actually carries.
+@@
+-    version: 8,
++    version: 9,
+*** Update File: src/stores/scanStoreMigrate.test.ts
+@@
+   it("never injects empty keys into a PARTIAL blob (v7->v8 live regression: settings-only e2e seed lost every product)", () => {
+@@
+   });
++
++  it("does not inject import keys into a settings-only v8 blob", () => {
++    const migrated = scanStoreMigrate(
++      { settings: { aiLookupEnabled: false } },
++      8,
++    ) as Record<string, unknown>;
++    expect("products" in migrated).toBe(false);
++    expect("scanFeed" in migrated).toBe(false);
++    expect("needsReviewQueue" in migrated).toBe(false);
++    expect(migrated.countSnapshots).toEqual([]);
++  });
+*** End Patch
+~~~
+
+The quantity loop exists only in resolveImportReview. The existing resolveUnknown and ReconcilePanel confirm-link path remain unchanged and keep applyToCount: false.
+
+- [ ] **Step 4: Route import rows through the distinct confirm action**
+
+~~~diff
+*** Begin Patch
+*** Update File: src/components/NeedsReviewTable.tsx
+@@
+   const resolveUnknown = useScanStore((state) => state.resolveUnknown);
++  const resolveImportReview = useScanStore((state) => state.resolveImportReview);
+@@
++  const resolveReview = (
++    action: "create_new" | "link_existing",
++    payload: Parameters<typeof resolveUnknown>[2],
++  ) => {
++    if (review.importQuantity !== undefined) {
++      resolveImportReview(review.id, action, { ...payload, origin: "human", applyToCount: false });
++      return;
++    }
++    resolveUnknown(review.id, action, payload);
++  };
+@@
+-                onClick={() => resolveUnknown(review.id, "link_existing", { productId: warn.productId, applyToCount, confirmedMismatch: true })}
++                onClick={() => resolveReview("link_existing", { productId: warn.productId, applyToCount, confirmedMismatch: true })}
+@@
+-                  resolveUnknown(review.id, "create_new", {
++                  resolveReview("create_new", {
+@@
+-                  resolveUnknown(review.id, "create_new", {
++                  resolveReview("create_new", {
+@@
+-              onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes })}
++              onClick={() => resolveReview("link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes })}
+*** End Patch
+~~~
+
+- [ ] **Step 5: Create the complete client container and mount it**
+
+~~~tsx
+// src/components/UniversalImportPanelContainer.tsx
+"use client";
+
+import { UniversalImportPanel } from "@/components/UniversalImportPanel";
+import { getSession } from "@/lib/auth";
+import type { ColumnMapping, MappedImportRow } from "@/services/importSchema";
+import { isLiveAuth } from "@/services/auth/authMode";
+import type { PreviewMatchResult } from "@/services/universalImportPreview";
+import { useScanStore } from "@/stores/scanStore";
+
+async function idToken(): Promise<string | undefined> {
+  if (!isLiveAuth()) return undefined;
+  const user = await getSession();
+  if (!user) throw new Error("Sign in required.");
+  return user.getIdToken();
+}
+
+export function UniversalImportPanelContainer() {
+  const businessId = useScanStore((state) => state.businessId);
+  const applyUniversalImport = useScanStore((state) => state.applyUniversalImport);
+
+  async function loadMapping(sourceSignature: string): Promise<ColumnMapping | null> {
+    const token = await idToken();
+    const query = new URLSearchParams({ businessId, sourceSignature });
+    const response = await fetch("/api/import-mapping?" + query.toString(), {
+      cache: "no-store",
+      headers: token ? { Authorization: "Bearer " + token } : {},
+    });
+    if (!response.ok) return null;
+    return ((await response.json()) as { mapping: ColumnMapping | null }).mapping;
+  }
+
+  async function saveMapping(sourceSignature: string, mapping: ColumnMapping): Promise<void> {
+    const token = await idToken();
+    const response = await fetch("/api/import-mapping", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+      body: JSON.stringify({ businessId, sourceSignature, mapping }),
+    });
+    if (!response.ok) throw new Error("Import applied, but the column mapping was not remembered.");
+  }
+
+  async function matchRows(rows: MappedImportRow[]): Promise<PreviewMatchResult[]> {
+    const response = await fetch("/api/reconcile/match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows: rows.map((row) => row.expected) }),
+    });
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      matches?: PreviewMatchResult[];
+    };
+    if (!response.ok || !body.matches) throw new Error(body.error || "Could not match imported rows.");
+    return body.matches;
+  }
+
+  return (
+    <UniversalImportPanel
+      loadMapping={loadMapping}
+      saveMapping={saveMapping}
+      matchRows={matchRows}
+      onApply={async (rows) => applyUniversalImport(rows)}
+    />
+  );
+}
+~~~
+
+~~~diff
+*** Begin Patch
+*** Update File: src/app/(app)/products/page.tsx
+@@
+-import { CsvImportPanel } from "@/components/CsvImportPanel";
++import { UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
+@@
+-      <CsvImportPanel />
++      <UniversalImportPanelContainer />
+*** End Patch
+~~~
+
+- [ ] **Step 6: Run store, migration, and bridge tests**
+
+Run: npx vitest run src/stores/universalImport.store.test.ts src/stores/scanStoreMigrate.test.ts src/stores/scanPersist.test.ts src/components/NeedsReviewTable.test.tsx src/components/UniversalImportPanel.test.tsx
+
+Expected: PASS. Preview-only data makes zero writes. Exact Apply produces an approved alias and full quantity. Fuzzy Apply makes an open review with zero alias and count. Human resolveImportReview applies the stored quantity. Partial v8 state gains no absent product, review, or feed keys.
+
+---
+
+## Task 12: Prove Stage A ships independently at both viewports
+
+**Stage:** A ship gate
+
+**Depends on:** Tasks 1 through 11. Task 13 cannot start until this task is green.
+
+**Design ruling encoded:** Prove the one-screen Matched 380 of 400 automatically beat, preview-before-apply, delayed mapping write, quantity application, variance, Boss Report, and both viewports without Stage B.
+
+**Files:**
+
+- Create: e2e/phase4-universal-import.spec.ts
+- Create: e2e/phase4-universal-import.visual.spec.ts
+
+**Interfaces:**
+
+- Consumes: UniversalImportPanelContainer, POST /api/reconcile/match, GET and PUT /api/import-mapping, applyUniversalImport(rows: ImportPreviewRow[]): UniversalImportApplySummary, the /scan variance UI, and /report Boss Report UI.
+- Produces: no production symbol; produces functional and visual proof at 1280 by 800 and 390 by 844.
+
+- [ ] **Step 1: Write the complete functional proof**
+
+~~~typescript
+// e2e/phase4-universal-import.spec.ts
+import { expect, test } from "./fixtures";
+
+const viewports = [
+  { name: "desktop", width: 1280, height: 800 },
+  { name: "phone", width: 390, height: 844 },
+] as const;
+
+function uploadCsv(): string {
+  const header = "PN,Make,Model,Tire Size,QOH";
+  const rows = Array.from({ length: 400 }, (_, index) =>
+    ["PN-" + index, "Acme", "Road " + index, "225/45R18", "1"].join(","),
+  );
+  return [header, ...rows].join("\n");
+}
+
+for (const viewport of viewports) {
+  test.describe("Phase 4 Stage A " + viewport.name, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test("upload, preview, apply, variance, and Boss Report", async ({ page }) => {
+      let mappingWrites = 0;
+      await page.route("**/api/import-mapping**", async (route) => {
+        if (route.request().method() === "GET") {
+          await route.fulfill({ json: { mapping: null } });
+          return;
+        }
+        mappingWrites += 1;
+        await route.fulfill({ json: { ok: true } });
+      });
+      await page.route("**/api/reconcile/match", async (route) => {
+        const body = route.request().postDataJSON() as { rows: Array<Record<string, unknown>> };
+        await route.fulfill({
+          json: {
+            matches: body.rows.map((row, index) => index < 380
+              ? {
+                  row,
+                  status: "matched",
+                  reason: "Part number hit for exact candidate.",
+                  confidence: 1,
+                  matchBasis: "part_number_exact",
+                  candidate: { uid: "candidate-" + index, brand: "Acme", name: "Road " + index },
+                }
+              : {
+                  row,
+                  status: "ambiguous",
+                  reason: "Two candidates require review.",
+                  confidence: 0.8,
+                  candidates: [
+                    { uid: "a-" + index, brand: "Acme", name: "Road " + index },
+                    { uid: "b-" + index, brand: "Acme", name: "Road " + index },
+                  ],
+                }),
+          },
+        });
+      });
+
+      await page.goto("/products");
+      await page.getByTestId("universal-import-file").setInputFiles({
+        name: "demo.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(uploadCsv()),
+      });
+      await expect(page.getByTestId("import-headline")).toHaveText("Matched 380 of 400 automatically");
+      await expect(page.getByTestId("import-preview")).toBeVisible();
+      expect(mappingWrites).toBe(0);
+
+      const beforeApply = await page.evaluate(() => {
+        const state = window.__scanStore?.getState();
+        return {
+          aliases: state?.aliases.length,
+          counts: state?.finalCounts.length,
+          reviews: state?.needsReviewQueue.length,
+          snapshots: state?.countSnapshots.length,
+        };
+      });
+      expect(beforeApply).toEqual({ aliases: 0, counts: 0, reviews: 0, snapshots: 0 });
+
+      await page.getByTestId("import-apply").click();
+      await expect(page.getByTestId("import-summary")).toContainText(
+        "Applied 380. Needs Review 20. Rejected 0.",
+      );
+      expect(mappingWrites).toBe(1);
+
+      await page.goto("/scan");
+      await expect(page.getByText("Before universal import")).toBeVisible();
+      await expect(page.getByText("After universal import")).toBeVisible();
+
+      await page.goto("/report");
+      await expect(page.getByText("Top variances")).toBeVisible();
+    });
+  });
+}
+~~~
+
+- [ ] **Step 2: Write the complete responsive visual proof**
+
+~~~typescript
+// e2e/phase4-universal-import.visual.spec.ts
+import { expect, test } from "./fixtures";
+
+const cases = [
+  { name: "desktop", width: 1280, height: 800 },
+  { name: "phone", width: 390, height: 844 },
+] as const;
+
+for (const item of cases) {
+  test("Phase 4 import surface is readable at " + item.name, async ({ page }) => {
+    await page.setViewportSize({ width: item.width, height: item.height });
+    await page.goto("/products");
+    await expect(page.getByTestId("universal-import-panel")).toBeVisible();
+    await expect(page).toHaveScreenshot("phase4-universal-import-" + item.name + ".png", {
+      fullPage: true,
+      animations: "disabled",
+    });
+  });
+}
+~~~
+
+- [ ] **Step 3: Run the focused Stage A proof**
+
+Run: npm run test:e2e -- phase4-universal-import.spec.ts phase4-universal-import.visual.spec.ts
+
+Expected: PASS at desktop and phone. The functional test observes zero writes before Apply, the exact 380 of 400 headline, one mapping write after Apply, 380 applied rows, 20 Needs Review rows, both snapshots, variance, and Boss Report. Review visual baselines intentionally.
+
+- [ ] **Step 4: Run the full Stage A gate**
+
+Run: npm run test
+
+Expected: PASS for all Vitest projects, including Tasks 1 through 11.
+
+Run: npm run test:ledger
+
+Expected: PASS because Task 11 changes quantity application.
+
+Run: npm run test:golden
+
+Expected: PASS with decode identity unchanged.
+
+Run: npm run test:firebase
+
+Expected: PASS with mapping-route tenant checks.
+
+Run: npx tsc --noEmit
+
+Expected: no TypeScript errors.
+
+Run: npm run lint
+
+Expected: no new lint errors.
+
+Run: npm run build
+
+Expected: PASS with the new route and Products panel.
+
+Run: npm run qa:revision
+
+Expected: PASS after intentional desktop and phone screenshot review.
+
+---
+
+## Task 13: Implement the net-new character-level edit-distance primitive
+
+**Stage:** B
+
+**Hard ordering:** Start only after Task 12 passes. This task cannot delay Stage A.
+
+**Files:**
+
+- Create: src/services/reconcile/normalizedEditDistance.ts
+- Test: src/services/reconcile/normalizedEditDistance.test.ts
+
+**Interfaces:**
+
+- Consumes: two untrusted strings.
+- Produces: normalizedEditSimilarity(left: string, right: string): number, always a finite value from 0 through 1.
+
+- [ ] **Step 1: Write the complete failing test**
+
+~~~typescript
+// src/services/reconcile/normalizedEditDistance.test.ts
+import { describe, expect, it } from "vitest";
+import { normalizedEditSimilarity } from "@/services/reconcile/normalizedEditDistance";
+
+describe("normalizedEditSimilarity", () => {
+  it("handles exact, empty, and unrelated strings", () => {
+    expect(normalizedEditSimilarity("Michelin", "michelin")).toBe(1);
+    expect(normalizedEditSimilarity("", "")).toBe(1);
+    expect(normalizedEditSimilarity("", "road")).toBe(0);
+    expect(normalizedEditSimilarity("abc", "xyz")).toBe(0);
+  });
+
+  it("scores a one-character brand typo at or above 0.75", () => {
+    expect(normalizedEditSimilarity("Michelin", "Micheln")).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("is symmetric", () => {
+    expect(normalizedEditSimilarity("Defender", "Defendr")).toBe(
+      normalizedEditSimilarity("Defendr", "Defender"),
+    );
+  });
+});
+~~~
+
+- [ ] **Step 2: Run the test and verify the expected failure**
+
+Run: npx vitest run src/services/reconcile/normalizedEditDistance.test.ts
+
+Expected: FAIL with Cannot find module '@/services/reconcile/normalizedEditDistance'.
+
+- [ ] **Step 3: Create the complete primitive**
+
+~~~typescript
+// src/services/reconcile/normalizedEditDistance.ts
+function normalize(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function normalizedEditSimilarity(left: string, right: string): number {
+  const a = normalize(left);
+  const b = normalize(right);
+  if (a === b) return 1;
+  if (a.length === 0 || b.length === 0) return 0;
+
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= a.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= b.length; column += 1) {
+      const substitution = previous[column - 1] + (a[row - 1] === b[column - 1] ? 0 : 1);
+      current[column] = Math.min(
+        current[column - 1] + 1,
+        previous[column] + 1,
+        substitution,
+      );
+    }
+    previous = current;
+  }
+
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
+}
+~~~
+
+- [ ] **Step 4: Run the focused test**
+
+Run: npx vitest run src/services/reconcile/normalizedEditDistance.test.ts
+
+Expected: PASS, 3 tests.
+
+---
+
+## Task 14: Build the conservative Stage B fuzzy matcher
+
+**Stage:** B
+
+**Depends on:** Task 13.
+
+**Design rulings encoded:** IDENTITY_JACCARD_THRESHOLD = 0.75 plus nameTokens and jaccard from src/services/catalog/identityMerge.ts are canonical. The implementations in crossCheckEngine.ts and siblingGuard.ts remain divergent and untouched because their empty-set behavior differs. Every fuzzy result is review-only, even at or above 0.75. Every below-threshold result is review. Multiple qualifying candidates are ambiguous. prefixBrandConflict(code: string | undefined, brand: string | undefined): boolean is a negative non-tire veto, never positive proof.
+
+**Files:**
+
+- Create: src/services/reconcile/importFuzzyMatcher.ts
+- Test: src/services/reconcile/importFuzzyMatcher.test.ts
+
+**Interfaces:**
+
+- Consumes: ExpectedInventoryRow, CorpusCandidate[], IDENTITY_JACCARD_THRESHOLD, nameTokens(value: string): string[], jaccard(a: string[], b: string[]): number, plusGenerationDiff(a: string[], b: string[]): boolean, normalizedEditSimilarity(left: string, right: string): number, tireSizeToken(r: IdentityText | null | undefined): string, sameBrandFamily(a: string, b: string): boolean, and prefixBrandConflict(code: string | undefined, brand: string | undefined): boolean.
+- Produces: FuzzyCandidateScore, FuzzyImportDecision, scoreImportCandidate(row: ExpectedInventoryRow, candidate: CorpusCandidate): FuzzyCandidateScore | null, and matchImportFuzzy(row: ExpectedInventoryRow, candidates: CorpusCandidate[]): FuzzyImportDecision.
+
+- [ ] **Step 1: Write the complete failing adversarial test**
+
+~~~typescript
+// src/services/reconcile/importFuzzyMatcher.test.ts
+import { describe, expect, it } from "vitest";
+import { matchImportFuzzy } from "@/services/reconcile/importFuzzyMatcher";
+import type { CorpusCandidate } from "@/services/reconcile/identityMatcher";
+import type { ExpectedInventoryRow } from "@/services/reconcile/types";
+
+function row(overrides: Partial<ExpectedInventoryRow> = {}): ExpectedInventoryRow {
+  return {
+    externalId: "row-1",
+    partNumbers: [],
+    brand: "Micheln",
+    model: "Defendr T H",
+    sizeText: "225-65-17",
+    qty: 4,
+    raw: {},
+    ...overrides,
+  };
+}
+
+function candidate(overrides: Partial<CorpusCandidate> = {}): CorpusCandidate {
+  return {
+    uid: "candidate-1",
+    brand: "Michelin",
+    name: "Defender T H",
+    sizeToken: "225/65R17",
+    ...overrides,
+  };
+}
+
+describe("matchImportFuzzy", () => {
+  it("finds a unique typo candidate but never auto-approves it", () => {
+    const result = matchImportFuzzy(row(), [candidate()]);
+    expect(result.status).toBe("fuzzy");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.75);
+    expect(result.candidate?.uid).toBe("candidate-1");
+    expect(result.autoApprove).toBe(false);
+  });
+
+  it("normalizes tire notation and rejects a real size mismatch", () => {
+    expect(matchImportFuzzy(row(), [candidate()]).status).toBe("fuzzy");
+    expect(matchImportFuzzy(row(), [candidate({ sizeToken: "235/65R17" })]).status).toBe("review");
+  });
+
+  it("routes below-threshold results to review", () => {
+    const result = matchImportFuzzy(
+      row({ brand: "Unknown", model: "Completely Different" }),
+      [candidate()],
+    );
+    expect(result.status).toBe("review");
+    expect(result.autoApprove).toBe(false);
+  });
+
+  it("returns ambiguous when two candidates qualify", () => {
+    const result = matchImportFuzzy(row(), [
+      candidate({ uid: "candidate-1" }),
+      candidate({ uid: "candidate-2", name: "Defender TH" }),
+    ]);
+    expect(result.status).toBe("ambiguous");
+    expect(result.candidates).toHaveLength(2);
+    expect(result.autoApprove).toBe(false);
+  });
+
+  it("vetoes plus-generation drift", () => {
+    const result = matchImportFuzzy(
+      row({ brand: "Acme", model: "Road Plus" }),
+      [candidate({ brand: "Acme", name: "Road" })],
+    );
+    expect(result.status).toBe("review");
+  });
+
+  it("uses a non-tire brand prefix conflict as a veto", () => {
+    const result = matchImportFuzzy(
+      row({
+        brand: "Denso",
+        model: "Spark Plug",
+        sizeText: undefined,
+        category: "Parts",
+        barcode: "00872951323308",
+      }),
+      [candidate({ brand: "Denso", name: "Spark Plug", sizeToken: undefined })],
+    );
+    expect(result.status).toBe("review");
+    expect(result.reason).toContain("brand prefix conflict");
+  });
+});
+~~~
+
+- [ ] **Step 2: Run the test and verify the expected failure**
+
+Run: npx vitest run src/services/reconcile/importFuzzyMatcher.test.ts
+
+Expected: FAIL with Cannot find module '@/services/reconcile/importFuzzyMatcher'.
+
+- [ ] **Step 3: Create the complete fuzzy matcher**
+
+~~~typescript
+// src/services/reconcile/importFuzzyMatcher.ts
+import { tireSizeToken } from "@/services/ai/tireSpecs";
+import {
+  IDENTITY_JACCARD_THRESHOLD,
+  jaccard,
+  nameTokens,
+  plusGenerationDiff,
+} from "@/services/catalog/identityMerge";
+import { sameBrandFamily } from "@/services/catalog/brandFamilies";
+import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
+import { normalizedEditSimilarity } from "@/services/reconcile/normalizedEditDistance";
+import type { CorpusCandidate } from "@/services/reconcile/identityMatcher";
+import type { ExpectedInventoryRow } from "@/services/reconcile/types";
+
+export interface FuzzyCandidateScore {
+  candidate: CorpusCandidate;
+  confidence: number;
+  brandScore: number;
+  nameScore: number;
+}
+
+export interface FuzzyImportDecision {
+  status: "fuzzy" | "ambiguous" | "review";
+  reason: string;
+  confidence: number | null;
+  candidate?: CorpusCandidate;
+  candidates?: CorpusCandidate[];
+  autoApprove: false;
+}
+
+function rowName(row: ExpectedInventoryRow): string {
+  return row.model || row.name || row.specs || "";
+}
+
+function sizeOf(value: string, brand?: string): string {
+  return tireSizeToken({ productName: value, brand });
+}
+
+function tireRow(row: ExpectedInventoryRow): boolean {
+  return Boolean(sizeOf([row.sizeText, row.model, row.specs].filter(Boolean).join(" "), row.brand));
+}
+
+export function scoreImportCandidate(
+  row: ExpectedInventoryRow,
+  candidate: CorpusCandidate,
+): FuzzyCandidateScore | null {
+  const expectedName = rowName(row);
+  const candidateName = candidate.name || "";
+  if (!expectedName || !candidateName) return null;
+
+  const expectedTokens = nameTokens(expectedName);
+  const candidateTokens = nameTokens(candidateName);
+  if (plusGenerationDiff(expectedTokens, candidateTokens)) return null;
+
+  const expectedSize = sizeOf([row.sizeText, row.model, row.specs].filter(Boolean).join(" "), row.brand);
+  const candidateSize = sizeOf([candidate.sizeToken, candidate.name].filter(Boolean).join(" "), candidate.brand);
+  if (expectedSize && expectedSize !== candidateSize) return null;
+
+  const code = row.barcode || row.partNumbers[0] || "";
+  if (!tireRow(row) && prefixBrandConflict(code, row.brand)) return null;
+
+  const brandScore = row.brand && candidate.brand
+    ? (sameBrandFamily(row.brand, candidate.brand)
+        ? 1
+        : normalizedEditSimilarity(row.brand, candidate.brand))
+    : 0;
+  const tokenScore = jaccard(expectedTokens, candidateTokens);
+  const characterScore = normalizedEditSimilarity(expectedName, candidateName);
+  const nameScore = Math.max(tokenScore, characterScore);
+
+  return {
+    candidate,
+    brandScore,
+    nameScore,
+    confidence: Math.min(brandScore, nameScore),
+  };
+}
+
+export function matchImportFuzzy(
+  row: ExpectedInventoryRow,
+  candidates: CorpusCandidate[],
+): FuzzyImportDecision {
+  const code = row.barcode || row.partNumbers[0] || "";
+  if (!tireRow(row) && prefixBrandConflict(code, row.brand)) {
+    return {
+      status: "review",
+      reason: "Non-tire brand prefix conflict requires review.",
+      confidence: null,
+      autoApprove: false,
+    };
+  }
+
+  const scored = candidates
+    .map((candidate) => scoreImportCandidate(row, candidate))
+    .filter((entry): entry is FuzzyCandidateScore => entry !== null)
+    .sort((left, right) => right.confidence - left.confidence);
+  const qualifying = scored.filter((entry) => entry.confidence >= IDENTITY_JACCARD_THRESHOLD);
+
+  if (qualifying.length === 1) {
+    return {
+      status: "fuzzy",
+      reason: "Unique typo-tolerant candidate requires human confirmation.",
+      confidence: qualifying[0].confidence,
+      candidate: qualifying[0].candidate,
+      autoApprove: false,
+    };
+  }
+
+  if (qualifying.length > 1) {
+    return {
+      status: "ambiguous",
+      reason: "Multiple typo-tolerant candidates require human selection.",
+      confidence: qualifying[0].confidence,
+      candidates: qualifying.map((entry) => entry.candidate),
+      autoApprove: false,
+    };
+  }
+
+  return {
+    status: "review",
+    reason: "No candidate met the 0.75 fuzzy threshold.",
+    confidence: scored[0]?.confidence ?? null,
+    candidates: scored.slice(0, 3).map((entry) => entry.candidate),
+    autoApprove: false,
+  };
+}
+~~~
+
+- [ ] **Step 4: Run the adversarial test**
+
+Run: npx vitest run src/services/reconcile/importFuzzyMatcher.test.ts
+
+Expected: PASS, 6 tests. Unique typo matches remain autoApprove: false. Below-threshold, size mismatch, plus-generation, prefix-conflict, and ambiguity cases never merge.
+
+---
+
+## Task 15: Integrate Stage B and run the final fixture and E2E gates
+
+**Stage:** B final gate
+
+**Depends on:** Task 14.
+
+**Files:**
+
+- Modify: src/services/reconcile/identityMatcher.ts
+- Test: src/services/reconcile/identityMatcher.test.ts
+- Modify: src/app/api/reconcile/match/route.ts
+- Test: src/app/api/reconcile/match/route.test.ts
+- Test: src/services/universalImportPreview.test.ts
+- Create: src/services/fixtures/import/typo-brands-models.csv
+- Create: src/services/fixtures/import/near-duplicate-brands.csv
+- Create: src/services/fixtures/import/size-notation.csv
+- Create: src/services/universalImport.stageB.test.ts
+- Create: e2e/phase4-fuzzy-reconcile.spec.ts
+
+**Interfaces:**
+
+- Consumes: matchImportFuzzy(row: ExpectedInventoryRow, candidates: CorpusCandidate[]): FuzzyImportDecision, candidatesBySizeToken(sizeToken: string): Promise<TireKnowledgeRow[]>, the route sizeCache, buildImportPreview, applyUniversalImport, resolveImportReview, Needs Review, variance, and Boss Report.
+- Produces: MatcherDeps.candidatesForFuzzy?(sizeToken: string): CorpusCandidate[], MatchResult.matchBasis extended with "identity_fuzzy", and proof that fuzzy suggestions never receive approved: true or quantity before confirmation.
+
+- [ ] **Step 1: Create the complete Stage B fixtures**
+
+~~~csv
+# src/services/fixtures/import/typo-brands-models.csv
+PN,Make,Model,Tire Size,QOH
+MISS-1,Micheln,Defendr T H,225-65-17,4
+~~~
+
+~~~csv
+# src/services/fixtures/import/near-duplicate-brands.csv
+PN,Make,Model,Tire Size,QOH
+MISS-2,Acme,Road Sport,225/45R18,3
+~~~
+
+~~~csv
+# src/services/fixtures/import/size-notation.csv
+PN,Make,Model,Tire Size,QOH
+MISS-3,Michelin,Defender T H,225 65 17,2
+~~~
+
+- [ ] **Step 2: Write the complete fixture classification test**
+
+~~~typescript
+// src/services/universalImport.stageB.test.ts
+import { describe, expect, it } from "vitest";
+import { matchImportFuzzy } from "@/services/reconcile/importFuzzyMatcher";
+import type { CorpusCandidate } from "@/services/reconcile/identityMatcher";
+import type { ExpectedInventoryRow } from "@/services/reconcile/types";
+
+const candidates: CorpusCandidate[] = [
+  { uid: "one", brand: "Michelin", name: "Defender T H", sizeToken: "225/65R17" },
+  { uid: "two", brand: "Acme", name: "Road Sport", sizeToken: "225/45R18" },
+  { uid: "three", brand: "Acme", name: "Road Sports", sizeToken: "225/45R18" },
+];
+
+function imported(overrides: Partial<ExpectedInventoryRow>): ExpectedInventoryRow {
+  return {
+    externalId: "row",
+    partNumbers: [],
+    qty: 1,
+    raw: {},
+    ...overrides,
+  };
+}
+
+describe("Stage B fixture outcomes", () => {
+  it.each([
+    {
+      name: "typo brand and model",
+      row: imported({ brand: "Micheln", model: "Defendr T H", sizeText: "225-65-17" }),
+      expected: "fuzzy",
+    },
+    {
+      name: "equivalent size notation",
+      row: imported({ brand: "Michelin", model: "Defender T H", sizeText: "225 65 17" }),
+      expected: "fuzzy",
+    },
+    {
+      name: "near duplicate candidates",
+      row: imported({ brand: "Acme", model: "Road Sport", sizeText: "225/45R18" }),
+      expected: "ambiguous",
+    },
+    {
+      name: "nonsense identity",
+      row: imported({ brand: "Unknown", model: "Nothing Similar", sizeText: "225/45R18" }),
+      expected: "review",
+    },
+  ])("classifies $name conservatively", ({ row, expected }) => {
+    const result = matchImportFuzzy(row, candidates);
+    expect(result.status).toBe(expected);
+    expect(result.autoApprove).toBe(false);
+  });
+});
+~~~
+
+- [ ] **Step 3: Apply the complete matcher and route integration patch**
+
+~~~diff
+*** Begin Patch
+*** Update File: src/services/reconcile/identityMatcher.ts
+@@
+ import { basePartNumberKey, tirePartNumberCore } from "@/services/catalog/tirePartNumber";
++import { matchImportFuzzy } from "@/services/reconcile/importFuzzyMatcher";
+@@
+-  matchBasis?: "part_number_exact" | "part_number_affix_core" | "identity_jaccard";
++  matchBasis?: "part_number_exact" | "part_number_affix_core" | "identity_jaccard" | "identity_fuzzy";
+@@
+ export interface MatcherDeps {
+@@
+   candidatesByBrandSize(brand: string | undefined, sizeToken: string): CorpusCandidate[];
++  candidatesForFuzzy?(sizeToken: string): CorpusCandidate[];
+@@
+   if (rowSize) {
+@@
+   }
++
++  if (rowSize && deps.candidatesForFuzzy) {
++    const fuzzy = matchImportFuzzy(row, deps.candidatesForFuzzy(rowSize));
++    if (fuzzy.status === "fuzzy") {
++      return {
++        row,
++        status: "matched",
++        reason: fuzzy.reason,
++        confidence: fuzzy.confidence ?? undefined,
++        matchBasis: "identity_fuzzy",
++        candidate: fuzzy.candidate,
++      };
++    }
++    if (fuzzy.status === "ambiguous" || fuzzy.status === "review") {
++      return {
++        row,
++        status: "ambiguous",
++        reason: fuzzy.reason,
++        confidence: fuzzy.confidence ?? undefined,
++        candidates: fuzzy.candidates,
++      };
++    }
++  }
+ 
+   // --- Step 3 / 4: non_tire vs unmatched
+*** Update File: src/app/api/reconcile/match/route.ts
+@@
+     const deps: MatcherDeps = {
+       lookupByPartNumber: (normalizedPn) => pnCache.get(normalizedPn) ?? [],
+       candidatesByBrandSize: (_brand, token) => sizeCache.get(token) ?? [],
++      candidatesForFuzzy: (token) => sizeCache.get(token) ?? [],
+     };
+*** Update File: src/services/reconcile/identityMatcher.test.ts
+@@
++  it("exposes a typo candidate as identity_fuzzy data only", () => {
++    const result = matchExpectedRow(row({
++      partNumbers: [],
++      brand: "Micheln",
++      model: "Defendr T H",
++      sizeText: "225-65-17",
++    }), {
++      lookupByPartNumber: () => [],
++      candidatesByBrandSize: () => [],
++      candidatesForFuzzy: () => [
++        { uid: "one", brand: "Michelin", name: "Defender T H", sizeToken: "225/65R17" },
++      ],
++    });
++    expect(result.status).toBe("matched");
++    expect(result.matchBasis).toBe("identity_fuzzy");
++    expect(result.confidence).toBeGreaterThanOrEqual(0.75);
++  });
+*** Update File: src/services/universalImportPreview.test.ts
+@@
++  it("never promotes identity_fuzzy matcher data to exact", () => {
++    const mapped = mapUniversalRows({ ...sheet, rows: [sheet.rows[0]] }, {
++      partNumber: 0,
++      brand: 1,
++      model: 2,
++      size: 3,
++      quantity: 4,
++    });
++    const preview = buildImportPreview(mapped, [{
++      row: mapped.rows[0].expected,
++      status: "matched",
++      reason: "Unique typo-tolerant candidate requires human confirmation.",
++      confidence: 0.8,
++      matchBasis: "identity_fuzzy",
++      candidate: { uid: "one", brand: "Acme", name: "Road" },
++    }], "header");
++    expect(preview.rows[0].status).toBe("fuzzy");
++    expect(preview.exact).toBe(0);
++  });
+*** End Patch
+~~~
+
+- [ ] **Step 4: Write the complete review-before-quantity E2E proof**
+
+~~~typescript
+// e2e/phase4-fuzzy-reconcile.spec.ts
+import { expect, test } from "./fixtures";
+
+test("fuzzy import stays in Needs Review until human confirmation", async ({ page }) => {
+  await page.route("**/api/import-mapping**", async (route) => {
+    await route.fulfill({
+      json: route.request().method() === "GET" ? { mapping: null } : { ok: true },
+    });
+  });
+  await page.route("**/api/reconcile/match", async (route) => {
+    const body = route.request().postDataJSON() as { rows: Array<Record<string, unknown>> };
+    await route.fulfill({
+      json: {
+        matches: body.rows.map((row) => ({
+          row,
+          status: "matched",
+          reason: "Unique typo-tolerant candidate requires human confirmation.",
+          confidence: 0.8,
+          matchBasis: "identity_fuzzy",
+          candidate: { uid: "one", brand: "Michelin", name: "Defender T H" },
+        })),
+      },
+    });
+  });
+
+  await page.goto("/products");
+  await page.getByTestId("universal-import-file").setInputFiles({
+    name: "typo.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from(
+      "PN,Make,Model,Tire Size,QOH\nMISS-1,Micheln,Defendr T H,225-65-17,4\n",
+    ),
+  });
+  await expect(page.getByTestId("import-headline")).toHaveText("Matched 0 of 1 automatically");
+  await page.getByTestId("import-apply").click();
+  await expect(page.getByTestId("import-summary")).toContainText(
+    "Applied 0. Needs Review 1. Rejected 0.",
+  );
+
+  const beforeConfirm = await page.evaluate(() => {
+    const state = window.__scanStore?.getState();
+    return {
+      approved: state?.aliases.some((item) => item.cleanCode === "MISS-1" && item.approved),
+      quantity: state?.finalCounts.reduce((sum, item) => sum + item.quantity, 0),
+    };
+  });
+  expect(beforeConfirm).toEqual({ approved: false, quantity: 0 });
+
+  await page.goto("/review");
+  await page.getByRole("button", { name: "Create new product" }).click();
+
+  const afterConfirm = await page.evaluate(() => {
+    const state = window.__scanStore?.getState();
+    return {
+      approved: state?.aliases.some((item) => item.cleanCode === "MISS-1" && item.approved),
+      quantity: state?.finalCounts.reduce((sum, item) => sum + item.quantity, 0),
+    };
+  });
+  expect(afterConfirm).toEqual({ approved: true, quantity: 4 });
+});
+~~~
+
+- [ ] **Step 5: Run focused Stage B and adversarial tests**
+
+Run: npx vitest run src/services/reconcile/normalizedEditDistance.test.ts src/services/reconcile/importFuzzyMatcher.test.ts src/services/reconcile/identityMatcher.test.ts src/app/api/reconcile/match/route.test.ts src/services/universalImportPreview.test.ts src/services/universalImport.stageB.test.ts src/stores/universalImport.store.test.ts
+
+Expected: PASS. Outcomes are unique fuzzy, normalized-size fuzzy, ambiguous, and below-threshold review. No fuzzy test observes automatic alias or quantity.
+
+Run: npm run test:e2e -- phase4-fuzzy-reconcile.spec.ts phase4-universal-import.spec.ts phase4-universal-import.visual.spec.ts
+
+Expected: PASS. Stage A remains green at both viewports. Fuzzy quantity is zero before confirm and four after confirm.
+
+- [ ] **Step 6: Run the final Phase 4 gate**
+
+Run: npm run test
+
+Expected: PASS.
+
+Run: npm run test:ledger
+
+Expected: PASS.
+
+Run: npm run test:golden
+
+Expected: PASS.
+
+Run: npm run test:firebase
+
+Expected: PASS.
+
+Run: npx tsc --noEmit
+
+Expected: no TypeScript errors.
+
+Run: npm run lint
+
+Expected: no new lint errors.
+
+Run: npm run build
+
+Expected: PASS.
+
+Run: npm run qa:revision
+
+Expected: PASS after desktop and phone screenshot review. Hand off Phase 4 only when every command is green.
+
+---
+
+## Self-Review Pass
+
+### Acceptance criteria coverage
+
+- [ ] AC1, any supported upload format without per-format code: Tasks 2, 3, 4, 7, 9, 10, and 12. Task 10 deletes SHOPWARE_COLUMN_MAP.partNumber. CSV, TSV, and OOXML XLSX are covered. An .xls filename is accepted only when its bytes are OOXML; true BIFF is the flagged unknown below.
+- [ ] AC2, per-fixture counts and zero low-confidence auto-merges: Tasks 7, 11, 13, 14, and 15. The threshold is exactly 0.75. Jaccard, affix-core, character-fuzzy, below-threshold, and ambiguous rows are review-only.
+- [ ] AC3, nonsense-header manual mapping remembered: Tasks 3, 5, 6, 9, 10, and 12. Mapping memory writes only after Apply.
+- [ ] AC4, 5,000 rows in less than 10 seconds: Task 10 times read, inference, map, matcher-result shaping, and preview together.
+- [ ] AC5, import through preview, Apply, variance, and Boss Report at both viewports with polish: Tasks 9, 11, 12, and 15.
+
+### Parallel and file-boundary audit
+
+- [ ] Tasks 1 through 4 form the sequential import foundation.
+- [ ] After Task 4, Tasks 5 and 6 own mapping persistence, Task 8 owns the reconcile route, Task 9 owns the panel, and Task 10 owns legacy adapters and performance fixtures. Their production boundaries are disjoint.
+- [ ] Task 7 precedes Tasks 8 and 9 because it publishes their types.
+- [ ] Task 11 is the only Stage A scanStore task and runs after all parallel Stage A tracks.
+- [ ] Task 12 blocks Stage B and makes Stage A independently shippable.
+- [ ] Tasks 13, 14, and 15 are sequential after Task 12, so fuzzy tuning cannot delay Stage A.
+- [ ] Task 15 reopens Task 7 files only after Stage A is complete; no parallel worker shares them.
+
+### Binding design-ruling audit
+
+- [ ] Resolver trust invariant 3: Task 7 classifies non-exact data as fuzzy or review. Tasks 11 and 15 prove no fuzzy alias or quantity before human confirmation. Exact human-upload rows retain origin: "human" and approved: true.
+- [ ] Preview-before-apply: Tasks 9, 11, and 12 keep preview in React memory and assert zero store, DB, mapping, and localStorage writes before Apply.
+- [ ] Sanitizer: Tasks 2 and 4 apply stripControlChars, cap at 500, then defuseFormulaInjection to every cell. Task 2 closes the current Shop-Ware gap.
+- [ ] ExcelJS read: Task 4 adds the first workbook.xlsx.load path; existing repo usage is write-only.
+- [ ] Monolith: Task 11 is the only Stage A scanStore edit and runs last among production Stage A work.
+- [ ] Migration: Task 11 cites scanStoreMigrate and changes version 8 to 9 without injecting absent keys.
+- [ ] Canonical Jaccard: Tasks 7 and 14 use identityMerge.ts nameTokens and jaccard at 0.75. crossCheckEngine.ts and siblingGuard.ts are the divergent landmine and are not unified.
+- [ ] Mapping seam: Tasks 5 and 6 choose businessId-namespaced Turso LadderStorage KV. It is the lowest-effort seam that works in mock and live. localStorage is device-only. Firestore would split this feature across the second database and lacks the scout's mock seam. The per-account key matches the tenancy direction, and the interface permits a dedicated table later.
+- [ ] Quantity review: Task 11 adds resolveImportReview and leaves reconcile confirm-link applyToCount: false unchanged.
+- [ ] Non-tire corroboration: Task 14 uses prefixBrandConflict only as a negative veto; Task 8 retains exact retail barcode lookup as positive evidence.
+- [ ] Performance: Task 10 enforces the complete 5,000-row target under 10 seconds.
+- [ ] Stage ordering: character edit distance exists only in Tasks 13 through 15 after the Stage A gate.
+- [ ] Typography and action safety: this plan contains no em dash or en dash and requests no paid script.
+
+### Flagged unknowns carried into execution
+
+- [ ] ExcelJS 4.4.0 has OOXML XLSX read APIs but no legacy BIFF .xls reader. The plan accepts OOXML bytes with an .xls filename and rejects true BIFF with actionable copy. Literal BIFF support needs an owner-approved parser and is not grounded in installed code.
+- [ ] The scout evidence contains no real customer Boss Report export. Fixtures use the binding PN, Make, Model, Tire Size, and QOH vocabulary. Validate the first real export without reintroducing per-format code.
+
