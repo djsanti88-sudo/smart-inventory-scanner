@@ -22,3 +22,14 @@ rules:
               import { ..., exec, ... } from "child_process";
               ...
           - pattern: exec(...)
+
+  - id: fable5-cap-single-charge
+    message: New checkAndIncrementDaily callers can double-charge the legacy daily cap.
+    languages: [typescript]
+    severity: ERROR
+    pattern: checkAndIncrementDaily(...)
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - /src/services/security/aiSpendGuard.ts
