@@ -191,6 +191,90 @@ class RunOneCostGateTests(unittest.IsolatedAsyncioTestCase):
             """,
         )
 
+    async def test_nonzero_cost_failure_is_blocking_when_allow_paid_false(self) -> None:
+        """When cost is detected and allow_paid=False, result.blocking must be True."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            auth_script = self._passing_preflight(root)
+            fake_claude = _fixture_script(
+                root,
+                "fake_claude.py",
+                """
+                import json
+                print(json.dumps({
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "ok",
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                    "total_cost_usd": 0.42,
+                }))
+                """,
+            )
+            with mock.patch.dict(
+                "os.environ",
+                {"FABLE5_AUTH_STATUS_CMD": f"{sys.executable} {auth_script}"},
+            ), mock.patch(
+                "tools.fable5.experts.build_claude_command",
+                return_value=[sys.executable, str(fake_claude)],
+            ), mock.patch("shutil.which", return_value=sys.executable):
+                results = await run_experts(
+                    root=root,
+                    report_dir=root / "report",
+                    agents=["security"],
+                    model="sonnet",
+                    changed_files=[],
+                    deterministic_results=[],
+                    workers=1,
+                    timeout_seconds=10,
+                    allow_paid=False,
+                )
+        self.assertEqual(len(results), 1)
+        result = results[0]
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.blocking, "Cost-detected failure must have blocking=True to exit 1")
+
+    async def test_nonzero_cost_success_is_not_blocking_when_allow_paid_true(self) -> None:
+        """When cost is detected and allow_paid=True, result.blocking must be False (status passes)."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            auth_script = self._passing_preflight(root)
+            fake_claude = _fixture_script(
+                root,
+                "fake_claude.py",
+                """
+                import json
+                print(json.dumps({
+                    "type": "result",
+                    "subtype": "success",
+                    "result": "ok",
+                    "usage": {"input_tokens": 10, "output_tokens": 5},
+                    "total_cost_usd": 0.42,
+                }))
+                """,
+            )
+            with mock.patch.dict(
+                "os.environ",
+                {"FABLE5_AUTH_STATUS_CMD": f"{sys.executable} {auth_script}"},
+            ), mock.patch(
+                "tools.fable5.experts.build_claude_command",
+                return_value=[sys.executable, str(fake_claude)],
+            ), mock.patch("shutil.which", return_value=sys.executable):
+                results = await run_experts(
+                    root=root,
+                    report_dir=root / "report",
+                    agents=["security"],
+                    model="sonnet",
+                    changed_files=[],
+                    deterministic_results=[],
+                    workers=1,
+                    timeout_seconds=10,
+                    allow_paid=True,
+                )
+        self.assertEqual(len(results), 1)
+        result = results[0]
+        self.assertEqual(result.status, "passed")
+        self.assertFalse(result.blocking, "Allowed cost success must have blocking=False")
+
     async def test_nonzero_cost_fails_closed_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

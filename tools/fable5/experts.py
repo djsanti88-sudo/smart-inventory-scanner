@@ -251,7 +251,7 @@ async def _run_one(
         check_id=f"expert-{agent}",
         description=f"{agent} review using Claude {model}",
         status=status,
-        blocking=False,
+        blocking=(status == "failed"),
         command=safe_command,
         started_at=started_at,
         duration_seconds=round(duration, 3),
