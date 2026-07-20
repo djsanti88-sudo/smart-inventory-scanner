@@ -183,4 +183,24 @@ describe("universalImportPreview", () => {
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].quantity).toBe(MAX_IMPORT_QUANTITY);
   });
+
+  it("never promotes identity_fuzzy to exact", () => {
+    const mapped = mapUniversalRows({ ...sheet, rows: [sheet.rows[0]] }, {
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      size: 3,
+      quantity: 4,
+    });
+    const preview = buildImportPreview(mapped, [{
+      row: mapped.rows[0].expected,
+      status: "matched",
+      reason: "Unique typo-tolerant candidate requires human confirmation.",
+      confidence: 0.8,
+      matchBasis: "identity_fuzzy",
+      candidate: { uid: "one", brand: "Acme", name: "Road" },
+    }], "header");
+    expect(preview.rows[0].status).toBe("fuzzy");
+    expect(preview.exact).toBe(0);
+  });
 });

@@ -327,4 +327,23 @@ describe("matchExpectedRow", () => {
     expect(result.status).toBe("ambiguous");
     expect(result.candidate).toBeUndefined();
   });
+
+  it("exposes a typo candidate as identity_fuzzy data only", () => {
+    const result = matchExpectedRow(row({
+      externalId: "E-fuzzy",
+      partNumbers: [],
+      brand: "Micheln",
+      model: "Defendr T H",
+      sizeText: "225-65-17",
+    }), {
+      lookupByPartNumber: () => [],
+      candidatesByBrandSize: () => [],
+      candidatesForFuzzy: () => [
+        { uid: "one", brand: "Michelin", name: "Defender T H", sizeToken: "225/65R17" },
+      ],
+    });
+    expect(result.status).toBe("matched");
+    expect(result.matchBasis).toBe("identity_fuzzy");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.75);
+  });
 });

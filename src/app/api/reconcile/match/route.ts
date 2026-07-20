@@ -111,6 +111,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const deps: MatcherDeps = {
       lookupByPartNumber: (normalizedPn) => pnCache.get(normalizedPn) ?? [],
       candidatesByBrandSize: (_brand, token) => sizeCache.get(token) ?? [],
+      candidatesForFuzzy: (token) => sizeCache.get(token) ?? [],
     };
     const match = matchExpectedRow(row, deps);
     if (match.status === "non_tire" && row.barcode) {

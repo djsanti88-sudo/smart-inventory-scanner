@@ -27,6 +27,7 @@ import { sameBrandFamily } from "@/services/catalog/brandFamilies";
 import { IDENTITY_JACCARD_THRESHOLD, nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { basePartNumberKey, tirePartNumberCore } from "@/services/catalog/tirePartNumber";
+import { matchImportFuzzy, normalizeImportSize } from "@/services/reconcile/importFuzzyMatcher";
 
 export type MatchStatus = "matched" | "ambiguous" | "unmatched" | "non_tire";
 
@@ -49,7 +50,7 @@ export interface MatchResult {
   /** Deterministic similarity in [0,1]. Exact corroborated PN hits are 1. `null` or unset means
    *  not applicable (e.g. ambiguous/unmatched), matching `ImportPreviewRow.confidence` in importSchema.ts. */
   confidence?: number | null;
-  matchBasis?: "part_number_exact" | "part_number_affix_core" | "identity_jaccard";
+  matchBasis?: "part_number_exact" | "part_number_affix_core" | "identity_jaccard" | "identity_fuzzy";
   /** Set when `status === "ambiguous"` and there is more than one colliding candidate. */
   candidates?: CorpusCandidate[];
   /** Matched rows with a corpus barcode (AM-R6): a SUGGESTION-GRADE barcode <-> part-number linkage.
@@ -65,6 +66,10 @@ export interface MatcherDeps {
   lookupByPartNumber(normalizedPn: string): CorpusCandidate[];
   /** Candidates sharing a brand (or its family) and an exact tire size token, for the identity path. */
   candidatesByBrandSize(brand: string | undefined, sizeToken: string): CorpusCandidate[];
+  /** Candidates for the character-fuzzy fallback tier (Task 15, Stage B): all corpus rows sharing the
+   *  row's exact size token, regardless of brand - matchImportFuzzy does its own brand corroboration
+   *  (family or bounded edit-distance) so this must NOT pre-filter by brand equality. */
+  candidatesForFuzzy?(sizeToken: string): CorpusCandidate[];
 }
 
 /** Same brand-equality test the rest of the round uses: equal after brandFamilies' own normalization,
@@ -76,10 +81,16 @@ function brandsCorroborate(a: string | undefined, b: string | undefined): boolea
 }
 
 /** Best-effort parseable tire size for a row: sizeText first, falling back to specs/model text so a
- *  size embedded in a free-text spec column is still found. "" when nothing parses. */
+ *  size embedded in a free-text spec column is still found. Falls back to notation-normalized parsing
+ *  (dash/space separators, e.g. "225-65-17" or "225 65 17") when the direct canonical parse misses -
+ *  same-numbers-different-separator is size EQUALITY, not fuzzy tolerance (mirrors importFuzzyMatcher's
+ *  sizeOf helper so the exact-token identity tier and the fuzzy fallback agree on what counts as the
+ *  same size). "" when nothing parses either way. */
 function rowSizeToken(row: ExpectedInventoryRow): string {
   const text = [row.sizeText ?? "", row.specs ?? "", row.model ?? ""].join(" ");
-  return tireSizeToken({ productName: text, brand: row.brand });
+  const direct = tireSizeToken({ productName: text, brand: row.brand });
+  if (direct) return direct;
+  return tireSizeToken({ productName: normalizeImportSize(text), brand: row.brand });
 }
 
 /** Whether the row shows any tire signal at all (a parseable size, or a brand/model that reads as a
@@ -236,6 +247,40 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
         confidence: Math.max(...identityMatches.map((entry) => entry.confidence)),
         candidates: identityMatches.map((entry) => entry.candidate),
       };
+    }
+  }
+
+  // --- Step 2b: character-fuzzy fallback (Stage B, Task 15) ------------------------------------
+  // Only runs when the exact-token identity-jaccard tier above found ZERO survivors (fell through
+  // without returning) AND there is at least one same-size corpus candidate to fuzzy-score against.
+  // Without the non-empty guard, a row with a parseable size but truly nothing in the corpus at that
+  // size would get matchImportFuzzy([]) -> "review" -> "ambiguous" here, silently downgrading the
+  // pre-existing honest "unmatched" outcome for a genuine no-hit row. matchImportFuzzy does its own
+  // brand corroboration (family or bounded edit-distance) and size-notation normalization; it NEVER
+  // auto-approves (autoApprove: false).
+  if (rowSize && deps.candidatesForFuzzy) {
+    const fuzzyCandidates = deps.candidatesForFuzzy(rowSize);
+    if (fuzzyCandidates.length > 0) {
+      const fuzzy = matchImportFuzzy(row, fuzzyCandidates);
+      if (fuzzy.status === "fuzzy") {
+        return {
+          row,
+          status: "matched",
+          reason: fuzzy.reason,
+          confidence: fuzzy.confidence ?? undefined,
+          matchBasis: "identity_fuzzy",
+          candidate: fuzzy.candidate,
+        };
+      }
+      if (fuzzy.status === "ambiguous" || fuzzy.status === "review") {
+        return {
+          row,
+          status: "ambiguous",
+          reason: fuzzy.reason,
+          confidence: fuzzy.confidence ?? undefined,
+          candidates: fuzzy.candidates,
+        };
+      }
     }
   }
 
