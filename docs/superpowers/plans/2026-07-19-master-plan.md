@@ -1,6 +1,7 @@
 # Scanbin Master Plan — Sell-Ready Product (FINAL — v3 + final-gate edits)
 
-> **Status:** APPROVED by owner 2026-07-19 — execution started with Phase 1. Passed all 3 critique loops (5 critics: engineering, product/GTM, red-team feasibility, simplicity+ambition, final-gate coherence); final gate verdict: APPROVE — all 12 owner requirements covered, no contradictions, every phase planner-ready. Owner decision: the P3 tire wedge (DOT date-code) keep/cut call is DEFERRED to Phase 3 plan-writing.
+> **Status:** APPROVED by owner 2026-07-19 — execution started with Phase 1 (COMPLETE, merged e6f2817). Passed all 3 critique loops (5 critics); final gate verdict: APPROVE. Owner decision: the P3 tire wedge (DOT date-code) keep/cut call is DEFERRED to Phase 3 plan-writing.
+> **OWNER ORDER (2026-07-19, supersedes "owner reviews between phases"):** AUTONOMOUS PROGRESSION - each phase runs plan -> review loops -> parallel-track execution -> task gates -> end-of-phase multi-agent ULTRA REVIEW -> fix wave -> local merge -> next phase, WITHOUT waiting for owner approval between phases. Push/deploy/production/paid-live calls remain owner-gated. Concurrency: up to 5 subagents, 4 shells.
 > **For agentic workers:** This is the PHASE-LEVEL master plan (owner order: big phases, long tasks).
 > Each phase gets its own detailed bite-sized implementation plan (superpowers:writing-plans) at phase start,
 > executed via superpowers:subagent-driven-development, one phase at a time, owner reviews between phases.
