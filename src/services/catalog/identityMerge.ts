@@ -79,6 +79,80 @@ export function jaccard(a: string[], b: string[]): number {
   return union === 0 ? 0 : inter / union;
 }
 
+/**
+ * Minimum length of the SHORTER token for it to qualify as a prefix bridge (Improvement 1,
+ * "prefix-aware tokens"). A 1-2 char token ("a", "at", "hd") is too generic to prove identity by
+ * startsWith, so it can only match as an exact token, never as a prefix. Guards against junk bridges.
+ */
+export const PREFIX_MATCH_MIN_LEN = 3;
+
+/**
+ * Credit a prefix pair earns toward a "shared token" (Improvement 1). A clean prefix ("def" of
+ * "defender") is strong evidence of the same word but NOT proof, so it counts as a fractional shared
+ * token rather than a full one. 0.8 keeps a single-token abbreviation ("def ltx" vs "defender ltx":
+ * one exact + one prefix over a 3-token union) above IDENTITY_JACCARD_THRESHOLD while a mismatch on a
+ * discriminating extra token still drags the score down.
+ */
+export const PREFIX_MATCH_CREDIT = 0.8;
+
+/**
+ * Prefix-aware token-containment overlap (Improvement 1, "prefix-aware tokens"). Relaxes plain
+ * {@link jaccard} in two safe ways so an abbreviated / trimmed name surfaces for HUMAN REVIEW:
+ *  - an EXACT shared token counts 1.0; a token that is a CLEAN prefix (startsWith) of a token in the
+ *    other set, where the SHORTER token is >= PREFIX_MATCH_MIN_LEN chars, counts PREFIX_MATCH_CREDIT.
+ *  - the denominator is the SMALLER token set's size (containment), so a proper subset such as
+ *    "Wrangler" vs "Wrangler AT" scores high (one side is simply missing a trailing descriptor).
+ * Returns exactly 1.0 for equal sets and 0 for disjoint sets, matching Jaccard at those endpoints.
+ *
+ * Guardrails (never bypass identity safety):
+ *  - Exact matches are consumed first; each token participates in at most ONE pair (greedy, no
+ *    double-counting) so short/generic tokens cannot inflate the numerator.
+ *  - A prefix pair requires shorter.length >= PREFIX_MATCH_MIN_LEN AND longer.startsWith(shorter),
+ *    so "at" never bridges "attitude" and "xyz" never bridges "defender".
+ *  - A DISCRIMINATING token that DIFFERS still drags the score down: it is unmatched, so it neither
+ *    earns credit nor shrinks the min-denominator ("at ltx" vs "attitude terrain ltx" -> 0.5).
+ *  - This is a NAME-token relaxation only; it does NOT touch the size-distinct rule. Callers still
+ *    enforce tire size equality and generic size-distinctness independently.
+ */
+export function prefixAwareJaccard(a: string[], b: string[]): number {
+  const sa = Array.from(new Set(a));
+  const sb = Array.from(new Set(b));
+  if (sa.length === 0 && sb.length === 0) return 0;
+  const denom = Math.min(sa.length, sb.length);
+  if (denom === 0) return 0;
+
+  const usedB = new Array(sb.length).fill(false);
+  let credit = 0;
+  const unmatchedA: string[] = [];
+
+  // Pass 1: exact-token matches (consume them first so a token never doubles as a prefix pair).
+  for (const ta of sa) {
+    const idx = sb.findIndex((tb, i) => !usedB[i] && tb === ta);
+    if (idx >= 0) {
+      usedB[idx] = true;
+      credit += 1;
+    } else {
+      unmatchedA.push(ta);
+    }
+  }
+
+  // Pass 2: prefix pairs over the remaining tokens, each used at most once.
+  const isPrefixPair = (x: string, y: string): boolean => {
+    const [shorter, longer] = x.length <= y.length ? [x, y] : [y, x];
+    return shorter.length >= PREFIX_MATCH_MIN_LEN && shorter !== longer && longer.startsWith(shorter);
+  };
+  for (const ta of unmatchedA) {
+    const idx = sb.findIndex((tb, i) => !usedB[i] && isPrefixPair(ta, tb));
+    if (idx >= 0) {
+      usedB[idx] = true;
+      credit += PREFIX_MATCH_CREDIT;
+    }
+  }
+
+  // Containment denominator, clamped to 1.0 (credit can only reach the smaller set's size).
+  return Math.min(1, credit / denom);
+}
+
 /** Binding Jaccard threshold for Phase 4 (Global Constraints): the single canonical similarity
  *  cutoff for identity-token matching. Both the Stage A matcher (reconcile/identityMatcher.ts) and
  *  the Stage B fuzzy-matching follow-up consume this one export; never redeclare a second literal. */

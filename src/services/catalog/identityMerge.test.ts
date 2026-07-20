@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { findIdentityMerge, type IdentityCandidate } from "./identityMerge";
+import {
+  findIdentityMerge,
+  nameTokens,
+  prefixAwareJaccard,
+  type IdentityCandidate,
+} from "./identityMerge";
 
 // Task 9 identity-merge trust rules:
 //  - auto_link ONLY on canonical-GTIN equality (across encodings, via canonicalGtin).
@@ -148,5 +153,40 @@ describe("size-aware fuzzy merge (2026-07-10 same-model-different-size collapse)
       { brand: "goodyear", name: "Eagle Touring 245/45R20 103V" },
     );
     expect(r.kind).toBe("none");
+  });
+});
+
+describe("prefixAwareJaccard (Improvement 1 shared scorer)", () => {
+  const t = (s: string) => nameTokens(s);
+
+  it("is identical to plain Jaccard for exact token-set overlap (1.0)", () => {
+    expect(prefixAwareJaccard(t("defender ltx"), t("defender ltx"))).toBe(1);
+  });
+
+  it("counts a >=3-char clean prefix as a (near-full) shared token: 'def ltx' ~ 'defender ltx'", () => {
+    // Plain Jaccard here is 1/3 (only 'ltx' shared). Prefix-aware must clear 0.75.
+    const score = prefixAwareJaccard(t("def ltx"), t("defender ltx"));
+    expect(score).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("counts a proper-subset extra token as a strong partial: 'wrangler' ~ 'wrangler at'", () => {
+    const score = prefixAwareJaccard(t("wrangler"), t("wrangler at"));
+    expect(score).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("does NOT let a 2-char token bridge as a prefix ('at' !~ 'attitude')", () => {
+    // "at ltx" vs "attitude terrain ltx": only 'ltx' truly shared; 'at' must not prefix-match.
+    const score = prefixAwareJaccard(t("at ltx"), t("attitude terrain ltx"));
+    expect(score).toBeLessThan(0.75);
+  });
+
+  it("does NOT prefix-match when the shorter token is not a genuine startsWith prefix", () => {
+    // "xyz" is 3 chars but not a prefix of "defender" -> no bridge.
+    const score = prefixAwareJaccard(t("xyz ltx"), t("defender ltx"));
+    expect(score).toBeLessThan(0.75);
+  });
+
+  it("returns 0 for disjoint token sets", () => {
+    expect(prefixAwareJaccard(t("alpha beta"), t("gamma delta"))).toBe(0);
   });
 });
