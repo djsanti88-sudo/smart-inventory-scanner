@@ -130,7 +130,7 @@ clone - this section is the durable name list. Client-exposed vars are
   `GPT_LADDER_DAILY_USD`), `GEMINI_API_KEY` (+ model vars; decode-disabled), `GO_UPC_API_KEY`
   (+ `GO_UPC_MONTHLY_LIMIT`), `FIRECRAWL_API_KEY` (+ `_1..4` rotation), `BRAVE_SEARCH_API_KEY`,
   `UPCITEMDB_DAILY_LIMIT`, `OPENFOODFACTS_PER_MINUTE_LIMIT`
-- Spend/rate guards: `AI_LOOKUP_DAILY_LIMIT` (default 500), `AI_LOOKUP_KILL_SWITCH`,
+- Spend/rate guards: `AI_LOOKUP_DAILY_LIMIT` (default 2000), `AI_LOOKUP_KILL_SWITCH`,
   `AI_LOOKUP_RATE_LIMIT` / `_WINDOW_MS` / `_GET_RATE_LIMIT`, `ENABLE_LIVE_AI_LOOKUP`,
   `ENABLE_AUTO_DECODE_ON_SCAN`, `AI_LOOKUP_MODE`, `DECODE_CACHE_FILE`, `DECODE_MISS_TTL_MS`
 - Data stores: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`

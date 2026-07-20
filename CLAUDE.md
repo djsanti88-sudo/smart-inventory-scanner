@@ -99,7 +99,7 @@ PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `inte
   -> Needs Review with honest reasons.
 - GEMINI IS PERMANENTLY OUT OF DECODE (grounding bills every executed search, no cap control; L11).
   `GEMINI_DECODE_DISABLED = true` in pipeline.ts; Gemini survives only in legacy lookup / correction re-check.
-- The daily AI cap (default 500, `AI_LOOKUP_DAILY_LIMIT`) charges ONLY paid rungs, exactly once per
+- The daily AI cap (default 2000, `AI_LOOKUP_DAILY_LIMIT`) charges ONLY paid rungs, exactly once per
   genuine compute, INSIDE the paid path via `chargeDailySlot` (L12: never charge two paths of one
   request). Free/corpus/cache hits never burn a slot. `checkAndIncrementDaily` is the LEGACY
   lookup-mode gate - do not add callers.

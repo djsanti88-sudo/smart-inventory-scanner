@@ -1288,7 +1288,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     const chargePaidSlot = async (): Promise<void> => {
       if (e2eMode()) return;
       const ladderStore = await ladderStorage();
-      const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+      const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
       // GC-A (P6 Task A2): when the route has already cleared this request's own per-account cap
       // (capContext.accountCapCleared), this internal global gate compares against the high
       // platform-wide BACKSTOP instead of the plain daily limit - it must never independently 429 an

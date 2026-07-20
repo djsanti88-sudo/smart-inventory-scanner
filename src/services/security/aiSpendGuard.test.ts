@@ -187,13 +187,13 @@ describe("aiSpendGuard", () => {
       expect(await readDailyUsed(s)).toBe(1);
     });
 
-    it("chargeDailySlot defaults limit from AI_LOOKUP_DAILY_LIMIT (blank env -> 500 default, not 0)", async () => {
+    it("chargeDailySlot defaults limit from AI_LOOKUP_DAILY_LIMIT (blank env -> 2000 default, not 0)", async () => {
       const prev = process.env.AI_LOOKUP_DAILY_LIMIT;
       process.env.AI_LOOKUP_DAILY_LIMIT = "";
       try {
         const s = memStorage();
         const r = await chargeDailySlot(s, { dateKey: "2026-07-09" });
-        expect(r.limit).toBe(500);
+        expect(r.limit).toBe(2000);
       } finally {
         if (prev === undefined) delete process.env.AI_LOOKUP_DAILY_LIMIT;
         else process.env.AI_LOOKUP_DAILY_LIMIT = prev;

@@ -154,7 +154,7 @@ export async function chargeDailySlot(
   storage: DailyCapStorage,
   opts: { limit?: number; dateKey?: string } = {},
 ): Promise<{ used: number; limit: number }> {
-  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
   const used = await storage.increment(DAILY_KEY_PREFIX + (opts.dateKey ?? todayKey()));
   return { used, limit };
 }

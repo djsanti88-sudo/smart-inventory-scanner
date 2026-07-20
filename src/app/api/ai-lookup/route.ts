@@ -172,7 +172,7 @@ export async function GET(request: Request) {
   const goUpcSpend = await goUpcUsage(await ladderStorage()).canSpend();
   // Task 1 (v2 daily cap): read-only peek at today's atomic, storage-backed usage - makes NO writes
   // (readDailyUsed never increments), so this GET never inflates the counter it is reporting on.
-  const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+  const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
   const dailyUsed = await readDailyUsed(await ladderStorage());
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
@@ -385,7 +385,7 @@ export async function POST(request: Request) {
   const forceRetry = body.forceRetry === true;
   if (!e2eMode() && !isDecodeMode) {
     const ladderStore = await ladderStorage();
-    const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+    const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
     if (authedBusinessId) {
       // Per-account cap FIRST (primary gate for authed traffic).
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
@@ -472,7 +472,7 @@ export async function POST(request: Request) {
     if (authedBusinessId && !e2eMode()) {
       const ladderStore = await ladderStorage();
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
-      const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500));
+      const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000));
       if (acctUsed >= acctLimit) {
         logServerEvent({
           route: "/api/ai-lookup",
