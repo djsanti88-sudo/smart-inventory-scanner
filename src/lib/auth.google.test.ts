@@ -21,7 +21,8 @@ vi.mock("firebase/auth", () => ({
 vi.mock("@/lib/firebaseClient", () => ({ getFirebaseAuth: () => ({}), getDb: () => ({}) }));
 vi.mock("@/services/auth/authBypass", () => ({ isAuthBypassEnabled: () => false }));
 vi.mock("firebase/firestore", () => ({
-  doc: vi.fn(), setDoc: vi.fn(), getDocs: vi.fn(), query: vi.fn(),
+  doc: vi.fn(), setDoc: vi.fn(), getDoc: vi.fn(() => Promise.resolve({ exists: () => false, data: () => undefined })),
+  getDocs: vi.fn(), query: vi.fn(),
   collection: vi.fn(), where: vi.fn(), serverTimestamp: vi.fn(),
 }));
 
