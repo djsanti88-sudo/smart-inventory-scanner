@@ -10,6 +10,7 @@ import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 import { GptLadderPanel } from "@/components/GptLadderPanel";
 import { GeminiStatusRow } from "@/components/GeminiStatusRow";
+import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -31,6 +32,26 @@ export default function SettingsPage() {
   const pendingCatalogCount = catalog.filter((e) => e.verificationStatus === "pending").length;
 
   const [cacheMsg, setCacheMsg] = useState("");
+  const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
+  const verifyOwnerPin = useScanStore((s) => s.verifyOwnerPin);
+  const [pinPrompt, setPinPrompt] = useState(false);
+  const [pin, setPin] = useState("");
+  const [pinErr, setPinErr] = useState("");
+
+  // The pre-existing clear-cache body, verbatim (AM-R9 preserved). The PIN gate wraps AROUND it.
+  function doClear() {
+    clearLocalCache();
+    // AM-R9: the reconcile session is browser-local session state too - the same wipe clears it.
+    useReconcileStore.getState().clearLocalCache();
+    setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
+    // Reload cleanly so cloud data re-loads fresh (and a poisoned alias that returns proves it is in
+    // cloud data, to be fixed via the alias repair path, not local cache).
+    if (typeof window !== "undefined") setTimeout(() => window.location.reload(), 1400);
+    setPinPrompt(false);
+    setPin("");
+    setPinErr("");
+  }
+
   function handleClearCache() {
     const ok =
       typeof window === "undefined" ||
@@ -39,13 +60,17 @@ export default function SettingsPage() {
           "cached data only. Your cloud data is NOT deleted.",
       );
     if (!ok) return;
-    clearLocalCache();
-    // AM-R9: the reconcile session is browser-local session state too - the same wipe clears it.
-    useReconcileStore.getState().clearLocalCache();
-    setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
-    // Reload cleanly so cloud data re-loads fresh (and a poisoned alias that returns proves it is in
-    // cloud data, to be fixed via the alias repair path, not local cache).
-    if (typeof window !== "undefined") setTimeout(() => window.location.reload(), 1400);
+    if (requiresOwnerPin("clearCache", hasPin)) {
+      setPinPrompt(true);
+      return;
+    }
+    doClear();
+  }
+
+  async function submitPin() {
+    const ok = await verifyOwnerPin(pin);
+    if (!ok) { setPinErr("Wrong PIN"); return; }
+    doClear();
   }
 
   return (
@@ -338,6 +363,19 @@ export default function SettingsPage() {
           <p className="mt-2 text-sm font-medium text-green-700" data-testid="clear-cache-message">
             {cacheMsg}
           </p>
+        )}
+        {pinPrompt && (
+          <div className="mt-2 flex items-center gap-2" data-testid="clear-cache-pin-row">
+            <input aria-label="owner PIN" inputMode="numeric" value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={6}
+              placeholder="Owner PIN" data-testid="clear-cache-pin"
+              className="min-h-[44px] w-28 rounded-lg border border-zinc-300 px-3 text-base" />
+            <button type="button" data-testid="clear-cache-confirm" onClick={submitPin}
+              className="inline-flex min-h-[44px] items-center rounded-lg bg-red-600 px-4 text-base font-medium text-white hover:bg-red-700">
+              Confirm clear
+            </button>
+            {pinErr && <span className="text-sm text-red-600" data-testid="clear-cache-pin-error">{pinErr}</span>}
+          </div>
         )}
       </div>
     </div>
