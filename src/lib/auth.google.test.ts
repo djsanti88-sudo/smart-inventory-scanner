@@ -22,6 +22,10 @@ vi.mock("@/lib/firebaseClient", () => ({ getFirebaseAuth: () => ({}), getDb: () 
 vi.mock("@/services/auth/authBypass", () => ({ isAuthBypassEnabled: () => false }));
 vi.mock("firebase/firestore", () => ({
   doc: vi.fn(), setDoc: vi.fn(), getDoc: vi.fn(() => Promise.resolve({ exists: () => false, data: () => undefined })),
+  // runTransaction invokes its callback with a fake tx whose get returns a not-exists snapshot.
+  runTransaction: vi.fn((_db: unknown, fn: (tx: unknown) => Promise<unknown>) =>
+    fn({ get: () => Promise.resolve({ exists: () => false, data: () => undefined }), set: vi.fn() }),
+  ),
   getDocs: vi.fn(), query: vi.fn(),
   collection: vi.fn(), where: vi.fn(), serverTimestamp: vi.fn(),
 }));

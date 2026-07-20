@@ -10,7 +10,7 @@ import {
   signInWithPopup,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, getDocs, query, collection, where, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDocs, query, collection, where, serverTimestamp, runTransaction } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "@/lib/firebaseClient";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { COLLECTIONS, memberDocId, type BusinessMember } from "@/services/db/types";
@@ -96,25 +96,31 @@ export async function signOut(): Promise<void> {
 /**
  * Create (or refresh) the user's profile doc on every login (doc id = uid; a user may only write
  * their own). `lastLoginAt` is stamped on every call; `signedUpAt` is stamped once, only when the
- * profile doc does not already have it (read-before-write so repeat logins never overwrite it).
+ * profile doc does not already have it. The read-then-conditional-write runs inside a Firestore
+ * `runTransaction` so the decision and the write are atomic: two concurrent logins for the same new
+ * uid (double-clicked sign-in, a Google popup racing an auth-state listener) can no longer both read
+ * "not exists" and both stamp `signedUpAt` - the transaction re-reads on conflict and preserves the
+ * first writer's timestamp, keeping the "stamped once" contract.
  */
 export async function ensureUserProfile(user: User): Promise<void> {
   const db = getDb();
   const ref = doc(db, COLLECTIONS.userProfiles, user.uid);
-  const existing = await getDoc(ref);
-  const hasSignedUpAt = existing.exists() && existing.data()?.signedUpAt != null;
-  await setDoc(
-    ref,
-    {
-      authUserId: user.uid,
-      email: user.email ?? "",
-      name: user.displayName ?? "",
-      updatedAt: serverTimestamp(),
-      lastLoginAt: serverTimestamp(),
-      ...(hasSignedUpAt ? {} : { signedUpAt: serverTimestamp() }),
-    },
-    { merge: true },
-  );
+  await runTransaction(db, async (tx) => {
+    const existing = await tx.get(ref);
+    const hasSignedUpAt = existing.exists() && existing.data()?.signedUpAt != null;
+    tx.set(
+      ref,
+      {
+        authUserId: user.uid,
+        email: user.email ?? "",
+        name: user.displayName ?? "",
+        updatedAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+        ...(hasSignedUpAt ? {} : { signedUpAt: serverTimestamp() }),
+      },
+      { merge: true },
+    );
+  });
 }
 
 /** Create a business and the creator's owner membership (allowed by the bootstrap security rules). */
