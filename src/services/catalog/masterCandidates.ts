@@ -1,0 +1,89 @@
+// masterCandidates.ts (Phase 5b, Task 3) - pure, client-safe transform from a single master-catalog
+// hit (the store's CatalogEntry, read via its optional masterId/masterProvenanceTier fields per the
+// GC4 boundary extension) into the MasterCandidate[] shape resolveScanToProductTiered accepts.
+//
+// GC1 (hard invariant, review F3): the resolver folds every MasterCandidate.productId into the SAME
+// distinctProductIds set as real tenant products (aliasMatcher.ts:269-273). A masterCandidates array
+// whose only entries are "master:"-prefixed ids with ZERO tenant-origin candidates would make
+// resolveScanToProductTiered mint a phantom "known" result pointing at a product id this account does
+// not own. So: ZERO tenant candidates for this code -> return [] (never emit a lone master candidate).
+//
+// Semantics:
+//   - find the tenant candidate product already resolvable for this code (reuse
+//     resolveScanToProductTiered with an empty master slot - the exact same deterministic tenant-only
+//     resolution logic every other caller relies on, never reimplemented here);
+//   - none -> [] (GC1 hard invariant);
+//   - identity AGREES (brand family-aware equality + name Jaccard >= IDENTITY_JACCARD_THRESHOLD) ->
+//     a candidate carrying the EXISTING tenant product id (agreement reinforces, never conflicts);
+//   - identity DISAGREES -> a candidate carrying the "master:"+masterId namespace tag, so the resolver
+//     sees a genuinely distinct id and emits a real conflict.
+//
+// Pure, sync, no I/O, no React imports - safe to import from client code (Task 4's scanStore wiring).
+
+import { resolveScanToProductTiered, type MasterCandidate } from "@/services/aliasMatcher";
+import { sameBrandFamily } from "@/services/catalog/brandFamilies";
+import { nameTokens, jaccard, IDENTITY_JACCARD_THRESHOLD } from "@/services/catalog/identityMerge";
+import type { Product, Alias, CleanedCode, ProvenanceTier } from "@/types";
+
+/** The subset of the store CatalogEntry shape this transform needs (GC4 boundary: masterId /
+ *  masterProvenanceTier are the optional fields catalogTypes.CatalogEntry gains in Task 4). */
+export interface MasterHit {
+  masterId: string;
+  name?: string;
+  brand?: string;
+  masterProvenanceTier?: ProvenanceTier;
+}
+
+/** True when two brand+name identities are the SAME product per the app's existing identity rules:
+ *  brand-family-aware equality (curated same-company groups, e.g. Michelin/BFGoodrich) AND name
+ *  token-Jaccard similarity at or above the app's single canonical threshold. Brand-empty on both
+ *  sides is treated as "brands agree" (nothing to disagree about) so a name-only match can still land. */
+function identitiesAgree(aName: string | undefined, aBrand: string | undefined, bName: string | undefined, bBrand: string | undefined): boolean {
+  const an = (aName ?? "").trim();
+  const bn = (bName ?? "").trim();
+  const ab = (aBrand ?? "").trim();
+  const bb = (bBrand ?? "").trim();
+
+  const brandsAgree = (!ab && !bb) || sameBrandFamily(ab, bb);
+  if (!brandsAgree) return false;
+
+  const sim = jaccard(nameTokens(an), nameTokens(bn));
+  return sim >= IDENTITY_JACCARD_THRESHOLD;
+}
+
+/**
+ * GC1 semantics (see file header). `tenantProducts`/`aliases` are the current store state for this
+ * account; `cleaned` is the scanned code being resolved.
+ */
+export function toMasterCandidates(
+  hit: MasterHit,
+  tenantProducts: Product[],
+  aliases: Alias[],
+  cleaned: CleanedCode,
+  businessId: string,
+): MasterCandidate[] {
+  // Find the tenant candidate product already resolvable for this code, using the SAME
+  // tenant-only tiered resolution every other caller uses (empty master slot - never reimplemented).
+  const tenantOnly = resolveScanToProductTiered(cleaned, { products: tenantProducts, aliases, masterCandidates: [] }, businessId);
+
+  // HARD INVARIANT (GC1 / review F3): no resolvable tenant candidate for this code -> emit nothing.
+  // A lone "master:"-namespaced candidate with zero tenant-origin candidates would make the resolver
+  // mint a phantom "known" result; the existing cloudCatalogResolve enrichment already owns that case.
+  if (!tenantOnly.productId) return [];
+
+  const tenantProduct = tenantProducts.find((p) => p.id === tenantOnly.productId);
+  // Defensive: the resolver returned an id but it is not in the supplied product list (should not
+  // happen in practice - resolveScanToProductTiered only ever returns ids drawn from tenantProducts
+  // when masterCandidates is empty). Treat as "no tenant candidate" rather than trusting an id we
+  // cannot verify.
+  if (!tenantProduct) return [];
+
+  const tier: ProvenanceTier = hit.masterProvenanceTier ?? "corpus_verified";
+  const agree = identitiesAgree(hit.name, hit.brand, tenantProduct.name, tenantProduct.brand);
+
+  if (agree) {
+    return [{ productId: tenantProduct.id, matchedOn: cleaned.cleanCode, provenanceTier: tier }];
+  }
+
+  return [{ productId: `master:${hit.masterId}`, matchedOn: cleaned.cleanCode, provenanceTier: tier }];
+}
