@@ -59,7 +59,7 @@ The Windows wrapper `.\fable5.cmd` and `python -m tools.fable5` are equivalent.
 | `npx vitest run <path> -t "name"` | One test by name within a file. |
 | `npm run test:ledger` | Crown invariant suite: 8 pinned files proving books balance, retry-is-no-op, markWrong transfer, merge union, provenance, replay, ladder timeout. Run for ANY counting change. |
 | `npm run test:golden` | Golden Baseline Gate: owner-loved 100/100 preview baseline, corpus slice, deterministic offline (Turso forced off). |
-| `npm run test:corpus-drift` | Live-Turso drift gate; self-skips unless `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` present. Asserts corpus row count has not shrunk. |
+| `npm run test:corpus-drift` | Local corpus gate (plain filesystem reads, no Turso, no skip; wired into `qa:revision`). Three checks: the REAL payload barcode key count in `tireKnowledge.generated.json` stays above a 1%-under floor derived at runtime from `meta.json`; payload is never POORER than the manifest (enrichment pipelines legitimately write the payload ahead of the manifest, but payload < manifest means a stale-snapshot regen wiped enrichments - fails); 10 golden barcodes still resolve. |
 | `npm run test:firebase` | `firebase emulators:exec` + the `src/services/db/firebase` suite (tenant isolation via real firestore.rules, audit append-only). These tests self-skip under plain `npm run test`. |
 
 Known flake: `cloudDrainRace.store.test.ts` is timing-flaky only under full parallel load; passes isolated.
