@@ -25,6 +25,7 @@ from .docs_check import check_docs
 from .experts import run_experts
 from .invariants import load_invariants, select_invariant_checks
 from .models import CheckResult, RunReport
+from .personas import run_personas
 from .plan_review import render_plan_markdown, review_plan
 from .report import write_report
 from .risk import classify, expert_tier
@@ -45,6 +46,7 @@ HOOK_TRIGGERED_WALL_CLOCK_CAP_MINUTES = 15
 # CLI flags refused outright when a hook-triggered run passes them explicitly.
 _HOOK_REFUSED_FLAGS: tuple[tuple[str, str], ...] = (
     ("with_experts", "--with-experts"),
+    ("personas", "--personas"),
     ("allow_network", "--allow-network"),
     ("allow_live", "--allow-live"),
     ("allow_paid", "--allow-paid"),
@@ -57,8 +59,14 @@ def _is_hook_triggered() -> bool:
     return os.environ.get(HOOK_TRIGGERED_ENV) == "1"
 
 
+def _personas_requested(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "personas", False) or getattr(args, "gate", "") == "monthly")
+
+
 def _hook_triggered_refusal(args: argparse.Namespace) -> str | None:
     """Return a refusal message if a hook-triggered run requested a refused flag."""
+    if _personas_requested(args):
+        return "hook-triggered runs are deterministic-only: --personas refused"
     for attribute, flag in _HOOK_REFUSED_FLAGS:
         if getattr(args, attribute, False):
             return f"hook-triggered runs are deterministic-only: {flag} refused"
@@ -307,6 +315,19 @@ async def _run_gated(
                         effort=effort,
                     )
                 )
+        if _personas_requested(args):
+            print("Launching measured personas on the single browser lane")
+            results.extend(
+                await run_personas(
+                    root=root,
+                    report_dir=report_dir,
+                    browser_workers=config.browser_workers,
+                    expert_workers=config.expert_workers,
+                    timeout_seconds=args.expert_timeout,
+                    dry_run=args.dry_run,
+                    allow_paid=args.allow_paid_fallback,
+                )
+            )
     finally:
         cache.close()
 
@@ -382,6 +403,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--with-experts",
         action="store_true",
         help="Use the Claude subscription/network to run selected experts concurrently.",
+    )
+    run.add_argument(
+        "--personas",
+        action="store_true",
+        help=(
+            "Measure local browser flows on port 3400, then run the existing value-roi and "
+            "ux-vision agents. Enabled by default for the monthly gate."
+        ),
     )
     run.add_argument(
         "--expert-model",
