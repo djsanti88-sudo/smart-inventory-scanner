@@ -1,4 +1,4 @@
-import type { Alias, CleanedCode, MatchType, Product, ScanResolution } from "@/types";
+import type { Alias, CleanedCode, MatchType, Product, ProvenanceTier, ScanResolution } from "@/types";
 
 // Deterministic alias matching. THE heart of the product. No AI here, ever.
 // One product can own many scannable codes; any of them must resolve to the same product.
@@ -161,4 +161,22 @@ export function resolveScanToProduct(
 /** True when a resolution means the scan needs human attention (unknown or conflicting). */
 export function needsReview(resolution: ScanResolution): boolean {
   return resolution.matchType === "unknown" || resolution.matchType === "conflict";
+}
+
+// Resolver tier interface (P2). Presents tenant truth (the account's own products/aliases) and, in a
+// slot, master truth (corpus/catalogEntries candidates carrying a provenanceTier). In P2 the master slot
+// is CARRIED but not compared - it exists so P5 can add cross-tier conflict detection (D5) without
+// re-plumbing callers. P2 outcome is identical to resolveScanToProduct (tenant tiers only, short-circuit
+// preserved). Do NOT add conflict logic here; that is P5.
+export type MasterCandidate = { productId: string; matchedOn: string; provenanceTier: ProvenanceTier };
+export type TierInput = { products: Product[]; aliases: Alias[]; masterCandidates?: MasterCandidate[] };
+
+export function resolveScanToProductTiered(
+  cleaned: CleanedCode,
+  input: TierInput,
+  businessId: string,
+): ScanResolution {
+  // P2: tenant-only resolution, unchanged. masterCandidates intentionally unused until P5 (D5).
+  void input.masterCandidates;
+  return resolveScanToProduct(cleaned, input.products, input.aliases, businessId);
 }
