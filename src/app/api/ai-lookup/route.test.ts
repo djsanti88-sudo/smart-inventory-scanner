@@ -941,8 +941,10 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
       // Go-UPC was genuinely called (spy proof), not just skipped/gated.
       expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("go-upc.com/api/v1/code/"))).toBe(true);
-      // The ladder's Go-UPC rung answer WINS the response, replacing Plan D's floor.
-      expect(json.decision.status).toBe("verified");
+      // The ladder's Go-UPC rung answer WINS the response, replacing Plan D's floor. P5 D6 (Task 2):
+      // Go-UPC is now an honest "suggested" (paid-DB self-report), never "verified" - it still WINS the
+      // response and still auto-applies its identity, only the badge/verified-flag changed.
+      expect(json.decision.status).toBe("suggested");
       expect(json.results[0].productName).toBe("Acme Go-UPC Widget");
       expect(json.providerNames).toContain("go-upc");
       // Plan D's own attempt is still recorded (debug transparency), not silently dropped.

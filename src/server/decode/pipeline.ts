@@ -4,6 +4,7 @@ import { emptyResult } from "@/services/ai/provider";
 import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
 import { decideDecode, isUsableProductName, isExampleOrTestRow } from "@/services/ai/decode";
 import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
+import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
@@ -1165,11 +1166,14 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // ladder; only its POSITION moved (owner cost-order fix), the internals are byte-for-byte unchanged.
     if (!e2eMode() && isPublicBarcode) {
       const fast = await resolveUnknownFast(code, {
-        // D8 (Task 2, Step 3b): UPCitemdb result is REUSED from rung-0, never re-queried. Rung-0
-        // (runUpcItemDb, above) is GTIN-gated exactly like this Plan D door (isPublicBarcode is the same
-        // GTIN universe), so by the time Plan D runs, rung 0 has ALWAYS already attempted this exact
-        // lookup - a second live fetch to api.upcitemdb.com for the same code would be pure waste.
-        lookupBarcodeDb: async () => upcItemDbResult,
+        // D8 (Task 2, Step 3b, + 2-DB-consensus regression fix): REUSE rung-0's UPCitemdb result when it
+        // produced one (the common hit path - no second fetch, pay-once holds). Rung-0 is NOT fully
+        // equivalent to barcodeDbProvider though: it applies a stricter check-digit gate and lacks the
+        // zero-pad-variant retry, so a code rung-0 rejected/missed can still be a genuine barcodeDbProvider
+        // hit that Plan D's 2-DB verified consensus needs (master plan D8: "the valuable 2-DB agreement
+        // path preserved"). Fall back to a real barcodeDbProvider lookup ONLY when rung-0 gave nothing -
+        // this keeps once-per-request on the hit path while never dropping the verified 2-DB path.
+        lookupBarcodeDb: async () => upcItemDbResult ?? (await lookupBarcodeDb(code)),
         retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
         // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
         // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.
