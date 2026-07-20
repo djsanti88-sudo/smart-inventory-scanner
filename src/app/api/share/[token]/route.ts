@@ -3,6 +3,7 @@ import {
   normalizeBossReportSnapshot,
   resolveShareToken,
 } from "@/server/share/shareTokenStore";
+import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,7 @@ export async function GET(
   const { token } = await context.params;
   const payload = await resolveShareToken(token);
   if (!payload) {
+    logServerEvent({ route: "/api/share/[token]", event: "invalid_token", reasonCode: "not_found", status: 404 });
     return json({ error: "This link has expired or does not exist." }, 404);
   }
 

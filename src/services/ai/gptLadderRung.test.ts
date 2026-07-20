@@ -12,89 +12,89 @@ const baseInput = {
   priorStatus: undefined as string | undefined,
   e2e: false,
   apiKeyPresent: true,
-  // LAZY budget: a thunk, not a pre-computed value (MINOR 3 - the route must not pay for the sync
-  // budget-file read when an earlier, cheaper check already decided to skip).
-  budget: () => okBudget,
+  // LAZY budget: a thunk, not a pre-computed value (MINOR 3 - the route must not pay for the
+  // budget-storage read when an earlier, cheaper check already decided to skip). ASYNC (B1): the
+  // $-guard reads through durable storage, so the thunk returns a Promise.
+  budget: async () => okBudget,
 };
 
 describe("shouldRunGptRung", () => {
-  test("runs when the ladder found nothing, code is public, online, keyed, and under budget", () => {
-    expect(shouldRunGptRung(baseInput)).toEqual({ run: true, skipReason: "" });
+  test("runs when the ladder found nothing, code is public, online, keyed, and under budget", async () => {
+    expect(await shouldRunGptRung(baseInput)).toEqual({ run: true, skipReason: "" });
   });
 
-  test("skips when a prior rung already verified the code", () => {
-    const r = shouldRunGptRung({ ...baseInput, priorStatus: "verified" });
+  test("skips when a prior rung already verified the code", async () => {
+    const r = await shouldRunGptRung({ ...baseInput, priorStatus: "verified" });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
 
-  test("skips when a prior rung already produced a suggested match", () => {
-    const r = shouldRunGptRung({ ...baseInput, priorStatus: "suggested" });
+  test("skips when a prior rung already produced a suggested match", async () => {
+    const r = await shouldRunGptRung({ ...baseInput, priorStatus: "suggested" });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
 
-  test("does NOT skip on a prior needs_review/conflict status (those are exactly what the rung should try to resolve)", () => {
-    expect(shouldRunGptRung({ ...baseInput, priorStatus: "needs_review" }).run).toBe(true);
-    expect(shouldRunGptRung({ ...baseInput, priorStatus: "conflict" }).run).toBe(true);
+  test("does NOT skip on a prior needs_review/conflict status (those are exactly what the rung should try to resolve)", async () => {
+    expect((await shouldRunGptRung({ ...baseInput, priorStatus: "needs_review" })).run).toBe(true);
+    expect((await shouldRunGptRung({ ...baseInput, priorStatus: "conflict" })).run).toBe(true);
   });
 
-  test("skips vendor_label codeType (Amazon FNSKU/ASIN labels never reach GPT)", () => {
-    const r = shouldRunGptRung({ ...baseInput, codeType: "vendor_label" });
+  test("skips vendor_label codeType (Amazon FNSKU/ASIN labels never reach GPT)", async () => {
+    const r = await shouldRunGptRung({ ...baseInput, codeType: "vendor_label" });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
 
-  test("skips a raw FNSKU-shaped code even if the caller passed a stale/wrong codeType", () => {
-    const r = shouldRunGptRung({ ...baseInput, code: "X001DY7YUT", codeType: "alpha_sku" });
+  test("skips a raw FNSKU-shaped code even if the caller passed a stale/wrong codeType", async () => {
+    const r = await shouldRunGptRung({ ...baseInput, code: "X001DY7YUT", codeType: "alpha_sku" });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
 
-  test("skips under E2E (mock path is handled separately by the route)", () => {
-    const r = shouldRunGptRung({ ...baseInput, e2e: true });
+  test("skips under E2E (mock path is handled separately by the route)", async () => {
+    const r = await shouldRunGptRung({ ...baseInput, e2e: true });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
 
-  test("skips when no OpenAI API key is configured", () => {
-    const r = shouldRunGptRung({ ...baseInput, apiKeyPresent: false });
+  test("skips when no OpenAI API key is configured", async () => {
+    const r = await shouldRunGptRung({ ...baseInput, apiKeyPresent: false });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
 
-  test("skips when the daily dollar budget is not allowed", () => {
-    const r = shouldRunGptRung({ ...baseInput, budget: () => blockedBudget });
+  test("skips when the daily dollar budget is not allowed", async () => {
+    const r = await shouldRunGptRung({ ...baseInput, budget: async () => blockedBudget });
     expect(r.run).toBe(false);
     expect(r.skipReason).toBeTruthy();
   });
 
-  test("each skip reason is a distinct, explicit string (no generic catch-all)", () => {
+  test("each skip reason is a distinct, explicit string (no generic catch-all)", async () => {
     const reasons = new Set([
-      shouldRunGptRung({ ...baseInput, priorStatus: "verified" }).skipReason,
-      shouldRunGptRung({ ...baseInput, codeType: "vendor_label" }).skipReason,
-      shouldRunGptRung({ ...baseInput, e2e: true }).skipReason,
-      shouldRunGptRung({ ...baseInput, apiKeyPresent: false }).skipReason,
-      shouldRunGptRung({ ...baseInput, budget: () => blockedBudget }).skipReason,
+      (await shouldRunGptRung({ ...baseInput, priorStatus: "verified" })).skipReason,
+      (await shouldRunGptRung({ ...baseInput, codeType: "vendor_label" })).skipReason,
+      (await shouldRunGptRung({ ...baseInput, e2e: true })).skipReason,
+      (await shouldRunGptRung({ ...baseInput, apiKeyPresent: false })).skipReason,
+      (await shouldRunGptRung({ ...baseInput, budget: async () => blockedBudget })).skipReason,
     ]);
     expect(reasons.size).toBe(5);
   });
 
-  // MINOR 3: the budget guard does a SYNCHRONOUS file read (checkGptLadderBudget). It must never pay
-  // that cost when an earlier, cheaper check (prior status / codeType / e2e / api key) already decided
-  // to skip - so `budget` is a thunk and shouldRunGptRung must not invoke it unless it reaches that
-  // final check.
-  test("never calls the budget thunk when an earlier cheap check already skips", () => {
-    const spy = () => { throw new Error("budget thunk must not be called - an earlier check should have skipped first"); };
-    expect(shouldRunGptRung({ ...baseInput, priorStatus: "verified", budget: spy }).run).toBe(false);
-    expect(shouldRunGptRung({ ...baseInput, codeType: "vendor_label", budget: spy }).run).toBe(false);
-    expect(shouldRunGptRung({ ...baseInput, e2e: true, budget: spy }).run).toBe(false);
-    expect(shouldRunGptRung({ ...baseInput, apiKeyPresent: false, budget: spy }).run).toBe(false);
+  // MINOR 3: the budget guard reads durable storage. It must never pay that cost when an earlier,
+  // cheaper check (prior status / codeType / e2e / api key) already decided to skip - so `budget` is
+  // a thunk and shouldRunGptRung must not invoke it unless it reaches that final check.
+  test("never calls the budget thunk when an earlier cheap check already skips", async () => {
+    const spy = async () => { throw new Error("budget thunk must not be called - an earlier check should have skipped first"); };
+    expect((await shouldRunGptRung({ ...baseInput, priorStatus: "verified", budget: spy })).run).toBe(false);
+    expect((await shouldRunGptRung({ ...baseInput, codeType: "vendor_label", budget: spy })).run).toBe(false);
+    expect((await shouldRunGptRung({ ...baseInput, e2e: true, budget: spy })).run).toBe(false);
+    expect((await shouldRunGptRung({ ...baseInput, apiKeyPresent: false, budget: spy })).run).toBe(false);
   });
 
-  test("DOES call the budget thunk once every cheaper check has passed", () => {
+  test("DOES call the budget thunk once every cheaper check has passed", async () => {
     let calls = 0;
-    const r = shouldRunGptRung({ ...baseInput, budget: () => { calls++; return okBudget; } });
+    const r = await shouldRunGptRung({ ...baseInput, budget: async () => { calls++; return okBudget; } });
     expect(r.run).toBe(true);
     expect(calls).toBe(1);
   });

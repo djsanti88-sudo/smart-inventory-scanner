@@ -14,6 +14,7 @@ import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import type { PreviewMatchResult } from "@/services/universalImportPreview";
+import { logServerEvent } from "@/server/log";
 
 // Preview result = a MatchResult optionally enriched with the exact retail-corpus hit for a non-tire
 // row (the "identified from the 4M-product catalog" badge). Shared with universalImportPreview.ts,
@@ -74,17 +75,21 @@ export async function POST(request: Request): Promise<NextResponse> {
   try {
     body = await request.json();
   } catch {
+    logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "invalid_json", status: 400 });
     return NextResponse.json({ error: "Body must be valid JSON." }, { status: 400 });
   }
 
   const rows = (body as { rows?: unknown } | null)?.rows;
   if (!Array.isArray(rows)) {
+    logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "missing_rows", status: 400 });
     return NextResponse.json({ error: "Body must be { rows: [...] }." }, { status: 400 });
   }
   if (rows.length > MAX_ROWS) {
+    logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "too_many_rows", status: 400 });
     return NextResponse.json({ error: `Too many rows (max ${MAX_ROWS}).` }, { status: 400 });
   }
   if (!rows.every(isValidRow)) {
+    logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "invalid_row_shape", status: 400 });
     return NextResponse.json(
       { error: "Each row needs externalId (string), partNumbers (string array), and qty (number)." },
       { status: 400 },

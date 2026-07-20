@@ -712,21 +712,23 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // The synchronous decode budget is already blown - never stack a paid ~10s call on top.
       return { payload: null, skipReason: "request_budget_exhausted", surfaceSkip: true };
     }
-    const rung = shouldRunGptRung({
+    const rung = await shouldRunGptRung({
       code,
       codeType,
       priorStatus: opts.priorStatus,
       e2e: false,
       apiKeyPresent: !!process.env.OPENAI_API_KEY,
-      // LAZY (MINOR 3): checkGptLadderBudget() does a synchronous file read. shouldRunGptRung checks
-      // priorStatus/codeType/e2e/apiKeyPresent FIRST and only calls this thunk once all of those pass,
-      // so a code that never had a chance to reach the ladder never pays for that file I/O.
-      budget: () => checkGptLadderBudget({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD }),
+      // LAZY (MINOR 3): checkGptLadderBudget() reads the durable storage-backed $-guard (B1).
+      // shouldRunGptRung checks priorStatus/codeType/e2e/apiKeyPresent FIRST and only calls this
+      // thunk once all of those pass, so a code that never had a chance to reach the ladder never
+      // pays for that storage round-trip.
+      budget: async () => checkGptLadderBudget({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD, storage: await ladderStorage() }),
     });
     if (!rung.run) return { payload: null, skipReason: rung.skipReason, surfaceSkip: true };
     const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY! });
-    recordGptLadderSpend(r.usdActual); // ALWAYS - success, error, or abort; never skip this.
-    recordGptLadderCall(); // Task 6: Settings spend panel + GET status "calls today" counter.
+    const gptLadderStore = await ladderStorage();
+    await recordGptLadderSpend(r.usdActual, { storage: gptLadderStore }); // ALWAYS - success, error, or abort; never skip this.
+    await recordGptLadderCall({ storage: gptLadderStore }); // Task 6: Settings spend panel + GET status "calls today" counter.
     // TRANSIENT-FAILURE GUARD (found live 2026-07-06): an aborted/HTTP-failed/garbled rung call is
     // NOT genuine exhaustion - the model never actually answered. Without this, one OpenAI hiccup
     // wrote a PERMANENT no_result_receipt and froze the code forever. Only a real answer with an

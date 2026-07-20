@@ -20,10 +20,12 @@ export interface GptRungInput {
   priorStatus: string | undefined; // decision?.status of the ladder so far
   e2e: boolean;
   apiKeyPresent: boolean;
-  // LAZY on purpose: checkGptLadderBudget() does a synchronous file read. It must only run once every
-  // cheaper/earlier check (prior status, codeType, e2e, api key) has already passed - so this is a
-  // thunk, not a pre-computed value, and shouldRunGptRung calls it ONLY when it reaches this check.
-  budget: () => { allowed: boolean; spentUsd: number; capUsd: number };
+  // LAZY on purpose: checkGptLadderBudget() reads the durable storage-backed $-guard. It must only
+  // run once every cheaper/earlier check (prior status, codeType, e2e, api key) has already passed -
+  // so this is a thunk, not a pre-computed value, and shouldRunGptRung calls it ONLY when it reaches
+  // this check. ASYNC (B1): the $-guard now reads through LadderStorage (Turso in production), so the
+  // thunk returns a Promise.
+  budget: () => Promise<{ allowed: boolean; spentUsd: number; capUsd: number }>;
 }
 
 export type GptRungDecodePayload = {
@@ -37,7 +39,7 @@ export type GptRungDecodePayload = {
  * distinct reason so the caller can log/report WHY the paid rung was skipped (never a silent skip).
  * Order matters only in that the first matching reason wins; each check is otherwise independent.
  */
-export function shouldRunGptRung(i: GptRungInput): { run: boolean; skipReason: string } {
+export async function shouldRunGptRung(i: GptRungInput): Promise<{ run: boolean; skipReason: string }> {
   // The ladder already produced an answer strong enough to act on - the paid rung would be pure
   // waste. A needs_review/conflict prior status is exactly what this rung exists to try to resolve,
   // so those do NOT skip.
@@ -57,8 +59,8 @@ export function shouldRunGptRung(i: GptRungInput): { run: boolean; skipReason: s
   if (!i.apiKeyPresent) {
     return { run: false, skipReason: "no_api_key" };
   }
-  // Cheapest checks above all passed - only NOW pay for the budget guard's sync file read.
-  if (!i.budget().allowed) {
+  // Cheapest checks above all passed - only NOW pay for the budget guard's storage read.
+  if (!(await i.budget()).allowed) {
     return { run: false, skipReason: "budget_exceeded" };
   }
   return { run: true, skipReason: "" };

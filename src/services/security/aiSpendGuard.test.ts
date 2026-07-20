@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { killSwitchOn, checkRateLimit, checkAndIncrementDaily, dailyUsage, readDailyUsed, chargeDailySlot, __resetForTest } from "./aiSpendGuard";
+import { killSwitchOn, checkRateLimit, readDailyUsed, chargeDailySlot, __resetForTest } from "./aiSpendGuard";
 
 /** In-memory StorageLike stub matching the ladder storage's minimal get/set/increment surface. */
 function memStorage() {
@@ -33,32 +33,34 @@ describe("aiSpendGuard", () => {
     });
   });
 
-  describe("checkRateLimit", () => {
-    it("allows up to the limit then blocks within the window", () => {
+  // checkRateLimit without opts.storage: the documented dev/no-storage in-memory fallback (unchanged
+  // behavior from before B1 - still async now, but no durable storage involved).
+  describe("checkRateLimit (in-memory fallback, no storage)", () => {
+    it("allows up to the limit then blocks within the window", async () => {
       const ip = "1.2.3.4";
       const now = 1_000_000;
       for (let i = 0; i < 3; i++) {
-        expect(checkRateLimit(ip, { limit: 3, windowMs: 1000, now }).allowed).toBe(true);
+        expect((await checkRateLimit(ip, { limit: 3, windowMs: 1000, now })).allowed).toBe(true);
       }
-      const blocked = checkRateLimit(ip, { limit: 3, windowMs: 1000, now });
+      const blocked = await checkRateLimit(ip, { limit: 3, windowMs: 1000, now });
       expect(blocked.allowed).toBe(false);
       expect(blocked.retryAfterMs).toBeGreaterThan(0);
     });
 
-    it("resets after the window elapses", () => {
+    it("resets after the window elapses", async () => {
       const ip = "5.6.7.8";
-      checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 0 });
-      expect(checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 500 }).allowed).toBe(false);
-      expect(checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 1500 }).allowed).toBe(true);
+      await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 0 });
+      expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 500 })).allowed).toBe(false);
+      expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 1500 })).allowed).toBe(true);
     });
 
-    it("tracks IPs independently", () => {
-      expect(checkRateLimit("a", { limit: 1, windowMs: 1000, now: 0 }).allowed).toBe(true);
-      expect(checkRateLimit("a", { limit: 1, windowMs: 1000, now: 0 }).allowed).toBe(false);
-      expect(checkRateLimit("b", { limit: 1, windowMs: 1000, now: 0 }).allowed).toBe(true);
+    it("tracks IPs independently", async () => {
+      expect((await checkRateLimit("a", { limit: 1, windowMs: 1000, now: 0 })).allowed).toBe(true);
+      expect((await checkRateLimit("a", { limit: 1, windowMs: 1000, now: 0 })).allowed).toBe(false);
+      expect((await checkRateLimit("b", { limit: 1, windowMs: 1000, now: 0 })).allowed).toBe(true);
     });
 
-    it("treats an empty AI_LOOKUP_RATE_LIMIT env as the default (30), not 0", () => {
+    it("treats an empty AI_LOOKUP_RATE_LIMIT env as the default (30), not 0", async () => {
       const prev = process.env.AI_LOOKUP_RATE_LIMIT;
       process.env.AI_LOOKUP_RATE_LIMIT = ""; // present-but-blank, the env-pull failure mode
       try {
@@ -66,7 +68,7 @@ describe("aiSpendGuard", () => {
         const now = 2_000_000;
         // With the bug (blank -> Number("") = 0) the 2nd call is blocked; with the default 30 all pass.
         for (let i = 0; i < 5; i++) {
-          expect(checkRateLimit(ip, { windowMs: 60_000, now }).allowed).toBe(true);
+          expect((await checkRateLimit(ip, { windowMs: 60_000, now })).allowed).toBe(true);
         }
       } finally {
         if (prev === undefined) delete process.env.AI_LOOKUP_RATE_LIMIT;
@@ -75,52 +77,74 @@ describe("aiSpendGuard", () => {
     });
   });
 
-  describe("checkAndIncrementDaily", () => {
-    it("increments and blocks once the daily cap is hit, making zero further calls", () => {
-      const o = { limit: 2, file: tmpFile, dateKey: "2026-06-28" };
-      expect(checkAndIncrementDaily(o)).toEqual({ allowed: true, used: 1, limit: 2 });
-      expect(checkAndIncrementDaily(o)).toEqual({ allowed: true, used: 2, limit: 2 });
-      expect(checkAndIncrementDaily(o)).toEqual({ allowed: false, used: 2, limit: 2 });
-      // still blocked on repeat
-      expect(checkAndIncrementDaily(o).allowed).toBe(false);
-    });
-
-    it("persists across a process restart (re-read from file, in-memory cleared)", () => {
-      const o = { limit: 5, file: tmpFile, dateKey: "2026-06-28" };
-      checkAndIncrementDaily(o);
-      checkAndIncrementDaily(o);
-      __resetForTest(); // simulate a fresh process
-      expect(checkAndIncrementDaily(o)).toEqual({ allowed: true, used: 3, limit: 5 });
-    });
-
-    it("resets on a new date", () => {
-      const file = tmpFile;
-      checkAndIncrementDaily({ limit: 1, file, dateKey: "2026-06-28" });
-      expect(checkAndIncrementDaily({ limit: 1, file, dateKey: "2026-06-28" }).allowed).toBe(false);
-      // new day -> fresh budget
-      expect(checkAndIncrementDaily({ limit: 1, file, dateKey: "2026-06-29" }).allowed).toBe(true);
-    });
-
-    it("treats an empty AI_LOOKUP_DAILY_LIMIT env as the default 500, not 0 (regression: blank env -> 0 cap blocked ALL decode)", () => {
-      const prev = process.env.AI_LOOKUP_DAILY_LIMIT;
-      process.env.AI_LOOKUP_DAILY_LIMIT = ""; // the production failure: var present but blank
-      try {
-        // No explicit opts.limit -> reads env -> blank must fall back to the default (500 per owner
-        // order 2026-07-10, raised from 200) -> ALLOWED, not blocked at 0/0.
-        const r = checkAndIncrementDaily({ file: tmpFile, dateKey: "2026-06-28" });
-        expect(r.allowed).toBe(true);
-        expect(r.limit).toBe(500);
-      } finally {
-        if (prev === undefined) delete process.env.AI_LOOKUP_DAILY_LIMIT;
-        else process.env.AI_LOOKUP_DAILY_LIMIT = prev;
+  // B1: durable storage-backed rate limiting - same fixed-window contract, but backed by the
+  // injected LadderStorage-shaped get/set/increment seam (mirrors chargeDailySlot's pattern).
+  describe("checkRateLimit (durable, storage-backed)", () => {
+    it("allows up to the limit then blocks within the window", async () => {
+      const s = memStorage();
+      const ip = "1.2.3.4";
+      const now = 1_000_000;
+      for (let i = 0; i < 3; i++) {
+        expect((await checkRateLimit(ip, { limit: 3, windowMs: 1000, now, storage: s })).allowed).toBe(true);
       }
+      const blocked = await checkRateLimit(ip, { limit: 3, windowMs: 1000, now, storage: s });
+      expect(blocked.allowed).toBe(false);
+      expect(blocked.retryAfterMs).toBeGreaterThan(0);
     });
 
-    it("dailyUsage peeks without incrementing", () => {
-      const o = { file: tmpFile, dateKey: "2026-06-28" };
-      checkAndIncrementDaily({ ...o, limit: 10 });
-      expect(dailyUsage(o).count).toBe(1);
-      expect(dailyUsage(o).count).toBe(1); // peek does not increment
+    it("resets after the window elapses (new window key)", async () => {
+      const s = memStorage();
+      const ip = "5.6.7.8";
+      await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 0, storage: s });
+      expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 500, storage: s })).allowed).toBe(false);
+      expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 1500, storage: s })).allowed).toBe(true);
+    });
+
+    it("tracks IPs independently under the same storage handle", async () => {
+      const s = memStorage();
+      expect((await checkRateLimit("a", { limit: 1, windowMs: 1000, now: 0, storage: s })).allowed).toBe(true);
+      expect((await checkRateLimit("a", { limit: 1, windowMs: 1000, now: 0, storage: s })).allowed).toBe(false);
+      expect((await checkRateLimit("b", { limit: 1, windowMs: 1000, now: 0, storage: s })).allowed).toBe(true);
+    });
+
+    // B1 TDD: two separate "instances" (two independent process-local Maps, e.g. two serverless
+    // warm lambdas) sharing ONE durable store must see and enforce the SAME limit - the whole point
+    // of moving off the in-memory Map.
+    it("two independent instances sharing one storage handle enforce ONE shared limit", async () => {
+      const sharedStorage = memStorage();
+      const ip = "10.0.0.1";
+      const now = 5_000_000;
+      // "Instance A" and "Instance B" are just two separate calls - checkRateLimit has no
+      // process-local state when storage is supplied, so this simulates two warm lambdas.
+      const a1 = await checkRateLimit(ip, { limit: 2, windowMs: 1000, now, storage: sharedStorage });
+      const b1 = await checkRateLimit(ip, { limit: 2, windowMs: 1000, now, storage: sharedStorage });
+      const a2 = await checkRateLimit(ip, { limit: 2, windowMs: 1000, now, storage: sharedStorage });
+      expect(a1.allowed).toBe(true);
+      expect(b1.allowed).toBe(true);
+      expect(a2.allowed).toBe(false); // 3rd request in the same window, same shared limit of 2
+    });
+
+    // TDD: a storage error must fail OPEN to the in-memory fallback, never fail-closed (a Turso
+    // hiccup must not 429 the whole app).
+    it("falls back to in-memory allow-through when storage.increment throws", async () => {
+      __resetForTest();
+      const brokenStorage = {
+        async get() { return null; },
+        async set() {},
+        async increment(): Promise<number> { throw new Error("storage unavailable"); },
+      };
+      const ip = "8.8.8.8";
+      const r = await checkRateLimit(ip, { limit: 3, windowMs: 1000, now: 100, storage: brokenStorage });
+      expect(r.allowed).toBe(true); // fails OPEN, not closed
+    });
+
+    it("window start rolls over to a NEW key at the boundary (durable window rollover)", async () => {
+      const s = memStorage();
+      const ip = "3.3.3.3";
+      // limit 1, windowMs 1000: now=999 is still window 0; now=1000 is window 1.
+      expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 999, storage: s })).allowed).toBe(true);
+      expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 999, storage: s })).allowed).toBe(false);
+      expect((await checkRateLimit(ip, { limit: 1, windowMs: 1000, now: 1000, storage: s })).allowed).toBe(true);
     });
   });
 

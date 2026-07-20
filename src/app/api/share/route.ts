@@ -10,6 +10,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
+import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,7 @@ function json(body: unknown, status = 200): NextResponse {
 export async function POST(request: NextRequest) {
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declaredLength) && declaredLength > MAX_SHARE_SNAPSHOT_BYTES) {
+    logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "snapshot_too_large", status: 413 });
     return json({ error: "Report snapshot must be 32KB or smaller." }, 413);
   }
 
@@ -55,9 +57,11 @@ export async function POST(request: NextRequest) {
   try {
     rawBody = await request.text();
   } catch {
+    logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "invalid_body", status: 400 });
     return json({ error: "Invalid request body." }, 400);
   }
   if (new TextEncoder().encode(rawBody).byteLength > MAX_SHARE_SNAPSHOT_BYTES) {
+    logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "snapshot_too_large", status: 413 });
     return json({ error: "Report snapshot must be 32KB or smaller." }, 413);
   }
 
@@ -69,11 +73,13 @@ export async function POST(request: NextRequest) {
     }
     body = parsed as ShareRequestBody;
   } catch {
+    logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "invalid_body", status: 400 });
     return json({ error: "Invalid request body." }, 400);
   }
 
   const sessionId = stringField(body.sessionId);
   if (!sessionId) {
+    logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "missing_session", status: 400 });
     return json({ error: "A session is required before creating a shareable link." }, 400);
   }
 
@@ -81,8 +87,14 @@ export async function POST(request: NextRequest) {
   const authBypass = isAuthBypassEnabled() || !isLiveAuth();
   if (!authBypass) {
     const idToken = stringField(body.idToken);
-    if (!idToken) return json({ error: "Sign in required." }, 401);
-    if (!requestedBusinessId) return json({ error: "Missing businessId." }, 400);
+    if (!idToken) {
+      logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "unauthenticated", status: 401 });
+      return json({ error: "Sign in required." }, 401);
+    }
+    if (!requestedBusinessId) {
+      logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "no_business", status: 400 });
+      return json({ error: "Missing businessId." }, 400);
+    }
 
     let uid: string;
     try {
@@ -90,8 +102,10 @@ export async function POST(request: NextRequest) {
       uid = decoded.uid;
     } catch (error) {
       if (authConfigurationError(error)) {
+        logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "auth_unavailable", status: 503 });
         return json({ error: "Server auth is not configured." }, 503);
       }
+      logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "bad_token", status: 401 });
       return json({ error: "Invalid or expired sign-in." }, 401);
     }
 
@@ -100,12 +114,15 @@ export async function POST(request: NextRequest) {
         .doc(`${COLLECTIONS.businessMembers}/${memberDocId(requestedBusinessId, uid)}`)
         .get();
       if (!member.exists) {
+        logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "not_member", businessId: requestedBusinessId, status: 403 });
         return json({ error: "Not a member of this business." }, 403);
       }
     } catch (error) {
       if (authConfigurationError(error)) {
+        logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "auth_unavailable", businessId: requestedBusinessId, status: 503 });
         return json({ error: "Server auth is not configured." }, 503);
       }
+      logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "membership_check_failed", businessId: requestedBusinessId, status: 503 });
       return json({ error: "Could not verify business membership." }, 503);
     }
   }

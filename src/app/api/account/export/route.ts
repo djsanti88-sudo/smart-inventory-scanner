@@ -6,6 +6,7 @@ import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { intEnv } from "@/services/security/aiSpendGuard";
+import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 
@@ -93,6 +94,7 @@ export async function POST(request: NextRequest) {
     }
     body = parsed as ExportRequestBody;
   } catch {
+    logServerEvent({ route: "/api/account/export", event: "error", reasonCode: "invalid_body", status: 400 });
     return json({ error: "Invalid request body." }, 400);
   }
 
@@ -103,16 +105,24 @@ export async function POST(request: NextRequest) {
 
   if (!authBypass) {
     const idToken = stringField(body.idToken);
-    if (!idToken) return json({ error: "Sign in required." }, 401);
-    if (!requestedBusinessId) return json({ error: "Missing businessId." }, 400);
+    if (!idToken) {
+      logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "unauthenticated", status: 401 });
+      return json({ error: "Sign in required." }, 401);
+    }
+    if (!requestedBusinessId) {
+      logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "no_business", status: 400 });
+      return json({ error: "Missing businessId." }, 400);
+    }
 
     try {
       const decoded = await getAdminAuth().verifyIdToken(idToken);
       uid = decoded.uid;
     } catch (error) {
       if (authConfigurationError(error)) {
+        logServerEvent({ route: "/api/account/export", event: "auth_unavailable", reasonCode: "auth_unavailable", status: 503 });
         return json({ error: "Server auth is not configured." }, 503);
       }
+      logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "bad_token", status: 401 });
       return json({ error: "Invalid or expired sign-in." }, 401);
     }
 
@@ -122,12 +132,15 @@ export async function POST(request: NextRequest) {
         .get();
       if (!member.exists) {
         // Honest-reason 403 without leaking whether requestedBusinessId even exists.
+        logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "not_member", businessId: requestedBusinessId, status: 403 });
         return json({ error: "Not a member of this business." }, 403);
       }
     } catch (error) {
       if (authConfigurationError(error)) {
+        logServerEvent({ route: "/api/account/export", event: "auth_unavailable", reasonCode: "auth_unavailable", businessId: requestedBusinessId, status: 503 });
         return json({ error: "Server auth is not configured." }, 503);
       }
+      logServerEvent({ route: "/api/account/export", event: "error", reasonCode: "membership_check_failed", businessId: requestedBusinessId, status: 503 });
       return json({ error: "Could not verify business membership." }, 503);
     }
   }
@@ -179,8 +192,10 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     if (authConfigurationError(error)) {
+      logServerEvent({ route: "/api/account/export", event: "auth_unavailable", reasonCode: "auth_unavailable", businessId, status: 503 });
       return json({ error: "Server auth is not configured." }, 503);
     }
+    logServerEvent({ route: "/api/account/export", event: "export_failed", reasonCode: "tenant_read_error", businessId, status: 500 });
     return json({ error: "Export failed while reading tenant data." }, 500);
   }
 

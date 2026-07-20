@@ -11,6 +11,7 @@ import {
   getImportMappingMemory,
   putImportMappingMemory,
 } from "@/server/importMappingMemory";
+import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 const MAX_MAPPING_BODY_BYTES = 32 * 1024;
@@ -42,21 +43,34 @@ function authConfigurationError(error: unknown): boolean {
 // short-circuits to false in production before reading any flag - a stray IS_E2E can never open this.
 async function authorize(businessId: string, idToken: string): Promise<NextResponse | null> {
   if (isAuthBypassEnabled() || !isLiveAuth()) return null;
-  if (!idToken) return json({ error: "Sign in required." }, 401);
+  if (!idToken) {
+    logServerEvent({ route: "/api/import-mapping", event: "auth_reject", reasonCode: "unauthenticated", businessId, status: 401 });
+    return json({ error: "Sign in required." }, 401);
+  }
   let uid: string;
   try {
     uid = (await getAdminAuth().verifyIdToken(idToken)).uid;
   } catch (error) {
-    if (authConfigurationError(error)) return json({ error: "Server auth is not configured." }, 503);
+    if (authConfigurationError(error)) {
+      logServerEvent({ route: "/api/import-mapping", event: "auth_unavailable", reasonCode: "auth_unavailable", businessId, status: 503 });
+      return json({ error: "Server auth is not configured." }, 503);
+    }
+    logServerEvent({ route: "/api/import-mapping", event: "auth_reject", reasonCode: "bad_token", businessId, status: 401 });
     return json({ error: "Invalid or expired sign-in." }, 401);
   }
   try {
     const member = await getAdminDb()
       .doc(`${COLLECTIONS.businessMembers}/${memberDocId(businessId, uid)}`)
       .get();
-    return member.exists ? null : json({ error: "Not a member of this business." }, 403);
+    if (member.exists) return null;
+    logServerEvent({ route: "/api/import-mapping", event: "auth_reject", reasonCode: "not_member", businessId, status: 403 });
+    return json({ error: "Not a member of this business." }, 403);
   } catch (error) {
-    if (authConfigurationError(error)) return json({ error: "Server auth is not configured." }, 503);
+    if (authConfigurationError(error)) {
+      logServerEvent({ route: "/api/import-mapping", event: "auth_unavailable", reasonCode: "auth_unavailable", businessId, status: 503 });
+      return json({ error: "Server auth is not configured." }, 503);
+    }
+    logServerEvent({ route: "/api/import-mapping", event: "error", reasonCode: "membership_check_failed", businessId, status: 503 });
     return json({ error: "Could not verify business membership." }, 503);
   }
 }

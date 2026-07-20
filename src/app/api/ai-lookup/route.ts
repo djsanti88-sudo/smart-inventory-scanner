@@ -22,6 +22,7 @@ import { isLiveAuth } from "@/services/auth/authMode";
 import { clampConfidenceThreshold } from "@/services/security/decodePolicy";
 import { readDailyUsedForAccount, chargeDailySlotForAccount } from "@/services/security/aiSpendGuard";
 import { buildMasterCatalogEntry, appendMasterCatalogEntry } from "@/server/catalog/masterAppend";
+import { logServerEvent } from "@/server/log";
 
 // FAST-FIRST: cheap/fast models do the first pass (+ page-fetch). The slow PRO models are only used
 // to escalate when the fast pass found no product. All overridable via env. (Reported by GET only;
@@ -131,8 +132,11 @@ export async function GET(request: Request) {
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       request.headers.get("x-real-ip") ||
       "local";
-    const rl = checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120) });
+    // B1: durable, storage-backed rate limiting (LadderStorage - Turso in production, so a
+    // multi-instance deployment shares one real counter instead of each instance's own in-memory bucket).
+    const rl = await checkRateLimit(`GET:${ip}`, { limit: intEnv(process.env.AI_LOOKUP_GET_RATE_LIMIT, 120), storage: await ladderStorage() });
     if (!rl.allowed) {
+      logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
       return Response.json(
         { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
         { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
@@ -150,7 +154,8 @@ export async function GET(request: Request) {
   if (!firecrawlConfigured) missingKeys.push("FIRECRAWL_API_KEY");
   // Task 6: read-only GPT ladder spend/call status for the Settings panel. getGptLadderStatus makes
   // no writes and spends nothing (it composes checkGptLadderBudget's peek + the call-count peek).
-  const gptLadderStatus = getGptLadderStatus({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD });
+  // B1: reads through the same durable LadderStorage seam as the daily cap / rate limit.
+  const gptLadderStatus = await getGptLadderStatus({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD, storage: await ladderStorage() });
   // Task 16: Go-UPC monthly quota visibility for the Settings panel. canSpend() only READS the usage
   // counter (no record()), so this GET spends nothing. Booleans + numbers ONLY - never the key value.
   // ladderStorage() selects Turso in production (TURSO_DATABASE_URL/TURSO_AUTH_TOKEN set), else the
@@ -217,14 +222,17 @@ export async function POST(request: Request) {
   // mock mode (no real provider spend to bound), so deterministic test runs are unaffected.
   if (!e2eMode()) {
     if (killSwitchOn()) {
+      logServerEvent({ route: "/api/ai-lookup", event: "kill_switch", reasonCode: "kill_switch", status: 503 });
       return Response.json({ error: "AI lookup is temporarily disabled.", reasonCode: "kill_switch" }, { status: 503 });
     }
     const clientIp =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       request.headers.get("x-real-ip") ||
       "local";
-    const rl = checkRateLimit(clientIp);
+    // B1: durable, storage-backed rate limiting - see the GET handler's comment above.
+    const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
     if (!rl.allowed) {
+      logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
       return Response.json(
         { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
         { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
@@ -364,6 +372,13 @@ export async function POST(request: Request) {
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
       const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, limit);
       if (acctUsed >= acctLimit) {
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "cap_blocked",
+          reasonCode: "account_daily_cap",
+          businessId: authedBusinessId,
+          status: 429,
+        });
         return Response.json(
           { error: `Your daily AI lookup cap is reached (${acctUsed}/${acctLimit}).`, reasonCode: "account_daily_cap" },
           { status: 429 }
@@ -375,6 +390,13 @@ export async function POST(request: Request) {
       const backstop = intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, limit * 10);
       const used = await readDailyUsed(ladderStore);
       if (used >= backstop) {
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "cap_blocked",
+          reasonCode: "daily_cap",
+          businessId: authedBusinessId,
+          status: 429,
+        });
         return Response.json(
           { error: `Daily AI lookup cap reached (${used}/${backstop}). No AI call made.`, reasonCode: "daily_cap" },
           { status: 429 }
@@ -386,6 +408,7 @@ export async function POST(request: Request) {
       // Anonymous/unauthenticated traffic: unchanged behavior, gated by the plain global cap.
       const used = await readDailyUsed(ladderStore);
       if (used >= limit) {
+        logServerEvent({ route: "/api/ai-lookup", event: "cap_blocked", reasonCode: "daily_cap", status: 429 });
         return Response.json(
           { error: `Daily AI lookup cap reached (${used}/${limit}). No AI call made.`, reasonCode: "daily_cap" },
           { status: 429 }
@@ -412,6 +435,13 @@ export async function POST(request: Request) {
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
       const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500));
       if (acctUsed >= acctLimit) {
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "cap_blocked",
+          reasonCode: "account_daily_cap",
+          businessId: authedBusinessId,
+          status: 429,
+        });
         return Response.json(
           { error: `Your daily AI lookup cap is reached (${acctUsed}/${acctLimit}).`, reasonCode: "account_daily_cap" },
           { status: 429 }
@@ -456,6 +486,13 @@ export async function POST(request: Request) {
       // row "<Brand> / product unconfirmed" instead of a bare "Unidentified item". Absent (undefined)
       // when the code isn't a public barcode or the prefix maps to no confident brand - unchanged there.
       // NEVER fires the master-append hook here (GC7/review F4): no decision was ever settled.
+      logServerEvent({
+        route: "/api/ai-lookup",
+        event: "cap_blocked",
+        reasonCode: "daily_cap",
+        businessId: authedBusinessId ?? undefined,
+        status: 429,
+      });
       return Response.json({ error: outcome.message, reasonCode: "daily_cap", floor: outcome.floor }, { status: 429 });
     }
     // computed: echo the L1/L2 `cached` flag into debug exactly as before. The per-account charge
@@ -483,6 +520,15 @@ export async function POST(request: Request) {
     } catch (e) {
       errors.push(`${provider.name}: ${e instanceof Error ? e.message : "error"}`);
     }
+  }
+
+  if (errors.length) {
+    logServerEvent({
+      route: "/api/ai-lookup",
+      event: "provider_error",
+      reasonCode: "lookup_provider_error",
+      detail: `${errors.length} provider(s) failed in lookup chain`,
+    });
   }
 
   return Response.json({

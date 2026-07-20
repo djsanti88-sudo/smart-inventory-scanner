@@ -34,7 +34,7 @@ vi.mock("@/server/upc/storage", async (importOriginal) => {
 });
 
 import { POST, GET } from "@/app/api/ai-lookup/route";
-import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCall, getGptLadderStatus } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
@@ -273,7 +273,14 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     }
   }
 
-  const gptLadderTodayKey = () => `gptLadderUsd:${new Date().toISOString().slice(0, 10)}`;
+  // B1: the GPT ladder $-guard now persists through the SAME durable ladderStorage() seam the route
+  // itself reads/writes (mocked above to the shared per-process tmp kv dir), not the standalone
+  // tmpGptLadderFile - so this read-through-storage helper (mirroring dailyUsedNow()) proves the real
+  // atomic counter the route uses, not a parallel one.
+  async function gptLadderSpendNowUsd(): Promise<number> {
+    const status = await getGptLadderStatus({ storage: await ladderStorage() });
+    return status.spentUsd;
+  }
 
   it("gpt-5.5 ladder rung fires and auto-counts (verified) when nothing else resolved the code", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
@@ -339,8 +346,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.decision.status).not.toBe("verified");
-    const spend = JSON.parse(fs.readFileSync(tmpGptLadderFile, "utf8"));
-    expect(spend[gptLadderTodayKey()].spentUsd).toBe(0.39);
+    expect(await gptLadderSpendNowUsd()).toBeCloseTo(0.39, 5);
 
     // TRANSIENT-FAILURE GUARD (found live 2026-07-06): a failed rung call is NOT genuine ladder
     // exhaustion - it must NOT write a permanent no_result_receipt (that froze the code forever on
@@ -476,9 +482,8 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(json.reasonCode).not.toBe("gpt_ladder");
     expect(json.providerNames).toEqual(["parallel:floor"]);
     expect(json.results[0].productName).toBe("Unidentified item (barcode 111000222778)");
-    // Cost truth: a failed call is still billed - the worst case must land in the spend file.
-    const spend = JSON.parse(fs.readFileSync(tmpGptLadderFile, "utf8"));
-    expect(spend[gptLadderTodayKey()].spentUsd).toBe(0.39);
+    // Cost truth: a failed call is still billed - the worst case must land in durable storage.
+    expect(await gptLadderSpendNowUsd()).toBeCloseTo(0.39, 5);
   }, 40000);
 
   it("Task 3b: a 12-digit UPC with NO key still ends at the floor with a visible ladder skip (no endpoint call)", async () => {
@@ -799,9 +804,10 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
     it("reflects recorded spend + calls, and enabled:true once a key is configured and budget allows", async () => {
       process.env.OPENAI_API_KEY = "test-openai-key";
-      recordGptLadderSpend(0.42, { file: tmpGptLadderFile });
-      recordGptLadderCall({ file: tmpGptLadderFile });
-      recordGptLadderCall({ file: tmpGptLadderFile });
+      const storage = await ladderStorage();
+      await recordGptLadderSpend(0.42, { storage });
+      await recordGptLadderCall({ storage });
+      await recordGptLadderCall({ storage });
       const res = await GET(mkGet());
       const json = await res.json();
       expect(json.gptLadder.spentTodayUsd).toBeCloseTo(0.42, 5);
@@ -812,7 +818,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     it("enabled is false once spend + worst case would exceed the cap, even with a key configured", async () => {
       process.env.OPENAI_API_KEY = "test-openai-key";
       process.env.GPT_LADDER_DAILY_USD = "1";
-      recordGptLadderSpend(0.9, { file: tmpGptLadderFile }); // 0.9 + worst-case(~0.39) > 1.0 cap
+      await recordGptLadderSpend(0.9, { storage: await ladderStorage() }); // 0.9 + worst-case(~0.39) > 1.0 cap
       const res = await GET(mkGet());
       const json = await res.json();
       expect(json.gptLadder.enabled).toBe(false);
