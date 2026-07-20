@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -25,8 +27,40 @@ from .models import CheckResult, RunReport
 from .plan_review import render_plan_markdown, review_plan
 from .report import write_report
 from .risk import classify, expert_tier
+from .runlock import acquire, release
 from .scheduler import SafetyPolicy, run_checks
 from .verdict import decide, exit_code, prune_old_runs, write_latest
+
+
+# Env var the Stop hook sets before launching a detached, unattended review.
+# Under this env, review-build is STRUCTURALLY deterministic-only: no expert
+# layer, no network/live/paid/mutating checks, light resource lane only, and
+# a hard wall-clock cap. The guard lives here in Python (not in the
+# PowerShell command line) so it cannot be bypassed by editing the hook script.
+HOOK_TRIGGERED_ENV = "FABLE5_HOOK_TRIGGERED"
+HOOK_TRIGGERED_WALL_CLOCK_CAP_MINUTES = 15
+
+# CLI flags refused outright when a hook-triggered run passes them explicitly.
+_HOOK_REFUSED_FLAGS: tuple[tuple[str, str], ...] = (
+    ("with_experts", "--with-experts"),
+    ("allow_network", "--allow-network"),
+    ("allow_live", "--allow-live"),
+    ("allow_paid", "--allow-paid"),
+    ("allow_mutating", "--allow-mutating"),
+    ("allow_paid_fallback", "--allow-paid-fallback"),
+)
+
+
+def _is_hook_triggered() -> bool:
+    return os.environ.get(HOOK_TRIGGERED_ENV) == "1"
+
+
+def _hook_triggered_refusal(args: argparse.Namespace) -> str | None:
+    """Return a refusal message if a hook-triggered run requested a refused flag."""
+    for attribute, flag in _HOOK_REFUSED_FLAGS:
+        if getattr(args, attribute, False):
+            return f"hook-triggered runs are deterministic-only: {flag} refused"
+    return None
 
 
 def _path_from_root(root: Path, value: str | None) -> Path | None:
@@ -79,6 +113,11 @@ def _plan(root: Path, config: FableConfig, args: argparse.Namespace) -> int:
 
 
 async def _run(root: Path, config: FableConfig, config_path: Path, args: argparse.Namespace) -> int:
+    if _is_hook_triggered():
+        refusal = _hook_triggered_refusal(args)
+        if refusal:
+            print(f"REFUSED: {refusal}")
+            return 3
     try:
         return await _run_inner(root, config, config_path, args)
     except Exception as error:  # noqa: BLE001 - engine error path must never masquerade as PASS/BLOCK
@@ -93,6 +132,34 @@ async def _run_inner(
     if args.gate not in valid_gates:
         raise ValueError(f"Unknown gate {args.gate!r}; choose one of: {', '.join(valid_gates)}")
 
+    hook_triggered = _is_hook_triggered()
+    wall_clock_limit = HOOK_TRIGGERED_WALL_CLOCK_CAP_MINUTES if hook_triggered else 60
+
+    # The lock covers dry runs too: a dry-run still schedules and prints the
+    # full check plan, so two concurrent invocations (dry-run or not) racing
+    # the same evidence directory and cache is exactly the pile-up the single
+    # -run lock exists to prevent.
+    lock = acquire(root, mode=args.gate, limit_minutes=wall_clock_limit)
+    if lock is None:
+        print(
+            "REFUSED: another Fable 5 review is already running "
+            "(see .fable5/running.json for the PID)"
+        )
+        return 3
+    try:
+        return await _run_gated(root, config, config_path, args, hook_triggered)
+    finally:
+        if lock is not None:
+            release(lock)
+
+
+async def _run_gated(
+    root: Path,
+    config: FableConfig,
+    config_path: Path,
+    args: argparse.Namespace,
+    hook_triggered: bool,
+) -> int:
     started = datetime.now(timezone.utc)
     started_timer = time.perf_counter()
     run_id = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{args.gate}"
@@ -114,10 +181,36 @@ async def _run_inner(
     print(f"Gate: {args.gate} | Changed files: {len(files)} | Specialists: {len(agents)}")
     print(f"Risk: score={profile.score} tags={','.join(sorted(profile.tags)) or 'none'}")
     print(f"Evidence directory: {report_dir}")
+
+    skipped_resource_results: list[CheckResult] = []
+    run_config = config
+    if hook_triggered:
+        print("Hook-triggered run: light resource lane only, deterministic checks only")
+        heavy_specs = [spec for spec in config.checks if spec.resource != "light"]
+        light_specs = tuple(spec for spec in config.checks if spec.resource == "light")
+        run_config = dataclasses.replace(config, checks=light_specs)
+        only_filter = set(args.only) if args.only else None
+        for spec in heavy_specs:
+            if args.gate not in spec.gates:
+                continue
+            if only_filter and spec.check_id not in only_filter:
+                continue
+            skipped_resource_results.append(
+                CheckResult(
+                    check_id=spec.check_id,
+                    description=spec.description,
+                    status="skipped",
+                    blocking=False,
+                    command=list(spec.command),
+                    started_at=datetime.now(timezone.utc).isoformat(),
+                    reason="hook-triggered light-lane only",
+                )
+            )
+
     try:
-        results = await run_checks(
+        checks_awaitable = run_checks(
             root=root,
-            config=config,
+            config=run_config,
             gate=args.gate,
             report_dir=report_dir,
             changed_files=files,
@@ -132,6 +225,36 @@ async def _run_inner(
             only=set(args.only) if args.only else None,
             dry_run=args.dry_run,
         )
+        if hook_triggered:
+            remaining_seconds = HOOK_TRIGGERED_WALL_CLOCK_CAP_MINUTES * 60
+            try:
+                results = await asyncio.wait_for(checks_awaitable, timeout=remaining_seconds)
+            except TimeoutError:
+                print(
+                    f"Hook-triggered run hit the {HOOK_TRIGGERED_WALL_CLOCK_CAP_MINUTES} "
+                    "min wall clock cap; remaining checks marked skipped"
+                )
+                selected_ids = {
+                    spec.check_id
+                    for spec in run_config.checks
+                    if args.gate in spec.gates
+                    and (not args.only or spec.check_id in set(args.only))
+                }
+                results = [
+                    CheckResult(
+                        check_id=check_id,
+                        description=check_id,
+                        status="skipped",
+                        blocking=False,
+                        command=[],
+                        started_at=datetime.now(timezone.utc).isoformat(),
+                        reason="wall clock cap",
+                    )
+                    for check_id in sorted(selected_ids)
+                ]
+        else:
+            results = await checks_awaitable
+        results.extend(skipped_resource_results)
         results.extend(check_docs(root, config.docs_files, set(inventory.package_scripts)))
         if args.with_experts:
             if tier == "skip":
