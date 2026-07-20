@@ -345,20 +345,22 @@ export async function POST(request: Request) {
   // provider call happens right after this block (see "lookup mode" below) - so this IS the first (and
   // only) paid rung for that mode, and chargeDailySlot fires here, once, only when the gate passes. A
   // request that is blocked here never charges (the old counter's bug: it incremented on rejects too).
+  //
+  // GC-A (P6 Task A2, tenant-starvation fix): for AUTHED traffic the PER-ACCOUNT cap is the primary
+  // gate and is checked/charged FIRST - a tenant with remaining account budget must never be 429'd
+  // because ANOTHER tenant (or anonymous demo traffic) drained the shared global bucket. The "global"
+  // check for authed traffic is only a high platform-wide BACKSTOP (AI_LOOKUP_GLOBAL_BACKSTOP, default
+  // AI_LOOKUP_DAILY_LIMIT*10) - a last-resort circuit breaker, not the primary gate. Anonymous traffic
+  // (no authedBusinessId) has no per-account bucket at all, so it keeps today's behavior unchanged:
+  // gated by the plain AI_LOOKUP_DAILY_LIMIT global cap. L12 unchanged: exactly one global charge +
+  // one account charge per genuine paid compute, only after every applicable check passes.
   const isDecodeMode = body.mode === "decode" || body.mode === "decode-deep";
   const forceRetry = body.forceRetry === true;
   if (!e2eMode() && !isDecodeMode) {
     const ladderStore = await ladderStorage();
-    const used = await readDailyUsed(ladderStore);
     const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
-    if (used >= limit) {
-      return Response.json(
-        { error: `Daily AI lookup cap reached (${used}/${limit}). No AI call made.`, reasonCode: "daily_cap" },
-        { status: 429 }
-      );
-    }
-    // Per-account cap layered on the global cap: same gate, same single charge point (L12).
     if (authedBusinessId) {
+      // Per-account cap FIRST (primary gate for authed traffic).
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
       const acctLimit = intEnv(process.env.AI_LOOKUP_ACCOUNT_DAILY_LIMIT, limit);
       if (acctUsed >= acctLimit) {
@@ -367,16 +369,44 @@ export async function POST(request: Request) {
           { status: 429 }
         );
       }
+      // Platform-wide BACKSTOP, not the per-tenant-fair gate - sized well above the normal global cap
+      // so one heavy tenant (or a burst of anonymous traffic) cannot starve another tenant that still
+      // has account budget remaining.
+      const backstop = intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, limit * 10);
+      const used = await readDailyUsed(ladderStore);
+      if (used >= backstop) {
+        return Response.json(
+          { error: `Daily AI lookup cap reached (${used}/${backstop}). No AI call made.`, reasonCode: "daily_cap" },
+          { status: 429 }
+        );
+      }
+      await chargeDailySlot(ladderStore, { limit: backstop });
+      await chargeDailySlotForAccount(ladderStore, authedBusinessId);
+    } else {
+      // Anonymous/unauthenticated traffic: unchanged behavior, gated by the plain global cap.
+      const used = await readDailyUsed(ladderStore);
+      if (used >= limit) {
+        return Response.json(
+          { error: `Daily AI lookup cap reached (${used}/${limit}). No AI call made.`, reasonCode: "daily_cap" },
+          { status: 429 }
+        );
+      }
+      await chargeDailySlot(ladderStore, { limit });
     }
-    await chargeDailySlot(ladderStore, { limit });
-    if (authedBusinessId) await chargeDailySlotForAccount(ladderStore, authedBusinessId);
   }
 
   if (isDecodeMode) {
     const threshold = clampConfidenceThreshold(body.confidenceThreshold);
 
-    // Per-account decode cap: read-only gate (the pipeline owns the single global charge). The
-    // account counter is charged below ONLY when the pipeline reports a genuine paid compute.
+    // GC-A (P6 Task A2): per-account decode cap is the TENANT GATE, checked here before the pipeline
+    // runs. Read-only gate (the pipeline owns the single global charge). The account counter is
+    // charged below ONLY when the pipeline reports a genuine paid compute. When this gate passes for
+    // an authed tenant, accountCapCleared is threaded into the pipeline so its OWN internal global cap
+    // gate compares against the high platform-wide BACKSTOP instead of the plain daily limit - the
+    // pipeline must never independently 429 an authed tenant who is under their own account limit.
+    // Anonymous/uncleared requests keep today's behavior byte-identical (accountCapCleared stays false,
+    // the pipeline's internal gate uses the plain AI_LOOKUP_DAILY_LIMIT exactly as before).
+    let accountCapCleared = false;
     if (authedBusinessId && !e2eMode()) {
       const ladderStore = await ladderStorage();
       const acctUsed = await readDailyUsedForAccount(ladderStore, authedBusinessId);
@@ -387,6 +417,7 @@ export async function POST(request: Request) {
           { status: 429 }
         );
       }
+      accountCapCleared = true;
     }
 
     // DECODE PIPELINE (Task 2.4): the entire cost-ordered ladder + cache/cap machinery lives in
@@ -405,6 +436,9 @@ export async function POST(request: Request) {
       // Server-side clamp (review hardening 2026-07-15): the client already clamps, but a hand-crafted
       // request must not be able to stretch the ladder deadline via a huge budgetMs.
       budgetMs: typeof body.budgetMs === "number" ? clampDecodeBudgetMs(body.budgetMs) : undefined,
+      // GC-A: undefined for anonymous traffic (pipeline default behavior unchanged); set for authed
+      // traffic once the per-account gate above has run (accountCapCleared reflects the gate's outcome).
+      capContext: authedBusinessId ? { authedBusinessId, accountCapCleared } : undefined,
     });
     if (outcome.kind === "persisted") {
       // FIX 4 (review MEDIUM, stale-verified replay + transaction storm): NEVER appends here. A cached/

@@ -384,6 +384,15 @@ export interface DecodePipelineRequest {
    *  through - dead since Task 2.4's extraction. Combined with DECODE_LADDER_TOTAL_MS to derive the
    *  single request-scoped ladder deadline (see decodeStartedAt / ladderDeadlineAt below). */
   budgetMs?: number;
+  /** GC-A (P6 Task A2, tenant-starvation fix): threaded by the route ONLY for authed traffic, after its
+   *  own per-account cap pre-check has run. accountCapCleared true means that tenant is genuinely under
+   *  their own AI_LOOKUP_ACCOUNT_DAILY_LIMIT right now - the pipeline's internal global cap gate
+   *  (chargePaidSlot below) then compares against the high platform-wide AI_LOOKUP_GLOBAL_BACKSTOP
+   *  instead of the plain AI_LOOKUP_DAILY_LIMIT, so an authed tenant with remaining account budget is
+   *  never 429'd purely because another tenant (or anonymous traffic) drained the shared global bucket.
+   *  Undefined for anonymous/unauthenticated requests - the gate falls back to today's plain global cap,
+   *  byte-identical to pre-A2 behavior. */
+  capContext?: { authedBusinessId?: string; accountCapCleared: boolean };
 }
 
 /** The settled decode payload (the response body the route serializes; debug is loose because each
@@ -416,7 +425,7 @@ export type DecodePipelineResult =
  * Behavior is identical to the former inline `isDecodeMode` block in route.ts.
  */
 export async function runDecodePipeline(req: DecodePipelineRequest): Promise<DecodePipelineResult> {
-  const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry, budgetMs } = req;
+  const { code, codeType, rawCodeSanitized, cleanCodeSanitized, threshold, allowNonPublicAutoCount, forceRetry, budgetMs, capContext } = req;
 
   // A4 (owner-ratified 2026-07-15, "trace every non-decode"): started at the very TOP of the OUTER
   // function (not computeDecode) so durationMs covers the corpus peek, the L2 persisted-decode peek,
@@ -1277,7 +1286,16 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     const chargePaidSlot = async (): Promise<void> => {
       if (e2eMode()) return;
       const ladderStore = await ladderStorage();
-      const limit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+      const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 500);
+      // GC-A (P6 Task A2): when the route has already cleared this request's own per-account cap
+      // (capContext.accountCapCleared), this internal global gate compares against the high
+      // platform-wide BACKSTOP instead of the plain daily limit - it must never independently 429 an
+      // authed tenant who is under their own account limit just because the shared global bucket is
+      // drained by other tenants/anonymous traffic. Anonymous/uncleared requests (capContext undefined
+      // or accountCapCleared false) keep today's behavior byte-identical: gated by the plain limit.
+      const limit = capContext?.accountCapCleared
+        ? intEnv(process.env.AI_LOOKUP_GLOBAL_BACKSTOP, dailyLimit * 10)
+        : dailyLimit;
       const used = await readDailyUsed(ladderStore);
       if (used >= limit) throw new DailyCapExceededError(used, limit);
       await chargeDailySlot(ladderStore, { limit });
