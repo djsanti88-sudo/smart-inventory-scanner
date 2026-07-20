@@ -359,6 +359,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     if (out.kind !== "computed") throw new Error("unreachable");
     expect(out.payload.providerNames).toContain("tire-corpus");
     expect(out.payload.decision.status).toBe("verified");
+    // F2: a free corpus (rung-0) settle never charges paid compute.
+    expect(out.paidComputeCharged).toBe(false);
   });
 
   // QA ROUND-2 SEAM 1 (live-proven bypass, 2026-07-16): the persisted-cache short-circuit replayed a
@@ -504,6 +506,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     // The paid daily-cap counter was charged EXACTLY ONCE for this request (free rungs missed, so the
     // paid phase ran; the cap started at 0 and must now read exactly 1 - not 0, not 2+).
     expect(await readDailyUsed(await ladderStorage())).toBe(1);
+    // F2: the outcome's paidComputeCharged flag mirrors the cap charge - genuine paid compute happened.
+    expect(outcome.paidComputeCharged).toBe(true);
   });
 
   it("L6: total-miss with free rungs MISS but NO keys at all -> cap counter stays at 0 (paid work was never possible)", async () => {
@@ -523,6 +527,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     const rungOrder = (reasons ?? []).map((r) => r.rung);
     expect(rungOrder).toEqual(["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]);
     expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    // F2: no paid compute was possible (no keys), so the outcome flag is false, mirroring the 0 counter.
+    expect(outcome.paidComputeCharged).toBe(false);
   });
 
   it("Z3: two encodings of one product share one cache identity (canonical GTIN cache key)", async () => {

@@ -69,4 +69,18 @@ describe("clear cache PIN gate", () => {
     fireEvent.click(screen.getByTestId("clear-cache"));
     await waitFor(() => expect(clearLocalCache).toHaveBeenCalledOnce()); // no PIN prompt, direct clear
   });
+
+  it("rejects a WRONG PIN: does NOT clear, and shows the visible 'Wrong PIN' error (F3)", async () => {
+    verifyOwnerPin.mockResolvedValue(false); // owner PIN check fails
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByTestId("clear-cache"));
+    const pinInput = await screen.findByTestId("clear-cache-pin");
+    fireEvent.change(pinInput, { target: { value: "0000" } });
+    fireEvent.click(screen.getByTestId("clear-cache-confirm"));
+    await waitFor(() => expect(verifyOwnerPin).toHaveBeenCalledWith("0000"));
+    const err = await screen.findByTestId("clear-cache-pin-error");
+    expect(err).toHaveTextContent("Wrong PIN");
+    expect(clearLocalCache).not.toHaveBeenCalled(); // a wrong PIN must NEVER wipe local data
+  });
 });

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Route } from "@playwright/test";
 
 // Task 16 (Phase 2, Track T5): proves acceptance criteria #5 (Google + email sign-in + reset
 // affordances in browser, both viewports; sign-out clears local state INCLUDING the per-uid
@@ -10,11 +10,27 @@ const VIEWPORTS = [
   { name: "phone", width: 390, height: 844 },
 ];
 
+// FLAKE FIX: a no-keys AI status (GET) + an inert POST reply, mirroring scan.spec.ts. Registered before
+// every page.goto so a background /api/ai-lookup call can never race the sign-out reset and deposit a
+// stray scan row mid-test. GET returns the capability check (auto-decode gate fails on hasKey -> no POST
+// fires); a POST, if it ever did, resolves to {} and mutates nothing.
+const NO_AI_STATUS = {
+  liveEnabled: false, autoDecodeOnScan: false, geminiEnabled: false, openaiEnabled: false,
+  geminiConfigured: false, openaiConfigured: false, premiumFallback: false, mode: "off",
+  dailyLimit: 200, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"], e2e: true,
+};
+
+async function mockAiLookup(route: Route) {
+  if (route.request().method() === "GET") return route.fulfill({ json: NO_AI_STATUS });
+  return route.fulfill({ json: {} });
+}
+
 for (const vp of VIEWPORTS) {
   test.describe(`P2 accounts (${vp.name})`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
     test("login page shows email, Google, and reset affordances", async ({ page }) => {
+      await page.route("**/api/ai-lookup", mockAiLookup);
       await page.goto("/login");
       await expect(page.getByTestId("login-email")).toBeVisible();
       await expect(page.getByTestId("login-google")).toBeVisible();
@@ -27,11 +43,26 @@ for (const vp of VIEWPORTS) {
       // Mock mode: the Nav logout button only renders in live mode, so the reset action is exercised
       // via the window.__scanStore hook (Phase 1 ratified precedent). Seed a fake signed-in identity
       // plus a fake per-uid localStorage key, then assert BOTH the in-memory wipe and the key removal.
+      await page.route("**/api/ai-lookup", mockAiLookup);
       await page.goto("/scan");
       await page.evaluate(() => {
         window.localStorage.setItem("sis-scan-test-uid", JSON.stringify({ state: {}, version: 8 }));
         const s = (window as unknown as { __scanStore?: { setState: (p: object) => void } }).__scanStore;
         s?.setState({ userId: "test-uid", scanFeed: [{ id: "leak" }], needsReviewQueue: [{ id: "leak-r" }] });
+      });
+      // N1 (I1 mechanism guard): actually re-point persist at the signed-out user's per-uid key and queue
+      // a coalesced write under it BEFORE the reset. This is what makes the test able to CATCH the I1 bug:
+      // resetForSignOut must re-point persist to the anon key BEFORE its own wipe write, or the coalescer's
+      // pending write (queued here under sis-scan-test-uid) resurrects that key on the next flush tick. A
+      // reset that removed the key but did NOT re-point first would let this queued write re-create it, and
+      // the post-tick re-check below would then fail.
+      await page.evaluate(() => {
+        const s = (window as unknown as { __scanStore?: { getState: () => { rehydrateForUid: (uid: string) => void } } }).__scanStore;
+        s?.getState().rehydrateForUid("test-uid"); // persist now points at sis-scan-test-uid
+      });
+      await page.evaluate(() => {
+        const s = (window as unknown as { __scanStore?: { setState: (p: object) => void } }).__scanStore;
+        s?.setState({ scanFeed: [{ id: "leak2" }] }); // queues a coalesced write under sis-scan-test-uid
       });
       await page.evaluate(() => {
         const s = (window as unknown as { __scanStore?: { getState: () => { resetForSignOut: () => void } } }).__scanStore;
@@ -63,6 +94,7 @@ for (const vp of VIEWPORTS) {
     test("destructive PIN policy surface exists on the store (markWrong class, __scanStore proof)", async ({ page }) => {
       // markWrong is UI-dead by owner decision (SHOW_ADVANCED_ACTIONS=false); assert the policy inputs
       // it depends on are live: no PIN set by default -> confirm-only path (requiresOwnerPin false).
+      await page.route("**/api/ai-lookup", mockAiLookup);
       await page.goto("/scan");
       const pinHash = await page.evaluate(() => {
         const s = (window as unknown as { __scanStore?: { getState: () => { settings: { ownerPinHash: string } } } }).__scanStore;

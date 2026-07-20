@@ -52,7 +52,13 @@ export function Nav() {
           <button
             type="button"
             onClick={async () => {
-              if (!window.confirm("Log out now? Your counts are saved - you can sign back in any time to keep going.")) return;
+              // F1: attempt one awaited drain first, then warn HONESTLY if unsynced work would be lost.
+              const left = await useScanStore.getState().prepareSignOut();
+              const message =
+                left === 0
+                  ? "Log out now? Your counts are saved - you can sign back in any time to keep going."
+                  : `${left} scan${left === 1 ? "" : "s"} could not sync to the cloud yet. Signing out now will discard ${left === 1 ? "it" : "them"} permanently. Sign out anyway?`;
+              if (!window.confirm(message)) return; // cancel aborts sign-out entirely: no reset, no signOut
               useScanStore.getState().resetForSignOut();
               await signOut();
               router.replace("/login");
