@@ -85,6 +85,35 @@ const VALID_BODY = {
   confirmPhrase: "DELETE MY ACCOUNT",
 };
 
+describe("POST /api/account/delete request body shape guard", () => {
+  it("rejects an array JSON body with 400 and deletes nothing", async () => {
+    const response = await POST(deleteRequest([]));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/invalid request body/i);
+    expect(mocks.verifyIdToken).not.toHaveBeenCalled();
+    expect(mocks.recursiveDelete).not.toHaveBeenCalled();
+  });
+
+  it("rejects a null JSON body with 400 and deletes nothing", async () => {
+    const response = await POST(deleteRequest(null));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/invalid request body/i);
+    expect(mocks.verifyIdToken).not.toHaveBeenCalled();
+    expect(mocks.recursiveDelete).not.toHaveBeenCalled();
+  });
+
+  it("rejects a bare string JSON body with 400 and deletes nothing", async () => {
+    const response = await POST(deleteRequest("just a string"));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/invalid request body/i);
+    expect(mocks.verifyIdToken).not.toHaveBeenCalled();
+    expect(mocks.recursiveDelete).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/account/delete authentication and authorization", () => {
   it("refuses deletion outright in mock/authBypass mode, even with a valid-looking body", async () => {
     vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "mock");
