@@ -90,6 +90,66 @@ export default function SettingsPage() {
     doClear();
   }
 
+  // D2 (Phase 6): hard account deletion. Same owner-PIN gate pattern as clear-cache, plus a typed
+  // confirm phrase the server re-checks (client state is never trusted for a destructive action).
+  const [deletePrompt, setDeletePrompt] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deletePin, setDeletePin] = useState("");
+  const [deleteErr, setDeleteErr] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  function handleDeleteAccount() {
+    if (!user) return;
+    setDeleteErr("");
+    setDeletePhrase("");
+    setDeletePin("");
+    setDeletePrompt(true);
+  }
+
+  async function submitDeleteAccount() {
+    if (!user || !businessId) return;
+    setDeleteErr("");
+
+    if (requiresOwnerPin("clearCache", hasPin)) {
+      const ok = await verifyOwnerPin(deletePin);
+      if (!ok) { setDeleteErr("Wrong PIN"); return; }
+    }
+
+    if (deletePhrase !== "DELETE MY ACCOUNT") {
+      setDeleteErr('Type "DELETE MY ACCOUNT" exactly to confirm.');
+      return;
+    }
+
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        "This permanently deletes every product, count, scan, and setting for this business. " +
+          "This cannot be undone. Continue?",
+      );
+    if (!confirmed) return;
+
+    setDeleteBusy(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ businessId, idToken, confirmPhrase: deletePhrase }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDeleteErr(typeof payload?.error === "string" ? payload.error : "Deletion failed.");
+        return;
+      }
+      setDeletePrompt(false);
+      if (typeof window !== "undefined") window.location.href = "/login";
+    } catch {
+      setDeleteErr("Deletion failed. Check your connection and try again.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
       <OwnerPinSettings />
@@ -414,6 +474,69 @@ export default function SettingsPage() {
             {pinErr && <span className="text-sm text-red-600" data-testid="clear-cache-pin-error">{pinErr}</span>}
           </div>
         )}
+
+        <div className="mt-6 border-t border-red-100 pt-4">
+          <h3 className="mb-1 text-sm font-semibold text-red-700">Delete account and all data</h3>
+          <p className="mb-3 text-xs text-zinc-500">
+            Export your data first. Deletion is permanent. This removes every product, count,
+            scan, and setting for this business from our servers and cannot be undone.
+          </p>
+          <button
+            type="button"
+            data-testid="delete-account"
+            onClick={handleDeleteAccount}
+            disabled={!user}
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Delete account and all data
+          </button>
+          {!user && (
+            <p className="mt-2 text-xs text-zinc-500" data-testid="delete-account-signin-required">
+              Sign in as the business owner to delete this account.
+            </p>
+          )}
+          {deletePrompt && (
+            <div className="mt-2 flex flex-col gap-2" data-testid="delete-account-form">
+              <label className="text-sm text-zinc-700">
+                Type <span className="font-mono font-semibold">DELETE MY ACCOUNT</span> to confirm
+              </label>
+              <input
+                aria-label="confirm deletion phrase"
+                value={deletePhrase}
+                onChange={(e) => setDeletePhrase(e.target.value)}
+                placeholder="DELETE MY ACCOUNT"
+                data-testid="delete-account-phrase"
+                className="min-h-[44px] w-full max-w-xs rounded-lg border border-zinc-300 px-3 text-base"
+              />
+              {hasPin && (
+                <input
+                  aria-label="owner PIN"
+                  inputMode="numeric"
+                  value={deletePin}
+                  onChange={(e) => setDeletePin(e.target.value.replace(/\D/g, ""))}
+                  maxLength={6}
+                  placeholder="Owner PIN"
+                  data-testid="delete-account-pin"
+                  className="min-h-[44px] w-28 rounded-lg border border-zinc-300 px-3 text-base"
+                />
+              )}
+              <button
+                type="button"
+                data-testid="delete-account-confirm"
+                onClick={submitDeleteAccount}
+                disabled={deleteBusy}
+                className="inline-flex min-h-[44px] w-fit items-center rounded-lg bg-red-600 px-4 text-base font-medium text-white hover:bg-red-700 disabled:opacity-40"
+              >
+                {deleteBusy ? "Deleting..." : "Permanently delete"}
+              </button>
+              {deleteErr && (
+                <span className="text-sm text-red-600" data-testid="delete-account-error">
+                  {deleteErr}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
