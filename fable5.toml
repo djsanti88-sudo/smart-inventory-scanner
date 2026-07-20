@@ -4,6 +4,9 @@ reports_dir = "reports/fable5"
 cache_db = ".fable5/cache.sqlite3"
 agents_dir = ".claude/agents"
 
+[docs]
+files = ["CLAUDE.md", "docs/ARCHITECTURE.md", "docs/COMMANDS.md"]
+
 [scheduler]
 light_workers = 6
 heavy_workers = 1

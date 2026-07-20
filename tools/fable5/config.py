@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ class FableConfig:
     checks: tuple[CheckSpec, ...]
     routes: tuple[Route, ...]
     expert_workers: int = 3
+    docs_files: list[str] = field(default_factory=lambda: ["CLAUDE.md", "docs/ARCHITECTURE.md", "docs/COMMANDS.md"])
 
 
 def _tuple(value: Any) -> tuple[str, ...]:
@@ -47,6 +48,7 @@ def load_config(root: Path, config_path: Path | None = None) -> FableConfig:
     project = raw.get("project", {})
     scheduler = raw.get("scheduler", {})
     safety = raw.get("safety", {})
+    docs = raw.get("docs", {})
     allowed = frozenset(str(item).lower() for item in safety.get("allowed_executables", []))
     if not allowed:
         raise ValueError("safety.allowed_executables must not be empty")
@@ -109,4 +111,7 @@ def load_config(root: Path, config_path: Path | None = None) -> FableConfig:
         checks=tuple(checks),
         routes=routes,
         expert_workers=max(1, int(scheduler.get("expert_workers", 3))),
+        docs_files=list(_tuple(docs.get("files")))
+        if "files" in docs
+        else ["CLAUDE.md", "docs/ARCHITECTURE.md", "docs/COMMANDS.md"],
     )
