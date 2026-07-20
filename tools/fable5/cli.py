@@ -130,6 +130,7 @@ async def _run(root: Path, config: FableConfig, config_path: Path, args: argpars
                     workers=config.expert_workers,
                     timeout_seconds=args.expert_timeout,
                     dry_run=args.dry_run,
+                    allow_paid=args.allow_paid_fallback,
                 )
             )
     finally:
@@ -206,6 +207,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=900,
         help="Maximum seconds per expert.",
+    )
+    run.add_argument(
+        "--allow-paid-fallback",
+        action="store_true",
+        help=(
+            "Opt out of the subscription-only fail-closed cost gate. Nonzero expert cost is "
+            "still reported in the result reason, but status follows exit code instead of "
+            "forcing failed. Off by default."
+        ),
     )
     run.add_argument("--allow-network", action="store_true", help="Allow checks marked as networked.")
     run.add_argument("--allow-live", action="store_true", help="Allow checks marked as touching live systems.")
