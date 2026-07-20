@@ -23,13 +23,14 @@ describe("goUpcUsage", () => {
     dir = freshDir();
   });
 
-  it("fresh file: allowed with used 0", async () => {
+  it("fresh file: allowed with used 0, unlimited by default", async () => {
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
     const gate = await usage.canSpend();
     expect(gate.allowed).toBe(true);
     expect(gate.used).toBe(0);
-    expect(gate.limit).toBe(4800);
+    expect(gate.limit).toBe(Infinity);
     expect(gate.warn).toBe(false);
+    expect(gate.reason).toBeUndefined();
   });
 
   it("record() three times increments used to 3", async () => {
@@ -43,25 +44,45 @@ describe("goUpcUsage", () => {
     expect((await reread.canSpend()).used).toBe(3);
   });
 
-  it("used at the limit (4800) blocks with a cap reason", async () => {
-    await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4800 });
-    const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
-    const gate = await usage.canSpend();
-    expect(gate.allowed).toBe(false);
-    expect(gate.reason).toContain("Go-UPC monthly cap reached");
-    expect(gate.used).toBe(4800);
-  });
-
-  it("used at 4001 warns but is still allowed", async () => {
-    await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4001 });
+  it("default (unlimited): allowed even with a very large used count, no warn, no reason", async () => {
+    await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 5_000_000 });
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
     const gate = await usage.canSpend();
     expect(gate.allowed).toBe(true);
-    expect(gate.warn).toBe(true);
+    expect(gate.used).toBe(5_000_000);
+    expect(gate.limit).toBe(Infinity);
+    expect(gate.warn).toBe(false);
+    expect(gate.reason).toBeUndefined();
+  });
+
+  it("record() still increments usage under the unlimited default (observability)", async () => {
+    await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4800 });
+    const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
+    await usage.record();
+    const persisted = await fileLadderStorage(dir).readUsage();
+    expect(persisted).toEqual({ month: "2026-07", used: 4801 });
+    // still allowed post-record: no cap in effect
+    expect((await usage.canSpend()).allowed).toBe(true);
+  });
+
+  it("explicit positive limit override still caps (regression: the lever still works)", async () => {
+    await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 10 });
+    const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY, limit: 10 });
+    const gate = await usage.canSpend();
+    expect(gate.allowed).toBe(false);
+    expect(gate.limit).toBe(10);
+    expect(gate.reason).toContain("Go-UPC monthly cap reached");
+  });
+
+  it("explicit limit of 0 resolves to unlimited (not a valid re-cap value)", async () => {
+    const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY, limit: 0 });
+    const gate = await usage.canSpend();
+    expect(gate.limit).toBe(Infinity);
+    expect(gate.allowed).toBe(true);
   });
 
   it("a stored month different from the current month resets used to 0 (rollover)", async () => {
-    // June is stored at the cap; the injected now is July -> treat used as 0.
+    // June is stored high; the injected now is July -> treat used as 0.
     await fileLadderStorage(dir).writeUsage({ month: "2026-06", used: 4800 });
     const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
     const gate = await usage.canSpend();
@@ -93,20 +114,49 @@ describe("goUpcUsage", () => {
     let saved: string | undefined;
     beforeEach(() => {
       saved = process.env.GO_UPC_MONTHLY_LIMIT;
-      process.env.GO_UPC_MONTHLY_LIMIT = "10";
     });
     afterEach(() => {
       if (saved === undefined) delete process.env.GO_UPC_MONTHLY_LIMIT;
       else process.env.GO_UPC_MONTHLY_LIMIT = saved;
     });
 
-    it("respects GO_UPC_MONTHLY_LIMIT=10", async () => {
+    it("respects GO_UPC_MONTHLY_LIMIT=10 (regression: positive cap still re-imposable)", async () => {
+      process.env.GO_UPC_MONTHLY_LIMIT = "10";
       await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 10 });
       const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
       const gate = await usage.canSpend();
       expect(gate.limit).toBe(10);
       expect(gate.allowed).toBe(false);
       expect(gate.reason).toContain("Go-UPC monthly cap reached");
+    });
+
+    it("GO_UPC_MONTHLY_LIMIT=10 warns at/above WARN_AT-equivalent behavior (used >= limit still blocks)", async () => {
+      process.env.GO_UPC_MONTHLY_LIMIT = "10000";
+      await fileLadderStorage(dir).writeUsage({ month: "2026-07", used: 4001 });
+      const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
+      const gate = await usage.canSpend();
+      expect(gate.allowed).toBe(true);
+      expect(gate.warn).toBe(true);
+    });
+
+    it.each(["", "0", "none", "unlimited", "None", "UNLIMITED", "-5", "abc"])(
+      "GO_UPC_MONTHLY_LIMIT=%j resolves to unlimited",
+      async (value) => {
+        process.env.GO_UPC_MONTHLY_LIMIT = value;
+        const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
+        const gate = await usage.canSpend();
+        expect(gate.limit).toBe(Infinity);
+        expect(gate.allowed).toBe(true);
+        expect(gate.warn).toBe(false);
+      },
+    );
+
+    it("unset GO_UPC_MONTHLY_LIMIT (deleted) resolves to unlimited", async () => {
+      delete process.env.GO_UPC_MONTHLY_LIMIT;
+      const usage = goUpcUsage(fileLadderStorage(dir), { now: AT_JULY });
+      const gate = await usage.canSpend();
+      expect(gate.limit).toBe(Infinity);
+      expect(gate.allowed).toBe(true);
     });
   });
 });

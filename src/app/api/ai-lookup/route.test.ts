@@ -802,15 +802,25 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
   describe("GET status: goUpc quota visibility", () => {
     const mkGet = () => new Request("http://localhost/api/ai-lookup", { headers: { "x-forwarded-for": "6.6.6.6" } });
 
-    it("returns goUpc with the right shape (configured boolean, used/limit numbers, warn boolean)", async () => {
+    it("returns goUpc with the right shape (configured boolean, used number, limit number|null, unlimited/warn boolean)", async () => {
       const res = await GET(mkGet());
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.goUpc).toBeDefined();
       expect(typeof json.goUpc.configured).toBe("boolean");
       expect(typeof json.goUpc.used).toBe("number");
-      expect(typeof json.goUpc.limit).toBe("number");
+      // limit is a number when a cap is configured, or null when unlimited (Infinity is not JSON-safe).
+      expect(json.goUpc.limit === null || typeof json.goUpc.limit === "number").toBe(true);
+      expect(typeof json.goUpc.unlimited).toBe("boolean");
       expect(typeof json.goUpc.warn).toBe("boolean");
+    });
+
+    it("reports unlimited by default (Go-UPC runs on the owner subscription, no monthly cap)", async () => {
+      // beforeEach deletes GO_UPC_MONTHLY_LIMIT, so the default resolves to unlimited.
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.goUpc.unlimited).toBe(true);
+      expect(json.goUpc.limit).toBe(null);
     });
 
     it("configured is false when GO_UPC_API_KEY is unset", async () => {
@@ -835,6 +845,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
       const res = await GET(mkGet());
       const json = await res.json();
       expect(json.goUpc.limit).toBe(10);
+      expect(json.goUpc.unlimited).toBe(false);
     });
   });
 

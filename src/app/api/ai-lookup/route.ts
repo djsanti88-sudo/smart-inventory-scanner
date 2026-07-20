@@ -139,7 +139,10 @@ export async function GET(request: Request) {
     goUpc: {
       configured: goUpcConfigured,
       used: goUpcSpend.used,
-      limit: goUpcSpend.limit,
+      // Infinity is not JSON-serializable (JSON.stringify -> null), so an unlimited (subscription) cap
+      // is reported as limit:null + unlimited:true; a configured numeric cap reports the number.
+      limit: Number.isFinite(goUpcSpend.limit) ? goUpcSpend.limit : null,
+      unlimited: !Number.isFinite(goUpcSpend.limit),
       warn: goUpcSpend.warn,
     },
     // Task 1 (v2 daily cap): exposes the SAME atomic, storage-backed counter the route gates and
