@@ -1,0 +1,333 @@
+import "server-only";
+
+import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { BossReportData } from "@/services/reports/bossReport";
+
+// A share token always points to the immutable, Boss Report safe snapshot captured when it was
+// minted. The resolver never needs tenant database access.
+export interface SharePayload {
+  businessId: string;
+  sessionId: string;
+  reportSnapshot: BossReportData;
+  createdAt: number;
+  expiresAt: number;
+}
+
+type TursoClient = {
+  execute: (statement: {
+    sql: string;
+    args: unknown[];
+  }) => Promise<{ rows: Record<string, unknown>[] }>;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LibsqlClientModule = { createClient: (config: { url: string; authToken: string }) => any };
+type StoredEntry = { payload: string; expiresAt: number };
+type FileShape = Record<string, StoredEntry>;
+type StoreBackend = "unresolved" | "turso" | "file" | "memory";
+
+const DDL =
+  "CREATE TABLE IF NOT EXISTS share_tokens (token TEXT PRIMARY KEY, payload TEXT NOT NULL, expires_at INTEGER NOT NULL)";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+let tursoClient: TursoClient | null | "unavailable" = null;
+let tableReady = false;
+let activeBackend: StoreBackend = "unresolved";
+const fallbackMemory = new Map<string, StoredEntry>();
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function safeString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value.slice(0, 512) : fallback;
+}
+
+function safeNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function safeNonNegativeNumber(value: unknown, fallback = 0): number {
+  return Math.max(0, safeNumber(value, fallback));
+}
+
+/**
+ * Project untrusted input onto the exact BossReportData allowlist. This prevents extra body fields,
+ * including raw scan rows or customer details, from becoming part of a public share artifact.
+ */
+export function normalizeBossReportSnapshot(input: unknown): BossReportData {
+  const source = record(input) ?? {};
+  const moat = record(source.moat) ?? {};
+
+  const byBrand = Array.isArray(source.byBrand)
+    ? source.byBrand.flatMap((value) => {
+        const row = record(value);
+        return row
+          ? [{ brand: safeString(row.brand, "Unknown"), qty: safeNonNegativeNumber(row.qty) }]
+          : [];
+      })
+    : [];
+
+  const byCategory = Array.isArray(source.byCategory)
+    ? source.byCategory.flatMap((value) => {
+        const row = record(value);
+        return row
+          ? [{ category: safeString(row.category, "Uncategorized"), qty: safeNonNegativeNumber(row.qty) }]
+          : [];
+      })
+    : [];
+
+  const topVariances = Array.isArray(source.topVariances)
+    ? source.topVariances.slice(0, 10).flatMap((value) => {
+        const row = record(value);
+        return row
+          ? [
+              {
+                productId: safeString(row.productId),
+                name: safeString(row.name),
+                prevQty: safeNonNegativeNumber(row.prevQty),
+                currQty: safeNonNegativeNumber(row.currQty),
+                delta: safeNumber(row.delta),
+              },
+            ]
+          : [];
+      })
+    : [];
+
+  const totalValue =
+    source.totalValue === null
+      ? null
+      : typeof source.totalValue === "number" && Number.isFinite(source.totalValue)
+        ? Math.max(0, source.totalValue)
+        : null;
+
+  return {
+    totalItems: safeNonNegativeNumber(source.totalItems),
+    moat: {
+      identified: safeNonNegativeNumber(moat.identified),
+      total: safeNonNegativeNumber(moat.total),
+    },
+    byBrand,
+    byCategory,
+    totalValue,
+    hasAnyCostData: source.hasAnyCostData === true && totalValue !== null,
+    topVariances,
+    sessionName: safeString(source.sessionName, "Untitled session"),
+    countedBy: safeString(source.countedBy, "Owner"),
+    countedAt: safeString(source.countedAt),
+  };
+}
+
+async function getTursoClient(): Promise<TursoClient | null> {
+  if (tursoClient === "unavailable") return null;
+  if (tursoClient) return tursoClient;
+
+  const url = process.env.TURSO_DATABASE_URL?.trim();
+  const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
+  if (!url || !authToken) {
+    tursoClient = "unavailable";
+    return null;
+  }
+
+  try {
+    const { createClient } = (await import("@libsql/client")) as unknown as LibsqlClientModule;
+    tursoClient = createClient({ url, authToken }) as TursoClient;
+    return tursoClient;
+  } catch (error) {
+    console.warn(
+      "[shareTokenStore] Failed to create Turso client, using local fallback:",
+      error instanceof Error ? error.message : String(error),
+    );
+    tursoClient = "unavailable";
+    return null;
+  }
+}
+
+async function ensureTable(client: TursoClient): Promise<boolean> {
+  if (tableReady) return true;
+  try {
+    await client.execute({ sql: DDL, args: [] });
+    tableReady = true;
+    return true;
+  } catch (error) {
+    console.warn(
+      "[shareTokenStore] Failed to ensure share_tokens table, using local fallback:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  }
+}
+
+function fallbackFile(): string {
+  return process.env.SHARE_TOKEN_FILE?.trim() || path.resolve(".share-tokens.json");
+}
+
+function isMemoryFallback(): boolean {
+  return fallbackFile() === ":memory:" || process.env.NODE_ENV === "test";
+}
+
+function readFallbackFile(): FileShape {
+  try {
+    const file = fallbackFile();
+    if (!fs.existsSync(file)) return {};
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return record(parsed) ? (parsed as FileShape) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFallbackFile(data: FileShape): void {
+  try {
+    fs.writeFileSync(fallbackFile(), JSON.stringify(data), "utf8");
+  } catch (error) {
+    console.warn(
+      "[shareTokenStore] Failed to write local share-token fallback:",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+function writeFallback(token: string, entry: StoredEntry): void {
+  fallbackMemory.set(token, entry);
+  if (isMemoryFallback()) {
+    activeBackend = "memory";
+    return;
+  }
+
+  activeBackend = "file";
+  const data = readFallbackFile();
+  data[token] = entry;
+  writeFallbackFile(data);
+}
+
+function readFallback(token: string): StoredEntry | null {
+  const memoryEntry = fallbackMemory.get(token);
+  if (memoryEntry) {
+    activeBackend = isMemoryFallback() ? "memory" : "file";
+    return memoryEntry;
+  }
+  if (isMemoryFallback()) {
+    activeBackend = "memory";
+    return null;
+  }
+
+  activeBackend = "file";
+  const entry = readFallbackFile()[token];
+  if (!entry || typeof entry.payload !== "string" || !Number.isFinite(entry.expiresAt)) {
+    return null;
+  }
+  fallbackMemory.set(token, entry);
+  return entry;
+}
+
+function parseStoredPayload(entry: StoredEntry): SharePayload | null {
+  try {
+    const source = record(JSON.parse(entry.payload));
+    if (!source) return null;
+
+    const businessId = safeString(source.businessId);
+    const sessionId = safeString(source.sessionId);
+    const createdAt = safeNumber(source.createdAt, Number.NaN);
+    const payloadExpiresAt = safeNumber(source.expiresAt, Number.NaN);
+    const expiresAt = Math.min(entry.expiresAt, payloadExpiresAt);
+    if (!businessId || !sessionId || !Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) {
+      return null;
+    }
+    if (Date.now() >= expiresAt) return null;
+
+    return {
+      businessId,
+      sessionId,
+      reportSnapshot: normalizeBossReportSnapshot(source.reportSnapshot),
+      createdAt,
+      expiresAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function mintShareToken(payload: SharePayload, ttlMs: number): Promise<string> {
+  void ttlMs;
+  const token = randomUUID();
+  const storedPayload: SharePayload = {
+    businessId: payload.businessId,
+    sessionId: payload.sessionId,
+    reportSnapshot: normalizeBossReportSnapshot(payload.reportSnapshot),
+    createdAt: payload.createdAt,
+    expiresAt: payload.expiresAt,
+  };
+  const entry = {
+    payload: JSON.stringify(storedPayload),
+    expiresAt: storedPayload.expiresAt,
+  };
+
+  const client = await getTursoClient();
+  if (client && (await ensureTable(client))) {
+    try {
+      await client.execute({
+        sql: "INSERT INTO share_tokens (token, payload, expires_at) VALUES (?, ?, ?)",
+        args: [token, entry.payload, entry.expiresAt],
+      });
+      activeBackend = "turso";
+      return token;
+    } catch (error) {
+      console.warn(
+        "[shareTokenStore] Turso insert failed, using local fallback:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  writeFallback(token, entry);
+  return token;
+}
+
+export async function resolveShareToken(token: string): Promise<SharePayload | null> {
+  if (!UUID_PATTERN.test(token)) return null;
+
+  const client = await getTursoClient();
+  if (client && (await ensureTable(client))) {
+    try {
+      const result = await client.execute({
+        sql: "SELECT payload, expires_at FROM share_tokens WHERE token = ?",
+        args: [token],
+      });
+      const row = result.rows[0];
+      if (row) {
+        activeBackend = "turso";
+        return parseStoredPayload({
+          payload: String(row.payload),
+          expiresAt: Number(row.expires_at),
+        });
+      }
+    } catch (error) {
+      console.warn(
+        "[shareTokenStore] Turso read failed, using local fallback:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  const entry = readFallback(token);
+  return entry ? parseStoredPayload(entry) : null;
+}
+
+/** Reset memoized backend state so unit tests can prove environment selection independently. */
+export function __resetShareTokenStoreForTests(): void {
+  tursoClient = null;
+  tableReady = false;
+  activeBackend = "unresolved";
+  fallbackMemory.clear();
+}
+
+/** Exposes only the selected backend name for the fallback safety assertion. */
+export function __getShareTokenStoreBackendForTests(): StoreBackend {
+  return activeBackend;
+}
