@@ -78,6 +78,8 @@ import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
+import { getOrCreateDeviceId } from "@/services/deviceIdentity";
+import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
@@ -481,6 +483,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoCountNonPublicWithEvidence: true,
 };
 
+const AUTO_SESSION_INACTIVITY_MINUTES = 30;
+
 export interface ScanState {
   // identity / config
   businessId: string;
@@ -491,6 +495,9 @@ export interface ScanState {
   // true on the mock/local path.
   businessDataLoaded: boolean;
   currentSession: InventorySession | null;
+  /** Phase 3: refresh-populated cloud session history (Task 7's refreshFromCloud writes it; the
+   *  cloud paths of listSessions/reopenSession read it). Always [] on the mock/local path. */
+  sessions: InventorySession[];
   sessionId: string;
   settings: Settings;
 
@@ -541,6 +548,10 @@ export interface ScanState {
 
   // hydration guard
   _hasHydrated: boolean;
+  // Phase 3: this device's stable identity (localStorage-persisted UUID). Null until first read
+  // (e.g. non-browser/test contexts, or before the store has touched deviceIdentity). Used only to
+  // derive idempotent auto-session ownership - never part of the count/ledger identity.
+  deviceId: string | null;
 
   // actions
   setHasHydrated: (v: boolean) => void;
@@ -573,6 +584,11 @@ export interface ScanState {
    *  active context to a saved session and reloads its counts from the durable store. */
   listSessions: () => InventorySession[];
   reopenSession: (sessionId: string) => boolean;
+  /** Idempotent per (account, device, time-window): reuses the current session if it is still
+   *  ACTIVE, owned by THIS device, and within the inactivity window; otherwise auto-opens a fresh
+   *  auto-named session stamped with this device's id. Safe to call on every mount/scan - a no-op
+   *  when a valid session already exists. */
+  ensureAutoSession: () => void;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
   retrySync: () => void;
@@ -1098,6 +1114,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         notes: "",
         syncStatus: "synced",
       },
+      sessions: [],
       settings: DEFAULT_SETTINGS,
       products: seed.products,
       aliases: seed.aliases,
@@ -1123,6 +1140,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       lastProductDeleteBackup: null,
       lastIdentifierBackfill: null,
       _hasHydrated: deps.persistName ? false : true,
+      deviceId: null,
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
@@ -1437,17 +1455,45 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       // --- Browse + reopen saved sessions --------------------------------------------------------------
-      listSessions: () =>
-        getMockDb()
+      // PHASE 3 FIX (scout-sessions gap #6): on the cloud backend these MUST NOT read getMockDb() directly
+      // (that silently returns an empty/stale local mock DB for a Firebase-backed account). The mock/local
+      // path is unchanged (still getMockDb(), which IS the real backing store there). Task 7's
+      // refreshFromCloud populates `sessions`; before the first refresh, the current session is the
+      // honest fallback. After refresh, the full cloud session history is the read source.
+      listSessions: () => {
+        if (cloudBackend) {
+          const sessions = get().sessions;
+          if (sessions.length > 0) return sessions;
+          const cur = get().currentSession;
+          return cur ? [cur] : [];
+        }
+        return getMockDb()
           .getSessions(get().businessId)
-          .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? "")),
+          .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+      },
 
       reopenSession: (sessionId) => {
+        if (cloudBackend) {
+          // Cloud path: Task 7 refreshes full session history and counts into store state. Look up the
+          // requested history row there, with currentSession only as the pre-refresh fallback.
+          const state = get();
+          const session =
+            state.sessions.find((candidate) => candidate.id === sessionId) ??
+            (state.currentSession?.id === sessionId ? state.currentSession : null);
+          if (!session) return false;
+          set({
+            currentSession: session,
+            sessionId: session.id,
+            finalCounts: state.finalCounts.filter((c) => c.sessionId === session.id),
+            scanFeed: [],
+            needsReviewQueue: [],
+          });
+          emitAudit({ entityType: "CountSession", entityId: session.id, action: "session_reopened", metadata: {} });
+          return true;
+        }
         const db = getMockDb();
         const session = db.getSession(sessionId);
         if (!session || session.businessId !== get().businessId) return false;
-        // Reload this session's counts from the durable store into the live view. The counts we leave behind
-        // are already saved (synced), so switching never loses data.
         const finalCounts: InventoryCount[] = db.getSessionCounts(sessionId).map((c) => ({
           id: `count-${c.sessionId}-${c.productId}`,
           businessId: c.businessId,
@@ -1468,10 +1514,75 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         return true;
       },
 
+      ensureAutoSession: () => {
+        if (typeof window === "undefined" || !window.localStorage) return; // non-browser/test context: no-op
+        const deviceId = getOrCreateDeviceId(window.localStorage);
+        set({ deviceId });
+        const cur = get().currentSession;
+        const nowIso = now();
+        if (
+          cur &&
+          shouldReuseSession(
+            { status: cur.status, deviceId: cur.deviceId, startedAt: cur.startedAt },
+            { deviceId, nowIso, inactivityMinutes: AUTO_SESSION_INACTIVITY_MINUTES },
+          )
+        ) {
+          return; // idempotent: this device's session is still fresh and active, reuse it
+        }
+        const id = `session-${idFactory()}`;
+        const businessId = get().businessId;
+        const session: InventorySession = {
+          id,
+          businessId,
+          name: buildAutoSessionName(nowIso),
+          location: cur?.location || "Main",
+          status: "active",
+          startedAt: nowIso,
+          completedAt: null,
+          createdBy: get().userId ?? "demo",
+          notes: "",
+          syncStatus: "synced",
+          locked: false,
+          lockedAt: null,
+          deviceId,
+        };
+        set({
+          sessionId: id,
+          currentSession: session,
+          scanFeed: [],
+          finalCounts: [],
+          needsReviewQueue: [],
+          pendingSyncQueue: [],
+          syncedScanEventIds: [],
+          lastSyncError: null,
+        });
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory,
+            now,
+            businessId,
+            sessionId: id,
+            entityType: "CountSession",
+            entityId: id,
+            operation: "SAVE_SESSION",
+            payload: session,
+            idempotencyKey: buildIdempotencyKey(businessId, id, `${id}-active`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
+        emitAudit({ entityType: "CountSession", entityId: id, action: "session_auto_started", metadata: { name: session.name, deviceId } });
+      },
+
       processScan: (rawInput) => {
         // OWNER PIN LOCK: a locked session is read-only - no new scan may land in it. Block before any work
         // so a locked count can never change until it is unlocked with the owner PIN.
         if (get().currentSession?.locked) return null;
+        // PHASE 3 completed-session guard: finishSession does NOT clear sessionId/currentSession (by
+        // design - see finishSession's own comment), so without this guard a scan taken between
+        // "Finish session" and the next ensureAutoSession/startSession call would silently stamp the
+        // OLD completed session's id. Callers (the scan page) call ensureAutoSession before every scan
+        // batch; this guard is the hard backstop for any path that does not.
+        if (get().currentSession?.status === "completed") return null;
         const cleaned = cleanScanCode(rawInput);
         if (!cleaned.cleanCode) return null;
 
