@@ -361,3 +361,10 @@ THEN: P5b (docs/superpowers/plans TBD - author from p5b-scout.md) + P6 (author f
 - Gates at close: unit 2768/0, tsc 0, ledger 44/44, golden 2/2, firebase green (isolated; first run = worker-crash flake under parallel load), build clean, e2e 55/55, Argus PASS.
 - Commits: 6225b88, d0dc416, 8ba2864, a4615be (P5+P5b plans), 47e34d4 (share tests + tools marker).
 - P5b plan authored + adversarially reviewed (2 Blockers F2/F3 + 4 Importants patched into the plan) + Argus review-plan structural pass. NEXT: P5b T1+T2 (server write path) and T3 (transform) dispatched in parallel; T4 (scanStore, law-critical) after T3; then phase gate + ultra + qa:bots:tire.
+
+## P5b CLOSE (2026-07-20)
+- Shipped: 4c2cb17 (T1+T2 write path), 4a629e6 (T3 transform), f305f64 (T4 store wiring), cb45de5 (ultra fix wave).
+- Ultra review (2 finders + agy): 2 HIGHs fixed (retail hits excluded from master conflict machinery via explicit isMaster opt-in; slug-vs-rich false conflict killed by brand-stripped subset rule), sync-throw guarded, persisted-branch master append REMOVED (stale looser-gate replay = trust hole + transaction storm), .catch added. All failing-first.
+- Gates: unit 2829/0, tsc 0, ledger 44/44, golden 2/2, firebase 52/52, build clean, e2e 55/55.
+- P6 progress: A1 (34ee9a7 profile refresh), A3 (4d4c2d0 honest drift gate - NOTE: regen from branch CSV DROPPED 1,902 harvest barcodes; orchestrator caught + reverted; payload 78,243 / meta 76,173 = documented healthy asymmetry; CSV reconciliation deferred, owner-flagged), D1 (fc9f8ec export route, bypass hard-pinned to demo tenant).
+- IN FLIGHT next wave: A2 (cap reorder, law-critical), C1 (settings account), C2 (first-run banner + firstScanAt), C3 (README). Then B1/B2 (after A2), D2 (after C1), phase gate + qa:bots + ultra + agy final.
