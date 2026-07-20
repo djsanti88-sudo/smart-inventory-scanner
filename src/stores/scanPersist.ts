@@ -29,6 +29,7 @@ export interface PersistableScanState {
   shopOverrides: unknown[];
   feedbackEvents: unknown[];
   countSnapshots: unknown[];
+  firstScanAt: string | null;
 }
 
 /** Resolve the persistence access level from the signed-in uid (defaults to customer when unknown). */
@@ -76,6 +77,9 @@ export function buildPersistedScanState(
     // Task 3.5: snapshot lines are already the product-facing shape (productId, name, qty - no raw
     // codes), the same fields a customer already sees in finalCounts, so this is safe for every role.
     countSnapshots: s.countSnapshots,
+    // P6 C2: a single ISO timestamp, no codes/identities - safe for every role (drives the /scan
+    // first-run banner across reloads).
+    firstScanAt: s.firstScanAt,
   };
   if (level === "platform") {
     return {

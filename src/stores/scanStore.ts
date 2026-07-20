@@ -611,6 +611,12 @@ export interface ScanState {
   /** Phase 3: capped ring buffer of recently-used location strings for this business, newest last -
    *  same append-and-slice-oldest pattern as countSnapshots (scanStore.ts:1289-1309). */
   recentLocations: string[];
+  /** P6 C2: ISO timestamp of this business's FIRST counted scan (any path - known, provisional, or
+   *  conflict), set exactly once. Null until then. Drives the /scan first-run banner
+   *  (scanFeed.length === 0 && firstScanAt === null). Local Zustand-persisted state only (MOCK-BACKEND
+   *  rule, review F5) - live-auth mode mirroring this to the business doc is explicitly deferred to a
+   *  future task, not built here. Reset to null on business switch / sign-out via emptyTenantState. */
+  firstScanAt: string | null;
 
   // actions
   setHasHydrated: (v: boolean) => void;
@@ -1129,6 +1135,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       }
     };
 
+    // P6 C2: set-once stamp of this business's first EVER counted scan (any path). Called AFTER the
+    // count has already been applied at each call site (never before - TOP-LEVEL LAW: counting is never
+    // gated on this). Idempotent: a no-op once firstScanAt is already set, so re-scans/re-entries never
+    // overwrite the original timestamp. Local Zustand-persisted state only (MOCK-BACKEND rule, review
+    // F5) - live-auth mode mirroring this to the business doc is deferred, not built here.
+    const markFirstScanIfNeeded = () => {
+      if (get().firstScanAt != null) return;
+      set({ firstScanAt: now() });
+    };
+
     // Serialize cloud drains: rapid scans each call syncPending, and overlapping async drains would
     // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
     // each drain after the previous completes; every enqueue still triggers a drain that picks up the
@@ -1238,6 +1254,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       deviceId: null,
       location: "Main",
       recentLocations: [],
+      firstScanAt: null,
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
@@ -1257,6 +1274,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           finalCounts: cleared.finalCounts,
           needsReviewQueue: cleared.needsReviewQueue,
           settings: cleared.settings,
+          firstScanAt: cleared.firstScanAt,
         });
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
@@ -1343,6 +1361,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           finalCounts: cleared.finalCounts,
           needsReviewQueue: cleared.needsReviewQueue,
           settings: cleared.settings,
+          firstScanAt: cleared.firstScanAt,
           pendingSyncQueue: [],
           syncedScanEventIds: [],
           lastSyncError: null,
@@ -1884,6 +1903,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 : c,
             ),
           }));
+          // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW).
+          markFirstScanIfNeeded();
 
           const incPayload: IncrementPayload = {
             businessId,
@@ -3579,6 +3600,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               : e,
           ),
         }));
+        // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW) - and only
+        // when this call actually counted something (countedEvent), never on a no-op/idempotent re-entry.
+        if (countedEvent) markFirstScanIfNeeded();
         // D1 FIX: a provisional count is real inventory. Enqueue its ledger writes through the SAME sync
         // queue mechanism every counted scan uses. SAVE_SCAN_EVENT + INCREMENT_COUNT mirror the countable
         // branch's two ops (scanStore.ts:1397-1422); SAVE_PRODUCT for the freshly minted provisional is a

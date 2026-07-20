@@ -39,6 +39,7 @@ export default function ScanPage() {
   const recentLocations = useScanStore((s) => s.recentLocations);
   const ensureAutoSession = useScanStore((s) => s.ensureAutoSession);
   const scanFeed = useScanStore((s) => s.scanFeed);
+  const firstScanAt = useScanStore((s) => s.firstScanAt);
 
   // BULK SCAN: paste/type several codes separated by spaces or newlines and each becomes its OWN row
   // (one processScan per code). A single hardware-scanned barcode contains no whitespace, so normal
@@ -121,6 +122,18 @@ export default function ScanPage() {
             >
               Dismiss
             </button>
+          </div>
+        )}
+        {/* C2 first-run banner (GC-D): shown only before this business's first EVER counted scan. Plain,
+            passive, non-interactive div - never a modal/overlay, never focusable, never intercepts keys,
+            never steals focus from the scanner input. Disappears once a scan exists (feed non-empty or
+            firstScanAt set), so it can never linger or block the scan loop. */}
+        {scanFeed.length === 0 && firstScanAt == null && (
+          <div
+            data-testid="first-run-banner"
+            className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-base text-blue-900"
+          >
+            Scan your first barcode to start counting. The scan box is already focused and ready.
           </div>
         )}
         <div className="flex flex-wrap items-end gap-3">
