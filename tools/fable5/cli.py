@@ -25,6 +25,7 @@ from .docs_check import check_docs
 from .experts import run_experts
 from .invariants import load_invariants, select_invariant_checks
 from .models import CheckResult, RunReport
+from .mutation import run_mutation_probes
 from .personas import run_personas
 from .plan_review import render_plan_markdown, review_plan
 from .report import write_report
@@ -64,10 +65,18 @@ def _personas_requested(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "personas", False) or getattr(args, "gate", "") == "monthly")
 
 
+def _mutation_requested(args: argparse.Namespace) -> bool:
+    return bool(
+        getattr(args, "mutation", False) or getattr(args, "gate", "") in {"pr", "monthly"}
+    )
+
+
 def _hook_triggered_refusal(args: argparse.Namespace) -> str | None:
     """Return a refusal message if a hook-triggered run requested a refused flag."""
     if getattr(args, "command", "") == "stress":
         return "hook-triggered runs are deterministic-only: stress refused"
+    if _mutation_requested(args):
+        return "hook-triggered runs are deterministic-only: mutation probes refused"
     if _personas_requested(args):
         return "hook-triggered runs are deterministic-only: --personas refused"
     for attribute, flag in _HOOK_REFUSED_FLAGS:
@@ -309,6 +318,17 @@ async def _run_gated(
             results = await checks_awaitable
         results.extend(skipped_resource_results)
         results.extend(check_docs(root, config.docs_files, set(inventory.package_scripts)))
+        if _mutation_requested(args):
+            print("Running changed-file mutation probes in one temporary worktree")
+            results.append(
+                await asyncio.to_thread(
+                    run_mutation_probes,
+                    root=root,
+                    changed_files=files,
+                    report_dir=report_dir,
+                    dry_run=args.dry_run,
+                )
+            )
         if args.with_experts:
             if tier == "skip":
                 print(f"Experts skipped: risk score {profile.score} (deterministic only)")
@@ -448,6 +468,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--only", nargs="+", help="Run only the named checks within the selected gate.")
     run.add_argument("--dry-run", action="store_true", help="Show scheduling without running checks.")
     run.add_argument("--no-cache", action="store_true", help="Ignore successful cached evidence.")
+    run.add_argument(
+        "--mutation",
+        action="store_true",
+        help="Probe changed TypeScript modules even outside the pr and monthly gates.",
+    )
     run.add_argument("--all-agents", action="store_true", help="Route the packet to every local agent.")
     run.add_argument(
         "--with-experts",
