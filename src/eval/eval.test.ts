@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { writeFileSync, mkdirSync } from "node:fs";
-import { runEval, formatReport } from "@/eval/runEval";
+import { runEval, formatReport, SUGGESTED_PRECISION_FLOOR_PCT } from "@/eval/runEval";
+import { CLASS_DATASET } from "@/eval/dataset";
+import { FIXTURES } from "@/eval/fixtures";
 
 // Runnable MOCK eval (no live AI). Prints the baseline table to the console AND asserts the safety
 // invariant. Run it directly with:  npx vitest run src/eval/eval.test.ts
@@ -31,5 +33,36 @@ describe("decode eval harness (mock baseline)", () => {
 
   it("identity accuracy is measured over tires and is non-trivial", () => {
     expect(report.summary.identityAccuracyPct).toBeGreaterThan(0);
+  });
+});
+
+// P5 Task 4: the eval harness's gate is now the REAL production gate (canAutoCount /
+// shouldAutoApplySuggestion from @/stores/scanGates), not a hand-mirrored copy - so this suite
+// mechanically proves the D6 demotion (Task 1) actually holds at the gate boundary, per class.
+describe("decode eval harness: per-class labeled precision gates (post-D6-demotion)", () => {
+  const report = runEval();
+
+  const classCases: Array<{ code: string; expectedStatus: string; label: string }> = [
+    { code: "gpt-self-report-verified-should-demote-to-suggested", expectedStatus: "suggested", label: "GPT self-report on a public barcode (bare model claim) must never mint verified" },
+    { code: "gpt-self-report-on-vendor-shape", expectedStatus: "suggested", label: "GPT self-report on a vendor/SKU shape must never mint verified" },
+    { code: "app-verified-exact-should-stay-verified", expectedStatus: "verified", label: "App-verified exact-code evidence (AC5) must still auto-verify unchanged" },
+    { code: "learned-tier-should-stay-suggested", expectedStatus: "suggested", label: "Learned tier stays a suggestion, never verified" },
+    { code: "corpus-retail-hit-should-stay-verified", expectedStatus: "verified", label: "Corpus/retail-corpus hit (AC5) must still auto-verify unchanged" },
+  ];
+
+  it.each(classCases)("$label ($code -> $expectedStatus)", ({ code, expectedStatus }) => {
+    expect(FIXTURES[code], `fixture for ${code} must exist`).toBeDefined();
+    expect(CLASS_DATASET.find((l) => l.code === code), `dataset label for ${code} must exist`).toBeDefined();
+    const row = report.rows.find((r) => r.code === code)!;
+    expect(row, `eval row for ${code} must exist`).toBeDefined();
+    expect(row.decision).toBe(expectedStatus);
+  });
+
+  it("HARD INVARIANT: falseAutoVerifiedRatePct is 0% across every labeled class (a suggestion can never be scored as verified when it should be suggested)", () => {
+    expect(report.summary.falseAutoVerifiedRatePct).toBe(0);
+  });
+
+  it(`HARD INVARIANT: suggestedPrecisionPct meets the floor (>= ${SUGGESTED_PRECISION_FLOOR_PCT}%) on the labeled ground-truth set`, () => {
+    expect(report.summary.suggestedPrecisionPct).toBeGreaterThanOrEqual(SUGGESTED_PRECISION_FLOOR_PCT);
   });
 });
