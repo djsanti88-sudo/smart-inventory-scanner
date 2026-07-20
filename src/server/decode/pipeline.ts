@@ -1124,7 +1124,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // comment for the full blast-radius rationale (a false steer can cost a real paid cap slot).
     const steering = steerFreeRungs(code);
     const freeRungs = steering.skip ? [] : buildFreeLadderRungs(code, { runUpcItemDb, runOpenFoodFacts });
-    const freeRun = await runLadder(code, freeRungs, { deadlineAt: ladderDeadlineAt });
+    const freeRun = await runLadder(code, freeRungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
     if (steering.skip) freeRun.reasons.push({ rung: "free-steering", reason: steering.reason });
     // The free rungs (UPCitemdb / Open Food Facts) NEVER emit "verified" today - both are always
     // suggestions (Resolver Trust Rules). freeStatus is read defensively so a future verified free rung
@@ -1247,7 +1247,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
       if (goUpcCanPay) {
         await chargePaidSlot();
-        const goRun = await runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt });
+        const goRun = await runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
         const goStatus = (goRun.outcome?.payload as LadderPayload | undefined)?.decision.status ?? null;
         ladderRun = goStatus === "verified"
           ? { settledBy: goRun.settledBy, outcome: goRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] }
@@ -1263,7 +1263,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // and honest per-rung skips - never a slot for work that was never actually paid. Escalation
       // above already applies the equivalent gate (goUpcCanPay) for its own paid attempt.
       if (paidWorkPossible(code)) await chargePaidSlot();
-      const paidRun = await runLadder(code, buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }), { deadlineAt: ladderDeadlineAt });
+      const paidRun = await runLadder(code, buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }), { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
       // that actually ran, honestly, in the order it ran.
       ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...paidRun.reasons] };
