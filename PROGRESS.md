@@ -154,3 +154,33 @@ signal (L12), resolver tier slot, owner-PIN destructive gates, master-catalog de
 Playwright accounts proof. Six real defects caught and fixed by the layered review chain
 (details: .superpowers/sdd/progress.md). Phase 3 (sessions/sync/report) planning done,
 review-patched, execution starting; DOT tire wedge CUT by owner. Push/deploy still gated.
+
+## Checkpoint 2026-07-20: Phase 3 (sessions / cross-device sync / locations / Boss Report) COMPLETE
+Branch feat/decode-ladder-goupc (never pushed). Executed via Codex (implementer) + orchestrator
+review/gate split, 15 tasks in 14 commits (9785a81..0d7b9fc) plus the plan commit 42fd07e.
+DOT tire wedge CUT by owner order (zero DOT scope).
+
+Full gate sweep (Task 15): unit suite PASS (all vitest projects), test:ledger 43/43,
+test:golden PASS, test:firebase 51/51 (incl. getScanEventsBySession + two-device concurrency),
+tsc clean, lint 86 = pre-existing 40 errors flat +1 warning in scripts/ (not Phase 3), build
+green (all new routes: /report, /report/[token], /sessions/[id], /api/share, /api/share/[token]),
+e2e 51 pass / 1 pre-existing goupc-ladder cap-timing flake (untouched decode file since pre-branch).
+
+Acceptance criteria -> proof:
+- Auto-sessions idempotent per account/device/window: autoSession.store.test.ts, deviceIdentity.test.ts
+- Session history + timeline (getScanEventsBySession): mockDb.test.ts, firebaseSyncTarget.rules.test.ts, sessions/[id]/page.tsx
+- Cross-device inbound MERGE never clobbers unsynced rows: refreshFromCloud.store.test.ts + orchestrator source-audit of the double-robust pending guard
+- Two devices converge exactly-once: sessionPersistence.rules.test.ts two-device concurrent test (emulator)
+- Free-text locations + recents, stamped on scans: scanLocation.store.test.ts, scanPersist.test.ts, phase3-location-moat.spec.ts
+- Boss Report (totals, brand/category, moat line, honest null value, print, shareable token): bossReport.test.ts, shareTokenStore.test.ts, report page + auth-gated share routes
+- Ledger invariants hold across auto-session rollover: ledgerInvariants.store.test.ts
+
+GATE-SWEEP REGRESSION CAUGHT+FIXED (0d7b9fc): ensureAutoSession on scan-mount rotated any
+deviceId-less (hydrated/default/mock) session, wiping visible finalCounts; fixed to ADOPT the
+unclaimed in-window session and preserve counts. Per-task gates missed it; the full e2e sweep caught it.
+
+Known limitation: cloud session history is refreshed ON DEMAND (manual Refresh button), not via a
+live listener (a naive onSnapshot replace would violate the TOP-LEVEL LAW). Before the first Refresh,
+listSessions falls back to [currentSession]; after Refresh, listSessions/reopenSession use the full
+Task-7-populated sessions state. Task 14 formal visual-polish agent pass deferred (its e2e screenshot
+specs were out of Tasks 10/11 file scope); markup self-review clean. Push/deploy still owner-gated.
