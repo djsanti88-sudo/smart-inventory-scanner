@@ -21,5 +21,28 @@
   },
   "remote": {
     "defaultEnvironmentId": "env_01WtbU5o7gmPtwnwQdcWYMy1"
+  },
+  "outputStyle": "Proactive",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/fable5-sessionstart.ps1"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/fable5-stop.ps1"
+          }
+        ]
+      }
+    ]
   }
 }

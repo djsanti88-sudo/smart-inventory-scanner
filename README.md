@@ -42,6 +42,11 @@ npm run dev        # http://localhost:3000 (tests pin port 3100)
 | Doc | Purpose |
 |---|---|
 | `CLAUDE.md` | Agent rules: decode ladder, resolver trust, scanner buffer, safety gates |
+| `docs/ARCHITECTURE.md` | Verified architecture map: scan flow, decode ladder, stores, traps |
+| `docs/COMMANDS.md` | Every script + port + env var name, with PAID/LIVE warnings |
+| `docs/PLAN_EXECUTION.md` | How plans are created, attacked, executed, and proven done |
+| `docs/AGENT_BOT_ROLES.md` | QA bot personas behind the human-bot proof gate |
+| `docs/superpowers/plans/2026-07-19-master-plan.md` | Owner-approved 6-phase plan (phase source of truth) |
 | `PROGRESS.md` | Live status checkpoint (current phase, pending owner decisions) |
 | `DECISIONS.md` | Technical decisions and why |
 | `TESTING.md` | Test commands, coverage map, acceptance checklist |

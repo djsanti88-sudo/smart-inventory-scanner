@@ -1,6 +1,6 @@
 # Scanbin Master Plan — Sell-Ready Product (FINAL — v3 + final-gate edits)
 
-> **Status:** APPROVED by owner 2026-07-19 — execution started with Phase 1 (COMPLETE, merged e6f2817). Passed all 3 critique loops (5 critics); final gate verdict: APPROVE. Owner decision: the P3 tire wedge (DOT date-code) keep/cut call is DEFERRED to Phase 3 plan-writing.
+> **Status:** APPROVED by owner 2026-07-19 — execution started with Phase 1 (COMPLETE, merged e6f2817). Passed all 3 critique loops (5 critics); final gate verdict: APPROVE. Owner decision 2026-07-19 (late): the P3 tire wedge (DOT date-code) is CUT - owner: "do not do anything with DOTs we dont scan those". No DOT capture anywhere in any phase.
 > **OWNER ORDER (2026-07-19, supersedes "owner reviews between phases"):** AUTONOMOUS PROGRESSION - each phase runs plan -> review loops -> parallel-track execution -> task gates -> end-of-phase multi-agent ULTRA REVIEW -> fix wave -> local merge -> next phase, WITHOUT waiting for owner approval between phases. Push/deploy/production/paid-live calls remain owner-gated. Concurrency: up to 5 subagents, 4 shells.
 > **For agentic workers:** This is the PHASE-LEVEL master plan (owner order: big phases, long tasks).
 > Each phase gets its own detailed bite-sized implementation plan (superpowers:writing-plans) at phase start,
@@ -132,7 +132,7 @@
   - **The moat line, top of page:** "142 of 150 items identified automatically — no manual entry." (Same coverage stat on the scan screen.)
   - **Shareable link:** read-only tokenized report route (token scoped to one session, expiring, no tenant leak) — the boss opens it on his phone; the demo leaves the room.
   - Brand-neutral header; phone-readable; print-clean.
-- **Tire wedge (owner-cuttable, 1-2d):** optional DOT date-code capture per scan (camera/manual) -> Boss Report flags "3 tires over 6 years old — $X at risk." Rides on report + location infra; nothing else depends on it.
+- **Tire wedge: CUT by owner 2026-07-19 ("do not do anything with DOTs we dont scan those").** No DOT date-code capture is built in any phase; nothing else depended on it.
 
 **Acceptance criteria:**
 1. Scan 50 items with no session started -> log shows "Jul 19, 4:00 PM — 50 items"; click shows all 50 rows with locations. (Playwright, both viewports.)

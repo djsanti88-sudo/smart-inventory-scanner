@@ -1,4 +1,7 @@
-# Decode improvement plan (analysis only — nothing implemented here)
+# [SUPERSEDED 2026-07-19] Decode improvement plan (analysis only — nothing implemented here)
+
+> **SUPERSEDED**: built on the pre-ladder architecture. Current truth: `docs/DECODER_ARCHITECTURE.md`
+> and `docs/ARCHITECTURE.md`. History only.
 
 > Companion to `ARCHITECTURE.md` (the real flow) and the eval harness (`src/eval`, baseline in
 > `eval-baseline.md`). Recommendations are prioritized by **impact ÷ effort** and grouped by the only three
