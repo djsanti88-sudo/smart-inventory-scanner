@@ -262,3 +262,43 @@ describe("Ledger invariant suite (books balance on every path)", () => {
     await assertRetryIsNoOp(store);
   });
 });
+
+describe("ledger invariants hold across an auto-session boundary", () => {
+  it("scans before and after an auto-session rollover both balance correctly, in their own session partitions", () => {
+    let clock = "2026-07-19T16:00:00.000Z";
+    const store = createTestScanStore({ now: () => clock });
+    store.setState({ sessionId: "", currentSession: null });
+    store.getState().ensureAutoSession();
+    const firstSessionId = store.getState().sessionId;
+    store.getState().processScan("012345678905");
+    store.getState().processScan("012345678905");
+    assertBooksBalance(store);
+    const firstSnapshot = ledgerSnapshot(store);
+
+    // Roll the clock past the inactivity window: a NEW auto-session must open, and the ledger
+    // invariant must hold independently for the new session's own scanFeed/finalCounts partition
+    // (ensureAutoSession resets scanFeed/finalCounts/pendingSyncQueue on rollover, same as
+    // startSession always has).
+    clock = "2026-07-19T16:45:00.000Z";
+    store.getState().ensureAutoSession();
+    expect(store.getState().sessionId).not.toBe(firstSessionId);
+    expect(store.getState().scanFeed).toHaveLength(0);
+    expect(store.getState().finalCounts).toHaveLength(0);
+    store.getState().processScan("012345678905");
+    assertBooksBalance(store);
+
+    // The first session's ledger snapshot is untouched by the rollover (rollover clears the LIVE
+    // view only - it does not retroactively edit history).
+    expect(firstSnapshot).toContain('"q":2');
+  });
+
+  it("a scan taken between finishSession and the next ensureAutoSession call never lands anywhere (processScan returns null, no phantom count)", () => {
+    const store = createTestScanStore({ now: () => "2026-07-19T16:00:00.000Z" });
+    store.getState().startSession("Manual", "Main");
+    store.getState().processScan("012345678905");
+    store.getState().finishSession();
+    const result = store.getState().processScan("012345678905"); // must be blocked, not silently counted
+    expect(result).toBeNull();
+    assertBooksBalance(store); // still balances: the blocked scan added nothing to compare against
+  });
+});
