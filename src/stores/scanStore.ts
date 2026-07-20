@@ -5042,10 +5042,36 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // review/count carrying the TOTAL quantity. Order of first appearance is preserved for the summary.
         type AggregatedRow = {
           code: string;
+          /** cleanCode passed to reopenNeedsReview. Equal to `code` except on a divergent-identity
+           *  collision, where it is disambiguated so the two conflicting identities land as TWO separate
+           *  review entries instead of colliding onto one (reopenNeedsReview keys reviews by cleanCode). */
+          reviewCode: string;
           status: ImportPreviewRow["status"];
           reason: string;
           quantity: number;
           suggestion: { name: string; brand: string; category: string; specsShort: string; primarySku: string; primaryBarcode: string };
+          /** Finding 3 fix (P4 ultra-review HIGH): the resolved identity this aggregate was built from,
+           *  used to detect a DIVERGENT collision (same raw key, different real product) so it is never
+           *  silently merged under the first row's identity. */
+          identitySignature: string;
+        };
+        // Finding 3 fix: two source rows can share the same raw aggregation key (barcode/partNumber/name
+        // fallback) yet resolve to genuinely DIFFERENT products - e.g. two blank-barcode/blank-PN rows
+        // that both fall back to a generic name like "Tire" but carry different candidate identities.
+        // Merging those under the first row's identity silently discards the second row's identity and
+        // misattributes its quantity (resolver-trust law: wrong identity is FAILURE). Compute a resolved
+        // identity signature per row - prefer the matched candidate/catalog identity over raw free text -
+        // and only sum quantities when two rows for the same raw key share that signature. A divergent
+        // collision is routed to its own review entry instead (never merged, never dropped).
+        const identitySignature = (preview: ImportPreviewRow, source: NonNullable<ImportPreviewRow["source"]>): string => {
+          if (preview.candidate?.uid) return `uid:${preview.candidate.uid}`;
+          if (preview.retailCatalogMatch) {
+            return `catalog:${preview.retailCatalogMatch.brand}|${preview.retailCatalogMatch.productName}|${preview.retailCatalogMatch.barcode}`;
+          }
+          // No matched identity at all - fall back to the same brand/name/sku/barcode fields the
+          // suggestion itself is built from, so two rows with materially different suggestions (e.g.
+          // different brand) are treated as different identities even without a corpus match.
+          return `raw:${source.brand}|${source.partNumber}|${source.barcode}|${source.name}`;
         };
         const aggregated = new Map<string, AggregatedRow>();
         for (const preview of rows) {
@@ -5054,33 +5080,62 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             continue;
           }
           const source = preview.source;
-          const code = source.barcode || source.partNumber || source.name;
-          if (!code) {
+          const rawCode = source.barcode || source.partNumber || source.name;
+          if (!rawCode) {
             summary.rejected += 1;
             continue;
           }
           const suggestion = {
-            name: preview.retailCatalogMatch?.productName || preview.candidate?.name || source.expected.name || code,
+            name: preview.retailCatalogMatch?.productName || preview.candidate?.name || source.expected.name || rawCode,
             brand: preview.retailCatalogMatch?.brand || preview.candidate?.brand || source.brand,
             category: preview.retailCatalogMatch?.category || source.category,
             specsShort: [source.model, source.size].filter(Boolean).join(" "),
             primarySku: source.partNumber,
             primaryBarcode: source.barcode,
           };
-          const existing = aggregated.get(code);
+          const signature = identitySignature(preview, source);
+          const existing = aggregated.get(rawCode);
           if (existing) {
-            existing.quantity += source.quantity;
-            // A later row for the same code never downgrades an already-exact status to fuzzy/review; an
-            // exact match on ANY row for this code is enough to treat the aggregated code as exact.
-            if (preview.status === "exact") existing.status = "exact";
+            if (existing.identitySignature === signature) {
+              // Genuinely the same resolved product - safe to sum (unchanged C5 behavior).
+              existing.quantity += source.quantity;
+              // A later row for the same code never downgrades an already-exact status to fuzzy/review;
+              // an exact match on ANY row for this code is enough to treat the aggregate as exact.
+              if (preview.status === "exact") existing.status = "exact";
+              continue;
+            }
+            // Divergent identity collision: do NOT merge under the first identity and do NOT drop this
+            // row's identity/quantity. Route BOTH the existing aggregate and this row to Needs Review
+            // under distinct keys, each keeping its own quantity, with an honest conflict reason.
+            const conflictReason = "This code maps to more than one product in the file; confirm which.";
+            if (existing.reason !== conflictReason) {
+              existing.status = "review";
+              existing.reason = conflictReason;
+              // Re-key both the map entry and the reviewCode passed to reopenNeedsReview onto a
+              // signature-qualified value, so this aggregate (a) no longer collides in this map with a
+              // future row sharing the same raw key but a third distinct identity, and (b) mints its OWN
+              // review row below instead of colliding with the review keyed on the bare raw code.
+              existing.reviewCode = `${rawCode} (${existing.identitySignature})`;
+              aggregated.delete(rawCode);
+              aggregated.set(`${rawCode} ${existing.identitySignature}`, existing);
+            }
+            aggregated.set(`${rawCode} ${signature}`, {
+              code: rawCode,
+              reviewCode: `${rawCode} (${signature})`,
+              status: "review",
+              reason: conflictReason,
+              quantity: source.quantity,
+              suggestion,
+              identitySignature: signature,
+            });
             continue;
           }
-          aggregated.set(code, { code, status: preview.status, reason: preview.reason, quantity: source.quantity, suggestion });
+          aggregated.set(rawCode, { code: rawCode, reviewCode: rawCode, status: preview.status, reason: preview.reason, quantity: source.quantity, suggestion, identitySignature: signature });
         }
 
         get().snapshotCount("Before universal import");
         for (const row of aggregated.values()) {
-          const reviewId = get().reopenNeedsReview(row.code, row.reason, {
+          const reviewId = get().reopenNeedsReview(row.reviewCode, row.reason, {
             importQuantity: row.quantity,
             suggestion: row.suggestion,
           });
