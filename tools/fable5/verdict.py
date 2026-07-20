@@ -118,9 +118,8 @@ def prune_old_runs(reports_root: Path, keep_days: int = 14) -> list[str]:
         if not child.is_dir():
             continue
         resolved_child = child.resolve()
-        assert resolved_child.parent == resolved_root, (
-            f"Refusing to prune path outside reports root: {resolved_child}"
-        )
+        if resolved_child.parent != resolved_root:
+            continue
         if resolved_child.stat().st_mtime < cutoff:
             _remove_tree(resolved_child)
             pruned.append(child.name)

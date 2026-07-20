@@ -200,19 +200,20 @@ def render_fix_packet(report: RunReport) -> str | None:
 def write_report(report: RunReport, report_dir: Path, root: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "run.json").write_text(
-        json.dumps(report.to_dict(), indent=2, sort_keys=True),
+        redact_secrets(json.dumps(report.to_dict(), indent=2, sort_keys=True)),
         encoding="utf-8",
     )
     (report_dir / "report.md").write_text(
         redact_secrets(render_markdown(report)), encoding="utf-8"
     )
-    (report_dir / "report.html").write_text(render_html(report), encoding="utf-8")
+    (report_dir / "report.html").write_text(
+        redact_secrets(render_html(report)), encoding="utf-8"
+    )
     (report_dir / "expert-packet.md").write_text(
-        render_expert_packet(report, root), encoding="utf-8"
+        redact_secrets(render_expert_packet(report, root)), encoding="utf-8"
     )
     fix_packet = render_fix_packet(report)
     if fix_packet is not None:
         (report_dir / "fix-packet.md").write_text(
             redact_secrets(fix_packet), encoding="utf-8"
         )
-

@@ -14,6 +14,7 @@ from .cache import EvidenceCache
 from .config import FableConfig
 from .discovery import matches_changed_paths
 from .models import CheckResult, CheckSpec
+from .verdict import redact_secrets
 
 
 @dataclass(frozen=True)
@@ -79,18 +80,16 @@ async def _stream_output(
     log_path: Path,
     tail_limit: int = 64 * 1024,
 ) -> str:
-    tail = bytearray()
-    with log_path.open("wb") as handle:
-        assert process.stdout is not None
-        while True:
-            chunk = await process.stdout.read(8192)
-            if not chunk:
-                break
-            handle.write(chunk)
-            tail.extend(chunk)
-            if len(tail) > tail_limit:
-                del tail[:-tail_limit]
-    return tail.decode("utf-8", errors="replace")
+    output = bytearray()
+    assert process.stdout is not None
+    while True:
+        chunk = await process.stdout.read(8192)
+        if not chunk:
+            break
+        output.extend(chunk)
+    redacted = redact_secrets(output.decode("utf-8", errors="replace"))
+    log_path.write_text(redacted, encoding="utf-8")
+    return redacted.encode("utf-8")[-tail_limit:].decode("utf-8", errors="replace")
 
 
 async def _execute(
@@ -276,4 +275,3 @@ async def run_checks(
         return []
     results = await asyncio.gather(*tasks.values())
     return sorted(results, key=lambda result: result.check_id)
-
