@@ -15,6 +15,7 @@ export function SyncStatusBar() {
   const setOnline = useScanStore((s) => s.setOnline);
   const setSimulateSyncFailure = useScanStore((s) => s.setSimulateSyncFailure);
   const retrySync = useScanStore((s) => s.retrySync);
+  const refreshFromCloud = useScanStore((s) => s.refreshFromCloud);
   const isPlatform = useIsPlatformOwner();
 
   return (
@@ -45,6 +46,16 @@ export function SyncStatusBar() {
         className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
       >
         Try saving again
+      </button>
+
+      <button
+        type="button"
+        data-testid="refresh-from-cloud"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => void refreshFromCloud()}
+        className="inline-flex min-h-[36px] items-center rounded-lg border border-zinc-300 px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+      >
+        Refresh
       </button>
 
       {isPlatform && (
