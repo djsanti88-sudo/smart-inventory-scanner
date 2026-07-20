@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { User } from "firebase/auth";
 import { useScanStore } from "@/stores/scanStore";
 import { useReconcileStore } from "@/stores/reconcileStore";
 import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
@@ -11,6 +12,7 @@ import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 import { GptLadderPanel } from "@/components/GptLadderPanel";
 import { GeminiStatusRow } from "@/components/GeminiStatusRow";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
+import { getSession, onAuthChange, signOut } from "@/lib/auth";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -30,6 +32,21 @@ export default function SettingsPage() {
 
   const verifiedCatalogCount = catalog.filter((e) => e.verificationStatus === "verified").length;
   const pendingCatalogCount = catalog.filter((e) => e.verificationStatus === "pending").length;
+
+  const [user, setUser] = useState<User | null>(null);
+  useEffect(() => {
+    let active = true;
+    getSession().then((s) => {
+      if (active) setUser(s);
+    });
+    const unsub = onAuthChange((s) => {
+      if (active) setUser(s);
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, []);
 
   const [cacheMsg, setCacheMsg] = useState("");
   const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
@@ -266,6 +283,26 @@ export default function SettingsPage() {
         />
       </Section>
       </>)}
+
+      <Section title="Account">
+        {user ? (
+          <>
+            <Row label="Signed in as">
+              <span className="text-sm text-zinc-700" data-testid="account-email">{user.email}</span>
+            </Row>
+            <button
+              type="button"
+              data-testid="sign-out"
+              onClick={() => void signOut()}
+              className="inline-flex min-h-[44px] w-fit items-center rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              Sign out
+            </button>
+          </>
+        ) : (
+          <span className="text-sm text-zinc-600" data-testid="account-local-mode">Local mode (no account)</span>
+        )}
+      </Section>
 
       <Section title="Export">
         <ExportMenu />
