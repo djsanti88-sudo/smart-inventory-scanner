@@ -9,6 +9,7 @@ import { DecodeStatusBadge, SyncBadge } from "@/components/badges";
 import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
 import { filterProducts } from "@/services/polish/filterProducts";
+import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
 // Task 4 (product-name polish): resolves the display Brand / Model / Size for one row, preferring
@@ -161,6 +162,8 @@ function CountRow({
   const markWrong = useScanStore((s) => s.markWrong);
   const aliases = useScanStore((s) => s.aliases);
   const approveDiscoveredIdentifiers = useScanStore((s) => s.approveDiscoveredIdentifiers);
+  const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
+  const verifyOwnerPin = useScanStore((s) => s.verifyOwnerPin);
   // Discovered (grounded, not-yet-approved) identifiers for this product: offered for one-click approval.
   // They do NOT match or count until approved (the resolver ignores approved !== true).
   const discovered = aliases.filter((a) => a.productId === product.id && !a.approved);
@@ -171,10 +174,26 @@ function CountRow({
   // actions (Mark wrong, hard product delete) are hidden behind this flag (code kept). Set true to restore.
   const SHOW_ADVANCED_ACTIONS = false;
 
+  const [removePinPrompt, setRemovePinPrompt] = useState(false);
+  const [removePin, setRemovePin] = useState("");
+  const [removePinErr, setRemovePinErr] = useState("");
+
   const onRemove = () => {
     if (window.confirm("Remove this product from the count? The product stays in your catalog. Scan it again to add it back.")) {
+      if (requiresOwnerPin("removeFromCount", hasPin)) {
+        setRemovePinPrompt(true);
+        return;
+      }
       removeFromCount(product.id);
     }
+  };
+  const submitRemovePin = async () => {
+    const ok = await verifyOwnerPin(removePin);
+    if (!ok) { setRemovePinErr("Wrong PIN"); return; }
+    removeFromCount(product.id);
+    setRemovePinPrompt(false);
+    setRemovePin("");
+    setRemovePinErr("");
   };
   const onMarkWrong = () => {
     if (
@@ -339,6 +358,19 @@ function CountRow({
             <button type="button" data-testid={`remove-count-${product.id}`} onClick={onRemove} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-800 hover:bg-red-100 active:scale-95">
               Remove from count
             </button>
+            {removePinPrompt && (
+              <div className="flex items-center gap-2" data-testid={`remove-pin-row-${product.id}`}>
+                <input aria-label="owner PIN" inputMode="numeric" value={removePin}
+                  onChange={(e) => setRemovePin(e.target.value.replace(/\D/g, ""))} maxLength={6}
+                  placeholder="Owner PIN" data-testid="remove-pin"
+                  className="min-h-[44px] w-28 rounded-lg border border-zinc-300 px-3 text-base" />
+                <button type="button" data-testid="remove-pin-confirm" onClick={submitRemovePin}
+                  className="inline-flex min-h-[44px] items-center rounded-lg bg-red-600 px-4 text-base font-medium text-white hover:bg-red-700">
+                  Confirm remove
+                </button>
+                {removePinErr && <span className="text-sm text-red-600" data-testid="remove-pin-error">{removePinErr}</span>}
+              </div>
+            )}
             {SHOW_ADVANCED_ACTIONS && isPlatform && (
               <button type="button" data-testid={`mark-wrong-${product.id}`} onClick={onMarkWrong} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">
                 Mark wrong
