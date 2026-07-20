@@ -890,9 +890,17 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // when the rung-0 item carries one so Plan D's `bestUrl` offer-link escalation is not lost (today's
     // rung-0 UpcItemDbItem shape has no sourceUrl field - see upcItemDbClient.ts - so this is currently
     // always ""; the passthrough is written generically so a future rung-0 enrichment with a sourceUrl
-    // flows through for free). NOTE: rung-0 lacks barcodeDbProvider's zero-pad-variant retry; that
-    // retry-robustness delta is accepted per the plan (Task 2 Step 3b #9).
+    // flows through for free). NOTE: rung-0 lacks barcodeDbProvider's zero-pad-variant retry, so on a
+    // rung-0 MISS, Plan D's fallback still queries the pad variants (see upcItemDbExactTried below) -
+    // that retry-robustness delta is accepted per the plan (Task 2 Step 3b #9).
     let upcItemDbResult: { name: string; brand: string; sourceUrl: string } | null = null;
+    // D8 follow-up (P5, 2026-07-20): true ONLY when rung-0 actually completed a live lookup for the
+    // EXACT code (hit OR a genuine "no match" miss from the client). False when rung-0 never truly
+    // tried the exact code: e2eMode skip, GTIN-gate reject (client never called), local daily-cap
+    // gate (client never called), or the rung never ran at all (freeRungs empty / non-GTIN / steered
+    // off). In every false case, Plan D's fallback below must keep its full exact-code + pad-variant
+    // behavior - only a genuinely-tried exact code may be skipped a second time.
+    let upcItemDbExactTried = false;
 
     // ---- Rung 0: UPCitemdb (FREE, keyless trial tier; GTIN codes only; gated in buildLadderRungs) ---
     // Runs BEFORE Go-UPC (free before paid, owner order 2026-07-12 free-rungs plan). Never touches the
@@ -920,6 +928,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // twice for the same request.
         const hitResult = r.results?.[0];
         upcItemDbResult = hitResult ? { name: hitResult.productName, brand: hitResult.brand, sourceUrl: (hitResult.sourceUrls ?? [])[0] ?? "" } : null;
+        upcItemDbExactTried = true; // a live lookup for the exact code genuinely ran (and hit).
         return {
           settled: true,
           reason: r.reason,
@@ -935,6 +944,12 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         };
       }
       // upcitemdb_miss / upcitemdb_unavailable: fall through, reason recorded.
+      // A GENUINE miss ("upcitemdb: no match") means the client DID fetch the exact code and got an
+      // empty result - that exact-code attempt is done and must not be repeated by Plan D's fallback.
+      // Every other miss/unavailable reason (GTIN-gate reject, local daily-cap gate, e2e skip - the
+      // e2e path returns before reaching here at all) means the client was NEVER called for this code,
+      // so the exact-code lookup genuinely still needs to happen and the flag stays false.
+      if (r.path === "upcitemdb_miss" && r.reason === "upcitemdb: no match") upcItemDbExactTried = true;
       return { settled: false, reason: r.reason };
     };
 
@@ -1173,7 +1188,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // hit that Plan D's 2-DB verified consensus needs (master plan D8: "the valuable 2-DB agreement
         // path preserved"). Fall back to a real barcodeDbProvider lookup ONLY when rung-0 gave nothing -
         // this keeps once-per-request on the hit path while never dropping the verified 2-DB path.
-        lookupBarcodeDb: async () => upcItemDbResult ?? (await lookupBarcodeDb(code)),
+        // D8 follow-up (P5, 2026-07-20): on the fallback path (rung-0 gave no hit), `skipExact` is set
+        // to `upcItemDbExactTried` - when rung-0 genuinely already fetched the exact code and got a
+        // clean miss, this fallback skips straight to the zero-pad variants instead of re-fetching the
+        // identical exact-code URL a second time. When rung-0 never truly tried the exact code
+        // (GTIN-gate reject, local daily-cap gate, e2e/steering skip, or the rung never ran), the flag
+        // is false and this fallback keeps its full original behavior, exact code included.
+        lookupBarcodeDb: async () => upcItemDbResult ?? (await lookupBarcodeDb(code, { skipExact: upcItemDbExactTried })),
         retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
         // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
         // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.

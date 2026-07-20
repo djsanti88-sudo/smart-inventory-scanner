@@ -9,13 +9,20 @@ function variants(code: string): string[] {
   return [...v];
 }
 
-export async function lookupBarcodeDb(code: string, deps?: { fetch?: typeof fetch; backoffMs?: number }): Promise<{ name: string; brand: string; sourceUrl: string } | null> {
+export async function lookupBarcodeDb(
+  code: string,
+  deps?: { fetch?: typeof fetch; backoffMs?: number; skipExact?: boolean }
+): Promise<{ name: string; brand: string; sourceUrl: string } | null> {
   const f = deps?.fetch ?? fetch;
   // UPCitemdb trial burst-limits aggressively (especially from shared Vercel egress IPs) and this vote is
   // load-bearing for consensus recall: a transient 429 gets ONE short-backoff retry before giving up.
   const backoffMs = deps?.backoffMs ?? 1200;
   let retried = false;
-  const queue = variants(code.trim());
+  const trimmed = code.trim();
+  // D8 follow-up (P5, 2026-07-20): a caller that already tried the exact code itself (decode pipeline
+  // rung-0) sets skipExact so this lookup goes straight to the zero-pad variants instead of wastefully
+  // re-fetching the identical exact-code URL against the keyless ~90-100/day trial budget.
+  const queue = deps?.skipExact ? variants(trimmed).filter((v) => v !== trimmed) : variants(trimmed);
   for (let i = 0; i < queue.length; i++) {
     const v = queue[i];
     let res: Response;

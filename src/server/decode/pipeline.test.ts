@@ -496,6 +496,26 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(upcCalls.length).toBeLessThanOrEqual(1);
   });
 
+  // D8 follow-up (P5, 2026-07-20): the test above only covers the HIT path, where `upcItemDbResult` is
+  // non-null and the `??` short-circuit means the fallback fetch function is never even called. The
+  // real gap is the CLEAN-MISS path: rung-0 completes a real lookup for the exact code, gets items:[],
+  // and `upcItemDbResult` stays null - so Plan D's `?? (await lookupBarcodeDb(code))` fallback DOES run
+  // and (before this fix) re-fetches the IDENTICAL exact code that rung-0 had already just tried, a
+  // provably wasted duplicate HTTP call against the keyless ~90-100/day trial budget. Pad variants ARE
+  // legitimate new value (rung-0 lacks the zero-pad retry) and must still be allowed.
+  it("D8b: on a clean rung-0 MISS, Plan D's fallback must not re-fetch the exact code a second time (pad variants still allowed)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    stubFreeRungFetch({ upcHit: false }); // rung-0 completes a genuine miss (items: [])
+
+    const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+    expect(outcome.kind).toBe("computed");
+
+    const upcUrls = fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => String(u).includes(UPCITEMDB_HOST));
+    const exactUrls = upcUrls.filter((u) => u.includes(`upc=${VALID_GTIN}`));
+    // The exact code must be fetched AT MOST ONCE across the whole request (rung-0's own attempt).
+    expect(exactUrls.length).toBeLessThanOrEqual(1);
+  });
+
   it("cap available + free rungs MISS -> paid charge happens EXACTLY ONCE, paid rungs run, and reasons chain is free-phase-then-paid-phase", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap
     // L6 (Task 12c): the total-miss cap charge now only fires when paidWorkPossible() is true. A Brave

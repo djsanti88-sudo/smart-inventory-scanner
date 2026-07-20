@@ -34,4 +34,33 @@ describe("barcode-DB provider (UPCitemdb)", () => {
     expect(r).toBeNull();
     expect(getLastBarcodeDbStatus()).toBe("miss");
   });
+
+  // D8 follow-up (P5, 2026-07-20): `skipExact` lets a caller who ALREADY tried the exact code (e.g.
+  // decode pipeline rung-0) skip straight to the zero-pad variants instead of wastefully re-fetching
+  // the identical exact-code URL against the keyless ~90-100/day trial budget.
+  it("skipExact: true skips the exact-code variant and queries only the zero-pad variants", async () => {
+    const calls: string[] = [];
+    const f = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return { ok: true, status: 200, json: async () => ({ items: [] }) };
+    }) as unknown as typeof fetch;
+    const code = "36000291452"; // 11 digits: pad-13 and pad-12 variants both differ from the exact code
+    await lookupBarcodeDb(code, { fetch: f, skipExact: true });
+    // The exact code itself must never appear in any fetched URL.
+    expect(calls.some((u) => u.includes(`upc=${code}`))).toBe(false);
+    // But the zero-padded variants must still be tried (skipExact does not disable pad-variant retry).
+    expect(calls.some((u) => u.includes(`upc=${code.padStart(13, "0")}`))).toBe(true);
+    expect(calls.some((u) => u.includes(`upc=${code.padStart(12, "0")}`))).toBe(true);
+  });
+
+  it("skipExact: false (default) still queries the exact code first, unchanged behavior", async () => {
+    const calls: string[] = [];
+    const f = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return { ok: true, status: 200, json: async () => ({ items: [] }) };
+    }) as unknown as typeof fetch;
+    const code = "36000291452";
+    await lookupBarcodeDb(code, { fetch: f });
+    expect(calls[0]).toContain(`upc=${code}`);
+  });
 });
