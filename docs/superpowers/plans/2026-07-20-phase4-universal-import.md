@@ -2,16 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Track every checkbox, run every failing test before implementation, and perform independent review before merging parallel tracks.
 
-**Goal:** Let a Scanbin account upload CSV, TSV, XLSX, or an OOXML workbook carrying an `.xls` filename, understand or manually map its columns, see one honest preview headed by `Matched 380 of 400 automatically`, and explicitly apply exact rows while every algorithmic fuzzy or ambiguous row stays in Needs Review until a human confirms it. The flow must feed the existing count snapshots, variance view, and Boss Report without any inventory, alias, count, review, localStorage, Turso, or Firestore write before the Apply click.
+**Goal:** Let a Scanbin account upload CSV, TSV, XLSX, or a file carrying an `.xls` name, understand or manually map its columns, see one honest preview headed by `Matched 380 of 400 automatically`, and explicitly apply exact rows while every algorithmic fuzzy or ambiguous row stays in Needs Review until a human confirms it. The flow must feed the existing count snapshots, variance view, and Boss Report without any inventory, alias, count, review, localStorage, Turso, or Firestore write before the Apply click. ExcelJS 4.4.0 can read XLSX but not legacy BIFF, so true BIFF `.xls` remains a flagged acceptance gap until the owner approves a compatible parser.
 
-**Architecture:** Build Stage A as an isolated universal-import pipeline around the existing pure seams. `sanitizeCell(raw: string): string` remains the single untrusted-cell boundary in `src/services/csvImport.ts`; `readUniversalFile(file: UploadFileLike): Promise<UniversalSheet>` sanitizes every CSV, TSV, and ExcelJS cell before inference. `inferColumnMapping(matrix: string[][]): ColumnInference` performs deterministic header normalization and conservative content inference, then `UniversalImportPanel` falls back to an explicit mapping screen. Preview calls the existing Node route `POST /api/reconcile/match`, which continues to run `matchExpectedRow(row, deps)` and gains exact retail-corpus enrichment through `lookupRetailBarcodeAsync(code)`. Preview state stays in React memory only. Mapping memory is a namespaced Turso KV record through `LadderStorage.get/set`, keyed by `businessId` and `sourceSignature`; the PUT occurs only after Apply. Exact human-upload rows use the existing `resolveUnknown(..., "create_new", { origin: "human" })` trust path and remain `approved: true`. Fuzzy rows are staged as import-specific Needs Review records with their quantity, and the existing human confirmation surface resolves them later. Stage B starts only after the complete Stage A proof gate and adds new character-level edit distance plus the canonical token Jaccard from `src/services/catalog/identityMerge.ts`.
+**Architecture:** Build Stage A as an isolated universal-import pipeline around the existing pure seams. `sanitizeCell(raw: string): string` remains the single untrusted-cell boundary in `src/services/csvImport.ts`; `readUniversalFile(file: UploadFileLike): Promise<UniversalSheet>` sanitizes every CSV, TSV, and ExcelJS cell before inference. `inferColumnMapping(matrix: string[][]): ColumnInference` performs deterministic header normalization and conservative content inference, then `UniversalImportPanel` falls back to an explicit mapping screen. Preview calls the existing Node route `POST /api/reconcile/match`, which continues to run `matchExpectedRow(row, deps)` and gains exact retail-corpus enrichment through `lookupRetailBarcodeAsync(code)`. Preview state stays in React memory only. Mapping memory is a namespaced Turso KV record through `LadderStorage.get/set`, keyed by `businessId` and `sourceSignature`; its route writes only after Apply. Exact human-upload rows use the existing `resolveUnknown(reviewId, action, payload)` human origin path and remain `approved: true`. Fuzzy rows are staged as import-specific Needs Review records with their quantity and a stable import event id. The new `resolveImportReview(reviewId, action, payload)` variant confirms identity first, then applies one idempotent ledger event carrying the full imported quantity. Stage B starts only after the complete Stage A proof gate and adds new character-level edit distance plus the canonical token Jaccard from `src/services/catalog/identityMerge.ts`.
 
 **Tech Stack:** Next.js 16.2.9 App Router and Route Handlers, React 19.2.4, TypeScript 5, Tailwind v4, Zustand 5.0.14, Vitest 4.1.8 unit and dom projects, Playwright 1.60.0, `csv-parse` 7.0.0, ExcelJS 4.4.0 lazy read, existing tire and retail SQLite/Turso corpus access, and existing Turso/file-backed `LadderStorage` KV.
 
 ## Global Constraints
 
-- **Stage order (this plan = Stage A only):** Tasks 1 through 11 ARE this plan. Tasks 1 through 10 are Stage A implementation; Task 11 is the Stage A ship + proof gate. Stage A is independently shippable and fixes D9 and delivers the demo beat on its own. Stage B (typo-tolerant fuzzy matching) and the combined handoff are a SEPARATE follow-up plan authored as `2026-07-20-phase4b-fuzzy-matching.md` AFTER Stage A ships and passes Task 11 - this matches the master plan's staging so a Stage B tuning rabbit hole can never block a Stage A release. Any reference below to "Stage B" or "Tasks 12-15" points to that follow-up plan, not this one.
-- **Binding threshold T:** `0.75`, grounded in `src/services/reconcile/identityMatcher.ts` and the existing literal used by `findIdentityMerge` in `src/services/catalog/identityMerge.ts`. Task 7 exports `JACCARD_THRESHOLD = 0.75` from `identityMatcher.ts`; the Stage A matcher and the P4b Stage B follow-up both consume that single export and never create a third threshold literal.
+- **Stage order:** Tasks 1 through 12 are Stage A. Stage A is independently shippable and must pass Task 12 before Tasks 13 through 15 begin. No Stage B tuning may block a Stage A release.
+- **Binding threshold T:** `0.75`, grounded in `src/services/reconcile/identityMatcher.ts:66` and the existing literal used by `findIdentityMerge` in `src/services/catalog/identityMerge.ts:167`. Task 7 exports `IDENTITY_JACCARD_THRESHOLD = 0.75` from the canonical identity-merge module and makes both existing consumers import it. Stage B imports it and does not create a third threshold literal.
 - **Canonical Jaccard:** only `jaccard(a: string[], b: string[]): number`, `nameTokens(s: string | null | undefined): string[]`, and `plusGenerationDiff(a: string[], b: string[]): boolean` from `src/services/catalog/identityMerge.ts` are canonical for Phase 4. The independent `jaccard` functions in `src/services/ai/crossCheckEngine.ts` and `src/services/fetchV2/siblingGuard.ts` remain untouched. This is a landmine: `identityMerge.ts` returns `0` for empty/empty, while `siblingGuard.ts` returns `1`. Unifying them is out of scope.
 - **Resolver trust invariant:** wrong identity is failure and ambiguity is acceptable. Every product-identity fuzzy match, including a score at or above `0.75`, is suggestion data only until a human confirms it. Every fuzzy score below `0.75`, every tie, every affix-core-only match, and every conflicting corroboration routes to Needs Review. No fuzzy row receives `approved: true` during Apply. Exact human-upload rows retain the current `approved: true`, `verified: true` behavior through `resolveUnknown` with `origin: "human"`.
 - **Preview before apply:** file read, column inference, mapping UI, corpus lookup, and preview are read-only. They may update React component memory and perform GET/POST reads, but they must not call `useScanStore.setState`, `reopenNeedsReview`, `resolveUnknown`, `snapshotCount`, `LadderStorage.set`, or a Firestore write. The first permitted write is the explicit Apply click.
@@ -19,8 +19,8 @@
 - **Sanitizer boundary:** every imported cell follows exactly `stripControlChars -> 500-character cap -> defuseFormulaInjection` through `sanitizeCell`. This applies to CSV, TSV, XLSX, OOXML-with-`.xls` filenames, header cells, mapped cells, sample rows, and `ExpectedInventoryRow.raw`. Task 2 closes the current Shop-Ware adapter gap.
 - **ExcelJS read reality:** `package.json` contains `exceljs: ^4.4.0`, and `node_modules/exceljs/README.md` documents `workbook.xlsx.load(data)` for XLSX only. Task 4 introduces the first repository read path. A true legacy BIFF `.xls` file is not silently claimed as supported; it gets the exact error `Legacy binary .xls is not supported by installed ExcelJS 4.4.0. Save it as .xlsx or .csv.` Supporting genuine BIFF remains a flagged unknown requiring an owner-approved parser decision. An OOXML payload named `.xls` is accepted because content, not the suffix, is passed to `workbook.xlsx.load`.
 - **Mapping memory decision:** choose Turso KV, wrapped by `src/server/importMappingMemory.ts`, using `LadderStorage.get/set` and key `import_mapping::<businessId>::<sourceSignature>`. Firestore is not chosen because the current default and demo backend is mock, while Firestore-only memory would disappear from that path. localStorage is not chosen because it is per browser rather than per account. The namespaced Turso/file seam works in mock and live modes, remains outside inventory truth, and preserves per-account keys. The API route still verifies membership in live mode. Reusing `ladder_kv` is an acknowledged semantic compromise; a dedicated table is deferred until mapping volume or retention warrants it.
-- **Monolith containment:** Tasks 1 through 9 create isolated modules or touch narrow existing files. Task 10 is the only Stage A task that edits the approximately 5,700-line `src/stores/scanStore.ts`; it is ordered last among Stage A implementation tasks and adds only one action, one optional review context, and import-quantity handling.
-- **Persist migration law:** the actual store is `name: "sis-scan-v1"`, `version: 8`, with `scanStoreMigrate(persisted, version)` at `src/stores/scanStore.ts:5687` and the version at `src/stores/scanStore.ts:5735`. Task 10 bumps to version 9 because `UnknownCodeReview.importQuantity` is persisted. Its migration preserves the v8 rule at lines 5704 through 5711: transform only keys the blob already carries, never inject absent arrays or settings into a partial blob.
+- **Monolith containment:** Tasks 1 through 10 create isolated modules or touch narrow existing files. Task 11 is the only Stage A task that edits the approximately 5,700-line `src/stores/scanStore.ts`; it is ordered last among Stage A implementation tasks and adds only optional import review context, `resolveImportReview`, and one idempotent bulk-quantity ledger event.
+- **Persist migration law:** the actual store is `name: "sis-scan-v1"`, `version: 8`, with `scanStoreMigrate(persisted, version)` at `src/stores/scanStore.ts:5685` and the version at `src/stores/scanStore.ts:5733`. Task 11 bumps to version 9 because `UnknownCodeReview.importQuantity` and `UnknownCodeReview.importEventId` are persisted. Its migration preserves the v8 rule at `src/stores/scanStore.ts:5703`: transform only keys the blob already carries, never inject absent arrays or settings into a partial blob. `countSnapshots` remains the one documented unconditional exception at line 5721.
 - **Performance:** parsing, mapping, matching supplied in-memory match results, and constructing a 5,000-row preview must complete in less than `10_000` ms locally. The performance test excludes Apply and external network latency, which are not import processing.
 - **Limits already grounded in code:** `MAX_FIELD_LENGTH = 500`, `PREVIEW_LIMIT = 20`, and reconcile route `MAX_ROWS = 20000`. The mapping API body cap reuses the existing share-route value `32 * 1024` bytes.
 - **No paid or live calls:** automated tests mock retail/Turso/Firebase access and never call paid providers. Phase 4 does not call `/api/ai-lookup`.
@@ -36,10 +36,14 @@
 | Stage A ingestion | 4 after 2 and 3; 6 after 1 and 5 | Disjoint files |
 | Stage A preview | 7 and 8 in parallel after 3 and 4 | Disjoint files |
 | Stage A UI | 9 after 6, 7, and 8 | No scanStore edit |
-| Stage A inventory bridge | 10 after 9 | Sole monolith edit |
-| Stage A ship gate | 11 after 10 | Final proof + handoff for this plan |
+| Stage A legacy and scale | 10 after 3, 4, and 7 | Shared header intelligence plus 5,000-row proof |
+| Stage A inventory bridge | 11 after 9 and 10 | Sole monolith edit, ordered last |
+| Stage A ship gate | 12 after 11 | Blocking gate before Stage B |
+| Stage B edit distance | 13 after Task 12 | Strictly after Stage A ships |
+| Stage B fuzzy matcher | 14 after Task 13 | Pure matcher and fixture tuning |
+| Stage B integration and handoff | 15 after Task 14 | Reconcile, E2E, polish, final proof |
 
-Stage B (typo-tolerant fuzzy matching + combined handoff) is a SEPARATE follow-up plan (`2026-07-20-phase4b-fuzzy-matching.md`), authored and executed only after Task 11 passes. It reuses this plan's `ImportPreviewStatus "fuzzy"` slot, the canonical `jaccard`/`nameTokens` from `identityMerge.ts`, `JACCARD_THRESHOLD` (Task 7), and `brandPrefixGeneral` corroboration, and adds net-new character-level edit distance - all behind the review-first guard (no fuzzy row ever auto-approves).
+Tasks 13 through 15 are present in this file but are blocked on the Task 12 Stage A gate. They reuse the `ImportPreviewStatus "fuzzy"` slot, the canonical `jaccard` and `nameTokens` from `identityMerge.ts`, `IDENTITY_JACCARD_THRESHOLD` from Task 7, and `prefixBrandConflict` for non-tire brand safety. No fuzzy row ever auto-approves.
 
 ---
 
@@ -725,7 +729,16 @@ describe("readUniversalFile", () => {
     };
     await expect(readUniversalFile(renamed)).resolves.toMatchObject({ kind: "xls" });
 
-    const biff = textFile("legacy.xls", "not-an-ooxml-zip");
+    const biffBytes = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    const biff: UploadFileLike = {
+      name: "legacy.xls",
+      type: "application/vnd.ms-excel",
+      text: async () => "",
+      arrayBuffer: async () => biffBytes.buffer.slice(
+        biffBytes.byteOffset,
+        biffBytes.byteOffset + biffBytes.byteLength,
+      ),
+    };
     await expect(readUniversalFile(biff)).rejects.toThrow(
       "Legacy binary .xls is not supported by installed ExcelJS 4.4.0. Save it as .xlsx or .csv.",
     );
@@ -1246,13 +1259,14 @@ Expected: PASS. GET is read-only; PUT is the only mapping-memory write path.
 - Create: `src/services/universalImportPreview.ts`
 - Test: `src/services/universalImportPreview.test.ts`
 - Modify: `src/services/reconcile/types.ts`
+- Modify: `src/services/catalog/identityMerge.ts`
 - Modify: `src/services/reconcile/identityMatcher.ts`
 - Test: `src/services/reconcile/identityMatcher.test.ts`
 
 **Interfaces:**
 
 - Consumes: `UniversalSheet`, `ColumnMapping`, `MappingSource`, and one `PreviewMatchResult` for each mapped row.
-- Produces: `MappingResult`, `PreviewMatchResult`, `mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping): MappingResult`, `buildImportPreview(mapped: MappingResult, matches: PreviewMatchResult[], mappingSource: MappingSource): ImportPreview`, exported `JACCARD_THRESHOLD = 0.75`, and optional `MatchResult.confidence`.
+- Produces: `MappingResult`, `PreviewMatchResult`, `mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping): MappingResult`, `buildImportPreview(mapped: MappingResult, matches: PreviewMatchResult[], mappingSource: MappingSource): ImportPreview`, exported `IDENTITY_JACCARD_THRESHOLD = 0.75` in `identityMerge.ts`, and optional `MatchResult.confidence` and `MatchResult.matchBasis`.
 
 - [ ] **Step 1: Write the complete failing preview tests**
 
@@ -1309,6 +1323,7 @@ describe("universalImportPreview", () => {
         status: "matched",
         reason: "Part number hit for exact candidate.",
         confidence: 1,
+        matchBasis: "part_number_exact",
         candidate: { uid: "uid-1", brand: "Acme", name: "Road" },
       },
       {
@@ -1316,6 +1331,7 @@ describe("universalImportPreview", () => {
         status: "matched",
         reason: "Identity match on size and model name similarity.",
         confidence: 0.75,
+        matchBasis: "identity_jaccard",
         candidate: { uid: "uid-2", brand: "Acme", name: "Road Plus" },
       },
     ];
@@ -1350,6 +1366,7 @@ describe("universalImportPreview", () => {
       status: "matched",
       reason: "Part number hit through affix core.",
       confidence: 1,
+      matchBasis: "part_number_affix_core",
       candidate: { uid: "a", brand: "Acme", name: "Road" },
       viaAffixCore: true,
     };
@@ -1374,25 +1391,42 @@ Expected: FAIL because the preview module and `MatchResult.confidence` do not ex
 +  barcode?: string;
 +  name?: string;
 +  category?: string;
+*** Update File: src/services/catalog/identityMerge.ts
+@@
+ export function jaccard(a: string[], b: string[]): number {
+@@
+ }
++
++export const IDENTITY_JACCARD_THRESHOLD = 0.75;
+@@
+-      if (sim >= 0.75 || plusDiff) {
++      if (sim >= IDENTITY_JACCARD_THRESHOLD || plusDiff) {
 *** Update File: src/services/reconcile/identityMatcher.ts
+@@
+-import { nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
++import { IDENTITY_JACCARD_THRESHOLD, nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
 @@
  export interface MatchResult {
 @@
    reason: string;
 +  /** Deterministic similarity in [0,1]. Exact corroborated PN hits are 1. */
 +  confidence?: number;
++  matchBasis?: "part_number_exact" | "part_number_affix_core" | "identity_jaccard";
 @@
 -const JACCARD_THRESHOLD = 0.75;
-+export const JACCARD_THRESHOLD = 0.75;
 @@
        return {
          row,
          status: "matched",
 +        confidence: 1,
++        matchBasis: viaAffixCore ? "part_number_affix_core" : "part_number_exact",
          reason: `Part number hit for "${hit.brand} ${hit.name}" (${reasonBits.join(", ") || "corroborated"}).${coreNote}`,
 @@
 -    const identityMatches: CorpusCandidate[] = [];
 +    const identityMatches: Array<{ candidate: CorpusCandidate; confidence: number }> = [];
+@@
+-      if (sim < JACCARD_THRESHOLD) continue;
++      if (sim < IDENTITY_JACCARD_THRESHOLD) continue;
 @@
 -      identityMatches.push(cand);
 +      identityMatches.push({ candidate: cand, confidence: sim });
@@ -1403,6 +1437,7 @@ Expected: FAIL because the preview module and `MatchResult.confidence` do not ex
          row,
          status: "matched",
 +        confidence,
++        matchBasis: "identity_jaccard",
 @@
 -        reason: `Identity match on size ${rowSize} and brand matches ${identityMatches.length} different corpus products (${identityMatches.map((c) => c.name).join(", ")}); cannot pick one safely.`,
 -        candidates: identityMatches,
@@ -1411,32 +1446,25 @@ Expected: FAIL because the preview module and `MatchResult.confidence` do not ex
 +        candidates: identityMatches.map((entry) => entry.candidate),
 *** Update File: src/services/reconcile/identityMatcher.test.ts
 @@
++import { IDENTITY_JACCARD_THRESHOLD } from "@/services/catalog/identityMerge";
+@@
  describe("matchExpectedRow", () => {
-+  it("reports exact PN confidence 1 and token similarity confidence at the canonical threshold", () => {
++  it("reports exact PN confidence and the canonical token threshold", () => {
 +    const exact = matchExpectedRow(row({ partNumbers: ["ABC-1"], brand: "Acme", sizeText: "225/45R18" }), {
 +      lookupByPartNumber: () => [{ uid: "a", brand: "Acme", name: "Road", sizeToken: "225/45R18" }],
 +      candidatesByBrandSize: () => [],
 +    });
 +    expect(exact.confidence).toBe(1);
++    expect(exact.matchBasis).toBe("part_number_exact");
 +
 +    const token = matchExpectedRow(row({ partNumbers: ["MISS"], brand: "Acme", model: "Road Sport XL", sizeText: "225/45R18" }), {
 +      lookupByPartNumber: () => [],
 +      candidatesByBrandSize: () => [{ uid: "b", brand: "Acme", name: "Road Sport", sizeToken: "225/45R18" }],
 +    });
 +    expect(token.status).toBe("matched");
-+    expect(token.confidence).toBeGreaterThanOrEqual(JACCARD_THRESHOLD);
++    expect(token.matchBasis).toBe("identity_jaccard");
++    expect(token.confidence).toBeGreaterThanOrEqual(IDENTITY_JACCARD_THRESHOLD);
 +  });
-*** End Patch
-```
-
-The test file already has a local `row(...)` fixture helper. Extend its existing import from `identityMatcher.ts` to include `JACCARD_THRESHOLD`. This exact import replacement is required:
-
-```diff
-*** Begin Patch
-*** Update File: src/services/reconcile/identityMatcher.test.ts
-@@
--import { matchExpectedRow } from "@/services/reconcile/identityMatcher";
-+import { JACCARD_THRESHOLD, matchExpectedRow } from "@/services/reconcile/identityMatcher";
 *** End Patch
 ```
 
@@ -1528,13 +1556,16 @@ export function mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping):
 }
 
 function statusForMatch(match: PreviewMatchResult, mappingSource: MappingSource): ImportPreviewStatus {
-  if (match.status === "ambiguous") return "review";
+  // RESOLVER-TRUST LAW: only a genuine exact identity is ever "exact" (which Task 10 auto-counts).
+  // A miss (unmatched), an ambiguous match, or any non-exact outcome MUST route to review - wrong or
+  // absent identity auto-counting is the project's top forbidden failure; unknown is acceptable.
+  // mappingSource must NEVER be able to promote a non-match to "exact".
+  void mappingSource;
   if (match.status === "matched") {
-    if (match.viaAffixCore) return "fuzzy";
-    return match.reason.startsWith("Part number hit") ? "exact" : "fuzzy";
+    return match.matchBasis === "part_number_exact" ? "exact" : "fuzzy";
   }
   if (match.status === "non_tire" && match.retailCatalogMatch) return "exact";
-  return mappingSource === "content" ? "review" : "exact";
+  return "review";
 }
 
 export function buildImportPreview(
@@ -1943,7 +1974,7 @@ export function UniversalImportPanel({
               <tbody>{preview.rows.slice(0, PREVIEW_LIMIT).map((row) => <tr key={row.line} className="border-t border-zinc-100"><td className="px-2 py-2">{row.line}</td><td className="px-2 py-2">{row.source?.expected.name ?? row.source?.partNumber ?? "Unreadable row"}</td><td className="px-2 py-2">{row.source?.quantity ?? "-"}</td><td className="px-2 py-2 font-medium">{row.status}</td><td className="px-2 py-2">{row.reason}{row.confidence !== null ? ` (${Math.round(row.confidence * 100)}%)` : ""}</td></tr>)}</tbody>
             </table>
           </div>
-          {!summary && <button type="button" disabled={busy} onClick={() => void apply()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply {preview.total} rows</button>}
+          {!summary && <button type="button" data-testid="import-apply" disabled={busy} onClick={() => void apply()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply {preview.total} rows</button>}
         </div>
       )}
       {summary && <p className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900" data-testid="import-summary">Applied {summary.applied}. Needs Review {summary.queuedForReview}. Rejected {summary.rejected}.</p>}
@@ -2362,7 +2393,9 @@ Michelin,Defender T+H,225/65R17,8
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readUniversalFile, inferColumnMapping, validateManualMapping, buildSourceSignature } from "@/services/importSchema";
+import { buildSourceSignature } from "@/services/importSchema";
+import { readUniversalFile } from "@/services/universalFileReader";
+import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
 
 const dir = join(__dirname, "__fixtures__");
 function file(name: string, type = "text/csv") {
@@ -2372,36 +2405,36 @@ function file(name: string, type = "text/csv") {
 describe("Stage A fixture battery (AC1, AC3)", () => {
   it("Shop-Ware headers import without the old four-name failure", async () => {
     const sheet = await readUniversalFile(file("shopware.csv"));
-    const inference = inferColumnMapping(sheet.matrix);
+    const inference = inferColumnMapping(sheet.rows);
     expect(inference.mapping.name).toBeGreaterThanOrEqual(0);
     expect(inference.mapping.quantity).toBeGreaterThanOrEqual(0);
   });
 
   it("reordered/renamed/extra/blank-leading-row TSV maps by synonym, not position", async () => {
     const sheet = await readUniversalFile(file("reordered-renamed.tsv", "text/tab-separated-values"));
-    const inference = inferColumnMapping(sheet.matrix);
+    const inference = inferColumnMapping(sheet.rows);
     expect(inference.mapping.partNumber).toBeGreaterThanOrEqual(0);
     expect(inference.mapping.tireSize).toBeGreaterThanOrEqual(0);
   });
 
   it("nonsense-header file yields low confidence and requires manual mapping (AC3)", async () => {
     const sheet = await readUniversalFile(file("nonsense-headers.csv"));
-    const inference = inferColumnMapping(sheet.matrix);
+    const inference = inferColumnMapping(sheet.rows);
     expect(inference.confidence).toBe("low");
-    const manual = validateManualMapping({ name: 0, tireSize: 2, quantity: 3 }, sheet.matrix[0].length);
+    const manual = validateManualMapping({ name: 0, tireSize: 2, quantity: 3 }, sheet.rows[0].length);
     expect(manual.ok).toBe(true);
   });
 
   it("the same file yields a stable source signature for mapping memory (AC3 remembered)", async () => {
     const sheet = await readUniversalFile(file("nonsense-headers.csv"));
-    const a = buildSourceSignature(sheet.matrix[0]);
-    const b = buildSourceSignature(sheet.matrix[0]);
+    const a = buildSourceSignature(sheet.rows[0]);
+    const b = buildSourceSignature(sheet.rows[0]);
     expect(a).toBe(b);
   });
 
   it("every imported cell passes through the sanitizer (no raw formula injection survives)", async () => {
     const sheet = await readUniversalFile(file("shopware.csv"));
-    for (const row of sheet.matrix) for (const cell of row) {
+    for (const row of sheet.rows) for (const cell of row) {
       expect(cell.startsWith("=") || cell.startsWith("+") || cell.startsWith("@")).toBe(false);
     }
   });
@@ -2415,7 +2448,7 @@ Run: `npx vitest run src/services/import/importFixtureBattery.test.ts` - expect 
 ```typescript
 // src/services/import/importPerf.test.ts
 import { describe, it, expect } from "vitest";
-import { inferColumnMapping } from "@/services/importSchema";
+import { inferColumnMapping } from "@/services/columnIntelligence";
 
 describe("Stage A performance (AC4)", () => {
   it("infers and shapes a 5000-row matrix in well under 10s", () => {
