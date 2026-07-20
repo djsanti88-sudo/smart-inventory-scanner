@@ -84,6 +84,7 @@ import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
+import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/services/importSchema";
 
 /** Result summary of a CSV product import (shown in the UI). */
 export interface CsvImportSummary {
@@ -768,8 +769,17 @@ export interface ScanState {
   /** Phase 6: mark a counted product wrong - deactivate its scanned-code aliases, remove the session count,
    *  reopen Needs Review for the code, and request a Gemini Pro correction recheck. Returns the reopened review id. */
   markWrong: (productId: string, opts?: { reason?: string }) => Promise<string | null>;
-  /** Phase 6: reopen (or create) an OPEN Needs Review item for a clean code; clears stale suggestions. */
-  reopenNeedsReview: (cleanCode: string, reason: string) => string | null;
+  /** Phase 6: reopen (or create) an OPEN Needs Review item for a clean code; clears stale suggestions.
+   *  Phase 4: an optional importContext carries the import row's quantity + suggestion so an import-origin
+   *  review is fully staged (never live-decoded - Phase 4 makes zero /api/ai-lookup calls). */
+  reopenNeedsReview: (cleanCode: string, reason: string, importContext?: ImportReviewContext) => string | null;
+  /** Phase 4 Task 10: resolve a universal-import preview into store writes. Exact rows resolve via the
+   *  human-origin create path (approved) and may auto-count; every non-exact/unmatched row is staged as
+   *  Needs Review carrying its quantity and never auto-counts. Duplicate cleanCodes across rows are
+   *  aggregated BEFORE any review/count is created so each unique code yields exactly one review/count
+   *  carrying the TOTAL quantity (C5). The only write path for a universal import - preview/mapping/match
+   *  stay read-only until this is called. */
+  applyUniversalImport: (rows: ImportPreviewRow[]) => UniversalImportApplySummary;
   /** Phase 6: correction-only Gemini Pro recheck. Cost-guarded (one per code unless retry). Never auto-saves. */
   correctionRecheck: (reviewId: string, opts?: { retry?: boolean; reason?: string }) => Promise<void>;
   /** Append a private feedback/event-log entry (the "smarter over time" substrate). */
@@ -4583,7 +4593,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // a customer review rehydrated from disk has its rawCode stripped (privacy), but cleanCode is kept
         // and is what the approved alias is keyed on, so the re-scan still matches + counts.
         if (payload.applyToCount && !weakGuessProduct && !approvingProvisional) {
-          get().processScan(review.rawCode || review.cleanCode);
+          // Phase 4: an import-origin review carries importQuantity - the full quantity from the source
+          // row (already aggregated across duplicate codes by applyUniversalImport) must land in one
+          // confirmation, not just 1 unit. A plain scan-born review has no importQuantity, so this stays
+          // the existing single-unit processScan call for every non-import path.
+          const applications = review.importQuantity ?? 1;
+          if (!Number.isSafeInteger(applications) || applications < 0) return;
+          for (let index = 0; index < applications; index += 1) {
+            get().processScan(review.rawCode || review.cleanCode);
+          }
         } else {
           get().syncPending();
         }
@@ -4942,7 +4960,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         emitAudit({ entityType: "Product", entityId: productId, action: "product_corrected", metadata: { fields: Object.keys(safe).join(",") } });
       },
 
-      reopenNeedsReview: (cleanCode, reason) => {
+      reopenNeedsReview: (cleanCode, reason, importContext) => {
         const state = get();
         const code = (cleanCode ?? "").trim();
         if (!code) return null;
@@ -4953,13 +4971,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               r.id === existing.id
                 ? {
                     ...r, status: "open", reason, resolvedAt: null, resolvedBy: null, resolutionAction: null,
-                    hasSuggestion: false, suggestedProductName: "", suggestedBrand: "", suggestedCategory: "",
-                    suggestedSpecsShort: "", suggestedSpecsFull: "", suggestedPrimarySku: "", suggestedPrimaryBarcode: "",
+                    hasSuggestion: Boolean(importContext?.suggestion), suggestedProductName: importContext?.suggestion?.name ?? "",
+                    suggestedBrand: importContext?.suggestion?.brand ?? "", suggestedCategory: importContext?.suggestion?.category ?? "",
+                    suggestedSpecsShort: importContext?.suggestion?.specsShort ?? "", suggestedSpecsFull: "",
+                    suggestedPrimarySku: importContext?.suggestion?.primarySku ?? "", suggestedPrimaryBarcode: importContext?.suggestion?.primaryBarcode ?? "",
                     suggestedGtin: "", suggestedUpc: "", suggestedEan: "", suggestedImageUrl: "", suggestedProductUrl: "",
                     suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [], confidence: 0, providerName: "",
                     decodeStatus: "needs_review", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
                     correctionRecheckStatus: undefined, correctionRecheckedAt: null, correctionRecheckMissingKeys: undefined,
                     reopenedFromWrong: true,
+                    importQuantity: importContext?.importQuantity,
                   }
                 : r,
             ),
@@ -4970,19 +4991,108 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const review: UnknownCodeReview = {
           id, businessId: state.businessId, sessionId: state.sessionId, rawCode: code, cleanCode: code,
           normalizedCandidates: normalizeCode(code).searchVariants ?? [code],
-          suggestedProductName: "", suggestedBrand: "", suggestedCategory: "", suggestedSpecsShort: "", suggestedSpecsFull: "",
-          suggestedPrimarySku: "", suggestedPrimaryBarcode: "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
+          suggestedProductName: importContext?.suggestion?.name ?? "", suggestedBrand: importContext?.suggestion?.brand ?? "",
+          suggestedCategory: importContext?.suggestion?.category ?? "", suggestedSpecsShort: importContext?.suggestion?.specsShort ?? "",
+          suggestedSpecsFull: "", suggestedPrimarySku: importContext?.suggestion?.primarySku ?? "",
+          suggestedPrimaryBarcode: importContext?.suggestion?.primaryBarcode ?? "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
           suggestedImageUrl: "", suggestedProductUrl: "", suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [],
-          reason, providerName: "", confidence: 0, hasSuggestion: false, decodeStatus: "needs_review",
+          reason, providerName: "", confidence: 0, hasSuggestion: Boolean(importContext?.suggestion), decodeStatus: "needs_review",
           evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "", reopenedFromWrong: true,
           status: "open", createdAt: now(), resolvedAt: null, resolvedBy: null, resolutionAction: null,
           syncStatus: "pending", idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, id, "SAVE_UNKNOWN_SCAN"),
+          importQuantity: importContext?.importQuantity,
         };
         set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
         enqueueAndSync([
           makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "UnknownCodeReview", entityId: id, operation: "SAVE_UNKNOWN_SCAN", payload: review, idempotencyKey: review.idempotencyKey, scanEventId: null }),
         ]);
         return id;
+      },
+
+      applyUniversalImport: (rows) => {
+        get().ensureAutoSession();
+        if (!get().currentSession || get().currentSession?.status !== "active") {
+          throw new Error("Start or unlock an active session before applying this import.");
+        }
+        const summary: UniversalImportApplySummary = { applied: 0, queuedForReview: 0, rejected: 0 };
+
+        // C5 fix (plan-review-mandated): reopenNeedsReview reuses the FIRST review sharing a cleanCode, so
+        // two source rows for the same code would otherwise OVERWRITE importQuantity (last row wins) and
+        // silently drop the earlier row's quantity - or, on the exact path, mint/count the code twice.
+        // Aggregate by resolved code BEFORE any review/count write so each unique code yields exactly one
+        // review/count carrying the TOTAL quantity. Order of first appearance is preserved for the summary.
+        type AggregatedRow = {
+          code: string;
+          status: ImportPreviewRow["status"];
+          reason: string;
+          quantity: number;
+          suggestion: { name: string; brand: string; category: string; specsShort: string; primarySku: string; primaryBarcode: string };
+        };
+        const aggregated = new Map<string, AggregatedRow>();
+        for (const preview of rows) {
+          if (preview.status === "reject" || !preview.source) {
+            summary.rejected += 1;
+            continue;
+          }
+          const source = preview.source;
+          const code = source.barcode || source.partNumber || source.name;
+          if (!code) {
+            summary.rejected += 1;
+            continue;
+          }
+          const suggestion = {
+            name: preview.retailCatalogMatch?.productName || preview.candidate?.name || source.expected.name || code,
+            brand: preview.retailCatalogMatch?.brand || preview.candidate?.brand || source.brand,
+            category: preview.retailCatalogMatch?.category || source.category,
+            specsShort: [source.model, source.size].filter(Boolean).join(" "),
+            primarySku: source.partNumber,
+            primaryBarcode: source.barcode,
+          };
+          const existing = aggregated.get(code);
+          if (existing) {
+            existing.quantity += source.quantity;
+            // A later row for the same code never downgrades an already-exact status to fuzzy/review; an
+            // exact match on ANY row for this code is enough to treat the aggregated code as exact.
+            if (preview.status === "exact") existing.status = "exact";
+            continue;
+          }
+          aggregated.set(code, { code, status: preview.status, reason: preview.reason, quantity: source.quantity, suggestion });
+        }
+
+        get().snapshotCount("Before universal import");
+        for (const row of aggregated.values()) {
+          const reviewId = get().reopenNeedsReview(row.code, row.reason, {
+            importQuantity: row.quantity,
+            suggestion: row.suggestion,
+          });
+          if (!reviewId) {
+            summary.rejected += 1;
+            continue;
+          }
+          if (row.status !== "exact") {
+            summary.queuedForReview += 1;
+            continue;
+          }
+          get().resolveUnknown(reviewId, "create_new", {
+            origin: "human",
+            applyToCount: true,
+            newProduct: {
+              name: row.suggestion.name,
+              brand: row.suggestion.brand,
+              category: row.suggestion.category,
+              specsShort: row.suggestion.specsShort,
+              primarySku: row.suggestion.primarySku,
+              primaryBarcode: row.suggestion.primaryBarcode || row.code,
+            },
+          });
+          if (get().needsReviewQueue.find((review) => review.id === reviewId)?.status === "resolved") {
+            summary.applied += 1;
+          } else {
+            summary.queuedForReview += 1;
+          }
+        }
+        get().snapshotCount("After universal import");
+        return summary;
       },
 
       markWrong: async (productId, opts) => {
@@ -5679,6 +5789,10 @@ const appDeps: ScanStoreDeps = {
 // (>=5) - simply needs it defaulted to []. An install that already has a countSnapshots array (e.g.
 // a fresh v7 write, or a future migrate step run twice) keeps it untouched: never clobber real data.
 //
+// v9 (Phase 4 Task 10): adds `UnknownCodeReview.importQuantity` (optional). No migrate transform is
+// needed - the field is undefined-safe on every existing persisted review, and the v8 rule (never
+// inject an absent needsReviewQueue/products/etc. key into a partial blob) already holds unchanged.
+//
 // Exported (Task 4 polish-review fix) so a unit test can call this directly with a v5 persisted-state
 // fixture and assert every field survives the migration untouched, without spinning up the full
 // zustand persist/localStorage machinery.
@@ -5700,12 +5814,15 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
       settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
     } as never;
   }
-  // Non-destructive branch (v5..v7 -> v8): transform ONLY keys the persisted blob actually carries.
+  // Non-destructive branch (v5..v8 -> v9): transform ONLY keys the persisted blob actually carries.
   // A PARTIAL blob (e.g. the e2e fixture's settings-only seed) must not gain products/scanFeed/
-  // countSnapshots/settings keys here - injected empties clobber the seeded initial state when zustand
-  // merges the migrated blob over it. Live-caught P2 regression: the v7->v8 bump made this branch run
-  // on the settings-only e2e blob for the first time, products became [] while aliases survived, so
-  // known scans counted but the count table lost every product row ("No counts yet").
+  // countSnapshots/settings/needsReviewQueue keys here - injected empties clobber the seeded initial
+  // state when zustand merges the migrated blob over it. Live-caught P2 regression: the v7->v8 bump made
+  // this branch run on the settings-only e2e blob for the first time, products became [] while aliases
+  // survived, so known scans counted but the count table lost every product row ("No counts yet"). The
+  // v8->v9 bump (Phase 4 Task 10, UnknownCodeReview.importQuantity) does not need its own key transform -
+  // an absent field on old persisted reviews just stays absent (optional, undefined-safe) - so this
+  // branch's existing non-injective shape already satisfies the v9 rule unchanged.
   const out: Record<string, unknown> = { ...p };
   if (Array.isArray(p.products)) {
     out.products = backfillProducts(p.products as Product[]).products;
@@ -5730,7 +5847,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 8,
+    version: 9,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken

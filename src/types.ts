@@ -336,6 +336,11 @@ export interface UnknownCodeReview {
   // two different unresolved codes sharing a GS1-prefix brand mint the identical name, so the name match
   // can attribute one code's count to the other's review. A plain local id has no such collision.
   provisionalProductId?: string | null;
+  /** Phase 4 import-only quantity. Absent for scans and reconcile links. A fuzzy import row keeps
+   *  this quantity pending until an explicit human confirmation applies it. Its presence (not undefined)
+   *  is also the import-origin marker: NeedsReviewTable hides liveDecode/correctionRecheck for any
+   *  review carrying it, because Phase 4 must make zero /api/ai-lookup calls (C4). */
+  importQuantity?: number;
 }
 
 export type ResolutionAction =

@@ -59,6 +59,7 @@ export const CUSTOMER_SAFE_REVIEW_FIELDS = [
   // resolveUnknown re-link this review's own provisional placeholder by id after a customer reload
   // instead of by reconstructed name (which collides when two codes share a prefix-floor brand).
   "provisionalProductId",
+  "importQuantity",
 ] as const;
 
 // A customer's OWN scan-feed event survives reload as an activity log (Product, Qty after, Status, Reason,

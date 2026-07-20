@@ -126,3 +126,34 @@ describe("NeedsReviewTable - parked 'suggested' reviews never render (Task 9b)",
     expect(screen.queryByTestId("review-row-6000000000006")).not.toBeNull();
   });
 });
+
+// Phase 4 Task 10 C4 (plan-review-mandated): Phase 4 must make ZERO /api/ai-lookup calls. An
+// import-origin review (importQuantity !== undefined, set by applyUniversalImport) must never
+// expose liveDecode / correctionRecheck - both POST the code to that route.
+describe("NeedsReviewTable - import-origin reviews hide live-decode/correction-recheck (Task 10 C4)", () => {
+  it("does NOT render 'Look up with AI' or 'Deep lookup' for an import-origin review, even for platformOwner", () => {
+    process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "imp1", cleanCode: "IMPORT-CODE-1", status: "open", syncStatus: "pending", importQuantity: 4 }),
+      ],
+      settings: { ...useScanStore.getState().settings, aiLookupEnabled: true },
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.queryByTestId("live-decode")).toBeNull();
+    expect(screen.queryByTestId("stronger-redecode")).toBeNull();
+  });
+
+  it("STILL renders 'Look up with AI' and 'Deep lookup' for a normal (non-import) review as platformOwner", () => {
+    process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1";
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "scan1", cleanCode: "SCAN-CODE-1", status: "open", syncStatus: "pending" }),
+      ],
+      settings: { ...useScanStore.getState().settings, aiLookupEnabled: true },
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.queryByTestId("live-decode")).not.toBeNull();
+    expect(screen.queryByTestId("stronger-redecode")).not.toBeNull();
+  });
+});

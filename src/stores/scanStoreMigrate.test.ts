@@ -167,4 +167,12 @@ describe("scanStoreMigrate - v5 -> v6 persist migration (Task 4 review fix)", ()
     expect(migrated.scanFeed[0].quantityDelta).toBe(1);
     expect(migrated.scanFeed[1].quantityDelta).toBe(2);
   });
+
+  it("keeps the v9 migration non-injective for a settings-only v8 blob", () => {
+    const migrated = scanStoreMigrate({ settings: { aiLookupEnabled: false } }, 8) as Record<string, unknown>;
+    expect("products" in migrated).toBe(false);
+    expect("scanFeed" in migrated).toBe(false);
+    expect("needsReviewQueue" in migrated).toBe(false);
+    expect(migrated.countSnapshots).toEqual([]);
+  });
 });

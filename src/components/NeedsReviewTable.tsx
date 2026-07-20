@@ -116,6 +116,13 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
     setDeselected((prev) => (on ? prev.filter((c) => c !== code) : Array.from(new Set([...prev, code]))));
   const aliasConflicts = useScanStore((s) => s.lastAliasConflicts);
   const myConflicts = (aliasConflicts ?? []).filter((c) => c.reviewId === review.id);
+  // Phase 4 (C4, plan-review-mandated): a review carrying importQuantity came from a universal-import
+  // row, not a scan. Its confirmation must be explicitly human-origin (so the poison guard / weak-guess
+  // check never treats an import row as an AI suggestion), and it must NEVER expose live-decode or
+  // correction-recheck - Phase 4 makes ZERO /api/ai-lookup calls, and those two actions POST the code to
+  // that route. importQuantity !== undefined is the store's own import-origin marker (see types.ts).
+  const isImportOrigin = review.importQuantity !== undefined;
+  const importHumanOrigin = isImportOrigin ? { origin: "human" as const } : {};
 
   // Task 9b: a parked "suggested" review is still AWAITING the human (never styled/treated as
   // resolved). Defense in depth - the table filter above already excludes suggested reviews.
@@ -231,7 +238,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               <button
                 type="button"
                 data-testid="mismatch-override"
-                onClick={() => resolveUnknown(review.id, "link_existing", { productId: warn.productId, applyToCount, confirmedMismatch: true })}
+                onClick={() => resolveUnknown(review.id, "link_existing", { productId: warn.productId, applyToCount, confirmedMismatch: true, ...importHumanOrigin })}
                 className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
               >
                 Link anyway
@@ -304,6 +311,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 data-testid="create-save"
                 onClick={() =>
                   resolveUnknown(review.id, "create_new", {
+                    ...importHumanOrigin,
                     newProduct: { name: np.name || review.cleanCode, brand: np.brand, category: np.category },
                     applyToCount,
                     selectedAliasCodes: selectedCodes,
@@ -330,6 +338,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 data-testid="approve-suggestion"
                 onClick={() =>
                   resolveUnknown(review.id, "create_new", {
+                    ...importHumanOrigin,
                     applyToCount,
                     newProduct: {
                       name: review.suggestedProductName,
@@ -368,7 +377,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             <button
               type="button"
               data-testid="link-existing"
-              onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes })}
+              onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes, ...importHumanOrigin })}
               className={primaryIsApprove ? btnSecondary : btnPrimary}
             >
               Link
@@ -397,7 +406,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             >
               Ignore
             </button>
-            {isPlatform && (
+            {/* C4: an import-origin review NEVER shows live-decode or correction-recheck - both POST the
+                code to /api/ai-lookup, and Phase 4 makes ZERO such calls. Human link/confirm only. */}
+            {isPlatform && !isImportOrigin && (
               <button
                 type="button"
                 data-testid="live-decode"
@@ -413,7 +424,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 Look up with AI
               </button>
             )}
-            {isPlatform && (
+            {isPlatform && !isImportOrigin && (
               <button
                 type="button"
                 data-testid="stronger-redecode"
