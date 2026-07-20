@@ -23,12 +23,14 @@ from .discovery import (
 )
 from .docs_check import check_docs
 from .experts import run_experts
+from .invariants import load_invariants, select_invariant_checks
 from .models import CheckResult, RunReport
 from .plan_review import render_plan_markdown, review_plan
 from .report import write_report
 from .risk import classify, expert_tier
 from .runlock import acquire, release
 from .scheduler import SafetyPolicy, run_checks
+from .selftest import run_selftest
 from .verdict import decide, exit_code, prune_old_runs, write_latest
 
 
@@ -112,6 +114,16 @@ def _plan(root: Path, config: FableConfig, args: argparse.Namespace) -> int:
     return 2 if review.verdict == "blocked" else 1
 
 
+def _selftest(root: Path) -> int:
+    results = run_selftest(root)
+    for result in results:
+        marker = "PASS" if result.status == "passed" else "FAIL"
+        print(f"{marker} {result.check_id}: {result.reason}")
+    passed = sum(result.status == "passed" for result in results)
+    print(f"Selftest: {passed}/{len(results)} canaries detected")
+    return 0 if passed == len(results) else 1
+
+
 async def _run(root: Path, config: FableConfig, config_path: Path, args: argparse.Namespace) -> int:
     if _is_hook_triggered():
         refusal = _hook_triggered_refusal(args)
@@ -176,19 +188,23 @@ async def _run_gated(
     plan_result = review_plan(Path(args.plan), root) if args.plan else None
     cache = EvidenceCache(root / config.cache_db, enabled=not args.no_cache and not args.dry_run)
     profile = classify(files, config.risk_rules)
+    invariant_checks = select_invariant_checks(
+        load_invariants(root / "tools" / "fable5" / "invariants.json"), profile.tags
+    )
     tier = expert_tier(profile.score, args.all_agents)
     print(f"Fable 5 review: {config.project_name}")
     print(f"Gate: {args.gate} | Changed files: {len(files)} | Specialists: {len(agents)}")
     print(f"Risk: score={profile.score} tags={','.join(sorted(profile.tags)) or 'none'}")
+    print(f"Invariant checks: {len(invariant_checks)}")
     print(f"Evidence directory: {report_dir}")
 
     skipped_resource_results: list[CheckResult] = []
-    run_config = config
+    run_config = dataclasses.replace(config, checks=(*config.checks, *invariant_checks))
     if hook_triggered:
         print("Hook-triggered run: light resource lane only, deterministic checks only")
-        heavy_specs = [spec for spec in config.checks if spec.resource != "light"]
-        light_specs = tuple(spec for spec in config.checks if spec.resource == "light")
-        run_config = dataclasses.replace(config, checks=light_specs)
+        heavy_specs = [spec for spec in run_config.checks if spec.resource != "light"]
+        light_specs = tuple(spec for spec in run_config.checks if spec.resource == "light")
+        run_config = dataclasses.replace(run_config, checks=light_specs)
         only_filter = set(args.only) if args.only else None
         for spec in heavy_specs:
             if args.gate not in spec.gates:
@@ -351,6 +367,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("path", help="Path to the Markdown plan.")
     plan.add_argument("--output-dir", help="Optional directory for JSON and Markdown evidence.")
 
+    subparsers.add_parser("selftest", help="Seed isolated defects and prove each detector catches one.")
+
     run = subparsers.add_parser(
         "review-build", aliases=["run"], help="Run the configured evidence arsenal concurrently."
     )
@@ -402,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
             return _doctor(root, config, args.json)
         if args.command in {"review-plan", "plan"}:
             return _plan(root, config, args)
+        if args.command == "selftest":
+            return _selftest(root)
         if args.command in {"review-build", "run"}:
             return asyncio.run(_run(root, config, config_path, args))
         parser.error(f"Unsupported command: {args.command}")
