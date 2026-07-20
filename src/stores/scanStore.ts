@@ -766,6 +766,20 @@ export interface ScanState {
   undoIdentifierBackfill: () => boolean;
 }
 
+/** Phase 3: stamp the current location + deviceId onto a freshly-built ScanEvent. Applied uniformly
+ *  to every fresh ScanEvent literal inside processScan. Spread-built events inherit the stamp from
+ *  their base; the markWrong residual literal outside processScan is deliberately unstamped. Pure -
+ *  takes the values, does not read the store itself. */
+// Stamp Phase 3 attribution onto a fresh ScanEvent. Concrete (not generic) so an inline object
+// literal is type-checked against the full ScanEvent shape, not just the two stamped fields.
+function stampScanEventLocation(
+  event: ScanEvent,
+  location: string,
+  deviceId: string | null,
+): ScanEvent {
+  return { ...event, location, deviceId: deviceId ?? undefined };
+}
+
 function makeQueueItem(params: {
   idFactory: () => string;
   now: () => string;
@@ -1678,6 +1692,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // OLD completed session's id. Callers (the scan page) call ensureAutoSession before every scan
         // batch; this guard is the hard backstop for any path that does not.
         if (get().currentSession?.status === "completed") return null;
+        const scanLocation = get().location;
+        const scanDeviceId = get().deviceId;
         const cleaned = cleanScanCode(rawInput);
         if (!cleaned.cleanCode) return null;
 
@@ -1728,29 +1744,33 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           set({ lastCategoryWarning: { code: cleaned.cleanCode, productName: matchedProduct?.name ?? "this product", reason: knownConflict } });
         }
 
-        const event: ScanEvent = {
-          id: scanEventId,
-          businessId,
-          sessionId,
-          rawCode: cleaned.rawCode,
-          cleanCode: cleaned.cleanCode,
-          normalizedCandidates: cleaned.normalizedCandidates,
-          matchedProductId: effectiveProductId,
-          matchType: resolution.matchType,
-          status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
-          resolverStatus: resolution.resolverStatus,
-          codeType: resolution.codeType,
-          reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
-          decodeStatus: provMatchId ? "suggested" : undefined,
-          quantityDelta: effectiveCountable ? 1 : 0,
-          quantityAfterScan: 0,
-          createdAt,
-          source: "scan",
-          notes: resolution.reason,
-          syncStatus: "pending",
-          idempotencyKey: keyFor("INCREMENT_COUNT"),
-          syncError: null,
-        };
+        const event: ScanEvent = stampScanEventLocation(
+          {
+            id: scanEventId,
+            businessId,
+            sessionId,
+            rawCode: cleaned.rawCode,
+            cleanCode: cleaned.cleanCode,
+            normalizedCandidates: cleaned.normalizedCandidates,
+            matchedProductId: effectiveProductId,
+            matchType: resolution.matchType,
+            status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
+            resolverStatus: resolution.resolverStatus,
+            codeType: resolution.codeType,
+            reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
+            decodeStatus: provMatchId ? "suggested" : undefined,
+            quantityDelta: effectiveCountable ? 1 : 0,
+            quantityAfterScan: 0,
+            createdAt,
+            source: "scan",
+            notes: resolution.reason,
+            syncStatus: "pending",
+            idempotencyKey: keyFor("INCREMENT_COUNT"),
+            syncError: null,
+          },
+          scanLocation,
+          scanDeviceId,
+        );
 
         if (effectiveCountable && effectiveProductId) {
           // Deterministic increment in local state FIRST (instant UI, no server round-trip).
@@ -1759,7 +1779,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           set((s) => ({
             scanFeed: [event, ...s.scanFeed],
-            finalCounts: counts,
+            finalCounts: counts.map((c) =>
+              c.productId === event.matchedProductId && c.sessionId === event.sessionId
+                ? { ...c, location: scanLocation }
+                : c,
+            ),
           }));
 
           const incPayload: IncrementPayload = {
@@ -3329,7 +3353,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           : null;
         if (countedEvent) {
           const r = incrementInventoryCount(counts, countedEvent, idFactory);
-          counts = r.counts;
+          counts = r.counts.map((c) =>
+            c.productId === countedEvent.matchedProductId && c.sessionId === countedEvent.sessionId
+              ? { ...c, location: countedEvent.location }
+              : c,
+          );
           qty = r.count.quantity;
           countId = r.count.id;
         }

@@ -166,4 +166,14 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     const persisted = buildPersistedScanState(s, "business");
     expect(persisted).toMatchObject({ location: "Bay A", recentLocations: ["Main", "Bay A"] });
   });
+
+  it("customer: persisted feed retains location but not attribution-only deviceId", () => {
+    const s = makeState();
+    const first = s.scanFeed[0] as Record<string, unknown>;
+    s.scanFeed = [{ ...first, location: "Bay A", deviceId: "device-a" }];
+    const persisted = buildPersistedScanState(s, "business");
+    const feed = persisted.scanFeed as Array<Record<string, unknown>>;
+    expect(feed[0].location).toBe("Bay A");
+    expect(feed[0].deviceId).toBeUndefined();
+  });
 });

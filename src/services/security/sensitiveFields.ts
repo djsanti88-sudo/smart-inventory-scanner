@@ -69,7 +69,7 @@ export const CUSTOMER_SAFE_REVIEW_FIELDS = [
 // alias/catalog database: that stays excluded via rawCode, normalizedCandidates, matchType, codeType,
 // decodeNote, notes, syncError (platform-only decode traces + internal formatting) which remain stripped.
 export const CUSTOMER_SAFE_SCANEVENT_FIELDS = [
-  "id", "businessId", "sessionId", "matchedProductId", "cleanCode",
+  "id", "businessId", "sessionId", "matchedProductId", "cleanCode", "location",
   "status", "resolverStatus", "reason", "quantityDelta", "quantityAfterScan",
   "decodeStatus", "syncStatus", "createdAt", "source", "idempotencyKey",
 ] as const;
