@@ -15,6 +15,7 @@ import { SessionsList } from "@/components/SessionsList";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { planScanBatch } from "./planScan";
 import { resolveRawScan } from "@/services/resolver";
+import { computeMoatStats } from "@/services/moatStats";
 
 export default function ScanPage() {
   const processScan = useScanStore((s) => s.processScan);
@@ -33,7 +34,11 @@ export default function ScanPage() {
   const clearCategoryWarning = useScanStore((s) => s.clearCategoryWarning);
 
   const [name, setName] = useState("");
-  const [location, setLocation] = useState("Main");
+  const location = useScanStore((s) => s.location);
+  const setLocation = useScanStore((s) => s.setLocation);
+  const recentLocations = useScanStore((s) => s.recentLocations);
+  const ensureAutoSession = useScanStore((s) => s.ensureAutoSession);
+  const scanFeed = useScanStore((s) => s.scanFeed);
 
   // BULK SCAN: paste/type several codes separated by spaces or newlines and each becomes its OWN row
   // (one processScan per code). A single hardware-scanned barcode contains no whitespace, so normal
@@ -59,6 +64,10 @@ export default function ScanPage() {
   useEffect(() => {
     void refreshAiStatus();
   }, [refreshAiStatus]);
+
+  useEffect(() => {
+    ensureAutoSession();
+  }, [ensureAutoSession]);
 
   const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
   const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page
@@ -157,18 +166,19 @@ export default function ScanPage() {
             placeholder="New session name"
             className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
           />
-          <select
+          <input
             aria-label="location"
+            list="recent-locations"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
+            placeholder="Location (e.g. Bay A)"
             className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
-          >
-            <option>Main</option>
-            <option>Bay A</option>
-            <option>Bay B</option>
-            <option>Cooler 1</option>
-            <option>Warehouse</option>
-          </select>
+          />
+          <datalist id="recent-locations">
+            {recentLocations.map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
+          </datalist>
           <button
             type="button"
             data-testid="start-session"
@@ -231,6 +241,11 @@ export default function ScanPage() {
         </details>
       </div>
 
+      {scanFeed.length > 0 && (
+        <p className="px-1 text-sm font-medium text-zinc-700" data-testid="moat-line">
+          {computeMoatStats(scanFeed).identified} of {computeMoatStats(scanFeed).total} identified automatically
+        </p>
+      )}
       <LiveScanFeed />
       <FinalCountTable />
       <VarianceReport />

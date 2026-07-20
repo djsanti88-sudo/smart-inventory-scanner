@@ -12,6 +12,8 @@ function makeState(): PersistableScanState {
     businessId: "biz-1",
     sessionId: "session-1",
     currentSession: { id: "session-1" },
+    location: "Main",
+    recentLocations: [],
     settings: { aiLookupEnabled: true },
     pendingSyncQueue: [],
     syncedScanEventIds: ["e1"],
@@ -155,5 +157,13 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     expect(rehydrated.every((r) => r.status === "open")).toBe(true);
     // Each rehydrated review keeps the cleanCode the approved alias is keyed on (approve+count works).
     expect(rehydrated.map((r) => r.cleanCode)).toEqual(["code-a", "code-b", "code-c"]);
+  });
+
+  it("persists location and recentLocations for customer-role reloads", () => {
+    const s = makeState();
+    s.location = "Bay A";
+    s.recentLocations = ["Main", "Bay A"];
+    const persisted = buildPersistedScanState(s, "business");
+    expect(persisted).toMatchObject({ location: "Bay A", recentLocations: ["Main", "Bay A"] });
   });
 });

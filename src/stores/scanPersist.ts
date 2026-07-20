@@ -13,6 +13,8 @@ export interface PersistableScanState {
   businessId: string;
   sessionId: string;
   currentSession: unknown;
+  location: string;
+  recentLocations: string[];
   settings: unknown;
   pendingSyncQueue: unknown[];
   syncedScanEventIds: unknown[];
@@ -64,6 +66,8 @@ export function buildPersistedScanState(
     businessId: s.businessId,
     sessionId: s.sessionId,
     currentSession: s.currentSession,
+    location: s.location,
+    recentLocations: s.recentLocations,
     settings: s.settings,
     pendingSyncQueue: s.pendingSyncQueue,
     // #16: bounded diagnostic dedup ledger (not customer data - see cap note above).

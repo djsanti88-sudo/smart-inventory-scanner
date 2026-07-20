@@ -91,6 +91,8 @@ describe("countSnapshots persistence", () => {
       businessId: "b1",
       sessionId: "s1",
       currentSession: null,
+      location: "Main",
+      recentLocations: [],
       settings: {},
       pendingSyncQueue: [],
       syncedScanEventIds: [],

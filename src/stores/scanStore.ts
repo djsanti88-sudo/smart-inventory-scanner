@@ -484,6 +484,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 const AUTO_SESSION_INACTIVITY_MINUTES = 30;
+const RECENT_LOCATIONS_CAP = 8;
 
 export interface ScanState {
   // identity / config
@@ -552,6 +553,12 @@ export interface ScanState {
   // (e.g. non-browser/test contexts, or before the store has touched deviceIdentity). Used only to
   // derive idempotent auto-session ownership - never part of the count/ledger identity.
   deviceId: string | null;
+  /** Phase 3: the location to stamp on the NEXT scan (defaults to the session's location; changing
+   *  it does not retroactively edit past scans). */
+  location: string;
+  /** Phase 3: capped ring buffer of recently-used location strings for this business, newest last -
+   *  same append-and-slice-oldest pattern as countSnapshots (scanStore.ts:1289-1309). */
+  recentLocations: string[];
 
   // actions
   setHasHydrated: (v: boolean) => void;
@@ -589,6 +596,9 @@ export interface ScanState {
    *  auto-named session stamped with this device's id. Safe to call on every mount/scan - a no-op
    *  when a valid session already exists. */
   ensureAutoSession: () => void;
+  /** Set the location to stamp on subsequent scans, and record it in recentLocations (capped,
+   *  deduped, most-recent-last). Empty/whitespace-only input is ignored (never stored). */
+  setLocation: (location: string) => void;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
   retrySync: () => void;
@@ -1141,6 +1151,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       lastIdentifierBackfill: null,
       _hasHydrated: deps.persistName ? false : true,
       deviceId: null,
+      location: "Main",
+      recentLocations: [],
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
@@ -1571,6 +1583,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }),
         ]);
         emitAudit({ entityType: "CountSession", entityId: id, action: "session_auto_started", metadata: { name: session.name, deviceId } });
+      },
+
+      setLocation: (location) => {
+        const trimmed = location.trim();
+        if (!trimmed) return;
+        set((s) => {
+          const withoutDup = s.recentLocations.filter((l) => l !== trimmed);
+          const next = [...withoutDup, trimmed];
+          return {
+            location: trimmed,
+            recentLocations: next.length > RECENT_LOCATIONS_CAP ? next.slice(next.length - RECENT_LOCATIONS_CAP) : next,
+          };
+        });
       },
 
       processScan: (rawInput) => {
