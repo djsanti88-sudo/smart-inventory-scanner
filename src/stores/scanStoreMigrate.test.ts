@@ -137,4 +137,34 @@ describe("scanStoreMigrate - v5 -> v6 persist migration (Task 4 review fix)", ()
     expect(migrated.pendingSyncQueue).toEqual(persistedV5.pendingSyncQueue);
     expect(migrated.syncedScanEventIds).toEqual(persistedV5.syncedScanEventIds);
   });
+
+  it("never injects empty keys into a PARTIAL blob (v7->v8 live regression: settings-only e2e seed lost every product)", () => {
+    // The e2e fixture seeds { state: { settings }, version: 7 }. Once the version bump made migrate run
+    // on it, injected products:[] / scanFeed:[] clobbered the seeded initial state on zustand's merge:
+    // known scans still counted (aliases survived) but the count table joined against zero products.
+    const settingsOnly = { settings: { scanContext: "any", aiLookupEnabled: false } };
+
+    const migrated = scanStoreMigrate(settingsOnly, 7) as unknown as Record<string, unknown>;
+
+    expect("products" in migrated).toBe(false);
+    expect("scanFeed" in migrated).toBe(false);
+    // countSnapshots IS injected as [] by documented contract (varianceSnapshot.store.test.ts) - safe
+    // because its initial state is empty too, unlike the seeded products.
+    expect(migrated.countSnapshots).toEqual([]);
+    const settings = migrated.settings as { scanContext: string; aiLookupEnabled: boolean };
+    expect(settings.scanContext).toBe("any"); // persisted value wins over the "tire" default
+    expect(settings.aiLookupEnabled).toBe(false);
+  });
+
+  it("still normalizes quantityDelta:0 for a v7 blob that DOES carry a feed", () => {
+    const withFeed = {
+      scanFeed: [
+        { id: "z", quantityDelta: 0 },
+        { id: "k", quantityDelta: 2 },
+      ],
+    };
+    const migrated = scanStoreMigrate(withFeed, 7) as unknown as { scanFeed: Array<{ quantityDelta: number }> };
+    expect(migrated.scanFeed[0].quantityDelta).toBe(1);
+    expect(migrated.scanFeed[1].quantityDelta).toBe(2);
+  });
 });
