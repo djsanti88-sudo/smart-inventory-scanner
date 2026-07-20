@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import CheckSpec
+from .risk import DEFAULT_RULES, RiskRule
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class FableConfig:
     routes: tuple[Route, ...]
     expert_workers: int = 3
     docs_files: list[str] = field(default_factory=lambda: ["CLAUDE.md", "docs/ARCHITECTURE.md", "docs/COMMANDS.md"])
+    risk_rules: list[RiskRule] = field(default_factory=lambda: list(DEFAULT_RULES))
 
 
 def _tuple(value: Any) -> tuple[str, ...]:
@@ -99,6 +101,19 @@ def load_config(root: Path, config_path: Path | None = None) -> FableConfig:
         Route(patterns=_tuple(item.get("patterns")), agents=_tuple(item.get("agents")))
         for item in raw.get("routes", [])
     )
+    risk_items = raw.get("risk", [])
+    risk_rules = (
+        [
+            RiskRule(
+                patterns=_tuple(item.get("patterns")),
+                tag=str(item.get("tag", "")),
+                weight=int(item.get("weight", 0)),
+            )
+            for item in risk_items
+        ]
+        if risk_items
+        else list(DEFAULT_RULES)
+    )
     return FableConfig(
         project_name=str(project.get("name", root.name)),
         reports_dir=str(project.get("reports_dir", "reports/fable5")),
@@ -114,4 +129,5 @@ def load_config(root: Path, config_path: Path | None = None) -> FableConfig:
         docs_files=list(_tuple(docs.get("files")))
         if "files" in docs
         else ["CLAUDE.md", "docs/ARCHITECTURE.md", "docs/COMMANDS.md"],
+        risk_rules=risk_rules,
     )

@@ -21,9 +21,10 @@ from .discovery import (
 )
 from .docs_check import check_docs
 from .experts import run_experts
-from .models import RunReport
+from .models import CheckResult, RunReport
 from .plan_review import render_plan_markdown, review_plan
 from .report import write_report
+from .risk import classify, expert_tier
 from .scheduler import SafetyPolicy, run_checks
 
 
@@ -94,8 +95,11 @@ async def _run(root: Path, config: FableConfig, config_path: Path, args: argpars
     fingerprint = workspace_fingerprint(root, files, config_path)
     plan_result = review_plan(Path(args.plan), root) if args.plan else None
     cache = EvidenceCache(root / config.cache_db, enabled=not args.no_cache and not args.dry_run)
+    profile = classify(files, config.risk_rules)
+    tier = expert_tier(profile.score, args.all_agents)
     print(f"Fable 5 review: {config.project_name}")
     print(f"Gate: {args.gate} | Changed files: {len(files)} | Specialists: {len(agents)}")
+    print(f"Risk: score={profile.score} tags={','.join(sorted(profile.tags)) or 'none'}")
     print(f"Evidence directory: {report_dir}")
     try:
         results = await run_checks(
@@ -117,24 +121,40 @@ async def _run(root: Path, config: FableConfig, config_path: Path, args: argpars
         )
         results.extend(check_docs(root, config.docs_files, set(inventory.package_scripts)))
         if args.with_experts:
-            print(
-                f"Launching {len(agents)} Fable expert review(s) with "
-                f"{config.expert_workers} concurrent workers"
-            )
-            results.extend(
-                await run_experts(
-                    root=root,
-                    report_dir=report_dir,
-                    agents=agents,
-                    model=args.expert_model,
-                    changed_files=files,
-                    deterministic_results=results,
-                    workers=config.expert_workers,
-                    timeout_seconds=args.expert_timeout,
-                    dry_run=args.dry_run,
-                    allow_paid=args.allow_paid_fallback,
+            if tier == "skip":
+                print(f"Experts skipped: risk score {profile.score} (deterministic only)")
+                results.append(
+                    CheckResult(
+                        check_id="experts-tier",
+                        description="Expert layer tier decision",
+                        status="skipped",
+                        blocking=False,
+                        command=[],
+                        started_at=datetime.now(timezone.utc).isoformat(),
+                        reason=f"risk score {profile.score} below expert threshold",
+                    )
                 )
-            )
+            else:
+                effort = "high" if tier == "high" else "medium"
+                print(
+                    f"Launching {len(agents)} Fable expert review(s) with "
+                    f"{config.expert_workers} concurrent workers at {effort} effort"
+                )
+                results.extend(
+                    await run_experts(
+                        root=root,
+                        report_dir=report_dir,
+                        agents=agents,
+                        model=args.expert_model,
+                        changed_files=files,
+                        deterministic_results=results,
+                        workers=config.expert_workers,
+                        timeout_seconds=args.expert_timeout,
+                        dry_run=args.dry_run,
+                        allow_paid=args.allow_paid_fallback,
+                        effort=effort,
+                    )
+                )
     finally:
         cache.close()
 
@@ -155,6 +175,8 @@ async def _run(root: Path, config: FableConfig, config_path: Path, args: argpars
         capabilities=inventory,
         results=results,
         plan_review=plan_result,
+        risk_score=profile.score,
+        risk_tags=sorted(profile.tags),
     )
     write_report(report, report_dir, root)
     failed = [result for result in results if result.status == "failed" and result.blocking]

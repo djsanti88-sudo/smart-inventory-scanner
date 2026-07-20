@@ -21,7 +21,7 @@ _MAX_BUDGET_USD = "0.50"
 _AUTH_STATUS_CMD_ENV = "FABLE5_AUTH_STATUS_CMD"
 
 
-def build_claude_command(agent: str, model: str, prompt: str) -> list[str]:
+def build_claude_command(agent: str, model: str, prompt: str, effort: str = "high") -> list[str]:
     executable = shutil.which("claude") or "claude"
     return [
         executable,
@@ -31,7 +31,7 @@ def build_claude_command(agent: str, model: str, prompt: str) -> list[str]:
         "--model",
         model,
         "--effort",
-        "high",
+        effort,
         "--permission-mode",
         "plan",
         "--tools",
@@ -190,8 +190,9 @@ async def _run_one(
     semaphore: asyncio.Semaphore,
     dry_run: bool,
     allow_paid: bool = False,
+    effort: str = "high",
 ) -> CheckResult:
-    command = build_claude_command(agent, model, prompt)
+    command = build_claude_command(agent, model, prompt, effort=effort)
     started_at = datetime.now(timezone.utc).isoformat()
     safe_command = command[:-1] + ["<review-prompt>"]
     if dry_run:
@@ -274,6 +275,7 @@ async def run_experts(
     timeout_seconds: int,
     dry_run: bool = False,
     allow_paid: bool = False,
+    effort: str = "high",
 ) -> list[CheckResult]:
     if not agents:
         return []
@@ -305,6 +307,7 @@ async def run_experts(
                 semaphore=semaphore,
                 dry_run=dry_run,
                 allow_paid=allow_paid,
+                effort=effort,
             )
         )
         for agent in agents

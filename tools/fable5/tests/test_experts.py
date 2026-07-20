@@ -26,7 +26,16 @@ class ExpertTests(unittest.TestCase):
         self.assertEqual(command[command.index("--permission-mode") + 1], "plan")
         self.assertEqual(command[command.index("--tools") + 1], "Read,Grep,Glob")
         self.assertEqual(command[command.index("--max-budget-usd") + 1], "0.50")
+        self.assertEqual(command[command.index("--effort") + 1], "high")
         self.assertNotIn("--dangerously-skip-permissions", command)
+
+    def test_command_defaults_effort_to_high(self) -> None:
+        command = build_claude_command("security", "fable", "review")
+        self.assertEqual(command[command.index("--effort") + 1], "high")
+
+    def test_command_accepts_explicit_effort(self) -> None:
+        command = build_claude_command("security", "fable", "review", effort="medium")
+        self.assertEqual(command[command.index("--effort") + 1], "medium")
 
 
 class ParseEnvelopeTests(unittest.TestCase):

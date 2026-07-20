@@ -101,6 +101,8 @@ class RunReport:
     capabilities: CapabilityInventory
     results: list[CheckResult] = field(default_factory=list)
     plan_review: PlanReview | None = None
+    risk_score: int = 0
+    risk_tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
