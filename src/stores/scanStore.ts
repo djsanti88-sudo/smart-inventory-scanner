@@ -5337,20 +5337,31 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
       settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
     } as never;
   }
-  const existingProducts = Array.isArray(p.products) ? (p.products as Product[]) : [];
-  const existingFeed = Array.isArray(p.scanFeed) ? (p.scanFeed as Array<{ quantityDelta?: number }>) : [];
-  // P1-handoff fold-in: legacy v7 feed rows may carry a literal quantityDelta:0 (pre-D1). applyScanEventOnce's
-  // `?? 1` does not correct a non-nullish 0, so normalize here where the persisted blob is rebuilt.
-  const normalizedFeed = existingFeed.map((row) =>
-    row && row.quantityDelta === 0 ? { ...row, quantityDelta: 1 } : row,
-  );
-  return {
-    ...p,
-    products: backfillProducts(existingProducts).products,
-    scanFeed: normalizedFeed,
-    countSnapshots: existingSnapshots,
-    settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
-  } as never;
+  // Non-destructive branch (v5..v7 -> v8): transform ONLY keys the persisted blob actually carries.
+  // A PARTIAL blob (e.g. the e2e fixture's settings-only seed) must not gain products/scanFeed/
+  // countSnapshots/settings keys here - injected empties clobber the seeded initial state when zustand
+  // merges the migrated blob over it. Live-caught P2 regression: the v7->v8 bump made this branch run
+  // on the settings-only e2e blob for the first time, products became [] while aliases survived, so
+  // known scans counted but the count table lost every product row ("No counts yet").
+  const out: Record<string, unknown> = { ...p };
+  if (Array.isArray(p.products)) {
+    out.products = backfillProducts(p.products as Product[]).products;
+  }
+  if (Array.isArray(p.scanFeed)) {
+    // P1-handoff fold-in: legacy v7 feed rows may carry a literal quantityDelta:0 (pre-D1).
+    // applyScanEventOnce's `?? 1` does not correct a non-nullish 0, so normalize here where the
+    // persisted blob is rebuilt.
+    out.scanFeed = (p.scanFeed as Array<{ quantityDelta?: number }>).map((row) =>
+      row && row.quantityDelta === 0 ? { ...row, quantityDelta: 1 } : row,
+    );
+  }
+  // countSnapshots stays UNCONDITIONAL by documented contract (varianceSnapshot.store.test.ts: pre-
+  // snapshot blobs migrate to []). Safe to inject: the initial state is empty too, unlike products.
+  out.countSnapshots = existingSnapshots;
+  if (p.settings !== undefined) {
+    out.settings = { ...DEFAULT_SETTINGS, ...(p.settings as Partial<Settings>) };
+  }
+  return out as never;
 }
 
 export const useScanStore = create<ScanState>()(
