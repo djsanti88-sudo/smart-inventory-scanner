@@ -1,0 +1,6 @@
+{
+  "name": "double-charge",
+  "target_files": ["tools/fable5/fixtures/selftest/cap-caller.ts"],
+  "patch": "--- a/tools/fable5/fixtures/selftest/cap-caller.ts\n+++ b/tools/fable5/fixtures/selftest/cap-caller.ts\n@@ -1,3 +1,4 @@\n export function decodeCanary(): string {\n+  checkAndIncrementDaily({ limit: 1 });\n   return \"safe\";\n }\n",
+  "expected_detector": "semgrep-cap-single-charge"
+}

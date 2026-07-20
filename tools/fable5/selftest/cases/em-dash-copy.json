@@ -1,0 +1,6 @@
+{
+  "name": "em-dash-copy",
+  "target_files": ["tools/fable5/fixtures/selftest/agent.md"],
+  "patch": "--- a/tools/fable5/fixtures/selftest/agent.md\n+++ b/tools/fable5/fixtures/selftest/agent.md\n@@ -8 +8 @@\n-Review safe copy.\n+Review\u2014unsafe copy.\n",
+  "expected_detector": "validate-agents"
+}
