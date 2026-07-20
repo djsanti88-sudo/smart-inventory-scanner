@@ -3,6 +3,11 @@ import type { MatchResult } from "@/services/reconcile/identityMatcher";
 
 const SENSITIVE_HEADER = /(^|[ _-])(cost|price|retail|msrp|margin)([ _-]|$)/i;
 
+// Upper bound for a single import row's quantity. A real shop's on-hand count for one SKU never
+// approaches this; values above it almost always mean a mis-mapped column (e.g. a 12-digit barcode
+// mapped to Quantity), which would otherwise drive ~10^11 processScan calls downstream (browser hang).
+export const MAX_IMPORT_QUANTITY = 100_000;
+
 export interface PreviewMatchResult extends MatchResult {
   retailCatalogMatch?: RetailCatalogMatch;
 }
@@ -29,9 +34,18 @@ export function mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping):
   sheet.rows.forEach((sourceCells, rowIndex) => {
     const line = sheet.headerRowIndex + rowIndex + 2;
     const quantityText = cell(sourceCells, mapping, "quantity");
-    const quantity = Number(quantityText);
+    const quantityTrimmed = quantityText.trim();
+    if (quantityTrimmed === "") {
+      rejected.push({ source: null, line, status: "reject", reason: "Quantity is blank; enter 0 explicitly if the count is zero.", confidence: null });
+      return;
+    }
+    const quantity = Number(quantityTrimmed);
     if (!Number.isSafeInteger(quantity) || quantity < 0) {
       rejected.push({ source: null, line, status: "reject", reason: `Quantity "${quantityText}" is not a non-negative whole number.`, confidence: null });
+      return;
+    }
+    if (quantity > MAX_IMPORT_QUANTITY) {
+      rejected.push({ source: null, line, status: "reject", reason: `Quantity "${quantityText}" looks too large; check the column mapping.`, confidence: null });
       return;
     }
     const base = {

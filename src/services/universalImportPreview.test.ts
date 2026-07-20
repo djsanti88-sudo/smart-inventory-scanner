@@ -3,6 +3,7 @@ import type { UniversalSheet } from "@/services/importSchema";
 import {
   buildImportPreview,
   mapUniversalRows,
+  MAX_IMPORT_QUANTITY,
   type PreviewMatchResult,
 } from "@/services/universalImportPreview";
 
@@ -96,5 +97,90 @@ describe("universalImportPreview", () => {
       viaAffixCore: true,
     };
     expect(buildImportPreview(mapped, [affix], "header").rows[0].status).toBe("fuzzy");
+  });
+
+  it("rejects a blank quantity cell instead of silently applying it as zero", () => {
+    const blankQtySheet: UniversalSheet = {
+      ...sheet,
+      rows: [["ABC-1", "Acme", "Road", "225/45R18", "", "99"]],
+    };
+    const result = mapUniversalRows(blankQtySheet, {
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      size: 3,
+      quantity: 4,
+    });
+    expect(result.rows).toHaveLength(0);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].reason).toMatch(/blank/i);
+  });
+
+  it("rejects a whitespace-only quantity cell the same as blank", () => {
+    const whitespaceQtySheet: UniversalSheet = {
+      ...sheet,
+      rows: [["ABC-1", "Acme", "Road", "225/45R18", "   ", "99"]],
+    };
+    const result = mapUniversalRows(whitespaceQtySheet, {
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      size: 3,
+      quantity: 4,
+    });
+    expect(result.rows).toHaveLength(0);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].reason).toMatch(/blank/i);
+  });
+
+  it("still accepts an explicit zero quantity as a legitimate zero-on-hand row", () => {
+    const zeroQtySheet: UniversalSheet = {
+      ...sheet,
+      rows: [["ABC-1", "Acme", "Road", "225/45R18", "0", "99"]],
+    };
+    const result = mapUniversalRows(zeroQtySheet, {
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      size: 3,
+      quantity: 4,
+    });
+    expect(result.rejected).toHaveLength(0);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].quantity).toBe(0);
+  });
+
+  it("rejects an absurdly large quantity that suggests a mis-mapped column (e.g. a barcode)", () => {
+    const hugeQtySheet: UniversalSheet = {
+      ...sheet,
+      rows: [["ABC-1", "Acme", "Road", "225/45R18", "196006123457", "99"]],
+    };
+    const result = mapUniversalRows(hugeQtySheet, {
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      size: 3,
+      quantity: 4,
+    });
+    expect(result.rows).toHaveLength(0);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].reason).toMatch(/too large|column mapping/i);
+  });
+
+  it("still accepts a normal quantity at or under the upper bound", () => {
+    const normalQtySheet: UniversalSheet = {
+      ...sheet,
+      rows: [["ABC-1", "Acme", "Road", "225/45R18", String(MAX_IMPORT_QUANTITY), "99"]],
+    };
+    const result = mapUniversalRows(normalQtySheet, {
+      partNumber: 0,
+      brand: 1,
+      model: 2,
+      size: 3,
+      quantity: 4,
+    });
+    expect(result.rejected).toHaveLength(0);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].quantity).toBe(MAX_IMPORT_QUANTITY);
   });
 });
