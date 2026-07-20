@@ -4,7 +4,6 @@ import { emptyResult } from "@/services/ai/provider";
 import { type ProviderStatus } from "@/services/ai/decodeOrchestrator";
 import { decideDecode, isUsableProductName, isExampleOrTestRow } from "@/services/ai/decode";
 import { firecrawlScrapeCheap, searchIdentifyByBarcode, firecrawlKeysFromEnv } from "@/services/ai/firecrawlProvider";
-import { lookupBarcodeDb } from "@/server/retail-knowledge/barcodeDbProvider";
 import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteGrounding";
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
@@ -882,6 +881,18 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     };
     const ladderProviderStatuses: ProviderStatus[] = [];
 
+    // D8 (Task 2, Step 3b, P5 2026-07-20): the tracked rung-0 UPCitemdb outcome, captured in a closure
+    // exactly like `retailHit` above. Plan D's `lookupBarcodeDb` dep (below, ~PLAN D EXECUTION) reuses
+    // THIS value instead of re-fetching api.upcitemdb.com a second time for the same code - UPCitemdb is
+    // GTIN-gated at rung 0 and Plan D only runs for `isPublicBarcode` (the same GTIN universe), so by
+    // the time Plan D runs, rung 0 has ALWAYS already tried this exact lookup. `sourceUrl` is preserved
+    // when the rung-0 item carries one so Plan D's `bestUrl` offer-link escalation is not lost (today's
+    // rung-0 UpcItemDbItem shape has no sourceUrl field - see upcItemDbClient.ts - so this is currently
+    // always ""; the passthrough is written generically so a future rung-0 enrichment with a sourceUrl
+    // flows through for free). NOTE: rung-0 lacks barcodeDbProvider's zero-pad-variant retry; that
+    // retry-robustness delta is accepted per the plan (Task 2 Step 3b #9).
+    let upcItemDbResult: { name: string; brand: string; sourceUrl: string } | null = null;
+
     // ---- Rung 0: UPCitemdb (FREE, keyless trial tier; GTIN codes only; gated in buildLadderRungs) ---
     // Runs BEFORE Go-UPC (free before paid, owner order 2026-07-12 free-rungs plan). Never touches the
     // paid daily AI-lookup cap - it owns its own local daily counter (90/day, buffer under the
@@ -904,6 +915,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         errorCode: r.path === "upcitemdb_unavailable" || r.path === "upcitemdb_miss" ? r.reason : undefined,
       });
       if (r.path === "upcitemdb_hit" && r.decision) {
+        // D8: capture the hit for Plan D's lookupBarcodeDb dep to reuse - UPCitemdb is never queried
+        // twice for the same request.
+        const hitResult = r.results?.[0];
+        upcItemDbResult = hitResult ? { name: hitResult.productName, brand: hitResult.brand, sourceUrl: (hitResult.sourceUrls ?? [])[0] ?? "" } : null;
         return {
           settled: true,
           reason: r.reason,
@@ -981,12 +996,16 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         errorCode: r.path === "goupc_unavailable" || r.path === "goupc_miss" ? r.reason : undefined,
       });
       if (r.path === "goupc_exact" && r.decision) {
+        // D6/Task 2 (P5 2026-07-20): honest evidence object - Go-UPC is a paid-DB API SELF-REPORT, not
+        // an app-verified fetch. `verified: false` / `strength: "none"` mirrors GoUpcProvider.ts's own
+        // demoted `r.decision` (status "suggested"); the reason names the provenance honestly instead
+        // of fabricating a "fetched_source" claim the app never actually earned.
         return {
           settled: true,
           reason: r.reason,
           payload: {
             results: r.results ?? [],
-            evidences: [{ verified: true, strength: "fetched_source", matchedCode: code, matchedSources: ["go-upc"], reason: "Go-UPC exact barcode match" }],
+            evidences: [{ verified: false, strength: "none", matchedCode: code, matchedSources: ["go-upc"], reason: "Go-UPC API self-report (not app page-verified)" }],
             providerNames: ["go-upc"],
             providerStatuses: [...ladderProviderStatuses],
             decision: r.decision,
@@ -1146,7 +1165,11 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // ladder; only its POSITION moved (owner cost-order fix), the internals are byte-for-byte unchanged.
     if (!e2eMode() && isPublicBarcode) {
       const fast = await resolveUnknownFast(code, {
-        lookupBarcodeDb: (c) => lookupBarcodeDb(c),
+        // D8 (Task 2, Step 3b): UPCitemdb result is REUSED from rung-0, never re-queried. Rung-0
+        // (runUpcItemDb, above) is GTIN-gated exactly like this Plan D door (isPublicBarcode is the same
+        // GTIN universe), so by the time Plan D runs, rung 0 has ALWAYS already attempted this exact
+        // lookup - a second live fetch to api.upcitemdb.com for the same code would be pure waste.
+        lookupBarcodeDb: async () => upcItemDbResult,
         retailDb: async () => (retailHit ? { name: retailHit.productName, brand: retailHit.brand } : null),
         // Gemini grounding arm gated off with the rest of Gemini (owner order 2026-07-06); null
         // is the arm's documented "miss" value, so Plan D consensus just proceeds without it.
@@ -1255,8 +1278,14 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       if (goUpcCanPay) {
         await chargePaidSlot();
         const goRun = await runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
-        const goStatus = (goRun.outcome?.payload as LadderPayload | undefined)?.decision.status ?? null;
-        ladderRun = goStatus === "verified"
+        // D6/Task 2 Step 3c (demotion ripple, CRITICAL): Go-UPC is now honestly labeled "suggested"
+        // (never "verified" - see GoUpcProvider.ts), so this win-selection can no longer gate on the
+        // literal status "verified" - that would DISCARD every genuinely settled paid Go-UPC answer in
+        // favor of the weaker free-rung stash, silently wasting the just-charged paid slot. Gate on
+        // whether Go-UPC SETTLED at all (goRun.outcome is only set when the rung actually answered,
+        // verified OR suggested) so a cleanly-resolved paid Go-UPC hit still WINS over the free
+        // suggestion, exactly as before the honesty relabel - only the label changed, not who wins.
+        ladderRun = goRun.outcome
           ? { settledBy: goRun.settledBy, outcome: goRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] }
           : { settledBy: freeRun.settledBy, outcome: freeRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] };
       } else {
@@ -1322,6 +1351,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // QA HARDENING FIX #5: a retailHit that is itself an example/test row (isExampleOrTestRow) must be
     // ignored the same way - a fake "Test Shopidoo"/"Healthyholics" example row must never be allowed to
     // downgrade a legitimate paid verify into a false conflict.
+    //
+    // D6/Task 2 Step 3c (demotion ripple, intentional side effect): this guard still gates strictly on
+    // the literal status "verified", so a demoted Go-UPC "suggested" hit no longer reaches it at all.
+    // That is ACCEPTABLE (not a regression) - a suggestion is already review-first/lower-trust than a
+    // verify, so it doesn't need this specific downgrade-to-conflict guard; only a genuine app-verified
+    // "verified" claim (corpus/retail/Fetch-V2/GPT-evidence-corroborated, per decideDecode) still needs
+    // the contradiction check against the retail corpus.
     if (
       win &&
       win.decision.status === "verified" &&
@@ -1539,6 +1575,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // as the same suggestion next time; forceRetry still overrides. Free-rung needs_review outcomes are
   // NOT covered by this branch (sourceTier is null for them), so they still never persist.
   //
+  // D6/Task 2 Step 3c AUDIT (demotion ripple): a demoted Go-UPC clean-exact hit now settles at status
+  // "suggested" (was "verified") - CONFIRMED this is still covered by the `status === "suggested"`
+  // branch immediately below, combined with classifySourceTier recognizing "go-upc" in providerNames as
+  // "paid_rung". So a settled Go-UPC suggestion persists to L2 exactly as a verified one used to - the
+  // honesty relabel does NOT reopen a pay-twice hole. See pipeline.test.ts's "a demoted Go-UPC
+  // 'suggested' settle STILL persists to L2..." regression test (Task 2).
+  //
   // A genuinely exhausted ladder (classifyReceipt, tracked in receiptState from whichever exit ran the
   // ladder) -> permanent "no_result_receipt". Anything else (needs_review from a transient skip, or a
   // conflict, with no paid-rung identity) is left untouched - it stays retryable exactly like today's
@@ -1569,6 +1612,11 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // GS1 prefix POSITIVELY CORROBORATING the decoded brand (never merely "no conflict") + (for tires)
   // the required tire specs. A joined in-flight waiter never writes here - the winning caller's own
   // pass through this same code path already would have (winner-only, same rule as the ledger above).
+  //
+  // D6/Task 2 Step 3c AUDIT: a demoted Go-UPC hit (now "suggested") no longer reaches this branch at
+  // all. This is correct and was ALREADY true before the relabel - Go-UPC never carried
+  // evidenceStrength "fetched_source" honestly (that field is now "none"), so `winningSourceUrl` would
+  // have been "" and the gate below would have skipped it regardless of status. No behavior change.
   if (!e2eMode() && !cached && !joinedInFlight && payload.decision.status === "verified") {
     const winningResult = payload.results[0];
     const winningSourceUrl = payload.decision.evidenceStrength === "fetched_source" ? (winningResult?.sourceUrls ?? [])[0] ?? "" : "";

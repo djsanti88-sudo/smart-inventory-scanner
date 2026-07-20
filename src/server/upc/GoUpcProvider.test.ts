@@ -120,14 +120,20 @@ function baseDeps(over?: Partial<GoUpcRungDeps>): GoUpcRungDeps {
 beforeEach(() => __resetArchiveCounter());
 
 describe("goUpcRung", () => {
-  it("exact hit -> verified decision + archive appended + usage recorded", async () => {
+  it("exact hit -> HONEST suggested decision (Go-UPC self-report, never verified) + archive appended + usage recorded", async () => {
     const storage = memStorage();
     const usage = usageGate();
     const deps = baseDeps({ storage, usage });
     const r = await goUpcRung(FALKEN, deps);
     expect(r.path).toBe("goupc_exact");
-    expect(r.decision?.status).toBe("verified");
-    expect(r.decision?.exactCodeEvidenceVerifiedByApp).toBe(true);
+    // D6/Task 2: Go-UPC is a raw paid-DB API self-report, never app-verified - demoted to "suggested".
+    expect(r.decision?.status).toBe("suggested");
+    expect(r.decision?.status).not.toBe("verified");
+    expect(r.decision?.exactCodeEvidenceVerifiedByApp).toBe(false);
+    expect(r.decision?.evidenceStrength).toBe("none");
+    expect(r.decision?.evidenceStrength).not.toBe("fetched_source");
+    // Confidence stays 0.9 - a settled suggestion still auto-applies to the counted row.
+    expect(r.decision?.confidence).toBe(0.9);
     expect(r.results?.[0].brand).toBe("Falken");
     expect(r.results?.[0].verifiedFacts).toContain("Go-UPC exact barcode match");
     expect(storage.archives).toHaveLength(1);
@@ -148,7 +154,7 @@ describe("goUpcRung", () => {
     expect(r.results?.[0].needsHumanReview).toBe(true);
   });
 
-  it("carlstar-owned prefix + Go-UPC brand 'Carlisle' -> NO conflict (same company family)", async () => {
+  it("carlstar-owned prefix + Go-UPC brand 'Carlisle' -> NO conflict (same company family); still HONEST suggested", async () => {
     // The eval false-positive: prefix owner carlstar vs Go-UPC Carlisle are the same company.
     const deps = baseDeps({
       client: vi.fn(async () => hit({ brand: "Carlisle" })),
@@ -156,17 +162,17 @@ describe("goUpcRung", () => {
     });
     const r = await goUpcRung(CARLSTAR_PREFIX, deps);
     expect(r.path).toBe("goupc_exact");
-    expect(r.decision?.status).toBe("verified");
+    expect(r.decision?.status).toBe("suggested");
   });
 
-  it("exact hit with an UNKNOWN prefix -> verified normally (absence of prefix data never blocks)", async () => {
+  it("exact hit with an UNKNOWN prefix -> HONEST suggested normally (absence of prefix data never blocks)", async () => {
     const deps = baseDeps({
       client: vi.fn(async () => hit({ brand: "Westlake" })),
       prefixLookup: () => null,
     });
     const r = await goUpcRung(UNKNOWN_PREFIX, deps);
     expect(r.path).toBe("goupc_exact");
-    expect(r.decision?.status).toBe("verified");
+    expect(r.decision?.status).toBe("suggested");
   });
 
   it("inferred hit -> needs_review suggestion + archived + NO negative cache", async () => {

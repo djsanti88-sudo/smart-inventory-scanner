@@ -479,6 +479,23 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     expect(hitAnAiProvider()).toBe(false);
   });
 
+  // D8 (Task 2, Step 3b): UPCitemdb must be queried AT MOST ONCE per request. Before this fix, Plan D's
+  // `lookupBarcodeDb` dep re-fetched the SAME api.upcitemdb.com endpoint that rung-0 (runUpcItemDb) had
+  // already just called for this exact code - a second, untracked, wasted network round-trip. VALID_GTIN
+  // is a public barcode (UPC-A) so it reaches Plan D; rung-0 suggests (never a terminal win on its own),
+  // so the pipeline continues past the free ladder into Plan D, which is exactly the path that used to
+  // double-fetch.
+  it("D8: UPCitemdb (api.upcitemdb.com) is fetched AT MOST ONCE per request - Plan D reuses rung-0's tracked result, never a second fetch", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    stubFreeRungFetch({ upcHit: true }); // rung-0 UPCitemdb hit -> a suggestion, not a terminal verified win
+
+    const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+    expect(outcome.kind).toBe("computed");
+    const upcCalls = fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => String(u).includes(UPCITEMDB_HOST));
+    expect(upcCalls.length).toBeLessThanOrEqual(1);
+  });
+
   it("cap available + free rungs MISS -> paid charge happens EXACTLY ONCE, paid rungs run, and reasons chain is free-phase-then-paid-phase", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100"; // plenty of cap
     // L6 (Task 12c): the total-miss cap charge now only fires when paidWorkPossible() is true. A Brave
@@ -653,6 +670,72 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
         expect(persisted.kind).not.toBe("result");
       }
     });
+
+    // Task 2 Step 3c (:1572 concern): demoting Go-UPC to "suggested" must NOT stop it from being
+    // cached - the L2 write-through gate at pipeline.ts (`status === "verified" || status === "suggested"`,
+    // combined with classifySourceTier's paid_rung classification for "go-upc") already covers a
+    // demoted, settled Go-UPC suggestion. Prove it end-to-end: a clean exact Go-UPC hit persists, and a
+    // SECOND scan of the same code replays from the L2 cache without re-invoking the paid Go-UPC API -
+    // the pay-once rule must hold even after the honesty relabel.
+    function stubGoUpcCleanExactHit() {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(GOUPC_HOST)) {
+          return new Response(
+            JSON.stringify({
+              inferred: false,
+              product: { name: "Continental TrueContact Tour 235/60R18", brand: "Continental", category: "Tire", specs: [] },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    }
+
+    it("a demoted Go-UPC 'suggested' settle STILL persists to L2, and a repeat scan does NOT re-invoke the paid Go-UPC API (pay-once holds post-demotion)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      // A fixture code DISTINCT from VALID_GTIN: the preceding test in this same describe block
+      // ("a genuine Go-UPC miss...") writes a real 30-day negative-miss-cache entry for VALID_GTIN in
+      // the shared per-pid ladder-storage tmp dir, which would otherwise short-circuit this test's
+      // fresh 200 hit into a stale "miss" (own FetchV2Cache/GoUpcGate module-singleton residue avoided
+      // too, same isolation reasoning used throughout this file).
+      const CLEAN_HIT_GTIN = "900000000201";
+      stubGoUpcCleanExactHit();
+
+      const first = await runDecodePipeline(makeReq(CLEAN_HIT_GTIN));
+      expect(first.kind).toBe("computed");
+      if (first.kind !== "computed") throw new Error("unreachable");
+      expect(first.payload.decision.status).toBe("suggested");
+      expect(first.payload.providerNames).toContain("go-upc");
+
+      const persisted = await getPersistedDecode("00" + CLEAN_HIT_GTIN);
+      expect(persisted).not.toBeNull();
+      expect(persisted?.kind).toBe("result");
+      expect(persisted?.sourceTier).toBe("paid_rung");
+
+      // Clear the L1 in-memory cache (but NOT the L2 persisted store) so the second call is forced to
+      // consult L2 exactly like a fresh serverless instance would - otherwise the in-process L1 hit
+      // would mask whether L2 persistence actually happened.
+      clearDecodeCache();
+
+      // Second scan of the SAME code: swap in a fetch stub that would THROW if the paid Go-UPC API were
+      // ever called again, proving the second request replays from L2 instead of re-paying.
+      const secondFetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("go-upc.com/api")) throw new Error("go-upc must NOT be re-invoked on a repeat scan of a cached code");
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", secondFetchSpy);
+
+      const second = await runDecodePipeline(makeReq(CLEAN_HIT_GTIN));
+      expect(second.kind).toBe("persisted");
+      if (second.kind !== "persisted") throw new Error("unreachable");
+      expect((second.body.decision as { status?: string }).status).toBe("suggested");
+      expect(secondFetchSpy.mock.calls.some(([u]) => String(u).includes("go-upc.com/api"))).toBe(false);
+    });
   });
 
   // ORDER v3 + ESCALATE-PAST-SUGGESTION (owner ratified 2026-07-14, Task 7). New computeDecode order:
@@ -718,7 +801,7 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(rungs.indexOf("upcitemdb")).toBeLessThan(rungs.indexOf("goupc"));
     });
 
-    it("ESCALATION: a free suggestion continues to Go-UPC; a Go-UPC verified exact WINS", async () => {
+    it("ESCALATION: a free suggestion continues to Go-UPC; a cleanly-settled Go-UPC hit still WINS over the free-rung stash (Task 2 Step 3c demotion ripple)", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       process.env.GO_UPC_API_KEY = "test-key";
       stubUpcSuggestionThenGoupc({ goupcVerified: true });
@@ -727,8 +810,13 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
       expect(out.kind).toBe("computed");
       if (out.kind !== "computed") throw new Error("unreachable");
-      expect(out.payload.decision.status).toBe("verified");
+      // D6: Go-UPC is now an honest "suggested" (never fabricated "verified"), but a cleanly-settled
+      // paid Go-UPC hit must still WIN over the weaker free-rung (upcitemdb) stash - the paid answer is
+      // never silently discarded just because it is no longer labeled "verified".
+      expect(out.payload.decision.status).toBe("suggested");
       expect(out.payload.providerNames).toContain("go-upc");
+      // Prove Go-UPC's identity (Continental), not the free rung's stashed identity (Falken), won.
+      expect(out.payload.results[0]?.brand).toBe("Continental");
       // The escalation ran Go-UPC only; fetchv2/gpt were NEVER reached.
       const rungs = ladderRungsOf(out);
       expect(rungs).not.toContain("fetchv2");
@@ -826,10 +914,12 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   // strong, 8 digits) is the same real fixture proven in freeRungSteering.test.ts; a distinct 12-digit
   // padding is used here so this test's ladder run shares no FetchV2Cache/GoUpcGate module-singleton
   // residue with that unit test. NOTE: this assertion is scoped to the LADDER's reasons chain (not raw
-  // fetch call inspection) because Plan D's own retail peek (lookupBarcodeDb, pipeline.ts:852) and the
-  // AM-7 keyless fetchv2 pattern-URL door (barcodeSources.ts's "upcitemdb.com" web-page entry) both
-  // legitimately reach upcitemdb-family hosts for unrelated reasons - only the ladder's own reasons
-  // chain unambiguously proves whether the STEERED rungs (upcitemdb/openfoodfacts) ran.
+  // fetch call inspection) because the AM-7 keyless fetchv2 pattern-URL door (barcodeSources.ts's
+  // "upcitemdb.com" web-page entry) can legitimately reach an upcitemdb-family host for an unrelated
+  // reason - only the ladder's own reasons chain unambiguously proves whether the STEERED rungs
+  // (upcitemdb/openfoodfacts) ran. (D8, Task 2: Plan D's `lookupBarcodeDb` dep no longer performs its
+  // own fetch at all - it is now fed from the tracked rung-0 UPCitemdb result via a closure, so it can
+  // never be a second, untracked fetch call to api.upcitemdb.com.)
   it("A6: a steered tire-prefix code skips upcitemdb/openfoodfacts and records the steering reason", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     const STEERED_TIRE_CODE = "450113522222"; // GTIN-13 "0450113522222" -> prefix "04501135" (Aplus, strong, 8 digits)
@@ -1323,37 +1413,69 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(vi.mocked(lookupRetailBarcodeAsync)).not.toHaveBeenCalled();
     });
 
-    // THE SALMON/BEER REGRESSION (live-proven): a paid rung (Go-UPC here) self-reports "verified" for
-    // an identity that CONTRADICTS a retail-corpus row for the exact same code. Previously nothing
-    // cross-checked a paid "verified" against the retail corpus, so the wrong paid identity survived
-    // unchallenged all the way to the customer as "Verified from Go-UPC". The contradiction guard must
-    // downgrade this to conflict/needs_review, never verified.
+    // THE SALMON/BEER REGRESSION (live-proven): a paid rung self-reports "verified" for an identity
+    // that CONTRADICTS a retail-corpus row for the exact same code. Previously nothing cross-checked a
+    // paid "verified" against the retail corpus, so the wrong paid identity survived unchallenged all
+    // the way to the customer. The contradiction guard must downgrade this to conflict/needs_review,
+    // never verified.
+    //
+    // D6/Task 2 fixture update (2026-07-20): this suite originally used Go-UPC as its "paid-rung
+    // verified" fixture. Go-UPC is now HONESTLY demoted to "suggested" (a raw paid-DB API self-report
+    // can never be "verified" under the Resolver Trust Rules - see GoUpcProvider.ts), so it can no
+    // longer produce the "verified" status this guard specifically gates on (pipeline.ts's contradiction
+    // guard intentionally no longer sees Go-UPC at all - see the Step 3c audit comment at the guard
+    // site). The guard itself is UNCHANGED and still must protect any paid rung that DOES genuinely
+    // settle "verified" - Fetch V2 (app-verified exact-code evidence) is that rung today, so these tests
+    // now mock `fetchV2` directly (the same pattern the "Task 21: learned-products tier write gate"
+    // suite below already uses) instead of the Go-UPC HTTP fixture.
     describe("paid-verified contradiction guard", () => {
-      const CONTRADICT_GTIN = "900000000003"; // VALID_GTIN fixture used elsewhere: valid GS1 check digit
-
-      function stubGoUpcVerified(product: { name: string; brand: string }) {
-        fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
-          const url = String(input);
-          if (url.includes("go-upc.com")) {
-            return new Response(
-              JSON.stringify({ inferred: false, product: { name: product.name, brand: product.brand, category: "Food", specs: [] } }),
-              { status: 200 },
-            );
-          }
-          return new Response("not found", { status: 404 });
-        });
-        vi.stubGlobal("fetch", fetchSpy);
-      }
+      const CONTRADICT_GTIN = "0900000012341"; // distinct fixture (valid EAN-13 check digit): own FetchV2Cache/GoUpcGate residue
 
       beforeEach(() => {
-        // Clear the shared 30-day Go-UPC negative-miss cache so this suite's fresh 200 hit is not
-        // short-circuited by an earlier test's miss entry for the same fixture code.
+        // Clear the shared 30-day Go-UPC negative-miss cache (preserved from the pre-Task-2 version of
+        // this suite). These tests no longer touch Go-UPC themselves (they mock fetchV2 instead), but
+        // OTHER tests later in this file (e.g. "BUG #14"'s Go-UPC prefix-conflict settle, "QA round-3"'s
+        // NORMAL-GTIN regression) reuse the shared VALID_GTIN fixture and depend on this file being
+        // clean - the cache is keyed in a shared per-pid tmp dir, so leaving this cleanup in place (as
+        // it was before) avoids reintroducing stale-miss cross-test pollution for those later suites.
         try { fs.unlinkSync(path.join(os.tmpdir(), `ladder-storage-pipeline-test-${process.pid}`, ".go-upc-miss-cache.json")); } catch {}
       });
 
+      function stubFetchV2Verified(product: { name: string; brand: string }) {
+        vi.mocked(fetchV2).mockResolvedValueOnce(
+          makeResult({
+            rawValue: CONTRADICT_GTIN,
+            outcome: "verified",
+            product: {
+              brand: product.brand,
+              name: product.name,
+              model: "",
+              partNumber: "",
+              size: "",
+              description: "",
+              category: "",
+              imageUrl: "",
+            },
+            evidence: {
+              exactCodeFound: true,
+              codeToProductProven: true,
+              sourceQuality: "strong",
+              sourceScore: 95,
+              identityScore: 1,
+              associationScore: 1,
+              finalConfidence: 0.95,
+              winningSourceUrl: "https://www.walmart.com/ip/contradiction-guard-fixture/1",
+              winningSourceType: "strong_commercial",
+              codeLocation: "json_ld.gtin",
+              proofSummary: "exact code in a structured product record",
+            },
+            sourcesChecked: ["https://www.walmart.com/ip/contradiction-guard-fixture/1"],
+          }),
+        );
+      }
+
       it("a paid-rung 'verified' that CONTRADICTS a retail-corpus row downgrades to conflict/needs_review, never verified (the salmon/beer bug)", async () => {
         process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-        process.env.GO_UPC_API_KEY = "test-key";
         vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
         // The rung-0 retail lookup call MISSES (null) so the ladder is actually reached (this test
         // targets the contradiction guard specifically, not the rung-0 settle) - but the LATER
@@ -1368,14 +1490,15 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             category: "Fish",
             barcode: CONTRADICT_GTIN,
           }); // computeDecode's consensus-peek call: the retail row the guard cross-checks against
-        // ...Go-UPC (paid) self-reports a completely different, contradicting identity (a beer).
-        stubGoUpcVerified({ name: "Heineken Lager Beer 12-pack", brand: "Heineken" });
+        // ...Fetch V2 (paid) self-reports a completely different, contradicting identity (a beer).
+        stubFetchV2Verified({ name: "Heineken Lager Beer 12-pack", brand: "Heineken" });
+        stubFreeRungFetch({ upcHit: false }); // free rungs miss so the ladder reaches the paid fetchv2 mock
 
         const outcome = await runDecodePipeline(makeReq(CONTRADICT_GTIN));
 
         expect(outcome.kind).toBe("computed");
         if (outcome.kind !== "computed") throw new Error("unreachable");
-        // Never the wrong "Verified from Go-UPC" identity that contradicts the retail corpus.
+        // Never the wrong "Verified" identity that contradicts the retail corpus.
         expect(outcome.payload.decision.status).not.toBe("verified");
         expect(["conflict", "needs_review"]).toContain(outcome.payload.decision.status);
         expect(outcome.payload.decision.reason).toMatch(/retail|disagree|conflict|contradict/i);
@@ -1383,7 +1506,6 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
       it("a paid-rung 'verified' that AGREES with the retail row passes through unchanged", async () => {
         process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-        process.env.GO_UPC_API_KEY = "test-key";
         vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
         vi.mocked(lookupRetailBarcodeAsync)
           .mockResolvedValueOnce(null) // rung-0 call: miss, so the ladder runs
@@ -1393,7 +1515,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             category: "Tire",
             barcode: CONTRADICT_GTIN,
           }); // consensus-peek call: an AGREEING retail row
-        stubGoUpcVerified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
+        stubFetchV2Verified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
+        stubFreeRungFetch({ upcHit: false });
 
         const outcome = await runDecodePipeline(makeReq(CONTRADICT_GTIN));
 
@@ -1413,7 +1536,6 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       // fails isUsableProductName, exactly like the rung-0 settle does.
       it("a paid-rung 'verified' is NOT downgraded when the retail row has a GARBAGE name (guard ignores it, isUsableProductName gate)", async () => {
         process.env.AI_LOOKUP_DAILY_LIMIT = "100";
-        process.env.GO_UPC_API_KEY = "test-key";
         vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
         // Run-on junk over isUsableProductName's 120-char cap, so it is rejected regardless of the
         // SITE_BLOCKLIST/PLACEHOLDER checks - a garbage name by length alone (fails isUsableProductName).
@@ -1429,7 +1551,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
             category: "Tire",
             barcode: CONTRADICT_GTIN,
           });
-        stubGoUpcVerified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
+        stubFetchV2Verified({ name: "Continental TrueContact Tour 235/60R18", brand: "Continental" });
+        stubFreeRungFetch({ upcHit: false });
 
         const outcome = await runDecodePipeline(makeReq(CONTRADICT_GTIN));
 

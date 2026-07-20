@@ -16,15 +16,22 @@ const GENERAL_MAP = brandPrefixMap as Record<string, string>;
 // The Go-UPC rung. SERVER-SIDE ONLY.
 //
 // Ladder position: runs AFTER local corpora/cache and the GTIN gate, BEFORE any web/AI rung. It turns
-// a deterministic Go-UPC exact barcode hit into a VERIFIED auto-count candidate (subject to the same
-// downstream store gate every verified decode passes) UNLESS a known GS1 prefix owner disagrees with
-// Go-UPC's brand and the two are not the same company - then it becomes a Needs Review suggestion.
+// a deterministic Go-UPC exact barcode hit into an honest "suggested" auto-apply candidate (confidence
+// 0.9, subject to the same downstream store gate every suggestion passes) UNLESS a known GS1 prefix
+// owner disagrees with Go-UPC's brand and the two are not the same company - then it becomes a Needs
+// Review suggestion (confidence 0.4). D6/Task 2 (P5, 2026-07-20): Go-UPC is a raw paid-DB API
+// self-report - the app never fetches/verifies the source page itself - so it can NEVER be "verified"
+// (Resolver Trust Rules require app-verified exact-code evidence or human/account approval). A clean
+// exact hit still SETTLES the ladder (pay-once) and still auto-applies its identity to the counted row
+// via the >=0.8-confidence suggestion auto-apply path - only the badge/verified-flag/alias-write
+// decision changes, never whether the scanned row appears or counts.
 //
 // Everything is injected (client, throttle, usage gate, storage, prefix lookup) so the rung is fully
 // unit-testable with mocks and never touches the network, the filesystem, or process.env directly.
 //
-// Result/decision shapes mirror TireKnowledgeProvider.toResult / resolveExactBarcode so the route and
-// store treat a Go-UPC verified decode identically to a trusted-corpus verified decode.
+// Result shape mirrors TireKnowledgeProvider.toResult / resolveExactBarcode so the route and store
+// handle a Go-UPC decode with the same AiLookupResult shape as a trusted-corpus decode; the DECISION
+// status differs on purpose (suggested, not verified - see above).
 
 const MISS_TTL_DAYS = 30;
 
@@ -146,13 +153,20 @@ function toResult(product: GoUpcProduct, code: string, canonical: string): AiLoo
   };
 }
 
+// D6/Task 2 (P5 Decode Trust, owner-ratified 2026-07-20): Go-UPC is a raw paid-DB API SELF-REPORT -
+// the app never independently fetches/verifies the source page, so this can never be "verified" under
+// the Resolver Trust Rules (app-verified exact-code evidence OR human/account approval only). Demoted
+// to an honest "suggested" with evidenceStrength "none" and exactCodeEvidenceVerifiedByApp false.
+// Confidence STAYS 0.9: a settled Go-UPC suggestion still STOPS the ladder (pay-once) and still
+// auto-applies its identity to the counted row (>=0.8 suggestions auto-apply per CLAUDE.md) - only the
+// badge/verified-flag/alias-write decision changes, never whether the row appears or counts.
 function verifiedDecision(): DecodeDecision {
   return {
-    status: "verified",
+    status: "suggested",
     confidence: 0.9,
-    reason: "Verified from Go-UPC (exact barcode match).",
-    evidenceStrength: "fetched_source",
-    exactCodeEvidenceVerifiedByApp: true,
+    reason: "Suggested by Go-UPC (exact barcode match, API self-report - not app-verified).",
+    evidenceStrength: "none",
+    exactCodeEvidenceVerifiedByApp: false,
     crossCheck: {
       decision: "single_provider",
       confidence: 0.9,
