@@ -142,3 +142,15 @@ Preview: https://inventory-y4ky0zj9t-sharpenly.vercel.app  Branch pushed through
 Review loop caught + fixed 3 intentional-behavior test fallouts (route cap tests->L6, pipeline spec->AM-7,
 e2e fixtures->A3) - all value-only updates, zero weakened assertions.
 NEXT: owner demo (2026-07-16); production promote NOT authorized; meros door removal = owner decision.
+
+## Checkpoint 2026-07-20: Phase 2 (accounts/tenancy/server-trust) COMPLETE
+Branch feat/decode-ladder-goupc (never pushed). 17 tasks + ultra-review fix wave, all
+task-gated. Final gates: unit 2573/0, tsc clean, lint 85 = pre-existing baseline, build
+green, test:ledger 41/41, test:firebase green, e2e 49/1 (the 1 = pre-existing goupc-ladder
+cap-timing flake). Shipped: AUTH_MODE chokepoint, Google sign-in + reset, per-uid persist
+namespace + owner-adopt migration, business-switch + sign-out tenant isolation with
+drain-then-warn guard, ai-lookup live auth + D4 clamps + per-account cap on the paid
+signal (L12), resolver tier slot, owner-PIN destructive gates, master-catalog deny rules,
+Playwright accounts proof. Six real defects caught and fixed by the layered review chain
+(details: .superpowers/sdd/progress.md). Phase 3 (sessions/sync/report) planning done,
+review-patched, execution starting; DOT tire wedge CUT by owner. Push/deploy still gated.
