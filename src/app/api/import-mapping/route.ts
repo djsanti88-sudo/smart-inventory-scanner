@@ -23,6 +23,15 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// Bearer tokens must travel in the Authorization header, never a URL query string (query strings
+// land in server/proxy access logs). Strips a leading "Bearer " case-insensitively; returns "" if
+// no header or an unrecognized scheme is present.
+function bearerToken(request: NextRequest): string {
+  const header = request.headers.get("authorization") ?? "";
+  const match = /^bearer\s+(.+)$/i.exec(header.trim());
+  return match ? match[1].trim() : "";
+}
+
 function authConfigurationError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(message);
@@ -56,7 +65,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const searchParams = new URL(request.url).searchParams;
   const businessId = text(searchParams.get("businessId"));
   const sourceSignature = text(searchParams.get("sourceSignature"));
-  const idToken = text(searchParams.get("idToken"));
+  const idToken = bearerToken(request);
   if (!businessId || !sourceSignature) {
     return json({ error: "businessId and sourceSignature are required." }, 400);
   }

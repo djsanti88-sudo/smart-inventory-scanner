@@ -20,8 +20,11 @@ export function UniversalImportPanelContainer() {
 
   async function loadMapping(sourceSignature: string): Promise<ColumnMapping | null> {
     const idToken = await token();
-    const query = new URLSearchParams({ businessId, sourceSignature, ...(idToken ? { idToken } : {}) });
-    const response = await fetch(`/api/import-mapping?${query.toString()}`, { cache: "no-store" });
+    const query = new URLSearchParams({ businessId, sourceSignature });
+    const response = await fetch(`/api/import-mapping?${query.toString()}`, {
+      cache: "no-store",
+      headers: idToken ? { Authorization: `Bearer ${idToken}` } : undefined,
+    });
     if (!response.ok) throw new Error("Could not load the remembered column mapping.");
     return (await response.json() as { mapping: ColumnMapping | null }).mapping;
   }
