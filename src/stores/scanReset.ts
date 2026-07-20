@@ -11,9 +11,20 @@ export function emptyTenantState(): {
   needsReviewQueue: UnknownCodeReview[];
   settings: Settings;
   firstScanAt: string | null;
+  recentLocations: string[];
 } {
   // C2: firstScanAt is per-tenant first-run state (drives the /scan empty-state banner), so a business
   // switch or sign-out must reset it to null exactly like scanFeed/finalCounts - otherwise a brand new
   // tenant would inherit the PREVIOUS tenant's "already scanned" flag and never see the banner.
-  return { scanFeed: [], finalCounts: [], needsReviewQueue: [], settings: { ...DEFAULT_SETTINGS }, firstScanAt: null };
+  // recentLocations is documented per-business (scanStore.ts:611) - a business switch/sign-out must
+  // reset it too, or the previous tenant's location strings leak into the new workspace's location
+  // picker.
+  return {
+    scanFeed: [],
+    finalCounts: [],
+    needsReviewQueue: [],
+    settings: { ...DEFAULT_SETTINGS },
+    firstScanAt: null,
+    recentLocations: [],
+  };
 }

@@ -94,3 +94,28 @@ describe("firstScanAt set-once", () => {
     expect(s.firstScanAt).not.toBeNull();
   });
 });
+
+// Fix 2 (final review pass): recentLocations is documented per-business (scanStore.ts:611), but
+// emptyTenantState() previously omitted it from the reset object - a business switch carried the
+// PREVIOUS tenant's location strings into the new workspace's location picker.
+describe("recentLocations tenant isolation", () => {
+  it("clears recentLocations when switching business context", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.setState({ recentLocations: ["Warehouse A", "Back Room"] });
+    expect(store.getState().recentLocations).toEqual(["Warehouse A", "Back Room"]);
+
+    store.getState().setBusinessContext("other-business", "other-user");
+
+    expect(store.getState().recentLocations).toEqual([]);
+  });
+
+  it("clears recentLocations on sign-out reset", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.setState({ recentLocations: ["Warehouse A"] });
+    expect(store.getState().recentLocations).toEqual(["Warehouse A"]);
+
+    store.getState().resetForSignOut();
+
+    expect(store.getState().recentLocations).toEqual([]);
+  });
+});

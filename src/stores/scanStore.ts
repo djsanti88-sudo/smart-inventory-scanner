@@ -1275,6 +1275,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           needsReviewQueue: cleared.needsReviewQueue,
           settings: cleared.settings,
           firstScanAt: cleared.firstScanAt,
+          recentLocations: cleared.recentLocations,
         });
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
@@ -1362,6 +1363,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           needsReviewQueue: cleared.needsReviewQueue,
           settings: cleared.settings,
           firstScanAt: cleared.firstScanAt,
+          recentLocations: cleared.recentLocations,
           pendingSyncQueue: [],
           syncedScanEventIds: [],
           lastSyncError: null,

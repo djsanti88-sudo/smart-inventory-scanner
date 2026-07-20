@@ -115,7 +115,12 @@ export async function POST(request: NextRequest) {
   // Fix 1: durable, storage-backed per-IP rate limit on the live export path, same seam
   // /api/ai-lookup uses (checkRateLimit + ladderStorage()). A distinct "EXPORT:" key prefix keeps
   // this counter independent of the ai-lookup rate limiter's buckets.
-  {
+  //
+  // Fail-open hardening: the whole block is wrapped so a storage init throw (e.g. Turso/libsql
+  // unreachable) never crashes the export into a raw 500 - it logs and falls through without rate
+  // limiting instead, matching checkRateLimit's own documented fail-open philosophy. A storage
+  // hiccup must never break exports for an already-verified member.
+  try {
     const clientIp =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
       request.headers.get("x-real-ip") ||
@@ -132,6 +137,8 @@ export async function POST(request: NextRequest) {
         { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
       );
     }
+  } catch {
+    logServerEvent({ route: "/api/account/export", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
   }
 
   let uid: string | null = null;

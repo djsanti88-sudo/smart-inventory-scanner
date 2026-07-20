@@ -225,6 +225,21 @@ describe("POST /api/account/export rate limiting (live path)", () => {
     expect(typeof payload.retryAfterMs).toBe("number");
     expect(payload.retryAfterMs).toBeGreaterThan(0);
   });
+
+  // Fix 1 (final review pass): a storage init throw (e.g. Turso/libsql unreachable) must never crash
+  // the export into a raw 500 - checkRateLimit's own philosophy is fail-open, and this route's
+  // try/catch around the rate-limit block must honor that for a verified member.
+  it("fails open (still 200) when ladderStorage() throws during the rate-limit check", async () => {
+    const storageMod = await import("@/server/upc/storage");
+    vi.spyOn(storageMod, "ladderStorage").mockRejectedValueOnce(new Error("storage unavailable"));
+
+    const response = await POST(
+      exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.businessId).toBe("biz-1");
+  });
 });
 
 describe("POST /api/account/export data shape and tenant isolation", () => {
