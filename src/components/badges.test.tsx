@@ -29,6 +29,58 @@ describe("DecodeStatusBadge - Suggested relabel (Plan C Task 1)", () => {
   });
 });
 
+// P5 Task 5 (honest provenance badges, 2026-07-20): a bare model/API self-report can never mint an
+// app-verified identity (see decode-trust plan). The badge must make that distinction VISIBLE:
+// app-verified exact-code decodes read "Verified (app-confirmed)"; a GPT self-report suggestion
+// reads "Suggested (AI)"; a Go-UPC self-report suggestion reads "Suggested (DB)". A plain verified
+// row with no provenance signal (older rows, pre-P5 write sites) must still render a working
+// "Verified" label so nothing existing breaks. Additive `provenance` prop only - no enum/logic change.
+describe("DecodeStatusBadge - honest provenance labels (P5 Task 5)", () => {
+  it('renders "Verified (app-confirmed)" for an app-verified exact-code decode', () => {
+    render(<DecodeStatusBadge status="verified" provenance="app_verified" />);
+    expect(screen.getByText("Verified (app-confirmed)")).toBeTruthy();
+  });
+
+  it('renders "Suggested (AI)" for a GPT self-report provenance', () => {
+    render(<DecodeStatusBadge status="suggested" provenance="ai_self_report" />);
+    expect(screen.getByText("Suggested (AI)")).toBeTruthy();
+    expect(screen.queryByText(/^Suggested$/)).toBeNull();
+  });
+
+  it('renders "Suggested (DB)" for a Go-UPC (paid-DB) self-report provenance', () => {
+    render(<DecodeStatusBadge status="suggested" provenance="db_self_report" />);
+    expect(screen.getByText("Suggested (DB)")).toBeTruthy();
+    expect(screen.queryByText(/^Suggested$/)).toBeNull();
+  });
+
+  it('renders a generic "Suggested" when status is suggested with no provenance signal', () => {
+    render(<DecodeStatusBadge status="suggested" />);
+    expect(screen.getByText("Suggested")).toBeTruthy();
+  });
+
+  it('renders a plain "Verified" for a verified row with no provenance signal (back-compat)', () => {
+    render(<DecodeStatusBadge status="verified" />);
+    expect(screen.getByText(/Verified/)).toBeTruthy();
+    expect(screen.queryByText("Verified (app-confirmed)")).toBeNull();
+  });
+
+  it("never uses an em dash or en dash in any provenance label", () => {
+    const cases: Array<["verified" | "suggested", "app_verified" | "ai_self_report" | "db_self_report" | undefined]> = [
+      ["verified", "app_verified"],
+      ["suggested", "ai_self_report"],
+      ["suggested", "db_self_report"],
+      ["suggested", undefined],
+      ["verified", undefined],
+    ];
+    for (const [status, provenance] of cases) {
+      cleanup();
+      render(<DecodeStatusBadge status={status} provenance={provenance} />);
+      const el = screen.getByTestId("decode-row-status");
+      expect(el.textContent).not.toMatch(/[–—]/);
+    }
+  });
+});
+
 // Task 9b fix (reviewer finding): StatusBadge must tolerate the parked review status "suggested" -
 // a real label + real classes, never an empty label with a literal "undefined" className. Defense
 // in depth: NeedsReviewTable filters suggested reviews out, but any future surface that renders one

@@ -184,6 +184,13 @@ export interface ScanEvent {
   reason: string; // customer-safe, product-facing explanation (no AI/provider/Settings mechanics)
   decodeNote?: string; // platformOwner-only auto-decode detail (why AI did/didn't run); never shown to customers
   decodeStatus?: FeedDecodeStatus; // live-decode pipeline state for this scan row
+  // P5 Task 5 (honest provenance badges, 2026-07-20): honest provenance signal for the feed row's
+  // badge (see src/components/badges.tsx DecodeProvenance). Populated ONLY at the primary
+  // live-decode write site (runLiveDecodeOnce) where a DecodeDecision is in scope - optional
+  // because the ~15 other decodeStatus write sites (relabel/mark-wrong/suggest-link/etc.) do not
+  // have a DecodeDecision in scope; full threading is deferred to P6. Display only, never gates
+  // counting or identity.
+  provenance?: "app_verified" | "ai_self_report" | "db_self_report";
   // Task 9 (owner-ratified 2026-07-14, decode-anything): true when an app-verified exact-code decode
   // counted even though its product domain is off the business scan context (e.g. hot sauce in a tire
   // shop). The category firewall was CLEARED by verification, not skipped - the row still shows an

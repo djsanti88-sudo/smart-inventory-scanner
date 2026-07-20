@@ -169,7 +169,7 @@ export function LiveScanFeed() {
                     <td className="px-4 py-3 tabular-nums">{e.status === "known" ? e.quantityAfterScan : "-"}</td>
                     <td className="px-4 py-3">
                       {e.decodeStatus && e.decodeStatus !== "none" ? (
-                        <DecodeStatusBadge status={e.decodeStatus} />
+                        <DecodeStatusBadge status={e.decodeStatus} provenance={e.provenance} />
                       ) : (
                         <StatusBadge status={e.status} />
                       )}

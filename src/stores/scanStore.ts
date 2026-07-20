@@ -686,8 +686,11 @@ export interface ScanState {
   /** Flip every not-yet-resolved scan-feed row for `cleanCode` to the "verified" decode badge (shared by
    *  the 4 auto-verify / catalog-hit sites so their badge-flip guard cannot drift). A row already counted
    *  synchronously is status "known" (not "resolved"), so it is still flipped; a row already "verified" or
-   *  "resolved" is left untouched. `reason` overrides the row reason when non-empty, else keeps the row's. */
-  markFeedRowVerified: (cleanCode: string, reason: string) => void;
+   *  "resolved" is left untouched. `reason` overrides the row reason when non-empty, else keeps the row's.
+   *  P5 Task 5: `provenance` is optional and additive - only the runLiveDecodeOnce call site (which has a
+   *  DecodeDecision in scope) passes "app_verified"; the other call sites (global-catalog hit, etc.) omit
+   *  it and the row's provenance is simply left unset (badge falls back to the plain "Verified" label). */
+  markFeedRowVerified: (cleanCode: string, reason: string, provenance?: ScanEvent["provenance"]) => void;
   /** Tasks 5+6: client-orchestrated background verify. After a tire scan's fast decode lands as
    *  suggested/needs_review, fire ONE `mode:"decode-deep"` request WITH `scanContext:"tire"` (the
    *  page-fetch verify gate cannot fire without it). On a `verified` decideDecode result, route it
@@ -2723,6 +2726,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const tireFields = best && s.scanContext === "tire" && isTireContext(best) ? extractTireFields(best) : null;
           const providerNamesArr = (data.providerNames as string[]) ?? [];
           const providerName = providerNamesArr.join("+") || "mock";
+          // P5 Task 5 (honest provenance badges): derive the honest provenance signal for the feed
+          // row's badge from the SAME DecodeDecision already in scope here (the primary live-decode
+          // write site). App-verified exact-code evidence wins first (it is the strongest, real
+          // signal); otherwise a bare self-report is labeled by which provider produced it. Display
+          // only - never gates counting/auto-count (that stays in scanGates.ts's canAutoCount).
+          const decodeProvenance: ScanEvent["provenance"] = decision?.exactCodeEvidenceVerifiedByApp
+            ? "app_verified"
+            : decision?.corroborationPath === "gpt_self_report"
+              ? "ai_self_report"
+              : providerNamesArr.includes("go-upc")
+                ? "db_self_report"
+                : undefined;
           const decodeProviderSummaries = results.map((r, i) => ({
             provider: providerNamesArr[i] ?? "?",
             productName: r.productName,
@@ -2821,6 +2836,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               return {
                 ...e,
                 decodeStatus: displayedBadge,
+                // P5 Task 5: honest provenance signal for the badge (display only). A raw "verified"
+                // decision is displayed as "suggested" above (displayedBadge), so app_verified here
+                // would be misleading on THIS provisional row - only attach it when the badge is
+                // actually settled to "suggested" so DecodeStatusBadge's app_verified branch (which
+                // only fires for status "verified") never mismatches this row's shown status.
+                provenance: displayedBadge === "suggested" ? decodeProvenance : undefined,
                 // BADGE/REASON INVARIANT: never write a "Verified...No AI lookup needed" reason under a
                 // non-verified badge (see honestReasonForBadge above - the owner-caught contradiction).
                 reason: honestReasonForBadge(decision?.reason, decision?.status, displayedBadge) || e.reason,
@@ -2960,7 +2981,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // unresolved placeholder name, exactly the owner-reported burst bug. Only mark the row
             // verified when resolveUnknown actually resolved it.
             if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
-              get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "");
+              // P5 Task 5: this branch only runs after the Phase-7 evidence gate (evidenceGatePassed /
+              // canAutoCount) passed, i.e. the app itself verified the exact-code evidence - honest
+              // "app_verified" provenance for the badge.
+              get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "", "app_verified");
             }
             // Task 9: an app-verified off-category decode counts, but flag the row so the feed shows the
             // "Off-category item" tag (the product is not a tire, even though it cleared the firewall).
@@ -3523,7 +3547,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         return provId;
       },
 
-      markFeedRowVerified: (cleanCode, reason) => {
+      markFeedRowVerified: (cleanCode, reason, provenance) => {
         set((s) => ({
           scanFeed: s.scanFeed.map((e) =>
             e.cleanCode === cleanCode && e.status !== "resolved" && e.decodeStatus !== "verified"
@@ -3534,6 +3558,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // STALE-NOTE FIX (goupc-cap-rootcause item 3): the row just settled to verified - drop
                   // any leftover in-flight "Decoding with AI..." note (see the main settle block above).
                   decodeNote: undefined,
+                  // P5 Task 5: additive, optional. Only set when the caller passed one (see the
+                  // interface comment) - display only, never gates counting/auto-count.
+                  provenance,
                 }
               : e,
           ),
