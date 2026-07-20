@@ -20,6 +20,7 @@ from .ledger import (
     put_cached_response,
 )
 from .models import CheckResult
+from .verdict import redact_secrets
 from .verify import CallBudget, VerifiedFinding, verify_findings
 
 # Belt-and-suspenders budget cap on every expert call. A stray metered API key must never be
@@ -474,6 +475,7 @@ async def _run_one(
         output = output_bytes.decode("utf-8", errors="replace")
         exit_code = process.returncode
 
+    output = redact_secrets(output)
     log_path.write_text(output, encoding="utf-8")
     duration = time.perf_counter() - started
     if timeout_reason:
@@ -589,4 +591,3 @@ async def run_experts(
     finally:
         if ledger_conn is not None:
             ledger_conn.close()
-

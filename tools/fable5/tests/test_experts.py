@@ -192,6 +192,60 @@ class RunExpertsPreflightTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("apiKeySource", result.reason)
 
 
+class ExpertLogRedactionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_raw_expert_log_redacts_secret_output(self) -> None:
+        secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            auth_script = _fixture_script(
+                root,
+                "auth_ok.py",
+                """
+                import json
+                print(json.dumps({"authMethod": "claude.ai", "subscriptionType": "max"}))
+                """,
+            )
+            fake_claude = _fixture_script(
+                root,
+                "fake_claude.py",
+                f"""
+                import json
+                print(json.dumps({{
+                    "type": "result",
+                    "subtype": "success",
+                    "result": json.dumps({{"findings": []}}),
+                    "debug": {secret!r},
+                    "usage": {{"input_tokens": 1, "output_tokens": 1}},
+                    "total_cost_usd": 0.0,
+                }}))
+                """,
+            )
+            report_dir = root / "report"
+            with mock.patch.dict(
+                "os.environ",
+                {"FABLE5_AUTH_STATUS_CMD": f"{sys.executable} {auth_script}"},
+            ), mock.patch(
+                "tools.fable5.experts.build_claude_command",
+                return_value=[sys.executable, str(fake_claude)],
+            ), mock.patch("shutil.which", return_value=sys.executable):
+                await run_experts(
+                    root=root,
+                    report_dir=report_dir,
+                    agents=["security"],
+                    model="sonnet",
+                    changed_files=[],
+                    deterministic_results=[],
+                    workers=1,
+                    timeout_seconds=10,
+                )
+
+            log_text = (report_dir / "logs" / "expert-security.json").read_text(
+                encoding="utf-8"
+            )
+        self.assertNotIn(secret, log_text)
+        self.assertIn("<redacted>", log_text)
+
+
 class RunOneCostGateTests(unittest.IsolatedAsyncioTestCase):
     def _passing_preflight(self, temporary: Path) -> Path:
         return _fixture_script(

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from tools.fable5.runlock import RunLock, acquire, release
 
@@ -35,6 +36,37 @@ class AcquireReleaseTests(unittest.TestCase):
             self.assertIsNone(second)
             assert first is not None
             release(first)
+
+    def test_racing_second_acquire_returns_none_at_exclusive_create(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state_dir = root / ".fable5"
+            state_dir.mkdir(parents=True)
+            lock_path = state_dir / "run.lock"
+            running_path = state_dir / "running.json"
+            existing = {
+                "pid": os.getpid(),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "mode": "other",
+                "wall_clock_limit_min": 15,
+            }
+            real_exists = Path.exists
+
+            def race_after_exists(path: Path) -> bool:
+                if path == lock_path:
+                    lock_path.write_text("", encoding="utf-8")
+                    running_path.write_text(json.dumps(existing), encoding="utf-8")
+                    return False
+                return real_exists(path)
+
+            with mock.patch.object(Path, "exists", autospec=True, side_effect=race_after_exists):
+                lock = acquire(root, mode="fast", limit_minutes=15)
+
+            self.assertIsNone(lock)
+            self.assertEqual(
+                json.loads(running_path.read_text(encoding="utf-8"))["mode"],
+                "other",
+            )
 
     def test_release_removes_running_json(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

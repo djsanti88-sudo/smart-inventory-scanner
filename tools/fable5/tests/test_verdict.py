@@ -6,6 +6,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from tools.fable5.models import CheckResult, PlanReview
 from tools.fable5.verdict import (
@@ -327,6 +328,20 @@ class PruneOldRunsTests(unittest.TestCase):
             self._touch_dir(outside, age_days=30)
 
             pruned = prune_old_runs(reports_root, keep_days=14)
+
+            self.assertEqual(pruned, [])
+            self.assertTrue(outside.exists())
+
+    def test_outside_sibling_from_iteration_is_skipped_without_assert(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            reports_root = root / "reports" / "fable5"
+            reports_root.mkdir(parents=True)
+            outside = root / "outside-run"
+            self._touch_dir(outside, age_days=30)
+
+            with mock.patch.object(Path, "iterdir", return_value=iter([outside])):
+                pruned = prune_old_runs(reports_root, keep_days=14)
 
             self.assertEqual(pruned, [])
             self.assertTrue(outside.exists())

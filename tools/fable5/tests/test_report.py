@@ -16,6 +16,7 @@ def make_result(
     reason: str = "",
     cached: bool = False,
     blocking: bool = True,
+    output_tail: str = "",
 ) -> CheckResult:
     return CheckResult(
         check_id=check_id,
@@ -26,6 +27,7 @@ def make_result(
         started_at=datetime.now(timezone.utc).isoformat(),
         duration_seconds=1.5,
         reason=reason,
+        output_tail=output_tail,
         cached=cached,
     )
 
@@ -140,6 +142,27 @@ class FixPacketTests(unittest.TestCase):
                 "sk-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN", report_text
             )
             self.assertIn("<redacted>", fix_packet_text)
+
+    def test_secrets_redacted_in_every_report_artifact(self) -> None:
+        secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+        results = [
+            make_result(
+                "secret-check",
+                "failed",
+                reason=f"reason exposed {secret}",
+                output_tail=f"output exposed {secret}",
+            )
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report_dir = root / "reports" / "fable5" / "run"
+            write_report(make_report(results), report_dir, root)
+
+            for artifact in ("run.json", "report.html", "expert-packet.md"):
+                text = (report_dir / artifact).read_text(encoding="utf-8")
+                with self.subTest(artifact=artifact):
+                    self.assertNotIn(secret, text)
+                    self.assertIn("<redacted>", text)
 
 
 if __name__ == "__main__":

@@ -103,7 +103,35 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         statuses = {result.check_id: result.status for result in results}
         self.assertEqual(statuses, {"first": "failed", "second": "skipped"})
 
+    async def test_deterministic_log_redacts_secret_output(self) -> None:
+        secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+        spec = CheckSpec(
+            check_id="secret-output",
+            description="prints a fixture secret",
+            command=("python", "-c", f"print({secret!r})"),
+            gates=frozenset({"fast"}),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report_dir = root / "report"
+            await run_checks(
+                root=root,
+                config=make_config((spec,)),
+                gate="fast",
+                report_dir=report_dir,
+                changed_files=[],
+                workspace_key="abc",
+                cache=EvidenceCache(root / "cache.sqlite3", enabled=False),
+                policy=SafetyPolicy(),
+                callback=lambda _: None,
+            )
+
+            log_text = (report_dir / "logs" / "secret-output.log").read_text(
+                encoding="utf-8"
+            )
+        self.assertNotIn(secret, log_text)
+        self.assertIn("<redacted>", log_text)
+
 
 if __name__ == "__main__":
     unittest.main()
-

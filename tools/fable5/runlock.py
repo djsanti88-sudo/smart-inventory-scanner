@@ -119,7 +119,11 @@ def acquire(root: Path, mode: str, limit_minutes: int) -> RunLock | None:
 
     started_at = datetime.now(timezone.utc).isoformat()
     pid = os.getpid()
-    lock_path.write_text("", encoding="utf-8")
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return None
+    os.close(lock_fd)
     running_path.write_text(
         json.dumps(
             {
