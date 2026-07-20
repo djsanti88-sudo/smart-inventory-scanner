@@ -133,6 +133,13 @@ export async function POST(request: NextRequest) {
     return json({ error: `Type "${CONFIRM_PHRASE}" exactly to confirm deletion.` }, 400);
   }
 
+  // Deletion runs the business tree FIRST, then the member rows - deliberately NOT reordered. If the
+  // second step throws, the tree is gone but the member rows (including the owner's own membership)
+  // survive, and this operation is SAFELY RETRYABLE: on a retry the surviving owner membership still
+  // passes the role check, recursiveDelete of an already-gone tree is a no-op, and the member rows then
+  // delete. So the error copy tells the caller to retry rather than implying an unrecoverable half-state.
+  // (Deleting members first would orphan a live business with no owner if the tree delete then failed -
+  // strictly worse, so the order stays.)
   try {
     await recursiveDeleteBusiness(businessId);
     await deleteBusinessMembers(businessId);
@@ -140,7 +147,7 @@ export async function POST(request: NextRequest) {
     if (authConfigurationError(error)) {
       return json({ error: "Server auth is not configured." }, 503);
     }
-    return json({ error: "Deletion failed partway through. Contact support." }, 500);
+    return json({ error: "Deletion partially completed. Retry to finish removing this account." }, 500);
   }
 
   // userProfiles is intentionally left untouched: a profile is per-user and may span multiple

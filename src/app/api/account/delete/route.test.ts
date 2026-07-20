@@ -219,3 +219,45 @@ describe("POST /api/account/delete success path", () => {
     }
   });
 });
+
+describe("POST /api/account/delete partial-failure retryability", () => {
+  it("member-delete failure after the tree delete returns 500 with a retry-safe message, and a retry finishes the deletion", async () => {
+    // FIRST call: recursiveDelete (business tree) succeeds, but the member-row delete throws. The tree
+    // is gone; the owner's membership row survives (so the operation is safely retryable). The caller
+    // must be told to RETRY, not that they are stuck in an unrecoverable half-state.
+    mocks.recursiveDelete.mockResolvedValueOnce(undefined);
+    let memberDeleteShouldFail = true;
+    mocks.memberRows = [
+      {
+        id: "biz-1_u1",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        get deleted(): boolean {
+          return (this as any)._deleted ?? false;
+        },
+        set deleted(v: boolean) {
+          if (memberDeleteShouldFail) throw new Error("simulated member-row delete failure");
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (this as any)._deleted = v;
+        },
+      } as unknown as { id: string; deleted: boolean },
+    ];
+
+    const firstResponse = await POST(deleteRequest(VALID_BODY));
+    expect(firstResponse.status).toBe(500);
+    const firstPayload = await firstResponse.json();
+    expect(firstPayload.error).toMatch(/retry/i);
+    expect(firstPayload.error).not.toMatch(/contact support/i);
+    // The business tree WAS deleted on the first attempt.
+    expect(mocks.recursiveDelete).toHaveBeenCalledTimes(1);
+
+    // SECOND call (the retry): the owner membership still exists (role check still passes), the tree
+    // delete no-ops on the already-gone tree, and the member rows now delete cleanly -> 200 deleted:true.
+    memberDeleteShouldFail = false;
+    const secondResponse = await POST(deleteRequest(VALID_BODY));
+    expect(secondResponse.status).toBe(200);
+    const secondPayload = await secondResponse.json();
+    expect(secondPayload).toEqual({ deleted: true, businessId: "biz-1" });
+    expect(mocks.memberRows[0].deleted).toBe(true);
+    expect(mocks.recursiveDelete).toHaveBeenCalledTimes(2);
+  });
+});

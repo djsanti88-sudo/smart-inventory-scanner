@@ -106,12 +106,6 @@ export async function checkRateLimit(
   }
 }
 
-type DailyState = { date: string; count: number };
-let memDaily: DailyState | null = null;
-
-function counterFile(): string {
-  return process.env.AI_LOOKUP_COUNTER_FILE || path.resolve(".ai-lookup-usage.json");
-}
 function todayKey(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
@@ -243,7 +237,7 @@ function tenthCentsToUsd(tenthCents: number): number {
 
 /**
  * Dedicated storage file for the GPT ladder dollar guard (dev/no-storage fallback only). Deliberately
- * its OWN file (not counterFile()'s legacy path), same directory-resolution pattern (env override,
+ * its OWN file (not the daily cap's legacy path), same directory-resolution pattern (env override,
  * else path.resolve of a dotfile in cwd).
  */
 function gptLadderFile(): string {
@@ -466,7 +460,6 @@ export async function getGptLadderStatus(
 /** Test-only: clear in-memory state between cases. */
 export function __resetForTest(): void {
   ipBuckets.clear();
-  memDaily = null;
   memGptLadder.clear();
   memGptLadderCalls.clear();
 }
