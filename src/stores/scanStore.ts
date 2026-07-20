@@ -5247,9 +5247,16 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
     } as never;
   }
   const existingProducts = Array.isArray(p.products) ? (p.products as Product[]) : [];
+  const existingFeed = Array.isArray(p.scanFeed) ? (p.scanFeed as Array<{ quantityDelta?: number }>) : [];
+  // P1-handoff fold-in: legacy v7 feed rows may carry a literal quantityDelta:0 (pre-D1). applyScanEventOnce's
+  // `?? 1` does not correct a non-nullish 0, so normalize here where the persisted blob is rebuilt.
+  const normalizedFeed = existingFeed.map((row) =>
+    row && row.quantityDelta === 0 ? { ...row, quantityDelta: 1 } : row,
+  );
   return {
     ...p,
     products: backfillProducts(existingProducts).products,
+    scanFeed: normalizedFeed,
     countSnapshots: existingSnapshots,
     settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
   } as never;
@@ -5258,7 +5265,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 7,
+    version: 8,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
