@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 export function validateAgentFile(text) {
   const errors = [];
-  const fm = text.match(/^---\n([\s\S]*?)\n---/);
+  const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!fm) {
     errors.push('missing frontmatter');
   } else {
@@ -30,3 +30,4 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   console.log(bad ? `${bad} invalid agent file(s)` : 'all agents valid');
   process.exit(bad ? 1 : 0);
 }
+

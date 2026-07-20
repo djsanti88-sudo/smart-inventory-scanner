@@ -1,0 +1,198 @@
+[project]
+name = "Smart Inventory Scanner"
+reports_dir = "reports/fable5"
+cache_db = ".fable5/cache.sqlite3"
+agents_dir = ".claude/agents"
+
+[scheduler]
+light_workers = 6
+heavy_workers = 1
+browser_workers = 1
+expert_workers = 3
+
+[safety]
+allowed_executables = [
+  "git",
+  "node",
+  "npm",
+  "npx",
+  "python",
+  "semgrep",
+  "gitleaks",
+  "osv-scanner",
+  "ruff",
+  "pip-audit",
+]
+
+[[checks]]
+id = "python-self-tests"
+description = "Prove the Fable 5 orchestration engine itself."
+command = ["python", "-m", "unittest", "discover", "-s", "tools/fable5/tests", "-v"]
+gates = ["fast", "pr", "release", "monthly"]
+resource = "light"
+timeout_seconds = 90
+blocking = true
+always_run = true
+
+[[checks]]
+id = "agent-contracts"
+description = "Validate every local specialist definition."
+command = ["npm", "run", "intel:validate"]
+gates = ["fast", "pr", "release", "monthly"]
+resource = "light"
+timeout_seconds = 90
+blocking = true
+paths = [".claude/agents/**", ".claude/commands/**", "tools/fable5/**", "fable5.toml"]
+
+[[checks]]
+id = "release-sentinel"
+description = "Collect release, documentation, and repository-readiness evidence."
+command = ["npm", "run", "release:check"]
+gates = ["fast", "pr", "release", "monthly"]
+resource = "light"
+timeout_seconds = 120
+blocking = false
+cache = false
+always_run = true
+
+[[checks]]
+id = "ruff"
+description = "Lint the Python reviewer."
+command = ["ruff", "check", "--no-cache", "tools/fable5"]
+gates = ["fast", "pr", "release", "monthly"]
+resource = "light"
+timeout_seconds = 60
+blocking = true
+paths = ["tools/fable5/**", "fable5.toml"]
+
+[[checks]]
+id = "gitleaks-current"
+description = "Scan the current Git changes for exposed secrets."
+command = ["gitleaks", "git", "--pre-commit", "--no-banner", "--no-color", "--redact", "--exit-code", "1", "."]
+gates = ["fast", "pr", "release", "monthly"]
+resource = "light"
+timeout_seconds = 90
+blocking = true
+always_run = true
+
+[[checks]]
+id = "gitleaks-history"
+description = "Deep-scan complete Git history and flag legacy secret evidence for triage."
+command = ["gitleaks", "git", "--no-banner", "--no-color", "--redact", "--exit-code", "1", "."]
+gates = ["release", "monthly"]
+resource = "light"
+timeout_seconds = 300
+blocking = false
+always_run = true
+
+[[checks]]
+id = "semgrep"
+description = "Run local high-signal security rules without downloading rule packs."
+command = ["semgrep", "scan", "--config", "tools/fable5/semgrep.yml", "--metrics=off", "--error", "src", "scripts", "tools"]
+gates = ["fast", "pr", "release", "monthly"]
+resource = "light"
+timeout_seconds = 240
+blocking = false
+paths = ["src/**", "scripts/**", "tools/**"]
+
+[[checks]]
+id = "proof-local"
+description = "Run the TypeScript compiler and complete deterministic unit suite."
+command = ["npm", "run", "proof:local"]
+gates = ["fast", "pr"]
+resource = "heavy"
+timeout_seconds = 600
+blocking = true
+always_run = true
+
+[[checks]]
+id = "eslint"
+description = "Run the repository's full lint policy."
+command = ["npm", "run", "lint"]
+gates = ["pr"]
+resource = "heavy"
+timeout_seconds = 600
+blocking = true
+paths = ["src/**", "e2e/**", "scripts/**", "*.ts", "*.tsx", "*.mjs"]
+
+[[checks]]
+id = "dependency-audit"
+description = "Query OSV for vulnerable locked dependencies."
+command = ["osv-scanner", "scan", "source", "-r", "."]
+gates = ["pr", "release", "monthly"]
+resource = "light"
+timeout_seconds = 600
+blocking = false
+network = true
+paths = ["package.json", "package-lock.json", "**/requirements*.txt", "**/pyproject.toml"]
+
+[[checks]]
+id = "proof-full"
+description = "Run the complete local proof and production build."
+command = ["npm", "run", "proof:full"]
+gates = ["release", "monthly"]
+resource = "heavy"
+timeout_seconds = 1200
+blocking = true
+always_run = true
+
+[[checks]]
+id = "firebase-emulator"
+description = "Prove tenant isolation and Firestore behavior against local emulators."
+command = ["npm", "run", "test:firebase"]
+gates = ["release", "monthly"]
+resource = "heavy"
+timeout_seconds = 1200
+blocking = true
+depends_on = ["proof-full"]
+paths = ["firestore.rules", "firebase.json", "src/services/db/firebase/**", "src/services/auth*"]
+
+[[checks]]
+id = "browser-e2e"
+description = "Run the complete mock browser suite with paid AI disabled."
+command = ["npm", "run", "test:e2e"]
+gates = ["release", "monthly"]
+resource = "browser"
+timeout_seconds = 1800
+blocking = true
+depends_on = ["proof-full"]
+paths = ["src/**", "e2e/**", "playwright.config.ts", "next.config.ts"]
+
+[[checks]]
+id = "human-bots"
+description = "Run human-like workflow, privacy, data, and usability bots."
+command = ["npm", "run", "qa:bots"]
+gates = ["monthly"]
+resource = "browser"
+timeout_seconds = 2400
+blocking = true
+depends_on = ["browser-e2e"]
+paths = ["src/**", "e2e/**", "playwright.bots.config.ts"]
+
+[[routes]]
+patterns = ["src/components/Scanner*", "src/stores/scan*", "src/services/inventory*", "src/services/resolver*"]
+agents = ["scanner-flow", "data-integrity", "trust-signals", "chaos-resilience"]
+
+[[routes]]
+patterns = ["firestore.rules", "firebase.json", "src/services/auth*", "src/services/db/firebase/**", "src/app/api/**"]
+agents = ["security", "tenant-isolation", "red-team"]
+
+[[routes]]
+patterns = ["src/components/Reconcile*", "src/stores/reconcile*", "src/services/reconcile/**"]
+agents = ["data-integrity", "chaos-resilience", "value-roi", "simplicity-enforcer"]
+
+[[routes]]
+patterns = ["src/components/**", "src/app/**", "src/**/*.css"]
+agents = ["accessibility", "visual-polish", "copy-clarity", "decision-fatigue"]
+
+[[routes]]
+patterns = ["package.json", "package-lock.json", "next.config.*", "playwright*.ts", "scripts/**"]
+agents = ["release-hygiene", "security", "observability", "performance-device"]
+
+[[routes]]
+patterns = ["docs/**", "plans/**", "PLAN_TEMPLATE.md", "PROGRESS.md", "RISK_REGISTER.md"]
+agents = ["project-manager", "simplicity-enforcer", "budget-analyst"]
+
+[[routes]]
+patterns = ["**/pricing*", "**/billing*", "docs/**/*market*", "docs/**/*competitor*"]
+agents = ["pricing-strategy", "product-strategy", "competitor-intel", "value-roi"]
