@@ -85,6 +85,16 @@ export function jaccard(a: string[], b: string[]): number {
 export const IDENTITY_JACCARD_THRESHOLD = 0.75;
 
 /**
+ * Stage B ONLY. Minimum normalized brand edit-similarity for a typo-tolerant brand match
+ * when the two brands are NOT the same curated corporate family. Deliberately higher than
+ * IDENTITY_JACCARD_THRESHOLD: brand identity is load-bearing, so a distinct real brand that
+ * merely looks similar ("Kelly" vs "Kelso") must fall below this and route to review, while a
+ * genuine single-char typo in a normal-length brand ("Micheln" vs "Michelin" = 0.875) clears it.
+ * Never used to auto-count - fuzzy matches are review-only.
+ */
+export const FUZZY_BRAND_MIN = 0.8;
+
+/**
  * The plus-generation guard: true when the two token sets differ ONLY by a trailing "+" on some token
  * (e.g. {dimax, r8} vs {dimax, r8+}). Such a pair is a DIFFERENT product generation and must never
  * auto-link; it can at most be a suggestion. Detected by comparing the sets with every trailing "+"
