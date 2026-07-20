@@ -10,6 +10,18 @@ from .plan_review import render_plan_markdown
 from .verdict import UNTRUSTED_BANNER, redact_secrets
 
 
+def redact_structure(obj: object) -> object:
+    if isinstance(obj, str):
+        return redact_secrets(obj)
+    if isinstance(obj, dict):
+        return {key: redact_structure(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [redact_structure(item) for item in obj]
+    if isinstance(obj, tuple):
+        return tuple(redact_structure(item) for item in obj)
+    return obj
+
+
 def _summary(report: RunReport) -> Counter[str]:
     return Counter(result.status for result in report.results)
 
@@ -199,8 +211,9 @@ def render_fix_packet(report: RunReport) -> str | None:
 
 def write_report(report: RunReport, report_dir: Path, root: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
+    redacted_report = redact_structure(report.to_dict())
     (report_dir / "run.json").write_text(
-        redact_secrets(json.dumps(report.to_dict(), indent=2, sort_keys=True)),
+        json.dumps(redacted_report, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     (report_dir / "report.md").write_text(

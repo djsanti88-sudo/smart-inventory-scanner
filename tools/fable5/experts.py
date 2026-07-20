@@ -20,6 +20,7 @@ from .ledger import (
     put_cached_response,
 )
 from .models import CheckResult
+from .report import redact_structure
 from .verdict import redact_secrets
 from .verify import CallBudget, VerifiedFinding, verify_findings
 
@@ -44,6 +45,29 @@ _PER_RUN_CALL_CEILING = 30
 # Every AI-call ceiling that gets tripped mid-run must record this exact, honest reason string
 # (never a silent drop). Kept as one constant so experts.py and verify.py stay byte-identical.
 CEILING_REASON = "AI call ceiling reached; partial review"
+
+
+def _redact_output(output: str) -> str:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        return redact_secrets(output)
+    if not isinstance(payload, dict) or not isinstance(payload.get("result"), str):
+        return json.dumps(redact_structure(payload))
+
+    result = payload["result"]
+    try:
+        result_payload = json.loads(_strip_code_fences(result))
+    except json.JSONDecodeError:
+        redacted_result = redact_secrets(result)
+    else:
+        redacted_result = json.dumps(redact_structure(result_payload))
+
+    redacted_payload = {
+        key: redacted_result if key == "result" else redact_structure(value)
+        for key, value in payload.items()
+    }
+    return json.dumps(redacted_payload)
 
 
 def build_claude_command(agent: str, model: str, prompt: str, effort: str = "high") -> list[str]:
@@ -475,7 +499,7 @@ async def _run_one(
         output = output_bytes.decode("utf-8", errors="replace")
         exit_code = process.returncode
 
-    output = redact_secrets(output)
+    output = _redact_output(output)
     log_path.write_text(output, encoding="utf-8")
     duration = time.perf_counter() - started
     if timeout_reason:

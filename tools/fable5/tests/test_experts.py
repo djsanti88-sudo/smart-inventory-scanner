@@ -195,6 +195,7 @@ class RunExpertsPreflightTests(unittest.IsolatedAsyncioTestCase):
 class ExpertLogRedactionTests(unittest.IsolatedAsyncioTestCase):
     async def test_raw_expert_log_redacts_secret_output(self) -> None:
         secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+        inner_detail = f"{secret} token: ok\r\ntestabcdefghijklmnopqrstuvwxy"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             auth_script = _fixture_script(
@@ -213,7 +214,10 @@ class ExpertLogRedactionTests(unittest.IsolatedAsyncioTestCase):
                 print(json.dumps({{
                     "type": "result",
                     "subtype": "success",
-                    "result": json.dumps({{"findings": []}}),
+                    "result": json.dumps({{
+                        "findings": [],
+                        "detail": {inner_detail!r},
+                    }}),
                     "debug": {secret!r},
                     "usage": {{"input_tokens": 1, "output_tokens": 1}},
                     "total_cost_usd": 0.0,
@@ -228,7 +232,7 @@ class ExpertLogRedactionTests(unittest.IsolatedAsyncioTestCase):
                 "tools.fable5.experts.build_claude_command",
                 return_value=[sys.executable, str(fake_claude)],
             ), mock.patch("shutil.which", return_value=sys.executable):
-                await run_experts(
+                results = await run_experts(
                     root=root,
                     report_dir=report_dir,
                     agents=["security"],
@@ -242,8 +246,15 @@ class ExpertLogRedactionTests(unittest.IsolatedAsyncioTestCase):
             log_text = (report_dir / "logs" / "expert-security.json").read_text(
                 encoding="utf-8"
             )
+            outer_payload = json.loads(log_text)
+            inner_payload = json.loads(outer_payload["result"])
+
         self.assertNotIn(secret, log_text)
         self.assertIn("<redacted>", log_text)
+        self.assertIn("<redacted>", inner_payload["detail"])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, "passed")
+        self.assertNotEqual(results[0].reason, "unparseable output")
 
 
 class RunOneCostGateTests(unittest.IsolatedAsyncioTestCase):

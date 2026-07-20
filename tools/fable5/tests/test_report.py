@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -121,27 +122,33 @@ class FixPacketTests(unittest.TestCase):
             fix_packet = report_dir / "fix-packet.md"
             self.assertTrue(fix_packet.exists())
 
-    def test_secrets_redacted_in_fix_packet_and_report(self) -> None:
+    def test_secrets_redacted_without_corrupting_run_json(self) -> None:
+        secret = "sk-ABCD1234567890ABCD1234567890"
         results = [
             make_result(
                 "b",
                 "failed",
-                reason="leaked api_key: sk-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN in output",
+                reason=f"{secret} token: ok\r\ntestabcdefghijklmnopqrstuvwxy",
             )
         ]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             report_dir = root / "reports" / "fable5" / "run"
             write_report(make_report(results), report_dir, root)
+            run_json_path = report_dir / "run.json"
+            with run_json_path.open(encoding="utf-8") as run_json_file:
+                json.load(run_json_file)
+
+            run_json_text = run_json_path.read_text(encoding="utf-8")
             fix_packet_text = (report_dir / "fix-packet.md").read_text(encoding="utf-8")
             report_text = (report_dir / "report.md").read_text(encoding="utf-8")
-            self.assertNotIn(
-                "sk-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN", fix_packet_text
-            )
-            self.assertNotIn(
-                "sk-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN", report_text
-            )
+
+            self.assertNotIn(secret, run_json_text)
+            self.assertIn("<redacted>", run_json_text)
+            self.assertNotIn(secret, fix_packet_text)
+            self.assertNotIn(secret, report_text)
             self.assertIn("<redacted>", fix_packet_text)
+            self.assertIn("<redacted>", report_text)
 
     def test_secrets_redacted_in_every_report_artifact(self) -> None:
         secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
