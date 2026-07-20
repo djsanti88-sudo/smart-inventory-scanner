@@ -1632,7 +1632,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             !Number.isNaN(startedMs) &&
             (Date.parse(nowIso) - startedMs) / 60000 <= AUTO_SESSION_INACTIVITY_MINUTES;
           if (withinWindow) {
-            const adopted: InventorySession = { ...cur, deviceId };
+            // Adopt keeps id/counts, but the boot placeholder name ("Default Session") must NOT leak
+            // to the UI - rename an unnamed/placeholder adopted session to a real auto-session name.
+            const adopted: InventorySession = {
+              ...cur,
+              deviceId,
+              name: cur.name === "Default Session" ? buildAutoSessionName(nowIso) : cur.name,
+            };
             set({ currentSession: adopted });
             enqueueAndSync([
               makeQueueItem({

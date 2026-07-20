@@ -152,6 +152,8 @@ describe("ensureAutoSession", () => {
     const s = store.getState();
     expect(s.currentSession!.id).toBe("session-legacy"); // adopted, NOT rotated to a new id
     expect(s.currentSession!.deviceId).toBeTruthy(); // now claimed by this device
+    expect(s.currentSession!.name).not.toBe("Default Session"); // boot placeholder must not leak to UI
+    expect(s.currentSession!.name).toMatch(/\d{1,2}:\d{2}\s*(AM|PM)/i); // renamed to a real auto-session name
     expect(s.finalCounts).toHaveLength(1); // counts preserved, NOT wiped
     expect(s.finalCounts[0].quantity).toBe(3);
   });
