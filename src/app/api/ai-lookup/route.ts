@@ -421,8 +421,28 @@ export async function POST(request: Request) {
           { status: 429 }
         );
       }
-      await chargeDailySlot(ladderStore, { limit: backstop });
-      await chargeDailySlotForAccount(ladderStore, authedBusinessId);
+      // CHARGE-PAIR CONSISTENCY (mirrors the decode path's Finding B fix, 543e7e2): these two counter
+      // charges must move together, but they are two sequential awaits. If the SECOND throws (a Turso
+      // hiccup on the account key alone), pre-fix the global slot was already charged, the account slot
+      // was not, and the whole legitimate request 500s on a pure bookkeeping error - both a counter
+      // divergence AND a user-facing failure after every gate had already passed. Wrap the PAIR: on
+      // failure of EITHER charge, log a structured divergence event and STILL fall through to the normal
+      // successful lookup response. Same fail-open philosophy as the rate limiter - a charge-accounting
+      // error must never 429/500 a request that already cleared every real gate.
+      try {
+        await chargeDailySlot(ladderStore, { limit: backstop });
+        await chargeDailySlotForAccount(ladderStore, authedBusinessId);
+      } catch (chargeErr) {
+        logServerEvent({
+          route: "/api/ai-lookup",
+          event: "charge_pair_incomplete",
+          reasonCode: "charge_error",
+          businessId: authedBusinessId,
+          status: 200,
+          detail: "legacy authed charge pair failed; request served, counters may have diverged by one",
+        });
+        void chargeErr;
+      }
     } else {
       // Anonymous/unauthenticated traffic: unchanged behavior, gated by the plain global cap.
       const used = await readDailyUsed(ladderStore);
@@ -520,8 +540,15 @@ export async function POST(request: Request) {
     // after the global charge. The per-account charge now fires INSIDE chargePaidSlot (pipeline.ts),
     // right after the global charge, so the two always move together and stay exception-consistent. This
     // route no longer post-charges the account - the pipeline owns BOTH charges at one site (L12 intact).
-    // P5b Task 2: fresh-compute branch - the other qualifying outcome (fresh AND persisted replay).
-    maybeAppendMasterCatalogEntry(outcome.payload, code, codeType);
+    // P5b Task 2: fresh-compute branch. Max-review (L1 replay append): the `computed` kind ALSO covers
+    // an in-memory L1 cache REPLAY (outcome.cached === true). The sibling `persisted`/L2 branch above
+    // excludes replays for exactly the staleness (an old, weaker "verified" re-minted into master truth
+    // today) and per-request transaction-storm reasons - and an L1 replay is the same untrusted class,
+    // so it must be excluded here too. ONLY a FRESH compute (cached === false), where the CURRENT verify
+    // gate was actually applied, is trusted to write master.
+    if (!outcome.cached) {
+      maybeAppendMasterCatalogEntry(outcome.payload, code, codeType);
+    }
     return Response.json({ ...outcome.payload, debug: { ...outcome.payload.debug, cached: outcome.cached } });
   }
 

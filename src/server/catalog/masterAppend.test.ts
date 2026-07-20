@@ -66,6 +66,28 @@ describe("buildMasterCatalogEntry (pure trust gate)", () => {
     const entry = buildMasterCatalogEntry(baseInput({ normalizedBarcode: "not-a-gtin-shape" }));
     expect(entry).toBeNull();
   });
+
+  // FIX 1 (max-review, confidence floor): the builder must enforce a HARD server-side >=0.8 confidence
+  // floor independent of any request threshold. clampConfidenceThreshold floors at 0.6, so without this
+  // gate a crafted POST could mint a 0.6-0.79 "verified" into the shared cross-tenant master catalog,
+  // violating the documented decode invariant (CLAUDE.md: verified requires confidence >= 0.8).
+  it("returns null when confidence is 0.79 (just under the 0.8 master-truth floor)", () => {
+    expect(
+      buildMasterCatalogEntry(baseInput({ decision: { status: "verified", exactCodeEvidenceVerifiedByApp: true, confidence: 0.79 } })),
+    ).toBeNull();
+  });
+
+  it("builds an entry when confidence is exactly 0.8 (floor inclusive)", () => {
+    expect(
+      buildMasterCatalogEntry(baseInput({ decision: { status: "verified", exactCodeEvidenceVerifiedByApp: true, confidence: 0.8 } })),
+    ).not.toBeNull();
+  });
+
+  it("returns null when confidence is undefined (no numeric confidence, never assume it cleared the floor)", () => {
+    expect(
+      buildMasterCatalogEntry(baseInput({ decision: { status: "verified", exactCodeEvidenceVerifiedByApp: true, confidence: undefined } })),
+    ).toBeNull();
+  });
 });
 
 // ---- Admin-SDK upsert (mocked db, never live Firestore) ----

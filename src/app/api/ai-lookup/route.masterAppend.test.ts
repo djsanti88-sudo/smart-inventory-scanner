@@ -156,6 +156,33 @@ describe("ai-lookup master-append hook wiring (P5b Task 2)", () => {
   // branch must NEVER call the append hook - a cached payload may have been written under a looser
   // historical verify gate, and replaying it to master on every cache hit is both a trust hole and a
   // per-request transaction storm. Only the fresh `computed` branch appends.
+  // FIX 2 (max-review, L1 replay append): the computed branch ALSO carries an in-memory L1 cache
+  // replay (outcome.cached === true). Those replays were excluded from the sibling `persisted` branch
+  // for the SAME staleness + transaction-storm reasons, so a cached computed outcome must not append
+  // either - only a FRESH compute (cached === false) is trusted to write master truth.
+  it("does NOT call the append hook on a computed outcome that is an L1 cache replay (cached:true)", async () => {
+    const outcome = verifiedComputedOutcome();
+    outcome.cached = true;
+    runDecodePipeline.mockResolvedValue(outcome);
+    const { POST } = await import("./route");
+    const res = await POST(decodeReq());
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(buildMasterCatalogEntry).not.toHaveBeenCalled();
+    expect(appendMasterCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  it("DOES call the append hook on a fresh computed outcome (cached:false)", async () => {
+    const outcome = verifiedComputedOutcome();
+    outcome.cached = false;
+    runDecodePipeline.mockResolvedValue(outcome);
+    const { POST } = await import("./route");
+    await POST(decodeReq());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(buildMasterCatalogEntry).toHaveBeenCalledOnce();
+    expect(appendMasterCatalogEntry).toHaveBeenCalledOnce();
+  });
+
   it("does NOT call the append hook on a persisted/L2-replay outcome (fresh-compute only)", async () => {
     runDecodePipeline.mockResolvedValue({
       kind: "persisted" as const,

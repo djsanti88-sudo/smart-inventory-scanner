@@ -23,6 +23,7 @@
 import { resolveScanToProductTiered, type MasterCandidate } from "@/services/aliasMatcher";
 import { sameBrandFamily } from "@/services/catalog/brandFamilies";
 import { nameTokens, jaccard, IDENTITY_JACCARD_THRESHOLD } from "@/services/catalog/identityMerge";
+import { tireSizeToken } from "@/services/ai/tireSpecs";
 import type { Product, Alias, CleanedCode, ProvenanceTier } from "@/types";
 
 /** The subset of the store CatalogEntry shape this transform needs (GC4 boundary: masterId /
@@ -56,6 +57,18 @@ function identitiesAgree(aName: string | undefined, aBrand: string | undefined, 
 
   const brandsAgree = (!ab && !bb) || sameBrandFamily(ab, bb);
   if (!brandsAgree) return false;
+
+  // Size-aware DISAGREEMENT (max-review): corpus law says same-model-DIFFERENT-SIZE is a DISTINCT
+  // product (identityMerge is size-aware; CLAUDE.md identity-merge rule). Name-Jaccard and the subset
+  // rule can BOTH false-agree a long, verbose model name that differs only by size (e.g. Jaccard clears
+  // 0.75 because the two size-derived tokens are a small fraction of a 12+ token name). So: if BOTH
+  // sides carry a parseable tire size token and the tokens DIFFER, the identities DISAGREE outright.
+  // If only one side (or neither) has a size token, the size is indeterminate and behavior is unchanged
+  // (a slug-without-size vs rich-with-size stays agree-eligible via the subset rule below). Reuses the
+  // existing tireSizeToken extractor (tireSpecs.ts) rather than minting a new size regex.
+  const aSize = tireSizeToken({ productName: an, brand: ab });
+  const bSize = tireSizeToken({ productName: bn, brand: bb });
+  if (aSize && bSize && aSize !== bSize) return false;
 
   const aTokens = nameTokens(an);
   const bTokens = nameTokens(bn);

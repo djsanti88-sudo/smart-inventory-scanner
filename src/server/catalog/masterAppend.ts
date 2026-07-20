@@ -41,6 +41,13 @@ export function buildMasterCatalogEntry(input: MasterAppendInput): DbCatalogEntr
 
   if (decision.status !== "verified") return null;
   if (decision.exactCodeEvidenceVerifiedByApp !== true) return null;
+  // Max-review (confidence floor): status "verified" + app-verified evidence is NOT sufficient on its
+  // own. clampConfidenceThreshold (decodePolicy.ts) only floors the REQUEST threshold at 0.6, so a
+  // hand-crafted POST with confidenceThreshold:0.6 could settle a 0.6-0.79-confidence "verified" and
+  // mint it into the shared cross-tenant `catalogEntries` master store. The documented decode invariant
+  // (CLAUDE.md decode rules: verified requires confidence >= 0.8) MUST be re-enforced here as a HARD
+  // server-side floor, independent of any request-supplied threshold. Undefined confidence never clears it.
+  if (typeof decision.confidence !== "number" || decision.confidence < 0.8) return null;
   if (!PUBLIC_CODE_TYPES.has(codeType)) return null;
   const name = (identity.name ?? "").trim();
   if (!name) return null;

@@ -259,6 +259,72 @@ describe("toMasterCandidates", () => {
     expect(out[0].productId).toBe("master:master-l");
   });
 
+  // FIX 3 (max-review, size-aware agreement): corpus law says same-model-DIFFERENT-SIZE = DISTINCT
+  // products (identityMerge is size-aware). identitiesAgree compared brand+name only, so the subset
+  // rule could false-AGREE a master identity of the 275/55R20 with a tenant 265/70R17 of the same
+  // model. When BOTH names carry a size token and the tokens DIFFER, identities must DISAGREE.
+  // The false-agree the plain Jaccard/subset rule cannot catch: a long, verbose model name (>=12 shared
+  // tokens) where the ONLY difference is the size, so token-Jaccard clears 0.75 (here ~0.765) and the
+  // identities wrongly AGREE - even though same-model-different-size is a DISTINCT product. The size-aware
+  // check (both sides carry a parseable tire size + the tokens differ -> DISAGREE) is what catches it.
+  it("(l) same model, DIFFERENT explicit sizes, long name (Jaccard>=0.75) -> CONFLICT (size-aware)", () => {
+    const code = "MC-N-0014";
+    const tenantProduct = makeProduct({
+      id: "prod-tenant-n",
+      primaryBarcode: code,
+      brand: "Michelin",
+      name: "Michelin Defender LTX Platinum Highway All Season Passenger Radial Touring Premium Long Wear 265/70R17",
+    });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = {
+      masterId: "master-n",
+      name: "Michelin Defender LTX Platinum Highway All Season Passenger Radial Touring Premium Long Wear 275/55R20",
+      brand: "Michelin",
+    };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].productId).toBe("master:master-n");
+
+    const res = resolveScanToProductTiered(cleaned, { products: [tenantProduct], aliases: [], masterCandidates: out }, BID);
+    expect(res.matchType).toBe("conflict");
+  });
+
+  it("(m) slug WITHOUT size vs rich name WITH size, same model -> still AGREES (only one side has a size = indeterminate)", () => {
+    const code = "MC-O-0015";
+    const tenantProduct = makeProduct({
+      id: "prod-tenant-o",
+      primaryBarcode: code,
+      brand: "Goodyear",
+      name: "Goodyear Wrangler Steadfast HT 265/70R17",
+    });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = { masterId: "master-o", name: "wrangler_steadfast_ht", brand: "Goodyear" };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].productId).toBe("prod-tenant-o");
+  });
+
+  it("(n) same model, SAME explicit size on both sides -> AGREES", () => {
+    const code = "MC-P-0016";
+    const tenantProduct = makeProduct({
+      id: "prod-tenant-p",
+      primaryBarcode: code,
+      brand: "Goodyear",
+      name: "Goodyear Wrangler Steadfast HT 265/70R17",
+    });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = { masterId: "master-p", name: "Goodyear Wrangler Steadfast HT 265/70R17", brand: "Goodyear" };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].productId).toBe("prod-tenant-p");
+  });
+
   it("(k) empty master name -> emits nothing (never conflicts, never agrees)", () => {
     const code = "MC-M-0013";
     const tenantProduct = makeProduct({ id: "prod-tenant-m", primaryBarcode: code, brand: "Goodyear", name: "Wrangler HT" });
