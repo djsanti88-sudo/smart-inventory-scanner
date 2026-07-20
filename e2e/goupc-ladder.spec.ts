@@ -66,13 +66,16 @@ function goUpcInferredResult(code: string) {
   });
 }
 
-// Mirrors GoUpcProvider.verifiedDecision().
-const VERIFIED_DECISION = {
-  status: "verified",
+// P5 Task 2 demotion (2026-07-20): Go-UPC's own exact-match response is a self-report, never an
+// app-verified fetch, so GoUpcProvider.verifiedDecision() no longer exists / no longer returns
+// status "verified". This fixture mirrors the CURRENT contract: a high-confidence SUGGESTION with
+// honest evidence (evidenceStrength "none", exactCodeEvidenceVerifiedByApp false).
+const GOUPC_EXACT_DECISION = {
+  status: "suggested",
   confidence: 0.9,
-  reason: "Verified from Go-UPC (exact barcode match).",
-  evidenceStrength: "fetched_source",
-  exactCodeEvidenceVerifiedByApp: true,
+  reason: "Suggested by Go-UPC (exact barcode match, API self-report - not app-verified).",
+  evidenceStrength: "none",
+  exactCodeEvidenceVerifiedByApp: false,
   crossCheck: {
     decision: "single_provider",
     confidence: 0.9,
@@ -109,13 +112,13 @@ function goUpcExactPayload(code: string) {
     mode: "decode",
     providerNames: ["go-upc"],
     results: [goUpcExactResult(code)],
-    evidences: [{ verified: true, strength: "fetched_source", matchedCode: code, matchedSources: ["go-upc"], reason: "Go-UPC exact barcode match" }],
+    evidences: [{ verified: false, strength: "none", matchedCode: code, matchedSources: ["go-upc"], reason: "Go-UPC API self-report (not app page-verified)" }],
     providerStatuses: [{ provider: "go-upc", status: "ok", latencyMs: 12, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
-    decision: VERIFIED_DECISION,
+    decision: GOUPC_EXACT_DECISION,
     reasonCode: "ok",
     reasonText: "",
     timedOut: false,
-    debug: { providersAttempted: ["go-upc"], evidenceStrengths: ["fetched_source"], sourceCounts: [0], ladderPath: "go-upc", aiCalled: false, pageFetched: false, cached: false },
+    debug: { providersAttempted: ["go-upc"], evidenceStrengths: ["none"], sourceCounts: [0], ladderPath: "go-upc", aiCalled: false, pageFetched: false, cached: false },
     sanitizedInput: { rawCodeSanitized: code, cleanCodeSanitized: code },
   };
 }
@@ -168,7 +171,7 @@ async function scan(page: Page, code: string) {
 }
 
 test.describe("Go-UPC decode ladder (mocked)", () => {
-  test("1. exact hit -> Verified AI Decode, auto-counts", async ({ page }) => {
+  test("1. exact hit -> Suggested (DB), still auto-counts (high-confidence suggestion auto-applies)", async ({ page }) => {
     const code = "034000002702"; // checksum-valid UPC-A, no seeded alias
     await page.route("**/api/ai-lookup", async (route: Route) => {
       const req = route.request();
@@ -183,9 +186,12 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
 
     await scan(page, code);
 
-    // Feed row upgrades from "Decoding..." to "Verified match" (DecodeStatusBadge label for status "verified").
-    await expect(page.getByTestId("scan-feed-body")).toContainText("Verified match", { timeout: 15_000 });
-    // Auto-counted: the product shows up in the final counts table with no human click.
+    // Feed row upgrades from "Decoding..." to "Suggested (DB)" (DecodeStatusBadge honest-provenance
+    // label for a Go-UPC self-report - P5 demotion: Go-UPC's own exact-match claim is never
+    // app-verified, so it never earns the green "Verified" badge, only an amber "Suggested (DB)").
+    await expect(page.getByTestId("scan-feed-body")).toContainText("Suggested (DB)", { timeout: 15_000 });
+    // Still auto-counted: a 0.9-confidence suggestion auto-applies onto the counted row even though
+    // it is not verified (shouldAutoApplySuggestion gate) - the row appears with no human click.
     await expect(page.getByTestId("final-count-body")).toContainText("Energizer MAX AA Batteries", { timeout: 15_000 });
     await expect(page.getByTestId("scanner-input")).toBeFocused();
 

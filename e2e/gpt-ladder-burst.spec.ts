@@ -28,8 +28,11 @@ const gptVerifiedPayload = (code: string, n: number) => ({
     confidence: 0.9, verifiedFacts: [], guesses: [], needsHumanReview: false,
   }],
   evidences: [],
+  // P5 Task 1 demotion (2026-07-20): a bare GPT self-report never mints an app-verified identity
+  // (the gptTrusted auto-count escape hatch was deleted); gptResultToDecodePayload now maps this
+  // tier to status "suggested", not "verified".
   decision: {
-    status: "verified", confidence: 0.9, reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
+    status: "suggested", confidence: 0.9, reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
     evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false,
     crossCheck: { decision: "single_provider", confidence: 0.9, reason: "single provider", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
     corroborationPath: "gpt_self_report",
@@ -95,9 +98,11 @@ test("burst: 20 rapid unknown scans count instantly; decode queue holds 2-in-fli
   await expect.poll(() => posts, { timeout: 30_000 }).toBe(20);
   expect(maxInFlight, "decode queue must cap in-flight requests at 2").toBeLessThanOrEqual(2);
 
-  // Verified rows landed (auto-decode applied through the queue; 500s fell to review, not lost).
-  // The count-first proof is the toHaveCount(20) above: it passed while at most 2 of the 20
-  // decodes (250ms each) could possibly have completed - rows never wait on the queue.
+  // Suggested rows landed (auto-decode applied through the queue; 500s fell to review, not lost).
+  // Post-P5-demotion a GPT self-report auto-APPLIES as a high-confidence suggestion (never a
+  // verified badge) - the count-first proof is the toHaveCount(20) above: it passed while at most
+  // 2 of the 20 decodes (250ms each) could possibly have completed - rows never wait on the queue.
   await expect(page.getByTestId("scan-feed-body")).toContainText("Burst Tire", { timeout: 20_000 });
+  await expect(page.getByTestId("scan-feed-body")).toContainText("Suggested (AI)", { timeout: 20_000 });
   await page.screenshot({ path: `${PROOF}/02-burst-settled.png`, fullPage: true });
 });

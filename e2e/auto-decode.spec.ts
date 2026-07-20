@@ -77,8 +77,11 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   await expect(page.getByTestId("auto-decode-status")).toContainText("On");
 
   // Verified: unknown scan auto-decodes AND AUTO-ADDS the product to the count (no clicking).
+  // P5 Decode Trust (2026-07-20): the badge label is the honest-provenance label "Verified
+  // (app-confirmed)" for a genuinely app-verified decode (two providers agree + a fetched source),
+  // not the old generic "Verified match".
   await scan(page, "878106003504");
-  await expect(page.getByTestId("scan-feed-body")).toContainText("Verified match");
+  await expect(page.getByTestId("scan-feed-body")).toContainText("Verified (app-confirmed)");
   await expect(page.getByTestId("final-count-body")).toContainText("Coca-Cola Classic"); // auto-added
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // focus retained across async decode
   expect(postHits).toBeGreaterThan(0); // AI WAS called automatically

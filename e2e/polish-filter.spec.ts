@@ -47,8 +47,11 @@ function gptVerifiedPayload(row: FixtureRow) {
       confidence: 0.9, verifiedFacts: [], guesses: [], needsHumanReview: false,
     }],
     evidences: [],
+    // P5 Task 1 demotion (2026-07-20): a bare GPT self-report never mints an app-verified identity
+    // (the gptTrusted auto-count escape hatch was deleted); gptResultToDecodePayload now maps this
+    // tier to status "suggested", not "verified".
     decision: {
-      status: "verified", confidence: 0.9, reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
+      status: "suggested", confidence: 0.9, reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
       evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false,
       crossCheck: { decision: "single_provider", confidence: 0.9, reason: "single provider", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
       corroborationPath: "gpt_self_report",
@@ -85,8 +88,10 @@ test("polish filter: full size narrows to one row, a shared prefix matches every
 
   for (const row of ROWS) await scan(page, row.code);
 
-  // All three verified decodes land as counted products (Brand/Model/Size columns populated by the
-  // hot-path structurer). Poll on the table body text rather than a fixed sleep.
+  // All three high-confidence GPT suggestions auto-apply as counted products (Brand/Model/Size
+  // columns populated by the hot-path structurer) even though none earns a "verified" badge post-P5
+  // demotion. Poll on the table body text rather than a fixed sleep.
+  await expect(page.getByTestId("scan-feed-body")).toContainText("Suggested (AI)", { timeout: 20_000 });
   await expect(page.getByTestId("final-count-body")).toContainText("Discoverer", { timeout: 20_000 });
   await expect(page.getByTestId("final-count-body")).toContainText("Defender", { timeout: 20_000 });
   await expect(page.getByTestId("final-count-body")).toContainText("Wildpeak", { timeout: 20_000 });
