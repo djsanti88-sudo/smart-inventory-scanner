@@ -2824,6 +2824,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // BADGE/REASON INVARIANT: never write a "Verified...No AI lookup needed" reason under a
                 // non-verified badge (see honestReasonForBadge above - the owner-caught contradiction).
                 reason: honestReasonForBadge(decision?.reason, decision?.status, displayedBadge) || e.reason,
+                // STALE-NOTE FIX (goupc-cap-rootcause item 3): decodeNote was set once at scan time to the
+                // in-flight "Decoding with AI..." note and never refreshed - platformOwner saw that note
+                // forever on every settled row. The decode has now settled, so replace the in-flight note
+                // with the honest post-decode transparency note (the skipped-paid-rung note when present),
+                // or clear it. Never leave "Decoding with AI..." on a row that is no longer decoding.
+                decodeNote: decodeNoteUpdate || undefined,
               };
             }),
             aiLookupLogs: [mkLog("success", providerName, decision?.confidence ?? 0, recordSuccess()), ...st.aiLookupLogs],
@@ -3521,7 +3527,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         set((s) => ({
           scanFeed: s.scanFeed.map((e) =>
             e.cleanCode === cleanCode && e.status !== "resolved" && e.decodeStatus !== "verified"
-              ? { ...e, decodeStatus: "verified" as ScanEvent["decodeStatus"], reason: reason || e.reason }
+              ? {
+                  ...e,
+                  decodeStatus: "verified" as ScanEvent["decodeStatus"],
+                  reason: reason || e.reason,
+                  // STALE-NOTE FIX (goupc-cap-rootcause item 3): the row just settled to verified - drop
+                  // any leftover in-flight "Decoding with AI..." note (see the main settle block above).
+                  decodeNote: undefined,
+                }
               : e,
           ),
         }));

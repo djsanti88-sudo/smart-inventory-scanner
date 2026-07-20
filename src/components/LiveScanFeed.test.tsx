@@ -1,8 +1,16 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { useScanStore } from "@/stores/scanStore";
 import type { ScanEvent, UnknownCodeReview, Product } from "@/types";
+
+// The decodeNote platformOwner suffix is only ever rendered for platformOwner. Mock it true just for
+// the stale-decodeNote suite below so we can assert on the suffix; every other describe block in this
+// file relies on the real (non-platform) default and must keep passing unmocked.
+let mockIsPlatformOwner = false;
+vi.mock("@/services/security/useAccessLevel", () => ({
+  useIsPlatformOwner: () => mockIsPlatformOwner,
+}));
 
 // Task 3: a scan that already minted a PROVISIONAL placeholder product ("Unidentified item (barcode X)")
 // must still surface the decoded suggestion identity on the feed row instead of showing the placeholder
@@ -67,6 +75,7 @@ function suggestionReview(code: string, confidence: number): UnknownCodeReview {
 afterEach(() => {
   cleanup();
   useScanStore.setState({ scanFeed: [], needsReviewQueue: [], products: [], finalCounts: [] });
+  mockIsPlatformOwner = false;
 });
 
 describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3)", () => {
@@ -195,5 +204,78 @@ describe("LiveScanFeed - Brand column (owner order 2026-07-10)", () => {
     render(<LiveScanFeed />);
 
     expect(screen.getByTestId("feed-brand-ev1").textContent).toBe("Michelin");
+  });
+});
+
+// Stale-UI fix (goupc-cap-rootcause item 3): decodeNote is set once at scan time to the in-flight
+// "Decoding with AI..." note. Once the row settles to a final decodeStatus, that note must never still
+// read "Decoding with AI..." - the store now clears/refreshes it on settle, and this suite also proves
+// the component-level backstop (never render the in-flight note on a non-decoding row).
+describe("LiveScanFeed - decodeNote must not show a stale 'Decoding with AI...' suffix after settle", () => {
+  it("platformOwner: a genuinely in-flight row still shows the honest in-flight note", () => {
+    mockIsPlatformOwner = true;
+    const code = "0866990001111";
+    const event = {
+      ...baseEvent(code, "prod1"),
+      decodeStatus: "decoding",
+      reason: "Unknown code - looking it up.",
+      decodeNote: "Decoding with AI...",
+    } as unknown as ScanEvent;
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [], products: [], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByText(/Decoding with AI/)).toBeInTheDocument();
+  });
+
+  it("platformOwner: a settled needs_review row never shows the stale in-flight note", () => {
+    mockIsPlatformOwner = true;
+    const code = "0866990002222";
+    const event = {
+      ...baseEvent(code, "prod1"),
+      decodeStatus: "needs_review",
+      reason: "No provider returned a usable product",
+      // Simulates the pre-fix bug directly: a stale note left over from scan time on an otherwise
+      // settled row. The component-level backstop must hide it even if a settle path ever regresses.
+      decodeNote: "Decoding with AI...",
+    } as unknown as ScanEvent;
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [], products: [], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByText("No provider returned a usable product")).toBeInTheDocument();
+    expect(screen.queryByText(/Decoding with AI/)).not.toBeInTheDocument();
+  });
+
+  it("platformOwner: a settled row with a real post-decode transparency note still shows that note", () => {
+    mockIsPlatformOwner = true;
+    const code = "0866990003333";
+    const event = {
+      ...baseEvent(code, "prod1"),
+      decodeStatus: "needs_review",
+      reason: "No provider returned a usable product",
+      decodeNote: "gpt-5.5-ladder skipped: budget_exceeded",
+    } as unknown as ScanEvent;
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [], products: [], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByText(/budget_exceeded/)).toBeInTheDocument();
+  });
+
+  it("non-platform customer: never sees any decodeNote suffix, settled or in-flight", () => {
+    mockIsPlatformOwner = false;
+    const code = "0866990004444";
+    const event = {
+      ...baseEvent(code, "prod1"),
+      decodeStatus: "decoding",
+      reason: "Unknown code - looking it up.",
+      decodeNote: "Decoding with AI...",
+    } as unknown as ScanEvent;
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [], products: [], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.queryByText(/Decoding with AI/)).not.toBeInTheDocument();
   });
 });

@@ -174,10 +174,24 @@ export function LiveScanFeed() {
                         <StatusBadge status={e.status} />
                       )}
                     </td>
-                    <td className="max-w-56 px-4 py-3 text-sm text-zinc-600" title={isPlatform && e.decodeNote ? `${e.reason}: ${e.decodeNote}` : e.reason}>
-                      {e.reason}
-                      {isPlatform && e.decodeNote ? <span className="text-zinc-500">: {e.decodeNote}</span> : null}
-                    </td>
+                    {/* STALE-NOTE FIX (goupc-cap-rootcause item 3): decodeNote is now cleared/refreshed by
+                        the store on every settle, so it should never read the in-flight note once the row
+                        is done decoding. This guard is a defensive backstop against any future settle path
+                        that forgets to clear it - the in-flight note is only ever honest while the row is
+                        still "decoding". */}
+                    {(() => {
+                      const showDecodeNote =
+                        isPlatform && Boolean(e.decodeNote) && (e.decodeStatus === "decoding" || e.decodeNote !== "Decoding with AI...");
+                      return (
+                        <td
+                          className="max-w-56 px-4 py-3 text-sm text-zinc-600"
+                          title={showDecodeNote ? `${e.reason}: ${e.decodeNote}` : e.reason}
+                        >
+                          {e.reason}
+                          {showDecodeNote ? <span className="text-zinc-500">: {e.decodeNote}</span> : null}
+                        </td>
+                      );
+                    })()}
                     <td className="px-4 py-3">
                       <SyncBadge status={e.syncStatus} />
                     </td>
