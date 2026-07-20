@@ -81,23 +81,6 @@ describe("ai-lookup master-append hook wiring (P5b Task 2)", () => {
     expect(arg.decision.exactCodeEvidenceVerifiedByApp).toBe(true);
   });
 
-  it("fires on a persisted/L2-replay outcome carrying a settled decision too", async () => {
-    runDecodePipeline.mockResolvedValue({
-      kind: "persisted" as const,
-      body: {
-        decision: { status: "verified", exactCodeEvidenceVerifiedByApp: true, confidence: 0.9 },
-        results: [{ productName: "Widget 100", brand: "Acme", category: "tools" }],
-        sanitizedInput: { cleanCodeSanitized: "012345678905" },
-        debug: {},
-      },
-    });
-    const { POST } = await import("./route");
-    await POST(decodeReq());
-    await new Promise((r) => setTimeout(r, 0));
-    expect(buildMasterCatalogEntry).toHaveBeenCalledOnce();
-    expect(appendMasterCatalogEntry).toHaveBeenCalledOnce();
-  });
-
   // (b) suggested -> never called
   it("does not call the append hook when the decision is only 'suggested'", async () => {
     buildMasterCatalogEntry.mockReturnValue(null); // the real builder would gate this out
@@ -148,6 +131,44 @@ describe("ai-lookup master-append hook wiring (P5b Task 2)", () => {
     runDecodePipeline.mockResolvedValue(verifiedComputedOutcome());
     const { POST } = await import("./route");
     await POST(decodeReq());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(buildMasterCatalogEntry).not.toHaveBeenCalled();
+    expect(appendMasterCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  // FIX 3 (review MEDIUM, sync-throw): a SYNCHRONOUS throw inside buildMasterCatalogEntry (called
+  // directly, not awaited) must never break the POST response - the whole hook body must be wrapped
+  // in try/catch, not just the async appendMasterCatalogEntry().catch() tail.
+  it("a synchronous throw in buildMasterCatalogEntry never breaks the HTTP response", async () => {
+    buildMasterCatalogEntry.mockImplementation(() => {
+      throw new Error("boom: synchronous builder failure");
+    });
+    runDecodePipeline.mockResolvedValue(verifiedComputedOutcome());
+    const { POST } = await import("./route");
+    const res = await POST(decodeReq());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.decision.status).toBe("verified");
+    expect(appendMasterCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  // FIX 4 (review MEDIUM, stale-verified replay + transaction storm): the `persisted` (cached/L2-replay)
+  // branch must NEVER call the append hook - a cached payload may have been written under a looser
+  // historical verify gate, and replaying it to master on every cache hit is both a trust hole and a
+  // per-request transaction storm. Only the fresh `computed` branch appends.
+  it("does NOT call the append hook on a persisted/L2-replay outcome (fresh-compute only)", async () => {
+    runDecodePipeline.mockResolvedValue({
+      kind: "persisted" as const,
+      body: {
+        decision: { status: "verified", exactCodeEvidenceVerifiedByApp: true, confidence: 0.9 },
+        results: [{ productName: "Widget 100", brand: "Acme", category: "tools" }],
+        sanitizedInput: { cleanCodeSanitized: "012345678905" },
+        debug: {},
+      },
+    });
+    const { POST } = await import("./route");
+    const res = await POST(decodeReq());
+    expect(res.status).toBe(200);
     await new Promise((r) => setTimeout(r, 0));
     expect(buildMasterCatalogEntry).not.toHaveBeenCalled();
     expect(appendMasterCatalogEntry).not.toHaveBeenCalled();

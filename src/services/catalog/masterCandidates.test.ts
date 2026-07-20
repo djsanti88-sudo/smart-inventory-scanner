@@ -180,4 +180,92 @@ describe("toMasterCandidates", () => {
     const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
     expect(out[0].provenanceTier).toBe("corpus_verified");
   });
+
+  // FIX 2 (review HIGH, slug false-conflict): corpus master names are SLUGS ("wrangler_steadfast_ht")
+  // vs the tenant's rich name ("Goodyear Wrangler Steadfast HT 265/70R17") - plain name-Jaccard is only
+  // ~0.50 (brand + size tokens dilute it), producing a false conflict. The subset rule (every token of
+  // the sparser name, after dropping the brand's own tokens, contained in the richer name) must agree.
+  it("(g) slug vs rich name, same brand -> AGREE (subset rule, worked example from review)", () => {
+    const code = "MC-I-0009";
+    const tenantProduct = makeProduct({
+      id: "prod-tenant-i",
+      primaryBarcode: code,
+      brand: "Goodyear",
+      name: "Goodyear Wrangler Steadfast HT 265/70R17",
+    });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = { masterId: "master-i", name: "wrangler_steadfast_ht", brand: "Goodyear" };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].productId).toBe("prod-tenant-i");
+
+    const res = resolveScanToProductTiered(cleaned, { products: [tenantProduct], aliases: [], masterCandidates: out }, BID);
+    expect(res.matchType).not.toBe("conflict");
+  });
+
+  it("(h) slug vs rich name with '+' notation, same brand -> AGREE (second worked example from review)", () => {
+    const code = "MC-J-0010";
+    const tenantProduct = makeProduct({
+      id: "prod-tenant-j",
+      primaryBarcode: code,
+      brand: "Michelin",
+      name: "Michelin Defender T+H 215/60R16",
+    });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = { masterId: "master-j", name: "michelin-defender-t-h", brand: "Michelin" };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].productId).toBe("prod-tenant-j");
+  });
+
+  it("(i) genuinely different model, same brand -> still CONFLICTS (subset rule must not over-forgive)", () => {
+    const code = "MC-K-0011";
+    const tenantProduct = makeProduct({
+      id: "prod-tenant-k",
+      primaryBarcode: code,
+      brand: "Goodyear",
+      name: "Goodyear Wrangler Duratrac 265/70R17",
+    });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = { masterId: "master-k", name: "defender_ltx", brand: "Goodyear" };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].productId).toBe("master:master-k");
+
+    const res = resolveScanToProductTiered(cleaned, { products: [tenantProduct], aliases: [], masterCandidates: out }, BID);
+    expect(res.matchType).toBe("conflict");
+  });
+
+  it("(j) different, non-family brand still conflicts even when name tokens would subset-match", () => {
+    const code = "MC-L-0012";
+    const tenantProduct = makeProduct({
+      id: "prod-tenant-l",
+      primaryBarcode: code,
+      brand: "Yokohama",
+      name: "Yokohama Wrangler Steadfast HT 265/70R17",
+    });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = { masterId: "master-l", name: "wrangler_steadfast_ht", brand: "Goodyear" };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].productId).toBe("master:master-l");
+  });
+
+  it("(k) empty master name -> emits nothing (never conflicts, never agrees)", () => {
+    const code = "MC-M-0013";
+    const tenantProduct = makeProduct({ id: "prod-tenant-m", primaryBarcode: code, brand: "Goodyear", name: "Wrangler HT" });
+    const cleaned = cleanScanCode(code);
+    const hit: MasterHit = { masterId: "master-m", name: "", brand: "Goodyear" };
+
+    const out = toMasterCandidates(hit, [tenantProduct], [], cleaned, BID);
+    expect(out).toEqual([]);
+  });
 });

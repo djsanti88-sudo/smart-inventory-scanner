@@ -61,7 +61,7 @@ import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
-import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
+import { isCatalogWritable, sanitizeCatalogEntry, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
 import { toMasterCandidates } from "@/services/catalog/masterCandidates";
 import {
@@ -2194,7 +2194,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Option 1 wiring: if the cloud dep is present and we're online, try the global catalog first;
           // cloudCatalogResolve falls through to AI internally on a miss / firewall conflict.
           if (deps.lookupGlobalCatalog && get().online) {
-            void get().cloudCatalogResolve(review.id, codes);
+            // FIX 5: swallow a rejection here (e.g. a dev-assert throw from the GC1 hard invariant)
+            // so it never becomes an unhandled promise rejection - siblings already do this (line ~1138).
+            void get().cloudCatalogResolve(review.id, codes).catch(() => {});
           } else if (autoGate.allowed) {
             void get().liveDecode(review.id);
           } else {
@@ -5895,25 +5897,23 @@ const appDeps: ScanStoreDeps = {
         const retailRepo = catalogRepository(getDb(), "retailCatalogEntries"); // SEPARATE retail catalog (Open Food Facts)
         const nowIso = new Date().toISOString();
         // toStoreEntry: map the minimal db/types.ts CatalogEntry shape -> the full catalogTypes CatalogEntry
-        // shape that the store/resolver expects, via sanitizeCatalogEntry (fills in all required defaults).
-        // Phase 5b Task 4 (GC4 boundary): also pass raw.id / raw.provenanceTier through onto the store
-        // entry's optional masterId/masterProvenanceTier fields, so cloudCatalogResolve can build master
-        // candidates for the cross-tier conflict check below. Purely additive - every other reader of
-        // this shape ignores the two new optional fields.
-        const toStoreEntry = (raw: { id: string; normalizedBarcode: string; name?: string; brand?: string; category?: string; verificationStatus?: string; provenanceTier?: ProvenanceTier }) => ({
-          ...sanitizeCatalogEntry(
-            { barcode: raw.normalizedBarcode, normalizedBarcode: raw.normalizedBarcode, name: raw.name ?? "", brand: raw.brand, category: raw.category },
-            { now: nowIso, verificationStatus: raw.verificationStatus === "verified" ? "verified" : raw.verificationStatus === "conflict" ? "conflict" : "pending", verifiedBy: null, by: "trusted_source" },
-          ),
-          masterId: raw.id,
-          masterProvenanceTier: raw.provenanceTier,
-        });
+        // shape that the store/resolver expects (toMasterAwareStoreEntry, services/catalog/sanitizeCatalog.ts).
+        // Phase 5b Task 4 (GC4 boundary): the tire-master hit ALSO passes raw.id / raw.provenanceTier
+        // through onto the store entry's optional masterId/masterProvenanceTier fields, so
+        // cloudCatalogResolve can build master candidates for the cross-tier conflict check below.
+        // Fix (review HIGH, retail provenance): masterId/masterProvenanceTier are tagged ONLY for hits
+        // from the TIRE master catalog (the default `repo`, collection catalogEntries) - see
+        // toMasterAwareStoreEntry's isMaster param. The retail catalog (`retailRepo`, Open Food Facts)
+        // is a SEPARATE, non-master collection; tagging its hits would run them through the tire-master
+        // conflict machinery with a defaulted "corpus_verified" tier they never earned.
+        const toStoreEntry = (raw: { id: string; normalizedBarcode: string; name?: string; brand?: string; category?: string; verificationStatus?: string; provenanceTier?: ProvenanceTier }, isMaster = false) =>
+          toMasterAwareStoreEntry(raw, isMaster, nowIso);
         let firstAny: CatalogEntry | null = null;
         for (const code of codes) {
           try {
             const raw = await repo.getByBarcode(code);
             if (raw) {
-              const entry = toStoreEntry(raw);
+              const entry = toStoreEntry(raw, true);
               if (entry.verificationStatus === "verified") return entry;
               if (!firstAny) firstAny = entry;
             }
@@ -5922,9 +5922,10 @@ const appDeps: ScanStoreDeps = {
           }
           try {
             // RETAIL catalog (Open Food Facts) - a hit IS the product identity, so resolve it as Known
-            // (mirrors the tire catalog behavior). Separate collection; never mixed with tires.
+            // (mirrors the tire catalog behavior). Separate collection; never mixed with tires. NOT the
+            // master catalog - never tagged with masterId/masterProvenanceTier (see toStoreEntry above).
             const rraw = await retailRepo.getByBarcode(code);
-            if (rraw) return toStoreEntry({ ...rraw, verificationStatus: "verified" });
+            if (rraw) return toStoreEntry({ ...rraw, verificationStatus: "verified" }, false);
           } catch {
             // swallow per-code errors; try the next candidate
           }

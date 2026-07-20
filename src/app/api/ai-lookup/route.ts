@@ -68,43 +68,55 @@ function lookupChain(primary: string): AiProvider[] {
 // now Go-UPC -> Fetch V2 -> GPT-5.5 (see the POST handler); Gemini is out of decode entirely. The
 // legacy `lookup` mode still uses createGeminiProvider via selectProvider/lookupChain (back-compat).
 
-// P5b Task 2 (master-truth write hook, GC7/GC8): shared helper fired on ANY decode outcome branch
-// that carries a settled DecodeDecision passing the Task-1 trust gate - a FRESH compute
-// (`kind:"computed"`) or a PERSISTED/L2-replay hit (`kind:"persisted"`, its body is the same
-// DecodePayload shape spread with cache debug flags). NEVER fired on `kind:"cap_blocked"` (no
-// decision was ever settled). Fire-and-forget: never awaited into the HTTP response, never lets a
-// rejection escape (masterAppend.ts already swallows its own errors into "error", this is a second,
-// cheap safety net). Skipped under e2eMode()/IS_E2E (GC7) and behind a default-ON feature flag so a
-// single env var can kill the whole write path without a deploy.
+// P5b Task 2 (master-truth write hook, GC7/GC8): shared helper fired ONLY on a FRESH compute
+// (`kind:"computed"`) that carries a settled DecodeDecision passing the Task-1 trust gate. FIX 4
+// (review MEDIUM): a PERSISTED/L2-replay hit (`kind:"persisted"`) NEVER fires this hook - a cached
+// payload may have been written under a looser historical verify gate, so replaying it to master
+// would be both a trust hole and a per-request transaction storm; pre-P5b cache rows are exactly the
+// untrusted class this excludes. Also NEVER fired on `kind:"cap_blocked"` (no decision was ever
+// settled). Fire-and-forget: never awaited into the HTTP response, never lets a rejection escape
+// (masterAppend.ts already swallows its own errors into "error"; this helper also wraps its entire
+// body in try/catch as a second, cheap safety net against a synchronous throw - GC7/review MEDIUM).
+// Skipped under e2eMode()/IS_E2E (GC7) and behind a default-ON feature flag so a single env var can
+// kill the whole write path without a deploy.
 function maybeAppendMasterCatalogEntry(payloadLike: {
   sanitizedInput?: { cleanCodeSanitized?: string; rawCodeSanitized?: string };
   decision?: { status?: string; exactCodeEvidenceVerifiedByApp?: boolean; confidence?: number };
   results?: Array<{ productName?: string; brand?: string; category?: string }>;
 }, fallbackCode: string, codeType: string): void {
-  if (e2eMode()) return;
-  if (process.env.MASTER_CATALOG_APPEND === "0") return;
-  const decision = payloadLike.decision;
-  if (!decision) return;
-  const normalizedBarcode = payloadLike.sanitizedInput?.cleanCodeSanitized || fallbackCode;
-  const winningResult = payloadLike.results?.[0];
-  const entry = buildMasterCatalogEntry({
-    normalizedBarcode,
-    codeType,
-    decision: {
-      status: decision.status ?? "",
-      exactCodeEvidenceVerifiedByApp: decision.exactCodeEvidenceVerifiedByApp,
-      confidence: decision.confidence,
-    },
-    identity: {
-      name: winningResult?.productName,
-      brand: winningResult?.brand,
-      category: winningResult?.category,
-    },
-  });
-  if (!entry) return;
-  void appendMasterCatalogEntry(entry).catch(() => {
-    /* GC7: an append failure must never affect the decode response */
-  });
+  // FIX 3 (review MEDIUM, sync-throw): the ENTIRE body runs inside try/catch, not just the async
+  // appendMasterCatalogEntry().catch() tail - a synchronous throw in buildMasterCatalogEntry (a plain
+  // function call, never awaited) would otherwise propagate straight into the POST handler and break
+  // the HTTP response for what is meant to be a fire-and-forget side effect.
+  try {
+    if (e2eMode()) return;
+    if (process.env.MASTER_CATALOG_APPEND === "0") return;
+    const decision = payloadLike.decision;
+    if (!decision) return;
+    const normalizedBarcode = payloadLike.sanitizedInput?.cleanCodeSanitized || fallbackCode;
+    const winningResult = payloadLike.results?.[0];
+    const entry = buildMasterCatalogEntry({
+      normalizedBarcode,
+      codeType,
+      decision: {
+        status: decision.status ?? "",
+        exactCodeEvidenceVerifiedByApp: decision.exactCodeEvidenceVerifiedByApp,
+        confidence: decision.confidence,
+      },
+      identity: {
+        name: winningResult?.productName,
+        brand: winningResult?.brand,
+        category: winningResult?.category,
+      },
+    });
+    if (!entry) return;
+    void appendMasterCatalogEntry(entry).catch(() => {
+      /* GC7: an append failure must never affect the decode response */
+    });
+  } catch {
+    // Never let a synchronous failure in this fire-and-forget side effect break the decode response.
+    console.error("maybeAppendMasterCatalogEntry: synchronous failure swallowed");
+  }
 }
 
 // GET reports which keys/flags are configured. NO secrets are returned (booleans + names only),
@@ -395,14 +407,13 @@ export async function POST(request: Request) {
       budgetMs: typeof body.budgetMs === "number" ? clampDecodeBudgetMs(body.budgetMs) : undefined,
     });
     if (outcome.kind === "persisted") {
-      // P5b Task 2: a persisted/L2-replay hit still carries a settled decision - the idempotent
-      // transactional upsert (GC6) makes replaying this append harmless and keeps the master catalog
-      // fresh even when the ladder itself was never re-run for this request.
-      maybeAppendMasterCatalogEntry(
-        outcome.body as { sanitizedInput?: { cleanCodeSanitized?: string }; decision?: { status?: string; exactCodeEvidenceVerifiedByApp?: boolean; confidence?: number }; results?: Array<{ productName?: string; brand?: string; category?: string }> },
-        code,
-        codeType,
-      );
+      // FIX 4 (review MEDIUM, stale-verified replay + transaction storm): NEVER appends here. A cached/
+      // L2-replay payload may have been written under a LOOSER historical verify gate than the current
+      // one - replaying it to the master catalog on every cache hit is a trust hole (an old, weaker
+      // "verified" gets minted into master truth today) and a per-request transaction storm (every
+      // repeat scan of a cached code would re-run the idempotent-but-not-free transactional upsert).
+      // Only the fresh `computed` branch below appends - a fresh compute is exactly the point where the
+      // CURRENT verify gate was applied, so it is the only outcome kind trusted to write master.
       return Response.json(outcome.body);
     }
     if (outcome.kind === "cap_blocked") {

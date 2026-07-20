@@ -136,6 +136,34 @@ describe("Phase 5b Task 4: cross-tier master-vs-tenant conflict (cloudCatalogRes
     await p;
   });
 
+  // FIX 1 (review HIGH, retail provenance): a retail-catalog hit must never carry masterId, so the
+  // cross-tier conflict machinery (gated on entry.masterId, scanStore.ts ~2477) must never run for it
+  // even when its identity disagrees with the tenant's own product for the same code. This mirrors
+  // toMasterAwareStoreEntry(raw, false, ...) - the store-side effect of the retail (isMaster:false) path.
+  it("(retail) a disagreeing entry with NO masterId never flips to needs_review via cross-tier conflict", async () => {
+    const store = storeWithMaster(() =>
+      Promise.resolve({
+        ...sanitizeCatalogEntry(
+          { barcode: CODE, normalizedBarcode: CODE, name: "Some Retail Product", brand: "RetailBrand", category: "" },
+          { now: NOW, verificationStatus: "verified", verifiedBy: null, by: "trusted_source" },
+        ),
+        // no masterId / masterProvenanceTier - exactly what a retail hit produces.
+      }),
+    );
+    seedTenantProduct(store, "Tenant Widget", "AcmeCo");
+
+    store.getState().processScan("700000000058");
+    const reviewId = reviewIdFor(store, "700000000058");
+    store.setState((s) => ({
+      needsReviewQueue: s.needsReviewQueue.map((r) => (r.id === reviewId ? { ...r, cleanCode: CODE, rawCode: CODE, normalizedCandidates: [CODE] } : r)),
+    }));
+
+    await store.getState().cloudCatalogResolve(reviewId, [CODE]);
+
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId);
+    expect(review?.reason).not.toBe("Cross-tier conflict: master catalog identity disagrees with this account's product");
+  });
+
   it("(d) a master-only hit (no tenant candidate) never reaches the tiered resolver; existing behavior byte-identical", async () => {
     // No tenant product exists for this code at all - toMasterCandidates must return [] and the
     // dev-assert must NOT fire (no throw), and the existing (non-Task-4) enrichment path runs exactly

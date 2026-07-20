@@ -35,20 +35,52 @@ export interface MasterHit {
 }
 
 /** True when two brand+name identities are the SAME product per the app's existing identity rules:
- *  brand-family-aware equality (curated same-company groups, e.g. Michelin/BFGoodrich) AND name
- *  token-Jaccard similarity at or above the app's single canonical threshold. Brand-empty on both
- *  sides is treated as "brands agree" (nothing to disagree about) so a name-only match can still land. */
+ *  brand-family-aware equality (curated same-company groups, e.g. Michelin/BFGoodrich) AND EITHER
+ *  name token-Jaccard similarity at or above the app's single canonical threshold, OR the SUBSET
+ *  rule: every token of the sparser (fewer-token) name, after dropping the brand's own tokens, is
+ *  contained in the richer name's token set. The subset rule exists because corpus master names are
+ *  SLUGS ("wrangler_steadfast_ht") while tenant names are rich strings ("Goodyear Wrangler Steadfast
+ *  HT 265/70R17") - plain Jaccard is diluted by the size/brand tokens the slug never had a chance to
+ *  match, producing a false conflict on the exact same product. Brand-empty on both sides is treated
+ *  as "brands agree" (nothing to disagree about) so a name-only match can still land. */
 function identitiesAgree(aName: string | undefined, aBrand: string | undefined, bName: string | undefined, bBrand: string | undefined): boolean {
   const an = (aName ?? "").trim();
   const bn = (bName ?? "").trim();
   const ab = (aBrand ?? "").trim();
   const bb = (bBrand ?? "").trim();
 
+  // Empty master name: never conflict, never agree - emit nothing (caller returns [] on !agree only
+  // when the caller itself special-cases this; here we simply refuse to call it agreement, and the
+  // caller's empty-name guard upstream keeps this path from ever reaching a "master:" candidate).
+  if (!an || !bn) return false;
+
   const brandsAgree = (!ab && !bb) || sameBrandFamily(ab, bb);
   if (!brandsAgree) return false;
 
-  const sim = jaccard(nameTokens(an), nameTokens(bn));
-  return sim >= IDENTITY_JACCARD_THRESHOLD;
+  const aTokens = nameTokens(an);
+  const bTokens = nameTokens(bn);
+
+  const sim = jaccard(aTokens, bTokens);
+  if (sim >= IDENTITY_JACCARD_THRESHOLD) return true;
+
+  // Subset rule: drop each side's own brand tokens (so "goodyear" in the rich name doesn't count
+  // against the sparser slug), then check whether the sparser token set is fully contained in the
+  // richer one. Order-independent: try both directions since we don't know which side is the slug.
+  // "+"-joined tokens (e.g. "t+h") are also split into their component letters for this comparison
+  // only, since a hyphenated slug ("t-h") naturally tokenizes to separate "t"/"h" tokens while the
+  // rich name's nameTokens() keeps "t+h" fused - both spellings mean the same product line.
+  const splitPlus = (tokens: string[]) => tokens.flatMap((t) => (t.includes("+") ? t.split("+").filter(Boolean) : [t]));
+  const brandTokens = new Set([...nameTokens(ab), ...nameTokens(bb)]);
+  const stripBrand = (tokens: string[]) => splitPlus(tokens).filter((t) => !brandTokens.has(t));
+  const aStripped = stripBrand(aTokens);
+  const bStripped = stripBrand(bTokens);
+
+  const isSubset = (sparse: string[], rich: string[]) => sparse.length > 0 && sparse.every((t) => rich.includes(t));
+
+  if (aStripped.length <= bStripped.length) {
+    return isSubset(aStripped, bStripped);
+  }
+  return isSubset(bStripped, aStripped);
 }
 
 /**
@@ -77,6 +109,10 @@ export function toMasterCandidates(
   // when masterCandidates is empty). Treat as "no tenant candidate" rather than trusting an id we
   // cannot verify.
   if (!tenantProduct) return [];
+
+  // Empty master name: never conflict, never agree - safest is to emit nothing rather than mint a
+  // "master:" disagreement candidate off an identity we cannot compare at all.
+  if (!(hit.name ?? "").trim()) return [];
 
   const tier: ProvenanceTier = hit.masterProvenanceTier ?? "corpus_verified";
   const agree = identitiesAgree(hit.name, hit.brand, tenantProduct.name, tenantProduct.brand);
