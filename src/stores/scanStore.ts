@@ -1171,6 +1171,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // middleware re-pointed to the anon key, or the fail-soft coalesced storage would simply
         // rewrite sis-scan-<uid> on the next tick and the "cleared" state would leak right back.
         const uid = get().userId;
+        // Re-point persist at the anon key BEFORE the wipe below. Firebase's own SDK auth persistence
+        // is cleared by fbSignOut (auth.ts:66-69) in the UI sign-out handlers - that call is the
+        // authority for SDK state; this action owns only app state. Guarded on deps.persistName so the
+        // non-persisted test store (createTestScanStore, persistName: null) never touches the
+        // module-level app store. Doing this BEFORE the wipe (not after) is what stops the coalesced
+        // writer from resurrecting the uid key: the coalescer keeps only one pending slot (latest
+        // name+value), so once persist is re-pointed, the wipe's own write below targets the anon key
+        // and overwrites any older pending write still queued for the uid key. The direct
+        // localStorage.removeItem(persistKeyForUid(uid)) further down stays authoritative regardless.
+        if (deps.persistName) {
+          const persistApi = (useScanStore as unknown as {
+            persist?: { setOptions: (o: { name: string }) => void };
+          }).persist;
+          if (persistApi) persistApi.setOptions({ name: persistKeyForUid(null) });
+        }
         const cleared = emptyTenantState();
         set({
           businessId: DEMO_BUSINESS_ID,
@@ -1192,17 +1207,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           } catch {
             // ignore storage errors: the in-memory reset above already holds
           }
-        }
-        // Re-point persist at the anon key. Firebase's own SDK auth persistence is cleared by
-        // fbSignOut (auth.ts:66-69) in the UI sign-out handlers - that call is the authority for
-        // SDK state; this action owns only app state. Guarded on deps.persistName so the
-        // non-persisted test store (createTestScanStore, persistName: null) never touches the
-        // module-level app store.
-        if (deps.persistName) {
-          const persistApi = (useScanStore as unknown as {
-            persist?: { setOptions: (o: { name: string }) => void };
-          }).persist;
-          if (persistApi) persistApi.setOptions({ name: persistKeyForUid(null) });
         }
       },
 

@@ -51,6 +51,12 @@ for (const vp of VIEWPORTS) {
       expect(after.feedLen).toBe(0);
       expect(after.userIdIsNull).toBe(true);
       expect(after.uidKeyGone).toBe(true); // the signed-out user's blob is GONE, not just reset in memory
+      // Post-tick re-check (I1 regression guard): the immediate check above is timing-lucky and would
+      // not catch a fail-soft coalesced write resurrecting the uid key on the next 0ms flush timer.
+      // Wait past that tick and assert the key is STILL gone.
+      await page.waitForTimeout(100);
+      const stillGone = await page.evaluate(() => window.localStorage.getItem("sis-scan-test-uid") === null);
+      expect(stillGone).toBe(true);
       await page.screenshot({ path: `e2e/proof/p2-signout-${vp.name}.png` });
     });
 
