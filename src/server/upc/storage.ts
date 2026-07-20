@@ -106,6 +106,15 @@ export interface LadderStorage {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   increment(key: string): Promise<number>;
+  /**
+   * Atomically add `delta` (may be any integer, not just 1) to the counter at `key` and return the
+   * NEW total. Same atomicity contract as `increment`: the Turso adapter computes the sum IN SQL
+   * (`value = CAST(value AS INTEGER) + ?`), never a JS-side read-modify-write, so concurrent
+   * serverless instances writing to the SAME key can never lose an update to a race. Backs the GPT
+   * ladder dollar guard's per-call spend deltas (see recordGptLadderSpend in aiSpendGuard.ts), which
+   * previously used get-then-set and could undercount concurrent spend.
+   */
+  incrementBy(key: string, delta: number): Promise<number>;
 }
 
 const USAGE_FILE = ".go-upc-usage.json";
@@ -216,6 +225,18 @@ export function fileLadderStorage(dir: string): LadderStorage {
       ensureDir(dir);
       const map = readJson<Record<string, string>>(kvPath, {});
       const n = Number(map[key] ?? "0") + 1;
+      map[key] = String(n);
+      writeJson(kvPath, map);
+      return n;
+    },
+
+    async incrementBy(key: string, delta: number): Promise<number> {
+      // Same single-process read-modify-write-inside-one-synchronous-block safety as increment()
+      // above. This IS the documented dev/no-storage fallback (see the module header comment); a
+      // genuine concurrent race here is not a concern for a single-process file adapter.
+      ensureDir(dir);
+      const map = readJson<Record<string, string>>(kvPath, {});
+      const n = Number(map[key] ?? "0") + delta;
       map[key] = String(n);
       writeJson(kvPath, map);
       return n;
@@ -426,6 +447,21 @@ export function tursoLadderStorage(client: TursoClientLike): LadderStorage {
               ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1
               RETURNING CAST(value AS INTEGER) AS value`,
         args: [key],
+      });
+      return Number(result.rows[0].value);
+    },
+
+    async incrementBy(key: string, delta: number): Promise<number> {
+      await ensureTables();
+      // Atomic in-SQL delta increment, same contract as increment() above but for an arbitrary
+      // integer delta (not just +1): the database computes `value + delta`, never a JS-side
+      // read-then-write, so two concurrent GPT ladder spend calls on the same day's key can never
+      // lose an update to a race (the get-then-set bug this method replaces in recordGptLadderSpend).
+      const result = await client.execute({
+        sql: `INSERT INTO ${TABLE_KV} (key, value) VALUES (?, ?)
+              ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + ?
+              RETURNING CAST(value AS INTEGER) AS value`,
+        args: [key, String(delta), delta],
       });
       return Number(result.rows[0].value);
     },

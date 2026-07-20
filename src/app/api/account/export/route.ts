@@ -5,7 +5,8 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
-import { intEnv } from "@/services/security/aiSpendGuard";
+import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
@@ -101,9 +102,44 @@ export async function POST(request: NextRequest) {
   const requestedBusinessId = stringField(body.businessId);
   const authBypass = isAuthBypassEnabled() || !isLiveAuth();
 
+  // Fix 1 (P6 ultra-review): export MIRRORS the sibling delete route's bypass refusal
+  // (src/app/api/account/delete/route.ts:83-85) rather than pinning to a demo-tenant bundle. A full
+  // account export is bulk tenant data egress; serving it to ANY anonymous caller in mock mode (the
+  // deployed default) is an unthrottled data-egress hole. Nothing in the UI calls this route yet
+  // (D1 shipped the route only), so refusing outright loses no functionality.
+  if (authBypass) {
+    logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "auth_bypass_refused", status: 403 });
+    return json({ error: "Account export requires a signed-in member." }, 403);
+  }
+
+  // Fix 1: durable, storage-backed per-IP rate limit on the live export path, same seam
+  // /api/ai-lookup uses (checkRateLimit + ladderStorage()). A distinct "EXPORT:" key prefix keeps
+  // this counter independent of the ai-lookup rate limiter's buckets.
+  {
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "local";
+    const rl = await checkRateLimit(`EXPORT:${clientIp}`, {
+      limit: intEnv(process.env.ACCOUNT_EXPORT_RATE_LIMIT, 10),
+      windowMs: intEnv(process.env.ACCOUNT_EXPORT_RATE_WINDOW_MS, 60_000),
+      storage: await ladderStorage(),
+    });
+    if (!rl.allowed) {
+      logServerEvent({ route: "/api/account/export", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+      return NextResponse.json(
+        { error: "Too many export requests. Slow down and try again.", retryAfterMs: rl.retryAfterMs },
+        { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
+    }
+  }
+
   let uid: string | null = null;
 
-  if (!authBypass) {
+  // authBypass is always false past this point (refused above), so this block always runs -
+  // kept as an explicit block (not merged into the outer function body) to minimize the diff
+  // against the original if/authBypass structure.
+  {
     const idToken = stringField(body.idToken);
     if (!idToken) {
       logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "unauthenticated", status: 401 });
@@ -145,11 +181,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // SECURITY: in authBypass mode (mock auth / E2E) there is NO membership verification, so a
-  // caller-supplied businessId must NEVER be honored - a full-account export is bulk data egress,
-  // and the same Firestore project can hold real tenant data while the app runs mock-auth.
-  // Hard-pin bypass exports to the demo tenant; only a verified member reaches requestedBusinessId.
-  const businessId = authBypass ? "demo-business" : requestedBusinessId;
+  // Fix 1: the prior demo-tenant pin for authBypass mode is dead code now that authBypass is
+  // refused outright above - only a verified live member ever reaches this point, so
+  // requestedBusinessId is always the caller's own verified business.
+  const businessId = requestedBusinessId;
   const maxDocs = intEnv(process.env.ACCOUNT_EXPORT_MAX_DOCS, 50000);
 
   const collections: Record<string, { count: number; truncated: boolean; docs: unknown[] }> = {};

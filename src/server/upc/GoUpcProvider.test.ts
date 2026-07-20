@@ -66,6 +66,11 @@ function memStorage(seed?: { miss?: Record<string, MissEntry> }): LadderStorage 
       kv.set(key, String(n));
       return n;
     },
+    incrementBy: async (key, delta) => {
+      const n = Number(kv.get(key) ?? "0") + delta;
+      kv.set(key, String(n));
+      return n;
+    },
   };
 }
 

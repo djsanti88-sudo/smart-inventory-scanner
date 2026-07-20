@@ -4,6 +4,21 @@ import { NextRequest } from "next/server";
 // D1 (Phase 6): account export route tests. Mocks the Admin SDK the same way
 // src/app/api/share/route.test.ts does - no live Firestore/emulator involved.
 
+// Fix 1: route.ts now calls checkRateLimit(..., { storage: await ladderStorage() }) on the live
+// path. Redirect ladderStorage() at a per-process tmp dir (same pattern as
+// src/app/api/ai-lookup/route.test.ts:21-34) so the durable rate-limit counter never pollutes the
+// real repo working tree (.ladder-kv.json) across test runs.
+vi.mock("@/server/upc/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/upc/storage")>();
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-export-route-test-${process.pid}`);
+  return {
+    ...actual,
+    ladderStorage: async () => actual.fileLadderStorage(tmpLadderDir),
+  };
+});
+
 type FakeDoc = { id: string; data: Record<string, unknown> } | null;
 
 const mocks = vi.hoisted(() => ({
@@ -79,6 +94,12 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 }));
 
 import { POST } from "@/app/api/account/export/route";
+import { __resetForTest } from "@/services/security/aiSpendGuard";
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs";
+
+const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-export-route-test-${process.pid}`);
 
 function exportRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost:3000/api/account/export", {
@@ -90,6 +111,8 @@ function exportRequest(body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  __resetForTest();
+  fs.rmSync(tmpLadderDir, { recursive: true, force: true });
   vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
   vi.stubEnv("IS_E2E", "");
   vi.stubEnv("ACCOUNT_EXPORT_MAX_DOCS", "");
@@ -148,52 +171,60 @@ describe("POST /api/account/export authentication", () => {
     expect(response.status).toBe(401);
   });
 
+  // Fix 1 (ultra-review finding): export MIRRORS delete's auth-bypass refusal (delete/route.ts:83-85).
+  // Nothing in the UI calls this route yet (D1 shipped the route only), so refusing loses nothing,
+  // and it closes an unthrottled anonymous-read hole in mock mode (the deployed default).
   it.each([
     ["IS_E2E", "live", "1"],
     ["mock auth mode", "mock", ""],
-  ])("bypasses auth via %s without calling Firebase Auth", async (_label, authMode, isE2e) => {
+  ])("refuses with 403 in authBypass mode (%s) - never serves the demo bundle to an anonymous caller", async (_label, authMode, isE2e) => {
     vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", authMode);
     vi.stubEnv("IS_E2E", isE2e);
-    mocks.tenantData["demo-business"] = mocks.tenantData["biz-1"];
-    mocks.businessDoc = { id: "demo-business", data: { name: "Demo" } };
 
     const response = await POST(exportRequest({}));
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(403);
+    const payload = await response.json();
+    expect(payload).toEqual({ error: "Account export requires a signed-in member." });
+    expect(payload).not.toHaveProperty("collections");
     expect(mocks.verifyIdToken).not.toHaveBeenCalled();
     expect(mocks.memberGet).not.toHaveBeenCalled();
+    // No Firestore path was ever touched - the refusal happens before any data access.
+    expect(mocks.queriedPaths).toEqual([]);
   });
 
-  it.each([
-    ["IS_E2E bypass", "live", "1"],
-    ["mock auth mode", "mock", ""],
-  ])(
-    "in authBypass mode (%s) NEVER honors a caller-supplied businessId - exports only demo-business",
-    async (_label, authMode, isE2e) => {
-      vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", authMode);
-      vi.stubEnv("IS_E2E", isE2e);
-      mocks.tenantData["victim-biz"] = {
-        products: [{ id: "stolen", data: { businessId: "victim-biz", name: "Victim secret" } }],
-        aliases: [], countSessions: [], inventoryCounts: [], scanEvents: [],
-        unknownCodeReviews: [], settings: [], shopOverrides: [], auditLog: [],
-      };
-      mocks.tenantData["demo-business"] = mocks.tenantData["biz-1"];
-      mocks.businessDoc = { id: "demo-business", data: { name: "Demo" } };
+  it("in authBypass mode never honors a caller-supplied businessId either - still 403, no query", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "mock");
+    vi.stubEnv("IS_E2E", "");
 
-      const response = await POST(exportRequest({ businessId: "victim-biz" }));
-      expect(response.status).toBe(200);
-      const payload = await response.json();
+    const response = await POST(exportRequest({ businessId: "victim-biz" }));
+    expect(response.status).toBe(403);
+    expect(mocks.queriedPaths).toEqual([]);
+  });
+});
 
-      // The bundle is pinned to demo-business, never the attacker-chosen tenant.
-      expect(payload.businessId).toBe("demo-business");
-      const serialized = JSON.stringify(payload);
-      expect(serialized).not.toContain("victim-biz");
-      expect(serialized).not.toContain("Victim secret");
-      // And no Firestore path for the victim tenant was ever queried.
-      for (const path of mocks.queriedPaths) {
-        expect(path).not.toContain("victim-biz");
-      }
-    },
-  );
+describe("POST /api/account/export rate limiting (live path)", () => {
+  it("allows a normal request through under the default limit", async () => {
+    const response = await POST(
+      exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("blocks with 429 + Retry-After once the per-IP limit is exhausted", async () => {
+    vi.stubEnv("ACCOUNT_EXPORT_RATE_LIMIT", "1");
+    vi.stubEnv("ACCOUNT_EXPORT_RATE_WINDOW_MS", "60000");
+
+    const first = await POST(exportRequest({ businessId: "biz-1", idToken: "firebase-token" }));
+    expect(first.status).toBe(200);
+
+    const second = await POST(exportRequest({ businessId: "biz-1", idToken: "firebase-token" }));
+    expect(second.status).toBe(429);
+    expect(second.headers.get("Retry-After")).toBeTruthy();
+    const payload = await second.json();
+    expect(payload.error).toBeTruthy();
+    expect(typeof payload.retryAfterMs).toBe("number");
+    expect(payload.retryAfterMs).toBeGreaterThan(0);
+  });
 });
 
 describe("POST /api/account/export data shape and tenant isolation", () => {

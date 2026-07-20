@@ -19,6 +19,40 @@ function memStorage() {
     async get(k: string) { return m.get(k) ?? null; },
     async set(k: string, v: string) { m.set(k, v); },
     async increment(k: string) { const n = Number(m.get(k) ?? "0") + 1; m.set(k, String(n)); return n; },
+    async incrementBy(k: string, delta: number) { const n = Number(m.get(k) ?? "0") + delta; m.set(k, String(n)); return n; },
+  };
+}
+
+/**
+ * Fix 2 (P6 ultra-review, $-guard race): a storage stub whose `incrementBy` is GENUINELY
+ * serialized (mirrors the Turso adapter's atomic in-SQL `value = CAST(value AS INTEGER) + ?`),
+ * unlike a naive get-then-set which would lose concurrent updates to a race. Used to prove
+ * recordGptLadderSpend correctly sums concurrent deltas instead of last-write-wins.
+ */
+function serializedIncrementByStorage() {
+  const m = new Map<string, string>();
+  let chain: Promise<unknown> = Promise.resolve();
+  return {
+    async get(k: string) { return m.get(k) ?? null; },
+    async set(k: string, v: string) { m.set(k, v); },
+    async increment(k: string): Promise<number> {
+      const result = chain.then(() => {
+        const n = Number(m.get(k) ?? "0") + 1;
+        m.set(k, String(n));
+        return n;
+      });
+      chain = result;
+      return result;
+    },
+    async incrementBy(k: string, delta: number): Promise<number> {
+      const result = chain.then(() => {
+        const n = Number(m.get(k) ?? "0") + delta;
+        m.set(k, String(n));
+        return n;
+      });
+      chain = result;
+      return result;
+    },
   };
 }
 
@@ -181,6 +215,7 @@ describe("GPT ladder dollar guard (durable, storage-backed)", () => {
       async get(): Promise<string | null> { throw new Error("storage unavailable"); },
       async set() {},
       async increment() { return 1; },
+      async incrementBy(): Promise<number> { throw new Error("storage unavailable"); },
     };
     const r = await checkGptLadderBudget({ capUsd: 1.0, dateKey: "broken-d1", file, storage: brokenStorage });
     expect(r.allowed).toBe(true); // fails OPEN: file/memory fallback reports 0 spent
@@ -193,11 +228,36 @@ describe("GPT ladder dollar guard (durable, storage-backed)", () => {
       async get(): Promise<string | null> { throw new Error("storage unavailable"); },
       async set() {},
       async increment() { return 1; },
+      async incrementBy(): Promise<number> { throw new Error("storage unavailable"); },
     };
     await recordGptLadderSpend(0.5, { dateKey: "broken-write-d1", file, storage: brokenStorage });
     // The write fell through to the file adapter - a plain file-only read confirms it landed.
     const r = await checkGptLadderBudget({ capUsd: 1.0, dateKey: "broken-write-d1", file });
     expect(r.spentUsd).toBeCloseTo(0.5, 5);
+  });
+
+  // Fix 2 (P6 ultra-review): recordGptLadderSpend previously did storage.get then storage.set -
+  // two concurrent calls racing on the SAME key can both read the same base value and the loser's
+  // write clobbers the winner's, silently undercounting spend by one call's worth. The fix uses an
+  // atomic incrementBy (in-SQL `value = value + ?` on Turso) instead of get-then-set.
+  test("two concurrent recordGptLadderSpend calls on the same key both land (sum, not last-write-wins)", async () => {
+    const storage = serializedIncrementByStorage();
+    const dateKey = "race-d1";
+    await Promise.all([
+      recordGptLadderSpend(0.1, { dateKey, storage }),
+      recordGptLadderSpend(0.25, { dateKey, storage }),
+    ]);
+    const r = await checkGptLadderBudget({ capUsd: 10, dateKey, storage, worstCaseUsd: 0 });
+    // 0.1 + 0.25 = 0.35, NOT just 0.25 (or 0.1) from a lost-update race.
+    expect(r.spentUsd).toBeCloseTo(0.35, 5);
+  });
+
+  test("twenty concurrent small spends on the same key all land (no lost updates)", async () => {
+    const storage = serializedIncrementByStorage();
+    const dateKey = "race-d2";
+    await Promise.all(Array.from({ length: 20 }, () => recordGptLadderSpend(0.01, { dateKey, storage })));
+    const r = await checkGptLadderBudget({ capUsd: 10, dateKey, storage, worstCaseUsd: 0 });
+    expect(r.spentUsd).toBeCloseTo(0.2, 5);
   });
 });
 

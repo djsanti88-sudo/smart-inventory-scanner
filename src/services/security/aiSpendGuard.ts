@@ -216,11 +216,17 @@ function gptLadderKey(dateKey: string): string {
   return `gptLadderUsd:${dateKey}`;
 }
 
-/** Minimal storage surface the GPT ladder $-guard needs - the same shape as DailyCapStorage. */
+/**
+ * Minimal storage surface the GPT ladder $-guard needs. `incrementBy` (Fix 2, P6 ultra-review) is
+ * an atomic arbitrary-delta increment - required so recordGptLadderSpend never does a JS-side
+ * get-then-set, which could silently lose one call's spend to a race between two concurrent GPT
+ * ladder rungs writing to the same day's key.
+ */
 export type GptLadderStorage = {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   increment(key: string): Promise<number>;
+  incrementBy(key: string, delta: number): Promise<number>;
 };
 
 const GPT_SPEND_CENTS_PREFIX = "gpt_ladder_usd_cents:";
@@ -291,9 +297,9 @@ export async function checkGptLadderBudget(
 /**
  * Records actual GPT ladder spend for the day. DURABLE when `opts.storage` is supplied: dollar
  * amounts are stored as integer tenth-of-a-cent units so the guard never rounds sub-cent spend to
- * zero. Uses a get-then-set (not `increment`, which only atomically adds exactly 1) - accepts the
- * same small race window the file adapter always had; `worstCaseUsd` headroom in
- * checkGptLadderBudget absorbs at most one call's worth of undercounting from a lost race. Falls
+ * zero. Uses the ATOMIC `incrementBy` (Fix 2, P6 ultra-review) - never a JS-side get-then-set - so
+ * two concurrent GPT ladder rungs recording spend against the SAME day's key both land (summed),
+ * instead of the loser's write silently clobbering the winner's under the old get-then-set. Falls
  * back to file/memory (dev/no-storage, or on a storage error).
  */
 export async function recordGptLadderSpend(
@@ -306,11 +312,7 @@ export async function recordGptLadderSpend(
   if (opts.storage) {
     try {
       const centsKey = GPT_SPEND_CENTS_PREFIX + date;
-      const raw = await opts.storage.get(centsKey);
-      const existingTenthCents = raw ? Number(raw) : 0;
-      const nextTenthCents =
-        (Number.isFinite(existingTenthCents) && existingTenthCents >= 0 ? existingTenthCents : 0) + usdToTenthCents(usd);
-      await opts.storage.set(centsKey, String(nextTenthCents));
+      await opts.storage.incrementBy(centsKey, usdToTenthCents(usd));
       return;
     } catch (err) {
       console.warn("[recordGptLadderSpend] storage error, falling back to file/memory:", err);
