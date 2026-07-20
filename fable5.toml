@@ -199,3 +199,28 @@ agents = ["project-manager", "simplicity-enforcer", "budget-analyst"]
 [[routes]]
 patterns = ["**/pricing*", "**/billing*", "docs/**/*market*", "docs/**/*competitor*"]
 agents = ["pricing-strategy", "product-strategy", "competitor-intel", "value-roi"]
+
+[[risk]]
+patterns = ["src/services/inventory*", "src/stores/scan*"]
+tag = "ledger"
+weight = 10
+
+[[risk]]
+patterns = ["firestore.rules", "src/services/auth*", "src/services/db/**", "src/app/api/**"]
+tag = "tenancy"
+weight = 8
+
+[[risk]]
+patterns = ["src/server/decode/**", "src/services/ai/**"]
+tag = "decode"
+weight = 6
+
+[[risk]]
+patterns = ["src/components/**", "src/app/**"]
+tag = "ui"
+weight = 4
+
+[[risk]]
+patterns = ["docs/**", "*.md"]
+tag = "docs"
+weight = 1
