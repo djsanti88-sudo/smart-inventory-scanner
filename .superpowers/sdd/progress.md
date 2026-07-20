@@ -368,3 +368,11 @@ THEN: P5b (docs/superpowers/plans TBD - author from p5b-scout.md) + P6 (author f
 - Gates: unit 2829/0, tsc 0, ledger 44/44, golden 2/2, firebase 52/52, build clean, e2e 55/55.
 - P6 progress: A1 (34ee9a7 profile refresh), A3 (4d4c2d0 honest drift gate - NOTE: regen from branch CSV DROPPED 1,902 harvest barcodes; orchestrator caught + reverted; payload 78,243 / meta 76,173 = documented healthy asymmetry; CSV reconciliation deferred, owner-flagged), D1 (fc9f8ec export route, bypass hard-pinned to demo tenant).
 - IN FLIGHT next wave: A2 (cap reorder, law-critical), C1 (settings account), C2 (first-run banner + firstScanAt), C3 (README). Then B1/B2 (after A2), D2 (after C1), phase gate + qa:bots + ultra + agy final.
+
+## P6 CLOSE (2026-07-20) - MASTER PLAN PHASES COMPLETE THROUGH P6
+- All 10 tasks shipped + 2 ultra fix waves + final dual review (Fable continuous diff-verify + agy flash-medium):
+  A1 34ee9a7, A2 40f6b65 (tenant-starvation cap fix, law-critical), A3 4d4c2d0 (drift gate; orchestrator caught+reverted a 1,902-barcode regen regression), C1 7176caa, C2 528d76e, C3 caeca6f, D1 fc9f8ec, D2 f0891bc (owner-only recursive deletion), B1+B2 f531259 (durable limits + $-guard + structured logging), ultra 272b888 (export 403-in-mock + rate limit; atomic incrementBy), bots 6975595 (SecurityLeakBot retargeted to real P0 surfaces - the "leak" was a stale assertion vs dec0384b policy), final 
+  micro-fixes (fail-open export limiter, recentLocations tenant reset).
+- Final gates: unit 2883/0 (307 files), tsc 0, ledger 44/44, golden 2/2, firebase 52/52, build clean, e2e 56/56, qa:bots 12/12, Argus PASS (1 engine-internal self-test failure adjudicated non-project: tools/fable5 test_hooks daily-cap state pollution - fix the engine later).
+- agy final pass: 4 findings, 2 refuted vs source (decode account charge exists, test-locked), 2 fixed.
+- DEFERRED/owner-flagged: corpus CSV-level reconciliation (harvester scope); breaker-open server telemetry; retail drift gate; live-mode firstScanAt mirroring; P5b GC10 server-path master feed. NOT pushed/deployed - owner-gated. /code-review ultra moment: NOW (P5+P5b+P6 all closed).

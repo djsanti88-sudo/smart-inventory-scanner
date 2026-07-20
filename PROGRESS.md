@@ -245,3 +245,9 @@ live listener (a naive onSnapshot replace would violate the TOP-LEVEL LAW). Befo
 listSessions falls back to [currentSession]; after Refresh, listSessions/reopenSession use the full
 Task-7-populated sessions state. Task 14 formal visual-polish agent pass deferred (its e2e screenshot
 specs were out of Tasks 10/11 file scope); markup self-review clean. Push/deploy still owner-gated.
+
+## Checkpoint 2026-07-20 (Fable 5 orchestrator session 2): P5 + P5b + P6 CLOSED
+Decode Trust (P5), Master Truth (P5b), and Sell-Ready (P6) are complete on feat/decode-ladder-goupc
+(NOT pushed). Full battery green: unit 2883/0, ledger 44/44, golden 2/2, firebase 52/52, build,
+e2e 56/56, qa:bots 12/12, Argus PASS. Durable ledger: .superpowers/sdd/progress.md (authoritative).
+Remaining owner decisions: push/PR, production promote, /code-review ultra, corpus CSV reconciliation.
