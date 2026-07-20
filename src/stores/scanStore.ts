@@ -4580,13 +4580,111 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               : e,
           ),
         }));
-        // 3. Remove the session count (product + now-deactivated aliases are kept for audit/repair).
+        // 3. Transfer the wrong product's physical quantity to a SAFE "Unidentified item" provisional
+        //    keyed by the representative scanned code, then reopen review. Total physical quantity is
+        //    INVARIANT across any identity correction (North-star #2): the items are still on the
+        //    shelf; only their identity was wrong.
+        const code = seenCodes[0] || product?.primaryBarcode || "";
         if (count) {
+          const wrongQty = count.quantity;
+          // (a) Remove the wrong count row FIRST. ensureProvisionalCount's idempotency guard
+          //     (scanStore.ts:2952) short-circuits when any CURRENTLY-COUNTED product carries this
+          //     code in its identifier fields - the wrong product still does (step 1b un-verifies but
+          //     does not blank primaryBarcode). Its `counted` set is built from finalCounts, so removing
+          //     the row here is what lets the mint below proceed.
           set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.productId !== productId) }));
-          emitAudit({ entityType: "InventoryCount", entityId: count.id, action: "count_removed", metadata: { productId, quantity: count.quantity, reason: "marked_wrong" } });
+          if (code && wrongQty > 0) {
+            // (b) Mint + count the Unidentified provisional off the first reopened feed row (step 2
+            //     already reset the wrong product's rows to matchedProductId: null / needs_review, which
+            //     is exactly the shape ensureProvisionalCount's feed lookup matches). Task 2's D1 repair
+            //     makes this mint enqueue SAVE_PRODUCT + SAVE_SCAN_EVENT + INCREMENT_COUNT too.
+            get().ensureProvisionalCount(code, `Marked wrong - re-identify. Previous match "${product?.name ?? ""}" removed.`);
+            const provRow = get().products.find(
+              (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === code,
+            );
+            if (provRow) {
+              // (c) Repoint every REMAINING reopened feed event for this code onto the provisional and
+              //     apply each through the ledger (incrementInventoryCount dedupes by event id), stamping
+              //     the same-fact quantityDelta: 1 on the row. The transferred quantity is carried by
+              //     REAL events - the ledger replay reproduces it exactly (North-star #2).
+              const pending = get().scanFeed.filter(
+                (e) => e.cleanCode === code && e.matchedProductId === null && e.status === "needs_review",
+              );
+              for (const ev2 of pending) {
+                const stNow = get();
+                const cur = stNow.finalCounts.find((c) => c.productId === provRow.id);
+                if (cur?.scanEventIds.includes(ev2.id)) continue;
+                const r = incrementInventoryCount(
+                  stNow.finalCounts,
+                  { ...ev2, matchedProductId: provRow.id, status: "known", quantityDelta: 1 },
+                  idFactory,
+                );
+                set((s2) => ({
+                  finalCounts: r.counts,
+                  scanFeed: s2.scanFeed.map((e) =>
+                    e.id === ev2.id
+                      ? { ...e, matchedProductId: provRow.id, status: "known" as const, quantityDelta: 1, quantityAfterScan: r.count.quantity }
+                      : e,
+                  ),
+                }));
+              }
+              // (d) Feed-trim safety net: if the wrong count carried MORE events than the current feed
+              //     exposes (a persist-trimmed feed), carry the residual on a SYNTHETIC BACKING EVENT
+              //     appended to the feed and applied through the ledger - NEVER a naked quantity bump.
+              //     replayLedgerCounts rebuilds counts from feed events only, so a bare `quantity +=`
+              //     would be quantity no replay can reproduce - the exact invariant this phase exists
+              //     to guarantee. On a complete feed (every unit test + normal sessions) the repoint
+              //     loop above accounts for everything, missing is 0, and this mints nothing.
+              const applied = get().finalCounts.find((c) => c.productId === provRow.id)?.quantity ?? 0;
+              const missing = wrongQty - applied;
+              if (missing > 0) {
+                const residualId = idFactory();
+                const residualEvent: ScanEvent = {
+                  id: residualId,
+                  businessId: state.businessId,
+                  sessionId: state.sessionId,
+                  rawCode: code,
+                  cleanCode: code,
+                  normalizedCandidates: [],
+                  matchedProductId: provRow.id,
+                  matchType: "unknown",
+                  status: "known",
+                  resolverStatus: "needs_review",
+                  codeType: detectCodeType(code),
+                  reason: "markWrong residual repoint (feed trimmed by persist).",
+                  quantityDelta: missing,
+                  quantityAfterScan: 0,
+                  createdAt: now(),
+                  source: "scan",
+                  notes: "markWrong residual repoint (feed trimmed by persist).",
+                  syncStatus: "pending",
+                  syncError: null,
+                  idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, residualId, "INCREMENT_COUNT"),
+                };
+                const rr = incrementInventoryCount(get().finalCounts, residualEvent, idFactory);
+                residualEvent.quantityAfterScan = rr.count.quantity;
+                set((s2) => ({
+                  scanFeed: [residualEvent, ...s2.scanFeed],
+                  finalCounts: rr.counts,
+                }));
+                // Enqueue the synthetic event like any counted scan (SAVE_SCAN_EVENT + INCREMENT_COUNT).
+                // Without this, the derived syncStatus reconcile (scanStore.ts:907-922) would report an
+                // event absent from pendingSyncQueue as "synced" - re-minting the exact fake-synced
+                // class Task 2 killed. No SAVE_PRODUCT here: ensureProvisionalCount already enqueued it.
+                const residualInc: IncrementPayload = {
+                  businessId: state.businessId, sessionId: state.sessionId, productId: provRow.id,
+                  scanEventId: residualId, quantityDelta: missing, idempotencyKey: residualEvent.idempotencyKey,
+                };
+                enqueueAndSync([
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "ScanEvent", entityId: residualId, operation: "SAVE_SCAN_EVENT", payload: residualEvent, idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, residualId, "SAVE_SCAN_EVENT"), scanEventId: residualId }),
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "InventoryCount", entityId: rr.count.id, operation: "INCREMENT_COUNT", payload: residualInc, idempotencyKey: residualEvent.idempotencyKey, scanEventId: residualId }),
+                ]);
+              }
+            }
+          }
+          emitAudit({ entityType: "InventoryCount", entityId: count.id, action: "count_transferred", metadata: { productId, quantity: wrongQty, toCode: code, reason: "marked_wrong" } });
         }
         // 4. Reopen Needs Review for the representative scanned code.
-        const code = seenCodes[0] || product?.primaryBarcode || "";
         const reviewId = code
           ? get().reopenNeedsReview(code, `Marked wrong by owner. Previous match ${product?.name ? `"${product.name}"` : ""} removed - re-identify the product.`)
           : null;

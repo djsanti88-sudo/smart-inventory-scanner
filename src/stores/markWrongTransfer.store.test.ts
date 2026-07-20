@@ -1,0 +1,95 @@
+import { describe, it, expect, vi } from "vitest";
+import { createTestScanStore } from "@/stores/scanStore";
+import { MockDb } from "@/services/mockDb";
+import { replayLedgerCounts } from "@/services/inventory.replay";
+
+const total = (store: ReturnType<typeof createTestScanStore>) =>
+  store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0);
+
+// Seed a VERIFIED product + approved alias so the scan resolves "known" and counts against it, then
+// markWrong it. The physical quantity must survive as an Unidentified provisional, not vanish.
+function seedKnown(store: ReturnType<typeof createTestScanStore>, code: string) {
+  const s = store.getState();
+  const productId = "seed-wrong-1";
+  store.setState((prev) => ({
+    products: [...prev.products, {
+      id: productId, businessId: s.businessId, name: "Wrongly Mapped Tire", brand: "Cooper", category: "tire",
+      specsShort: "", specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "",
+      vendorCodes: [], aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active",
+      source: "seed", confidence: 1, verified: true, createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "seed", updatedBy: "seed",
+    }],
+    aliases: [...prev.aliases, {
+      id: "alias-wrong-1", businessId: s.businessId, productId, rawCodeExample: code, cleanCode: code,
+      normalizedCode: code, aliasType: "barcode", source: "seed", confidence: 1, approved: true,
+      createdAt: s.sessionId, updatedAt: s.sessionId, createdBy: "seed", lastSeenAt: s.sessionId,
+      syncStatus: "synced", idempotencyKey: "seed-alias-wrong-1",
+    }],
+  }));
+  return productId;
+}
+
+describe("D2: markWrong transfers quantity instead of destroying it", () => {
+  it("marking a counted product wrong keeps total physical quantity constant", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const code = "049000006346";
+    const productId = seedKnown(store, code);
+
+    store.getState().processScan(code); // counts against the (wrong) verified product
+    store.getState().processScan(code); // qty 2
+    expect(total(store)).toBe(2);
+
+    await store.getState().markWrong(productId, { reason: "test" });
+
+    // The wrong product's count is gone, but the 2 physical items survive on an Unidentified provisional.
+    expect(total(store), "total physical quantity is invariant across markWrong").toBe(2);
+    expect(store.getState().finalCounts.some((c) => c.productId === productId)).toBe(false);
+    const unidentified = store.getState().products.find(
+      (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === code,
+    );
+    expect(unidentified, "an Unidentified provisional now carries the quantity").toBeDefined();
+    expect(store.getState().finalCounts.find((c) => c.productId === unidentified!.id)!.quantity).toBe(2);
+  });
+
+  it("a ledger replay after markWrong reproduces the surviving quantity and scanEventIds", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const code = "049000006346";
+    const productId = seedKnown(store, code);
+    store.getState().processScan(code);
+    store.getState().processScan(code);
+    await store.getState().markWrong(productId, { reason: "test" });
+
+    const unidentified = store.getState().products.find((p) => p.provisional && p.primaryBarcode === code)!;
+    const live = store.getState().finalCounts.find((c) => c.productId === unidentified.id)!;
+    const replay = replayLedgerCounts(store.getState().scanFeed, store.getState().sessionId)
+      .find((c) => c.productId === unidentified.id)!;
+    expect(replay.quantity).toBe(live.quantity);
+    expect(new Set(live.scanEventIds)).toEqual(new Set(replay.scanEventIds));
+  });
+
+  it("EXAMPLE-GATE REGRESSION LOCK: an example barcode marked wrong never dispatches a paid decode and never settles verified", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    // AI ON so a paid decode WOULD dispatch if the example-gate ever regressed.
+    store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    // Spy on fetch: a paid decode POST to /api/ai-lookup would flow through here.
+    const original = globalThis.fetch;
+    const fetchSpy = vi.fn(async () => { throw new Error("no live call allowed"); }) as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
+    try {
+      const exampleCode = "4006381333931"; // textbook GS1 example barcode (b4ff79a blocklist)
+      const productId = seedKnown(store, exampleCode);
+      store.getState().processScan(exampleCode);
+      await store.getState().markWrong(productId, { reason: "test" });
+      // The transferred provisional stays an Unidentified/needs-review row, never verified.
+      const prov = store.getState().products.find((p) => p.provisional && p.primaryBarcode === exampleCode);
+      expect(prov).toBeDefined();
+      expect(prov!.verified).toBe(false);
+      const row = store.getState().scanFeed.find((e) => e.matchedProductId === prov!.id);
+      expect(row?.decodeStatus === "verified").toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
