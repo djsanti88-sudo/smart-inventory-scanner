@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { getSession } from "@/lib/auth";
+import { isLiveAuth } from "@/services/auth/authMode";
 import { buildBossReport } from "@/services/reports/bossReport";
 import { useScanStore } from "@/stores/scanStore";
 
@@ -10,28 +12,53 @@ export default function BossReportPage() {
   const scanFeed = useScanStore((state) => state.scanFeed);
   const session = useScanStore((state) => state.currentSession);
   const userId = useScanStore((state) => state.userId);
+  const businessId = useScanStore((state) => state.businessId);
+  const countSnapshots = useScanStore((state) => state.countSnapshots);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
-  const report = buildBossReport({
-    products,
-    finalCounts,
-    scanFeed,
-    sessionName: session?.name ?? "Current session",
-    countedBy: userId ?? "Owner",
-    countedAt: new Date().toISOString(),
-  });
+  const previousSnapshot = countSnapshots[countSnapshots.length - 2];
+  const currentSnapshotForVariance = countSnapshots[countSnapshots.length - 1];
+  const buildCurrentReport = () =>
+    buildBossReport({
+      products,
+      finalCounts,
+      scanFeed,
+      sessionName: session?.name ?? "Current session",
+      countedBy: userId ?? "Owner",
+      countedAt: new Date().toISOString(),
+      previousSnapshot,
+      currentSnapshotForVariance,
+    });
+  const report = buildCurrentReport();
 
   async function handleShare() {
     setSharing(true);
     setShareError(null);
 
     try {
+      const reportSnapshot = buildCurrentReport();
+      let idToken: string | undefined;
+
+      if (isLiveAuth()) {
+        const user = await getSession();
+        if (!user) {
+          setShareError("Sign in required.");
+          return;
+        }
+        idToken = await user.getIdToken();
+      }
+
       const response = await fetch("/api/share", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: session?.id ?? "" }),
+        body: JSON.stringify({
+          businessId,
+          reportSnapshot,
+          sessionId: session?.id ?? "",
+          ...(idToken ? { idToken } : {}),
+        }),
       });
 
       if (!response.ok) {

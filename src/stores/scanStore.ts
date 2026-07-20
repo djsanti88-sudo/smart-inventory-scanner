@@ -1665,8 +1665,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           scanFeed: [],
           finalCounts: [],
           needsReviewQueue: [],
-          pendingSyncQueue: [],
-          syncedScanEventIds: [],
           lastSyncError: null,
         });
         enqueueAndSync([
