@@ -206,6 +206,13 @@ export interface ScanEvent {
   syncStatus: SyncStatus;
   syncError: string | null;
   idempotencyKey: string;
+  /** Phase 3: the device that produced this scan (getOrCreateDeviceId). Attribution/debugging only -
+   *  never used to decide whether a scan counts (that guarantee is the idempotencyKey/_appliedKeys
+   *  transaction, unrelated to this field). Optional: older persisted events lack it. */
+  deviceId?: string;
+  /** Phase 3: free-text location captured at scan time (defaults to the session's location until
+   *  changed - see Task 9). Optional: older persisted events lack it. */
+  location?: string;
 }
 
 export interface InventorySession {
@@ -223,6 +230,9 @@ export interface InventorySession {
    *  edited until it is unlocked with the owner PIN. Optional for back-compat with older persisted sessions. */
   locked?: boolean;
   lockedAt?: string | null;
+  /** Phase 3: the device that auto-opened this session (getOrCreateDeviceId). Undefined for
+   *  manually-started or pre-Phase-3 sessions - those are never auto-reused (see autoSession.ts). */
+  deviceId?: string;
 }
 
 export interface InventoryCount {
@@ -239,6 +249,9 @@ export interface InventoryCount {
   syncStatus: SyncStatus;
   syncError: string | null;
   appliedIdempotencyKeys: string[];
+  /** Phase 3: the most recent location a scan for this product/session was recorded at. Optional:
+   *  older persisted counts lack it. Display-only; never part of the ledger identity. */
+  location?: string;
 }
 
 export interface UnknownCodeReview {
