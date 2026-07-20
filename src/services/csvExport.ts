@@ -154,6 +154,48 @@ export function exportRawScanLog(scanFeed: ScanEvent[]): string {
   return buildCsv(headers, rows);
 }
 
+/** Session-scoped scan-level CSV for a single session's timeline.
+ *  Kept separate from exportRawScanLog because the whole-account raw log and one session's timeline
+ *  have different audiences. */
+export function exportSessionScanLog(events: ScanEvent[]): string {
+  const headers = [
+    "time",
+    "raw_code",
+    "clean_code",
+    "match_type",
+    "matched_product_id",
+    "status",
+    "quantity_after_scan",
+    "location",
+    "sync_status",
+  ];
+  const rows = events.map((e) => [
+    e.createdAt,
+    e.rawCode,
+    e.cleanCode,
+    e.matchType,
+    e.matchedProductId ?? "",
+    e.status,
+    e.quantityAfterScan,
+    e.location ?? "",
+    e.syncStatus,
+  ]);
+  return buildCsv(headers, rows);
+}
+
+/** Customer-safe session timeline export. Code and attribution fields stay platform-only. */
+export function exportSessionScanLogCustomer(events: ScanEvent[]): string {
+  const headers = ["time", "status", "quantity_after_scan", "location", "sync_status"];
+  const rows = events.map((e) => [
+    e.createdAt,
+    e.status,
+    e.quantityAfterScan,
+    e.location ?? "",
+    e.syncStatus,
+  ]);
+  return buildCsv(headers, rows);
+}
+
 export function exportUnknowns(reviews: UnknownCodeReview[]): string {
   const headers = [
     "raw_code",
