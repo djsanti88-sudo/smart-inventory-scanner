@@ -12,7 +12,8 @@ import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 import { GptLadderPanel } from "@/components/GptLadderPanel";
 import { GeminiStatusRow } from "@/components/GeminiStatusRow";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
-import { getSession, onAuthChange, signOut } from "@/lib/auth";
+import { getSession, onAuthChange } from "@/lib/auth";
+import { runSignOutFlow, wipeAndSignOut } from "@/services/auth/signOutFlow";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -142,6 +143,11 @@ export default function SettingsPage() {
         return;
       }
       setDeletePrompt(false);
+      // F2: the business is deleted server-side, so the local tenant blob (scan feed / products /
+      // aliases in sis-scan-v1) is now meaningless AND a data leak - without this wipe it ghosts into
+      // the next session on this browser. No unsynced-work confirm here: there is nothing to preserve,
+      // and the typed-phrase + confirm already gated the destructive act. Same wipe as the sign-out flow.
+      await wipeAndSignOut();
       if (typeof window !== "undefined") window.location.href = "/login";
     } catch {
       setDeleteErr("Deletion failed. Check your connection and try again.");
@@ -353,7 +359,10 @@ export default function SettingsPage() {
             <button
               type="button"
               data-testid="sign-out"
-              onClick={() => void signOut()}
+              // C1: route through the ONE shared sign-out flow (honest unsynced warning + full tenant wipe
+              // + signOut + redirect) so this can never drift from Nav's Log out button. A bare signOut()
+              // would leave the prior tenant's data in localStorage for the next user on this browser.
+              onClick={() => void runSignOutFlow(() => { window.location.href = "/login"; })}
               className="inline-flex min-h-[44px] w-fit items-center rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
             >
               Sign out

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
-import { signOut } from "@/lib/auth";
+import { runSignOutFlow } from "@/services/auth/signOutFlow";
 import { isLiveAuth } from "@/services/auth/authMode";
 
 // App navigation. Shows an open-review count badge so unknown codes are obvious but not disruptive.
@@ -51,18 +51,9 @@ export function Nav() {
         {isLiveAuth() && (
           <button
             type="button"
-            onClick={async () => {
-              // F1: attempt one awaited drain first, then warn HONESTLY if unsynced work would be lost.
-              const left = await useScanStore.getState().prepareSignOut();
-              const message =
-                left === 0
-                  ? "Log out now? Your counts are saved - you can sign back in any time to keep going."
-                  : `${left} scan${left === 1 ? "" : "s"} could not sync to the cloud yet. Signing out now will discard ${left === 1 ? "it" : "them"} permanently. Sign out anyway?`;
-              if (!window.confirm(message)) return; // cancel aborts sign-out entirely: no reset, no signOut
-              useScanStore.getState().resetForSignOut();
-              await signOut();
-              router.replace("/login");
-            }}
+            // F1/C1: the ONE shared sign-out flow (honest unsynced warning + full tenant wipe + signOut +
+            // redirect). Settings' Sign out button calls the same helper so the two can never drift.
+            onClick={() => void runSignOutFlow(() => router.replace("/login"))}
             className="ml-auto inline-flex min-h-[44px] items-center rounded-lg px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50"
           >
             Log out
