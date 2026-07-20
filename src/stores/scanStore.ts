@@ -75,6 +75,7 @@ import { parseCsv, buildProductImport, type ImportConflict } from "@/services/cs
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
 import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
+import { emptyTenantState } from "@/stores/scanReset";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import { backfillProducts } from "@/services/polish/backfillProducts";
@@ -1108,7 +1109,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       setBusinessContext: (businessId, userId) => {
         const needsLoad = cloudBackend && !!deps.loadBusinessData;
-        set({ businessId, userId, businessContextReady: true, businessDataLoaded: !needsLoad, lastSyncError: null });
+        // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
+        // finalCounts linger when no session restores, so a context switch must REPLACE all four or
+        // the previous tenant's rows bleed through (two users OR one user with two businesses).
+        const cleared = emptyTenantState();
+        set({
+          businessId,
+          userId,
+          businessContextReady: true,
+          businessDataLoaded: !needsLoad,
+          lastSyncError: null,
+          scanFeed: cleared.scanFeed,
+          finalCounts: cleared.finalCounts,
+          needsReviewQueue: cleared.needsReviewQueue,
+          settings: cleared.settings,
+        });
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
           // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
