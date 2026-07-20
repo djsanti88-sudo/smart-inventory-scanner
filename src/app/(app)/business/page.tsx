@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createBusiness, listMemberships, signOut, type Membership } from "@/lib/auth";
 import { setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
+import { useScanStore } from "@/stores/scanStore";
 
 // Business-creation + membership flow. A signed-in user sees the businesses they belong to (with their
 // admin/counter role) and can create a new business (becoming its admin via the hardened RPC). This is
@@ -57,7 +58,7 @@ export default function BusinessPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-zinc-900">Your businesses</h1>
         <button
-          onClick={async () => { await signOut(); router.replace("/login"); }}
+          onClick={async () => { useScanStore.getState().resetForSignOut(); await signOut(); router.replace("/login"); }}
           className="text-sm text-zinc-500 hover:underline"
           data-testid="sign-out"
         >

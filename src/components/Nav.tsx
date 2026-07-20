@@ -53,6 +53,7 @@ export function Nav() {
             type="button"
             onClick={async () => {
               if (!window.confirm("Log out now? Your counts are saved - you can sign back in any time to keep going.")) return;
+              useScanStore.getState().resetForSignOut();
               await signOut();
               router.replace("/login");
             }}
