@@ -41,12 +41,42 @@ const CUSTOMER_REASON_DENYLIST =
 const HONEST_DEFAULT_REASON = "Could not confirm this item automatically. Review and confirm the details.";
 
 /** Context-specific honest fallbacks, reused from the existing scanStore honest-reason copy so a
- *  sanitized reason still tells the customer roughly WHY (cap / offline / missing keys) when that
- *  context is known, instead of always collapsing to the fully generic default. */
+ *  sanitized reason still tells the customer roughly WHY (offline / missing keys) when that context
+ *  is known, instead of always collapsing to the fully generic default.
+ *  NOTE: the "cap_blocked" key that used to live here was DEAD CODE - `decision.status` (the only
+ *  thing ever passed as `ctx.status`) is architecturally always verified|needs_review|suggested|
+ *  conflict, never "cap_blocked" (that string only exists as a PipelineOutcome.kind and a telemetry
+ *  status, both of which bypass sanitizeCustomerReason entirely). A per-rung cap (e.g. Go-UPC's own
+ *  monthly quota) instead flows through the ordinary all-miss reason with status "needs_review" - see
+ *  allMissReasonCode()/MISS_REASON_TEXT below, which classify the per-rung reasons directly. */
 const HONEST_CONTEXT_REASON: Record<string, string> = {
-  cap_blocked: "Daily AI lookup cap reached. Routed to Needs Review.",
   offline: "Offline. Saved locally; AI was not called.",
   missing_keys: "No API keys configured. Set them server-side, then retry live decode.",
+};
+
+/**
+ * Classify an all-rungs-missed decode into a SPECIFIC, customer-safe reason code by reading the
+ * honest per-rung reasons (e.g. "go-upc: Go-UPC monthly cap reached"). Most-specific match wins so a
+ * cap distinguishes itself from a generic rate limit or a genuine not-found. This is what actually
+ * captures "cap reached" today - `ctx.status` never can (see note above).
+ */
+export function allMissReasonCode(reasons: Array<{ rung: string; reason: string }>): string {
+  const joined = reasons.map((r) => r.reason).join(" ; ");
+  if (/\b(cap|quota|monthly limit|usage limit)\b/i.test(joined)) return "provider_cap_reached";
+  if (/rate.?limit|\b429\b/i.test(joined)) return "provider_rate_limited";
+  if (/budget|timed out|timeout/i.test(joined)) return "lookup_budget_exceeded";
+  if (/no.?api.?key|unavailable|offline|no key/i.test(joined)) return "provider_unavailable";
+  return "product_not_found";
+}
+
+/** Honest, token-free prose for each allMissReasonCode() outcome. Hand-written so none of these
+ *  strings can ever match CUSTOMER_REASON_DENYLIST - they name no vendor, provider, or model. */
+export const MISS_REASON_TEXT: Record<string, string> = {
+  provider_cap_reached: "A lookup service is at its usage limit right now. Saved to Needs Review; try again shortly.",
+  provider_rate_limited: "A lookup service was rate-limited. Saved to Needs Review; retry shortly.",
+  lookup_budget_exceeded: "The lookup ran out of time. Saved to Needs Review; retry live decode.",
+  provider_unavailable: "Live lookup is unavailable right now. Saved to Needs Review.",
+  product_not_found: "No match found in the databases or open web. Saved to Needs Review.",
 };
 
 /**

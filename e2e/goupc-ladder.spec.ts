@@ -138,23 +138,24 @@ function goUpcInferredPayload(code: string) {
 }
 
 // Cap-reached: Go-UPC rung returns "goupc_unavailable" (reason "Go-UPC monthly cap reached"), then every
-// other rung also misses in this fixture, so the route's all-miss branch assembles allMissReason from the
-// per-rung reasons list (route.ts: `No rung resolved the code. ${reasons.join("; ")}` and the review row
-// renders `review.reason`, which the store sets verbatim from `decision.reason`).
+// other rung also misses in this fixture, so the route's all-miss branch classifies the per-rung reasons
+// (allMissReasonCode, src/services/ai/decodeFallback.ts) into "provider_cap_reached" and uses its honest,
+// token-free text (MISS_REASON_TEXT) as decision.reason/reasonText - never the raw vendor-named join
+// (BUG #14 anti-leak law: "Go-UPC" must never reach a customer-facing field). The review row renders
+// `review.reason`, which the store sets verbatim from `decision.reason`.
 function goUpcCapPayload(code: string) {
-  const goUpcReason = "Go-UPC monthly cap reached";
-  const allMissReason = `No rung resolved the code. go-upc: ${goUpcReason}; fetchv2: Fetch V2 skipped (E2E mock mode); gpt: gpt-5.5 skipped: no_api_key`;
+  const honestCapReason = "A lookup service is at its usage limit right now. Saved to Needs Review; try again shortly.";
   return {
     mode: "decode",
     providerNames: ["go-upc", "fetchv2", "gpt"],
     results: [],
     evidences: [],
-    providerStatuses: [{ provider: "go-upc", status: "skipped", latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false, errorCode: goUpcReason }],
-    decision: { status: "needs_review", confidence: 0, reason: allMissReason, evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "weak", confidence: 0, reason: "", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] } },
+    providerStatuses: [{ provider: "go-upc", status: "skipped", latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false, errorCode: "Go-UPC monthly cap reached" }],
+    decision: { status: "needs_review", confidence: 0, reason: honestCapReason, evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "weak", confidence: 0, reason: "", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] } },
     reasonCode: "no_result",
-    reasonText: allMissReason,
+    reasonText: honestCapReason,
     timedOut: false,
-    debug: { providersAttempted: ["go-upc", "fetchv2", "gpt"], evidenceStrengths: [], sourceCounts: [], ladderPath: "none", aiCalled: false, pageFetched: false, cached: false },
+    debug: { providersAttempted: ["go-upc", "fetchv2", "gpt"], evidenceStrengths: [], sourceCounts: [], ladderPath: "none", missReasonCode: "provider_cap_reached", aiCalled: false, pageFetched: false, cached: false },
     sanitizedInput: { rawCodeSanitized: code, cleanCodeSanitized: code },
   };
 }
@@ -218,7 +219,7 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
     await page.screenshot({ path: `${PROOF}/goupc-inferred-suggest.png`, fullPage: true });
   });
 
-  test("3. cap reached -> row reason contains 'Go-UPC monthly cap reached'", async ({ page }) => {
+  test("3. cap reached -> row reason is the honest cap message, never the raw vendor name", async ({ page }) => {
     const code = "034000002726"; // checksum-valid UPC-A, distinct from scenarios 1-2
     await page.route("**/api/ai-lookup", async (route: Route) => {
       const req = route.request();
@@ -234,7 +235,11 @@ test.describe("Go-UPC decode ladder (mocked)", () => {
     await scan(page, code);
 
     // The scan feed's Reason column surfaces decision.reason verbatim (scanStore: `reason: decision?.reason`).
-    await expect(page.getByTestId("scan-feed-body")).toContainText("Go-UPC monthly cap reached", { timeout: 15_000 });
+    // Honest reasons law (root-cause fix 2026-07-20): the row must say WHY (a usage limit was hit) but must
+    // NEVER leak the raw vendor name (BUG #14 anti-leak law - "Go-UPC" is a denylisted token).
+    const feed = page.getByTestId("scan-feed-body");
+    await expect(feed).toContainText("usage limit", { timeout: 15_000 });
+    await expect(feed).not.toContainText("Go-UPC");
 
     await page.screenshot({ path: `${PROOF}/goupc-cap-reason.png`, fullPage: true });
   });

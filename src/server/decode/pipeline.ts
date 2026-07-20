@@ -9,7 +9,7 @@ import { groundIdentify, getLastGroundingStatus } from "@/services/ai/flashLiteG
 import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { prefixFloorName } from "@/services/catalog/prefixFloor";
-import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason } from "@/services/ai/decodeFallback";
+import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason, allMissReasonCode, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
@@ -1394,15 +1394,23 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // the ladder's per-rung miss reasons into the reason text/providerStatuses/debug so nothing is
     // silent. Otherwise (non-public code, or Plan D itself found nothing to stash) emit the plain
     // needs_review whose reason lists every rung that came back empty (owner: never silent).
-    // BUG #14 (QA hardening 2026-07-16): allMissReason names every rung by its internal name and joins
-    // each rung's raw miss reason (provider names, internal skip-reason codes like "gpt_call_failed").
-    // It stays RAW here for debug.ladderReasons (below) and for building the merged customer text, but
-    // the value that actually reaches reasonText/decision.reason is always the SANITIZED one.
-    const allMissReason = `No rung resolved the code. ${ladderRun.reasons.map((r) => `${r.rung}: ${r.reason}`).join("; ")}`;
-    const cleanAllMissReason = sanitizeCustomerReason(allMissReason);
+    // BUG #14 (QA hardening 2026-07-16) + goupc-cap-rootcause fix (2026-07-20): allMissReason names
+    // every rung by its internal name and joins each rung's raw miss reason (provider names, internal
+    // skip-reason codes like "gpt_call_failed") - it ALWAYS trips sanitizeCustomerReason's denylist, so
+    // passing it straight through collapsed every all-miss decode (cap, rate-limit, timeout, outage,
+    // genuine not-found alike) to the same generic boilerplate, hiding the honest reason from the
+    // customer. Fix: classify the per-rung reasons into a specific missReasonCode BEFORE sanitizing
+    // (allMissReasonCode) and use its hand-written, token-free honest text (MISS_REASON_TEXT) as the
+    // input to sanitizeCustomerReason instead - it passes on its own merits (no denylisted token), so
+    // the customer now sees WHY (cap / rate-limited / timed out / provider down / not found) without
+    // any vendor/model name leaking. The RAW per-rung reasons stay in debug.ladderReasons (below,
+    // platform-only, structured - richer than the old joined string) for diagnosis; missReasonCode is
+    // also attached to debug so the UI/tests can key off it without parsing prose.
+    const missReasonCode = allMissReasonCode(ladderRun.reasons);
+    const honestAllMissReason = MISS_REASON_TEXT[missReasonCode] ?? MISS_REASON_TEXT.product_not_found;
+    const cleanAllMissReason = sanitizeCustomerReason(honestAllMissReason);
     if (planDStash) {
-      const mergedReasonText = `${planDStash.reasonText || planDStash.decision.reason || "Unresolved"}. ${allMissReason}`;
-      const cleanMergedReasonText = sanitizeCustomerReason(mergedReasonText, { status: planDStash.decision.status });
+      const cleanMergedReasonText = sanitizeCustomerReason(honestAllMissReason, { status: planDStash.decision.status });
       return {
         ...planDStash,
         reasonText: cleanMergedReasonText,
@@ -1413,6 +1421,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
           ...planDStash.debug,
           ladderPath: "none",
           ladderReasons: ladderRun.reasons,
+          missReasonCode,
           aiCalled: planDAiCalled || ladderRun.reasons.some((r) => r.rung === "gpt"),
           pageFetched: ladderRun.reasons.some((r) => r.rung === "fetchv2"),
           cached: false,
@@ -1448,6 +1457,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         sourceCounts: [],
         ladderPath: "none",
         ladderReasons: ladderRun.reasons,
+        missReasonCode,
         aiCalled: ladderRun.reasons.some((r) => r.rung === "gpt"),
         pageFetched: ladderRun.reasons.some((r) => r.rung === "fetchv2"),
         cached: false,
