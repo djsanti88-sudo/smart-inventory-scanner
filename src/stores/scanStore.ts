@@ -596,6 +596,13 @@ export interface ScanState {
    *  auto-named session stamped with this device's id. Safe to call on every mount/scan - a no-op
    *  when a valid session already exists. */
   ensureAutoSession: () => void;
+  /** Phase 3 cross-device inbound sync: a manual, one-shot refresh (NOT a live listener - see the
+   *  sync scout's Trap C on why a listener wired to a naive replace would violate the TOP-LEVEL LAW).
+   *  MERGES additively: products/aliases/sessions upsert by id; finalCounts upsert by
+   *  (sessionId,productId) EXCEPT rows this device still has an unsynced pendingSyncQueue entry for,
+   *  which are left untouched (a stale remote read must never regress a not-yet-synced local count).
+   *  No-op on the mock/local backend. Never touches scanFeed. */
+  refreshFromCloud: () => Promise<void>;
   /** Set the location to stamp on subsequent scans, and record it in recentLocations (capped,
    *  deduped, most-recent-last). Empty/whitespace-only input is ignored (never stored). */
   setLocation: (location: string) => void;
@@ -1583,6 +1590,69 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }),
         ]);
         emitAudit({ entityType: "CountSession", entityId: id, action: "session_auto_started", metadata: { name: session.name, deviceId } });
+      },
+
+      refreshFromCloud: async () => {
+        if (!cloudBackend || !deps.loadBusinessData) return; // mock/local path: already the source of truth
+        const state = get();
+        if (!state.businessContextReady || !state.userId || !state.businessId) return;
+        let data;
+        try {
+          data = await deps.loadBusinessData(state.businessId, state.userId);
+        } catch (e) {
+          set({ lastSyncError: e instanceof Error ? e.message : "Failed to refresh from the cloud" });
+          return;
+        }
+        set((cur) => {
+          // Products/aliases: upsert by id over the existing arrays (additive - a product this
+          // device does not know about yet is ADDED; an existing id is refreshed to the remote's
+          // version, since products/aliases are not counted-quantity state and always safe to take
+          // the server's word for, matching the trust model everywhere else in this app).
+          const productsById = new Map(cur.products.map((p) => [p.id, p]));
+          for (const p of data.products) productsById.set(p.id, p);
+          const aliasesById = new Map(cur.aliases.map((a) => [a.id, a]));
+          for (const a of data.aliases) aliasesById.set(a.id, a);
+          const sessionsById = new Map(cur.sessions.map((s) => [s.id, s]));
+          // Preserve previously refreshed history and fold in the current session before applying
+          // the remote list, so a refresh never silently drops this device's own active session.
+          if (cur.currentSession) sessionsById.set(cur.currentSession.id, cur.currentSession);
+          for (const s of data.sessions) sessionsById.set(s.id, s);
+
+          // finalCounts: additive upsert by (sessionId,productId), EXCEPT any row still referenced by
+          // a pending (unsynced) queue item - that row's local value is authoritative until it syncs.
+          const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+          const pendingCountKeys = new Set(
+            pendingCountItems
+              .map((it) => {
+                const payload = it.payload as Partial<IncrementPayload> | undefined;
+                const productId = payload?.productId;
+                if (!productId) return null;
+                return `${payload.sessionId ?? it.sessionId}|${productId}`;
+              })
+              .filter((key): key is string => !!key),
+          );
+          const pendingCountEntityIds = new Set(pendingCountItems.map((it) => it.entityId));
+          const countsByKey = new Map(cur.finalCounts.map((c) => [`${c.sessionId}|${c.productId}`, c]));
+          for (const remote of data.counts) {
+            const key = `${remote.sessionId}|${remote.productId}`;
+            const local = countsByKey.get(key);
+            const localIsPending =
+              !!local &&
+              (pendingCountKeys.has(key) ||
+                pendingCountEntityIds.has(local.id) ||
+                pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`));
+            if (localIsPending) continue; // guard: unsynced local wins
+            countsByKey.set(key, remote);
+          }
+
+          return {
+            products: [...productsById.values()],
+            aliases: [...aliasesById.values()],
+            sessions: [...sessionsById.values()],
+            finalCounts: [...countsByKey.values()],
+            lastSyncError: null,
+          };
+        });
       },
 
       setLocation: (location) => {
