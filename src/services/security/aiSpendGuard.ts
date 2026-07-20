@@ -112,6 +112,35 @@ export async function chargeDailySlot(
 }
 
 /**
+ * Per-account daily-cap key. Distinct namespace from the global `ai_daily_cap:<date>` so a per-account
+ * layer never collides with (or double-counts against) the global counter. Charged only alongside the
+ * global charge on the SAME genuine-paid-compute signal, exactly once per request (L12).
+ */
+export function perAccountDailyKey(businessId: string, dateKey: string = todayKey()): string {
+  return `${DAILY_KEY_PREFIX}${businessId}:${dateKey}`;
+}
+
+/** Read-only peek at a single account's daily usage. Never inflates the counter. */
+export async function readDailyUsedForAccount(
+  storage: DailyCapStorage,
+  businessId: string,
+  dateKey: string = todayKey(),
+): Promise<number> {
+  const raw = await storage.get(perAccountDailyKey(businessId, dateKey));
+  const n = raw ? Number(raw) : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** Atomically charge one account daily slot. Same one-charge-per-request discipline as chargeDailySlot. */
+export async function chargeDailySlotForAccount(
+  storage: DailyCapStorage,
+  businessId: string,
+  dateKey: string = todayKey(),
+): Promise<number> {
+  return storage.increment(perAccountDailyKey(businessId, dateKey));
+}
+
+/**
  * Hard daily cap. Increments and persists the day's count; once the limit is reached it returns
  * allowed:false so the caller makes ZERO provider calls. Resets automatically on a new date.
  */
