@@ -574,8 +574,12 @@ export interface ScanState {
   applyDecodeFallback: (reviewId: string, reason: string) => void;
   /** Idempotent primitive: count one provisional row for `code` (create it if absent), keyed by an
    *  already-existing scan-feed row. Safe to call any number of times for the same code (never double
-   *  counts). Used synchronously by processScan and by applyDecodeFallback. */
-  ensureProvisionalCount: (code: string, reason: string) => void;
+   *  counts). Used synchronously by processScan and by applyDecodeFallback. Returns the product id the
+   *  code is counted under: the already-counted product on the idempotent-hit path, else the freshly
+   *  minted provisional's id. markWrong depends on this return to target the CORRECT provisional when
+   *  the marked-wrong product is itself a provisional sharing the same primaryBarcode (Task 9 finding:
+   *  an unordered products.find could pick the OLD provisional and inflate the total). */
+  ensureProvisionalCount: (code: string, reason: string) => string;
   /** Flip every not-yet-resolved scan-feed row for `cleanCode` to the "verified" decode badge (shared by
    *  the 4 auto-verify / catalog-hit sites so their badge-flip guard cannot drift). A row already counted
    *  synchronously is status "known" (not "resolved"), so it is still flipped; a row already "verified" or
@@ -2956,7 +2960,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             p.status !== "archived" &&
             [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
         );
-        if (existing) return;
+        if (existing) return existing.id;
         // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
         // anatomy here (no decode response). PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a
         // known brand, in which case the row states the brand with confidence and flags the product
@@ -3045,6 +3049,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);
         }
+        return provId;
       },
 
       markFeedRowVerified: (cleanCode, reason) => {
@@ -4598,9 +4603,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             //     already reset the wrong product's rows to matchedProductId: null / needs_review, which
             //     is exactly the shape ensureProvisionalCount's feed lookup matches). Task 2's D1 repair
             //     makes this mint enqueue SAVE_PRODUCT + SAVE_SCAN_EVENT + INCREMENT_COUNT too.
-            get().ensureProvisionalCount(code, `Marked wrong - re-identify. Previous match "${product?.name ?? ""}" removed.`);
+            //     TASK 9 FIX (provisional-wrong inflation): the mint target id comes from
+            //     ensureProvisionalCount's own return, NEVER re-derived via an unordered
+            //     products.find on primaryBarcode. When the marked-wrong product is ITSELF a
+            //     provisional, the old find matched it (its primaryBarcode is never blanked) and the
+            //     repoint loop re-counted the same physical scans on the OLD row while the mint had
+            //     already counted one event on the NEW row - inflating the total. The id-keyed lookup
+            //     below is deterministic; excluding productId is defense in depth so the repoint can
+            //     never target the product being corrected away from.
+            const mintedId = get().ensureProvisionalCount(code, `Marked wrong - re-identify. Previous match "${product?.name ?? ""}" removed.`);
             const provRow = get().products.find(
-              (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === code,
+              (p) => p.id === mintedId && p.id !== productId && p.provisional === true && p.status !== "archived",
             );
             if (provRow) {
               // (c) Repoint every REMAINING reopened feed event for this code onto the provisional and
