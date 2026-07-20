@@ -121,16 +121,18 @@ function gptResult(overrides: Partial<GptFromScratchResult>): GptFromScratchResu
 }
 
 describe("gptResultToDecodePayload", () => {
-  test("PROBE PARITY (owner order 2026-07-06): a verified answer passes through even on a short code - no downgrade wrapper", () => {
+  test("PROBE PARITY (owner order 2026-07-06): a verified-tier answer passes through even on a short code - no downgrade wrapper - but the decision.status is now demoted to suggested (D6 core, 2026-07-20)", () => {
     // The old short-code (<10 digit) verified->suggested cap was deleted with the rest of the
-    // wrapper: GPT's answer is taken exactly as returned.
+    // wrapper: GPT's answer (result payload fields) is taken exactly as returned. The DECISION status,
+    // however, is now demoted: a bare GPT self-report can never mint "verified" (D6 core).
     const r = gptResult({
       tier: "verified", brand: "Qbake", productName: "Qbake Arabic Bread Brown",
       confidence: 0.86, exactCodeFound: true, gtin: "10011126",
     });
     const payload = gptResultToDecodePayload(r, "10011126");
     expect(payload).not.toBeNull();
-    expect(payload!.decision.status).toBe("verified");
+    expect(payload!.decision.status).toBe("suggested");
+    expect(payload!.decision.status).not.toBe("verified");
     expect(payload!.result.needsHumanReview).toBe(false);
   });
 
@@ -138,7 +140,7 @@ describe("gptResultToDecodePayload", () => {
     expect(gptResultToDecodePayload(gptResult({ tier: "none" }), "049000028904")).toBeNull();
   });
 
-  test("tier verified maps to a verified decision with the gpt_self_report corroboration path", () => {
+  test("tier verified maps to a SUGGESTED decision (D6 core demotion) with the gpt_self_report corroboration path preserved", () => {
     const r = gptResult({
       tier: "verified", brand: "Falken", productName: "Falken Wildpeak A/T3W 265/70R17",
       specs: "265/70R17 115T", gtin: "848983006257", confidence: 0.92, exactCodeFound: true,
@@ -146,7 +148,10 @@ describe("gptResultToDecodePayload", () => {
     });
     const payload = gptResultToDecodePayload(r, "848983006257");
     expect(payload).not.toBeNull();
-    expect(payload!.decision.status).toBe("verified");
+    // D6 core (2026-07-20): a bare GPT self-report can never mint "verified" - it is demoted to a
+    // suggestion. corroborationPath/exactCodeEvidenceVerifiedByApp stay honest (unchanged).
+    expect(payload!.decision.status).toBe("suggested");
+    expect(payload!.decision.status).not.toBe("verified");
     expect(payload!.decision.confidence).toBe(0.92);
     expect(payload!.decision.corroborationPath).toBe("gpt_self_report");
     expect(payload!.decision.exactCodeEvidenceVerifiedByApp).toBe(false);

@@ -57,12 +57,14 @@ function gptResult(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("GPT ladder trust tiers - verified auto-count", () => {
-  // NOTE: this code MUST be a public-barcode shape (upc_a/ean_13/gtin_14). The gpt_self_report trust
-  // tier is ONLY theoretically falsifiable (GPT claims to have found the exact code on a real page) for
-  // a real public barcode - a vendor/SKU/part-number code has no public page to have been "found" on, so
-  // trusting a bare self-report for those shapes is exactly the T20 code-1225 hallucination-auto-count
-  // hole (see .superpowers/sdd/task-1225-report.md). A 12-digit numeric code is upc_a.
-  it("gpt_self_report verified at confidence 0.9 on a PUBLIC BARCODE (upc_a) auto-counts once (product created, counted, alias written), idempotent on double-apply", async () => {
+  // D6 core (2026-07-20, decode-trust): the gptTrusted escape hatch is DELETED. gptResultToDecodePayload
+  // itself now demotes tier "verified" to decision.status "suggested" for every GPT self-report, on
+  // EVERY code shape (not just non-public ones) - so a bare self-report can never mint a "Verified"
+  // identity or a permanent alias, period. This test used to prove the public-barcode-shape trusted
+  // tier auto-counted as VERIFIED; it now proves the TOP-LEVEL LAW instead: the row still appears,
+  // still counts, and the identity still lands on the row (via shouldAutoApplySuggestion's
+  // confidence>=0.8 auto-apply path) - but as a SUGGESTION, never verified, never an approved alias.
+  it("gpt_self_report at confidence 0.9 on a PUBLIC BARCODE (upc_a) is demoted to a SUGGESTED row that still auto-applies + counts (identity shown, verified false, no approved alias)", async () => {
     const store = aiOnStore();
     const review = openReview(store, "012345678905");
     const RESP = {
@@ -78,10 +80,13 @@ describe("GPT ladder trust tiers - verified auto-count", () => {
           needsHumanReview: false,
         }),
       ],
+      // This mirrors what gptResultToDecodePayload now ACTUALLY emits for a bare GPT self-report
+      // (status "suggested", corroborationPath "gpt_self_report", exactCodeEvidenceVerifiedByApp false)
+      // rather than the pre-demotion "verified" shape the old test stubbed.
       decision: {
-        status: "verified",
+        status: "suggested",
         confidence: 0.9,
-        reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
+        reason: "Identity suggested by the AI model (self-report) - not app-verified; shown as a suggestion.",
         evidenceStrength: "none",
         exactCodeEvidenceVerifiedByApp: false,
         corroborationPath: "gpt_self_report",
@@ -95,27 +100,20 @@ describe("GPT ladder trust tiers - verified auto-count", () => {
       restore();
     }
 
+    // TOP-LEVEL LAW: the scan still appears + counts. auto-apply (confidence 0.9 >= 0.8, non-"verified"
+    // status) closes the review, same as before, but the identity is a suggestion, not verified.
     const r = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
-    expect(r.status).toBe("resolved"); // auto-counted -> resolveUnknown flips it resolved
+    expect(r.status).toBe("resolved"); // auto-suggest-applied -> review closes
 
     const product = store.getState().products.find((p) => p.name === "Falken Wildpeak A/T3W 265/70R17");
     expect(product).toBeDefined();
+    // The row STILL COUNTS (law intact) ...
     expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1);
-    const alias = store.getState().aliases.find((a) => a.cleanCode === "012345678905");
-    expect(alias).toBeDefined();
-    expect(alias!.approved).toBe(true);
-
-    // Idempotent on a repeat application: re-running resolveUnknown's underlying count for the SAME
-    // scan event must never double count. Re-scan the same code - it should now resolve deterministically
-    // via the approved alias (no second AI call) and only add ONE more unit.
-    const { spy: spy2, restore: restore2 } = stub(RESP);
-    try {
-      store.getState().processScan("012345678905");
-    } finally {
-      restore2();
-    }
-    expect(spy2).not.toHaveBeenCalled(); // known alias now -> deterministic match, no AI
-    expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(2);
+    // ... but the identity is NEVER verified and NEVER an approved alias - only the badge/verified/alias
+    // decision changed, per the demotion.
+    expect(product!.verified).toBe(false);
+    const alias = store.getState().aliases.find((a) => a.cleanCode === "012345678905" && a.approved === true);
+    expect(alias).toBeUndefined();
   });
 
   // T20 code-1225 regression: a NON-public-barcode-shaped code (numeric_sku, 4 digits) can NEVER auto-count
@@ -597,6 +595,10 @@ describe("Direct idempotency lock (liveDecode re-entry on an already-resolved re
   it("calling liveDecode twice for the SAME review is a no-op the second time (open-status guard, not the rescan/alias path)", async () => {
     const store = aiOnStore();
     const review = openReview(store, "614141000418");
+    // D6 core (2026-07-20): a bare GPT self-report now settles "suggested" (never "verified") - this
+    // mirrors what gptResultToDecodePayload actually emits post-demotion. It still auto-APPLIES onto
+    // the counted row (confidence 0.9 >= 0.8, non-"verified" status) and resolves the review, so the
+    // idempotency-lock behavior under test here is unchanged.
     const RESP = {
       providerNames: ["gpt-5.5-ladder"],
       results: [
@@ -611,9 +613,9 @@ describe("Direct idempotency lock (liveDecode re-entry on an already-resolved re
         }),
       ],
       decision: {
-        status: "verified",
+        status: "suggested",
         confidence: 0.9,
-        reason: "gpt-5.5 from-scratch: exact code self-reported (owner trust rule)",
+        reason: "Identity suggested by the AI model (self-report) - not app-verified; shown as a suggestion.",
         evidenceStrength: "none",
         exactCodeEvidenceVerifiedByApp: false,
         corroborationPath: "gpt_self_report",
@@ -622,7 +624,7 @@ describe("Direct idempotency lock (liveDecode re-entry on an already-resolved re
     };
     const { spy, restore } = stub(RESP);
     try {
-      // First call: GPT verified 0.9 -> auto-count fires, review resolves.
+      // First call: GPT suggested 0.9 -> auto-suggest-apply fires, review resolves.
       await store.getState().liveDecode(review.id);
       const afterFirst = store.getState().needsReviewQueue.find((x) => x.id === review.id)!;
       expect(afterFirst.status).toBe("resolved");
@@ -641,7 +643,9 @@ describe("Direct idempotency lock (liveDecode re-entry on an already-resolved re
       expect(spy).toHaveBeenCalledTimes(1); // fetch NOT called a second time
       expect(store.getState().finalCounts.find((c) => c.productId === product!.id)?.quantity).toBe(1); // unchanged
       expect(store.getState().products.filter((p) => p.name === "Continental TerrainContact 235/65R18")).toHaveLength(1); // no duplicate product
-      expect(store.getState().aliases.filter((a) => a.cleanCode === "614141000418")).toHaveLength(1); // no duplicate alias
+      // D6 core: auto-suggest-apply (unlike the old gptTrusted auto-count path) never writes an alias -
+      // a bare GPT self-report is never approved/aliased. Zero aliases for this code either call.
+      expect(store.getState().aliases.filter((a) => a.cleanCode === "614141000418")).toHaveLength(0);
     } finally {
       restore();
     }

@@ -81,7 +81,10 @@ export interface AutoCountInput {
  * returns only the evidence decision plus a machine reason for logging/rows.
  */
 export function canAutoCount(input: AutoCountInput): { allowed: boolean; reason: string } {
-  const { codeType, decision, tireOk, contextConflict, productNameUsable } = input;
+  // NOTE: codeType (public-barcode-shape gating) is no longer read here - it was only needed by the
+  // now-deleted gptTrusted branch. Kept on AutoCountInput/isPublicBarcodeShape for callers and any
+  // future evidence-corroborated-but-shape-gated branch; not destructured to avoid an unused var.
+  const { decision, tireOk, contextConflict, productNameUsable } = input;
   const confidence = decision?.confidence ?? 0;
   const status = decision?.status;
 
@@ -90,15 +93,11 @@ export function canAutoCount(input: AutoCountInput): { allowed: boolean; reason:
   if (contextConflict) return { allowed: false, reason: "scan-context / brand-prefix conflict" };
   if (confidence < 0.8) return { allowed: false, reason: "confidence below 0.8 threshold" };
 
-  // GPT LADDER TRUST TIER (Task 5): a GPT self-report the app did NOT independently verify may auto-count
-  // on its OWN narrower branch, but ONLY on a real public barcode shape (1225/T20 firewall).
-  const gptTrusted =
-    isPublicBarcodeShape(codeType) &&
-    decision?.corroborationPath === "gpt_self_report" &&
-    status === "verified";
-  if (gptTrusted) return { allowed: true, reason: "gpt self-report on public barcode (trusted tier)" };
-
   // Evidence-corroborated branch: app-verified exact code OR internet_two_source_size, on a "verified" decode.
+  // D6 core (2026-07-20): this is now the ONLY verified-auto-count path. The former gptTrusted escape
+  // hatch (a bare GPT self-report on a public barcode shape) is DELETED - gptResultToDecodePayload no
+  // longer emits status "verified" for a self-report, so this branch can never be reached by one
+  // anyway; deleting the dead branch here keeps the gate honest and prevents future re-introduction.
   if (status === "verified" && decodeCorroborated(decision)) {
     return { allowed: true, reason: "verified + app-corroborated exact code" };
   }

@@ -284,7 +284,10 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const res = await POST(makeRequest({ cleanCode: "111000222901", mode: "decode" }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.decision.status).toBe("verified");
+    // D6 core (2026-07-20): a bare GPT self-report is demoted to "suggested" - it can no longer mint
+    // "verified". It still settles the ladder (still the gpt-5.5-ladder provider, still stops the
+    // ladder) - only the status/badge/alias decision changed, per the decode-trust plan.
+    expect(json.decision.status).toBe("suggested");
     expect(json.decision.corroborationPath).toBe("gpt_self_report");
     expect(json.providerNames).toContain("gpt-5.5-ladder");
     expect(json.reasonCode).toBe("gpt_ladder");
@@ -431,10 +434,11 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const res = await POST(makeRequest({ cleanCode: "111000222777", mode: "decode" }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    // The code DID travel the Plan D path (floor produced), and the GPT verified self-report REPLACED it.
+    // The code DID travel the Plan D path (floor produced), and the GPT self-report REPLACED it.
+    // D6 core (2026-07-20): the self-report settles as "suggested" (demoted), never "verified".
     expect(json.providerNames).toContain("parallel:floor");
     expect(json.providerNames).toContain("gpt-5.5-ladder");
-    expect(json.decision.status).toBe("verified");
+    expect(json.decision.status).toBe("suggested");
     expect(json.decision.corroborationPath).toBe("gpt_self_report");
     expect(json.reasonCode).toBe("gpt_ladder");
     expect(json.results[0].productName).toBe("Acme Widget Pro 500");
@@ -575,7 +579,9 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const retried = await POST(makeRequest({ cleanCode: code, mode: "decode", forceRetry: true }));
     expect(retried.status).toBe(200);
     const retriedJson = await retried.json();
-    expect(retriedJson.decision.status).toBe("verified");
+    // D6 core (2026-07-20): a bare GPT self-report settles "suggested" (demoted), never "verified" -
+    // it still genuinely re-ran and still settled/persisted, which is what this test proves.
+    expect(retriedJson.decision.status).toBe("suggested");
     expect(retriedJson.providerNames).toContain("gpt-5.5-ladder");
     expect(openaiCallCount, "forceRetry must genuinely re-call the provider").toBe(2);
     expect((await dailyUsedNow()), "a genuine forceRetry recompute burns its own slot").toBe(2);
@@ -585,19 +591,19 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const storedAfterRetry = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
     expect(storedAfterRetry[canonicalGtin(code) ?? code].kind).toBe("result");
 
-    // And a THIRD, normal (non-forceRetry) POST now short-circuits on the fresh verified result with
+    // And a THIRD, normal (non-forceRetry) POST now short-circuits on the fresh suggested result with
     // no further provider calls.
     clearDecodeCache();
     const third = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     const thirdJson = await third.json();
-    expect(thirdJson.decision.status).toBe("verified");
+    expect(thirdJson.decision.status).toBe("suggested");
     expect(thirdJson.debug.persistedCacheHit).toBe(true);
     expect(thirdJson.debug.persistedKind).toBe("result");
-    expect(openaiCallCount, "the replayed verified result must make no new provider call").toBe(2);
+    expect(openaiCallCount, "the replayed suggested result must make no new provider call").toBe(2);
     expect((await dailyUsedNow())).toBe(2);
   }, 60000);
 
-  it("Task 4: a verified GPT-ladder outcome persists as a permanent result; a later POST replays it with ZERO provider calls", async () => {
+  it("Task 4: a suggested GPT-ladder outcome persists as a permanent result; a later POST replays it with ZERO provider calls", async () => {
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     process.env.OPENAI_API_KEY = "test-openai-key";
     const verifiedBody = responsesBody({
@@ -614,9 +620,10 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
-    const code = "111000222900"; // QA round-2: valid check digit (tests verified-result cache replay, not misread)
+    const code = "111000222900"; // QA round-2: valid check digit (tests suggested-result cache replay, not misread)
     const first = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
-    expect((await first.json()).decision.status).toBe("verified");
+    // D6 core (2026-07-20): a bare GPT self-report settles "suggested" (demoted), never "verified".
+    expect((await first.json()).decision.status).toBe("suggested");
     const stored = JSON.parse(fs.readFileSync(tmpDecodeCacheFile, "utf8"));
     // Z3: the L2 store is keyed by the canonical GTIN, not the raw scanned code.
     const storeKey = canonicalGtin(code) ?? code;
@@ -630,7 +637,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
 
     const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     const secondJson = await second.json();
-    expect(secondJson.decision.status).toBe("verified");
+    expect(secondJson.decision.status).toBe("suggested");
     expect(secondJson.providerNames).toContain("gpt-5.5-ladder");
     expect(secondJson.debug.persistedCacheHit).toBe(true);
     const ladderCallsAfter = fetchSpy.mock.calls.filter(([u]) => String(u).includes("api.openai.com/v1/responses")).length;
@@ -689,7 +696,9 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const retried = await POST(makeRequest({ cleanCode: code, mode: "decode", forceRetry: true }));
     expect(retried.status).toBe(200);
     const retriedJson = await retried.json();
-    expect(retriedJson.decision.status, "forceRetry must genuinely bypass the warm L1 entry").toBe("verified");
+    // D6 core (2026-07-20): a bare GPT self-report settles "suggested" (demoted), never "verified" -
+    // it still genuinely bypassed the warm L1 entry, which is what this test proves.
+    expect(retriedJson.decision.status, "forceRetry must genuinely bypass the warm L1 entry").toBe("suggested");
     expect(openaiCallCount, "forceRetry must genuinely re-call the provider despite warm L1").toBe(2);
     expect((await dailyUsedNow()), "forceRetry must burn its own daily-cap slot, even with a warm L1 entry").toBe(2);
   }, 60000);
@@ -740,7 +749,9 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     const second = await POST(makeRequest({ cleanCode: code, mode: "decode" }));
     expect(second.status).toBe(200);
     const secondJson = await second.json();
-    expect(secondJson.decision.status, "the ladder must genuinely re-attempt, not be blocked by a stale receipt").toBe("verified");
+    // D6 core (2026-07-20): a bare GPT self-report settles "suggested" (demoted), never "verified" -
+    // it still genuinely re-attempted, which is what this test proves.
+    expect(secondJson.decision.status, "the ladder must genuinely re-attempt, not be blocked by a stale receipt").toBe("suggested");
     expect(secondJson.debug.persistedCacheHit, "there was no receipt to replay").not.toBe(true);
     expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com/v1/responses"))).toBe(true);
   }, 60000);

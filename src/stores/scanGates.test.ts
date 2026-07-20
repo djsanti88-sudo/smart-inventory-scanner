@@ -68,15 +68,18 @@ describe("canAutoCount - Phase-7 evidence gate (pure)", () => {
     ).toBe(true);
   });
 
-  // 1225 / T20 FIREWALL: a GPT self-report may auto-count ONLY on a real public barcode shape.
-  it("auto-counts a gpt_self_report verified decode on a PUBLIC barcode (trusted tier)", () => {
+  // D6 core (2026-07-20): the gptTrusted escape hatch is DELETED. A bare GPT self-report
+  // (corroborationPath "gpt_self_report", not app-corroborated) can no longer auto-count, even on a
+  // public barcode shape and even at high confidence. The evidence-corroborated branch is now the
+  // ONLY verified-auto-count path.
+  it("REFUSES a gpt_self_report verified decode even on a PUBLIC barcode (gptTrusted escape hatch deleted)", () => {
     expect(
       canAutoCount({
         ...baseCount,
         codeType: "upc_a",
         decision: { status: "verified", corroborationPath: "gpt_self_report", confidence: 0.95, exactCodeEvidenceVerifiedByApp: false },
       }).allowed,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("REFUSES a gpt_self_report verified decode on a NON-public (vendor/SKU) shape - the code-1225 lesson", () => {
@@ -125,7 +128,7 @@ describe("canAutoCount - Phase-7 evidence gate (pure)", () => {
     expect(canAutoCount({ ...baseCount, contextConflict: "category_context_conflict" }).allowed).toBe(false);
   });
 
-  it("also blocks the gpt trusted-tier branch when a firewall conflict is present", () => {
+  it("still refuses a gpt_self_report decode when a firewall conflict is also present (belt-and-suspenders)", () => {
     expect(
       canAutoCount({
         ...baseCount,

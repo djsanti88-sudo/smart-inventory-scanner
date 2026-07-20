@@ -67,9 +67,13 @@ export function shouldRunGptRung(i: GptRungInput): { run: boolean; skipReason: s
 // BUG #14 (medium, info-disclosure, QA hardening 2026-07-16): these used to name the model
 // ("gpt-5.5 from-scratch: ...") in customer-facing decision.reason text. The model name is
 // gratuitous here - the honest, token-free wording below still says exactly what matters: the
-// identity was self-reported by the exact code, or is a best guess, and (for the exact-code case)
-// is an auto-count candidate.
-const GPT_LADDER_REASON = "Exact code self-reported by the source - auto-count candidate.";
+// identity was self-reported by the exact code, or is a best guess.
+//
+// D6 core (2026-07-20, decode-trust): a bare model self-report can never mint a "Verified"
+// identity - see gptResultToDecodePayload's r.tier === "verified" branch below, which now maps to
+// status "suggested". The wording reflects that: this is a suggestion, not an auto-count claim.
+const GPT_LADDER_REASON =
+  "Identity suggested by the AI model (self-report) - not app-verified; shown as a suggestion.";
 const GPT_LADDER_SUGGEST_REASON = "Best guess based on available evidence - review before confirming.";
 
 function crossCheckSingleProvider(confidence: number): CrossCheckResult {
@@ -124,8 +128,13 @@ export function gptResultToDecodePayload(r: GptFromScratchResult, code: string):
   };
 
   if (r.tier === "verified") {
+    // D6 core (2026-07-20): a bare GPT self-report can never mint "verified" - it is demoted to a
+    // suggestion. corroborationPath stays "gpt_self_report" and exactCodeEvidenceVerifiedByApp stays
+    // false (both already honest); only the status changes. A high-confidence suggestion still
+    // auto-applies its identity onto the counted row via shouldAutoApplySuggestion (scanGates.ts) -
+    // this demotion changes the badge/alias decision, never whether the scan appears or counts.
     const decision: DecodeDecision = {
-      status: "verified",
+      status: "suggested",
       confidence: r.confidence,
       reason: GPT_LADDER_REASON,
       evidenceStrength: "none",
