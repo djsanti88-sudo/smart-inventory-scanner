@@ -65,7 +65,7 @@ import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
-import { cleanListingTitle, parseTireIdentity, canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
+import { enrichProductIdentity } from "@/services/catalog/enrichProductIdentity";
 import { toMasterCandidates } from "@/services/catalog/masterCandidates";
 import {
   canAutoCount,
@@ -402,21 +402,6 @@ function isWeakGuess(review: UnknownCodeReview, np: Partial<Product>): boolean {
     [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
     (review.sourceUrls?.length ?? 0) > 0;
   return acceptingSuggestion && !suggestionHasRealEvidence;
-}
-
-/** B1 (owner-reported, 268-row review, 2026-07-20 + Lane A tireListingNormalizer integration): a
- *  decode payload's raw `name` is often a junky marketplace-scraped listing title ("Set of 4 NEW
- *  Fortune ClimaFlex 4S FSR402 235/55R18 104V Tires Fits: 2019 Toyota Camry") that itself carries no
- *  structured specsShort/size field. Clean the display name deterministically (cleanListingTitle) and
- *  parse a canonical size out of it (canonicalTireSize) to fill a STILL-EMPTY specsShort - never
- *  overwrites a value the decode payload or the product already carries, and never guesses (an
- *  unparseable title yields "", same as the decode payload having nothing). Applied at every
- *  structured-field write site so the enrichment is consistent whichever path applied the identity.
- *  Returns only the fields that should be considered for a fill-if-empty write. */
-function tireListingEnrichment(rawName: string | undefined): { cleanName: string; specsShort: string } {
-  const cleanName = cleanListingTitle(rawName);
-  const specsShort = canonicalTireSize(rawName ?? "");
-  return { cleanName: cleanName || (rawName ?? ""), specsShort };
 }
 
 /** TRUST GATE (spec v3 AM-4.2): rejected barcode identity fields are blanked, never stored. This is
@@ -3226,13 +3211,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     candidateBarcode: best?.primaryBarcode,
                     partNumber: best?.primarySku,
                   }) || code;
+                // FALKEN FIX (owner-reported live bug, 2026-07-20): this is the DECODE-EVERYTHING
+                // provisional mint - the exact path a single fresh scan with a name-only decode
+                // payload (no separate brand/category/specsShort/specsFull) takes. Previously every
+                // structured column defaulted straight to "" with no fallback, leaving Brand/Model/
+                // Category/Specs/Size permanently blank even though they are cleanly parseable from
+                // the decoded name. Route through the shared helper: the payload's own field always
+                // wins; a still-empty field falls back to a deterministic name parse, never a guess.
+                const mintEnriched = enrichProductIdentity({
+                  payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
+                });
                 const provProduct: Product = {
-                  id: provId, businessId: cur.businessId, name: provName, brand: best?.brand || (floor?.brand ?? ""),
-                  category: best?.category ?? "", specsShort: best?.specsShort ?? "", specsFull: best?.specsFull ?? "",
+                  id: provId, businessId: cur.businessId, name: provName, brand: mintEnriched.brand || (floor?.brand ?? ""),
+                  category: mintEnriched.category, specsShort: mintEnriched.specsShort, specsFull: mintEnriched.specsFull,
                   primarySku: best?.primarySku ?? "", primaryBarcode: mintedBarcode, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
                   ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
                   productUrl: best?.productUrl ?? "", location: "", notes: "", status: "active", source: "ai_gemini",
                   confidence: decision?.confidence ?? 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+                  ...(mintEnriched.structuredModel ? { structuredModel: mintEnriched.structuredModel, structuredBy: "deterministic" as const } : {}),
                 };
                 set((st) => ({ products: [...st.products, provProduct] }));
                 emitAudit({ entityType: "Product", entityId: provId, action: "product_created", metadata: { code, origin: "ai_suggested_provisional" } });
@@ -3243,15 +3239,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // provisional + unverified; the review stays open for human confirmation.
                 const enrichId = provId;
                 set((st) => ({
-                  products: st.products.map((p) =>
-                    p.id === enrichId
-                      ? {
+                  products: st.products.map((p) => {
+                    if (p.id !== enrichId) return p;
+                    // FALKEN FIX (owner-reported live bug, 2026-07-20): same gap as the mint branch
+                    // above - a name-only decode payload used to leave brand/category/specsShort/
+                    // specsFull permanently blank on the upgraded row. Fill-if-empty via the shared
+                    // helper: a field the row already carries a value for is preserved untouched.
+                    const enrichIdentity = enrichProductIdentity({
+                      payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
+                      existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                    });
+                    return {
                           ...p,
                           name: provName,
-                          brand: best?.brand ?? p.brand,
-                          category: best?.category ?? p.category,
-                          specsShort: best?.specsShort ?? p.specsShort,
-                          specsFull: best?.specsFull ?? p.specsFull,
+                          brand: enrichIdentity.brand,
+                          category: enrichIdentity.category,
+                          specsShort: enrichIdentity.specsShort,
+                          specsFull: enrichIdentity.specsFull,
+                          ...(!p.structuredModel && enrichIdentity.structuredModel ? { structuredModel: enrichIdentity.structuredModel } : {}),
                           primarySku: p.primarySku || (best?.primarySku ?? ""),
                           // PN-BARCODE-CARRY: upgrade the placeholder primaryBarcode (empty, or the
                           // scanned PN itself) to the decode's corpus barcode - never a real scanned
@@ -3272,9 +3277,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                           confidence: decision?.confidence ?? p.confidence,
                           updatedAt: now(),
                           updatedBy: "ai",
-                        }
-                      : p,
-                  ),
+                    };
+                  }),
                 }));
               }
               // Count it on the EXISTING scan event for this code (idempotent by event id), and surface the
@@ -4413,19 +4417,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // (not the AI suggestion), apply the human's product details to the upgraded row so the
                 // product identity reflects what the human actually intended, not the AI's provisional guess.
                 const normName = (s: string) => cleanProductName(s ?? "").trim().toLowerCase();
-                // Lane A integration: clean a junky marketplace-scraped title deterministically, and
-                // parse a canonical tire size out of it for a still-empty specsShort fallback - the
-                // decode payload's OWN specsShort (when present) always wins; this only fills the gap
-                // when the payload carries no structured size at all, never guesses.
-                const listing = tireListingEnrichment(np.name);
                 products = products.map((p) => {
                   if (p.id !== productId) return p;
                   const updates: Partial<Product> = { verified: true, provisional: false, updatedAt: now(), updatedBy: "human" };
-                  if (np.name && normName(np.name) !== normName(p.name)) {
-                    updates.name = listing.cleanName;
-                    if (np.brand !== undefined) updates.brand = np.brand;
-                    if (np.category !== undefined) updates.category = np.category;
-                  }
+                  // FALKEN FIX (owner-reported live bug, 2026-07-20): a name-only decode payload (no
+                  // separate brand/category/specsShort/specsFull fields) used to leave every structured
+                  // column blank forever, even though the size/brand/model are cleanly parseable from
+                  // the name itself (e.g. "Falken Azenis RT660 P 245 /40 R18 97W XL BSW"). Route every
+                  // apply through the single shared enrichProductIdentity helper: the payload's own
+                  // structured field always wins; a still-empty field falls back to a deterministic
+                  // parse of the (cleaned) name - never a guess. `enriched.name` is the CLEANED name
+                  // (tireListingNormalizer's cleanListingTitle) - use it wherever np.name would have
+                  // been written raw before.
+                  const enriched = enrichProductIdentity({
+                    payload: { name: np.name ?? p.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
+                    existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                  });
                   // B1 FIX (owner-reported, 268-row review, 2026-07-20): this re-match/reuse path used to
                   // drop specsShort/specsFull/primarySku/category entirely - a decode payload's structured
                   // fields never landed on an existing (already-counted) provisional row, so Brand/Model/
@@ -4433,16 +4440,26 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // LATER, richer decode re-matched the same physical item. Fill-if-empty ONLY: any field
                   // this row already carries a non-empty value for (human-entered or from an earlier
                   // decode) is never clobbered by a weaker/different later suggestion.
-                  if (!p.category && np.category) updates.category = np.category;
-                  if (!p.specsShort && np.specsShort) updates.specsShort = np.specsShort;
-                  else if (!p.specsShort && !np.specsShort && listing.specsShort) updates.specsShort = listing.specsShort;
-                  if (!p.specsFull && np.specsFull) updates.specsFull = np.specsFull;
+                  if (np.name && normName(np.name) !== normName(p.name)) {
+                    updates.name = enriched.name;
+                    if (np.brand !== undefined) updates.brand = np.brand;
+                    if (np.category !== undefined) updates.category = np.category;
+                  }
+                  if (!p.category) updates.category = enriched.category;
+                  if (!p.specsShort) updates.specsShort = enriched.specsShort;
+                  if (!p.specsFull) updates.specsFull = enriched.specsFull;
                   if (!p.primarySku && np.primarySku) updates.primarySku = np.primarySku;
-                  if (!p.brand && np.brand) updates.brand = np.brand;
+                  if (!p.brand) updates.brand = enriched.brand;
+                  if (!p.structuredModel && enriched.structuredModel) updates.structuredModel = enriched.structuredModel;
                   // Task 4: (re)structure only when the name/brand actually changed above; the guard
                   // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
                   // the safe wrapper: a structurer throw must never break this scan flow (Task 4 review fix).
                   Object.assign(updates, safeStructuredFieldsFor(updates.name ?? p.name, updates.brand ?? p.brand, p.structuredBy));
+                  // safeStructuredFieldsFor may return its own structuredModel guess (name-only
+                  // structurer); prefer OUR still-empty fill above when the structurer found nothing.
+                  if (!updates.structuredModel && enriched.structuredModel && !p.structuredModel) {
+                    updates.structuredModel = enriched.structuredModel;
+                  }
                   return { ...p, ...updates };
                 });
               }
@@ -4458,13 +4475,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             approvingProvisional = true;
             weakGuessProduct = isWeakGuess(review, np) && payload.origin !== "human";
             const orphan = products.find((p) => p.id === provOrphanId)!;
+            // FALKEN FIX (owner-reported live bug, 2026-07-20): this upgrade path used to write
+            // np.brand/np.category/np.specsShort/np.specsFull verbatim with no fallback, so a
+            // name-only decode payload (all structured fields empty) left every structured column
+            // permanently blank even though the size/brand/model are cleanly parseable from the
+            // name. Route through the shared helper: payload field wins when present; a still-empty
+            // field falls back to a deterministic parse of the (cleaned) name - never a guess.
+            const orphanEnriched = enrichProductIdentity({
+              payload: { name: np.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
+              existing: { name: orphan.name, brand: orphan.brand, category: orphan.category, specsShort: orphan.specsShort, specsFull: orphan.specsFull },
+            });
             const upgraded: Product = {
               ...orphan,
-              name: np.name ?? orphan.name,
-              brand: np.brand ?? orphan.brand,
-              category: np.category ?? orphan.category,
-              specsShort: np.specsShort ?? orphan.specsShort,
-              specsFull: np.specsFull ?? orphan.specsFull,
+              name: orphanEnriched.name || orphan.name,
+              brand: orphanEnriched.brand,
+              category: orphanEnriched.category,
+              specsShort: orphanEnriched.specsShort,
+              specsFull: orphanEnriched.specsFull,
               primarySku: np.primarySku ?? orphan.primarySku,
               primaryBarcode: orphan.primaryBarcode || review.cleanCode,
               ...(function () {
@@ -4488,8 +4515,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               updatedBy: payload.origin === "human" ? "human" : orphan.updatedBy,
               // Task 4: structure the upgraded identity (deterministic only, never LLM on the hot
               // path). Guarded against clobbering a prior "human" stamp.
-              ...safeStructuredFieldsFor(np.name ?? orphan.name, np.brand ?? orphan.brand, orphan.structuredBy),
+              ...safeStructuredFieldsFor(np.name ?? orphan.name, orphanEnriched.brand, orphan.structuredBy),
             };
+            if (!upgraded.structuredModel && orphanEnriched.structuredModel) {
+              upgraded.structuredModel = orphanEnriched.structuredModel;
+            }
             products = products.map((p) => (p.id === provOrphanId ? upgraded : p));
             createdProduct = upgraded;
           } else {
@@ -4504,15 +4534,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // origin !== "human" (behavior preserved from before the extraction).
             weakGuessProduct = isWeakGuess(review, np);
             const mintedName = np.name ?? review.cleanCode;
-            const mintedBrand = np.brand ?? "";
+            // FALKEN FIX (owner-reported live bug, 2026-07-20): a fresh mint used to take np.brand/
+            // np.category/np.specsShort/np.specsFull verbatim (defaulting to "" when absent) with no
+            // fallback to parse them from the name - exactly the shape of the owner's bug row (a
+            // single fresh scan whose decode payload carried only a name, no separate structured
+            // fields). Route through the shared helper so a still-empty field is deterministically
+            // parsed from the (cleaned) name instead of staying blank forever.
+            const mintEnriched = enrichProductIdentity({
+              payload: { name: mintedName, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
+            });
+            const mintedBrand = mintEnriched.brand;
             const newProduct: Product = {
               id: productId,
               businessId: state.businessId,
               name: mintedName,
               brand: mintedBrand,
-              category: np.category ?? "",
-              specsShort: np.specsShort ?? "",
-              specsFull: np.specsFull ?? "",
+              category: mintEnriched.category,
+              specsShort: mintEnriched.specsShort,
+              specsFull: mintEnriched.specsFull,
               primarySku: np.primarySku ?? "",
               // Identity = the scanned code, so the product's primaryBarcode and its first approved alias
               // agree (prevents the alias-miss -> identifier-conflict -> re-decode -> duplicate cascade).
@@ -4535,6 +4574,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // Task 4: fresh mint - always deterministic-structure (no prior stamp to protect).
               ...safeStructuredFieldsFor(mintedName, mintedBrand),
             };
+            if (!newProduct.structuredModel && mintEnriched.structuredModel) {
+              newProduct.structuredModel = mintEnriched.structuredModel;
+            }
             products = [...products, newProduct];
             createdProduct = newProduct;
           }
@@ -6146,7 +6188,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
       settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
     } as never;
   }
-  // Non-destructive branch (v5..v8 -> v9): transform ONLY keys the persisted blob actually carries.
+  // Non-destructive branch (v5..v9 -> v10): transform ONLY keys the persisted blob actually carries.
   // A PARTIAL blob (e.g. the e2e fixture's settings-only seed) must not gain products/scanFeed/
   // countSnapshots/settings/needsReviewQueue keys here - injected empties clobber the seeded initial
   // state when zustand merges the migrated blob over it. Live-caught P2 regression: the v7->v8 bump made
@@ -6154,7 +6196,10 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   // survived, so known scans counted but the count table lost every product row ("No counts yet"). The
   // v8->v9 bump (Phase 4 Task 10, UnknownCodeReview.importQuantity) does not need its own key transform -
   // an absent field on old persisted reviews just stays absent (optional, undefined-safe) - so this
-  // branch's existing non-injective shape already satisfies the v9 rule unchanged.
+  // branch's existing non-injective shape already satisfies the v9 rule unchanged. The v9->v10 bump
+  // (Task 2, owner-reported live bug, 2026-07-20) reuses this SAME `backfillProducts` call below - it
+  // now also runs the enrichProductIdentity fill-if-empty pass (see backfillProducts.ts), so a legacy
+  // row's blank brand/category/specsShort/specsFull gets filled from its parseable name, exactly once.
   const out: Record<string, unknown> = { ...p };
   if (Array.isArray(p.products)) {
     out.products = backfillProducts(p.products as Product[]).products;
@@ -6179,7 +6224,11 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 9,
+    // Task 2 (owner-reported live bug, 2026-07-20): v9 -> v10 bump so every existing install runs
+    // the identity-field backfill (enrichProductIdentity fill-if-empty, see backfillProducts.ts)
+    // exactly once on next load - a legacy row's blank brand/category/specsShort/specsFull gets
+    // filled from its parseable name via the same non-destructive >= 5 migrate branch below.
+    version: 10,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
