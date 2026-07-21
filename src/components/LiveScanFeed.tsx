@@ -4,6 +4,19 @@ import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { matchTireSize } from "@/services/tire/tireSizeNormalizer";
+import { canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
+import type { Product } from "@/types";
+
+// Size column: same structured-size source FinalCountTable already uses (product.specsShort via
+// matchTireSize), falling back to a deterministic parse of the row's own display name when the
+// linked product has no parseable structured size yet (e.g. still-provisional rows). Never guesses;
+// "-" when neither source yields a confident size.
+function resolvedFeedSize(product: Product | undefined, displayName: string): string {
+  const fromProduct = product ? matchTireSize(product.specsShort)?.canonical.split(" ")[0] : undefined;
+  if (fromProduct) return fromProduct;
+  return canonicalTireSize(displayName) || "-";
+}
 
 // Raw live scan feed: every scan event in order, newest first. Keeps the full audit trail. Raw/clean
 // codes AND the internal match type are platformOwner-only; customers see the product name + part number
@@ -17,8 +30,9 @@ export function LiveScanFeed() {
   const isPlatform = useIsPlatformOwner();
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
-  // platformOwner-only. Customer columns: Time, Barcode, Brand, Product, SKU, Qty, Status, Reason, Sync = 9.
-  const colSpan = isPlatform ? 11 : 9;
+  // platformOwner-only. Customer columns: Time, Barcode, Brand, Product, Size, SKU, Qty, Status, Reason,
+  // Sync = 10.
+  const colSpan = isPlatform ? 12 : 10;
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -41,6 +55,7 @@ export function LiveScanFeed() {
               {isPlatform && <th scope="col" className="px-4 py-3">Match</th>}
               <th scope="col" className="px-4 py-3">Brand</th>
               <th scope="col" className="px-4 py-3">Product</th>
+              <th scope="col" className="px-4 py-3">Size</th>
               <th scope="col" className="px-4 py-3">{isPlatform ? "SKU" : "Part number"}</th>
               <th scope="col" className="px-4 py-3">Qty on hand</th>
               <th scope="col" className="px-4 py-3">Status</th>
@@ -167,6 +182,9 @@ export function LiveScanFeed() {
                           Off-category item
                         </span>
                       ) : null}
+                    </td>
+                    <td className="px-4 py-3 text-sm" data-testid={`feed-size-${e.id}`}>
+                      {resolvedFeedSize(product, displayName)}
                     </td>
                     <td className="px-4 py-3 font-mono text-sm" data-testid={`feed-part-number-${e.id}`}>
                       {displaySku}

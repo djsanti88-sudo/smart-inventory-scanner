@@ -207,6 +207,51 @@ describe("LiveScanFeed - Brand column (owner order 2026-07-10)", () => {
   });
 });
 
+// Owner order: the Size column shows the linked product's structured size (specsShort, parsed via
+// matchTireSize - same source FinalCountTable already uses), falling back to canonicalTireSize() of
+// the row's display name when the product has no parseable structured size. Never guesses; "-" when
+// nothing resolves.
+describe("LiveScanFeed - Size column", () => {
+  it("shows the product's structured tire size under the Size header", () => {
+    const event = {
+      id: "evSize1", rawCode: "078742051451", cleanCode: "078742051451", matchedProductId: "pSize1",
+      matchType: "barcode", status: "known", quantityAfterScan: 1, decodeStatus: "verified", reason: "",
+      syncStatus: "synced", createdAt: Date.now(),
+    } as unknown as ScanEvent;
+    useScanStore.setState({
+      scanFeed: [event], needsReviewQueue: [], finalCounts: [],
+      products: [{
+        id: "pSize1", name: "Wrangler Workhorse AT", primarySku: "", provisional: false,
+        specsShort: "245/40R18 97Y",
+      } as unknown as Product],
+    });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByText("Size")).toBeInTheDocument();
+    expect(screen.getByTestId("feed-size-evSize1").textContent?.trim()).toBe("245/40R18");
+  });
+
+  it("shows a dash when the product has no parseable size", () => {
+    const event = {
+      id: "evSize2", rawCode: "999999999999", cleanCode: "999999999999", matchedProductId: "pSize2",
+      matchType: "barcode", status: "known", quantityAfterScan: 1, decodeStatus: "verified", reason: "",
+      syncStatus: "synced", createdAt: Date.now(),
+    } as unknown as ScanEvent;
+    useScanStore.setState({
+      scanFeed: [event], needsReviewQueue: [], finalCounts: [],
+      products: [{
+        id: "pSize2", name: "Member's Mark Purified Water 500ml", primarySku: "", provisional: false,
+        specsShort: "",
+      } as unknown as Product],
+    });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.getByTestId("feed-size-evSize2").textContent?.trim()).toBe("-");
+  });
+});
+
 // Stale-UI fix (goupc-cap-rootcause item 3): decodeNote is set once at scan time to the in-flight
 // "Decoding with AI..." note. Once the row settles to a final decodeStatus, that note must never still
 // read "Decoding with AI..." - the store now clears/refreshes it on settle, and this suite also proves
