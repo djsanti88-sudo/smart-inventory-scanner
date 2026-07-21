@@ -49,7 +49,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
+    <main className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
       <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold text-zinc-900">Smart Inventory Scanner</h1>
         <p className="mt-1 text-base text-zinc-600">
@@ -134,6 +134,6 @@ export default function LoginPage() {
           )}
         </div>
       </form>
-    </div>
+    </main>
   );
 }

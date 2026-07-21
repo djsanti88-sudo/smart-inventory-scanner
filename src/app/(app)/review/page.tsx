@@ -20,6 +20,7 @@ export default function ReviewPage() {
   // gate re-establishes context (from the signed-in user + selected business) so sync can drain.
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
+      <h1 className="sr-only">Review queue</h1>
       <BusinessContextGate>
         <SyncStatusBar />
         <div className="flex gap-2" role="tablist" aria-label="Review tabs">

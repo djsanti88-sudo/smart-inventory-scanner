@@ -58,7 +58,12 @@ export function NeedsReviewTable() {
             : "These codes already count. Confirm the right product once if you like, and from then on scanning that code is automatic."}
         </p>
       </div>
-      <div className="overflow-auto">
+      <div
+        className="overflow-auto shadow-[inset_-8px_0_6px_-6px_rgba(0,0,0,0.08)]"
+        tabIndex={0}
+        role="region"
+        aria-label="Suggested items table, scroll horizontally for more columns"
+      >
         <table className="w-full border-collapse text-left text-base" aria-labelledby="review-heading">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>

@@ -158,6 +158,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
+      <h1 className="sr-only">Settings</h1>
       <OwnerPinSettings />
       {/* P3: the raw Business ID is an internal identifier - platformOwner only. Customers see only
           Export, Clean up, and Danger zone. */}

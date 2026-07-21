@@ -92,6 +92,7 @@ export default function ScanPage() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
+      <h1 className="sr-only">Scan</h1>
       <BusinessContextGate>
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
         {SHOW_CATEGORY && categoryWarning && (

@@ -101,7 +101,12 @@ export function FinalCountTable() {
           className="min-h-[44px] w-full max-w-md rounded-lg border border-zinc-300 px-3 text-base"
         />
       </div>
-      <div className="overflow-auto">
+      <div
+        className="overflow-auto shadow-[inset_-8px_0_6px_-6px_rgba(0,0,0,0.08)]"
+        tabIndex={0}
+        role="region"
+        aria-label="Your counts table, scroll horizontally for more columns"
+      >
         <table className="w-full border-collapse text-left text-base" aria-labelledby="counts-heading">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>

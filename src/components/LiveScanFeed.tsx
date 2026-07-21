@@ -26,7 +26,12 @@ export function LiveScanFeed() {
         <h2 id="scan-feed-heading" className="text-lg font-semibold text-zinc-900">What you just scanned</h2>
         <span className="text-sm text-zinc-600">{scanFeed.length} scans</span>
       </div>
-      <div className="max-h-72 overflow-auto">
+      <div
+        className="max-h-72 overflow-auto shadow-[inset_-8px_0_6px_-6px_rgba(0,0,0,0.08)]"
+        tabIndex={0}
+        role="region"
+        aria-label="What you just scanned table, scroll horizontally for more columns"
+      >
         <table className="w-full border-collapse text-left text-base" aria-labelledby="scan-feed-heading">
           <thead className="sticky top-0 border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
