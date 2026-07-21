@@ -159,4 +159,63 @@ describe("columnIntelligence", () => {
     expect(fuzzy.mapping.partNumber).toBe(0);
     expect(fuzzy.tiers?.partNumber).toBe("medium");
   });
+
+  // --- GAP 1: name-with-embedded-size vs pure-size content inference ---
+
+  it("infers a name column as name (not size) when values are prose with an embedded tire size", () => {
+    // Mirrors .superpowers/stress/fixtures/unhelpful-headers.csv Column2: cryptic header, every
+    // sampled value is a tire NAME that happens to embed a parseable size token. This must NOT be
+    // claimed by isSizeValue just because a size substring is present.
+    const result = inferColumnMapping([
+      ["Column2", "Qcol"],
+      ["Versado LX II 205/55R16", "5"],
+      ["Michelin Pilot Sport 4 225/45R17", "7"],
+      ["Wrangler Territory RT 235/65R17", "8"],
+      ["Dueler H P Sport AS 225/65R17", "2"],
+    ]);
+    expect(result.mapping.name).toBe(0);
+    expect(result.mapping.size).toBeUndefined();
+  });
+
+  it("still infers a pure-size column as size when values are ONLY the size token", () => {
+    // Lock the non-regression: a column whose values are essentially just a size (no surrounding
+    // prose) must still be recognized as size.
+    const result = inferColumnMapping([
+      ["Column2", "Qcol"],
+      ["205/55R16", "5"],
+      ["225/45R17", "7"],
+      ["LT265/70R17", "8"],
+      ["235/65R17", "2"],
+    ]);
+    expect(result.mapping.size).toBe(0);
+    expect(result.mapping.name).toBeUndefined();
+  });
+
+  // --- GAP 2: brand content-shape detection ---
+
+  it("infers a brand column from real brand values under an unhelpful header, at MEDIUM tier", () => {
+    // Mirrors .superpowers/stress/fixtures/unhelpful-headers.csv Column5: header carries zero
+    // semantic signal, but the sampled values are real tire brand names.
+    const result = inferColumnMapping([
+      ["Column5", "Qcol"],
+      ["Michelin", "5"],
+      ["Goodyear", "7"],
+      ["Bridgestone", "8"],
+      ["Continental", "2"],
+      ["Pirelli", "6"],
+    ]);
+    expect(result.mapping.brand).toBe(0);
+    expect(result.tiers?.brand).toBe("medium");
+  });
+
+  it("does not infer brand from a column of random words that are not known brand names", () => {
+    const result = inferColumnMapping([
+      ["Column5", "Qcol"],
+      ["turtle", "5"],
+      ["hallway", "7"],
+      ["gravity", "8"],
+      ["mixture", "2"],
+    ]);
+    expect(result.mapping.brand).toBeUndefined();
+  });
 });

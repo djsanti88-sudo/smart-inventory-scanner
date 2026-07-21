@@ -1,5 +1,6 @@
 // src/services/columnIntelligence.ts
-import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { KNOWN_TIRE_BRANDS, tireSizeToken } from "@/services/ai/tireSpecs";
+import { sameBrandFamily } from "@/services/catalog/brandFamilies";
 import { sanitizeCell } from "@/services/csvImport";
 import type { ColumnMapping, ImportField, MappingSource } from "@/services/importSchema";
 import { normalizedEditSimilarity } from "@/services/reconcile/normalizedEditDistance";
@@ -152,8 +153,19 @@ function isQuantityValue(value: string): boolean {
   return Number.isSafeInteger(parsed) && parsed >= 0 && !isGtinShaped(value);
 }
 
+// A value is a SIZE only when it is essentially JUST a size token, not prose that happens to embed
+// one (e.g. a tire name/description like "Versado LX II 205/55R16"). Compare the extracted size
+// token's character length (letters+digits, ignoring the separator noise the raw value may carry:
+// spaces, commas) against the value's own letter+digit length; a pure size column's values are
+// almost entirely the token itself, while a name column's embedded size is a small fraction of a
+// much longer string.
 function isSizeValue(value: string): boolean {
-  return tireSizeToken({ productName: value }) !== "";
+  const token = tireSizeToken({ productName: value });
+  if (!token) return false;
+  const valueDense = value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  const tokenDense = token.replace(/[^A-Za-z0-9]/g, "");
+  if (valueDense.length === 0) return false;
+  return tokenDense.length / valueDense.length >= 0.8;
 }
 
 // SKU / part-number shape: an alphanumeric code that carries letters and/or separators (- / .),
@@ -191,6 +203,38 @@ function isUomValue(value: string): boolean {
   return UOM_WORDS.has(value.trim().toLowerCase());
 }
 
+// Compact inline list of common RETAIL (non-tire) brand names, lowercase. Client-safe: does not
+// import the server-only retail corpus. Kept small and hand-picked (not exhaustive) - it only needs
+// to recognize a column whose header gives no signal, not replace the corpus.
+const KNOWN_RETAIL_BRANDS = [
+  "3m", "sony", "samsung", "lg", "philips", "panasonic", "bosch", "black and decker", "dewalt",
+  "makita", "milwaukee", "ryobi", "stanley", "craftsman", "kohler", "moen", "delta", "whirlpool",
+  "ge", "general electric", "honeywell", "energizer", "duracell", "rayovac", "kodak", "canon",
+  "nikon", "hp", "dell", "logitech", "belkin", "anker", "gorilla", "loctite", "wd-40", "rustoleum",
+  "rust-oleum", "sherwin williams", "behr", "valspar", "clorox", "lysol", "scotch", "gillette",
+  "colgate", "crest", "oral-b", "johnson and johnson", "kimberly clark", "nestle", "kraft",
+  "coca cola", "pepsi", "unilever", "procter and gamble", "kingston", "sandisk", "seagate",
+  "western digital", "intel", "amd", "nvidia", "asus", "acer", "lenovo", "toshiba", "epson",
+  "brother", "husky", "irwin", "klein tools", "dremel", "shopvac", "champion", "napa", "acdelco",
+  "bosch automotive", "denso", "gates", "fram", "castrol", "mobil", "valvoline", "stp", "prestone",
+];
+
+// Case-insensitive, trimmed brand vocabulary lookup: the tire brand list already used elsewhere in
+// this codebase (KNOWN_TIRE_BRANDS) plus the compact retail list above. Also treats a value as a
+// brand hit when it belongs to the same curated corporate family as a known brand (e.g. "Kelly" ->
+// Goodyear family), so family members are recognized without listing every one individually.
+const KNOWN_BRAND_SET = new Set<string>([...KNOWN_TIRE_BRANDS, ...KNOWN_RETAIL_BRANDS].map((b) => b.toLowerCase()));
+
+function isBrandValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  if (KNOWN_BRAND_SET.has(normalized)) return true;
+  for (const known of KNOWN_BRAND_SET) {
+    if (sameBrandFamily(normalized, known)) return true;
+  }
+  return false;
+}
+
 interface ContentSignal {
   field: ImportField;
   fits: (value: string) => boolean;
@@ -202,6 +246,7 @@ const CONTENT_SIGNALS: ContentSignal[] = [
   { field: "size", fits: isSizeValue },
   { field: "uom", fits: isUomValue },
   { field: "quantity", fits: isQuantityValue },
+  { field: "brand", fits: isBrandValue },
   { field: "partNumber", fits: isPartNumberValue },
   { field: "name", fits: isNameValue },
 ];
