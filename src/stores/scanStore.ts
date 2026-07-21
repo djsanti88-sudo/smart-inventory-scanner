@@ -3254,9 +3254,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     // above - a name-only decode payload used to leave brand/category/specsShort/
                     // specsFull permanently blank on the upgraded row. Fill-if-empty via the shared
                     // helper: a field the row already carries a value for is preserved untouched.
+                    //
+                    // PREFIX-FLOOR BRAND LOCK FIX (owner-reported live bug, 2026-07-21, 310-row review:
+                    // rows 049000242201/049000245462 showed a real tire's decoded name next to Brand
+                    // "Coca-Cola" - 049000 is Coca-Cola's GS1 prefix): p.brand at this point may be
+                    // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+                    // synchronously BEFORE this decode ever ran (p.name is still exactly the floor's own
+                    // placeholder text). That guess is not "another source" that fill-if-empty must
+                    // protect - it must yield to whatever THIS decode determines (its own brand, or a
+                    // name-parsed brand, or genuinely empty), never silently lock in the wrong brand next
+                    // to a now-correct decoded name. A brand set by any OTHER means (a prior real decode,
+                    // a human edit) still wins untouched, since p.name would no longer equal the floor text.
+                    const brandIsOnlyFloorGuess = isBareUnidentifiedLabel(p.name, code) || p.name === provisionalPlaceholderName(code);
                     const enrichIdentity = enrichProductIdentity({
                       payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
-                      existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                      existing: {
+                        name: p.name,
+                        brand: brandIsOnlyFloorGuess ? "" : p.brand,
+                        category: p.category, specsShort: p.specsShort, specsFull: p.specsFull,
+                      },
                     });
                     return {
                           ...p,
@@ -6251,7 +6267,14 @@ export const useScanStore = create<ScanState>()(
     // Group C item 11 (owner mandate 2026-07-21): v10 -> v11 bump so every existing install also
     // re-cleans a legacy JUNKY product name into the app's own canonical display form exactly once
     // (see scanStoreMigrate's v11 name re-clean step below).
-    version: 11,
+    // Bug 4 fix (owner mandate 2026-07-21, 310-row review): v11 -> v12 bump so every existing install
+    // ALSO re-runs backfillProducts once more to dedupe a brand-duplicated name that an earlier
+    // enrichment/backfill pass baked in before canonicalTireDisplayName/enrichProductIdentity learned
+    // to collapse duplicate brand-token runs (e.g. "Greenball Greenball Greenball Tow-Master"). The
+    // >= 5 migrate branch below already calls backfillProducts unconditionally on every hydrate whose
+    // persisted version is below `version`, so this bump alone is sufficient - no separate v12 step
+    // needed (backfillProducts itself now dedupes via the fixed canonicalTireDisplayName).
+    version: 12,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken

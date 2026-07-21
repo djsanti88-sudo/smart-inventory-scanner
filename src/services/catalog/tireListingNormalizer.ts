@@ -52,6 +52,12 @@ const LEAD_QTYX_RE = /^\s*\d+\s*[xX]\s+/;
 const MID_SET_OF_RE = /(?:^|\s)set\s+of\s+\d+(?:\s|$)/gi;
 const MID_QTY_NEW_RE = /(?:^|\s)\d+\s*(?:new|used)(?:\s|$)/gi;
 const MID_QTYX_RE = /(?:^|\s)\d+\s*[xX](?:\s|$)/g;
+// Bug 5 (owner mandate 2026-07-21): the quantity strip removed "Set" but left "Of N"/"Of N
+// word-number" remnants leaking into the model - live-observed "Bearway Of 2 Two Bw777", "Farroad Of
+// 4 Four Frd26", "Durun Of 2 M626". Matches "Of <digit>" optionally followed by its spelled-out
+// count word (Two/Three/.../Eight), anywhere in the string, at any position (not just leading).
+const QTY_COUNT_WORD = "one|two|three|four|five|six|seven|eight";
+const MID_OF_N_RE = new RegExp(`(?:^|\\s)of\\s+\\d+(?:\\s+(?:${QTY_COUNT_WORD}))?(?:\\s|$)`, "gi");
 // Trailing bare "Tires"/"Tire" noise word at the very end of the string, but ONLY when it directly
 // follows a sidewall marker (BSW/OWL/WSW/RWL/XL/SL) - the shape a real listing uses ("111T XL
 // Tires"). Deliberately NOT a blanket trailing strip: a legitimate category-descriptor tail like
@@ -142,6 +148,7 @@ export function cleanListingTitle(raw: string | null | undefined): string {
     s = s.replace(MID_SET_OF_RE, " ");
     s = s.replace(MID_QTY_NEW_RE, " ");
     s = s.replace(MID_QTYX_RE, " ");
+    s = s.replace(MID_OF_N_RE, " ");
   } while (s.length !== prevLen);
 
   s = s.replace(PAREN_NOISE_RE, " ");

@@ -18,7 +18,18 @@ const METRIC = /(P|LT|ST)?\s*(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*(\d{2}(?:\.\d)?)/
 // prefix (LT/P/ST) can sit directly attached to the flotation number ("LT33X12.50R20") - mirrors
 // METRIC's optional (P|LT|ST)? so the prefix is captured as PART of the size, never left dangling
 // in the surrounding text to leak into a model/description field.
-const FLOTATION = /(P|LT|ST)?\s*(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(?:ZR|R|-)?\s*(\d{2}(?:\.\d)?)/i;
+//
+// (Bug 2 fix, owner mandate 2026-07-21): the ZR/R/- separator before the rim is now MANDATORY (was
+// optional), matching every real flotation size in the corpus (COMMERCIAL's own comment already notes
+// "decimal rim required to avoid false positives" for the same reason). Without it, a bicycle "NN X
+// N.NNN" dimension like "16 X 2.125" false-matched by splitting the decimal mid-digit ("2.1" width +
+// "25" rim, fabricating "16X2.1R25") - there is no separator there at all for this to require.
+const FLOTATION = /(P|LT|ST)?\s*(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
+// (Bug 2 fix) Plausibility bounds for the flotation match: diameter (the "35" in 35X12.50R20) 22-44in,
+// width (the "12.50") 4-18in, rim 8-30in - mirrors structurer.ts's isPlausibleTireSize bounds for the
+// exact same shape. Guards a technically-separator-bearing but implausible match.
+const okFlotationDiameter = (d: number) => d >= 22 && d <= 44;
+const okFlotationWidth = (w: number) => w >= 4 && w <= 18;
 // Commercial without an aspect slash: 11R22.5 (decimal rim required to avoid false positives).
 const COMMERCIAL = /(\d{2,3})\s*(ZR|R)\s*(\d{2}\.\d)/i;
 // Space-separated shorthand: "225 60 18".
@@ -65,9 +76,9 @@ export function matchTireSize(input: string | null | undefined): TireSizeMatch |
   }
 
   m = FLOTATION.exec(s);
-  if (m) {
+  if (m && okFlotationDiameter(Number(m[2])) && okFlotationWidth(Number(m[3])) && okRim(Number(m[5]))) {
     const prefix = (m[1] ?? "").toUpperCase();
-    return withLoadSpeed(`${prefix}${m[2]}X${m[3]}R${m[4]}`, s, m[0]);
+    return withLoadSpeed(`${prefix}${m[2]}X${m[3]}R${m[5]}`, s, m[0]);
   }
 
   m = COMMERCIAL.exec(s);

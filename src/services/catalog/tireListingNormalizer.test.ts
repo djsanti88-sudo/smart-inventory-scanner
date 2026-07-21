@@ -94,6 +94,87 @@ describe("cleanListingTitle - A1 junk stripping", () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Bug 5 (owner mandate 2026-07-21, 310-row review): the quantity strip removed "Set" but left "Of
+// N"/"Of N word-number" remnants leaking into the model. Live-observed: "Bearway Of 2 Two Bw777",
+// "Farroad Of 4 Four Frd26", "Durun Of 2 M626".
+// ---------------------------------------------------------------------------------------------
+describe("cleanListingTitle - Bug 5: 'Of N' / 'Of N word-number' quantity remnants", () => {
+  it("strips 'Of N Two' quantity remnant (Bearway fixture)", () => {
+    const out = cleanListingTitle("Bearway Of 2 Two Bw777");
+    expect(out).toBe("Bearway Bw777");
+  });
+
+  it("strips 'Of N Four' quantity remnant (Farroad fixture)", () => {
+    const out = cleanListingTitle("Farroad Of 4 Four Frd26");
+    expect(out).toBe("Farroad Frd26");
+  });
+
+  it("strips a bare 'Of N' quantity remnant with no trailing count word (Durun fixture)", () => {
+    const out = cleanListingTitle("Durun Of 2 M626");
+    expect(out).toBe("Durun M626");
+  });
+
+  it("strips 'Of N' mid-string, not just at an edge", () => {
+    const out = cleanListingTitle("Fortune Tormenta Of 4 A/T2 265/65R17");
+    expect(out).not.toMatch(/\bOf\s+4\b/i);
+    expect(out).toContain("Fortune Tormenta");
+    expect(out).toContain("A/T2");
+  });
+
+  it("never strips a legitimate model containing the word 'of' as part of a longer phrase", () => {
+    // Sanity: "Of" alone (no following count-word-or-digit-then-count-word shape) is not touched.
+    expect(cleanListingTitle("Cooper Discoverer A/T3 LT245/75R16")).toBe("Cooper Discoverer A/T3 LT245/75R16");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Bug 3 (owner mandate 2026-07-21, 310-row review): words in the source name must never be REPLACED
+// (substituted with different text like "Tire") - only whole junk phrases may be REMOVED. Live-
+// observed mangled forms named "Radial"/"Only" being substituted. These property/regression fixtures
+// pin the invariant directly: every surviving (non-stripped) word must appear in the input verbatim,
+// and specific words the owner named as at-risk (Radial, Only) must never be silently swapped out.
+// ---------------------------------------------------------------------------------------------
+describe("cleanListingTitle - Bug 3: words are removed, never replaced", () => {
+  it("keeps 'Radial' and 'Only' verbatim, never substituted (Carlstar fixture)", () => {
+    const out = cleanListingTitle("Custom Flo Grip Radial R-2 Tire Only");
+    expect(out).toContain("Radial");
+    expect(out).toContain("Only");
+    expect(out).not.toMatch(/\bTire\b.*\bTire\b/i); // "Tire" must not appear twice (once real, once injected)
+  });
+
+  it("keeps 'Radial' verbatim in a leading position (Goodyear Farm fixture shape)", () => {
+    const out = cleanListingTitle("Radial Trail Hd Tire Wheel Assembly");
+    expect(out).toContain("Radial");
+    expect(out).toContain("Trail Hd");
+    expect(out).toContain("Wheel Assembly");
+  });
+
+  it("keeps 'Radial' verbatim next to a model code (M-108 fixture)", () => {
+    const out = cleanListingTitle("M-108 Radial Tires");
+    expect(out).toContain("M-108");
+    expect(out).toContain("Radial");
+  });
+
+  it("property: every surviving whitespace-separated token in the output exists verbatim (case-insensitive) somewhere in the input - cleaning only REMOVES spans, never substitutes text", () => {
+    const fixtures = [
+      "Custom Flo Grip Radial R-2 Tire Only",
+      "Radial Trail Hd Tire Wheel Assembly",
+      "M-108 Radial Tires",
+      "Fortune Set Of 4 FSR305 265/50R20 111T XL Tires",
+      "Bearway Of 2 Two Bw777",
+      "Cooper Discoverer A/T3 LT245/75R16",
+    ];
+    for (const raw of fixtures) {
+      const out = cleanListingTitle(raw);
+      const inputLower = raw.toLowerCase();
+      for (const tok of out.split(/\s+/).filter(Boolean)) {
+        expect(inputLower.includes(tok.toLowerCase()), `token "${tok}" from output must appear verbatim in input "${raw}"`).toBe(true);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Item A2: parseTireIdentity must isolate a clean Model field, never the whole listing string.
 // ---------------------------------------------------------------------------------------------
 describe("parseTireIdentity - A2 model isolation", () => {

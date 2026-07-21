@@ -102,4 +102,32 @@ describe("backfillProducts", () => {
       expect(products[0].location).toBe("Bay 9");
     });
   });
+
+  // Bug 4 (CRITICAL mechanism, owner mandate 2026-07-21, 310-row review): a row damaged by an earlier
+  // buggy enrichment pass ("Greenball Greenball Greenball Tow-Master", brand duplicated by repeated
+  // apply-site + backfill passes) must self-heal on the NEXT backfill run - and running backfill twice
+  // on its own output must never add another copy.
+  describe("dedupe self-heal (Bug 4)", () => {
+    it("dedupes a brand-duplicated legacy name on backfill", () => {
+      const p = product({ id: "p-dup", name: "Greenball Greenball Greenball Tow-Master", brand: "Greenball" });
+      const { products } = backfillProducts([p]);
+      expect(products[0].name).toBe("Greenball Tow-Master");
+    });
+
+    it("backfill(backfill(row)) === backfill(row): running it twice never adds another brand copy", () => {
+      const p = product({ id: "p-dup2", name: "Greenball Greenball Greenball Tow-Master", brand: "Greenball" });
+      const once = backfillProducts([p]);
+      const twice = backfillProducts(once.products);
+      expect(twice.products[0].name).toBe(once.products[0].name);
+      expect(twice.changedIds).toEqual([]);
+    });
+
+    it("never rewrites a duplicated name on a row stamped structuredBy human", () => {
+      const p = product({
+        id: "p-dup-human", name: "Greenball Greenball Greenball Tow-Master", brand: "Greenball", structuredBy: "human",
+      });
+      const { products } = backfillProducts([p]);
+      expect(products[0].name).toBe(p.name);
+    });
+  });
 });

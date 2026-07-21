@@ -122,3 +122,44 @@ describe("scanStoreMigrate - v10 -> v11 canonical name re-clean (Group C item 11
     expect(row.name).not.toContain("(suggested)");
   });
 });
+
+// Bug 4 (CRITICAL mechanism, owner mandate 2026-07-21, 310-row review): a row saved by an install
+// already at persist v11 (i.e. it already ran the v10->v11 name re-clean) can still carry a
+// brand-duplicated name from BEFORE canonicalTireDisplayName/enrichProductIdentity learned to dedupe
+// ("Greenball Greenball Greenball Tow-Master"). The v11->v12 bump re-runs backfillProducts (which now
+// dedupes) on every existing install exactly once more to self-heal that damage.
+describe("scanStoreMigrate - v11 -> v12 dedupe re-clean (Bug 4)", () => {
+  it("dedupes a brand-duplicated legacy name even when migrating from version 11 (already past the v10->v11 step)", () => {
+    const damagedRow = product({
+      id: "p-dup",
+      name: "Greenball Greenball Greenball Tow-Master",
+      brand: "Greenball",
+    });
+
+    const migrated = scanStoreMigrate({ businessId: "b1", products: [damagedRow] }, 11) as unknown as { products: Product[] };
+    const row = migrated.products.find((p) => p.id === "p-dup")!;
+
+    expect(row.name).toBe("Greenball Tow-Master");
+  });
+
+  it("never rewrites a v11->v12 migration on a row stamped structuredBy human", () => {
+    const humanRow = product({
+      id: "p-human-dup",
+      name: "Greenball Greenball Greenball Tow-Master",
+      brand: "Greenball",
+      structuredBy: "human",
+    });
+
+    const migrated = scanStoreMigrate({ businessId: "b1", products: [humanRow] }, 11) as unknown as { products: Product[] };
+    const row = migrated.products.find((p) => p.id === "p-human-dup")!;
+
+    expect(row.name).toBe("Greenball Greenball Greenball Tow-Master");
+  });
+
+  it("is idempotent: migrating an already-deduped row again changes nothing further", () => {
+    const cleanRow = product({ id: "p-already-clean", name: "Greenball Tow-Master", brand: "Greenball" });
+    const migrated = scanStoreMigrate({ businessId: "b1", products: [cleanRow] }, 11) as unknown as { products: Product[] };
+    const row = migrated.products.find((p) => p.id === "p-already-clean")!;
+    expect(row.name).toBe("Greenball Tow-Master");
+  });
+});

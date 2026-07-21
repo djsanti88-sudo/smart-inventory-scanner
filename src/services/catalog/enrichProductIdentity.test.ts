@@ -130,6 +130,38 @@ describe("canonicalTireDisplayName", () => {
       canonicalTireDisplayName({ brand: "Fortune", model: "", size: "265/50R20", loadSpeed: "111T", sidewall: "" }),
     ).toBe("Fortune 265/50R20 111T");
   });
+
+  // Bug 4 (CRITICAL mechanism, owner mandate 2026-07-21, 310-row review): canonical assembly must
+  // never prepend the brand again when the model text already begins with it (case-insensitive) -
+  // live-observed "Greenball Greenball Greenball Tow-Master", "Goodyear Farm Made By Titan Farm Made
+  // By Titan" (each enrichment pass added another copy). Also must collapse an existing consecutive
+  // duplicate token run already baked into the model text.
+  it("does NOT prepend the brand again when the model already starts with it", () => {
+    expect(
+      canonicalTireDisplayName({ brand: "Greenball", model: "Greenball Tow-Master", size: "", loadSpeed: "", sidewall: "" }),
+    ).toBe("Greenball Tow-Master");
+  });
+
+  it("does NOT prepend the brand again case-insensitively", () => {
+    expect(
+      canonicalTireDisplayName({ brand: "Goodyear", model: "goodyear Farm Made By Titan", size: "", loadSpeed: "", sidewall: "" }),
+    ).toBe("Goodyear Farm Made By Titan");
+  });
+
+  it("collapses an existing consecutive duplicate brand-token run already baked into the model", () => {
+    expect(
+      canonicalTireDisplayName({ brand: "Greenball", model: "Greenball Greenball Greenball Tow-Master", size: "", loadSpeed: "", sidewall: "" }),
+    ).toBe("Greenball Tow-Master");
+  });
+
+  it("is idempotent: assembling twice from its own output never adds another brand copy", () => {
+    const once = canonicalTireDisplayName({ brand: "Fortune", model: "FSR305", size: "265/50R20", loadSpeed: "111T", sidewall: "XL" });
+    // Re-run treating the previous output's remainder (after the brand) as "model" - the real
+    // enrich(enrich(row)) shape: a second pass parses brand back out of the assembled name.
+    const modelFromOnce = once.replace(new RegExp(`^Fortune\\s+`), "").replace(/\s*265\/50R20.*$/, "");
+    const twice = canonicalTireDisplayName({ brand: "Fortune", model: modelFromOnce, size: "265/50R20", loadSpeed: "111T", sidewall: "XL" });
+    expect(twice).toBe(once);
+  });
 });
 
 describe("enrichProductIdentity - Group B canonical name assembly + specsShort + category default + multiVariant", () => {
@@ -216,5 +248,89 @@ describe("enrichProductIdentity - Group B canonical name assembly + specsShort +
       existing: { name: "", brand: "", category: "", specsShort: "", specsFull: "" },
     });
     expect(result.multiVariant).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Bug 2c (owner mandate 2026-07-21, 310-row review): tire enrichment must never fire for a non-tire
+// product whose text happens to contain a coincidentally range-plausible size but no known tire
+// brand and no tire-specific corroboration (load/speed rating, sidewall marker). Live-observed: a
+// rivet kit and an essential-oil bottle both got category "Tire".
+// ---------------------------------------------------------------------------------------------
+describe("enrichProductIdentity - tire-ification requires a known brand or real tire corroboration", () => {
+  it("does NOT tire-ify a rivet kit whose part-count text coincidentally parses a plausible size", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Rivet Kit 195 65 15 Pieces" },
+      existing: { name: "", brand: "", category: "", specsShort: "", specsFull: "" },
+    });
+    expect(result.category).not.toBe("Tire");
+  });
+
+  it("does NOT tire-ify a non-tire product with no known brand and no size at all", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Manstel 200 Pcs Aluminum Rivet Screw Kit" },
+      existing: { name: "", brand: "", category: "", specsShort: "", specsFull: "" },
+    });
+    expect(result.category).not.toBe("Tire");
+    expect(result.brand).toBe("");
+  });
+
+  it("STILL tire-ifies a known-brand tire even without a load/speed rating or sidewall marker", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Cooper Discoverer A/T3 LT245/75R16" },
+      existing: { name: "", brand: "", category: "", specsShort: "", specsFull: "" },
+    });
+    expect(result.category).toBe("Tire");
+  });
+
+  it("STILL tire-ifies a brandless listing when the size carries a load/speed rating (tire-specific corroboration)", () => {
+    const result = enrichProductIdentity({
+      payload: { name: "Some Unbranded Model 265/70R17 115T" },
+      existing: { name: "", brand: "", category: "", specsShort: "", specsFull: "" },
+    });
+    expect(result.category).toBe("Tire");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Bug 4 (CRITICAL mechanism, owner mandate 2026-07-21): enrichment must be idempotent end to end -
+// enrich(enrich(row)) === enrich(row), byte-identical - so repeated apply-site/backfill passes never
+// duplicate the brand. Live-observed rows: "Greenball Greenball Greenball Tow-Master", "Grand Spirit
+// x4", "Custom 428 x3", "Goodyear Farm Made By Titan Made By Titan".
+// ---------------------------------------------------------------------------------------------
+describe("enrichProductIdentity - idempotency (Bug 4)", () => {
+  function enrichTwice(name: string, brand?: string) {
+    const once = enrichProductIdentity({ payload: { name, brand } });
+    const twice = enrichProductIdentity({
+      payload: { name: once.name, brand: once.brand },
+      existing: { name: once.name, brand: once.brand, category: once.category, specsShort: once.specsShort, specsFull: once.specsFull },
+    });
+    return { once, twice };
+  }
+
+  it("re-enriching a Greenball row does not duplicate the brand further", () => {
+    const { once, twice } = enrichTwice("Greenball Greenball Greenball Tow-Master", "Greenball");
+    expect(twice.name).toBe(once.name);
+    expect((once.name.match(/Greenball/gi) ?? []).length).toBeLessThanOrEqual(1);
+  });
+
+  it("re-enriching a Goodyear Farm-Made-By-Titan row does not duplicate the brand further", () => {
+    const { once, twice } = enrichTwice("Goodyear Farm Made By Titan Farm Made By Titan", "Goodyear");
+    expect(twice.name).toBe(once.name);
+    expect((once.name.match(/Goodyear/gi) ?? []).length).toBeLessThanOrEqual(1);
+  });
+
+  it("property: enrich(enrich(row)) === enrich(row) for every fixture row", () => {
+    const fixtures: Array<[string, string?]> = [
+      ["Fortune Set Of 4 FSR305 265/50R20 111T XL Tires", undefined],
+      ["Greenball Greenball Greenball Tow-Master", "Greenball"],
+      ["Goodyear Farm Made By Titan Farm Made By Titan", "Goodyear"],
+      ["Cooper Discoverer A/T3 LT245/75R16", undefined],
+      ["Reifen Nokian 205 50 R17 93V, 93W, 93H | Preis auf AUTODOC", undefined],
+    ];
+    for (const [name, brand] of fixtures) {
+      const { once, twice } = enrichTwice(name, brand);
+      expect(twice).toEqual(once);
+    }
   });
 });
