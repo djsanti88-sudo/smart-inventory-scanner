@@ -150,6 +150,21 @@ async function setupNonTireSuggested(page: Page, counter: { posts: number }) {
     counter.posts += 1;
     return route.fulfill({ json: lowConfSuggestedResponse(CODE_9B) });
   });
+  // F5 bundle-surgery (wave 2, 2026-07-20): the 2.3MB derived prefix map is server-only now, so the
+  // decline path's "Pellicano ... / product unconfirmed" floor name arrives via the async
+  // /api/prefix-floor enrichment instead of a synchronous client lookup. Mock it (IS_E2E rule: all
+  // decode/enrichment traffic in E2E is page.route-mocked, deterministic, no live/server data dependency).
+  await page.route("**/api/prefix-floor*", async (route: Route) =>
+    route.fulfill({
+      json: {
+        floor: {
+          name: "Pellicano Specialty Food Distributors / product unconfirmed",
+          brand: "Pellicano Specialty Food Distributors",
+          familyLabel: null,
+        },
+      },
+    }),
+  );
 
   await page.goto("/login");
   await page.getByTestId("login-button").click();

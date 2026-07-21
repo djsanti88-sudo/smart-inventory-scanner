@@ -17,7 +17,7 @@ import type { EvidenceStrength } from "@/types";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 import { normalizeBrand } from "@/services/catalog/brandPrefixGeneral";
-import { lookupPrefix } from "@/services/catalog/prefixIndex";
+import { lookupPrefixFull as lookupPrefix } from "@/server/catalog/prefixIndexServer";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 import { hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 

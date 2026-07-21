@@ -16,12 +16,28 @@ import { lookupPrefix } from "@/services/catalog/prefixIndex";
 // scanned code from that prefix would have one; QA round-2's misread guard now suppresses the floor for
 // bad-check-digit GTINs, so these anchors must be genuinely valid to exercise the floor path).
 describe("prefixFloorName (P5: family annotation)", () => {
-  it("annotates the family leader when the floor brand is a family MEMBER", () => {
-    const code = "5603344000016"; // prefix 5603344 -> dominant "general" (valid check digit)
+  // F5 bundle-surgery (wave 2, 2026-07-20): the 5603344/"General (Continental family)" and
+  // 8901036/"Continental" anchors are DERIVED-tier entries, and the 2.3MB derivedPrefixMap.json is
+  // now SERVER-ONLY (never in the /scan client bundle). Those two full-index family tests moved
+  // VERBATIM to src/server/catalog/prefixIndexServer.test.ts (prefixFloorNameFull). Client-side, the
+  // same code honestly returns null (row keeps the safe "Unidentified item" fallback until the async
+  // /api/prefix-floor enrichment upgrades it), and the family-annotation COMPOSITION logic is proven
+  // here via the injectable lookupFn seam with a synthetic derived-tier entry.
+  it("a DERIVED-tier-only prefix now returns null client-side (enrichment happens via /api/prefix-floor)", () => {
+    const code = "5603344000016"; // derived-tier "general" - not in the client-safe SEED/LEARNED tiers
+    expect(lookupPrefix(code)).toBeNull();
+    expect(prefixFloorName(code, detectCodeType(code))).toBeNull();
+  });
+
+  it("annotates the corporate family when the injected lookup resolves a family MEMBER (composition logic)", () => {
+    const code = "5603344000016";
     const ct = detectCodeType(code);
-    // Sanity: the anchor really does resolve to the family member we expect.
-    expect((lookupPrefix(code)?.dominant?.name ?? "").toLowerCase()).toContain("general");
-    const floor = prefixFloorName(code, ct);
+    const floor = prefixFloorName(code, ct, () => ({
+      prefix: "5603344",
+      candidates: [{ name: "general", kind: "manufacturer", productCount: 10, confidence: 0.9 }],
+      dominant: { name: "general", kind: "manufacturer", productCount: 10, confidence: 0.9 },
+      productCount: 10, categoryDist: {}, countryHints: [], confidence: 0.9, ambiguity: 0.1, source: "derived_catalog",
+    }));
     expect(floor).not.toBeNull();
     expect(floor!.brand).toBe("General");
     expect(floor!.familyLabel).toBe("Continental family");
@@ -29,10 +45,15 @@ describe("prefixFloorName (P5: family annotation)", () => {
     expect(floor!.name).toMatch(/ \/ product unconfirmed$/);
   });
 
-  it("keeps the plain floor name when the brand is a family LEADER (no annotation)", () => {
-    const code = "8901036000007"; // prefix 8901036 -> dominant "continental" (leader, valid check digit)
+  it("keeps the plain floor name when the injected lookup resolves a family LEADER (no annotation)", () => {
+    const code = "8901036000007";
     const ct = detectCodeType(code);
-    const floor = prefixFloorName(code, ct);
+    const floor = prefixFloorName(code, ct, () => ({
+      prefix: "8901036",
+      candidates: [{ name: "continental", kind: "manufacturer", productCount: 10, confidence: 0.9 }],
+      dominant: { name: "continental", kind: "manufacturer", productCount: 10, confidence: 0.9 },
+      productCount: 10, categoryDist: {}, countryHints: [], confidence: 0.9, ambiguity: 0.1, source: "derived_catalog",
+    }));
     expect(floor).not.toBeNull();
     expect(floor!.brand).toBe("Continental");
     expect(floor!.familyLabel).toBeUndefined();

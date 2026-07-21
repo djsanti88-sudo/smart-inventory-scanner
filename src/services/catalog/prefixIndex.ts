@@ -65,13 +65,23 @@ const SEED: Record<string, PrefixEntry> = {
   },
 };
 
-// Derived (from our 4M DB / corpus) is merged in at runtime from the generated JSON. Empty {} until
-// `scripts/build-prefix-index.mjs` populates it. Kept separate so the seed stays hand-auditable and the
-// derived map can be regenerated independently. Loaded at module init below via setDerivedPrefixes.
-import derivedPrefixMap from "@/services/catalog/derivedPrefixMap.json";
+// F5 bundle-surgery (wave 2, 2026-07-20): the DERIVED_CATALOG tier (2.3MB `derivedPrefixMap.json`,
+// generated from our 4M-row retail/tire corpus) used to be statically imported and eagerly expanded
+// HERE, which put the whole file on the /scan client bundle (this module is reachable from
+// scanStore.ts via prefixFloor.ts). It now lives SERVER-ONLY in @/server/catalog/prefixIndexServer.ts
+// (lookupPrefixFull / lookupDerivedPrefix / candidateKnownPrefixesFull) - server callers (the decode
+// pipeline, learnedProducts.ts) import the full-index functions from there instead of from here.
+//
+// This module (client-safe) keeps only SEED (curated, hand-audited, tiny) and LEARNED (in-memory
+// flywheel, built from runtime data, never a static file) - both are safe and cheap to ship to the
+// browser. `lookupPrefix`/`candidateKnownPrefixes` below intentionally do NOT see the derived tier;
+// a client caller (scanStore's synchronous prefix-floor naming) gets SEED/LEARNED results instantly,
+// and the async /api/prefix-floor route enriches with the derived tier afterward (never blocks the
+// scanned row from appearing/counting - see prefixFloor.ts).
 const DERIVED: Record<string, PrefixEntry> = {};
 
-/** Replace the derived prefix map (called by the loader once the generated file is available). */
+/** Test-only helper: replace the derived tier (used by prefixIndex.test.ts to simulate a derived hit
+ *  without pulling in the 2.3MB file). Production code never calls this from the client. */
 export function setDerivedPrefixes(map: Record<string, PrefixEntry>): void {
   for (const k of Object.keys(DERIVED)) delete DERIVED[k];
   Object.assign(DERIVED, map);
@@ -183,26 +193,3 @@ export function candidateKnownPrefixes(brand: string | undefined): string[] {
   return [...(brandFootprint.get(b) ?? [])];
 }
 
-// The generated derived map is stored COMPACT (array per prefix) to keep the file small + fast to load:
-//   [confidence, ambiguity, productCount, [[name,count]...], [[category,count]...]]
-// Expand it into full PrefixEntry objects at module init. (An empty {} stays empty.)
-type CompactEntry = [number, number, number, [string, number][], [string, number][]];
-function expandCompact(map: Record<string, unknown>): Record<string, PrefixEntry> {
-  const out: Record<string, PrefixEntry> = {};
-  for (const [prefix, v] of Object.entries(map)) {
-    if (!Array.isArray(v)) continue;
-    const [cf, am, pc, cands, cats] = v as CompactEntry;
-    const categories = (cats ?? []).map(([k]) => k);
-    const candidates: PrefixCandidate[] = (cands ?? []).map(([name, count]) => ({
-      name, kind: "manufacturer", productCount: count, confidence: pc ? Number((count / pc).toFixed(3)) : 0, categories,
-    }));
-    const categoryDist: Record<string, number> = {};
-    for (const [k, n] of cats ?? []) categoryDist[k] = n;
-    out[prefix] = {
-      prefix, candidates, dominant: cf >= 0.5 ? (candidates[0] ?? null) : null,
-      productCount: pc, categoryDist, countryHints: [], confidence: cf, ambiguity: am, source: "derived_catalog",
-    };
-  }
-  return out;
-}
-setDerivedPrefixes(expandCompact(derivedPrefixMap as Record<string, unknown>));

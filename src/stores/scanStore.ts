@@ -61,6 +61,7 @@ import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
@@ -458,6 +459,11 @@ function carriedProvisionalBarcode(params: {
  * primarySku) were stripped by the customer-role localStorage split (buildPersistedScanState /
  * CUSTOMER_SAFE_PRODUCT_FIELDS never persists those product-identity fields to a customer's disk).
  */
+// F5 bundle-surgery: productIds with an /api/prefix-floor enrichment round-trip currently in flight.
+// Module-level (not store state - transient network bookkeeping, never persisted): multiple call sites
+// can request enrichment for the same freshly minted row in one scan flow; only one fetch ever fires.
+const enrichInFlight = new Set<string>();
+
 function provisionalPlaceholderName(code: string): string {
   const ct = detectCodeType(code);
   const struct = decodeBarcodeStructure(code, ct);
@@ -692,6 +698,14 @@ export interface ScanState {
    *  the marked-wrong product is itself a provisional sharing the same primaryBarcode (Task 9 finding:
    *  an unordered products.find could pick the OLD provisional and inflate the total). */
   ensureProvisionalCount: (code: string, reason: string) => string;
+  /** F5 bundle-surgery (wave 2, 2026-07-20): fire-and-forget enrichment for a provisional row's bare
+   *  "Unidentified item (...)" label. Called AFTER the row already appears + counts (never before -
+   *  TOP-LEVEL LAW is unaffected). Fetches /api/prefix-floor for the DERIVED-tier (2.3MB corpus) brand
+   *  the client-safe SEED/LEARNED lookup couldn't see, and upgrades the row's name/brand ONLY if the
+   *  row still carries the exact bare fallback label for this code (never clobbers a decoded name, an
+   *  already-resolved prefix-floor name, or a human edit that happened while the fetch was in flight).
+   *  Offline/failed fetch/no-hit = silent no-op, never an error, never a re-throw. */
+  enrichPrefixFloorLabel: (code: string, productId: string) => void;
   /** Flip every not-yet-resolved scan-feed row for `cleanCode` to the "verified" decode badge (shared by
    *  the 4 auto-verify / catalog-hit sites so their badge-flip guard cannot drift). A row already counted
    *  synchronously is status "known" (not "resolved"), so it is still flipped; a row already "verified" or
@@ -3275,6 +3289,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   ),
                 }));
               }
+              // F5 bundle-surgery: no usable AI name and the client-safe (SEED/LEARNED) lookup found no
+              // brand - worth an async check for a DERIVED-tier hit. The row already appeared + counted
+              // above either way (TOP-LEVEL LAW unaffected).
+              if (!hasUsableName && !floor && provId) get().enrichPrefixFloorLabel(code, provId);
             }
             // STABLE-ID FIX: the decode-everything block just above minted/reused this code's provisional
             // placeholder. Look its id up fresh (it is scoped inside the block above) so resolveUnknown can
@@ -3482,6 +3500,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
             };
             set((st) => ({ products: [...st.products, provProduct] }));
+          } else if (floor) {
+            // F5 bundle-surgery: the row was pre-counted at scan time by ensureProvisionalCount, whose
+            // CLIENT-SAFE (SEED/LEARNED) lookup may have missed a DERIVED-tier brand the server knows
+            // (capFloor from the 429 body, or a local hit). If the existing row still carries the bare
+            // "Unidentified item" fallback for this code, upgrade it in place with the floor's
+            // brand-confident naming aid - exactly what the pre-split synchronous path produced. Never
+            // clobbers a real decoded/human name (bare-label guard), never verified, never a re-count.
+            const targetId = provId;
+            set((st) => ({
+              products: st.products.map((p) =>
+                p.id === targetId && p.provisional === true && p.verified !== true && isBareUnidentifiedLabel(p.name, code)
+                  ? { ...p, name: floor.name, brand: floor.brand, updatedAt: now(), updatedBy: "ai" }
+                  : p,
+              ),
+            }));
           }
           const evF = get().scanFeed.find((ev) => ev.cleanCode === code && ev.status !== "known");
           let countsF = get().finalCounts;
@@ -3499,7 +3532,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     ...r,
                     decodeStatus: "needs_review",
                     reason: failReason,
-                    suggestedProductName: r.suggestedProductName || fbName,
+                    // F5 bundle-surgery: a bare "Unidentified item" suggestion (stamped at scan time by
+                    // the client-safe SEED/LEARNED lookup) upgrades to the floor's brand-confident name
+                    // (fbName carries the server-authoritative capFloor when present) - exactly what the
+                    // pre-split synchronous path produced. A REAL suggestion is never overwritten.
+                    suggestedProductName:
+                      r.suggestedProductName && !isBareUnidentifiedLabel(r.suggestedProductName, code)
+                        ? r.suggestedProductName
+                        : fbName,
                     // STABLE-ID FIX: capture the placeholder id (freshly minted above, or reused if one
                     // already existed) so resolveUnknown can re-link by id after a customer reload.
                     provisionalProductId: r.provisionalProductId ?? provId ?? null,
@@ -3518,6 +3558,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastFailureReason: failReason },
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
           }));
+          // F5 bundle-surgery: only worth enriching when neither the server-authoritative cap floor nor
+          // the client-safe (SEED/LEARNED) lookup found a brand - capFloor already used the FULL index.
+          if (!capFloor && !floor && provId) get().enrichPrefixFloorLabel(code, provId);
         }
       },
 
@@ -3627,7 +3670,39 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);
         }
+        // F5 bundle-surgery: the row already appeared + counted above (TOP-LEVEL LAW unaffected). Only
+        // worth an enrichment fetch when the client-safe (SEED/LEARNED) lookup found nothing - a
+        // DERIVED-tier hit is still possible server-side.
+        if (!floor) get().enrichPrefixFloorLabel(code, provId);
         return provId;
+      },
+
+      enrichPrefixFloorLabel: (code, productId) => {
+        // Fire-and-forget: never awaited by any caller, never blocks/delays the row that already
+        // appeared + counted synchronously. Deferred a tick so any SYNCHRONOUS same-call resolution
+        // (catalog-first hit, deterministic alias, a decode landing in the same stack) renames the row
+        // first and the pre-fetch bare-label check below skips the network call entirely - the fetch
+        // only fires for a row that genuinely settled as a bare "Unidentified item".
+        setTimeout(() => {
+          if (!get().online) return; // offline: no fetch, label silently stays (retry is not needed - naming aid only)
+          if (enrichInFlight.has(productId)) return; // one enrichment round-trip per row, never a duplicate fetch
+          const before = get().products.find((p) => p.id === productId);
+          if (!before || !isBareUnidentifiedLabel(before.name, code)) return; // already identified: no fetch
+          enrichInFlight.add(productId);
+          void fetchPrefixFloorEnrichment(code).finally(() => enrichInFlight.delete(productId)).then((floor) => {
+            if (!floor) return; // offline / no derived-tier hit / non-barcode-shaped code: silent no-op
+            const prod = get().products.find((p) => p.id === productId);
+            // Re-check after the round-trip too: only upgrade if the row STILL carries the exact bare
+            // fallback label for this code - a decode may have landed (real name), or a human may have
+            // edited it, while the fetch was in flight. Never clobber anything but the bare placeholder.
+            if (!prod || !isBareUnidentifiedLabel(prod.name, code)) return;
+            set((s) => ({
+              products: s.products.map((p) =>
+                p.id === productId ? { ...p, name: floor.name, brand: floor.brand } : p,
+              ),
+            }));
+          });
+        }, 0);
       },
 
       markFeedRowVerified: (cleanCode, reason, provenance) => {
@@ -4932,6 +5007,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           action: "alias_rejected",
           metadata: { code, kind: "inline_suggestion_declined" },
         });
+        // F5 bundle-surgery: the declined row was just renamed to the bare/local-floor placeholder above
+        // - if the client-safe lookup found no brand, check for a DERIVED-tier hit asynchronously.
+        if (code && !floor && prodId) get().enrichPrefixFloorLabel(code, prodId);
       },
 
       evaluateLinkMismatch: (reviewId, productId) => {

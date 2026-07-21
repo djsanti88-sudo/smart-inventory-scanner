@@ -49,7 +49,11 @@ function aiOnStore() {
   store.getState().updateSettings({ aiLookupEnabled: true });
   return store;
 }
-const calls = (spy: unknown) => (spy as { mock: { calls: unknown[] } }).mock.calls.length;
+// Owner cost rule counts PAID DECODE calls (/api/ai-lookup) only. The free local /api/prefix-floor
+// enrichment (F5 bundle-surgery, 2026-07-20: async naming aid for a bare "Unidentified item" row)
+// also goes through fetch but costs nothing and never retries decode - excluded from the count.
+const calls = (spy: unknown) =>
+  (spy as { mock: { calls: unknown[][] } }).mock.calls.filter((c) => String(c[0]).includes("/api/ai-lookup")).length;
 
 describe("confidence-based auto-verify (speed-first)", () => {
   it("a strong evidence-backed decode auto-verifies + counts with NO owner approval", async () => {
