@@ -24,7 +24,8 @@
 
 import type { ExpectedInventoryRow } from "./types";
 import { sameBrandFamily } from "@/services/catalog/brandFamilies";
-import { IDENTITY_JACCARD_THRESHOLD, nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
+import { IDENTITY_JACCARD_THRESHOLD, FUZZY_BRAND_MIN, nameTokens, jaccard, plusGenerationDiff } from "@/services/catalog/identityMerge";
+import { normalizedEditSimilarity } from "@/services/reconcile/normalizedEditDistance";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
 import { basePartNumberKey, tirePartNumberCore } from "@/services/catalog/tirePartNumber";
 import { matchImportFuzzy, normalizeImportSize } from "@/services/reconcile/importFuzzyMatcher";
@@ -80,14 +81,27 @@ function brandsCorroborate(a: string | undefined, b: string | undefined): boolea
   return sameBrandFamily(a, b);
 }
 
-/** Best-effort parseable tire size for a row: sizeText first, falling back to specs/model text so a
- *  size embedded in a free-text spec column is still found. Falls back to notation-normalized parsing
+/** Distinguishes a TYPO of the same brand ("Micheln" vs "Michelin") from a genuinely different real
+ *  brand ("Goodyear" vs "Michelin"). Same test the character-fuzzy tier (importFuzzyMatcher) already
+ *  uses for this exact question: same curated brandFamilies family, or normalized edit-similarity
+ *  clearing FUZZY_BRAND_MIN. Deliberately NOT used for general brand corroboration (that stays exact-
+ *  or-family only, AM-R4/AM-R5) - only to decide whether an exact-barcode identity should be trusted
+ *  over a brand-text mismatch that is plausibly just a typo. */
+function brandsAreTypoOfSameBrand(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  if (brandsCorroborate(a, b)) return true;
+  return normalizedEditSimilarity(a, b) >= FUZZY_BRAND_MIN;
+}
+
+/** Best-effort parseable tire size for a row: sizeText first, falling back to specs/model/name text so
+ *  a size embedded in a free-text spec column (or a Name-only column, as UniversalImportPanel produces
+ *  when there is no dedicated size column) is still found. Falls back to notation-normalized parsing
  *  (dash/space separators, e.g. "225-65-17" or "225 65 17") when the direct canonical parse misses -
  *  same-numbers-different-separator is size EQUALITY, not fuzzy tolerance (mirrors importFuzzyMatcher's
  *  sizeOf helper so the exact-token identity tier and the fuzzy fallback agree on what counts as the
  *  same size). "" when nothing parses either way. */
 function rowSizeToken(row: ExpectedInventoryRow): string {
-  const text = [row.sizeText ?? "", row.specs ?? "", row.model ?? ""].join(" ");
+  const text = [row.sizeText ?? "", row.specs ?? "", row.model ?? "", row.name ?? ""].join(" ");
   const direct = tireSizeToken({ productName: text, brand: row.brand });
   if (direct) return direct;
   return tireSizeToken({ productName: normalizeImportSize(text), brand: row.brand });
@@ -97,7 +111,7 @@ function rowSizeToken(row: ExpectedInventoryRow): string {
  *  tire even without one) - used only to decide `non_tire` vs `unmatched` when nothing else matched. */
 function hasAnyTireSignal(row: ExpectedInventoryRow, sizeToken: string): boolean {
   if (sizeToken) return true;
-  const text = `${row.brand ?? ""} ${row.model ?? ""} ${row.specs ?? ""}`.toLowerCase();
+  const text = `${row.brand ?? ""} ${row.model ?? ""} ${row.specs ?? ""} ${row.name ?? ""}`.toLowerCase();
   return /\b(tire|tyre|r1[3-9]|r20|r21|r22)\b/.test(text);
 }
 
@@ -153,6 +167,13 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
     const hasRowBrand = !!row.brand && row.brand.trim().length > 0;
     const hitSize = hit.sizeToken ?? "";
     const bothHaveSize = !!rowSize && !!hitSize;
+    // An exact-barcode match (same canonical GTIN, byte-exact as parsed) is a STRONGER identity signal
+    // than fuzzy brand text. When the row's barcode matches the PN-hit candidate's barcode byte-exact,
+    // AND the brand mismatch is plausibly just a typo of the SAME brand (not a genuinely different real
+    // brand), trust the barcode identity instead of downgrading to a false "brand collision". A truly
+    // different brand (e.g. barcode says Michelin but the row says Goodyear) still gets flagged below -
+    // this only forgives the typo case, never a real cross-brand collision.
+    const barcodeExact = !!row.barcode && !!hit.barcode && row.barcode.trim() === hit.barcode.trim();
 
     if (!hasRowBrand && !rowSize) {
       // Nothing to corroborate a per-manufacturer-namespace PN hit with - ambiguous, not matched.
@@ -164,11 +185,15 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
     }
 
     if (hasRowBrand && !brandsCorroborate(row.brand, hit.brand)) {
-      return {
-        row,
-        status: "ambiguous",
-        reason: `Part number hit resolves to brand "${hit.brand}" but the Shop-Ware row says brand "${row.brand}" (not the same company); treating as a brand collision, not a match.`,
-      };
+      const typoOfSameBrand = barcodeExact && brandsAreTypoOfSameBrand(row.brand, hit.brand);
+      if (!typoOfSameBrand) {
+        return {
+          row,
+          status: "ambiguous",
+          reason: `Part number hit resolves to brand "${hit.brand}" but the Shop-Ware row says brand "${row.brand}" (not the same company); treating as a brand collision, not a match.`,
+        };
+      }
+      // Fall through: exact-barcode identity + a same-brand typo overrides the brand-text mismatch.
     }
 
     if (bothHaveSize && rowSize !== hitSize) {
@@ -183,9 +208,11 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
     // was merely absent on one side (e.g. row has a size but the corpus hit carries none at all) is
     // not corroboration, it is just an unchecked dimension. Without this, a PN hit with a size-only
     // row against a size-less corpus candidate would fall through to `matched` on zero real evidence.
+    const brandTypoCorroborated = hasRowBrand && barcodeExact && !brandsCorroborate(row.brand, hit.brand)
+      && brandsAreTypoOfSameBrand(row.brand, hit.brand);
     const brandCorroborated = hasRowBrand && brandsCorroborate(row.brand, hit.brand);
     const sizeCorroborated = bothHaveSize && rowSize === hitSize;
-    if (!brandCorroborated && !sizeCorroborated) {
+    if (!brandCorroborated && !sizeCorroborated && !brandTypoCorroborated) {
       return {
         row,
         status: "ambiguous",
@@ -195,6 +222,7 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
 
     const reasonBits: string[] = [];
     if (brandCorroborated) reasonBits.push("brand corroborated");
+    if (brandTypoCorroborated) reasonBits.push("exact barcode match overrides a likely brand typo");
     if (sizeCorroborated) reasonBits.push("size corroborated");
     const viaAffixCore = !baseHitUids.has(hit.uid);
     const coreNote = viaAffixCore ? " Candidate found via distributor-affix core - confirm the exact product before attaching." : "";

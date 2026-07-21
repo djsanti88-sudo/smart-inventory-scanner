@@ -328,6 +328,84 @@ describe("matchExpectedRow", () => {
     expect(result.candidate).toBeUndefined();
   });
 
+  // Defect 1 (stress lane finding #2, .superpowers/stress/lanes/reconcile/findings.md): rowSizeToken
+  // and hasAnyTireSignal built their haystack from sizeText/specs/model only, never row.name. A row
+  // whose size is embedded ONLY in the Name column (as UniversalImportPanel produces) fell through to
+  // non_tire even on a byte-perfect import.
+  it("defect 1: size embedded only in row.name is still detected as a tire (no false non_tire)", () => {
+    const r = row({
+      externalId: "E-name-size",
+      partNumbers: [],
+      brand: "Kumho",
+      name: "Versado LX II 205/55R16",
+      // deliberately no sizeText/specs/model - size lives ONLY in name
+    });
+    const d = deps({
+      lookupByPartNumber: () => [],
+      candidatesByBrandSize: () => [],
+    });
+    const result = matchExpectedRow(r, d);
+    expect(result.status).not.toBe("non_tire");
+  });
+
+  // Defect 2 (stress lane finding #3): a PN hit whose corpus brand is byte-identical to the row's
+  // barcode-verified product, but the row's brand TEXT has a typo ("Micheln" vs "Michelin"), false-
+  // flagged a "brand collision" and downgraded to ambiguous - even though the barcode is exact. An
+  // exact-barcode match is a stronger identity signal than fuzzy brand text: a typo of the SAME brand
+  // (edit-similarity >= FUZZY_BRAND_MIN, or same brandFamilies family) must still match. A genuinely
+  // DIFFERENT brand (e.g. barcode says Michelin but the row says Goodyear) must still be flagged.
+  describe("defect 2: exact-barcode identity outranks a brand-text typo", () => {
+    it("exact-barcode PN hit + brand typo of the SAME brand -> matched, not brand-collision", () => {
+      const r = row({
+        externalId: "E-typo-brand",
+        partNumbers: ["MICH1"],
+        brand: "Micheln", // typo of "Michelin"
+        sizeText: "245/65R17",
+        barcode: "0123456789012",
+      });
+      const cand = candidate({
+        uid: "u-typo",
+        brand: "Michelin",
+        name: "Defender LTX",
+        sizeToken: "245/65R17",
+        partNumber: "MICH1",
+        barcode: "0123456789012", // byte-exact match to row.barcode
+      });
+      const d = deps({
+        lookupByPartNumber: (pn) => (pn === "MICH1" ? [cand] : []),
+      });
+      const result = matchExpectedRow(r, d);
+      expect(result.status).toBe("matched");
+      expect(result.candidate).toEqual(cand);
+      expect(result.reason).not.toMatch(/collision/i);
+    });
+
+    it("exact-barcode PN hit + a genuinely DIFFERENT brand -> still flagged, never silently matched", () => {
+      const r = row({
+        externalId: "E-diff-brand",
+        partNumbers: ["MICH2"],
+        brand: "Goodyear", // NOT a typo of Michelin - a real, different brand
+        sizeText: "245/65R17",
+        barcode: "0123456789099",
+      });
+      const cand = candidate({
+        uid: "u-diff",
+        brand: "Michelin",
+        name: "Defender LTX",
+        sizeToken: "245/65R17",
+        partNumber: "MICH2",
+        barcode: "0123456789099", // byte-exact match to row.barcode - must NOT be enough to override
+      });
+      const d = deps({
+        lookupByPartNumber: (pn) => (pn === "MICH2" ? [cand] : []),
+      });
+      const result = matchExpectedRow(r, d);
+      expect(result.status).toBe("ambiguous");
+      expect(result.candidate).toBeUndefined();
+      expect(result.reason).toMatch(/brand/i);
+    });
+  });
+
   it("exposes a typo candidate as identity_fuzzy data only", () => {
     const result = matchExpectedRow(row({
       externalId: "E-fuzzy",
