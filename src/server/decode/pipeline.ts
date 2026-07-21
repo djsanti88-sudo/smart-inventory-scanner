@@ -750,8 +750,14 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     if (!rung.run) return { payload: null, skipReason: rung.skipReason, surfaceSkip: true };
     const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY! });
     const gptLadderStore = await ladderStorage();
-    await recordGptLadderSpend(r.usdActual, { storage: gptLadderStore }); // ALWAYS - success, error, or abort; never skip this.
-    await recordGptLadderCall({ storage: gptLadderStore }); // Task 6: Settings spend panel + GET status "calls today" counter.
+    // ALWAYS record both - success, error, or abort; never let one skip the other. recordGptLadderSpend
+    // already fail-opens internally (aiSpendGuard.ts), but running them via Promise.allSettled is
+    // belt-and-suspenders: if either somehow throws, the other still runs instead of the spend/call
+    // counters silently diverging (Task 6: Settings spend panel + GET status "calls today" counter).
+    await Promise.allSettled([
+      recordGptLadderSpend(r.usdActual, { storage: gptLadderStore }),
+      recordGptLadderCall({ storage: gptLadderStore }),
+    ]);
     // TRANSIENT-FAILURE GUARD (found live 2026-07-06): an aborted/HTTP-failed/garbled rung call is
     // NOT genuine exhaustion - the model never actually answered. Without this, one OpenAI hiccup
     // wrote a PERMANENT no_result_receipt and froze the code forever. Only a real answer with an

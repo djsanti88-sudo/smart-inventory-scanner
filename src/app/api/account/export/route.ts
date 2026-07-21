@@ -78,7 +78,10 @@ async function exportCollection(
     .collection(`${COLLECTIONS.businesses}/${businessId}/${name}`)
     .limit(maxDocs + 1)
     .get();
-  const docs = snap.docs.slice(0, maxDocs).map((d) => ({ id: d.id, ...d.data() }));
+  // Fix (Gemini Pro review): id must come AFTER the spread of d.data() so the authoritative
+  // Firestore doc id always wins over a same-named "id" field that might exist inside the stored
+  // document payload (spread order previously let payload.id silently overwrite the true doc id).
+  const docs = snap.docs.slice(0, maxDocs).map((d) => ({ ...d.data(), id: d.id }));
   return {
     count: docs.length,
     truncated: snap.docs.length > maxDocs,
@@ -206,7 +209,7 @@ export async function POST(request: NextRequest) {
     collections[COLLECTIONS.businesses] = {
       count: businessDoc.exists ? 1 : 0,
       truncated: false,
-      docs: businessDoc.exists ? [{ id: businessDoc.id, ...businessDoc.data() }] : [],
+      docs: businessDoc.exists ? [{ ...businessDoc.data(), id: businessDoc.id }] : [],
     };
 
     // businessMembers: top-level collection, filtered to this business only.
@@ -215,7 +218,7 @@ export async function POST(request: NextRequest) {
       .where("businessId", "==", businessId)
       .limit(maxDocs + 1)
       .get();
-    const memberDocs = membersSnap.docs.slice(0, maxDocs).map((d) => ({ id: d.id, ...d.data() }));
+    const memberDocs = membersSnap.docs.slice(0, maxDocs).map((d) => ({ ...d.data(), id: d.id }));
     collections[COLLECTIONS.businessMembers] = {
       count: memberDocs.length,
       truncated: membersSnap.docs.length > maxDocs,
@@ -229,7 +232,7 @@ export async function POST(request: NextRequest) {
       collections[COLLECTIONS.userProfiles] = {
         count: profileDoc.exists ? 1 : 0,
         truncated: false,
-        docs: profileDoc.exists ? [{ id: profileDoc.id, ...profileDoc.data() }] : [],
+        docs: profileDoc.exists ? [{ ...profileDoc.data(), id: profileDoc.id }] : [],
       };
     }
   } catch (error) {

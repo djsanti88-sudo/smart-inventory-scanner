@@ -97,9 +97,29 @@ vi.mock("@/server/upc/storage", async (importOriginal) => {
   };
 });
 
+// Gemini Pro review fix 2: recordGptLadderSpend / recordGptLadderCall must BOTH always run after a
+// live GPT rung call, even if one throws (they used to run sequentially, so a spend-record throw
+// silently skipped the call-count record). Spy on both while passing through to the real
+// implementations by default; the dedicated test below overrides recordGptLadderSpend to reject and
+// asserts recordGptLadderCall still fires.
+const realSpendGuard = vi.hoisted(() => ({
+  recordGptLadderSpend: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderSpend,
+  recordGptLadderCall: undefined as unknown as typeof import("@/services/security/aiSpendGuard").recordGptLadderCall,
+}));
+vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+  realSpendGuard.recordGptLadderSpend = actual.recordGptLadderSpend;
+  realSpendGuard.recordGptLadderCall = actual.recordGptLadderCall;
+  return {
+    ...actual,
+    recordGptLadderSpend: vi.fn(actual.recordGptLadderSpend),
+    recordGptLadderCall: vi.fn(actual.recordGptLadderCall),
+  };
+});
+
 import { runDecodePipeline, DailyCapExceededError, classifySourceTier } from "@/server/decode/pipeline";
 import { detectCodeType } from "@/services/codeTypeDetector";
-import { __resetForTest, readDailyUsed } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed, recordGptLadderSpend, recordGptLadderCall } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import * as decodeCacheModule from "@/services/ai/decodeCache";
 import { clearDecodeCache } from "@/services/ai/decodeCache";
@@ -162,6 +182,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(upsertLearnedProduct).mockReset().mockImplementation(realLearned.upsertLearnedProduct);
     vi.mocked(fetchV2).mockReset().mockImplementation(realFetchV2.fetchV2);
     vi.mocked(lookupRetailBarcodeAsync).mockReset().mockImplementation(realRetail.lookupRetailBarcodeAsync);
+    vi.mocked(recordGptLadderSpend).mockReset().mockImplementation(realSpendGuard.recordGptLadderSpend);
+    vi.mocked(recordGptLadderCall).mockReset().mockImplementation(realSpendGuard.recordGptLadderCall);
     __resetRetailKnowledgeCacheForTests();
     __resetForTest();
     __resetDecodeCacheStoreForTest();
@@ -2072,6 +2094,77 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       // The paid Go-UPC rung genuinely RAN for a normal code (proving the gate did not over-fire).
       expect(rungs).toContain("goupc");
       expect(fetchSpy.mock.calls.map(([u]) => String(u)).filter((u) => u.includes(GOUPC_API)).length).toBeGreaterThan(0);
+    }, 30000);
+  });
+
+  describe("Gemini Pro review fix 2: GPT ladder spend+call recording never diverges on a partial throw", () => {
+    const GOUPC_API = "go-upc.com/api";
+    const UPCITEMDB_HOST = "api.upcitemdb.com";
+    const OFF_HOST = "world.openfoodfacts.org";
+
+    // Every free/earlier rung misses so the code genuinely reaches the paid GPT-5.5 rung, and OpenAI
+    // itself returns a real answer - proving recordGptLadderSpend/recordGptLadderCall's call site
+    // (pipeline.ts ~line 751-760) actually executes for a genuine paid GPT call.
+    function stubAllMissExceptGpt() {
+      fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes("api.openai.com/v1/responses")) {
+          const body = {
+            output: [{
+              type: "message",
+              content: [{
+                type: "output_text",
+                text: JSON.stringify({
+                  brand: "Acme", productName: "Acme Widget", specs: "", gtin: "",
+                  confidence: 0.55, exactCodeFound: false, basis: "best guess",
+                  sourceUrls: [],
+                }),
+              }],
+            }],
+            usage: { input_tokens: 200, output_tokens: 100 },
+          };
+          return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+    }
+
+    it("records both spend and call for a genuine GPT rung call (baseline sanity)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.OPENAI_API_KEY = "test-key";
+      stubAllMissExceptGpt();
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      expect(recordGptLadderSpend).toHaveBeenCalledTimes(1);
+      expect(recordGptLadderCall).toHaveBeenCalledTimes(1);
+    }, 30000);
+
+    // FAILING-FIRST for the fix: before the fix, recordGptLadderSpend and recordGptLadderCall ran as
+    // two sequential `await`s - if the first threw, the second (recordGptLadderCall) was skipped
+    // entirely, silently diverging the spend-vs-call-count counters. The fix wraps both in
+    // Promise.allSettled so one failing never skips the other.
+    it("still records the call count even when recordGptLadderSpend rejects", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.OPENAI_API_KEY = "test-key";
+      stubAllMissExceptGpt();
+      vi.mocked(recordGptLadderSpend).mockRejectedValueOnce(new Error("simulated spend-record failure"));
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      expect(recordGptLadderSpend).toHaveBeenCalledTimes(1);
+      // The whole point of the fix: recordGptLadderCall must still fire even though the spend record
+      // rejected. Pre-fix, the sequential `await recordGptLadderSpend(...)` throwing would skip this
+      // entirely (0 calls); post-fix it always runs.
+      expect(recordGptLadderCall).toHaveBeenCalledTimes(1);
     }, 30000);
   });
 });

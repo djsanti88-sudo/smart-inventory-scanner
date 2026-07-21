@@ -279,6 +279,23 @@ describe("POST /api/account/export data shape and tenant isolation", () => {
     expect(payload.collections.userProfiles.docs[0].id).toBe("u1");
   });
 
+  // Fix (Gemini Pro review, real minor bug): a document whose stored data() payload itself contains
+  // an "id" field must never overwrite the authoritative Firestore doc id (d.id) in the export. The
+  // old spread order `{ id: d.id, ...d.data() }` let payload.id win; the fix flips it to
+  // `{ ...d.data(), id: d.id }` so d.id always wins.
+  it("never lets a document's own data.id field overwrite the true Firestore doc id", async () => {
+    mocks.tenantData["biz-1"].products = [
+      { id: "real-doc-id", data: { businessId: "biz-1", name: "Widget", id: "PAYLOAD-ID" } },
+    ];
+
+    const response = await POST(
+      exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),
+    );
+    const payload = await response.json();
+
+    expect(payload.collections.products.docs[0].id).toBe("real-doc-id");
+  });
+
   it("sets a truncated flag per collection when the doc cap is hit, without silently dropping data", async () => {
     vi.stubEnv("ACCOUNT_EXPORT_MAX_DOCS", "1");
     mocks.tenantData["biz-1"].scanEvents = [
