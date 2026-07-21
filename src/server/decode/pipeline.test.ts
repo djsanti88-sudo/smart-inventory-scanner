@@ -37,12 +37,19 @@ vi.mock("@/server/decodeCacheStore", async (importOriginal) => {
 const realLearned = vi.hoisted(() => ({
   getLearnedProduct: undefined as unknown as typeof import("@/server/learnedProducts").getLearnedProduct,
   upsertLearnedProduct: undefined as unknown as typeof import("@/server/learnedProducts").upsertLearnedProduct,
+  siblingPrefixConflict: undefined as unknown as typeof import("@/server/learnedProducts").siblingPrefixConflict,
 }));
 vi.mock("@/server/learnedProducts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/learnedProducts")>();
   realLearned.getLearnedProduct = actual.getLearnedProduct;
   realLearned.upsertLearnedProduct = actual.upsertLearnedProduct;
-  return { ...actual, getLearnedProduct: vi.fn(actual.getLearnedProduct), upsertLearnedProduct: vi.fn(actual.upsertLearnedProduct) };
+  realLearned.siblingPrefixConflict = actual.siblingPrefixConflict;
+  return {
+    ...actual,
+    getLearnedProduct: vi.fn(actual.getLearnedProduct),
+    upsertLearnedProduct: vi.fn(actual.upsertLearnedProduct),
+    siblingPrefixConflict: vi.fn(actual.siblingPrefixConflict),
+  };
 });
 
 // Task 21 write-gate tests: mock the top-level fetchV2 engine call directly so a test can hand back a
@@ -126,7 +133,7 @@ import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest, getPersistedDecode, type PersistedDecode } from "@/server/decodeCacheStore";
 import { resolveExactBarcode, resolveExactPartNumber, type CorpusDecodeResult } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
-import { getLearnedProduct, upsertLearnedProduct, __resetLearnedProductsForTest, type LearnedProductRow } from "@/server/learnedProducts";
+import { getLearnedProduct, upsertLearnedProduct, siblingPrefixConflict, __resetLearnedProductsForTest, type LearnedProductRow } from "@/server/learnedProducts";
 import { fetchV2 } from "@/services/fetchV2/index";
 import { makeResult } from "@/services/fetchV2/types";
 import { lookupRetailBarcodeAsync, __resetRetailKnowledgeCacheForTests } from "@/server/retail-knowledge/retailKnowledgeIndex";
@@ -1219,6 +1226,97 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
       await new Promise((r) => setTimeout(r, 20));
       expect(vi.mocked(upsertLearnedProduct)).not.toHaveBeenCalled();
+    });
+  });
+
+  // LANE C ITEM C4 (owner-reported live regression, 2026-07-20): the "721749* family" - 721749089643
+  // learned as a Fortune tire; a sibling code sharing the same GS1 prefix (721749249238, the owner's
+  // named example) decoded to an unrelated Lattafa perfume and was stored as a clean suggestion instead
+  // of conflicting. siblingPrefixConflict (learnedProducts.ts) must demote this to needs_review with an
+  // honest conflict reason - never suppress the row.
+  describe("Item C4: same-prefix sibling contradiction guard (Fortune tire vs Lattafa perfume)", () => {
+    const SIBLING_PREFIX_CODE = "7217492492380"; // GTIN-13 form of 721749249238, same 721749 GS1 block
+
+    it("demotes an UNVERIFIED fetchv2 suggestion (no strong app-verified exact-code evidence for THIS scan) to needs_review when it contradicts an already-learned same-prefix sibling", async () => {
+      // Mirrors the real live shape: the owner's stress batch shows Fortune-family codes settling as
+      // FetchV2 "suggested" outcomes (unverified evidence), never "verified" - so this is the realistic
+      // fixture for the guard actually firing. A fetchv2 "verified" outcome is BY DEFINITION built from
+      // strong app-verified exact-code evidence for the scanned code itself, which the owner's own Plan
+      // C override rule says must win over ANY prefix conflict (existing evidence-strength rule,
+      // unchanged) - so this guard's bite is on suggestions/weaker evidence, exactly like the static
+      // catalog-derived firewall it sits beside.
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      // A genuinely learned sibling exists on the SAME 721749 GS1 prefix: a Fortune tire.
+      vi.mocked(siblingPrefixConflict).mockResolvedValueOnce({
+        conflict: true,
+        overriddenByEvidence: false,
+        reason:
+          'Barcode prefix 721749 already has a verified sibling product "Fortune Tormenta H/T FSR305 265/75R16 116T BSW" (brand "Fortune", category "tire"); candidate is a different brand + category ("Lattafa" / "perfume"). Demoted to Needs Review.',
+        siblingCode: "00721749089643",
+      });
+      vi.mocked(fetchV2).mockResolvedValueOnce(
+        makeResult({
+          rawValue: SIBLING_PREFIX_CODE,
+          outcome: "suggested",
+          product: {
+            brand: "Lattafa",
+            name: "LATTAFA GIVE ME GOURMAND VANILLA FREAK/EDP",
+            model: "",
+            partNumber: "",
+            size: "",
+            description: "",
+            category: "perfume",
+            imageUrl: "",
+          },
+          evidence: {
+            exactCodeFound: false, codeToProductProven: false, sourceQuality: "weak", sourceScore: 40,
+            identityScore: 0.6, associationScore: 0.5, finalConfidence: 0.5,
+            winningSourceUrl: "https://www.someperfumeshop.example.com/p/lattafa", winningSourceType: "weak_association",
+            codeLocation: "text_mention", proofSummary: "",
+          },
+          sourcesChecked: ["https://www.someperfumeshop.example.com/p/lattafa"],
+        }),
+      );
+
+      const outcome = await runDecodePipeline(makeReq(SIBLING_PREFIX_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // Demoted: never verified when it contradicts a genuinely verified same-prefix sibling.
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      // The row still appears with its identity (never suppressed) - "every scan appears and counts".
+      expect(outcome.payload.results[0]?.productName).toContain("LATTAFA");
+      expect(vi.mocked(siblingPrefixConflict)).toHaveBeenCalled();
+    });
+
+    it("does NOT demote when siblingPrefixConflict reports no conflict (no learned sibling, or same-company)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      vi.mocked(siblingPrefixConflict).mockResolvedValueOnce({ conflict: false, overriddenByEvidence: false, reason: "" });
+      const trustedUrl = "https://www.walmart.com/ip/fortune-tormenta/12345";
+      vi.mocked(fetchV2).mockResolvedValueOnce(
+        makeResult({
+          rawValue: SIBLING_PREFIX_CODE,
+          outcome: "verified",
+          product: { brand: "Fortune", name: "Fortune Tormenta H/T FSR305 265/75R16 116T BSW", model: "Tormenta H/T FSR305", partNumber: "", size: "265/75R16 116T", description: "", category: "tire", imageUrl: "" },
+          evidence: {
+            exactCodeFound: true, codeToProductProven: true, sourceQuality: "strong", sourceScore: 95,
+            identityScore: 1, associationScore: 1, finalConfidence: 0.95,
+            winningSourceUrl: trustedUrl, winningSourceType: "strong_commercial",
+            codeLocation: "json_ld.gtin", proofSummary: "",
+          },
+          sourcesChecked: [trustedUrl],
+        }),
+      );
+
+      const outcome = await runDecodePipeline(makeReq(SIBLING_PREFIX_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("verified");
     });
   });
 

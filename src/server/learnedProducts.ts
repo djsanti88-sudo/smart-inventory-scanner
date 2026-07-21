@@ -297,6 +297,137 @@ export async function upsertLearnedProduct(entry: LearnedProductRow): Promise<vo
   }
 }
 
+/**
+ * LANE C ITEM C4 (owner-reported live regression, 2026-07-20): reverse prefix->learned-siblings
+ * lookup. Given a 7-digit GS1 company prefix, returns every learned (previously-verified-then-learned)
+ * row whose OWN code shares that prefix. Used by siblingPrefixConflict below to catch a fresh decode
+ * that contradicts what the app already knows about this prefix from a genuinely verified sibling scan
+ * - e.g. a code sharing the 721749* prefix with an already-learned Fortune tire decoding to an
+ * unrelated perfume brand. Returns [] on a genuine miss OR any storage failure (never throws).
+ */
+export async function getLearnedProductsByPrefix(prefix: string): Promise<LearnedProductRow[]> {
+  const p = (prefix ?? "").replace(/\D/g, "");
+  if (!p || p.length < 4) return [];
+  try {
+    const client = await getTursoClient();
+    if (client) {
+      const ready = await ensureTursoTable(client);
+      if (!ready) return [];
+      const result = await client.execute({
+        sql:
+          "SELECT code, name, brand, category, specs_short, specs_full, confidence, source_url, evidence_strength, prefix_check, created_at " +
+          "FROM learned_products WHERE code LIKE ? OR code LIKE ?",
+        // canonicalGtin always pads to 14 digits; a real 12/13-digit code's prefix can start at
+        // position 0, 1, or 2 of the stored 14-digit key depending on padding - match both the
+        // zero-padded (14-digit) and unpadded start positions so no sibling is missed.
+        args: [`${p}%`, `0${p}%`],
+      });
+      return result.rows.map((row) => ({
+        code: String(row.code),
+        name: String(row.name ?? ""),
+        brand: String(row.brand ?? ""),
+        category: String(row.category ?? ""),
+        specsShort: String(row.specs_short ?? ""),
+        specsFull: String(row.specs_full ?? ""),
+        confidence: Number(row.confidence ?? 0),
+        sourceUrl: String(row.source_url ?? ""),
+        evidenceStrength: (row.evidence_strength as EvidenceStrength) ?? "none",
+        prefixCheck: String(row.prefix_check ?? ""),
+        createdAt: String(row.created_at ?? ""),
+      }));
+    }
+    const store = readFileStore();
+    return Object.values(store).filter((row) => isValidRow(row) && row.code.replace(/^0+/, "").startsWith(p.replace(/^0+/, "")));
+  } catch (e) {
+    console.warn("[learned-products] getLearnedProductsByPrefix failed:", (e as Error).message);
+    return [];
+  }
+}
+
+export interface SiblingConflictCandidate {
+  brand?: string;
+  category?: string;
+}
+
+export interface SiblingConflictVerdict {
+  conflict: boolean; // true => demote to needs_review (never suppress the row - it still appears+counts)
+  overriddenByEvidence: boolean;
+  reason: string; // platformOwner-only diagnostic
+  siblingCode?: string;
+}
+
+function catTokens(s: string | undefined): string[] {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter((t) => t.length >= 3);
+}
+
+/** Token-tolerant brand match, same tolerance shape as prefixFirewall.ts's candidateMatchesPrefix. */
+function brandsMatch(a: string | undefined, b: string | undefined): boolean {
+  const na = normalizeBrand(a);
+  const nb = normalizeBrand(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const a0 = na.split(" ")[0];
+  const b0 = nb.split(" ")[0];
+  return (!!a0 && nb.includes(a0)) || (!!b0 && na.includes(b0));
+}
+
+/** True when the two category strings share no token overlap AND both are non-empty (unknown category
+ *  on either side is never treated as a conflict - only a POSITIVE mismatch counts). */
+function categoriesConflict(a: string | undefined, b: string | undefined): boolean {
+  const ta = catTokens(a);
+  const tb = catTokens(b);
+  if (ta.length === 0 || tb.length === 0) return false;
+  return !ta.some((t) => tb.includes(t));
+}
+
+/**
+ * SAME-PREFIX SIBLING CONTRADICTION GUARD (Item C4, owner-reported live regression 2026-07-20): when
+ * the app already holds VERIFIED-then-learned evidence that GS1 prefix P belongs to brand/category X
+ * (a learned row sharing this code's prefix), a NEW decode on prefix P whose identity contradicts X -
+ * DIFFERENT brand family AND DIFFERENT category - must not be stored/applied as a clean suggestion. It
+ * is a DEMOTION to needs_review with an honest conflict reason, never a suppression (the row always
+ * appears+counts per the top-level "every scan counts" law). Strong app-verified exact-code evidence
+ * for THIS scan still overrides (same override shape as evaluatePrefixFirewall). A same-company
+ * different-category product (e.g. a tire manufacturer that also sells wheel accessories) is NOT a
+ * conflict - only a brand mismatch AND a category mismatch together indicate contradiction (mirrors
+ * evaluatePrefixFirewall's categoryCompatible escape hatch for legitimate multi-category manufacturers).
+ * Inert (no conflict) when there is no learned sibling on this prefix at all - absence of data is never
+ * treated as a conflict.
+ */
+export async function siblingPrefixConflict(
+  code: string,
+  candidate: SiblingConflictCandidate,
+  opts: { exactCodeVerifiedByApp?: boolean } = {},
+): Promise<SiblingConflictVerdict> {
+  // NOTE: a 6-digit block (not the 7-digit candidateCompanyPrefix used elsewhere for corroboration) is
+  // used here deliberately - real GS1 company-prefix length is variable, and the owner's live regression
+  // fixture (721749089643 vs 721749249238, a Fortune-tire/Lattafa-perfume pair) shares only 6 digits.
+  // A 6-digit block is coarser (more siblings match), which is the SAFER direction for a conflict GUARD
+  // (a false negative here silently stores a wrong identity; a false positive only demotes to review,
+  // never suppresses the row) - the brand+category double-mismatch requirement keeps it from
+  // false-flagging unrelated same-block coincidences.
+  const digits = (code ?? "").replace(/\D/g, "");
+  const prefix = digits.slice(0, 6);
+  if (prefix.length < 6) return { conflict: false, overriddenByEvidence: false, reason: "" };
+
+  const siblings = await getLearnedProductsByPrefix(prefix);
+  if (siblings.length === 0) return { conflict: false, overriddenByEvidence: false, reason: "" };
+
+  for (const sib of siblings) {
+    if (brandsMatch(candidate.brand, sib.brand)) continue; // same company - never a conflict
+    if (!categoriesConflict(candidate.category, sib.category)) continue; // unknown/compatible category
+    const rawConflict = true;
+    const overriddenByEvidence = rawConflict && opts.exactCodeVerifiedByApp === true;
+    const conflict = rawConflict && !overriddenByEvidence;
+    const reason = overriddenByEvidence
+      ? `Same-prefix sibling conflict present but OVERRIDDEN: the app verified the exact code in strong evidence for this scan.`
+      : `Barcode prefix ${prefix} already has a verified sibling product "${sib.name}" (brand "${sib.brand}", category "${sib.category}"); ` +
+        `candidate is a different brand + category ("${candidate.brand || "?"}" / "${candidate.category || "?"}"). Demoted to Needs Review.`;
+    return { conflict, overriddenByEvidence, reason, siblingCode: sib.code };
+  }
+  return { conflict: false, overriddenByEvidence: false, reason: "" };
+}
+
 /** Test-only: reset in-memory Turso client/table-ready state between test cases. */
 export function __resetLearnedProductsForTest(): void {
   _tursoClient = null;

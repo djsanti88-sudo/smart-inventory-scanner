@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decideDecode, isUsableProductName, cleanProductName, isExampleOrTestRow } from "@/services/ai/decode";
+import { decideDecode, isUsableProductName, cleanProductName, isExampleOrTestRow, MIN_SUGGESTION_CONFIDENCE } from "@/services/ai/decode";
 import { emptyResult } from "@/services/ai/provider";
 import type { AiLookupResult, EvidenceResult } from "@/types";
 
@@ -53,6 +53,29 @@ describe("product-name quality gate (junk firewall)", () => {
     expect(cleanProductName("Some Product | Barcode Lookup")).toBe("Some Product");
     // real hyphens and parentheticals are preserved
     expect(cleanProductName("Coca-Cola Classic (12 pack)")).toBe("Coca-Cola Classic (12 pack)");
+  });
+
+  it("rejects error/404-shaped page titles (lane C item C1: 721749249238 stored 'We couldn't find this page')", () => {
+    // Live stress-batch regression: 721749249238 got the browser/CDN 404 title "We couldn't find this
+    // page" (curly apostrophe) stored as the product identity. None of the existing patterns matched
+    // it (no literal "404", no literal "not found"). Cover the real string plus common localized/
+    // provider variants named in the owner's brief.
+    for (const junk of [
+      "We couldn’t find this page", // curly apostrophe (the exact live regression string)
+      "We couldn't find this page", // straight apostrophe variant
+      "We can't find that page",
+      "This page isn't available",
+      "This page is not available",
+      "Sorry, this page isn't available",
+      "Page Not Found",
+      "404 error",
+      "Access Denied",
+      "Robot Check",
+      "Attention Required! | Cloudflare",
+      "Attention Required",
+    ]) {
+      expect(isUsableProductName(junk), junk).toBe(false);
+    }
   });
 
   it("rejects additional barcode-aggregator and store-nav junk titles", () => {
@@ -216,6 +239,36 @@ describe("decideDecode applies the quality gate", () => {
       confidenceThreshold: 0.8,
     });
     expect(d.status).toBe("needs_review");
+  });
+});
+
+describe("lane C item C3: a suggestion confidence floor (0% must never be stored/applied as an identity)", () => {
+  // Live regression: 6959956718368 stored "Pneu 195X40 R17 81V - LINGLONG ... (suggested, 0%)". A
+  // suggestion with confidence 0 has no signal behind it at all - it must never carry a numeric
+  // confidence a UI could render as "(suggested, 0%)"; it should read as a bare needs-review-shaped
+  // suggestion floored to MIN_SUGGESTION_CONFIDENCE, not zero.
+  it("floors a 0-confidence suggestion to the minimum suggestion confidence, never 0", () => {
+    const d = decideDecode({
+      codeType: "ean_13",
+      code: "6959956718368",
+      results: [{ ...emptyResult(), productName: "Pneu 195X40 R17 81V - LINGLONG", brand: "", confidence: 0 }],
+      evidences: [{ verified: false, strength: "none", matchedCode: "", matchedSources: [], reason: "no evidence" }],
+      confidenceThreshold: 0.8,
+    });
+    expect(d.status).toBe("suggested");
+    expect(d.confidence).toBeGreaterThan(0);
+    expect(d.confidence).toBeGreaterThanOrEqual(MIN_SUGGESTION_CONFIDENCE);
+  });
+
+  it("never lowers an already-computed suggestion confidence (floor only raises, never caps down)", () => {
+    const d = decideDecode({
+      codeType: "ean_13",
+      results: [{ ...emptyResult(), productName: "Some Real Product", brand: "Some Brand", confidence: 0.5 }],
+      evidences: [{ verified: true, strength: "snippet", matchedCode: "x", matchedSources: ["s"], reason: "" }],
+      confidenceThreshold: 0.8,
+    });
+    expect(d.status).toBe("suggested");
+    expect(d.confidence).toBeCloseTo(0.3, 5); // 0.5 * 0.6, unaffected by the floor
   });
 });
 

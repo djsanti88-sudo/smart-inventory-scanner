@@ -44,10 +44,19 @@ const GENERIC_NAME_RE = /^(nutrition facts?|ingredients?|products?|details?|spec
 const NAV_NAME_RE =
   /\bproduct details?\b|^my store\b|\bshop all\b|\bstore locator\b|\bcompare prices?\b|\bprice comparison\b|\bpreisvergleich\b|\bg(?:ü|u)nstig\b|\bkaufen\b|\bfree download\b|^\[?pdf\]?\b|\bsal(?:ī|i)dzin\w*\b|\bcenas\b|\bcompare precios?\b|\bcompre barato\b|\bprecios? bajos?\b|\bupc lookup\b|\bean lookup\b|\bbarcode lookup\b|\bitem\s*#\b|\bupc code\b|^model type\b|\bachetez\b|\bacheter\b|\ben ligne\b|\bhammerpreis\b|\bbei uns\b|\bbuy online\b|^buy\b|\bbuy cheap\b|\bin (?:an )?online store\b|\bat the best price\b|[»➤]|\beuro to us\b|\bexchange rates?\b|\bcurrency converter\b|\b(?:eur|usd|gbp|jpy) to (?:eur|usd|gbp|jpy)\b/i;
 
+// LANE C ITEM C1 (owner data review, 2026-07-20): a final belt-and-suspenders check against error/404-
+// shaped page names at THIS door too, so no FetchV2 identity path can ever store an error-shaped
+// identity even if isUsableProductName's own ERROR_PAGE_NAME_RE were ever loosened or bypassed upstream.
+// Live regression: 721749249238 -> "We couldn't find this page" (curly-apostrophe 404 title) reached
+// storage via the l1_cache rung. Kept in sync with decode.ts's ERROR_PAGE_NAME_RE intent, duplicated
+// here deliberately (a second independent check, not a re-export) per the owner's "belt" instruction.
+const ERROR_PAGE_NAME_RE =
+  /\b(?:we (?:couldn['’]?t|can['’]?t|could not|cannot) find (?:this|that|the) page|(?:this|that) page (?:is(?:n['’]?t| not)|does not exist|cannot be found)|page not found|404(?:\s*(?:error|not found))?|not available\b|access denied|robot check|attention required)\b/i;
+
 /** True when a name can serve as a product identity (not a code echo, nav label, or shop-speak). */
 export function usableIdentityName(name: string, code: string): boolean {
   const n = (name ?? "").trim();
-  if (!n || GENERIC_NAME_RE.test(n) || NAV_NAME_RE.test(n)) return false;
+  if (!n || GENERIC_NAME_RE.test(n) || NAV_NAME_RE.test(n) || ERROR_PAGE_NAME_RE.test(n)) return false;
   if (n.replace(/[\s\-_.]/g, "").toUpperCase() === (code ?? "").replace(/[\s\-_.]/g, "").toUpperCase()) return false;
   return isUsableProductName(n, code);
 }

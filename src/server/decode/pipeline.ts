@@ -42,7 +42,7 @@ import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome
 import { canonicalGtin, isGtinShaped } from "@/services/upc/gtin";
 import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
-import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, type LearnedProductRow } from "@/server/learnedProducts";
+import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, siblingPrefixConflict, type LearnedProductRow } from "@/server/learnedProducts";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
@@ -276,7 +276,7 @@ function retailPayload(
 // firewall is OVERRIDE-AWARE - strong app-verified exact-code evidence makes fw.conflict false - so this
 // never blocks a legitimately exact-verified decode, only conflicting non-exact verify paths (e.g. the
 // internet-two-source-size tire path) and Gemini-style "plausible product, wrong code" hallucinations.
-function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): { conflict: boolean; hint: string; reason: string; brandPrefixAdvisory: boolean } {
+async function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, evidences: EvidenceResult[]): Promise<{ conflict: boolean; hint: string; reason: string; brandPrefixAdvisory: boolean }> {
   const strongExact = isStrongEvidence(strongestEvidence(evidences));
   const prefix = lookupPrefix(code);
   const fw = evaluatePrefixFirewall({
@@ -294,10 +294,21 @@ function evalCombinedFirewall(code: string, result: AiLookupResult | undefined, 
   // OVERRIDE-AWARE (strong app-verified exact-code evidence clears it), so it never false-rejects a
   // legitimately exact-verified decode. The category/poison guard stays in the store's contextConflict gate.
   const brandPrefixAdvisory = prefixBrandConflict(code, result?.brand);
-  const conflict = fw.conflict;
+
+  // LANE C ITEM C4 (owner-reported live regression, 2026-07-20): SAME-PREFIX SIBLING CONTRADICTION
+  // GUARD. `fw` above only checks the STATIC catalog-derived prefix map; it says nothing about what the
+  // app's OWN decode history has already verified for this prefix. siblingPrefixConflict consults the
+  // learned-products tier (genuinely verified-then-learned rows) for a sibling sharing this code's GS1
+  // prefix block whose brand+category CONTRADICTS the current candidate - e.g. a code on the same
+  // prefix as an already-learned Fortune tire decoding to an unrelated Lattafa perfume. Folded into the
+  // SAME `conflict` boolean fed to decideDecode (never a parallel gate) so it demotes exactly like any
+  // other prefix conflict: blocks auto-verify, forces Needs Review, is overridden by this scan's own
+  // strong app-verified exact-code evidence, and NEVER suppresses the row (still appears + counts).
+  const sibling = await siblingPrefixConflict(code, { brand: result?.brand, category: result?.category }, { exactCodeVerifiedByApp: strongExact });
+  const conflict = fw.conflict || sibling.conflict;
   // platformOwner-only display: what the barcode prefix maps to, and why a conflict (if any) fired.
   const hint = prefix?.dominant ? `${prefix.dominant.name} (${prefix.dominant.kind}, from barcode prefix - ${prefix.source})` : "";
-  const reason = fw.conflict ? fw.reason : "";
+  const reason = fw.conflict ? fw.reason : sibling.conflict ? sibling.reason : "";
   return { conflict, hint, reason, brandPrefixAdvisory };
 }
 
@@ -1200,7 +1211,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       const evidence: EvidenceResult = verified
         ? { verified: true, strength: "fetched_source", matchedCode: code, matchedSources: [fv2.evidence.winningSourceUrl || "fetchv2"], reason: "Fetch V2 app-verified exact code on page" }
         : { verified: false, strength: "snippet", matchedCode: "", matchedSources: [], reason: `Fetch V2 ${fv2.outcome} (unverified) - human review` };
-      const fw = evalCombinedFirewall(code, result, [evidence]);
+      const fw = await evalCombinedFirewall(code, result, [evidence]);
       const decision = decideDecode({ codeType, results: [result], evidences: [evidence], confidenceThreshold: threshold, code, scanContext: req.scanContext, brandPrefixConflict: fw.conflict, allowNonPublicAutoCount });
       return {
         settled: true,

@@ -22,6 +22,17 @@ import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 
 const PUBLIC_BARCODE_TYPES: CodeType[] = ["upc_a", "ean_13", "gtin_14"];
 
+// LANE C ITEM C3 (owner data review, 2026-07-20): a suggestion with confidence EXACTLY 0 has no signal
+// behind it at all - live regression 6959956718368 stored "Pneu 195X40 R17 81V - LINGLONG ...
+// (suggested, 0%)" because both maxConfidence and cc.confidence were 0, so `Math.max(0*0.6, 0*0.6)`
+// computed exactly 0. A confidence of 0 must never be treated as "this identity was suggested with
+// some (if weak) signal" - it reads to a human reviewer as "the app found nothing", which is honest,
+// but storing/showing it as a numeric "0%" on an otherwise-named suggestion misrepresents it as an
+// evaluated-and-rejected guess rather than "no signal". Floor every suggestion's confidence at this
+// minimum so a suggestion is never indistinguishable from a hard needs_review with 0 confidence. Only
+// RAISES a computed value that would otherwise round to (near) zero; never lowers a stronger signal.
+export const MIN_SUGGESTION_CONFIDENCE = 0.2;
+
 export interface DecodeParams {
   codeType: CodeType;
   results: AiLookupResult[];
@@ -62,7 +73,18 @@ const PLACEHOLDER_NAME = /^\s*(unknown|unidentified|n\/a)\b|no (public )?match|n
 // product that merely CONTAINS a word (e.g. "Error Coin 1955 Double Die") is not blocked. Observed live:
 // a scrape titled "Error" auto-counted as a Verified product (2026-07-01).
 const SCRAPE_ERROR_TITLE =
-  /^(?:error(?:\s*\d{3})?|oops|access denied|forbidden|unauthorized|just a moment|attention required|are you (?:a )?(?:human|robot)|(?:please )?enable javascript|service unavailable|bad gateway|gateway timeout|temporarily unavailable|(?:site )?under maintenance)\s*$/i;
+  /^(?:error(?:\s*\d{3})?|oops|access denied|forbidden|unauthorized|just a moment|attention required(?:\s*[|!].*)?|are you (?:a )?(?:human|robot)|robot check|(?:please )?enable javascript|service unavailable|bad gateway|gateway timeout|temporarily unavailable|(?:site )?under maintenance)\s*$/i;
+
+// LANE C ITEM C1 (owner data review, 268-code stress batch, 2026-07-20): a client-side or CDN 404/
+// error-page TITLE passed the junk gate whole and was stored as a product identity for 721749249238
+// ("We couldn't find this page" - a curly-apostrophe React/Next.js style 404 title, not caught by any
+// existing pattern since it names neither "404" nor "not found" literally). This is a SEPARATE, NOT
+// whole-name-anchored pattern (unlike SCRAPE_ERROR_TITLE) because "not found"/"not available" phrasing
+// can appear mid-sentence in a page's error copy, not only as the entire title. Covers the exact live
+// string plus the owner-named localized/provider variants ("page not found", "404", "not available",
+// "access denied", "robot check", "attention required").
+const ERROR_PAGE_NAME_RE =
+  /\b(?:we (?:couldn['’]?t|can['’]?t|could not|cannot) find (?:this|that|the) page|(?:this|that) page (?:is(?:n['’]?t| not)|does not exist|cannot be found)|page not found|404(?:\s*(?:error|not found))?|not available\b|access denied|robot check|attention required)\b/i;
 
 // AI REFUSAL sentences returned as if they were product names ("Unable to identify product for
 // UPC ...", "... is not a recognized product ..."). Observed live in the preview mass-scan bots
@@ -109,6 +131,7 @@ export function isUsableProductName(raw: string, code?: string): boolean {
   if (PLACEHOLDER_NAME.test(name)) return false;
   if (REFUSAL_NAME.test(name)) return false;
   if (SCRAPE_ERROR_TITLE.test(name)) return false;
+  if (ERROR_PAGE_NAME_RE.test(name)) return false;
   if (SITE_BLOCKLIST.test(name)) return false;
   if (NUTRITION_DB_TITLE.test(name)) return false;
   if (/^https?:\/\//i.test(name) || /^[a-z0-9.-]+\.(com|org|net|io)\b/i.test(name)) return false; // bare domain/url
@@ -411,7 +434,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
           : "Needs human confirmation.";
     return {
       status: "suggested",
-      confidence: Math.max(maxConfidence * 0.6, cc.confidence * 0.6),
+      confidence: Math.max(maxConfidence * 0.6, cc.confidence * 0.6, MIN_SUGGESTION_CONFIDENCE),
       reason: `Suggested, not trusted. ${why} Review the sources and approve to save.`,
       evidenceStrength: bestEvidence.strength,
       exactCodeEvidenceVerifiedByApp: false,
