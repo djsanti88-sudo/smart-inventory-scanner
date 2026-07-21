@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { gptFromScratch, gptTierFor } from "./gptFromScratch";
+import { gptFromScratch, gptTierFor, GPT_LADDER_WORST_CASE_USD } from "./gptFromScratch";
 
 const MODEL_JSON = {
   brand: "Falken", productName: "Falken Wildpeak A/T3W 265/70R17", category: "Tires", specs: "265/70R17 115T",
@@ -71,7 +71,7 @@ describe("gptFromScratch", () => {
     expect(r.usdActual).toBeCloseTo((3000 / 1e6) * 5 + (900 / 1e6) * 30 + 0.02, 5);
     const body = JSON.parse(vi.mocked(f).mock.calls[0][1]!.body as string);
     expect(body.model).toBe("gpt-5.5");
-    expect(body.tools).toEqual([{ type: "web_search", search_context_size: "low" }]);
+    expect(body.tools).toEqual([{ type: "web_search", search_context_size: "medium" }]);
     expect(body.reasoning).toEqual({ effort: "low" });
     expect(body.max_output_tokens).toBe(6000);
     expect(body.max_tool_calls).toBe(5); // the owner-set probe cap, server-enforced by OpenAI
@@ -122,6 +122,49 @@ describe("gptFromScratch", () => {
     expect(r.usdWorstCase).toBe(0.39);
   });
 
+  describe("wave-3 Item E: 4xx pre-execution rejections bill $0, not worst case (2026-07-20 owner-approved)", () => {
+    test.each([400, 401, 403, 404, 422])("HTTP %i is rejected pre-execution: usdActual is 0 (nothing was billable)", async (status) => {
+      const f = vi.fn(async () => ({ ok: false, status, json: async () => ({ error: { message: "rejected" } }) })) as unknown as typeof fetch;
+      const r = await gptFromScratch("049000000000", { apiKey: "k", fetchImpl: f });
+      expect(r.tier).toBe("none");
+      expect(r.usdActual).toBe(0);
+      // usdWorstCase is always the documented worst-case CONSTANT (0.39) regardless of what was
+      // actually billed - it is not a claim about this call's actual spend.
+      expect(r.usdWorstCase).toBe(0.39);
+    });
+
+    test("401 sets the exact honest error message for the ladder's skip reason", async () => {
+      const f = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: { message: "invalid_api_key" } }) })) as unknown as typeof fetch;
+      const r = await gptFromScratch("049000000000", { apiKey: "bad-key", fetchImpl: f });
+      expect(r.error).toBe("openai_auth_failed (check OPENAI_API_KEY)");
+      expect(r.usdActual).toBe(0);
+    });
+
+    test.each([429, 500, 502, 503])("HTTP %i still bills worst case (may have executed or is ambiguous per cost-truth rule)", async (status) => {
+      const f = vi.fn(async () => ({ ok: false, status, json: async () => ({ error: { message: "server-side" } }) })) as unknown as typeof fetch;
+      const r = await gptFromScratch("049000000000", { apiKey: "k", fetchImpl: f });
+      expect(r.tier).toBe("none");
+      expect(r.usdActual).toBe(GPT_LADDER_WORST_CASE_USD);
+    });
+
+    test("a network error (not an HTTP response at all) still bills worst case, unaffected by the 4xx carve-out", async () => {
+      const f = vi.fn(async () => { throw new Error("ECONNRESET"); }) as unknown as typeof fetch;
+      const r = await gptFromScratch("049000000000", { apiKey: "k", fetchImpl: f });
+      expect(r.usdActual).toBe(GPT_LADDER_WORST_CASE_USD);
+    });
+
+    test("abort still bills worst case, unaffected by the 4xx carve-out", async () => {
+      const f = vi.fn(async (_u: string, init: RequestInit) => {
+        return await new Promise((_res, rej) => {
+          init.signal?.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" })));
+        });
+      }) as unknown as typeof fetch;
+      const r = await gptFromScratch("049000000000", { apiKey: "k", fetchImpl: f, timeoutMs: 20 });
+      expect(r.aborted).toBe(true);
+      expect(r.usdActual).toBe(GPT_LADDER_WORST_CASE_USD);
+    });
+  });
+
   test("abort: fetch rejecting with AbortError -> aborted true, usdActual = worst case", async () => {
     const f = vi.fn(async (_u: string, init: RequestInit) => {
       return await new Promise((_res, rej) => {
@@ -143,6 +186,32 @@ describe("gptFromScratch", () => {
     expect(typeof r.brand).toBe("string");
   });
 
+  describe("wave-3: external signal threading (2026-07-20 owner-ratified)", () => {
+    test("aborts the HTTP call when an externally-passed signal fires, even before the internal 35s timeout", async () => {
+      let sawSignal: AbortSignal | undefined;
+      const f = ((_u: string, init: RequestInit) =>
+        new Promise((_res, rej) => {
+          sawSignal = init.signal ?? undefined;
+          init.signal?.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" })));
+        })) as unknown as typeof fetch;
+      const external = new AbortController();
+      const p = gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f, signal: external.signal });
+      external.abort();
+      const r = await p;
+      expect(r.aborted).toBe(true);
+      expect(sawSignal?.aborted).toBe(true);
+    });
+
+    test("with no external signal passed, behaves exactly as before (internal 35s timeout still governs)", async () => {
+      const f = ((_u: string, init: RequestInit) =>
+        new Promise((_res, rej) => {
+          init.signal?.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" })));
+        })) as unknown as typeof fetch;
+      const r = await gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f, timeoutMs: 10 });
+      expect(r.aborted).toBe(true);
+    });
+  });
+
   test("Z4: prompt teaches GTIN zero-padding equivalence (code property, not an answer hint)", async () => {
     let sentBody: any = null;
     const fetchImpl = (async (_url: any, init: any) => {
@@ -152,6 +221,23 @@ describe("gptFromScratch", () => {
     await gptFromScratch("0049000006346", { apiKey: "k", fetchImpl });
     expect(sentBody.input).toContain("zero-padding variants");
     expect(sentBody.input).toContain("shortest form");
+  });
+
+  describe("wave-3: GPT_SEARCH_CONTEXT env override (2026-07-20 owner-ratified)", () => {
+    afterEach(() => { delete process.env.GPT_SEARCH_CONTEXT; });
+    test("defaults to medium when unset (raised from low - low starved the model of search context)", async () => {
+      const f = okFetch(respBody(MODEL_JSON));
+      await gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f });
+      const body = JSON.parse(vi.mocked(f).mock.calls[0][1]!.body as string);
+      expect(body.tools).toEqual([{ type: "web_search", search_context_size: "medium" }]);
+    });
+    test("uses the env override when set", async () => {
+      process.env.GPT_SEARCH_CONTEXT = "high";
+      const f = okFetch(respBody(MODEL_JSON));
+      await gptFromScratch("848983006257", { apiKey: "k", fetchImpl: f });
+      const body = JSON.parse(vi.mocked(f).mock.calls[0][1]!.body as string);
+      expect(body.tools).toEqual([{ type: "web_search", search_context_size: "high" }]);
+    });
   });
 
   describe("G2: GPT_LADDER_MODEL env override", () => {

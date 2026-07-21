@@ -31,6 +31,13 @@ export interface RunLadderContext {
 export interface LadderRung {
   name: string;
   run: (ctx: RunLadderContext) => Promise<RungOutcome>;
+  /** wave-3 (2026-07-20 owner-ratified): an optional per-rung realistic budget (ms) that TAKES
+   *  PRIORITY over opts.perRungTimeoutMs for this rung specifically (e.g. Fetch V2 needs ~27s, GPT
+   *  needs ~40s - a uniform 8s budget starves both). `opts.deadlineAt` is still an outer ceiling: the
+   *  real budget is min(rung.budgetMs ?? opts.perRungTimeoutMs, remaining-to-deadlineAt) when either
+   *  is defined. Omitting budgetMs is fully backward compatible - the rung falls back to
+   *  opts.perRungTimeoutMs exactly as before this field existed. */
+  budgetMs?: number;
 }
 
 export interface LadderResult {
@@ -103,7 +110,10 @@ export async function runLadder(_code: string, rungs: LadderRung[], opts: RunLad
     // unbounded (legacy behavior, fully backward compatible).
     const controller = new AbortController();
     const budgets: number[] = [];
-    if (opts.perRungTimeoutMs !== undefined) budgets.push(opts.perRungTimeoutMs);
+    // wave-3: the rung's OWN budgetMs takes priority over the ladder-wide opts.perRungTimeoutMs when
+    // present (see LadderRung.budgetMs doc comment). deadlineAt is still an outer ceiling below.
+    const perRungBudget = r.budgetMs ?? opts.perRungTimeoutMs;
+    if (perRungBudget !== undefined) budgets.push(perRungBudget);
     if (opts.deadlineAt !== undefined) budgets.push(Math.max(0, opts.deadlineAt - now()));
     const budgetMs = budgets.length > 0 ? Math.min(...budgets) : undefined;
 
@@ -146,13 +156,15 @@ export async function runLadder(_code: string, rungs: LadderRung[], opts: RunLad
   return { reasons };
 }
 
-/** The concrete rung runners the route injects (each already closed over the request + deps). */
+/** The concrete rung runners the route injects (each already closed over the request + deps).
+ *  `runGpt` optionally accepts the ladder's RunLadderContext (wave-3: signal threading into
+ *  gptFromScratch) - widened to accept it without requiring every other runner to. */
 export interface LadderRungRunners {
   runUpcItemDb: () => Promise<RungOutcome>;
   runOpenFoodFacts: () => Promise<RungOutcome>;
   runGoUpc: () => Promise<RungOutcome>;
   runFetchV2: () => Promise<RungOutcome>;
-  runGpt: () => Promise<RungOutcome>;
+  runGpt: (ctx?: RunLadderContext) => Promise<RungOutcome>;
 }
 
 /**

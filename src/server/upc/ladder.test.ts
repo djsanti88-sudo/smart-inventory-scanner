@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runLadder, buildLadderRungs, buildFreeLadderRungs, buildPaidLadderRungs, type LadderRung, type RungOutcome } from "./ladder";
 
 // A tiny rung factory: names + a controllable outcome, with a call spy.
@@ -223,5 +223,87 @@ describe("L2 total ladder deadline (owner-reported 36-70s blocking decodes, AM-1
     const a = rung("a", settled("a hit"));
     const r = await runLadder("049000006346", [a], { deadlineAt: Date.now() + 60_000 });
     expect(r.settledBy).toBe("a");
+  });
+});
+
+describe("wave-3: per-rung budgetMs override (2026-07-20 owner-ratified)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("a rung's own budgetMs overrides opts.perRungTimeoutMs when it is LARGER", async () => {
+    let t = 0;
+    const now = () => t;
+    const hang: LadderRung = {
+      name: "fetchv2",
+      budgetMs: 27_000,
+      run: ({ signal }) =>
+        new Promise<RungOutcome>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    };
+    const p = runLadder("049000006346", [hang], { perRungTimeoutMs: 8_000, now });
+    // The rung's own 27s budget must still be running at 20s (would already be aborted under the old
+    // uniform 8s perRungTimeoutMs).
+    await vi.advanceTimersByTimeAsync(20_000);
+    // The promise is still pending - resolve it manually to end the test cleanly.
+    let resolved = false;
+    p.then(() => { resolved = true; });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    // Let it run out to its real 27s budget so the ladder settles and the test can finish.
+    await vi.advanceTimersByTimeAsync(8_000);
+    const r = await p;
+    expect(r.reasons[0].reason).toMatch(/aborted/i);
+  });
+
+  it("a rung's budgetMs is used INSTEAD of opts.perRungTimeoutMs when no deadlineAt is set (shorter budgetMs still aborts sooner)", async () => {
+    let t = 0;
+    const now = () => t;
+    const hang: LadderRung = {
+      name: "goupc",
+      budgetMs: 3_000,
+      run: ({ signal }) =>
+        new Promise<RungOutcome>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    };
+    const p = runLadder("049000006346", [hang], { perRungTimeoutMs: 8_000, now });
+    await vi.advanceTimersByTimeAsync(3_100);
+    const r = await p;
+    expect(r.reasons[0].reason).toMatch(/aborted/i);
+  });
+
+  it("deadlineAt still caps budgetMs as an outer ceiling (a rung's budgetMs cannot outlive the total deadline)", async () => {
+    let t = 0;
+    const now = () => t;
+    const hang: LadderRung = {
+      name: "gpt",
+      budgetMs: 40_000,
+      run: ({ signal }) =>
+        new Promise<RungOutcome>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    };
+    // Only 5s remains to the total deadline - far less than the rung's own 40s budget.
+    const p = runLadder("049000006346", [hang], { perRungTimeoutMs: 8_000, deadlineAt: 5_000, now });
+    await vi.advanceTimersByTimeAsync(5_100);
+    const r = await p;
+    expect(r.reasons[0].reason).toMatch(/aborted/i);
+  });
+
+  it("a rung with NO budgetMs behaves byte-identically to before (falls back to opts.perRungTimeoutMs)", async () => {
+    let t = 0;
+    const now = () => t;
+    const hang: LadderRung = {
+      name: "upcitemdb",
+      run: ({ signal }) =>
+        new Promise<RungOutcome>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    };
+    const p = runLadder("049000006346", [hang], { perRungTimeoutMs: 8_000, now });
+    await vi.advanceTimersByTimeAsync(8_100);
+    const r = await p;
+    expect(r.reasons[0].reason).toMatch(/aborted/i);
   });
 });

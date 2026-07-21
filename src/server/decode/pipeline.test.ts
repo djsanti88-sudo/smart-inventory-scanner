@@ -168,7 +168,10 @@ const learnedProductsTestFile = () => path.join(os.tmpdir(), `learned-products-p
 
 describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
   const saved: Record<string, string | undefined> = {};
-  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE"];
+  // wave-3: DECODE_LADDER_TOTAL_MS added so a test that overrides it (the wave-3 preflight/budget
+  // suite) never leaks into a later test in the same file (test-isolation fix, found live while
+  // writing the wave-3 non_public_code_type test below).
+  const keys = ["IS_E2E", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "GO_UPC_API_KEY", "BRAVE_SEARCH_API_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE", "LEARNED_PRODUCTS_FILE", "DECODE_LADDER_TOTAL_MS"];
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -891,7 +894,13 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(rungs).not.toContain("gpt");
     });
 
-    it("ESCALATION: a Go-UPC miss falls back to the stashed free suggestion; fetchv2/gpt NEVER run", async () => {
+    // wave-3 (2026-07-20 owner-ratified ORDER v3 EXTENSION): a Go-UPC miss no longer stops the
+    // escalation - Fetch V2 now ALSO gets a shot at beating the free suggestion (this test's stub has
+    // no discovery keys configured, so Fetch V2's paid doors can't run and it can only miss via the
+    // free keyless pattern-URL door - see paidWorkPossible/fetchV2CanPay gating). GPT still never runs
+    // here (no OPENAI_API_KEY configured), and the stashed free suggestion still stands as the final
+    // answer because nothing produced a strictly-higher-confidence or verified result.
+    it("ESCALATION: a Go-UPC miss falls back to the stashed free suggestion; fetchv2 gets a shot but can't beat it (no discovery keys); gpt never runs (no key)", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       process.env.GO_UPC_API_KEY = "test-key";
       stubUpcSuggestionThenGoupc({ goupcVerified: false });
@@ -902,9 +911,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       if (out.kind !== "computed") throw new Error("unreachable");
       // The stashed free suggestion is the final answer (its provider name survives in the payload).
       expect(out.payload.providerNames).toContain("upcitemdb");
-      // fetchv2/gpt must never run past a free suggestion.
+      // gpt must never run past a free suggestion when it has no key to pay with.
       const rungs = ladderRungsOf(out);
-      expect(rungs).not.toContain("fetchv2");
       expect(rungs).not.toContain("gpt");
     });
 
@@ -2165,6 +2173,273 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       // rejected. Pre-fix, the sequential `await recordGptLadderSpend(...)` throwing would skip this
       // entirely (0 calls); post-fix it always runs.
       expect(recordGptLadderCall).toHaveBeenCalledTimes(1);
+    }, 30000);
+  });
+
+  // wave-3 (2026-07-20 owner-ratified): realistic per-rung ladder budgets + money preflight + GPT
+  // signal threading + ORDER v3 escalation past a free suggestion via fetchv2/gpt.
+  describe("wave-3: realistic per-rung budgets + money preflight (2026-07-20 owner-ratified)", () => {
+    const GOUPC_API = "go-upc.com/api";
+
+    it("DECODE_LADDER_TOTAL_MS default is 90000ms (raised from 15000): a fetchv2 rung with no env override is never deadline-skipped even though it can take up to ~27s", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      // No DECODE_LADDER_TOTAL_MS override - proves the new 90s default actually applies. All rungs
+      // miss quickly (stubbed fetch), so this only proves the deadline itself is generous, not that a
+      // slow call survives (that is proven by the budgetMs tests below).
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      const reasons = (out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
+      // None of the rungs were skipped for "ladder deadline reached" - the old 15s default with even a
+      // handful of quick misses could plausibly starve later rungs; the new 90s default never does.
+      expect(reasons.some((r) => r.reason.includes("ladder deadline reached"))).toBe(false);
+      expect(reasons.map((r) => r.rung)).toContain("gpt");
+    });
+
+    it("preflight skips fetchv2 with the exact reason text when DECODE_LADDER_TOTAL_MS leaves under 10s", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.DECODE_LADDER_TOTAL_MS = "5000"; // total deadline is only 5s - under FETCHV2_MIN_VIABLE_MS (10s)
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      const reasons = (out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
+      const fetchv2Skip = reasons.find((r) => r.rung === "fetchv2" && r.reason.includes("insufficient time budget left"));
+      expect(fetchv2Skip?.reason).toBe("skipped: insufficient time budget left (needed >=10s)");
+    });
+
+    it("preflight skips gpt with the exact reason text when DECODE_LADDER_TOTAL_MS leaves under 20s", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-key"; // gpt must be genuinely capable of running to prove the TIME gate (not the key gate) is what skips it
+      process.env.DECODE_LADDER_TOTAL_MS = "15000"; // 15s total: clears fetchv2's 10s minimum, not gpt's 20s minimum
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      const reasons = (out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
+      const gptSkip = reasons.find((r) => r.rung === "gpt" && r.reason.includes("insufficient time budget left"));
+      expect(gptSkip?.reason).toBe("skipped: insufficient time budget left (needed >=20s)");
+    });
+
+    it("skip-before-charge ordering: a GPT rung skipped for insufficient time NEVER calls chargeDailySlot / bills anything", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-key";
+      process.env.GO_UPC_API_KEY = "test-key";
+      process.env.DECODE_LADDER_TOTAL_MS = "15000"; // clears goupc + fetchv2, not gpt's 20s minimum
+      fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(out.kind).toBe("computed");
+      if (out.kind !== "computed") throw new Error("unreachable");
+      // GPT's run() closure (shouldRunGptRung -> gptFromScratch) never executed: no OpenAI call, no
+      // spend/call record.
+      expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com"))).toBe(false);
+      expect(recordGptLadderSpend).not.toHaveBeenCalled();
+      expect(recordGptLadderCall).not.toHaveBeenCalled();
+      const reasons = (out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
+      expect(reasons.some((r) => r.rung === "gpt" && r.reason.includes("insufficient time budget left"))).toBe(true);
+    });
+
+    describe("Item D: fetchv2/gpt may upgrade a free suggestion (ORDER v3 extension)", () => {
+      function stubFreeSuggestionThenPaid(opts: { fetchv2Confidence?: "high" | "low" | "none"; goupcMiss?: boolean }) {
+        fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes(UPCITEMDB_HOST)) {
+            return new Response(
+              JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }),
+              { status: 200 },
+            );
+          }
+          if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 }); // goupc genuine miss (never wins)
+          if (opts.fetchv2Confidence && opts.fetchv2Confidence !== "none" && url.includes("brocade")) {
+            // brocade structured door is exercised via the fetchV2 module mock below instead.
+          }
+          return new Response("not found", { status: 404 });
+        });
+        vi.stubGlobal("fetch", fetchSpy);
+      }
+
+      it("a higher-confidence fetchv2 suggestion REPLACES the free suggestion", async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+        process.env.GO_UPC_API_KEY = "test-key";
+        process.env.BRAVE_SEARCH_API_KEY = "test-brave-key"; // makes fetchV2CanPay true
+        stubFreeSuggestionThenPaid({ goupcMiss: true });
+        // UPCitemdb's free suggestion confidence is fixed by upcItemDbRung (0.55 - see UpcItemDbProvider);
+        // stub fetchV2 directly to return a clean "verified" result WITH the required confidence >= free.
+        vi.mocked(fetchV2).mockResolvedValueOnce(
+          makeResult({
+            rawValue: VALID_GTIN,
+            outcome: "verified",
+            product: {
+              brand: "Continental",
+              name: "Continental TrueContact Tour",
+              model: "TrueContact Tour",
+              partNumber: "",
+              size: "235/60R18",
+              description: "",
+              category: "tire",
+              imageUrl: "",
+            },
+            evidence: {
+              exactCodeFound: true,
+              codeToProductProven: true,
+              sourceQuality: "strong",
+              sourceScore: 95,
+              identityScore: 1,
+              associationScore: 1,
+              finalConfidence: 0.95,
+              winningSourceUrl: "https://tirerack.com/x",
+              winningSourceType: "strong_commercial",
+              codeLocation: "json_ld.gtin",
+              proofSummary: "exact code in a structured product record",
+            },
+            sourcesChecked: ["https://tirerack.com/x"],
+          }),
+        );
+
+        const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+        expect(out.kind).toBe("computed");
+        if (out.kind !== "computed") throw new Error("unreachable");
+        expect(out.payload.providerNames).toContain("fetchv2");
+        expect(out.payload.results[0]?.brand).toBe("Continental");
+        expect(out.payload.decision.status).toBe("verified");
+      });
+
+      it("a LOWER/equal-confidence gpt suggestion does NOT replace the free suggestion (free suggestion stands)", async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+        process.env.GO_UPC_API_KEY = "test-key";
+        process.env.OPENAI_API_KEY = "test-key";
+        stubFreeSuggestionThenPaid({ goupcMiss: true });
+        fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes(UPCITEMDB_HOST)) {
+            return new Response(
+              JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }),
+              { status: 200 },
+            );
+          }
+          if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+          if (url.includes("api.openai.com/v1/responses")) {
+            const body = {
+              output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
+                brand: "Acme", productName: "Acme Widget", category: "Tire", specs: "", gtin: "",
+                confidence: 0.3, exactCodeFound: false, basis: "weak guess", sourceUrls: [],
+              }) }] }],
+              usage: { input_tokens: 100, output_tokens: 50 },
+            };
+            return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+          }
+          return new Response("not found", { status: 404 });
+        });
+        vi.stubGlobal("fetch", fetchSpy);
+
+        const out = await runDecodePipeline(makeReq(VALID_GTIN));
+
+        expect(out.kind).toBe("computed");
+        if (out.kind !== "computed") throw new Error("unreachable");
+        // The free UPCitemdb suggestion (Falken) stands - GPT's weak 0.3 guess never beats it.
+        expect(out.payload.providerNames).toContain("upcitemdb");
+        expect(out.payload.results[0]?.brand).toBe("Falken");
+      });
+
+      it("non_public_code_type still blocks gpt from running in this escalation path (vendor-label code)", async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+        process.env.OPENAI_API_KEY = "test-key";
+        // A vendor-label (ASIN) code never reaches the free-suggestion escalation branch since
+        // buildFreeLadderRungs returns [] for non-GTINs (no goupc either) - so this proves the
+        // non_public_code_type gate via the TOTAL-MISS path instead, which shares the identical
+        // shouldRunGptRung gating this task's escalation path reuses.
+        const ASIN = "B09XYZ7DEF";
+        const out = await runDecodePipeline(makeReq(ASIN));
+        expect(out.kind).toBe("computed");
+        if (out.kind !== "computed") throw new Error("unreachable");
+        expect(fetchSpy.mock.calls.some(([u]) => String(u).includes("api.openai.com"))).toBe(false);
+        const reasons = (out.payload.debug.ladderReasons as Array<{ rung: string; reason: string }> | undefined) ?? [];
+        expect(reasons.some((r) => r.rung === "gpt" && r.reason.includes("non_public_code_type"))).toBe(true);
+      });
+
+      it("pay-once: multi-rung escalation (goupc miss -> fetchv2 miss -> gpt runs) charges the cap exactly once per genuinely-run paid rung, never twice for one logical request", async () => {
+        process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+        process.env.GO_UPC_API_KEY = "test-key";
+        process.env.OPENAI_API_KEY = "test-key";
+        stubFreeSuggestionThenPaid({ goupcMiss: true });
+        fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.includes(UPCITEMDB_HOST)) {
+            return new Response(
+              JSON.stringify({ code: "OK", items: [{ title: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", category: "Tire" }] }),
+              { status: 200 },
+            );
+          }
+          if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+          if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+          if (url.includes("api.openai.com/v1/responses")) {
+            const body = {
+              output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
+                brand: "Acme", productName: "Acme Widget", category: "Tire", specs: "", gtin: "",
+                confidence: 0.3, exactCodeFound: false, basis: "weak guess", sourceUrls: [],
+              }) }] }],
+              usage: { input_tokens: 100, output_tokens: 50 },
+            };
+            return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+          }
+          return new Response("not found", { status: 404 });
+        });
+        vi.stubGlobal("fetch", fetchSpy);
+
+        await runDecodePipeline(makeReq(VALID_GTIN));
+
+        // Two genuinely-run paid rungs (goupc + gpt; fetchv2 has no discovery keys so paidWorkPossible's
+        // fetchV2CanPay is false and it never even attempts a charge) -> exactly 2 charges, never more.
+        expect(await readDailyUsed(await ladderStorage())).toBe(2);
+      });
+    });
+
+    it("signal propagation: the ladder's AbortSignal reaches gptFromScratch's OpenAI fetch call (ctx.signal threaded through maybeGptLadder)", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.OPENAI_API_KEY = "test-key";
+      let openAiSignal: AbortSignal | undefined;
+      fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(UPCITEMDB_HOST)) return new Response(JSON.stringify({ code: "OK", items: [] }), { status: 200 });
+        if (url.includes(OFF_HOST)) return new Response(JSON.stringify({ status: 0 }), { status: 200 });
+        if (url.includes(GOUPC_API)) return new Response("not found", { status: 404 });
+        if (url.includes("api.openai.com/v1/responses")) {
+          openAiSignal = init?.signal ?? undefined;
+          // Never resolves on its own - only the ladder's own abort (or the test's manual check below)
+          // ends this promise. Proves the OpenAI call genuinely received a signal it can act on.
+          return new Promise<Response>(() => {});
+        }
+        return new Response("not found", { status: 404 });
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+
+      // A tiny ladder deadline forces the ladder to give up waiting on GPT quickly - but GPT's own
+      // 20s preflight minimum must still be clearable for the rung to actually START (so the signal
+      // gets threaded in the first place). Use a deadline just above GPT_MIN_VIABLE_MS (20s) so the
+      // rung starts, then races the ladder's own abort.
+      process.env.DECODE_LADDER_TOTAL_MS = "21000";
+
+      const p = runDecodePipeline(makeReq(VALID_GTIN));
+      // Give the synchronous/microtask chain a moment to reach the GPT rung and register the fetch call.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(openAiSignal, "the OpenAI fetch call must have received a signal object").toBeTruthy();
+      expect(openAiSignal?.aborted).toBe(false);
+
+      await p; // let the ladder's own deadline abort resolve the hanging promise's race and settle
+      // The ladder gave up waiting at its deadline - the signal threaded into the OpenAI call must now
+      // show aborted, proving the abort actually propagated into the fetch call (not just a local
+      // ladder-side give-up that leaves the real HTTP call running unaborted server-side).
+      expect(openAiSignal?.aborted).toBe(true);
     }, 30000);
   });
 });

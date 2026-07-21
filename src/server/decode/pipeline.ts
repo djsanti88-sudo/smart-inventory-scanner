@@ -38,7 +38,7 @@ import { braveProvider, firecrawlSearchProvider, type DiscoveryProvider, type Mi
 import { brocadeLookup } from "@/services/fetchV2/sources/brocade";
 import { selectBarcodeUrls } from "@/services/ai/barcodeSources";
 import { isSafePublicUrl } from "@/services/ai/urlSafety";
-import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult } from "@/server/upc/ladder";
+import { runLadder, buildFreeLadderRungs, buildPaidLadderRungs, type RungOutcome, type LadderResult, type RunLadderContext, type LadderRung } from "@/server/upc/ladder";
 import { canonicalGtin, isGtinShaped } from "@/services/upc/gtin";
 import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
@@ -90,6 +90,36 @@ const fetchV2Cache = new FetchV2Cache();
 const FETCHV2_MAX_SOURCES = Number(process.env.FETCHV2_MAX_SOURCES || 3);
 const FETCHV2_MAX_TOTAL_MS = Number(process.env.FETCHV2_MAX_TOTAL_MS || 25_000);
 const FETCHV2_PAGE_TIMEOUT_MS = Number(process.env.FETCHV2_PAGE_TIMEOUT_MS || 8_000);
+
+// wave-3 (2026-07-20 owner-ratified: realistic per-rung ladder budgets). Root cause fixed: paid rungs
+// (Fetch V2, GPT) were starved by a uniform 8s-per-rung / 15s-total budget far below what they
+// actually need, so the ladder aborted WAITING on them while the underlying call still ran (and
+// billed) server-side - $9.75 burned across ~25 doomed calls in one day. Each paid rung now gets a
+// budget derived from its OWN real completion-time ceiling, computed from the SAME constant its
+// engine actually uses (never a hardcoded guess):
+//   - goupc: unchanged, DECODE_LADDER_RUNG_MS (default 8000ms) - no new env var, no behavior change.
+//   - fetchv2: FETCHV2_MAX_TOTAL_MS (the engine's own hard cap, read above) + 2000ms overhead margin
+//     for the ladder's own bookkeeping around the call. Default ~27000ms.
+//   - gpt: gptFromScratch's own internal 35s client timeout + 5000ms overhead margin. Default 40000ms.
+const DECODE_LADDER_FETCHV2_MS = Number(process.env.DECODE_LADDER_FETCHV2_MS || FETCHV2_MAX_TOTAL_MS + 2_000);
+const DECODE_LADDER_GPT_MS = Number(process.env.DECODE_LADDER_GPT_MS || 40_000);
+
+// wave-3 PREFLIGHT (2026-07-20 owner-ratified): even with a realistic per-rung budget, a rung must
+// never be STARTED when there clearly is not enough of the total ladder deadline left to have any
+// chance of completing - that is exactly how the $9.75 burn happened (the ladder started a paid call
+// with 2-3s left on the clock, aborted it a moment later, and still paid the worst-case charge for a
+// call that could never have finished). These are the MINIMUM viable windows below which starting the
+// rung is pointless - named constants, not magic numbers, so their rationale is visible at the call
+// site:
+//   - FETCHV2_MIN_VIABLE_MS: Fetch V2's cheapest real path (a single structured/pattern-URL door hit)
+//     still needs a few seconds for DNS + TLS + a page fetch + parse; under 10s there is essentially
+//     no chance of a genuine multi-source crawl completing.
+//   - GPT_MIN_VIABLE_MS: GPT-5.5's own probe data shows a genuine answer (even a fast "no evidence"
+//     empty-productName reply) takes at least several seconds once tool calls are involved; under 20s
+//     there is no realistic chance of the model completing even one web_search round trip and replying
+//     before the ladder's own deadline gives up on it.
+const FETCHV2_MIN_VIABLE_MS = 10_000;
+const GPT_MIN_VIABLE_MS = 20_000;
 
 export function e2eMode(): boolean {
   return process.env.IS_E2E === "1";
@@ -440,13 +470,15 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
 
   // L2 total ladder deadline (AM-1(b), owner-reported 36-70s blocking decodes): ONE request-scoped
   // deadline, derived once, passed to EVERY runLadder call below (free run, escalation Go-UPC-only
-  // run, full paid run). DECODE_LADDER_TOTAL_MS defaults to 15000ms (AM-1(c): a budget the client's
-  // own AbortController - decodeBudgetMs + 7000ms margin, see scanStore.ts - actually outlives), and
-  // is widened by the client's own budgetMs when the client asked for a longer window (never
-  // narrowed - a client requesting a bigger budget must not get a SMALLER server deadline than its
-  // own env default). Never trips on the golden gate: that gate runs fully offline with instant
-  // rungs, so wall-clock time never reaches the deadline (do not make it time-sensitive there).
-  const ladderDeadlineAt = decodeStartedAt + Math.max(intEnv(process.env.DECODE_LADDER_TOTAL_MS, 15_000), budgetMs ?? 0);
+  // run, full paid run). DECODE_LADDER_TOTAL_MS default RAISED 15000ms -> 90000ms (wave-3, 2026-07-20
+  // owner-ratified): the old 15s ceiling could not fit even ONE realistic paid rung (Fetch V2 needs up
+  // to ~27s, GPT's own client timeout is 35s) - it guaranteed every paid rung was aborted mid-flight
+  // while still billing worst-case, which is the root cause this wave fixes. 90s comfortably fits the
+  // full paid chain (goupc 8s + fetchv2 ~27s + gpt ~40s, with margin) end to end. Still overridable by
+  // its env var, and still widened (never narrowed) by the client's own requested budgetMs. Never
+  // trips on the golden gate: that gate runs fully offline with instant rungs, so wall-clock time never
+  // reaches the deadline (do not make it time-sensitive there).
+  const ladderDeadlineAt = decodeStartedAt + Math.max(intEnv(process.env.DECODE_LADDER_TOTAL_MS, 90_000), budgetMs ?? 0);
 
   // A4 outcome ledger append (AM-5): fire-and-forget, best-effort -- a ledger failure must never
   // affect the scan response. Skipped entirely under e2eMode() (tests/Playwright must never touch the
@@ -720,6 +752,10 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   const maybeGptLadder = async (opts: {
     priorStatus: string;
     timedOut?: boolean;
+    /** wave-3: the ladder rung's AbortSignal (RunLadderContext.signal), threaded all the way into
+     *  gptFromScratch's fetch call so a ladder-level give-up also cancels the in-flight HTTP request
+     *  server-side, instead of leaving it running unaborted after the ladder stopped waiting. */
+    signal?: AbortSignal;
   }): Promise<{ payload: ReturnType<typeof gptResultToDecodePayload>; skipReason?: string; surfaceSkip: boolean }> => {
     if (opts.priorStatus === "verified" || opts.priorStatus === "suggested") {
       return { payload: null, skipReason: "prior_status_already_decided", surfaceSkip: false };
@@ -747,7 +783,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       budget: async () => checkGptLadderBudget({ worstCaseUsd: GPT_LADDER_WORST_CASE_USD, storage: await ladderStorage() }),
     });
     if (!rung.run) return { payload: null, skipReason: rung.skipReason, surfaceSkip: true };
-    const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY! });
+    const r = await gptFromScratch(code, { apiKey: process.env.OPENAI_API_KEY!, signal: opts.signal });
     const gptLadderStore = await ladderStorage();
     // ALWAYS record both - success, error, or abort; never let one skip the other. recordGptLadderSpend
     // already fail-opens internally (aiSpendGuard.ts), but running them via Promise.allSettled is
@@ -1182,8 +1218,8 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     };
 
     // ---- Rung 3: GPT-5.5 (paid END of the ladder; reuses maybeGptLadder) ----------------------------
-    const runGpt = async (): Promise<RungOutcome> => {
-      const ladder = await maybeGptLadder({ priorStatus: "needs_review", timedOut: false });
+    const runGpt = async (ctx?: RunLadderContext): Promise<RungOutcome> => {
+      const ladder = await maybeGptLadder({ priorStatus: "needs_review", timedOut: false, signal: ctx?.signal });
       gptLadderResult = ladder;
       if (ladder.payload) {
         return {
@@ -1204,12 +1240,19 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       return { settled: false, reason: ladder.skipReason ? `gpt-5.5 skipped: ${ladder.skipReason}` : "gpt-5.5 tier none (no product)" };
     };
 
-    // ===== ORDER v3 (owner-ratified 2026-07-14) =====================================================
+    // ===== ORDER v3 (owner-ratified 2026-07-14; EXTENDED 2026-07-20 owner-ratified, wave-3) ==========
     // retail peek (above, unchanged) -> FREE rungs -> Plan D -> cap gate -> paid ladder.
     // Free-before-paid now holds STRICTLY: Plan D's internal Firecrawl legs no longer run before the $0
-    // UPCitemdb/OFF rungs. ESCALATION: a free-rung SUGGESTION is a fallback, not a stop - one cap-charged
-    // Go-UPC exact-verify may still upgrade it to verified; fetchv2/gpt NEVER run past it. A total free
-    // MISS keeps today's exact behavior (Plan D -> cap gate -> full paid ladder: goupc -> fetchv2 -> gpt).
+    // UPCitemdb/OFF rungs. ESCALATION (2026-07-20 owner-ratified, wave-3): a free-rung SUGGESTION is a
+    // fallback, not a stop - Go-UPC gets first crack at beating it (a cap-charged exact-verify may still
+    // upgrade it), and when Go-UPC does NOT produce something better, Fetch V2 ALSO gets a shot, and if
+    // that doesn't improve on the stash either, GPT gets the final shot. Each paid rung may REPLACE the
+    // free suggestion only when its own outcome is a "verified" decision or a suggestion with STRICTLY
+    // higher confidence than the free suggestion's own confidence - otherwise the free suggestion stands
+    // and the paid rung's reason is still recorded for transparency (see the escalation block below for
+    // the full mechanics, including realistic per-rung budgets and the money preflight time gate). A
+    // total free MISS keeps today's exact behavior (Plan D -> cap gate -> full paid ladder: goupc ->
+    // fetchv2 -> gpt), now also carrying the wave-3 realistic budgets + money preflight.
     //
     // A6 (owner-ratified 2026-07-15, AM-3 hardened): a code with a strong, >=8-digit tire-prefix hint
     // skips BOTH free rungs (UPCitemdb/OFF have never returned a tire). The steered path is otherwise
@@ -1321,6 +1364,50 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       }
     }
 
+    // wave-3 (2026-07-20 owner-ratified): annotate the fetchv2/gpt rungs with their REALISTIC budgets
+    // (see DECODE_LADDER_FETCHV2_MS / DECODE_LADDER_GPT_MS above) - goupc is untouched (keeps the
+    // uniform DECODE_LADDER_RUNG_MS default via runLadder's opts.perRungTimeoutMs fallback). Applied
+    // as a post-hoc annotation over buildPaidLadderRungs's output rather than threading a new param
+    // through the builder - the builder only decides WHICH rungs exist and their order; per-rung
+    // budget is a ladder-runtime concern layered on afterward, at the one call site that needs it.
+    const withRealisticBudgets = (rungs: LadderRung[]): LadderRung[] =>
+      rungs.map((r) => {
+        if (r.name === "fetchv2") return { ...r, budgetMs: DECODE_LADDER_FETCHV2_MS };
+        if (r.name === "gpt") return { ...r, budgetMs: DECODE_LADDER_GPT_MS };
+        return r;
+      });
+
+    // wave-3 MONEY PREFLIGHT (2026-07-20 owner-ratified): filter OUT a paid rung whose realistic
+    // minimum viable window no longer fits before the ladder's own total deadline - this runs ABOVE and
+    // IN ADDITION to runLadder's own "any time left at all" deadline check (that check only asks "is
+    // there time left", not "is there enough time for THIS specific rung's minimum viable window").
+    // Every filtered-out rung still records an honest "skipped: insufficient time budget left" reason
+    // so the needs_review response is never silent about why a paid rung never even started - this
+    // mirrors the exact reasons/providerStatuses mechanism the ladder already uses for every other
+    // skip (see runLadder's own "skipped: ladder deadline reached" wording).
+    //
+    // CRITICAL ordering for GPT (L12, never charge two paths of one request): this filter runs BEFORE
+    // the ladder is ever invoked, which is BEFORE shouldRunGptRung's own budget-charging path
+    // (checkGptLadderBudget) ever executes inside maybeGptLadder - a GPT rung skipped here for
+    // insufficient time is filtered OUT of the rungs array entirely, so its run() closure (and
+    // therefore shouldRunGptRung/gptFromScratch/chargeDailySlot) never executes at all. Zero bill.
+    const preflightTimeGate = (rungs: LadderRung[], deadlineAt: number): { rungs: LadderRung[]; skippedReasons: Array<{ rung: string; reason: string }> } => {
+      const skippedReasons: Array<{ rung: string; reason: string }> = [];
+      const kept = rungs.filter((r) => {
+        const remainingMs = deadlineAt - Date.now();
+        if (r.name === "fetchv2" && remainingMs < FETCHV2_MIN_VIABLE_MS) {
+          skippedReasons.push({ rung: r.name, reason: `skipped: insufficient time budget left (needed >=${FETCHV2_MIN_VIABLE_MS / 1000}s)` });
+          return false;
+        }
+        if (r.name === "gpt" && remainingMs < GPT_MIN_VIABLE_MS) {
+          skippedReasons.push({ rung: r.name, reason: `skipped: insufficient time budget left (needed >=${GPT_MIN_VIABLE_MS / 1000}s)` });
+          return false;
+        }
+        return true;
+      });
+      return { rungs: kept, skippedReasons };
+    };
+
     // ---- LAZY DAILY CAP GATE, extracted ONCE (Task 7) -----------------------------------------------
     // The single read-then-charge block, used by BOTH the escalation branch (before the Go-UPC-only run)
     // and the full-paid branch (before the full ladder). READ-ONLY check first (never writes on a block),
@@ -1359,23 +1446,48 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
 
     let ladderRun: LadderResult;
     if (freeSuggestion) {
-      // ESCALATION PATH: a free suggestion stands as a fallback; a single cap-charged Go-UPC exact-verify
-      // may still upgrade it to verified (Go-UPC wins). Otherwise the free suggestion is the final answer;
-      // fetchv2/gpt NEVER run past a free suggestion (owner-ratified). receiptState stays {eligible:false}
-      // and gptLadderResult stays null on this branch - the GPT rung never runs, so the code was NOT
-      // exhaustively probed and earns no permanent no_result_receipt.
+      // ===== ORDER v3 ESCALATION (owner-ratified 2026-07-20, wave-3 EXTENDED) ==========================
+      // A free suggestion stands as a fallback. Go-UPC gets first crack at beating it (unchanged: a
+      // cap-charged exact attempt may settle a stronger paid answer). NEW (2026-07-20): when Go-UPC
+      // does NOT produce something better, Fetch V2 ALSO gets a shot, and if THAT doesn't improve on
+      // the stash either, GPT gets the final shot - each with its own wave-3 realistic budget/preflight
+      // (see withRealisticBudgets/preflightTimeGate above) and its own paid-capability + non-public-
+      // code-type gating (goUpcCanPay/fetchV2CanPay/gptCanPay below mirror paidWorkPossible.ts's
+      // per-provider checks). A paid rung's outcome REPLACES the stashed free suggestion ONLY when it is
+      // itself a "verified" decision (only possible from goupc/fetchv2 - GPT never mints "verified", see
+      // gptResultToDecodePayload) OR a suggestion whose confidence is STRICTLY HIGHER than the free
+      // suggestion's own confidence; otherwise the free suggestion stands and the paid rung's reason is
+      // still recorded in the reasons list for transparency. receiptState stays {eligible:false} on this
+      // whole branch (no permanent no_result_receipt from an escalation attempt - see classifyReceipt,
+      // which only ever looks at gptLadderResult from the FINAL win, not this comparison).
       //
-      // The cap is charged BEFORE the Go-UPC-only run (paid work is paid work) - but ONLY when Go-UPC is
-      // genuinely capable of a paid attempt: the goupc rung is present (GTIN-gated; a NON-GTIN code yields
-      // an empty array) AND a Go-UPC key is configured. Charging (and cap-blocking) for a rung that would
-      // immediately no-op as "unavailable" would violate the doctrine that the cap bounds only genuine
-      // PAID work and must never block a $0 free resolution - so when Go-UPC can't actually pay, we skip
-      // the charge and the free suggestion simply stands (no fetchv2/gpt escalation past it).
+      // PAY-ONCE (L12): each paid rung charges its cap slot exactly once, immediately before it runs,
+      // and ONLY when it is genuinely capable of paying (mirrors the pre-existing goUpcCanPay pattern
+      // for goupc). A rung skipped by the preflight time gate or by shouldRunGptRung's own gating
+      // (non_public_code_type, no key, etc) is NEVER charged - its run() closure never executes.
+      const freeConfidence = (freeRun.outcome?.payload as LadderPayload | undefined)?.decision.confidence ?? 0;
+      let winningOutcome: RungOutcome | undefined = freeRun.outcome;
+      let winningSettledBy: string | undefined = freeRun.settledBy;
+      let beatFree = false; // true once a paid rung's outcome has replaced the free stash
+      const reasonsAcc: Array<{ rung: string; reason: string }> = [...freeRun.reasons];
+
+      // A win is "better" than the free stash when it is itself verified, or a suggestion with
+      // STRICTLY higher confidence than the free suggestion's own confidence (never GPT-verified - that
+      // is structurally impossible per gptResultToDecodePayload, so this check is honest for all three).
+      const isBetterThanFree = (outcome: RungOutcome | undefined): boolean => {
+        const payload = outcome?.payload as LadderPayload | undefined;
+        if (!payload) return false;
+        if (payload.decision.status === "verified") return true;
+        return payload.decision.confidence > freeConfidence;
+      };
+
+      // ---- Step 1: Go-UPC only (unchanged behavior) ---------------------------------------------------
       const goUpcRungOnly = buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "goupc");
       const goUpcCanPay = goUpcRungOnly.length > 0 && !!process.env.GO_UPC_API_KEY;
       if (goUpcCanPay) {
         await chargePaidSlot();
         const goRun = await runLadder(code, goUpcRungOnly, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+        reasonsAcc.push(...goRun.reasons);
         // D6/Task 2 Step 3c (demotion ripple, CRITICAL): Go-UPC is now honestly labeled "suggested"
         // (never "verified" - see GoUpcProvider.ts), so this win-selection can no longer gate on the
         // literal status "verified" - that would DISCARD every genuinely settled paid Go-UPC answer in
@@ -1383,13 +1495,58 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         // whether Go-UPC SETTLED at all (goRun.outcome is only set when the rung actually answered,
         // verified OR suggested) so a cleanly-resolved paid Go-UPC hit still WINS over the free
         // suggestion, exactly as before the honesty relabel - only the label changed, not who wins.
-        ladderRun = goRun.outcome
-          ? { settledBy: goRun.settledBy, outcome: goRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] }
-          : { settledBy: freeRun.settledBy, outcome: freeRun.outcome, reasons: [...freeRun.reasons, ...goRun.reasons] };
-      } else {
-        // No paid Go-UPC attempt possible -> the free suggestion is the answer, unblocked, uncharged.
-        ladderRun = freeRun;
+        if (goRun.outcome) {
+          winningOutcome = goRun.outcome;
+          winningSettledBy = goRun.settledBy;
+          beatFree = true;
+        }
       }
+
+      // ---- Step 2: Fetch V2, only when nothing has beaten the free suggestion yet --------------------
+      if (!beatFree) {
+        // wave-3 fix (found while testing): paidWorkPossible(code) is an OR across ALL three providers
+        // (goupc/fetchv2/gpt) - using it here would charge a cap slot for fetchv2 even when ONLY goupc
+        // or gpt has a key configured and fetchv2 itself has zero discovery keys (it would only ever
+        // run its free keyless pattern-URL door, never genuinely paid work). fetchV2CanPay here mirrors
+        // paidWorkPossible.ts's OWN internal fetchV2 check (Brave or any Firecrawl key) in isolation.
+        const fetchV2CanPay = !!process.env.BRAVE_SEARCH_API_KEY || firecrawlKeysFromEnv().length > 0;
+        const fetchV2RungOnly = withRealisticBudgets(buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "fetchv2"));
+        const gated = preflightTimeGate(fetchV2RungOnly, ladderDeadlineAt);
+        reasonsAcc.push(...gated.skippedReasons);
+        if (fetchV2CanPay && gated.rungs.length > 0) {
+          await chargePaidSlot();
+          const fv2Run = await runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+          reasonsAcc.push(...fv2Run.reasons);
+          if (isBetterThanFree(fv2Run.outcome)) {
+            winningOutcome = fv2Run.outcome;
+            winningSettledBy = fv2Run.settledBy;
+            beatFree = true;
+          }
+        }
+      }
+
+      // ---- Step 3: GPT, only when nothing has beaten the free suggestion yet -------------------------
+      if (!beatFree) {
+        const gptRungOnly = withRealisticBudgets(buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }).filter((r) => r.name === "gpt"));
+        const gated = preflightTimeGate(gptRungOnly, ladderDeadlineAt);
+        reasonsAcc.push(...gated.skippedReasons);
+        // shouldRunGptRung (inside maybeGptLadder/runGpt) still applies its own gates - non_public_code_type,
+        // api key, e2e, and its own daily-$-budget check - exactly as the normal full-paid-ladder path
+        // does. Nothing here duplicates or bypasses those checks; the preflight time gate is STRICTLY
+        // additional (it fires before shouldRunGptRung ever runs, so a time-skipped GPT rung never even
+        // reaches shouldRunGptRung's own budget-charging path - see preflightTimeGate's doc comment).
+        if (gated.rungs.length > 0 && !!process.env.OPENAI_API_KEY) {
+          await chargePaidSlot();
+          const gptRun = await runLadder(code, gated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+          reasonsAcc.push(...gptRun.reasons);
+          if (isBetterThanFree(gptRun.outcome)) {
+            winningOutcome = gptRun.outcome;
+            winningSettledBy = gptRun.settledBy;
+          }
+        }
+      }
+
+      ladderRun = { settledBy: winningSettledBy, outcome: winningOutcome, reasons: reasonsAcc };
     } else if (!freeRun.outcome) {
       // TOTAL FREE MISS: cap gate then the FULL paid ladder (goupc -> fetchv2 -> gpt) - BUT (L6, Task
       // 12c) only charge the cap slot when paid work is genuinely POSSIBLE for this code. With zero
@@ -1397,10 +1554,15 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
       // and honest per-rung skips - never a slot for work that was never actually paid. Escalation
       // above already applies the equivalent gate (goUpcCanPay) for its own paid attempt.
       if (paidWorkPossible(code)) await chargePaidSlot();
-      const paidRun = await runLadder(code, buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt }), { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
+      // wave-3: fetchv2/gpt get their realistic budgets (withRealisticBudgets), and the money preflight
+      // filters out either one whose minimum viable window no longer fits the remaining ladder deadline
+      // BEFORE it is ever started (preflightTimeGate) - goupc is unaffected (kept at its existing
+      // DECODE_LADDER_RUNG_MS default via runLadder's own opts.perRungTimeoutMs fallback).
+      const preGated = preflightTimeGate(withRealisticBudgets(buildPaidLadderRungs(code, { runGoUpc, runFetchV2, runGpt })), ladderDeadlineAt);
+      const paidRun = await runLadder(code, preGated.rungs, { deadlineAt: ladderDeadlineAt, perRungTimeoutMs: intEnv(process.env.DECODE_LADDER_RUNG_MS, 8000) });
       // Concatenate reasons free-phase-then-paid-phase so an unresolved response still lists every rung
-      // that actually ran, honestly, in the order it ran.
-      ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...paidRun.reasons] };
+      // that actually ran, honestly, in the order it ran (including any preflight-skipped rung).
+      ladderRun = { settledBy: paidRun.settledBy, outcome: paidRun.outcome, reasons: [...freeRun.reasons, ...preGated.skippedReasons, ...paidRun.reasons] };
     } else {
       // Future-proof: a VERIFIED free win (no free rung emits one today). Terminal, no paid work.
       ladderRun = freeRun;

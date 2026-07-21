@@ -72,7 +72,7 @@ function none(partial: Partial<GptFromScratchResult>): GptFromScratchResult {
 
 export async function gptFromScratch(
   code: string,
-  deps: { apiKey: string; fetchImpl?: typeof fetch; now?: () => number; timeoutMs?: number },
+  deps: { apiKey: string; fetchImpl?: typeof fetch; now?: () => number; timeoutMs?: number; signal?: AbortSignal },
 ): Promise<GptFromScratchResult> {
   const f = deps.fetchImpl ?? fetch;
   // 35s cap (owner-set 2026-07-06, raised from 18s): the exhaustion band on unfindable codes runs
@@ -81,6 +81,13 @@ export async function gptFromScratch(
   const timeoutMs = deps.timeoutMs ?? 35_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // wave-3 (2026-07-20 owner-ratified): thread the ladder rung's externally-passed abort signal (when
+  // given) in ALONGSIDE this function's own internal timeoutMs cap - the SAME AbortSignal.any combinator
+  // pattern pageFetch.ts already uses (fetchOne). When the ladder gives up waiting on this rung, the
+  // actual HTTP call now also cancels instead of running to completion server-side unaborted. Cost-truth
+  // doctrine is unaffected: an externally-aborted call still bills worst case below (usdActual stays
+  // GPT_LADDER_WORST_CASE_USD on any abort, regardless of which signal fired first).
+  const fetchSignal = deps.signal ? AbortSignal.any([deps.signal, controller.signal]) : controller.signal;
   let data: {
     output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
     usage?: { input_tokens?: number; output_tokens?: number };
@@ -93,7 +100,10 @@ export async function gptFromScratch(
       body: JSON.stringify({
         model: process.env.GPT_LADDER_MODEL?.trim() || "gpt-5.5",
         input: promptFor(code),
-        tools: [{ type: "web_search", search_context_size: "low" }],
+        // wave-3 (2026-07-20 owner-ratified): raised default "low" -> "medium" - "low" was starving the
+        // model of search context on codes that genuinely need broader web coverage to find. Overridable
+        // via GPT_SEARCH_CONTEXT for further tuning without a code change.
+        tools: [{ type: "web_search", search_context_size: process.env.GPT_SEARCH_CONTEXT || "medium" }],
         reasoning: { effort: "low" },
         max_output_tokens: 6000,
         // 5 = the owner-set cap from the 21/21 probe (server-enforced by OpenAI).
@@ -127,9 +137,23 @@ export async function gptFromScratch(
           },
         },
       }),
-      signal: controller.signal,
+      signal: fetchSignal,
     });
-    if (!res.ok) return none({ error: `HTTP ${res.status}`, usdActual: GPT_LADDER_WORST_CASE_USD });
+    if (!res.ok) {
+      // wave-3 Item E (2026-07-20 owner-approved, live-verified: 15 isolated 401 calls all billed the
+      // full $0.39 worst case despite being rejected instantly with 0 searches - $9.75 of the burn was
+      // exactly this pattern). A 4xx client-error response (400/401/403/404/422) means OpenAI rejected
+      // the REQUEST itself before any model execution ever started - bad auth, malformed request,
+      // unknown route, or unprocessable input. Nothing was actually spent, so usdActual is honestly $0.
+      // 429 (rate limit) is NOT in this list: a 429 can still reflect real queued/executed work
+      // depending on where in the request lifecycle the provider throttles, so it stays worst-case
+      // per the cost-truth rule (as do 5xx, timeouts, aborts, and network errors - all ambiguous or
+      // possibly-executed). usdWorstCase below is unaffected either way - it is always the documented
+      // constant, never a claim about what THIS call actually spent.
+      const isPreExecutionRejection = res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404 || res.status === 422;
+      const error = res.status === 401 ? "openai_auth_failed (check OPENAI_API_KEY)" : `HTTP ${res.status}`;
+      return none({ error, usdActual: isPreExecutionRejection ? 0 : GPT_LADDER_WORST_CASE_USD });
+    }
     data = await res.json();
   } catch (e) {
     const aborted = (e as Error)?.name === "AbortError";
