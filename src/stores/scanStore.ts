@@ -24,6 +24,7 @@ import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector
 import { resolveScan } from "@/services/resolver";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { gradeBarcode } from "@/services/upc/barcodeTrust";
+import { canonicalGtin } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
@@ -3444,9 +3445,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 : "Daily AI lookup cap reached. This scan is saved and counted as unverified. Retry after the cap resets."
               : e instanceof DecodeAbortedError
                 ? "Decode is taking longer than expected - it keeps working in the background; check Needs Review shortly"
-                : `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${
-                    e instanceof Error ? e.message : ""
-                  }`.trim();
+                : // DEFECT 2 (untrusted string leak): NEVER surface the raw browser/provider error
+                  // ("Failed to fetch", DNS errors, etc.) in the user-facing Reason column. Map every
+                  // network/provider failure to honest human copy; the technical detail stays only in
+                  // the debug-only aiLookupLogs error entry written below (mkLog), never on the row.
+                  "Live decode failed (network / rate-limit / provider error). Saved locally and counted as unverified; retry to identify when back online.";
           // DECODE-EVERYTHING (owner): a FAILED decode (timeout / 429 rate-limit / provider error / AI down)
           // must NOT leave the scan blank. We still COUNT it as an UNVERIFIED, reviewable provisional row with
           // a SAFE label and the scanned code - never a fabricated product identity, never an approved alias,
@@ -5187,9 +5190,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
           // No matched identity at all - fall back to the same brand/name/sku/barcode fields the
           // suggestion itself is built from, so two rows with materially different suggestions (e.g.
-          // different brand) are treated as different identities even without a corpus match.
-          return `raw:${source.brand}|${source.partNumber}|${source.barcode}|${source.name}`;
+          // different brand) are treated as different identities even without a corpus match. DEFECT 1
+          // (padded-GTIN equivalence law): a GTIN-shaped barcode is compared by its CANONICAL form so
+          // 086699866707 (UPC-A) and 0086699866707 (zero-padded EAN-13) share one signature; non-GTIN
+          // codes (part numbers) fall through untouched - their leading zeros carry meaning.
+          const sigBarcode = canonicalGtin(source.barcode) ?? source.barcode;
+          return `raw:${source.brand}|${source.partNumber}|${sigBarcode}|${source.name}`;
         };
+        // DEFECT 1 (padded-GTIN equivalence law): the aggregation MAP key must collapse zero-padded GTIN
+        // encodings of one product onto a single entry. Key on the CANONICAL GTIN when the code is
+        // GTIN-shaped; otherwise fall back to the raw string (a part number is NEVER canonicalized away).
+        // The raw code is still preserved verbatim on the row/alias/product records below.
+        const aggKeyFor = (rawCode: string): string => canonicalGtin(rawCode) ?? rawCode;
         const aggregated = new Map<string, AggregatedRow>();
         for (const preview of rows) {
           if (preview.status === "reject" || !preview.source) {
@@ -5202,6 +5214,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             summary.rejected += 1;
             continue;
           }
+          const aggKey = aggKeyFor(rawCode);
           const suggestion = {
             name: preview.retailCatalogMatch?.productName || preview.candidate?.name || source.expected.name || rawCode,
             brand: preview.retailCatalogMatch?.brand || preview.candidate?.brand || source.brand,
@@ -5211,7 +5224,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             primaryBarcode: source.barcode,
           };
           const signature = identitySignature(preview, source);
-          const existing = aggregated.get(rawCode);
+          const existing = aggregated.get(aggKey);
           if (existing) {
             if (existing.identitySignature === signature) {
               // Genuinely the same resolved product - safe to sum (unchanged C5 behavior).
@@ -5233,10 +5246,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // future row sharing the same raw key but a third distinct identity, and (b) mints its OWN
               // review row below instead of colliding with the review keyed on the bare raw code.
               existing.reviewCode = `${rawCode} (${existing.identitySignature})`;
-              aggregated.delete(rawCode);
-              aggregated.set(`${rawCode} ${existing.identitySignature}`, existing);
+              aggregated.delete(aggKey);
+              aggregated.set(`${aggKey} ${existing.identitySignature}`, existing);
             }
-            aggregated.set(`${rawCode} ${signature}`, {
+            aggregated.set(`${aggKey} ${signature}`, {
               code: rawCode,
               reviewCode: `${rawCode} (${signature})`,
               status: "review",
@@ -5247,7 +5260,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             });
             continue;
           }
-          aggregated.set(rawCode, { code: rawCode, reviewCode: rawCode, status: preview.status, reason: preview.reason, quantity: source.quantity, suggestion, identitySignature: signature });
+          aggregated.set(aggKey, { code: rawCode, reviewCode: rawCode, status: preview.status, reason: preview.reason, quantity: source.quantity, suggestion, identitySignature: signature });
         }
 
         get().snapshotCount("Before universal import");
