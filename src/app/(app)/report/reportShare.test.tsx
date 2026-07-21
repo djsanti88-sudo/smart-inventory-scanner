@@ -36,6 +36,7 @@ function seededStoreState() {
     ],
     finalCounts: [
       {
+        sessionId: "session-123",
         productId: "product-1",
         quantity: 4,
       },
