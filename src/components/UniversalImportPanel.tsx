@@ -61,7 +61,10 @@ export function UniversalImportPanel({
       setMapping(nextMapping);
       setMappingMode(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not build the import preview.");
+      // STRESS WAVE 2 (Item 3): `cause.message || fallback`, never a bare `cause.message` - an Error
+      // with an EMPTY message previously set error to "" which renders NOTHING ({error && ...}),
+      // leaving the user a silent dead-end: no preview, no mapping UI, no message.
+      setError((cause instanceof Error && cause.message) || "Could not build the import preview. Check your connection and try the upload again.");
     } finally {
       setBusy(false);
     }
@@ -97,7 +100,7 @@ export function UniversalImportPanel({
       }
     } catch (cause) {
       setSheet(null);
-      setError(cause instanceof Error ? cause.message : "Could not read this file.");
+      setError((cause instanceof Error && cause.message) || "Could not read this file."); // never a blank error (wave 2, Item 3)
     } finally {
       setBusy(false);
     }
@@ -112,7 +115,7 @@ export function UniversalImportPanel({
       setSummary(result);
       await saveMapping(sheet.sourceSignature, mapping);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not apply this import.");
+      setError((cause instanceof Error && cause.message) || "Could not apply this import."); // never a blank error (wave 2, Item 3)
     } finally {
       setBusy(false);
     }
