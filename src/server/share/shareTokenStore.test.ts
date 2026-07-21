@@ -79,3 +79,53 @@ describe("shareTokenStore fallback path", () => {
     expect(createClient).not.toHaveBeenCalled();
   });
 });
+
+describe("shareTokenStore durable-write requirement in production", () => {
+  const execute = vi.fn();
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("TURSO_DATABASE_URL", "libsql://example.turso.io");
+    vi.stubEnv("TURSO_AUTH_TOKEN", "test-token");
+    vi.stubEnv("SHARE_TOKEN_FILE", ":memory:");
+    execute.mockReset().mockRejectedValue(new Error("turso unreachable"));
+    createClient.mockReset().mockReturnValue({ execute });
+    __resetShareTokenStoreForTests();
+  });
+
+  it("rejects (no token minted) when the Turso write fails in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const now = Date.now();
+    const payload = {
+      businessId: "b1",
+      sessionId: "s1",
+      reportSnapshot: reportSnapshot(),
+      createdAt: now,
+      expiresAt: now + 60_000,
+    };
+
+    await expect(mintShareToken(payload, 60_000)).rejects.toThrow();
+    expect(__getShareTokenStoreBackendForTests()).not.toBe("file");
+    expect(__getShareTokenStoreBackendForTests()).not.toBe("memory");
+  });
+
+  it("still returns a token via the file/memory fallback when NODE_ENV is not production", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    const now = Date.now();
+    const payload = {
+      businessId: "b1",
+      sessionId: "s1",
+      reportSnapshot: reportSnapshot(),
+      createdAt: now,
+      expiresAt: now + 60_000,
+    };
+
+    const token = await mintShareToken(payload, 60_000);
+
+    expect(token).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    const resolved = await resolveShareToken(token);
+    expect(resolved).toEqual(payload);
+  });
+});
