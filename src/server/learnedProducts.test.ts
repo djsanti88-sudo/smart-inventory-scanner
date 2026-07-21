@@ -13,6 +13,8 @@ import {
   shouldLearnDecode,
   getLearnedProduct,
   upsertLearnedProduct,
+  getLearnedProductsByPrefix,
+  siblingPrefixConflict,
   __resetLearnedProductsForTest,
   type ShouldLearnInput,
   type LearnedProductRow,
@@ -191,5 +193,62 @@ describe("learnedProducts storage (file-fallback mode; no Turso configured)", ()
   it("empty/blank code is a no-op for both read and write", async () => {
     expect(await getLearnedProduct("")).toBeNull();
     await expect(upsertLearnedProduct(row({ code: "  " }))).resolves.toBeUndefined();
+  });
+
+  // --- Item C4: same-prefix sibling contradiction guard --------------------------------------------
+  // Owner-reported live regression (tonight's preview run): a code sharing the same GS1 company prefix
+  // as an already-VERIFIED (learned) tire decoded to a completely unrelated random product (perfume)
+  // and was stored as a clean suggestion instead of conflicting. Fixture: 721749* prefix family -
+  // 721749089643 learned as "Fortune Tormenta H/T FSR305 265/75R16 116T BSW" (tire), a sibling code on
+  // the SAME prefix (721749249238 in the live batch) must not silently store an unrelated identity like
+  // "LATTAFA GIVE ME GOURMAND VANILLA FREAK/EDP" (perfume) without at least a demotion to review.
+  describe("getLearnedProductsByPrefix: reverse prefix->learned-siblings lookup", () => {
+    it("returns learned rows sharing the same 7-digit GS1 prefix", async () => {
+      await upsertLearnedProduct(row({ code: "721749089643", brand: "Fortune", category: "tire", name: "Fortune Tormenta H/T FSR305 265/75R16 116T BSW" }));
+      const siblings = await getLearnedProductsByPrefix("721749");
+      expect(siblings.some((r) => r.code.includes("721749089643") || r.code.endsWith("21749089643"))).toBe(true);
+    });
+
+    it("returns an empty array when no learned row shares the prefix", async () => {
+      expect(await getLearnedProductsByPrefix("9999999")).toEqual([]);
+    });
+
+    it("empty/blank prefix is a no-op", async () => {
+      expect(await getLearnedProductsByPrefix("")).toEqual([]);
+    });
+  });
+
+  describe("siblingPrefixConflict: brand+category contradiction against verified same-prefix siblings", () => {
+    const fortuneTire = row({
+      code: "721749089643",
+      brand: "Fortune",
+      category: "tire",
+      name: "Fortune Tormenta H/T FSR305 265/75R16 116T BSW",
+    });
+
+    it("flags a conflict when a different brand AND different category is proposed on the same prefix (Lattafa perfume vs Fortune tire)", async () => {
+      await upsertLearnedProduct(fortuneTire);
+      const verdict = await siblingPrefixConflict("721749249238", { brand: "Lattafa", category: "perfume" });
+      expect(verdict.conflict).toBe(true);
+      expect(verdict.reason).toMatch(/fortune/i);
+    });
+
+    it("does NOT flag a same-company different-category product (legitimate multi-category manufacturer)", async () => {
+      await upsertLearnedProduct(fortuneTire);
+      const verdict = await siblingPrefixConflict("721749249238", { brand: "Fortune", category: "wheel accessory" });
+      expect(verdict.conflict).toBe(false);
+    });
+
+    it("does NOT flag when strong app-verified exact-code evidence is present (override)", async () => {
+      await upsertLearnedProduct(fortuneTire);
+      const verdict = await siblingPrefixConflict("721749249238", { brand: "Lattafa", category: "perfume" }, { exactCodeVerifiedByApp: true });
+      expect(verdict.conflict).toBe(false);
+      expect(verdict.overriddenByEvidence).toBe(true);
+    });
+
+    it("is inert (no conflict) when there is no learned sibling on this prefix at all", async () => {
+      const verdict = await siblingPrefixConflict("999999912345", { brand: "AnyBrand", category: "anything" });
+      expect(verdict.conflict).toBe(false);
+    });
   });
 });
