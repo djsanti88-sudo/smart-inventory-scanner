@@ -11,8 +11,11 @@ const product: Product = {
   status: "active", source: "human_review", confidence: 1, verified: true,
   createdAt: "", updatedAt: "", createdBy: "human", updatedBy: "human",
 };
+// sessionId matches the scanStore's default currentSession.id ("session-1", see scanStore.ts) so
+// these fixtures represent counts in the CURRENT session; the F2 regression test below uses a
+// deliberately different sessionId to prove other-session counts are excluded from display.
 const count: InventoryCount = {
-  id: "c1", businessId: "b", sessionId: "s", productId: "p1", quantity: 5, lastScannedAt: "",
+  id: "c1", businessId: "b", sessionId: "session-1", productId: "p1", quantity: 5, lastScannedAt: "",
   aliasesSeen: ["111222333444", "ALT-CODE-9"], scanEventIds: [], createdAt: "", updatedAt: "",
   syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
 };
@@ -250,6 +253,35 @@ function suggestionReview(overrides: Partial<UnknownCodeReview> = {}): UnknownCo
     ...overrides,
   } as unknown as UnknownCodeReview;
 }
+
+// F2 regression (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge
+// into the store's finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts).
+// The defect is at THIS display layer: it must show only the current session's counts, not every
+// session's counts merged into the store.
+describe("FinalCountTable session scoping (F2 regression)", () => {
+  it("shows only the current session's counts after a simulated cross-session merge", () => {
+    seed(); // seeds `product`/`count`, which use the store's default currentSession.id ("session-1")
+    const otherSessionProduct: Product = { ...product, id: "pOther", name: "Other Session Widget" };
+    const otherSessionCount: InventoryCount = {
+      ...count,
+      id: "cOther",
+      sessionId: "other-session-id", // merged in from another device's session by refreshFromCloud
+      productId: "pOther",
+      quantity: 7,
+    };
+    useScanStore.setState({
+      products: [product, otherSessionProduct],
+      finalCounts: [count, otherSessionCount],
+    });
+    render(<FinalCountTable />);
+
+    expect(screen.queryByTestId("count-row-p1")).not.toBeNull(); // current session row present
+    expect(screen.queryByTestId("count-row-pOther")).toBeNull(); // other session row excluded
+    expect(screen.queryByText("Other Session Widget")).toBeNull();
+    // The "N of M products" summary also reflects only the current session's rows, not the merged total.
+    expect(screen.getByText("1 of 1 products")).not.toBeNull();
+  });
+});
 
 describe("FinalCountTable Status column + suggested-identity display (owner order 2026-07-10)", () => {
   it("shows a Status column with the Verified badge for a verified product row", () => {

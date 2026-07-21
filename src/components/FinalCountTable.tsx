@@ -53,12 +53,20 @@ function resolvedSizeDisplay(product: Product): string {
 // the bad alias + reopen Needs Review + Gemini Pro recheck).
 export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
+  const currentSession = useScanStore((s) => s.currentSession);
   const getProduct = useScanStore((s) => s.getProduct);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
   const [filterQuery, setFilterQuery] = useState("");
 
-  const rows = finalCounts
+  // F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge into
+  // finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts). This table
+  // must show only the CURRENT session's counts, not every session's counts merged into the store.
+  const sessionCounts = currentSession
+    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
+    : finalCounts;
+
+  const rows = sessionCounts
     .map((c) => ({ count: c, product: getProduct(c.productId) }))
     .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
     .sort((a, b) => b.count.quantity - a.count.quantity);

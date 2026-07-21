@@ -33,11 +33,11 @@ function product(id: string, name: string, brand: string, category: string): Pro
   };
 }
 
-function count(productId: string, quantity: number): InventoryCount {
+function count(productId: string, quantity: number, sessionId = "s1"): InventoryCount {
   return {
-    id: `c-${productId}`,
+    id: `c-${productId}-${sessionId}`,
     businessId: "b1",
-    sessionId: "s1",
+    sessionId,
     productId,
     quantity,
     lastScannedAt: "t",
@@ -177,5 +177,33 @@ describe("buildBossReport", () => {
 
     expect(report.topVariances).toHaveLength(10);
     expect(report.topVariances.map((row) => row.delta)).toEqual([11, 10, 9, 8, 7, 6, 5, 4, 3, 2]);
+  });
+
+  // F2 regression (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session
+  // merge into finalCounts (a tested cross-device sync path). Without scoping, a public Boss Report
+  // minted after a Refresh leaks other sessions' totals into totalItems/byBrand/byCategory. The
+  // report must be scoped to the CURRENT session only.
+  it("scopes totals to currentSessionId only, excluding other sessions' counts merged in by a cross-device refresh", () => {
+    const products = [
+      product("p1", "Widget A", "Acme", "Tools"),
+      product("p2", "Widget B", "Acme", "Tools"),
+      product("p3", "Gadget", "Zeta", "Electronics"),
+    ];
+    // p1/p2 belong to the current session (s1); p3 was merged in from another device's session (s2).
+    const counts = [count("p1", 3, "s1"), count("p2", 2, "s1"), count("p3", 5, "s2")];
+
+    const report = buildBossReport({
+      products,
+      finalCounts: counts,
+      scanFeed: [],
+      sessionName: "Jul 19",
+      countedBy: "Owner",
+      countedAt: "2026-07-19T16:00:00.000Z",
+      currentSessionId: "s1",
+    });
+
+    expect(report.totalItems).toBe(5); // 3 + 2, NOT +5 from the other session
+    expect(report.byBrand).toEqual([{ brand: "Acme", qty: 5 }]);
+    expect(report.byCategory).toEqual([{ category: "Tools", qty: 5 }]);
   });
 });

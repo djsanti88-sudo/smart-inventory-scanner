@@ -17,6 +17,13 @@ export interface BossReportInput {
   countedAt: string;
   previousSnapshot?: CountSnapshot;
   currentSnapshotForVariance?: CountSnapshot;
+  /** F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge
+   *  into the store's finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts).
+   *  Without this scope, a public Boss Report snapshot minted after a Refresh would leak other
+   *  sessions' totals. When provided, only finalCounts for this session are aggregated; omitted (or
+   *  a falsy value) preserves the prior unscoped behavior for callers that don't yet track a session
+   *  (e.g. the /api/share fallback report, which always has empty finalCounts anyway). */
+  currentSessionId?: string;
 }
 
 export interface BossReportData {
@@ -38,7 +45,11 @@ export function buildBossReport(input: BossReportInput): BossReportData {
   const brandQty = new Map<string, number>();
   const categoryQty = new Map<string, number>();
 
-  for (const count of input.finalCounts) {
+  const scopedCounts = input.currentSessionId
+    ? input.finalCounts.filter((count) => count.sessionId === input.currentSessionId)
+    : input.finalCounts;
+
+  for (const count of scopedCounts) {
     const product = byId.get(count.productId);
     totalItems += count.quantity;
 
