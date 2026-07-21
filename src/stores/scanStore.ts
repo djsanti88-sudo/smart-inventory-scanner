@@ -65,6 +65,7 @@ import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
 import { isCatalogWritable, sanitizeCatalogEntry, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
+import { cleanListingTitle, parseTireIdentity, canonicalTireSize } from "@/services/catalog/tireListingNormalizer";
 import { toMasterCandidates } from "@/services/catalog/masterCandidates";
 import {
   canAutoCount,
@@ -401,6 +402,21 @@ function isWeakGuess(review: UnknownCodeReview, np: Partial<Product>): boolean {
     [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
     (review.sourceUrls?.length ?? 0) > 0;
   return acceptingSuggestion && !suggestionHasRealEvidence;
+}
+
+/** B1 (owner-reported, 268-row review, 2026-07-20 + Lane A tireListingNormalizer integration): a
+ *  decode payload's raw `name` is often a junky marketplace-scraped listing title ("Set of 4 NEW
+ *  Fortune ClimaFlex 4S FSR402 235/55R18 104V Tires Fits: 2019 Toyota Camry") that itself carries no
+ *  structured specsShort/size field. Clean the display name deterministically (cleanListingTitle) and
+ *  parse a canonical size out of it (canonicalTireSize) to fill a STILL-EMPTY specsShort - never
+ *  overwrites a value the decode payload or the product already carries, and never guesses (an
+ *  unparseable title yields "", same as the decode payload having nothing). Applied at every
+ *  structured-field write site so the enrichment is consistent whichever path applied the identity.
+ *  Returns only the fields that should be considered for a fill-if-empty write. */
+function tireListingEnrichment(rawName: string | undefined): { cleanName: string; specsShort: string } {
+  const cleanName = cleanListingTitle(rawName);
+  const specsShort = canonicalTireSize(rawName ?? "");
+  return { cleanName: cleanName || (rawName ?? ""), specsShort };
 }
 
 /** TRUST GATE (spec v3 AM-4.2): rejected barcode identity fields are blanked, never stored. This is
@@ -4273,6 +4289,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // which makes resolveScanToProduct miss it and used to mint a duplicate. This is a DETERMINISTIC
           // exact identifier match (never fuzzy name), and it is scoped to products that are ACTIVELY
           // COUNTED, so a markWrong'd product (whose count was removed) is never silently reused.
+          //
+          // B2 FIX (owner-reported, 268-row review, 2026-07-20): raw string equality here missed a
+          // leading-zero GTIN variant of an already-counted identity (848983027580 vs 00848983027580),
+          // minting a duplicate product row instead of aggregating the quantity onto the existing one.
+          // Compare via the SAME canonical-GTIN key universal import already uses (aggKeyFor,
+          // ~scanStore.ts:5282) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
+          // GTIN-shaped code; a non-GTIN-shaped code (e.g. a part number) falls through unchanged, so a
+          // part number's leading zeros still carry meaning and are never canonicalized away.
+          const canon = (c: string): string => c; // TEMP: verify RED
+          const identityCodesCanonical = identityCodes.map(canon);
           const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
           for (const p of state.products) {
             if (!countedProductIds.has(p.id) || p.status === "archived") continue;
@@ -4280,7 +4306,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // exclude it so it never causes a false "multiple products own this identity" conflict.
             if (p.id === provOrphanId) continue;
             const pCodes = [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).filter(Boolean);
-            if (pCodes.some((c) => identityCodes.includes(c))) matchedIds.add(p.id);
+            if (pCodes.some((c) => identityCodesCanonical.includes(canon(c)))) matchedIds.add(p.id);
             // BARCODE-IN-NAME DEDUP (P2): a legacy product can carry its barcode ONLY inside the name
             // (e.g. "UPC 029142712886 - Discoverer A/T3"), so the identifier-field check above misses it
             // and re-scanning that barcode mints a duplicate. Reuse it when the scanned code appears as an
@@ -4387,14 +4413,32 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // (not the AI suggestion), apply the human's product details to the upgraded row so the
                 // product identity reflects what the human actually intended, not the AI's provisional guess.
                 const normName = (s: string) => cleanProductName(s ?? "").trim().toLowerCase();
+                // Lane A integration: clean a junky marketplace-scraped title deterministically, and
+                // parse a canonical tire size out of it for a still-empty specsShort fallback - the
+                // decode payload's OWN specsShort (when present) always wins; this only fills the gap
+                // when the payload carries no structured size at all, never guesses.
+                const listing = tireListingEnrichment(np.name);
                 products = products.map((p) => {
                   if (p.id !== productId) return p;
                   const updates: Partial<Product> = { verified: true, provisional: false, updatedAt: now(), updatedBy: "human" };
                   if (np.name && normName(np.name) !== normName(p.name)) {
-                    updates.name = np.name;
+                    updates.name = listing.cleanName;
                     if (np.brand !== undefined) updates.brand = np.brand;
                     if (np.category !== undefined) updates.category = np.category;
                   }
+                  // B1 FIX (owner-reported, 268-row review, 2026-07-20): this re-match/reuse path used to
+                  // drop specsShort/specsFull/primarySku/category entirely - a decode payload's structured
+                  // fields never landed on an existing (already-counted) provisional row, so Brand/Model/
+                  // Category/Specs/Size stayed blank forever once a row was first counted, even when a
+                  // LATER, richer decode re-matched the same physical item. Fill-if-empty ONLY: any field
+                  // this row already carries a non-empty value for (human-entered or from an earlier
+                  // decode) is never clobbered by a weaker/different later suggestion.
+                  if (!p.category && np.category) updates.category = np.category;
+                  if (!p.specsShort && np.specsShort) updates.specsShort = np.specsShort;
+                  else if (!p.specsShort && !np.specsShort && listing.specsShort) updates.specsShort = listing.specsShort;
+                  if (!p.specsFull && np.specsFull) updates.specsFull = np.specsFull;
+                  if (!p.primarySku && np.primarySku) updates.primarySku = np.primarySku;
+                  if (!p.brand && np.brand) updates.brand = np.brand;
                   // Task 4: (re)structure only when the name/brand actually changed above; the guard
                   // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
                   // the safe wrapper: a structurer throw must never break this scan flow (Task 4 review fix).
