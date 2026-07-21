@@ -84,13 +84,48 @@ function brandsCorroborate(a: string | undefined, b: string | undefined): boolea
 /** Distinguishes a TYPO of the same brand ("Micheln" vs "Michelin") from a genuinely different real
  *  brand ("Goodyear" vs "Michelin"). Same test the character-fuzzy tier (importFuzzyMatcher) already
  *  uses for this exact question: same curated brandFamilies family, or normalized edit-similarity
- *  clearing FUZZY_BRAND_MIN. Deliberately NOT used for general brand corroboration (that stays exact-
- *  or-family only, AM-R4/AM-R5) - only to decide whether an exact-barcode identity should be trusted
- *  over a brand-text mismatch that is plausibly just a typo. */
+ *  clearing FUZZY_BRAND_MIN. WAVE 2 (typos-values.csv): also accepts an ABBREVIATION - the row brand
+ *  is a strict >= 3-char prefix of the corpus brand or vice versa ("MICH" -> "michelin") - since a
+ *  shop file abbreviating a brand is not a different company. Deliberately NOT used for general brand
+ *  corroboration (that stays exact-or-family only, AM-R4/AM-R5) - only to decide whether an
+ *  exact-barcode identity should be trusted over a brand-text mismatch that is plausibly just a
+ *  typo/abbreviation. */
 function brandsAreTypoOfSameBrand(a: string | undefined, b: string | undefined): boolean {
   if (!a || !b) return false;
   if (brandsCorroborate(a, b)) return true;
+  const na = a.trim().toLowerCase();
+  const nb = b.trim().toLowerCase();
+  if (na.length >= 3 && nb.length >= 3 && (nb.startsWith(na) || na.startsWith(nb))) return true; // abbreviation
   return normalizedEditSimilarity(a, b) >= FUZZY_BRAND_MIN;
+}
+
+/** WAVE 2 (typos-values.csv Class B): a 2-edit typo on a SHORT brand name ("Goodyr"/"Goodyear",
+ *  "Falcon"/"Falken", "Dulnop"/"Dunlop") scores below FUZZY_BRAND_MIN on normalized similarity
+ *  (2 edits / 6-8 chars = 0.667-0.75 < 0.8), so brandsAreTypoOfSameBrand alone misses it. This
+ *  bounded-distance forgiveness is DELIBERATELY narrower: it applies ONLY when the caller has
+ *  ALREADY established a byte-exact barcode match AND model-token corroboration (three independent
+ *  identity signals: PN exact, barcode exact, model text agreeing) - only then is a <= 2-edit brand
+ *  text dissent on a >= 5-char name treated as a data-entry typo rather than a different company. */
+function brandsWithinTwoEdits(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const na = a.trim().toLowerCase();
+  const nb = b.trim().toLowerCase();
+  if (na.length < 5 || nb.length < 5) return false; // too short: 2 edits could reach a different real brand
+  const maxLen = Math.max(na.length, nb.length);
+  return normalizedEditSimilarity(a, b) >= 1 - 2 / maxLen; // edit distance <= 2
+}
+
+/** WAVE 2: does the row's own model/name text share at least one substantive token (>= 3 chars,
+ *  containing a letter - never a bare size number) with the candidate's model name? The third leg of
+ *  the compound typo-forgiveness evidence above. Reuses identityMerge's nameTokens (AM-R5: never a
+ *  new tokenizer). */
+function modelTokensCorroborate(row: ExpectedInventoryRow, hit: CorpusCandidate): boolean {
+  const substantive = (t: string) => t.length >= 3 && /[a-z]/.test(t);
+  const rowTokens = new Set(
+    nameTokens([row.model ?? "", row.name ?? "", row.specs ?? ""].join(" ")).filter(substantive),
+  );
+  if (rowTokens.size === 0) return false;
+  return nameTokens(hit.name).filter(substantive).some((t) => rowTokens.has(t));
 }
 
 /** Best-effort parseable tire size for a row: sizeText first, falling back to specs/model/name text so
@@ -152,15 +187,26 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
   }
 
   if (pnHits.size > 0) {
-    const hits = [...pnHits.values()];
+    let hits = [...pnHits.values()];
 
     if (hits.length > 1) {
-      return {
-        row,
-        status: "ambiguous",
-        reason: `Part number matches ${hits.length} different corpus products (${hits.map((h) => `${h.brand} ${h.name}`).join(", ")}); cannot pick one safely.`,
-        candidates: hits,
-      };
+      // WAVE 2 (typos-values.csv Class A): a per-manufacturer PN can legitimately hit several corpus
+      // rows (one PN, many sizes). When the row carries a barcode that byte-exact-matches EXACTLY ONE
+      // of the colliding candidates, that barcode uniquely identifies the product - narrow to it and
+      // run the normal single-hit corroboration below (brand/size checks still apply, nothing is
+      // auto-trusted). Zero or MULTIPLE barcode matches keep the honest multi-hit ambiguity.
+      const rowBc = (row.barcode ?? "").trim();
+      const bcMatches = rowBc ? hits.filter((h) => (h.barcode ?? "").trim() === rowBc) : [];
+      if (bcMatches.length === 1) {
+        hits = bcMatches;
+      } else {
+        return {
+          row,
+          status: "ambiguous",
+          reason: `Part number matches ${hits.length} different corpus products (${hits.map((h) => `${h.brand} ${h.name}`).join(", ")}); cannot pick one safely.`,
+          candidates: hits,
+        };
+      }
     }
 
     const hit = hits[0];
@@ -184,16 +230,23 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
       };
     }
 
+    // WAVE 2 (Class B): the typo forgiveness has two tiers, BOTH requiring the byte-exact barcode:
+    //   1. brandsAreTypoOfSameBrand (family / edit-similarity >= FUZZY_BRAND_MIN / abbreviation-prefix);
+    //   2. a <= 2-edit dissent on a >= 5-char brand name, but ONLY with model-token corroboration -
+    //      three exact/independent signals (PN, barcode, model text) against one 2-edit brand typo.
+    const typoForgiven =
+      barcodeExact &&
+      (brandsAreTypoOfSameBrand(row.brand, hit.brand) ||
+        (brandsWithinTwoEdits(row.brand, hit.brand) && modelTokensCorroborate(row, hit)));
     if (hasRowBrand && !brandsCorroborate(row.brand, hit.brand)) {
-      const typoOfSameBrand = barcodeExact && brandsAreTypoOfSameBrand(row.brand, hit.brand);
-      if (!typoOfSameBrand) {
+      if (!typoForgiven) {
         return {
           row,
           status: "ambiguous",
           reason: `Part number hit resolves to brand "${hit.brand}" but the Shop-Ware row says brand "${row.brand}" (not the same company); treating as a brand collision, not a match.`,
         };
       }
-      // Fall through: exact-barcode identity + a same-brand typo overrides the brand-text mismatch.
+      // Fall through: exact-barcode identity + a same-brand typo/abbreviation overrides the brand-text mismatch.
     }
 
     if (bothHaveSize && rowSize !== hitSize) {
@@ -208,8 +261,7 @@ export function matchExpectedRow(row: ExpectedInventoryRow, deps: MatcherDeps): 
     // was merely absent on one side (e.g. row has a size but the corpus hit carries none at all) is
     // not corroboration, it is just an unchecked dimension. Without this, a PN hit with a size-only
     // row against a size-less corpus candidate would fall through to `matched` on zero real evidence.
-    const brandTypoCorroborated = hasRowBrand && barcodeExact && !brandsCorroborate(row.brand, hit.brand)
-      && brandsAreTypoOfSameBrand(row.brand, hit.brand);
+    const brandTypoCorroborated = hasRowBrand && !brandsCorroborate(row.brand, hit.brand) && typoForgiven;
     const brandCorroborated = hasRowBrand && brandsCorroborate(row.brand, hit.brand);
     const sizeCorroborated = bothHaveSize && rowSize === hitSize;
     if (!brandCorroborated && !sizeCorroborated && !brandTypoCorroborated) {

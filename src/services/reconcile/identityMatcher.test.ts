@@ -424,4 +424,107 @@ describe("matchExpectedRow", () => {
     expect(result.matchBasis).toBe("identity_fuzzy");
     expect(result.confidence).toBeGreaterThanOrEqual(0.75);
   });
+
+  // STRESS WAVE 2 (typos-values.csv, 5 remaining barcode-exact misses of 30). Two root-cause classes,
+  // both reproduced from the REAL fixture rows against the real corpus (see .superpowers/stress/fixes/
+  // wave2-report.md). The trust rule is unchanged: every case here has a BYTE-EXACT barcode agreeing
+  // with the PN-hit candidate - three independent exact identifiers - and only forgivable brand-TEXT
+  // dissent. Genuine cross-brand collisions (the defect-2 guardrail above) must stay ambiguous.
+  describe("wave 2: barcode-exact misses on typos-values.csv (2 root-cause classes)", () => {
+    // CLASS A (fixture row "Sailun Atrezzo Sh406"): the PN hits MULTIPLE corpus rows, and the
+    // multi-hit ambiguity fired BEFORE the barcode was ever consulted - even though the row's barcode
+    // byte-exact-matches exactly ONE of the colliding candidates, which uniquely identifies it.
+    it("CLASS A: multi-hit PN narrowed by a byte-exact barcode match on exactly ONE candidate -> matched", () => {
+      const r = row({
+        externalId: "E-sailun",
+        partNumbers: ["SH406", "682318570934"],
+        brand: "Sailun",
+        name: "Sailun Atrezzo Sh406 185/70R13",
+        barcode: "682318570934",
+      });
+      const hits = [
+        candidate({ uid: "s1", brand: "sailun", name: "sailun_atrezzo_sh406", sizeToken: "185/70R13", partNumber: "SH406", barcode: "682318570934" }),
+        candidate({ uid: "s2", brand: "sailun", name: "atrezzo_sh406", sizeToken: "175/70R14", partNumber: "SH406", barcode: "682318570941" }),
+        candidate({ uid: "s3", brand: "sailun", name: "atrezzo_sh406", sizeToken: "195/70R14", partNumber: "SH406", barcode: "682318570958" }),
+      ];
+      const result = matchExpectedRow(r, deps({ lookupByPartNumber: (pn) => (pn === "SH406" ? hits : []) }));
+      expect(result.status).toBe("matched");
+      expect(result.candidate?.uid).toBe("s1");
+      expect(result.matchBasis).toBe("part_number_exact");
+    });
+
+    it("CLASS A guardrail: multi-hit PN where the barcode matches NONE (or several) stays ambiguous", () => {
+      const r = row({
+        externalId: "E-sailun-none",
+        partNumbers: ["SH406"],
+        brand: "Sailun",
+        name: "Sailun Atrezzo Sh406 185/70R13",
+        barcode: "000000000000", // matches no candidate
+      });
+      const hits = [
+        candidate({ uid: "s1", brand: "sailun", name: "sailun_atrezzo_sh406", sizeToken: "185/70R13", partNumber: "SH406", barcode: "682318570934" }),
+        candidate({ uid: "s2", brand: "sailun", name: "atrezzo_sh406", sizeToken: "175/70R14", partNumber: "SH406", barcode: "682318570941" }),
+      ];
+      const result = matchExpectedRow(r, deps({ lookupByPartNumber: (pn) => (pn === "SH406" ? hits : []) }));
+      expect(result.status).toBe("ambiguous");
+    });
+
+    // CLASS B: unique PN hit + byte-exact barcode, but the brand text is an ABBREVIATION ("MICH" for
+    // Michelin) or a 2-edit typo on a short name ("Goodyr", "Falcon", "Dulnop") that scores below
+    // FUZZY_BRAND_MIN's normalized similarity on 6-letter brands. All four REAL fixture rows:
+    const classB: Array<{ label: string; rowBrand: string; corpBrand: string; rowName: string; corpName: string; size: string; pn: string; barcode: string }> = [
+      { label: "MICH abbreviation of Michelin", rowBrand: "MICH", corpBrand: "michelin", rowName: "Premeir LTX 225/65R17", corpName: "premier_ltx", size: "225/65R17", pn: "44953", barcode: "086699449535" },
+      { label: "Goodyr 2-edit typo of Goodyear", rowBrand: "Goodyr", corpBrand: "goodyear", rowName: "Wrangler Terr RT 235/65R17", corpName: "wrangler_territory_rt", size: "235/65R17", pn: "710004933", barcode: "697662155133" },
+      { label: "Falcon 2-edit typo of Falken", rowBrand: "Falcon", corpBrand: "falken", rowName: "Wildpeak A/T3W 265/70R17", corpName: "wildpeak_a_t3w", size: "265/70R17", pn: "28034300", barcode: "848983006257" },
+      // Size token keeps the P prefix (tireSizeToken's METRIC_SIZE regex), so the candidate token
+      // mirrors the row's own "P245/75R16" form - same-token equality, as in the real corpus row.
+      { label: "Dulnop 2-edit typo of Dunlop", rowBrand: "Dulnop", corpBrand: "dunlop", rowName: "Grandtrek AT-20 P245/75R16", corpName: "grandtrek_at20", size: "P245/75R16", pn: "290105537", barcode: "697662056829" },
+    ];
+    for (const c of classB) {
+      it(`CLASS B: ${c.label} + byte-exact barcode + model-token corroboration -> matched`, () => {
+        const r = row({
+          externalId: `E-${c.rowBrand}`,
+          partNumbers: [c.pn, c.barcode],
+          brand: c.rowBrand,
+          name: c.rowName,
+          specs: c.rowName,
+          barcode: c.barcode,
+        });
+        const cand = candidate({ uid: `u-${c.pn}`, brand: c.corpBrand, name: c.corpName, sizeToken: c.size, partNumber: c.pn, barcode: c.barcode });
+        const result = matchExpectedRow(r, deps({ lookupByPartNumber: (pn) => (pn === c.pn ? [cand] : []) }));
+        expect(result.status, c.label).toBe("matched");
+        expect(result.matchBasis).toBe("part_number_exact");
+        expect(result.candidate?.uid).toBe(`u-${c.pn}`);
+      });
+    }
+
+    it("CLASS B guardrail: a 2-edit typo WITHOUT any model-token overlap stays ambiguous", () => {
+      // Same short-brand 2-edit distance (Falcon/Falken) but the row's name shares NO token with the
+      // candidate's model - the compound evidence (PN + barcode + model) is missing its third leg.
+      const r = row({
+        externalId: "E-no-model",
+        partNumbers: ["28034300"],
+        brand: "Falcon",
+        name: "Something Entirely Different 265/70R17",
+        barcode: "848983006257",
+      });
+      const cand = candidate({ uid: "u-nm", brand: "falken", name: "wildpeak_a_t3w", sizeToken: "265/70R17", partNumber: "28034300", barcode: "848983006257" });
+      const result = matchExpectedRow(r, deps({ lookupByPartNumber: (pn) => (pn === "28034300" ? [cand] : []) }));
+      expect(result.status).toBe("ambiguous");
+    });
+
+    it("CLASS B guardrail: the genuinely-different-brand case (defect 2) is unchanged - still ambiguous", () => {
+      const r = row({
+        externalId: "E-still-diff",
+        partNumbers: ["MICH2"],
+        brand: "Goodyear", // a real different brand, large edit distance - NOT an abbreviation or typo
+        sizeText: "245/65R17",
+        name: "Defender LTX 245/65R17", // even WITH model-token overlap
+        barcode: "0123456789099",
+      });
+      const cand = candidate({ uid: "u-sd", brand: "Michelin", name: "Defender LTX", sizeToken: "245/65R17", partNumber: "MICH2", barcode: "0123456789099" });
+      const result = matchExpectedRow(r, deps({ lookupByPartNumber: (pn) => (pn === "MICH2" ? [cand] : []) }));
+      expect(result.status).toBe("ambiguous");
+    });
+  });
 });
