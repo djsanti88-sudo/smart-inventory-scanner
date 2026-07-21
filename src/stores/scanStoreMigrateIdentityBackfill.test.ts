@@ -36,7 +36,9 @@ describe("scanStoreMigrate - Task 2 identity backfill (Falken bug legacy rows)",
 
     const migratedRow = migrated.products.find((p) => p.id === "p-falken-legacy")!;
     expect(migratedRow.brand, "Brand column backfilled").toBe("Falken");
-    expect(migratedRow.specsShort, "Specs/Size column backfilled").toBe("P245/40R18");
+    // Group B owner mandate (2026-07-21): specsShort includes the parsed load/speed + sidewall when
+    // parseable, not just the bare size.
+    expect(migratedRow.specsShort, "Specs/Size column backfilled").toBe("P245/40R18 97W XL BSW");
     expect(migratedRow.structuredModel ?? "", "Model column backfilled").toContain("Azenis RT660");
   });
 

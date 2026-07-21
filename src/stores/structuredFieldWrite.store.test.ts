@@ -131,8 +131,9 @@ describe("scanStore - structured fields (specsShort/specsFull/category/primarySk
     expect(merged.name).not.toMatch(/\bnew\b/i);
     expect(merged.name).not.toMatch(/fits:/i);
     // The still-empty specsShort/size column is filled from the parsed identity (never guessed -
-    // deterministically parsed from the listing title itself).
-    expect(merged.specsShort).toBe("235/55R18");
+    // deterministically parsed from the listing title itself). Group B owner mandate (2026-07-21):
+    // includes the parsed load/speed rating (104V) alongside the bare size.
+    expect(merged.specsShort).toBe("235/55R18 104V");
   });
 
   it("never overwrites a non-empty (human-entered) specs value with a later decode's field", () => {

@@ -36,6 +36,34 @@ describe("LiveScanFeed - Suggested display (Phase 1)", () => {
     expect(useScanStore.getState().finalCounts, "Phase 1 shows but does not count").toHaveLength(0);
   });
 
+  it("the underlying suggested product name string never contains the literal '(suggested)' tag itself (UI-only badge, not baked into stored/displayed name)", () => {
+    const event = {
+      id: "ev1b", rawCode: "X004DY7YUT", cleanCode: "X004DY7YUT", matchedProductId: null, matchType: "unknown",
+      status: "needs_review", quantityAfterScan: 0, decodeStatus: "suggested", reason: "Suggested, not trusted.",
+      syncStatus: "synced", createdAt: Date.now(),
+    } as unknown as ScanEvent;
+    const review = {
+      id: "rv1b", cleanCode: "X004DY7YUT", suggestedProductName: "NatureBell Magnesium Glycinate 500mg",
+      suggestedPrimarySku: "", status: "open",
+    } as unknown as UnknownCodeReview;
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [review], products: [], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    // The stored suggestion name itself is clean - "(suggested)" is rendered as a SEPARATE sibling
+    // span (the status badge), never concatenated into the name string.
+    expect(review.suggestedProductName).not.toContain("(suggested)");
+    const nameCell = screen.getByTestId(`feed-product-${event.id}`);
+    expect(nameCell.textContent).toContain("NatureBell Magnesium Glycinate 500mg");
+    expect(nameCell.textContent).toContain("(suggested)");
+    // The name and the "(suggested)" tag are rendered as separate DOM nodes (a text node + a
+    // sibling <span>), never one concatenated name string - the tag element's OWN text is exactly
+    // "(suggested)", not the product name plus the tag.
+    const tagSpan = screen.getByText("(suggested)");
+    expect(tagSpan.textContent).toBe("(suggested)");
+    expect(tagSpan.textContent).not.toContain("NatureBell");
+  });
+
   it("a counted (known) row shows the real product name with NO '(suggested)' tag", () => {
     const event = {
       id: "ev2", rawCode: "078742051451", cleanCode: "078742051451", matchedProductId: "p1", matchType: "barcode",

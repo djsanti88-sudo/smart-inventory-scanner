@@ -46,6 +46,10 @@ export type EnrichedProductIdentity = {
   /** Parsed model/line text (e.g. "Azenis RT660") - maps to Product.structuredModel at call sites
    *  that track it separately from `name`. "" when nothing confidently parses. */
   structuredModel: string;
+  /** True when the source name describes a LISTING covering multiple product variants (e.g.
+   *  several speed ratings for one size) rather than one confident product identity. Call sites
+   *  must force human review and never auto-apply/auto-count when this is true. */
+  multiVariant: boolean;
 };
 
 function firstNonEmpty(...vals: Array<string | undefined>): string {
@@ -66,6 +70,24 @@ function synthesizeSpecsFull(size: string, loadSpeed: string, sidewall: string):
 }
 
 /**
+ * Assemble the ONE canonical tire display name the app itself owns: "<Brand> <Model> <Size>
+ * <LoadSpeed> <Sidewall>", omitting empty parts, single-space-joined. Never fabricates: a part
+ * missing from the parse is simply left out, never guessed.
+ */
+export function canonicalTireDisplayName(parts: {
+  brand: string;
+  model: string;
+  size: string;
+  loadSpeed: string;
+  sidewall: string;
+}): string {
+  return [parts.brand, parts.model, parts.size, parts.loadSpeed, parts.sidewall]
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
  * Compute the normalized identity fields to apply at a decode/suggestion apply site, with
  * fill-if-empty semantics baked in: a field already non-empty on `existing` is always preserved.
  */
@@ -82,19 +104,34 @@ export function enrichProductIdentity(args: {
   const parsed = parseTireIdentity(rawName);
   const parsedSize = canonicalTireSize(rawName) || parsed.size;
 
-  const name = cleanName;
-
   const brand = (existing.brand && existing.brand.trim())
     ? existing.brand
     : firstNonEmpty(payload.brand, parsed.brand);
 
+  // Confident tire parse: brand AND model AND size all present, and not a multi-variant listing
+  // page. Only then does the app replace raw listing text with its OWN assembled canonical name -
+  // never for an unconfident parse (keeps the existing cleanListingTitle output unchanged).
+  const confidentTireParse = Boolean(brand && parsed.model && parsedSize) && !parsed.multiVariant;
+
+  const name = confidentTireParse
+    ? canonicalTireDisplayName({ brand, model: parsed.model, size: parsedSize, loadSpeed: parsed.loadSpeed, sidewall: parsed.sidewall })
+    : cleanName;
+
+  // Category default requires a size PLUS either a brand or a model (never fabricated from a bare
+  // size alone). multiVariant does NOT gate this - a listing's brand+size identity is still
+  // trustworthy as "a Tire" even when the exact variant model/rating is ambiguous.
+  const tireCategoryConfident = Boolean(parsedSize && (brand || parsed.model));
+
   const category = (existing.category && existing.category.trim())
     ? existing.category
-    : firstNonEmpty(payload.category);
+    : firstNonEmpty(payload.category) || (tireCategoryConfident ? "Tire" : "");
 
   const specsShort = (existing.specsShort && existing.specsShort.trim())
     ? existing.specsShort
-    : firstNonEmpty(payload.specsShort, parsedSize);
+    : firstNonEmpty(
+        payload.specsShort,
+        parsed.loadSpeed ? [parsedSize, parsed.loadSpeed, parsed.sidewall].filter(Boolean).join(" ") : parsedSize,
+      );
 
   const specsFull = (existing.specsFull && existing.specsFull.trim())
     ? existing.specsFull
@@ -102,5 +139,5 @@ export function enrichProductIdentity(args: {
 
   const structuredModel = parsed.model ?? "";
 
-  return { name, brand, category, specsShort, specsFull, structuredModel };
+  return { name, brand, category, specsShort, specsFull, structuredModel, multiVariant: parsed.multiVariant };
 }

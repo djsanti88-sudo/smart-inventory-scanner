@@ -14,12 +14,17 @@ export type TireSizeMatch = {
 
 // Metric / P-metric / LT / ST: P225/65ZR18, 225/60R18, LT285/55R20, 295/75R22.5 (decimal rim ok).
 const METRIC = /(P|LT|ST)?\s*(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*(\d{2}(?:\.\d)?)/i;
-// Flotation: 35X12.50R20 (the middle is a decimal; construction letter optional).
-const FLOTATION = /(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(?:ZR|R|-)?\s*(\d{2}(?:\.\d)?)/i;
+// Flotation: 35X12.50R20 (the middle is a decimal; construction letter optional). A construction
+// prefix (LT/P/ST) can sit directly attached to the flotation number ("LT33X12.50R20") - mirrors
+// METRIC's optional (P|LT|ST)? so the prefix is captured as PART of the size, never left dangling
+// in the surrounding text to leak into a model/description field.
+const FLOTATION = /(P|LT|ST)?\s*(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(?:ZR|R|-)?\s*(\d{2}(?:\.\d)?)/i;
 // Commercial without an aspect slash: 11R22.5 (decimal rim required to avoid false positives).
 const COMMERCIAL = /(\d{2,3})\s*(ZR|R)\s*(\d{2}\.\d)/i;
 // Space-separated shorthand: "225 60 18".
 const SPACED = /\b(\d{3})\s+(\d{2})\s+(\d{2})\b/;
+// Space-separated shorthand with an explicit R before the rim: "205 50 R17".
+const SPACED_R = /\b(\d{3})\s+(\d{2})\s+(?:ZR|R)\s*(\d{2}(?:\.\d)?)\b/i;
 // Separator-free shorthand: "2256018".
 const NOSEP = /\b(\d{7})\b/;
 
@@ -60,10 +65,18 @@ export function matchTireSize(input: string | null | undefined): TireSizeMatch |
   }
 
   m = FLOTATION.exec(s);
-  if (m) return withLoadSpeed(`${m[1]}X${m[2]}R${m[3]}`, s, m[0]);
+  if (m) {
+    const prefix = (m[1] ?? "").toUpperCase();
+    return withLoadSpeed(`${prefix}${m[2]}X${m[3]}R${m[4]}`, s, m[0]);
+  }
 
   m = COMMERCIAL.exec(s);
   if (m) return withLoadSpeed(`${m[1]}${m[2].toUpperCase()}${m[3]}`, s, m[0]);
+
+  m = SPACED_R.exec(s);
+  if (m && okWidth(Number(m[1])) && okAspect(Number(m[2])) && okRim(Number(m[3]))) {
+    return withLoadSpeed(`${m[1]}/${m[2]}R${m[3]}`, s, m[0]);
+  }
 
   m = SPACED.exec(s);
   if (m && okWidth(Number(m[1])) && okAspect(Number(m[2])) && okRim(Number(m[3]))) {

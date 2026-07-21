@@ -19,6 +19,14 @@ const CASES: Array<[string, string | null]> = [
   ["295/75R22.5", "295/75R22.5"],
   // --- dual load index ---
   ["LT265/70R17 121/118S", "LT265/70R17 121/118S"],
+  // --- flotation with a construction-letter prefix directly attached (Group A item 4) ---
+  ["LT33X12.50R20", "LT33X12.50R20"],
+  ["LT33X12.50R20 114Q", "LT33X12.50R20 114Q"],
+  // --- flotation with no prefix must still work unchanged ---
+  ["33X12.50R20", "33X12.50R20"],
+  ["35X12.50R17", "35X12.50R17"],
+  // --- spaced shorthand WITH an R separator (Group A item 3): "205 50 R17" ---
+  ["205 50 R17", "205/50R17"],
   // --- case / whitespace tolerance ---
   ["p225/60r18", "P225/60R18"],
   ["  225/60R18  ", "225/60R18"],

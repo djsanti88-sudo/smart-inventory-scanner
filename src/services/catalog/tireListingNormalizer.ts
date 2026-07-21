@@ -31,6 +31,10 @@ export type ParsedTireIdentity = {
   loadSpeed: string;
   sidewall: string;
   rest: string;
+  /** True when the cleaned name carries multiple distinct load/speed ratings for what looks like
+   *  one size (e.g. "93V, 93W, 93H") - a listing PAGE covering several variants, not one product.
+   *  loadSpeed is left "" in this case (never arbitrarily pick one variant's rating). */
+  multiVariant: boolean;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -42,8 +46,27 @@ const LEAD_SET_OF_RE = /^\s*set\s+of\s+\d+\s*/i;
 const LEAD_QTY_NEW_RE = /^\s*\d+\s*(?:new|used)\s+/i;
 const LEAD_QTYX_RE = /^\s*\d+\s*[xX]\s+/;
 
+// Same quantity/marketing phrases, but ANYWHERE in the string (owner mandate: "Fortune Set Of 4
+// FSR305 ..." has the phrase mid-string after the brand, not just leading). Requires a word
+// boundary / whitespace on both sides so it can never eat digits that are part of a size token.
+const MID_SET_OF_RE = /(?:^|\s)set\s+of\s+\d+(?:\s|$)/gi;
+const MID_QTY_NEW_RE = /(?:^|\s)\d+\s*(?:new|used)(?:\s|$)/gi;
+const MID_QTYX_RE = /(?:^|\s)\d+\s*[xX](?:\s|$)/g;
+// Trailing bare "Tires"/"Tire" noise word at the very end of the string, but ONLY when it directly
+// follows a sidewall marker (BSW/OWL/WSW/RWL/XL/SL) - the shape a real listing uses ("111T XL
+// Tires"). Deliberately NOT a blanket trailing strip: a legitimate category-descriptor tail like
+// "... Light Truck Tire" is preserved here (that phrase is trimmed later, in parseTireIdentity's
+// own model-isolation edge-noise step, which is the correct layer for category-word stripping).
+const TRAILING_TIRE_NOISE_RE = /(\b(?:BSW|OWL|WSW|RWL|XL|SL)\b)\s+tires?\s*$/i;
+
 // Standalone condition words anywhere in the title: "New", "NEW!", "Used".
 const CONDITION_WORD_RE = /\b(?:new|used)\b!?/gi;
+
+// Internal UI status-tag leakage: a row's own name must NEVER carry the literal "(suggested)"
+// status marker some earlier version of the app appended to it (the badge is UI-only, rendered as
+// a separate sibling element - see FinalCountTable.tsx / LiveScanFeed.tsx). Stripped anywhere in
+// the string, case-insensitively.
+const SUGGESTED_TAG_RE = /\(\s*suggested\s*\)/gi;
 
 // Parenthetical quantity/unit noise: "(TWO)", "(4 Tires)", "(2 Pack)", "(Two)".
 const PAREN_QTY_WORD = /^(one|two|three|four|four|five|six|seven|eight)$/i;
@@ -64,6 +87,16 @@ const TRAILING_ELLIPSIS_RE = /\s*\.{2,}\s*$/;
 // Leading bracketed/parenthetical distributor tag that is not itself junk-quantity, e.g.
 // "(Ikon Tyres) Hakkapeliitta SUV 7" - the parens are noise, the brand text inside survives.
 const LEADING_PAREN_TAG_RE = /^\(([^()]+)\)\s*/;
+
+// Leading foreign-language "tire(s)" boilerplate words (German "Reifen", French "Pneu"/"Pneus",
+// Spanish "Neumatico"/"Neumaticos", with or without the accent). Mirrors the POLISH_BOILERPLATE_RE
+// approach: a whole-word strip, never a substring match that could eat part of a brand/model.
+const LEADING_FOREIGN_TIRE_WORD_RE = /^\s*(?:reifen|pneus?|neum[aá]ticos?)\s+/i;
+
+// Retailer/foreign boilerplate tail introduced by a pipe ("| Preis auf AUTODOC"). Scoped to a
+// TRAILING pipe-introduced span only (never a mid-string pipe some other listing might use for an
+// unrelated reason) via the trailing $ anchor.
+const TRAILING_PIPE_TAIL_RE = /\s*\|.*$/;
 
 function stripParenIfNotQtyWord(inner: string): boolean {
   const t = inner.trim();
@@ -93,6 +126,23 @@ export function cleanListingTitle(raw: string | null | undefined): string {
   s = s.replace(LEAD_SET_OF_RE, "");
   s = s.replace(LEAD_QTY_NEW_RE, "");
   s = s.replace(LEAD_QTYX_RE, "");
+  s = s.replace(LEADING_FOREIGN_TIRE_WORD_RE, "");
+  s = s.replace(SUGGESTED_TAG_RE, " ");
+
+  // Trailing retailer pipe-tail boilerplate ("| Preis auf AUTODOC") - strip BEFORE the mid-string
+  // quantity-phrase stripping below, since a "|"-introduced tail can itself contain digit-adjacent
+  // text that would otherwise confuse the qty-phrase regexes.
+  s = s.replace(TRAILING_PIPE_TAIL_RE, "");
+
+  // Quantity/marketing phrases anywhere in the string (owner mandate: "Fortune Set Of 4 FSR305 ..."
+  // has the phrase mid-string, after the brand). Run repeatedly since two phrases can be adjacent.
+  let prevLen: number;
+  do {
+    prevLen = s.length;
+    s = s.replace(MID_SET_OF_RE, " ");
+    s = s.replace(MID_QTY_NEW_RE, " ");
+    s = s.replace(MID_QTYX_RE, " ");
+  } while (s.length !== prevLen);
 
   s = s.replace(PAREN_NOISE_RE, " ");
   s = s.replace(FITS_CLAUSE_RE, "");
@@ -100,6 +150,7 @@ export function cleanListingTitle(raw: string | null | undefined): string {
   s = s.replace(CYRILLIC_RUN_RE, " ");
   s = s.replace(CONDITION_WORD_RE, " ");
   s = s.replace(TRAILING_ELLIPSIS_RE, "");
+  s = s.replace(TRAILING_TIRE_NOISE_RE, "$1");
 
   // Collapse stray empty parens left behind by noise removal, then whitespace/edge punctuation.
   s = s.replace(/\(\s*\)/g, " ");
@@ -178,12 +229,22 @@ function extractBrand(cleaned: string): { brand: string; withoutBrand: string } 
  */
 export function parseTireIdentity(raw: string | null | undefined): ParsedTireIdentity {
   const cleaned = cleanListingTitle(raw);
-  if (!cleaned) return { brand: "", model: "", size: "", loadSpeed: "", sidewall: "", rest: "" };
+  if (!cleaned) {
+    return { brand: "", model: "", size: "", loadSpeed: "", sidewall: "", rest: "", multiVariant: false };
+  }
 
   const preNormalized = preNormalizeSizeSeparators(cleaned);
   const sizeMatch = findSize(cleaned);
   const size = sizeMatch?.canonical.split(" ")[0] ?? "";
-  const loadSpeed = sizeMatch ? sizeMatch.canonical.split(" ").slice(1).join(" ") : "";
+
+  // Multi-speed-variant detection (owner mandate): a listing page naming several distinct
+  // load/speed ratings for the same size ("93V, 93W, 93H") describes MULTIPLE product variants,
+  // not one. Detected on comma-separated load/speed-shaped tokens anywhere in the cleaned text -
+  // scoped to a run of 2+ such tokens so a single legitimate rating never false-positives.
+  const MULTI_VARIANT_RUN_RE = /\b\d{2,3}[A-Z]\b(?:\s*,\s*\d{2,3}[A-Z]\b){1,}/i;
+  const multiVariant = MULTI_VARIANT_RUN_RE.test(preNormalized);
+
+  const loadSpeed = multiVariant ? "" : sizeMatch ? sizeMatch.canonical.split(" ").slice(1).join(" ") : "";
 
   // Remove the matched size + load/speed spans before isolating brand/model so their tokens never
   // leak into either. Work from the pre-normalized text so a "235/65/17" span (whose raw match
@@ -192,6 +253,11 @@ export function parseTireIdentity(raw: string | null | undefined): ParsedTireIde
   if (sizeMatch) {
     working = working.split(sizeMatch.raw).join(" ");
     if (sizeMatch.rawLoadSpeed) working = working.split(sizeMatch.rawLoadSpeed).join(" ");
+  }
+  if (multiVariant) {
+    // Strip the entire comma-separated run of variant ratings out of the working text so none of
+    // them leak into the model.
+    working = working.replace(MULTI_VARIANT_RUN_RE, " ");
   }
 
   // Sidewall marker (BSW/OWL/WSW/RWL/XL/SL) - captured separately, stripped from model.
@@ -247,5 +313,5 @@ export function parseTireIdentity(raw: string | null | undefined): ParsedTireIde
   }
   const model = tokens.join(" ").replace(/\s+/g, " ").trim();
 
-  return { brand, model, size, loadSpeed, sidewall, rest: "" };
+  return { brand, model, size, loadSpeed, sidewall, rest: "", multiVariant };
 }

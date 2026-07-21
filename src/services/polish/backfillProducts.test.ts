@@ -49,4 +49,57 @@ describe("backfillProducts", () => {
     expect(changedIds).toEqual(["a"]);
     expect(skippedHumanIds).toEqual(["b"]);
   });
+
+  // Group C item 11 (owner mandate 2026-07-21): rebuild a junky legacy name into the app's own
+  // canonical display form when the tire parse is confident, so the persist migration (which reuses
+  // this SAME function) can retroactively clean names saved before this fix shipped.
+  describe("canonical name re-clean (Group C item 11)", () => {
+    it("rebuilds a junky name into the canonical display form when brand+model+size confidently parse", () => {
+      const p = product({ id: "p-junky", name: "Fortune Set Of 4 FSR305 265/50R20 111T XL Tires" });
+      const { products, changedIds } = backfillProducts([p]);
+      expect(products[0].name).toBe("Fortune FSR305 265/50R20 111T XL");
+      expect(changedIds).toEqual(["p-junky"]);
+    });
+
+    it("never rewrites a name on a row stamped structuredBy human", () => {
+      const p = product({
+        id: "p-human", name: "Set of 4 Fortune FSR305 265/50R20 111T XL Tires", structuredBy: "human",
+      });
+      const { products } = backfillProducts([p]);
+      expect(products[0].name).toBe(p.name);
+    });
+
+    it("never touches an already-clean name (no junk pattern present)", () => {
+      const p = product({ id: "p-clean", name: "Cooper Discoverer A/T3 LT245/75R16 120R" });
+      const { products } = backfillProducts([p]);
+      expect(products[0].name).toBe(p.name);
+    });
+
+    it("never touches a non-tire product name", () => {
+      const p = product({ id: "p-retail", name: "Member's Mark Purified Water 500ml" });
+      const { products } = backfillProducts([p]);
+      expect(products[0].name).toBe(p.name);
+    });
+
+    it("rewrites a name still carrying the literal '(suggested)' junk suffix", () => {
+      const p = product({ id: "p-sugg", name: "Fortune FSR305 265/50R20 111T XL (suggested)" });
+      const { products } = backfillProducts([p]);
+      expect(products[0].name).not.toContain("(suggested)");
+    });
+
+    it("is idempotent: rewriting twice does not change the name further", () => {
+      const p = product({ id: "p-idem", name: "Fortune Set Of 4 FSR305 265/50R20 111T XL Tires" });
+      const once = backfillProducts([p]);
+      const twice = backfillProducts(once.products);
+      expect(twice.products[0].name).toBe(once.products[0].name);
+      expect(twice.changedIds).toEqual([]);
+    });
+
+    it("never touches quantities or unrelated fields - only name/brand/category/specs/structuredModel", () => {
+      const p = product({ id: "p-fields", name: "Fortune Set Of 4 FSR305 265/50R20 111T XL Tires", primarySku: "KEEP-ME", location: "Bay 9" });
+      const { products } = backfillProducts([p]);
+      expect(products[0].primarySku).toBe("KEEP-ME");
+      expect(products[0].location).toBe("Bay 9");
+    });
+  });
 });

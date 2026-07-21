@@ -25,6 +25,15 @@ export interface BackfillResult {
  * RT660 P 245 /40 R18 97W XL BSW") gets its structured columns filled retroactively on the next
  * rehydrate. Never overwrites a field the row already carries a non-empty value for (human-entered
  * or an earlier decode already won) - same fill-if-empty contract as the live apply sites.
+ *
+ * Group C item 11 (owner mandate 2026-07-21): also re-cleans a legacy JUNKY `name` into the app's
+ * own canonical tire display form via that SAME enrichProductIdentity call (its `name` output is the
+ * canonical form whenever brand+model+size confidently parse and the row is not multiVariant, else
+ * the existing cleanListingTitle output - see enrichProductIdentity.ts). Applied unconditionally
+ * (not fill-if-empty) since a NAME rewrite is a cleanup, not a "field was empty" backfill - but never
+ * for a `structuredBy: "human"` row (skipped above) and never a no-op change when the name is
+ * already in canonical/clean form (naturally idempotent, since cleanListingTitle/canonicalTireDisplayName
+ * are pure functions of the current name).
  */
 export function backfillProducts(products: Product[]): BackfillResult {
   const changedIds: string[] = [];
@@ -48,6 +57,11 @@ export function backfillProducts(products: Product[]): BackfillResult {
     if (!p.category && enriched.category) identityPatch.category = enriched.category;
     if (!p.specsShort && enriched.specsShort) identityPatch.specsShort = enriched.specsShort;
     if (!p.specsFull && enriched.specsFull) identityPatch.specsFull = enriched.specsFull;
+    // Name re-clean (Group C item 11): enriched.name is already the canonical display form for a
+    // confidently-parsed row, or the cleaned listing title otherwise - always safe to adopt when it
+    // differs from the stored name (never fabricates anything new; it is a pure re-derivation of the
+    // SAME name string already on the row).
+    if (enriched.name && enriched.name !== p.name) identityPatch.name = enriched.name;
     const withIdentity: Product = Object.keys(identityPatch).length > 0 ? { ...p, ...identityPatch } : p;
 
     // safeStructuredFieldsFor (not structuredFieldsFor): a structurer throw on one bad row must
@@ -65,7 +79,8 @@ export function backfillProducts(products: Product[]): BackfillResult {
       next.brand !== p.brand ||
       next.category !== p.category ||
       next.specsShort !== p.specsShort ||
-      next.specsFull !== p.specsFull;
+      next.specsFull !== p.specsFull ||
+      next.name !== p.name;
     if (changed) changedIds.push(p.id);
     return next;
   });

@@ -3034,7 +3034,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             tireOk,
             contextConflict,
           }).allowed;
-          if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
+          // MULTI-VARIANT GATE (Group C, owner mandate 2026-07-21): a listing naming several
+          // distinct speed ratings for one size (e.g. "93V, 93W, 93H") describes MULTIPLE product
+          // variants, not one confident identity - it must NEVER auto-apply/auto-count as a clean
+          // verified match, regardless of how strong the evidence/confidence otherwise looks.
+          const multiVariantIdentity = enrichProductIdentity({ payload: { name: best?.productName ?? "" } }).multiVariant;
+          if (autoAddOn && evidenceGatePassed && !multiVariantIdentity && (plan.status === "auto_verify" || plan.status === "auto_count")) {
             // Origin decides the catalog write: exact app-confirmed evidence -> VERIFIED global catalog
             // entry; a trusted-but-non-exact AI product -> still counted + aliased, PENDING catalog
             // entry ("ai"); learning off -> count only, no catalog write ("auto_count").
@@ -3395,14 +3400,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // exact decode (Go-UPC exact class: status "verified" + exactCodeEvidenceVerifiedByApp true).
             // TRUST RULES: no alias is created here, the product stays provisional:true/verified:false,
             // and the feed badge stays "suggested" (never "verified") - markFeedRowVerified is not called.
-            const autoSuggestApplied = autoSuggestApplyOk({
-              autoAddOn,
-              contextConflict,
-              productName: best?.productName ?? "",
-              confidence: decision?.confidence ?? 0,
-              status: decision?.status,
-              exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
-            });
+            // MULTI-VARIANT GATE (Group C): a listing naming several distinct speed ratings for one
+            // size describes multiple product variants, not one confident identity - never let it
+            // skip Needs Review via auto-suggest-apply, regardless of confidence/evidence.
+            const multiVariantIdentity = enrichProductIdentity({ payload: { name: best?.productName ?? "" } }).multiVariant;
+            const autoSuggestApplied =
+              !multiVariantIdentity &&
+              autoSuggestApplyOk({
+                autoAddOn,
+                contextConflict,
+                productName: best?.productName ?? "",
+                confidence: decision?.confidence ?? 0,
+                status: decision?.status,
+                exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
+              });
             if (autoSuggestApplied) {
               set((st) => ({
                 needsReviewQueue: st.needsReviewQueue.map((r) =>
@@ -3451,6 +3462,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             const suggestionInline =
               autoAddOn &&
               !autoSuggestApplied &&
+              !multiVariantIdentity &&
               decision?.status === "suggested" &&
               isUsableProductName(best?.productName ?? "") &&
               !contextConflict &&
@@ -3867,12 +3879,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const freshAfter = get().needsReviewQueue.find((r) => r.id === reviewId);
           // Same autoAddOn master-switch gate as the fast path: with autoAddDecodedProducts OFF the
           // owner asked for every decode to sit in manual review, so no inline conversion happens.
+          // MULTI-VARIANT GATE (Group C): same rule as the fast path - never convert a multi-variant
+          // listing into a pending inline suggestion, regardless of confidence/evidence.
+          const deepMultiVariant = enrichProductIdentity({ payload: { name: freshAfter?.suggestedProductName ?? "" } }).multiVariant;
           if (
             (s.autoAddDecodedProducts ?? true) &&
             freshAfter &&
             freshAfter.status === "open" &&
             freshAfter.hasSuggestion &&
-            isUsableProductName(freshAfter.suggestedProductName)
+            isUsableProductName(freshAfter.suggestedProductName) &&
+            !deepMultiVariant
           ) {
             const deepConflict =
               best && isUsableProductName(best.productName ?? "")
@@ -6232,7 +6248,10 @@ export const useScanStore = create<ScanState>()(
     // the identity-field backfill (enrichProductIdentity fill-if-empty, see backfillProducts.ts)
     // exactly once on next load - a legacy row's blank brand/category/specsShort/specsFull gets
     // filled from its parseable name via the same non-destructive >= 5 migrate branch below.
-    version: 10,
+    // Group C item 11 (owner mandate 2026-07-21): v10 -> v11 bump so every existing install also
+    // re-cleans a legacy JUNKY product name into the app's own canonical display form exactly once
+    // (see scanStoreMigrate's v11 name re-clean step below).
+    version: 11,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken

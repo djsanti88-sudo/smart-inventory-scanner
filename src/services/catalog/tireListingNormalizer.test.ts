@@ -164,7 +164,75 @@ describe("parseTireIdentity - A2 model isolation", () => {
 
   it("empty input yields all-empty fields, never a guess", () => {
     const id = parseTireIdentity("");
-    expect(id).toEqual({ brand: "", model: "", size: "", loadSpeed: "", sidewall: "", rest: "" });
+    expect(id).toEqual({
+      brand: "",
+      model: "",
+      size: "",
+      loadSpeed: "",
+      sidewall: "",
+      rest: "",
+      multiVariant: false,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Owner mandate fixtures (2026-07-21): real fixture rows, verbatim, that must parse cleanly for
+// good - universal for any code, not just these specific fixtures.
+// ---------------------------------------------------------------------------------------------
+describe("owner mandate fixture rows", () => {
+  it("fixture 1: 'Set Of 4' mid-string after brand strips regardless of position", () => {
+    const out = cleanListingTitle("Fortune Set Of 4 FSR305 265/50R20 111T XL Tires");
+    expect(out).toBe("Fortune FSR305 265/50R20 111T XL");
+  });
+
+  it("fixture 2: LT flotation size no longer splits model+prefix (FSR310 LT bug)", () => {
+    const id = parseTireIdentity("Set of 4 Fortune FSR310 LT33X12.50R20 114Q E Tires");
+    expect(id.size).toBe("LT33X12.50R20");
+    expect(id.model).toBe("FSR310");
+    expect(id.loadSpeed).toBe("114Q");
+  });
+
+  it("fixture 3: German boilerplate + spaced size + multi-speed-rating triggers multiVariant", () => {
+    const id = parseTireIdentity("Reifen Nokian 205 50 R17 93V, 93W, 93H | Preis auf AUTODOC");
+    expect(id.brand).toBe("Nokian");
+    expect(id.size).toBe("205/50R17");
+    expect(id.multiVariant).toBe(true);
+    expect(id.loadSpeed).toBe("");
+  });
+
+  it("fixture 4 (regression): Nokian Hakkapeliitta 7 with spaces around the size slash still works", () => {
+    const id = parseTireIdentity("Nokian Hakkapeliitta 7 185 /65 R15 92T XL BSW");
+    expect(id.brand).toBe("Nokian");
+    expect(id.size).toBe("185/65R15");
+    expect(id.loadSpeed).toBe("92T");
+    expect(id.sidewall).toContain("XL");
+    expect(id.sidewall).toContain("BSW");
+    expect(id.model).toContain("Hakkapeliitta 7");
+  });
+
+  it("fixture 5 (regression): LT street size survives the mid-string 'Set Of 4' fix", () => {
+    const id = parseTireIdentity("Fortune Set Of 4 FSR305 LT265/70R18 124/121S E Tires");
+    expect(id.brand).toBe("Fortune");
+    expect(id.model).toBe("FSR305");
+    expect(id.size).toBe("LT265/70R18");
+    expect(id.loadSpeed).toBe("124/121S");
+  });
+
+  it("strips retailer pipe-tail boilerplate ('| Preis auf AUTODOC')", () => {
+    const out = cleanListingTitle("Nokian 205/50R17 93V | Preis auf AUTODOC");
+    expect(out).not.toMatch(/\|/);
+    expect(out).not.toMatch(/AUTODOC/i);
+  });
+
+  it("strips leading German 'Reifen' (tire) boilerplate word", () => {
+    const out = cleanListingTitle("Reifen Nokian 205/50R17 93V");
+    expect(out).not.toMatch(/\bReifen\b/i);
+    expect(out).toContain("Nokian");
+  });
+
+  it("parses spaced size with explicit R separator ('205 50 R17')", () => {
+    expect(canonicalTireSize("205 50 R17")).toBe("205/50R17");
   });
 });
 
