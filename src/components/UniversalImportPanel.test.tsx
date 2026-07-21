@@ -18,6 +18,23 @@ const nonsenseSheet: UniversalSheet = {
   sourceSignature: "source-nonsense",
 };
 
+// Foreign headers: 'Mfr Code' (fuzzy -> partNumber HIGH once corroborated) but 'Qty On Hand'
+// resolves quantity, and a MEDIUM guess is present. This sheet exercises the tiered mapping UI.
+const foreignSheet: UniversalSheet = {
+  fileName: "foreign.csv",
+  kind: "csv",
+  // 'Mfr Code' -> partNumber (HIGH: fuzzy header + SKU-shaped values agree). 'Qty On Hand' -> quantity
+  // (exact synonym, HIGH). 'Brnd' -> brand (MEDIUM: a header typo close to "brand" by edit similarity;
+  // plain-word values give no corroborating content shape), which forces the tiered confirm UI.
+  headers: ["Mfr Code", "Brnd", "Qty On Hand"],
+  rows: [
+    ["MT-2657017", "acme", "7"],
+    ["DEF-LTX-01", "acme", "8"],
+  ],
+  headerRowIndex: 0,
+  sourceSignature: "source-foreign",
+};
+
 function props() {
   return {
     readFile: vi.fn().mockResolvedValue(nonsenseSheet),
@@ -60,7 +77,7 @@ describe("UniversalImportPanel", () => {
     fireEvent.change(screen.getByLabelText("Model column"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("Size column"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("Quantity column"), { target: { value: "4" } });
-    fireEvent.click(screen.getByRole("button", { name: "Preview mapped file" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and preview" }));
     expect(await screen.findByTestId("import-headline")).toHaveTextContent("Matched 1 of 1 automatically");
     expect(handlers.onApply).not.toHaveBeenCalled();
     expect(handlers.saveMapping).not.toHaveBeenCalled();
@@ -74,5 +91,21 @@ describe("UniversalImportPanel", () => {
       quantity: 4,
     });
     expect(await screen.findByTestId("import-summary")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("pre-fills MEDIUM guesses and shows a confirm affordance instead of silently applying", async () => {
+    const handlers = { ...props(), readFile: vi.fn().mockResolvedValue(foreignSheet) };
+    render(<UniversalImportPanel {...handlers} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "foreign.csv")] } });
+    // The tiered mapping UI opens (not the preview) because a MEDIUM guess needs confirmation.
+    const mappingUi = await screen.findByTestId("column-mapping");
+    // partNumber column is pre-filled from the fuzzy header 'Mfr Code'.
+    expect((screen.getByLabelText("Part number column") as HTMLSelectElement).value).toBe("0");
+    // The Manufacturer Ref column is a MEDIUM guess and is surfaced for a one-tap confirm.
+    expect(screen.getByTestId("mapping-confirm")).toBeTruthy();
+    expect(mappingUi).toHaveTextContent(/confirm/i);
+    // Nothing was applied automatically.
+    expect(handlers.onApply).not.toHaveBeenCalled();
+    expect(handlers.saveMapping).not.toHaveBeenCalled();
   });
 });

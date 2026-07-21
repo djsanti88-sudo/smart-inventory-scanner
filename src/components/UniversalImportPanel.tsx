@@ -2,8 +2,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { IMPORT_FIELD_ORDER, type ColumnMapping, type ImportPreview, type ImportPreviewRow, type MappedImportRow, type UniversalImportApplySummary, type UniversalSheet, type UploadFileLike } from "@/services/importSchema";
-import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
+import { IMPORT_FIELD_ORDER, type ColumnMapping, type ImportField, type ImportPreview, type ImportPreviewRow, type MappedImportRow, type UniversalImportApplySummary, type UniversalSheet, type UploadFileLike } from "@/services/importSchema";
+import { inferColumnMapping, validateManualMapping, type FieldTier } from "@/services/columnIntelligence";
 import { readUniversalFile } from "@/services/universalFileReader";
 import { buildImportPreview, describeSkippedSheets, mapUniversalRows, type PreviewMatchResult } from "@/services/universalImportPreview";
 
@@ -39,6 +39,7 @@ export function UniversalImportPanel({
   const inputRef = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<UniversalSheet | null>(null);
   const [mapping, setMapping] = useState<ColumnMapping>({});
+  const [tiers, setTiers] = useState<Partial<Record<ImportField, FieldTier>>>({});
   const [mappingMode, setMappingMode] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [error, setError] = useState("");
@@ -82,9 +83,15 @@ export function UniversalImportPanel({
       }
       const inferred = inferColumnMapping([nextSheet.headers, ...nextSheet.rows]);
       setMapping(inferred.mapping);
-      if (inferred.confidence === "high") {
+      setTiers(inferred.tiers);
+      const allHigh = Object.values(inferred.tiers).every((tier) => tier === "high");
+      if (inferred.confidence === "high" && allHigh) {
+        // Every mapped column is HIGH tier (exact synonym, or fuzzy header and cell content agree):
+        // auto-map and go straight to the confirmed preview.
         await previewWith(nextSheet, inferred.mapping, "header");
       } else {
+        // At least one MEDIUM guess: pre-fill every guess into the dropdowns and ask for a one-tap
+        // confirm before importing. Nothing is applied silently under a guessed column.
         setMappingMode(true);
         setError(inferred.reasons.join(" "));
       }
@@ -137,9 +144,16 @@ export function UniversalImportPanel({
       {sheet && describeSkippedSheets(sheet) && (
         <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" data-testid="import-skipped-sheets">{describeSkippedSheets(sheet)}</p>
       )}
-      {mappingMode && sheet && (
+      {mappingMode && sheet && (() => {
+        const mediumFields = IMPORT_FIELD_ORDER.filter((field) => tiers[field] === "medium" && mapping[field] !== undefined);
+        return (
         <div className="flex flex-col gap-3" data-testid="column-mapping">
           <h3 className="font-semibold">Map the columns we saw</h3>
+          {mediumFields.length > 0 && (
+            <p role="status" data-testid="mapping-confirm" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              We pre-filled our best guess for {mediumFields.map((field) => FIELD_LABELS[field]).join(", ")}. Please confirm these look right, then preview.
+            </p>
+          )}
           <div className="overflow-auto">
             <table className="w-full text-left text-sm">
               <thead><tr>{sheet.headers.map((header, index) => <th key={`${header}-${index}`} className="px-2 py-1">{header || `(blank ${index + 1})`}</th>)}</tr></thead>
@@ -147,24 +161,32 @@ export function UniversalImportPanel({
             </table>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {IMPORT_FIELD_ORDER.map((field) => (
+            {IMPORT_FIELD_ORDER.map((field) => {
+              const tier = mapping[field] !== undefined ? tiers[field] : undefined;
+              return (
               <label key={field} className="flex flex-col gap-1 text-sm">
-                {FIELD_LABELS[field]}
+                <span className="flex items-center gap-2">
+                  {FIELD_LABELS[field]}
+                  {tier === "high" && <span className="rounded bg-emerald-100 px-1.5 text-xs font-medium text-emerald-800" data-testid={`tier-${field}`}>Confirmed</span>}
+                  {tier === "medium" && <span className="rounded bg-amber-100 px-1.5 text-xs font-medium text-amber-800" data-testid={`tier-${field}`}>Confirm this</span>}
+                </span>
                 <select
                   aria-label={`${FIELD_LABELS[field]} column`}
                   value={mapping[field] ?? ""}
                   onChange={(event) => setMapping((current) => ({ ...current, [field]: event.target.value === "" ? undefined : Number(event.target.value) }))}
-                  className="min-h-[44px] rounded border border-zinc-300 px-2"
+                  className={`min-h-[44px] rounded border px-2 ${tier === "medium" ? "border-amber-400 bg-amber-50" : "border-zinc-300"}`}
                 >
                   <option value="">Not mapped</option>
                   {sheet.headers.map((header, index) => <option key={`${header}-${index}`} value={index}>{header || `(blank ${index + 1})`}</option>)}
                 </select>
               </label>
-            ))}
+              );
+            })}
           </div>
-          <button type="button" disabled={busy} onClick={() => void previewWith(sheet, mapping, "manual")} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Preview mapped file</button>
+          <button type="button" disabled={busy} onClick={() => void previewWith(sheet, mapping, "manual")} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Confirm and preview</button>
         </div>
-      )}
+        );
+      })()}
       {preview && (
         <div className="flex flex-col gap-3" data-testid="import-preview">
           <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-4">
