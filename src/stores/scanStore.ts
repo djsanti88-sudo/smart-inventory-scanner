@@ -1657,7 +1657,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (
           cur &&
           shouldReuseSession(
-            { status: cur.status, deviceId: cur.deviceId, startedAt: cur.startedAt },
+            { status: cur.status, deviceId: cur.deviceId, startedAt: cur.startedAt, locked: cur.locked },
             { deviceId, nowIso, inactivityMinutes: AUTO_SESSION_INACTIVITY_MINUTES },
           )
         ) {
@@ -1668,7 +1668,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // session and wiping the visible finalCounts. Rotating-with-wipe is correct only for a genuinely
         // new session (none active), a DIFFERENT device's session, or one past the inactivity window.
         // Without this, ensureAutoSession on scan-page mount would erase a hydrated in-progress count.
-        if (cur && cur.status === "active" && !cur.deviceId) {
+        // A LOCKED session is never adopted either (F1) - it must rotate to a fresh session, same as completed.
+        if (cur && cur.status === "active" && !cur.locked && !cur.deviceId) {
           const startedMs = Date.parse(cur.startedAt);
           const withinWindow =
             !Number.isNaN(startedMs) &&
@@ -1819,15 +1820,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       processScan: (rawInput) => {
-        // OWNER PIN LOCK: a locked session is read-only - no new scan may land in it. Block before any work
-        // so a locked count can never change until it is unlocked with the owner PIN.
-        if (get().currentSession?.locked) return null;
-        // PHASE 3 completed-session guard: finishSession does NOT clear sessionId/currentSession (by
-        // design - see finishSession's own comment), so without this guard a scan taken between
-        // "Finish session" and the next ensureAutoSession/startSession call would silently stamp the
-        // OLD completed session's id. Callers (the scan page) call ensureAutoSession before every scan
-        // batch; this guard is the hard backstop for any path that does not.
-        if (get().currentSession?.status === "completed") return null;
+        // TOP-LEVEL LAW / Phase 3 defect F1: a scanned code must ALWAYS appear on the feed and count,
+        // even when the current session is locked (owner PIN) or completed (Finish). Those guards
+        // decide the session's own frozen/read-only status; they must never make a physical scan
+        // vanish. So instead of dropping the scan, ROTATE to a fresh active session and count it
+        // there - reusing the exact mechanism ensureAutoSession/mount already use for a stale/absent
+        // session - leaving the locked/completed session and its counts untouched and auditable.
+        // Callers (the scan page) also call ensureAutoSession before every scan batch; this is the
+        // hard backstop for any path (including the internal resolveUnknown -> processScan re-apply
+        // call) that does not.
+        if (get().currentSession?.locked || get().currentSession?.status === "completed") {
+          get().ensureAutoSession();
+        }
         const scanLocation = get().location;
         const scanDeviceId = get().deviceId;
         const cleaned = cleanScanCode(rawInput);

@@ -167,6 +167,14 @@ function fallbackFile(): string {
   return process.env.SHARE_TOKEN_FILE?.trim() || path.resolve(".share-tokens.json");
 }
 
+// Same production-detection convention as src/services/auth/authBypass.ts: NODE_ENV === "production"
+// is the sole signal, so this can never misfire in dev/test/CI. In production, Vercel's filesystem is
+// ephemeral: the local-file fallback write is silently lost, which would hand out a share link that
+// later 404s. Fail loud instead so the caller gets a 503 and never receives a broken token.
+function isProductionRuntime(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
 function isMemoryFallback(): boolean {
   return fallbackFile() === ":memory:" || process.env.NODE_ENV === "test";
 }
@@ -283,6 +291,16 @@ export async function mintShareToken(payload: SharePayload, ttlMs: number): Prom
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  // Durable storage (Turso) was unavailable or the write failed. In production the only remaining
+  // option is the local-file fallback, but Vercel's filesystem is ephemeral: that write never
+  // survives past the current invocation, so the link handed back would 404 later with no trace.
+  // Fail loud here instead of returning a token that silently rots.
+  if (isProductionRuntime()) {
+    throw new Error(
+      "Durable share storage is unavailable. Share links cannot be created right now.",
+    );
   }
 
   writeFallback(token, entry);

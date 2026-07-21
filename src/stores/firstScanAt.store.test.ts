@@ -40,16 +40,17 @@ describe("firstScanAt set-once", () => {
     expect(store.getState().firstScanAt).toBe(first);
   });
 
-  it("stays null when a scan is blocked before counting (locked session)", () => {
+  it("is still set on a scan taken after Finish: Phase 3 F1 rotates the scan into a fresh session and counts it, it is never dropped", () => {
     const store = createTestScanStore({ db: new MockDb() });
-    // Lock a session with no PIN set is not directly testable here without setup; instead assert the
-    // documented ordering indirectly: a completed session guard blocks processScan entirely (returns
-    // null), and firstScanAt must remain untouched.
     store.getState().startSession("s1", "Main");
     store.getState().finishSession();
+    // Per the TOP-LEVEL LAW, a scan taken after Finish rotates to a fresh active session and counts -
+    // it is never silently dropped, so firstScanAt (written after the count is applied) IS set.
     const result = store.getState().processScan("333333333332");
-    expect(result).toBeNull();
-    expect(store.getState().firstScanAt).toBeNull();
+    expect(result).not.toBeNull();
+    const stamp = store.getState().firstScanAt;
+    expect(stamp).not.toBeNull();
+    expect(new Date(stamp as string).toISOString()).toBe(stamp);
   });
 
   it("repeated ensureProvisionalCount calls for the same code do not move the timestamp", () => {

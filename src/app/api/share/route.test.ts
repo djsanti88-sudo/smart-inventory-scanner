@@ -121,6 +121,24 @@ describe("POST /api/share authentication", () => {
   });
 });
 
+describe("POST /api/share durable-storage failure", () => {
+  it("responds 503 with no token/url when mintShareToken rejects", async () => {
+    vi.stubEnv("IS_E2E", "1");
+    mocks.mintShareToken.mockReset().mockRejectedValue(
+      new Error("Durable share storage is unavailable"),
+    );
+
+    const response = await POST(
+      shareRequest({ sessionId: "s1", reportSnapshot: reportSnapshot() }),
+    );
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("token");
+    expect(body).not.toHaveProperty("url");
+  });
+});
+
 describe("POST /api/share request limits and safe snapshot shape", () => {
   it.each([
     ["live", ""],

@@ -30,6 +30,9 @@ export default function BossReportPage() {
       countedAt: new Date().toISOString(),
       previousSnapshot,
       currentSnapshotForVariance,
+      // F2 fix: scope the report (and the minted public share snapshot) to the current session only,
+      // so a cross-device refresh's additive merge never leaks other sessions' totals.
+      currentSessionId: session?.id,
     });
   const report = buildCurrentReport();
 

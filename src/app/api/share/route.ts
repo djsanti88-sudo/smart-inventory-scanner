@@ -138,16 +138,33 @@ export async function POST(request: NextRequest) {
   });
   const reportSnapshot = normalizeBossReportSnapshot(body.reportSnapshot ?? fallbackReport);
   const now = Date.now();
-  const token = await mintShareToken(
-    {
-      businessId,
-      sessionId,
-      reportSnapshot,
-      createdAt: now,
-      expiresAt: now + SHARE_TTL_MS,
-    },
-    SHARE_TTL_MS,
-  );
+  let token: string;
+  try {
+    token = await mintShareToken(
+      {
+        businessId,
+        sessionId,
+        reportSnapshot,
+        createdAt: now,
+        expiresAt: now + SHARE_TTL_MS,
+      },
+      SHARE_TTL_MS,
+    );
+  } catch (error) {
+    // mintShareToken only throws when durable storage is required (production) and unavailable.
+    // Fail loud here too: no token, no url, so the caller never gets a link that will 404 later.
+    logServerEvent({
+      route: "/api/share",
+      event: "mint_failed",
+      reasonCode: "durable_storage_unavailable",
+      status: 503,
+    });
+    console.error(
+      "[api/share] mintShareToken failed:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return json({ error: "Could not create a shareable link right now." }, 503);
+  }
 
   return json({ token, url: `${request.nextUrl.origin}/report/${token}` });
 }
