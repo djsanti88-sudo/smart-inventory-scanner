@@ -23,26 +23,29 @@ describe("owner PIN lock", () => {
     expect(st().hasOwnerPin()).toBe(true);
   });
 
-  it("locks -> blocks new scans -> unlocks only with the correct PIN", async () => {
+  it("locks -> new scans rotate to a fresh session (never dropped, Phase 3 F1) -> the locked session itself only unlocks with the correct PIN", async () => {
     await st().setOwnerPin("1234");
     const sid = st().currentSession!.id;
 
     expect(st().lockSession(sid)).toBe(true);
     expect(st().currentSession!.locked).toBe(true);
 
-    // a locked session takes NO new scans
-    expect(st().processScan("049000028904")).toBeNull();
-    expect(st().finalCounts.length).toBe(0);
+    // A locked session takes NO new scans itself, but the TOP-LEVEL LAW ("every scan appears and
+    // counts") means the scan is never dropped - it rotates into a fresh active session instead.
+    const result = st().processScan("049000028904");
+    expect(result).not.toBeNull();
+    expect(st().currentSession!.id).not.toBe(sid);
+    expect(st().currentSession!.locked).toBeFalsy();
+    expect(st().finalCounts.filter((c) => c.sessionId === st().currentSession!.id).length).toBe(1);
 
-    // wrong PIN keeps it locked
+    // The original session is no longer current (rotated away), but it stays locked in the mock DB
+    // and reopening it proves it: wrong PIN never unlocks it, right PIN does.
+    st().reopenSession(sid);
+    expect(st().currentSession!.locked).toBe(true);
     expect(await st().unlockSession(sid, "0000")).toBe(false);
     expect(st().currentSession!.locked).toBe(true);
-
-    // correct PIN unlocks; scanning works again
     expect(await st().unlockSession(sid, "1234")).toBe(true);
     expect(st().currentSession!.locked).toBe(false);
-    expect(st().processScan("049000028904")).not.toBeNull();
-    expect(st().finalCounts.length).toBe(1);
   });
 
   it("a locked session blocks count edits (remove + correct)", async () => {

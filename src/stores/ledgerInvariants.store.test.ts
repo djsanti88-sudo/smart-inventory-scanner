@@ -292,13 +292,32 @@ describe("ledger invariants hold across an auto-session boundary", () => {
     expect(firstSnapshot).toContain('"q":2');
   });
 
-  it("a scan taken between finishSession and the next ensureAutoSession call never lands anywhere (processScan returns null, no phantom count)", () => {
-    const store = createTestScanStore({ now: () => "2026-07-19T16:00:00.000Z" });
+  it("a scan taken between finishSession and the next ensureAutoSession call rotates into a fresh session's ledger (Phase 3 F1: TOP-LEVEL LAW - never silently dropped, never a phantom/double count)", () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db, now: () => "2026-07-19T16:00:00.000Z" });
     store.getState().startSession("Manual", "Main");
-    store.getState().processScan("012345678905");
+    // Known seeded product (prod-coke), so both scans deterministically resolve to the SAME product
+    // id - isolating the assertion to the session-ledger split, not provisional-placeholder identity.
+    store.getState().processScan("049000028904");
+    const finishedSessionId = store.getState().sessionId;
+    expect(db.getServerCount(finishedSessionId, "prod-coke")?.quantity).toBe(1);
     store.getState().finishSession();
-    const result = store.getState().processScan("012345678905"); // must be blocked, not silently counted
-    expect(result).toBeNull();
-    assertBooksBalance(store); // still balances: the blocked scan added nothing to compare against
+    // No explicit ensureAutoSession call here - processScan itself must rotate internally so the
+    // scan is never silently dropped, without ever mutating the finished session's own ledger.
+    const result = store.getState().processScan("049000028904");
+    expect(result).not.toBeNull();
+
+    const state = store.getState();
+    const rotatedSessionId = state.sessionId;
+    expect(rotatedSessionId).not.toBe(finishedSessionId);
+    expect(state.currentSession?.status).toBe("active");
+
+    // The rotated session's own ledger balances cleanly (fresh partition, one scan in it).
+    assertBooksBalance(store);
+    expect(state.finalCounts.find((c) => c.sessionId === rotatedSessionId && c.productId === "prod-coke")?.quantity).toBe(1);
+
+    // The finished session's OWN synced ledger is untouched by the rotation - no phantom/double count
+    // leaked backward onto it, still exactly the one scan taken before Finish.
+    expect(db.getServerCount(finishedSessionId, "prod-coke")?.quantity).toBe(1);
   });
 });

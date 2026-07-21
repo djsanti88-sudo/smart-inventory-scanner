@@ -125,13 +125,17 @@ describe("ensureAutoSession", () => {
     expect(store.getState().currentSession!.status).toBe("active");
   });
 
-  it("processScan on a completed session (before ensureAutoSession runs) is blocked, matching the locked-session guard shape", () => {
+  it("processScan on a completed session (before ensureAutoSession runs) rotates to a fresh active session instead of dropping the scan (Phase 3 defect F1, TOP-LEVEL LAW)", () => {
     const store = createTestScanStore({ now: () => "2026-07-19T16:00:00.000Z" });
     store.getState().startSession("Manual", "Main");
     store.getState().finishSession();
-    // Without an explicit ensureAutoSession call, a scan must not silently land in the completed session.
+    const completedId = store.getState().sessionId;
+    // Without an explicit ensureAutoSession call, a scan must NOT be silently dropped just because the
+    // session is completed - processScan must rotate to a fresh active session internally and count it.
     const result = store.getState().processScan("012345678905");
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(store.getState().sessionId).not.toBe(completedId);
+    expect(store.getState().currentSession!.status).toBe("active");
   });
 
   it("ADOPTS an unclaimed active in-window session (no deviceId) and PRESERVES its counts instead of rotating", () => {
