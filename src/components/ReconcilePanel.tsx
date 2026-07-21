@@ -64,7 +64,16 @@ export function ReconcilePanel() {
   const products = useScanStore((s) => s.products);
   const aliases = useScanStore((s) => s.aliases);
   const finalCounts = useScanStore((s) => s.finalCounts);
+  const currentSession = useScanStore((s) => s.currentSession);
   const businessId = useScanStore((s) => s.businessId);
+
+  // M2 fix (same leak class as F2/FinalCountTable): refreshFromCloud intentionally does an ADDITIVE
+  // cross-session merge into finalCounts (a tested cross-device sync path - see
+  // refreshFromCloud.store.test.ts). The reconcile comparison must use only the CURRENT session's
+  // counts, not every session's counts merged into the store.
+  const sessionFinalCounts = currentSession
+    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
+    : finalCounts;
 
   const [importError, setImportError] = useState("");
   const [matchError, setMatchError] = useState("");
@@ -108,7 +117,7 @@ export function ReconcilePanel() {
         return;
       }
       const body = (await res.json()) as { matches: MatchResult[] };
-      const countedByUid = deriveCountedByUid(body.matches, products, aliases, finalCounts, businessId);
+      const countedByUid = deriveCountedByUid(body.matches, products, aliases, sessionFinalCounts, businessId);
       const builtReport = buildReconcileReport({ matches: body.matches, adapter: session.adapter, countedByUid });
       setResults(body.matches, builtReport);
     } catch {
