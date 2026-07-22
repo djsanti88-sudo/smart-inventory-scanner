@@ -187,6 +187,30 @@ describe("Ledger invariant suite (books balance on every path)", () => {
     await assertRetryIsNoOp(store);
   });
 
+  it("path: POST-DELETE (quantity transferred to an Unidentified provisional, never lost)", async () => {
+    const store = aiOffStore();
+    store.getState().processScan("878106003504");
+    const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === "878106003504" && r.status === "open")!;
+    store.getState().resolveUnknown(review.id, "create_new", { applyToCount: true, origin: "human", newProduct: { name: "To Delete", primaryBarcode: "878106003504" } });
+    store.getState().processScan("878106003504"); // second unit
+    const p = store.getState().products.find((x) => x.name === "To Delete")!;
+    const totalBefore = store.getState().finalCounts.reduce((s2, c) => s2 + c.quantity, 0);
+
+    store.getState().deleteProduct(p.id);
+
+    // Sentinel (feed-124/counts-122 class): the total NEVER drops on delete.
+    expect(store.getState().finalCounts.reduce((s2, c) => s2 + c.quantity, 0), "delete: total quantity invariant").toBe(totalBefore);
+    expect(store.getState().finalCounts.some((c) => c.productId === p.id), "delete: no count remains on the deleted product").toBe(false);
+    assertBooksBalance(store);
+    await assertRetryIsNoOp(store);
+
+    // Undo restores the original attribution without inflating or losing quantity.
+    store.getState().undoDeleteProduct();
+    expect(store.getState().finalCounts.reduce((s2, c) => s2 + c.quantity, 0), "undo: total quantity invariant").toBe(totalBefore);
+    assertBooksBalance(store);
+    await assertRetryIsNoOp(store);
+  });
+
   it("path: POST-MARKWRONG (quantity transferred)", async () => {
     const store = aiOffStore();
     const s = store.getState();

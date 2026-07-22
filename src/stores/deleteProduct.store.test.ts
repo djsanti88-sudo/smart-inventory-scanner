@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 
-// Phase 1: deleting a saved product archives it + un-verifies it + deactivates ALL its aliases + removes
-// its count + detaches its feed rows, so the freed code re-decodes (Needs Review) and never re-matches the
-// deleted product. Reversible via undoDeleteProduct. Deleting one duplicate must not touch the others.
+// Phase 1 (+ 2026-07-22 delete-transfer): deleting a saved product archives it + un-verifies it +
+// deactivates ALL its aliases + TRANSFERS its counted quantity onto an Unidentified provisional
+// (TOP-LEVEL LAW: scanned quantity never vanishes) + repoints its feed rows, so the code never
+// re-matches the deleted product. Reversible via undoDeleteProduct. Deleting one duplicate must not
+// touch the others. Transfer specifics: deleteCountTransfer.store.test.ts.
 
 function addProduct(store: ReturnType<typeof createTestScanStore>, code: string, over: { name: string; brand?: string }) {
   store.getState().processScan(code);
@@ -35,16 +37,22 @@ describe("scanStore - deleteProduct (reversible, frees the code)", () => {
     expect(store.getState().finalCounts.some((c) => c.productId === p.id)).toBe(false);
   });
 
-  it("the freed code re-scans to Needs Review, NOT the deleted product", () => {
+  it("the freed code re-scans against the Unidentified provisional carrying the transferred count, NOT the deleted product", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const p = addProduct(store, "888888888881", { name: "Widget", brand: "Acme" });
     store.getState().deleteProduct(p.id);
 
+    // 2026-07-22 (delete-transfer): the deleted product's count moved onto a counted, UNVERIFIED
+    // "Unidentified item" provisional. The Phase-2 re-scan dedup bridge therefore counts a re-scan
+    // deterministically against that provisional (identity still unconfirmed) instead of opening a
+    // duplicate review - same as scanning any unknown code twice.
     const ev = store.getState().processScan("888888888881");
     expect(ev?.matchedProductId).not.toBe(p.id); // never re-matches the deleted product
-    expect(ev?.status).not.toBe("known");
-    expect(store.getState().needsReviewQueue.some((r) => r.cleanCode === "888888888881" && r.status === "open")).toBe(true);
+    const matched = store.getState().products.find((x) => x.id === ev?.matchedProductId);
+    expect(matched?.provisional).toBe(true);
+    expect(matched?.verified).toBe(false);
     expect(qty(store, p.id)).toBe(0);
+    expect(qty(store, matched!.id)).toBe(2); // transferred 1 + re-scan 1: nothing lost, nothing duplicated
   });
 
   it("Undo restores the product, its aliases, and its count exactly", () => {

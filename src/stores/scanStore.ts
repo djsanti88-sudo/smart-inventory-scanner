@@ -166,6 +166,10 @@ export interface ProductDeleteBackup {
   shopOverrides: ShopOverride[]; // removed private shop-override entries keyed to their codes
   feed: ScanEvent[]; // scan-feed rows (full prior value) that referenced the deleted product(s)
   deletedAt: string;
+  /** Ids of the "Unidentified item" provisionals minted by the delete to carry the deleted counts
+   *  (TOP-LEVEL LAW: quantity never vanishes). Optional: older persisted backups lack it. Undo uses
+   *  it to remove the now-empty provisionals after restoring the original rows. */
+  mintedProvisionalIds?: string[];
 }
 
 /**
@@ -902,23 +906,30 @@ function makeQueueItem(params: {
 // appliedIdempotencyKeys) so orphan history survives the merge and a replayed event id stays a no-op.
 // Deduped unions keep a repeated merge idempotent. Pure: returns a new array, never mutates. A null
 // targetId (or a zero-quantity orphan) just drops the orphan row - identical to each site's old behavior.
-function transferOrphanCount(
+// SESSION-SCOPED (root-cause fix 2026-07-22): refreshFromCloud's additive cross-session merge can
+// leave finalCounts holding rows for the SAME productId from a DIFFERENT session. Matching the
+// target by productId alone (the old behavior) could pour the orphan's quantity onto a foreign
+// session's row - which the session-filtered counts table then hides, deflating the visible total
+// (the feed-124/counts-122 class). Each orphan row now merges only into a target row of ITS OWN
+// session, mirroring incrementInventoryCount's (productId, sessionId) scoping. Exported for tests.
+export function transferOrphanCount(
   finalCounts: InventoryCount[],
   oid: string,
   targetId: string | null,
   nowIso: string,
 ): InventoryCount[] {
-  const orphanRow = finalCounts.find((c) => c.productId === oid);
-  const orphanQty = orphanRow?.quantity ?? 0;
+  const orphanRows = finalCounts.filter((c) => c.productId === oid);
   let next = finalCounts.filter((c) => c.productId !== oid);
-  if (targetId && orphanRow && orphanQty > 0) {
-    const targetRow = next.find((c) => c.productId === targetId);
+  if (!targetId) return next; // no merge target: drop (identical to each call site's old behavior)
+  for (const orphanRow of orphanRows) {
+    if (orphanRow.quantity <= 0) continue;
+    const targetRow = next.find((c) => c.productId === targetId && c.sessionId === orphanRow.sessionId);
     next = targetRow
       ? next.map((c) =>
-          c.productId === targetId
+          c.productId === targetId && c.sessionId === orphanRow.sessionId
             ? {
                 ...c,
-                quantity: c.quantity + orphanQty,
+                quantity: c.quantity + orphanRow.quantity,
                 scanEventIds: Array.from(new Set([...c.scanEventIds, ...orphanRow.scanEventIds])),
                 aliasesSeen: Array.from(new Set([...c.aliasesSeen, ...orphanRow.aliasesSeen])),
                 appliedIdempotencyKeys: Array.from(new Set([...c.appliedIdempotencyKeys, ...orphanRow.appliedIdempotencyKeys])),
@@ -5929,7 +5940,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       deleteProduct: (productId) => {
-        const r = deleteProductsInternal(get, set, emitAudit, now, [productId], "product_deleted");
+        const r = deleteProductsInternal(get, set, emitAudit, now, idFactory, [productId], "product_deleted");
         return r.backup;
       },
 
@@ -5949,7 +5960,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           })
           .map((p) => p.id);
         if (ids.length === 0) return { removed: 0, backup: null };
-        const r = deleteProductsInternal(get, set, emitAudit, now, ids, "product_purged");
+        const r = deleteProductsInternal(get, set, emitAudit, now, idFactory, ids, "product_purged");
         return { removed: ids.length, backup: r.backup };
       },
 
@@ -5966,15 +5977,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         };
         const restoredProductIds = new Set(backup.products.map((p) => p.id));
         const feedById = new Map(backup.feed.map((e) => [e.id, e]));
-        set((s) => ({
-          products: upsertById(s.products, backup.products),
+        set((s) => {
+          // The repointed count rows share ids with the backed-up originals, so upsertById below
+          // restores them onto the original product. The delete-minted provisionals are then empty:
+          // remove any that no remaining count row references (a provisional that gained NEW scans
+          // after the delete keeps its own fresh count row and therefore stays).
+          const restoredCounts = upsertById(s.finalCounts, backup.counts);
+          const stillCounted = new Set(restoredCounts.map((c) => c.productId));
+          const minted = new Set(backup.mintedProvisionalIds ?? []);
+          return {
+          products: upsertById(s.products, backup.products).filter((p) => !(minted.has(p.id) && !stillCounted.has(p.id))),
           aliases: upsertById(s.aliases, backup.aliases),
-          finalCounts: upsertById(s.finalCounts, backup.counts),
+          finalCounts: restoredCounts,
           catalog: [...s.catalog, ...backup.catalog.filter((c) => !s.catalog.some((x) => x.normalizedBarcode === c.normalizedBarcode && x.name === c.name))],
           shopOverrides: [...s.shopOverrides, ...backup.shopOverrides.filter((o) => !s.shopOverrides.some((x) => x.businessId === o.businessId && x.normalizedBarcode === o.normalizedBarcode))],
           scanFeed: s.scanFeed.map((e) => feedById.get(e.id) ?? e),
           lastProductDeleteBackup: null,
-        }));
+          };
+        });
         for (const p of backup.products) emitAudit({ entityType: "Product", entityId: p.id, action: "product_delete_undone", metadata: { name: p.name } });
         get().recordFeedback("restored_cleanup", { code: "", meta: { restored: restoredProductIds.size } });
         return true;
@@ -6048,6 +6068,7 @@ function deleteProductsInternal(
   set: (partial: Partial<ScanState> | ((s: ScanState) => Partial<ScanState>)) => void,
   emitAudit: (e: { entityType: string; entityId: string; action: string; metadata?: Record<string, unknown> }) => void,
   now: () => string,
+  idFactory: () => string,
   productIds: string[],
   auditAction: string,
 ): { backup: ProductDeleteBackup | null } {
@@ -6063,6 +6084,35 @@ function deleteProductsInternal(
   const targetOverrides = state.shopOverrides.filter((o) => codes.has(o.normalizedBarcode));
   const touchedFeed = state.scanFeed.filter((e) => e.matchedProductId !== null && targetIds.has(e.matchedProductId));
 
+  // TOP-LEVEL LAW (feed-124/counts-122 root cause, fixed 2026-07-22): deleting a product must never
+  // make counted quantity vanish - the physical items were scanned and are still on the shelf; only
+  // the identity is being discarded. For every deleted product that carries counted quantity, mint an
+  // "Unidentified item" provisional (same shape as ensureProvisionalCount's) and REPOINT the count
+  // rows onto it (ids/sessionIds/scanEventIds untouched, so undo's upsert-by-id restores them
+  // exactly and the ledger replay stays reproducible). Feed rows repoint to the provisional too.
+  const provisionalByProduct = new Map<string, Product>();
+  for (const p of targetProducts) {
+    const qty = targetCounts.filter((c) => c.productId === p.id).reduce((s, c) => s + c.quantity, 0);
+    if (qty <= 0) continue; // nothing counted -> nothing to preserve, mint no ghost row
+    const code =
+      touchedFeed.find((e) => e.matchedProductId === p.id)?.cleanCode ||
+      (p.primaryBarcode ?? "").trim() ||
+      productIdentityCodes(p, state.aliases)[0] ||
+      "";
+    const ct = code ? detectCodeType(code) : null;
+    const floor = code && ct ? prefixFloorName(code, ct) : null;
+    provisionalByProduct.set(p.id, {
+      id: `prod-${idFactory()}`, businessId: state.businessId,
+      name: code ? provisionalPlaceholderName(code) : "Unidentified item (deleted product)",
+      brand: floor?.brand ?? "", category: "", specsShort: "", specsFull: "", primarySku: "",
+      primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [], aliases: [], imageUrl: "",
+      productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini", confidence: 0,
+      verified: false, provisional: true, provenanceTier: "provisional",
+      createdAt: now(), createdBy: "human", updatedAt: now(), updatedBy: "human",
+    });
+  }
+  const mintedProvisionalIds = [...provisionalByProduct.values()].map((p) => p.id);
+
   // Snapshot the PRE-delete values for an exact Undo (+ for the downloadable JSON backup in the UI).
   const backup: ProductDeleteBackup = {
     products: targetProducts.map((p) => ({ ...p })),
@@ -6072,22 +6122,36 @@ function deleteProductsInternal(
     shopOverrides: targetOverrides.map((o) => ({ ...o })),
     feed: touchedFeed.map((e) => ({ ...e })),
     deletedAt: now(),
+    mintedProvisionalIds,
   };
 
   set((s) => ({
     // Archive + un-verify so the deterministic resolver/matcher (verified === true only) stops matching it.
-    products: s.products.map((p) => (targetIds.has(p.id) ? { ...p, status: "archived" as const, verified: false, updatedBy: "human" } : p)),
+    products: [
+      ...s.products.map((p) => (targetIds.has(p.id) ? { ...p, status: "archived" as const, verified: false, updatedBy: "human" } : p)),
+      ...provisionalByProduct.values(),
+    ],
     // Deactivate ALL aliases so an approved alias can no longer resolve the freed code.
     aliases: s.aliases.map((a) => (targetIds.has(a.productId) ? { ...a, approved: false } : a)),
-    // Remove the session count rows.
-    finalCounts: s.finalCounts.filter((c) => !targetIds.has(c.productId)),
+    // Repoint counted rows onto the minted provisional (quantity INVARIANT); drop only zero-qty rows.
+    finalCounts: s.finalCounts.flatMap((c) => {
+      if (!targetIds.has(c.productId)) return [c];
+      const prov = provisionalByProduct.get(c.productId);
+      return prov ? [{ ...c, productId: prov.id, updatedAt: now() }] : [];
+    }),
     // Drop catalog / shop-override entries keyed to the freed codes so a future scan re-decodes them.
     catalog: s.catalog.filter((c) => !(codes.has(c.normalizedBarcode) || codes.has(c.barcode))),
     shopOverrides: s.shopOverrides.filter((o) => !codes.has(o.normalizedBarcode)),
-    // Detach scan-feed rows (history kept, but no longer "known" / pointing at the deleted product).
+    // Repoint scan-feed rows at the provisional carrying their quantity (history kept, identity
+    // reopened); rows of a zero-count product detach to null exactly as before.
     scanFeed: s.scanFeed.map((e) =>
       e.matchedProductId !== null && targetIds.has(e.matchedProductId)
-        ? { ...e, matchedProductId: null, status: "needs_review" as const, resolverStatus: "needs_review" as const }
+        ? {
+            ...e,
+            matchedProductId: provisionalByProduct.get(e.matchedProductId)?.id ?? null,
+            status: "needs_review" as const,
+            resolverStatus: "needs_review" as const,
+          }
         : e,
     ),
     lastProductDeleteBackup: backup,
