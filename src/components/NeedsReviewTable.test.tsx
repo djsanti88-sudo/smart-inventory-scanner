@@ -96,6 +96,33 @@ describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
   });
 });
 
+describe("NeedsReviewTable - resolved rows show human copy, never the raw enum", () => {
+  it("a resolved create_new row says the product was created, not 'create_new'", () => {
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "done-cn", cleanCode: "4000000000004", status: "resolved", syncStatus: "pending", resolutionAction: "create_new" }),
+      ],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.queryByText("create_new")).toBeNull();
+    expect(screen.getByTestId("resolved-label").textContent).toMatch(/new product created/i);
+  });
+
+  it("link_existing and ignore also render human copy", () => {
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "done-le", cleanCode: "5000000000005", status: "resolved", syncStatus: "pending", resolutionAction: "link_existing" }),
+        review({ id: "done-ig", cleanCode: "6000000000006", status: "resolved", syncStatus: "pending", resolutionAction: "ignore" }),
+      ],
+    });
+    render(<NeedsReviewTable />);
+    expect(screen.queryByText("link_existing")).toBeNull();
+    const labels = screen.getAllByTestId("resolved-label").map((el) => el.textContent ?? "");
+    expect(labels.some((t) => /linked to existing product/i.test(t))).toBe(true);
+    expect(labels.some((t) => /ignored/i.test(t))).toBe(true);
+  });
+});
+
 // Task 9b fix (reviewer finding): a review PARKED at status "suggested" (pending inline suggestion,
 // owner-ratified 2026-07-14) must NOT render in the Needs Review queue - it belongs to the feed
 // row's inline controls + the SuggestedApprovalPanel surface. The reviewer's exact hole: at

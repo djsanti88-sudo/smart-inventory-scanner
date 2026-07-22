@@ -79,7 +79,7 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await row.getByTestId("open-create").click();
   await row.getByLabel("product name").fill("FB Mystery");
   await row.getByTestId("create-save").click();
-  await expect(row).toContainText(/resolved|create_new/i);
+  await expect(row).toContainText(/new product created|resolved/i);
   await waitDrained(page); // ensure SAVE_PRODUCT + RESOLVE_ALIAS reached the emulator before reloading /scan
   await page.screenshot({ path: `${PROOF}/04-approved.png`, fullPage: true });
 

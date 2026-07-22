@@ -32,6 +32,23 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
   );
 }
 
+// A resolved row stays visible until its resolution syncs (owner rule: nothing looks lost before it
+// saves), so its Actions cell must read as a DONE state in plain words - never the internal enum
+// ("create_new"), which reads like a broken button.
+function resolvedActionLabel(review: UnknownCodeReview): string {
+  const saving = review.syncStatus !== "synced" ? " (saving...)" : "";
+  switch (review.resolutionAction) {
+    case "create_new":
+      return `Done: new product created${saving}`;
+    case "link_existing":
+      return `Done: linked to existing product${saving}`;
+    case "ignore":
+      return `Ignored${saving}`;
+    default:
+      return `Done${saving}`;
+  }
+}
+
 // Needs Review queue. Unknown / conflicting codes land here and are never silently counted.
 // Human resolution permanently learns an alias (handled by the store), so the AI is never asked
 // about that code again.
@@ -284,7 +301,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           </div>
         )}
         {resolved ? (
-          <span className="text-sm text-zinc-600">{review.resolutionAction ?? review.status}</span>
+          <span className="text-sm text-zinc-600" data-testid="resolved-label">
+            {resolvedActionLabel(review)}
+          </span>
         ) : mode === "create" ? (
           <div className="flex w-64 flex-col gap-1.5" data-testid="create-form">
             <input
