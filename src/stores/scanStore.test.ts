@@ -718,7 +718,7 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
         { productName: "Camel Crush Box", brand: "Camel", upc: "049000111222", sourceUrls: ["https://gs1.org/x"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
-    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name.includes("Camel Crush"));
     expect(prov).toBeDefined();
@@ -726,7 +726,12 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(prov!.verified).toBe(false);
   });
 
-  it("provisionally counts a tire decode missing size/load/speed even if verified (incomplete specs)", async () => {
+  it("auto-applies a tire decode missing size/load/speed as a suggestion (app-verified exact) - owner order 2026-07-10", async () => {
+    // Owner order 2026-07-10: an app-verified exact decode (exactCodeEvidenceVerifiedByApp true) no
+    // longer sits in Needs Review just because tireOk failed (thin tire identity) - it auto-applies as
+    // a SUGGESTION onto the counted row instead and the review auto-closes. Product stays
+    // provisional/unverified (never a real verified product); see scanStore.test.ts "auto-apply
+    // high-trust suggestions" describe block for the dedicated coverage of this rule.
     const store = createTestScanStore({ db: new MockDb() });
     const { reviewId } = await decode(
       store,
@@ -737,13 +742,13 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       ),
     );
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
-    expect(review.status).toBe("open"); // thin tire identity stays open for review
+    expect(review.status).toBe("resolved"); // auto-closed (owner order 2026-07-10)
+    expect(review.resolvedBy).toBe("auto");
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name.includes("Falken Wildpeak"));
     expect(prov).toBeDefined();
     expect(prov!.provisional).toBe(true);
-    expect(prov!.verified).toBe(false);
-    expect(review.reason.toLowerCase()).toContain("size");
+    expect(prov!.verified).toBe(false); // still only a suggestion, never a verified product
   });
 
   it("DOES auto-count a tire decode WITH full specs (size + load + speed)", async () => {
@@ -761,7 +766,11 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(1);
   });
 
-  it("provisionally counts when confidence is below the 0.80 gate even if verified", async () => {
+  it("auto-applies as a suggestion when confidence is below the 0.80 gate but app-verified exact - owner order 2026-07-10", async () => {
+    // Owner order 2026-07-10: exactCodeEvidenceVerifiedByApp true + status "verified" (the Go-UPC exact
+    // class) qualifies for auto-suggest-apply regardless of confidence - it no longer needs confidence
+    // >= 0.8 to skip Needs Review. It is still applied as a SUGGESTION (product stays
+    // provisional/unverified), never a full verified auto-count (that still requires confidence >= 0.8).
     const store = createTestScanStore({ db: new MockDb() });
     const { reviewId } = await decode(
       store,
@@ -771,12 +780,14 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
         { productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "049000111222", sourceUrls: ["https://x"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
-    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("open");
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("resolved"); // auto-closed (owner order 2026-07-10)
+    expect(review.resolvedBy).toBe("auto");
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name === "Coca-Cola Classic");
     expect(prov).toBeDefined();
     expect(prov!.provisional).toBe(true);
-    expect(prov!.verified).toBe(false);
+    expect(prov!.verified).toBe(false); // still only a suggestion, never a verified product
   });
 
   it("provisionally counts a CONFLICT (providers disagree) - review stays open", async () => {
@@ -824,18 +835,23 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
   });
 
   it("FIREWALL: 745125495781 rivet kit in tire context provisionally counts (category conflict flagged, review stays open)", async () => {
+    // Task 9 (owner-ratified 2026-07-14): the category hard-block now clears ONLY for an APP-VERIFIED exact
+    // code. The go-upc rivet-kit POISON is the canonical weak/unverified class - in production the app's
+    // EvidenceVerifier returns exactCodeEvidenceVerifiedByApp:false for it (the evidence text carries a
+    // DIFFERENT code + an invalidation phrase, proven by src/eval/fixtures.ts:745125495781). Mirror that
+    // real weak shape here so the poison guard is exercised honestly: it STILL hard-blocks and stays open.
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ scanContext: "tire" });
     const { reviewId } = await decode(
       store,
       "745125495781",
       decodeResponse(
-        { status: "verified", confidence: 0.92, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { status: "suggested", confidence: 0.6, reason: "Suggested", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
         { productName: "Manstel 200 Pcs Aluminum Core Blind Rivet Semi-Round Head Screw Kit M3.2X11mm", brand: "", upc: "745125495781", sourceUrls: ["https://go-upc.com/search?q=745125495781"], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
     const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
-    expect(review.status).toBe("open"); // category conflict flagged for review
+    expect(review.status).toBe("open"); // category conflict flagged for review (poison guard intact)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name.toLowerCase().includes("manstel") || p.name.toLowerCase().includes("rivet"));
     expect(prov).toBeDefined();
@@ -860,14 +876,66 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
     expect(store.getState().finalCounts).toHaveLength(1);
   });
 
+  it("TASK 9 (owner-ratified 2026-07-14): an APP-VERIFIED off-category decode COUNTS with an off-category tag and its REAL confidence", async () => {
+    // Real incident: 0792080004312 decoded via Go-UPC EXACT match as "Original Anchor Bar Hot Sauce" at 90%
+    // with app-verified evidence. The tire-context category firewall used to hard-block it to Needs Review
+    // and demote it to a bogus "50/100". Now the app-verified exact code CLEARS the hard-block: it counts,
+    // the feed row is tagged offCategory, the review resolves, and the honest 90% confidence is kept.
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "0792080004312",
+      decodeResponse(
+        { status: "verified", confidence: 0.9, reason: "Verified AI Decode", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { productName: "Original Anchor Bar Hot Sauce", brand: "Anchor Bar", category: "food", upc: "0792080004312", sourceUrls: ["https://go-upc.com/search?q=0792080004312"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    // Counts (the category hard-block was cleared by verification, not skipped).
+    expect(store.getState().finalCounts).toHaveLength(1);
+    // Review resolves - it is NOT routed to Needs Review.
+    expect(store.getState().needsReviewQueue.find((r) => r.id === reviewId)!.status).toBe("resolved");
+    // The feed row carries the off-category advisory flag.
+    const feedRow = store.getState().scanFeed.find((e) => e.cleanCode === "0792080004312");
+    expect(feedRow?.offCategory).toBe(true);
+    // COPY FIX: a resolved review never shows the "confidence too low (50/100)" demotion. Even if a score
+    // were present, decodeStatus "verified" suppresses that copy (asserted in the NeedsReviewTable test).
+    // The product exists at its honest identity.
+    const prod = store.getState().products.find((p) => p.name.toLowerCase().includes("hot sauce"));
+    expect(prod).toBeDefined();
+  });
+
+  it("TASK 9 poison guard intact: a WEAK (non-app-verified) non-tire decode in tire context still hard-blocks (no off-category count)", async () => {
+    // Same off-category product, but WITHOUT app-verified exact evidence -> the coconut-oil / poison class.
+    // The hard-block MUST stay: it counts only provisionally (scan N = count N) with the review left OPEN,
+    // and the row is NOT tagged offCategory (the conflict was NOT cleared).
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "0792080004312",
+      decodeResponse(
+        { status: "suggested", confidence: 0.6, reason: "Suggested", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
+        { productName: "Original Anchor Bar Hot Sauce", brand: "Anchor Bar", category: "food", upc: "0792080004312", sourceUrls: ["https://go-upc.com/search?q=0792080004312"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("open"); // still hard-blocked to review
+    expect(review.reason.toLowerCase()).toContain("category conflict");
+    const feedRow = store.getState().scanFeed.find((e) => e.cleanCode === "0792080004312");
+    expect(feedRow?.offCategory).toBeFalsy(); // conflict NOT cleared -> no advisory tag
+  });
+
   it("FIREWALL: after a category conflict provisionally counts, manual relink makes future scans count the correct product", async () => {
+    // Task 9: same weak-poison shape as above (exactCodeEvidenceVerifiedByApp:false) so the rivet kit still
+    // hard-blocks and only provisionally counts - the app-verified clear does NOT apply to the poison class.
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ scanContext: "tire" });
     const { reviewId } = await decode(
       store,
       "745125495781",
       decodeResponse(
-        { status: "verified", confidence: 0.92, reason: "Verified", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" } },
+        { status: "suggested", confidence: 0.6, reason: "Suggested", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider" } },
         { productName: "Manstel Aluminum Rivet Kit", brand: "", upc: "745125495781", sourceUrls: [], verifiedFacts: [], guesses: [], aliases: [] },
       ),
     );
@@ -901,5 +969,147 @@ describe("scanStore - liveDecode (mocked, no live tokens)", () => {
       globalThis.fetch = original;
     }
     expect(spy).not.toHaveBeenCalled(); // deterministic known scan never hits the AI route
+  });
+});
+
+describe("scanStore - auto-apply high-trust suggestions (owner order 2026-07-10)", () => {
+  // Any decode with confidence >= 0.8, OR a verified decode with app-verified exact-code evidence
+  // (Go-UPC exact class), must no longer sit in Needs Review: the suggested identity is applied
+  // in place onto the already-counted provisional product row (still provisional/unverified, no
+  // alias), and the review auto-closes. Below 0.8 confidence (and non-exact-verified), conflicts,
+  // and the master switch off must behave exactly as before (open review).
+  function decodeResponse(decision: object, result: object) {
+    return {
+      ok: true,
+      json: async () => ({ providerNames: ["gemini", "openai"], results: [result], decision }),
+    };
+  }
+  function stub(resp: object) {
+    const original = globalThis.fetch;
+    const spy = vi.fn(async () => resp) as unknown as typeof fetch;
+    globalThis.fetch = spy;
+    return { spy, restore: () => (globalThis.fetch = original) };
+  }
+  async function decode(store: ReturnType<typeof createTestScanStore>, code: string, resp: object) {
+    store.getState().processScan(code);
+    const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
+    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini" });
+    const { spy, restore } = stub(resp);
+    try {
+      await store.getState().liveDecode(reviewId);
+    } finally {
+      restore();
+    }
+    return { reviewId, spy };
+  }
+
+  it("Test 1: suggested decode confidence 0.9 with usable name+brand, no conflict -> auto-applies identity, review auto-closes, no double count, no alias", async () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db });
+    const { reviewId } = await decode(
+      store,
+      "049000111222",
+      decodeResponse(
+        { status: "suggested", confidence: 0.9, reason: "Suggested, strong sources.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },
+        { productName: "Coca-Cola Classic 12oz", brand: "Coca-Cola", upc: "049000111222", sourceUrls: ["https://example.com"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    // Review auto-closed (badge excludes it: Nav.tsx filters status === "open").
+    expect(review.status).toBe("resolved");
+    expect(review.resolvedBy).toBe("auto");
+    // Suggestion fields remain on the resolved review (LiveScanFeed's render-time lookup has no status filter).
+    expect(review.suggestedProductName).toBe("Coca-Cola Classic 12oz");
+
+    // The provisional product row now carries the suggested identity, but stays provisional+unverified.
+    const prov = store.getState().products.find((p) => p.name === "Coca-Cola Classic 12oz");
+    expect(prov).toBeDefined();
+    expect(prov!.brand).toBe("Coca-Cola");
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
+
+    // Counted exactly once (no double count): one final-count row, quantity 1.
+    expect(store.getState().finalCounts).toHaveLength(1);
+    expect(store.getState().finalCounts[0].quantity).toBe(1);
+
+    // Feed row decodeStatus is "suggested", never "verified" from this path.
+    const feedRow = store.getState().scanFeed.find((e) => e.cleanCode === "049000111222");
+    expect(feedRow?.decodeStatus).toBe("suggested");
+
+    // TRUST RULES: no new alias created at all from this path.
+    expect(store.getState().aliases.some((a) => a.cleanCode === "049000111222")).toBe(false);
+  });
+
+  it("Test 2: verified decode with exactCodeEvidenceVerifiedByApp=true, confidence 0.9, FAILS tireOk (tire context, missing size/model) -> auto-applies as suggested, counted once", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const { reviewId } = await decode(
+      store,
+      "770000000007",
+      decodeResponse(
+        { status: "verified", confidence: 0.9, reason: "Verified from Go-UPC (exact barcode match).", evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "single_provider" }, corroborationPath: "single_source" },
+        // Falken Wildpeak AT, no specsShort -> isTireContext true, hasCountableTireIdentity false (no size) -> tireOk fails.
+        { productName: "Falken Wildpeak AT", brand: "Falken", upc: "770000000007", sourceUrls: ["https://go-upc.com/x"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("resolved"); // auto-closed via app-verified exact class, despite tireOk failing
+    expect(review.resolvedBy).toBe("auto");
+
+    const prov = store.getState().products.find((p) => p.name.includes("Falken Wildpeak"));
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false); // NOT a verified product - only displayed as a suggestion
+
+    expect(store.getState().finalCounts).toHaveLength(1);
+    expect(store.getState().finalCounts[0].quantity).toBe(1); // counted once, no double count
+
+    expect(store.getState().aliases.some((a) => a.cleanCode === "770000000007")).toBe(false);
+  });
+
+  it("Test 3: suggested decode confidence 0.7 -> review STAYS open (legacy behavior unchanged), product name stays placeholder", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const { reviewId } = await decode(
+      store,
+      "049000111222",
+      decodeResponse(
+        { status: "suggested", confidence: 0.7, reason: "Suggested, weak sources.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },
+        { productName: "Coca-Cola Classic 12oz", brand: "Coca-Cola", upc: "049000111222", sourceUrls: ["https://example.com"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
+    expect(store.getState().finalCounts).toHaveLength(1);
+    // Below 0.8, current behavior still enriches the provisional row in place with the usable name
+    // (pre-existing TASK 3 ENRICH behavior) - this test pins that this is UNCHANGED by the new rule.
+    const prov = store.getState().products.find((p) => p.name === "Coca-Cola Classic 12oz");
+    expect(prov).toBeDefined();
+    expect(prov!.provisional).toBe(true);
+    expect(prov!.verified).toBe(false);
+  });
+
+  it("Test 4: autoAddDecodedProducts=false + suggested confidence 0.9 -> review stays open (master switch respected)", async () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db });
+    store.getState().processScan("049000111222");
+    const reviewId = store.getState().needsReviewQueue.find((r) => r.status === "open")!.id;
+    store.getState().updateSettings({ aiLookupEnabled: true, primaryProvider: "gemini", autoAddDecodedProducts: false });
+    const { restore } = stub(
+      decodeResponse(
+        { status: "suggested", confidence: 0.9, reason: "Suggested, strong sources.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },
+        { productName: "Coca-Cola Classic 12oz", brand: "Coca-Cola", upc: "049000111222", sourceUrls: ["https://example.com"], verifiedFacts: [], guesses: [], aliases: [] },
+      ),
+    );
+    try {
+      await store.getState().liveDecode(reviewId);
+    } finally {
+      restore();
+    }
+    const review = store.getState().needsReviewQueue.find((r) => r.id === reviewId)!;
+    expect(review.status).toBe("open"); // master switch off routes everything to manual review
+    expect(store.getState().finalCounts).toHaveLength(1);
   });
 });

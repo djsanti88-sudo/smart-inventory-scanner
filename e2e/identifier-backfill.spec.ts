@@ -28,7 +28,7 @@ const legacyState = {
       syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
     }],
   },
-  version: 5,
+  version: 6,
 };
 
 test("IdentifierBackfillBot: platform fills barcode-in-name, reversible (P2)", async ({ page }) => {

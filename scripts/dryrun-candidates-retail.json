@@ -1,0 +1,352 @@
+[
+  {
+    "code": "0000750270333",
+    "truth": "TJ Ravioli",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0010700557469",
+    "truth": "Jolly Rancher Jolly Rancher Gummies Minis",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0011110835550",
+    "truth": "Kroger Kroger applesauce",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0011284003151",
+    "truth": "JTM FOODS, LLC Lightly glazed snack pies",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0014100050605",
+    "truth": "thin & crispy",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0016000507258",
+    "truth": "Nature Valley Oats N Dark Chocolate Granola Bars",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0019600920106",
+    "truth": "Van de Kamp's CRISPY BATTERED FILLETS",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0021130281213",
+    "truth": "Signature Select Old-Fashioned Oats",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0023100136851",
+    "truth": "Rice ramen",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0028400668699",
+    "truth": "Rold Gold Rold Gold Garlic Parmesan Thin Crisps Pretzels - 8.75 Oz",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0030223029076",
+    "truth": "readymeals! CHICKEN & BACON COBB WRAP",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0032917007841",
+    "truth": "Traditional Medicinals Immune Zoom",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0035549812920",
+    "truth": "American Valley Creamy Peanut Butter",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0036800412828",
+    "truth": "Food Club Cherry pre-baked pie, cherry",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0038259130155",
+    "truth": "Italian style meatball",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0040822342506",
+    "truth": "Sabra,  Sabra Dipping Company Llc Bold & Spicy Hummus With Tostitos Tortilla Chips",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0041220306794",
+    "truth": "Hill Country Fare CHICKEN WINGS Buffalo Style Hot",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0041268707089",
+    "truth": "Hannaford Bakery Double Blueberry Filled Muffins",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0041376201301",
+    "truth": "Frankford Candy  Llc Marvel, Avengers Assemble, Mini Milk Chocolate Bar",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0041497400805",
+    "truth": "Weis,  Weis Markets  Inc. Iodized Salt & Pepper",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0041735094315",
+    "truth": "PICS Hummus",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0043119001568",
+    "truth": "BYRNE DAIRY Ice Cream",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0046100358122",
+    "truth": "Sargent Shareables",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0049022596986",
+    "truth": "Walgreens Co. Fruit & Grain Cereal Bar",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0051000231451",
+    "truth": "CAMPBELL SOUP COMPANY Campbell's pasta chicken alfredo",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0052548597887",
+    "truth": "7-Eleven, Inc. Marshmallow treat",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0055742564631",
+    "truth": "Tranches d'ananas",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0058779144265",
+    "truth": "Breyers Hazelnut Chocolate Ice-cream",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0060383152369",
+    "truth": "President's Choice Vanilla Cupcakes Gluten Free",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0062639358327",
+    "truth": "Western Family Extra virgin olive oil",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0065776631513",
+    "truth": "Flax4life Flax Muffins, Carrot Raisin",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0069065000929",
+    "truth": "Pacific,  Bedessee Pacific maquereau in tomato sauce",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0070253492471",
+    "truth": "Nash Finch Company Lemon sandwich cremes cookies, lemon",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0070784503288",
+    "truth": "Tops,  Tops Markets  Llc Tops, conversation hearts",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0071430011508",
+    "truth": "Dole Blueberries",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0072100024002",
+    "truth": "Imperial Sugar Extra Fine Granulated Pure Cane Sugar",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0072830011433",
+    "truth": "Tillamook Extra Sharp Triple White Cheddar Shreds",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0073934159526",
+    "truth": "Yellow Clingstone Peach Halves",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0075130532738",
+    "truth": "Krasdale Foods, Inc. Saltine crackers",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0075925304151",
+    "truth": "Milton G. Waldbaum Company Muenster Cheese",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0077567001672",
+    "truth": "UNILEVER Turmeric chai spiced light ice cream swirled with cinnamon streusel",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0078197119232",
+    "truth": "Camomile Flowers Herbal Tea",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0078783904273",
+    "truth": "Cal-Organic Organic Green Chard",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0081652209058",
+    "truth": "Musk melon flavored ice bar",
+    "source": "turso:retail"
+  },
+  {
+    "code": "0085239054123",
+    "truth": "Good & Gather Boneless Diced Pork Sirloin",
+    "source": "turso:retail"
+  },
+  {
+    "code": "3014409009547",
+    "truth": "Slaur Sardet Crème de cassis",
+    "source": "turso:retail"
+  },
+  {
+    "code": "3027030038381",
+    "truth": "ANCEL, L’INSTANT GOUTMAND PAR SAINTE LUCIE Mon fondant au chocolat",
+    "source": "turso:retail"
+  },
+  {
+    "code": "3041090898174",
+    "truth": "Gallia Gallia Lait Bébé Expert Ar 1",
+    "source": "turso:retail"
+  },
+  {
+    "code": "3067163632032",
+    "truth": "Delpeyrat Magret de canard fumé au bois de hêtre",
+    "source": "turso:retail"
+  },
+  {
+    "code": "4000269100356",
+    "truth": "Sangrita Sangrita classico",
+    "source": "turso:retail"
+  },
+  {
+    "code": "4001419007433",
+    "truth": "rodeo Rodeo energy drink",
+    "source": "turso:retail"
+  },
+  {
+    "code": "4002471010003",
+    "truth": "Weyengold Frisches Sauerkraut",
+    "source": "turso:retail"
+  },
+  {
+    "code": "4004154077952",
+    "truth": "Burkhardt Mandel Sirup",
+    "source": "turso:retail"
+  },
+  {
+    "code": "5000129359190",
+    "truth": "Coop Quad summer squash",
+    "source": "turso:retail"
+  },
+  {
+    "code": "5000169661659",
+    "truth": "Waitrose Hot Cross Bunettone",
+    "source": "turso:retail"
+  },
+  {
+    "code": "5000396053432",
+    "truth": "McVitie’s Flipz Salted Caramel",
+    "source": "turso:retail"
+  },
+  {
+    "code": "5010338205195",
+    "truth": "Blue Dragon,Lloyds pharmacy Fish sauce",
+    "source": "turso:retail"
+  },
+  {
+    "code": "6009548000507",
+    "truth": "Tasty soya",
+    "source": "turso:retail"
+  },
+  {
+    "code": "6111031005019",
+    "truth": "Bimo TONIK CRISPY CHOK&NUT",
+    "source": "turso:retail"
+  },
+  {
+    "code": "6130336001991",
+    "truth": "Potato chips",
+    "source": "turso:retail"
+  },
+  {
+    "code": "6178642168090",
+    "truth": "Simply Protein Passionfruit Coconut",
+    "source": "turso:retail"
+  },
+  {
+    "code": "7032069734452",
+    "truth": "REMA 1000 Nøtte og fruktmix uten tilsatt salt",
+    "source": "turso:retail"
+  },
+  {
+    "code": "7050122120950",
+    "truth": "Maarud Mike's Tortilla Chili & Lime Style",
+    "source": "turso:retail"
+  },
+  {
+    "code": "7290002703723",
+    "truth": "מחנה יהודה סילאן טבעי 100%",
+    "source": "turso:retail"
+  },
+  {
+    "code": "7310070003577",
+    "truth": "Carlsberg 7up free",
+    "source": "turso:retail"
+  },
+  {
+    "code": "8000130171061",
+    "truth": "Nicola Russo Linguine",
+    "source": "turso:retail"
+  },
+  {
+    "code": "8000605091672",
+    "truth": "Bauli, Doria Dore'",
+    "source": "turso:retail"
+  },
+  {
+    "code": "8001091001589",
+    "truth": "Germinal Sedanini trafilati al bronzo, mais bianco ceci",
+    "source": "turso:retail"
+  },
+  {
+    "code": "8001300670124",
+    "truth": "Spar Tagliatelle ai funghi",
+    "source": "turso:retail"
+  },
+  {
+    "code": "9002859026270",
+    "truth": "Gunz, Piacelli Citrilemon Green (piacelli), Limette",
+    "source": "turso:retail"
+  }
+]

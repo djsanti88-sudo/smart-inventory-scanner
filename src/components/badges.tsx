@@ -2,11 +2,26 @@
 
 import type { FeedDecodeStatus, MatchType, ScanStatus, SyncStatus } from "@/types";
 
+// P5 Task 5 (honest provenance badges, 2026-07-20, decode-trust plan): a bare model/API
+// self-report can never mint an app-verified identity (resolver-trust law). This signal lets the
+// badge SHOW that distinction honestly: "app_verified" = the app itself fetched/matched the exact
+// code (EvidenceVerifier / decideDecode's verify paths); "ai_self_report" = a bare GPT self-report
+// (corroborationPath "gpt_self_report"); "db_self_report" = a bare Go-UPC (paid-DB) self-report.
+// Additive + optional - a row/caller with no provenance signal renders the pre-existing plain
+// label so nothing already shipped breaks.
+export type DecodeProvenance = "app_verified" | "ai_self_report" | "db_self_report";
+
 // PLAN C, TASK 1 (presentational only): collapse the weak decode states into a single
 // "Suggested" label/style. needs_review and conflict are non-blocking LABELS (Plan A already
 // makes every scan count), so the user only ever sees Verified or Suggested here - no wall.
 // This does NOT change the underlying decodeStatus enum or any counting/gating logic.
-export function DecodeStatusBadge({ status }: { status: FeedDecodeStatus }) {
+export function DecodeStatusBadge({
+  status,
+  provenance,
+}: {
+  status: FeedDecodeStatus;
+  provenance?: DecodeProvenance;
+}) {
   const map: Record<FeedDecodeStatus, [string, string]> = {
     none: ["", ""],
     decoding: ["bg-blue-100 text-blue-700 animate-pulse", "Looking up product..."],
@@ -16,7 +31,18 @@ export function DecodeStatusBadge({ status }: { status: FeedDecodeStatus }) {
     needs_review: ["bg-amber-100 text-amber-900", "Suggested"],
     vendor_label: ["bg-purple-100 text-purple-700", "Vendor label"],
   };
-  const [cls, label] = map[status];
+  const [cls, defaultLabel] = map[status];
+  // Honest provenance overrides the generic label ONLY for the two settled outcomes it applies to
+  // (verified / suggested). decoding/conflict/needs_review/vendor_label keep their own labels
+  // regardless of any stray provenance value passed in.
+  let label = defaultLabel;
+  if (status === "verified" && provenance === "app_verified") {
+    label = "Verified (app-confirmed)";
+  } else if (status === "suggested" && provenance === "ai_self_report") {
+    label = "Suggested (AI)";
+  } else if (status === "suggested" && provenance === "db_self_report") {
+    label = "Suggested (DB)";
+  }
   return (
     <span className={`rounded-md px-2 py-1 text-sm font-medium ${cls}`} data-testid="decode-row-status">
       {label}
@@ -68,22 +94,30 @@ export function SyncBadge({ status }: { status: SyncStatus }) {
   );
 }
 
-export function StatusBadge({ status }: { status: ScanStatus }) {
-  const map: Record<ScanStatus, string> = {
+// "suggested" (Task 9b, owner-ratified 2026-07-14): the PARKED pending-inline-suggestion review
+// status. NeedsReviewTable filters those reviews out of the queue entirely, but the badge stays
+// tolerant (defense in depth) so any surface that ever renders one shows a real amber "Suggested"
+// label instead of an empty label with a literal "undefined" className.
+type StatusBadgeStatus = ScanStatus | "suggested";
+
+export function StatusBadge({ status }: { status: StatusBadgeStatus }) {
+  const map: Record<StatusBadgeStatus, string> = {
     known: "bg-green-100 text-green-700",
     unknown: "bg-red-100 text-red-800",
     needs_review: "bg-amber-100 text-amber-900",
     resolved: "bg-blue-100 text-blue-700",
     ignored: "bg-zinc-100 text-zinc-600",
     conflict: "bg-amber-100 text-amber-900",
+    suggested: "bg-amber-100 text-amber-900",
   };
-  const label: Record<ScanStatus, string> = {
+  const label: Record<StatusBadgeStatus, string> = {
     known: "Counted",
     unknown: "Not recognised",
     needs_review: "Needs review",
     resolved: "Resolved",
     ignored: "Ignored",
     conflict: "Conflict",
+    suggested: "Suggested",
   };
   return <span className={`rounded-md px-2 py-1 text-sm font-medium ${map[status]}`}>{label[status]}</span>;
 }

@@ -6,7 +6,10 @@ import type { CatalogEntry, ShopOverride } from "@/services/catalog/catalogTypes
 import { DEMO_BUSINESS_ID } from "@/seed/seedData";
 
 const NOW = "2026-06-14T00:00:00.000Z";
-const CODE = "111222333444"; // not a seed alias -> resolver returns needs_review
+// A3/AM-2 (2026-07-15): must be a VALID-check-digit GTIN - a bad-check-digit code is now treated
+// as a likely misread and skips auto-decode entirely (src/services/upc/misread.ts), which is
+// unrelated to what this suite tests. Fixture value only; no assertions changed.
+const CODE = "111222333446"; // not a seed alias -> resolver returns needs_review
 
 const SUGGESTED = {
   providerNames: ["gemini", "openai"],
@@ -126,7 +129,7 @@ describe("catalog-first lookup (saves AI tokens; offline-first)", () => {
     } finally {
       restore();
     }
-    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("open"); // review stays open
+    expect(store.getState().needsReviewQueue.at(-1)!.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name === "Maybe Snack");
     expect(prov).toBeDefined();
@@ -153,7 +156,8 @@ describe("catalog-first lookup (saves AI tokens; offline-first)", () => {
 
 describe("cloud global catalog lookup (Option 1 wiring)", () => {
   // Shared helpers
-  const CLOUD_CODE = "555666777888"; // not a seed alias -> resolver returns needs_review
+  // A3/AM-2 (2026-07-15): must be a VALID-check-digit GTIN for the same reason as CODE above.
+  const CLOUD_CODE = "555666777884"; // not a seed alias -> resolver returns needs_review
 
   function cloudEntry(code: string, name: string, status: "verified" | "pending" = "verified"): CatalogEntry {
     return sanitizeCatalogEntry(

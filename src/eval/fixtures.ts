@@ -1,5 +1,5 @@
 import { emptyResult } from "@/services/ai/provider";
-import type { AiLookupResult } from "@/types";
+import type { AiLookupResult, DecodeDecision } from "@/types";
 
 // MOCK/OFFLINE fixtures for the eval harness — NO live AI. Each fixture represents the decode INPUT the
 // pipeline realistically produces today: a SINGLE-provider page-fetch result (brand + title + specs) plus
@@ -17,6 +17,14 @@ export interface DecodeFixture {
   result: AiLookupResult;
   /** The REAL page text the EvidenceVerifier reads (must contain the EXACT scanned code to verify). */
   fetchedSourceText: string;
+  /**
+   * P5 Task 4 (golden precision gates): an OPTIONAL pre-built DecodeDecision. When present, the
+   * harness scores this decision directly (through the real canAutoCount/shouldAutoApplySuggestion
+   * gate) instead of deriving one via verifyEvidence + decideDecode. Needed for classes whose
+   * decision is never built by decideDecode - gpt_self_report (gptLadderRung.ts) and the Go-UPC /
+   * corpus / retail / learned-tier payload builders each hand-build their own DecodeDecision.
+   */
+  decision?: DecodeDecision;
 }
 
 // Phase 9: accurate tire fixtures now carry corroboratedByModel=true, modeling the new pipeline where the
@@ -73,5 +81,88 @@ export const FIXTURES: Record<string, DecodeFixture> = {
   "745125495781": {
     result: tire({ productName: "Manstel 200 Pcs Aluminum Core Blind Rivet Screw Kit", brand: "Manstel", specsShort: "", category: "Hardware", confidence: 0.9, corroboratedByModel: false, sourceUrls: ["https://go-upc.com/7451254957818"] }, "745125495781"),
     fetchedSourceText: "Sorry, 745125495781 is not a valid UPC. Did you mean GTIN 7451254957818 (Manstel 200 Pcs Aluminum Core Blind Rivet Screw Kit)?",
+  },
+
+  // --- P5 Task 4: per-class labeled fixtures (CLASS_DATASET) -----------------------------------
+  // Each supplies a pre-built `decision` (bypassing decideDecode) mirroring exactly what the named
+  // production payload builder emits post-D6-demotion, so the harness proves the REAL gate
+  // (canAutoCount/shouldAutoApplySuggestion) scores each class per its ground-truth expectedStatus.
+
+  // Mirrors gptLadderRung.ts gptResultToDecodePayload's r.tier === "verified" branch (post-D6): a bare
+  // GPT self-report on a public barcode (upc_a) is demoted to "suggested" - never verified.
+  "gpt-self-report-verified-should-demote-to-suggested": {
+    result: { ...emptyResult(), productName: "Falken Wildpeak A/T3W 265/70R17", brand: "Falken", specsShort: "265/70R17 115T", category: "Tire", confidence: 0.9, sourceUrls: ["https://www.tirerack.com/x"] },
+    fetchedSourceText: "",
+    decision: {
+      status: "suggested",
+      confidence: 0.9,
+      reason: "Identity suggested by the AI model (self-report) - not app-verified; shown as a suggestion.",
+      evidenceStrength: "none",
+      exactCodeEvidenceVerifiedByApp: false,
+      corroborationPath: "gpt_self_report",
+      crossCheck: { decision: "single_provider", confidence: 0.9, reason: "single provider - no second source to cross-check", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+    },
+  },
+  // T20/code-1225: a GPT self-report on a NON-public-barcode shape (numeric_sku) must never mint
+  // verified either - mirrors the same gptResultToDecodePayload branch on a vendor part number.
+  "gpt-self-report-on-vendor-shape": {
+    result: { ...emptyResult(), productName: "Spitz Vorosafonya Cranberry Juice", brand: "Spitz", category: "Beverage", confidence: 0.9, sourceUrls: [] },
+    fetchedSourceText: "",
+    decision: {
+      status: "suggested",
+      confidence: 0.9,
+      reason: "Identity suggested by the AI model (self-report) - not app-verified; shown as a suggestion.",
+      evidenceStrength: "none",
+      exactCodeEvidenceVerifiedByApp: false,
+      corroborationPath: "gpt_self_report",
+      crossCheck: { decision: "single_provider", confidence: 0.9, reason: "single provider - no second source to cross-check", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+    },
+  },
+  // AC5 fence: app-verified exact-code evidence (the app itself fetched + matched the code) must
+  // still auto-verify exactly as before - decideDecode's canVerify/singleSourceVerified path.
+  "app-verified-exact-should-stay-verified": {
+    result: { ...emptyResult(), productName: "Michelin Defender LTX M/S 275/55R20 113T", brand: "Michelin", specsShort: "275/55R20 113T", category: "Tire", confidence: 0.95, sourceUrls: ["https://www.upcitemdb.com/upc/086699205636"] },
+    fetchedSourceText: "Michelin Defender LTX M/S 275/55R20 113T. UPC 086699205636.",
+    decision: {
+      status: "verified",
+      confidence: 0.95,
+      reason: "app-verified exact code match on fetched page",
+      evidenceStrength: "fetched_source",
+      exactCodeEvidenceVerifiedByApp: true,
+      corroborationPath: "single_source",
+      crossCheck: { decision: "single_provider", confidence: 0.95, reason: "single provider - no second source to cross-check", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+    },
+  },
+  // Learned tier is a suggestion by construction (never verified) regardless of confidence.
+  "learned-tier-should-stay-suggested": {
+    result: { ...emptyResult(), productName: "Cooper Discoverer A/T3 LT245/75R16 120R", brand: "Cooper", specsShort: "LT245/75R16 120R", category: "Tire", confidence: 0.85, sourceUrls: [] },
+    fetchedSourceText: "",
+    decision: {
+      status: "suggested",
+      confidence: 0.85,
+      reason: "learned tier: previously human-approved for a similar code, not app-verified this time",
+      evidenceStrength: "none",
+      exactCodeEvidenceVerifiedByApp: false,
+      crossCheck: { decision: "single_provider", confidence: 0.85, reason: "single provider - no second source to cross-check", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] },
+    },
+  },
+  // AC5 fence: a GENUINE tire-corpus exact-barcode hit must still auto-verify exactly as before. Mirrors
+  // TireKnowledgeProvider.ts resolveExactBarcode's decision VERBATIM (reason/evidenceStrength/
+  // corroborationPath) - the retail-corpus tier (pipeline.ts retailPayload, see its :192-196 comment)
+  // ALWAYS emits "suggested"/"none" and can never emit "verified", so a "corpus-retail" fixture claiming
+  // verified was fabricated, not representative of any real tier. This fixture proves the REAL gate still
+  // passes a genuine corpus-verified decision, not a hand-built stand-in.
+  "tire-corpus-hit-stays-verified": {
+    result: { ...emptyResult(), productName: "Michelin Defender LTX M/S 275/55R20 113T", brand: "Michelin", category: "Tire", specsShort: "275/55R20 113T", confidence: 0.92, sourceUrls: [] },
+    fetchedSourceText: "",
+    decision: {
+      status: "verified",
+      confidence: 0.92,
+      reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
+      evidenceStrength: "fetched_source",
+      exactCodeEvidenceVerifiedByApp: true,
+      corroborationPath: "corpus_exact_barcode",
+      crossCheck: { decision: "single_provider", confidence: 0.92, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+    },
   },
 };

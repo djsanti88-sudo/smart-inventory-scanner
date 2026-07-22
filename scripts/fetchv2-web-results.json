@@ -1,0 +1,2735 @@
+{
+ "spent": 0.0174,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "051596320812",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Home Depot 5 Gal Orange Homer Bucket / 05GLHD2",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.69,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "078742051451",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Member's Mark Purified Water 500ml / 16.9 oz",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Member's Mark PURIFIED WATER",
+   "cost": 0,
+   "secs": 1.53,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0078742051451",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"PURIFIED WATER\" vs \"Shin Megami Tensei: Digital Devil Saga [Deluxe Box] - PlayStation 2\" (similarity 0.00)"
+   ]
+  },
+  {
+   "code": "078742028477",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Member's Mark Purified Water 40 Pack / 16.9 oz",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.22,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10019320009355",
+   "group": "owner",
+   "expected": "suggest-only",
+   "truth": "Oreo Cookies Sleeve Pack / case pack",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.17,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "009800120871",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Ferrero Rocher Valentine's Fine Hazelnut Chocolate Hearts, 2.6 oz",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.17,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "044000072742",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Nabisco Oreo / club pack sandwich cookies",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Nabisco Club sandwich cookies",
+   "cost": 0,
+   "secs": 2.24,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0044000072742",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Club sandwich cookies\" vs \"Oreo Chocolate Sandwich Cookies, 5.25 Oz Pouch, 10 Pouches/box, Delivered In 1-4 Business Days\" (similarity 0.17)"
+   ]
+  },
+  {
+   "code": "072554159725",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Oreo King Cone ice cream cone 7.5 oz",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Oreo Oreo ice cream cone",
+   "cost": 0,
+   "secs": 1.74,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0072554159725",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "016000462427",
+   "group": "owner",
+   "expected": "suggest-only",
+   "truth": "General Mills product",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Cheerios Protein Cereal, Oats & Honey",
+   "cost": 0,
+   "secs": 2.88,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0016000462427",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "00028400234306",
+   "group": "owner",
+   "expected": "suggest-only",
+   "truth": "Doritos / Frito-Lay product",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "Lay's Pico de Gallo Potato Chips 2.875 Ounces",
+   "cost": 0,
+   "secs": 2.24,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0028400234306",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0028400199247",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Lay's Kettle Cooked Potato Chips",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Fritolay Flamin' hot nacho flavored tortilla chips",
+   "cost": 0,
+   "secs": 8.88,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0028400199247",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0087684001127",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Capri Sun Roarin' Waters Tropical Fruit",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "CAPRISUN ROARIN’ WATERS FLAVORED WATER BEVERAGE",
+   "cost": 0,
+   "secs": 3.78,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0087684001127",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "00028400076388",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Doritos Cool Ranch Tortilla Chips",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "Lay's Kettle Cooked Party Size Original Potato Chips 14 Ounce Plastic Bag",
+   "cost": 0,
+   "secs": 1.84,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0028400076388",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "028400325042",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Doritos Cool Ranch tortilla chips (Frito-Lay)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Frito Lay Cool ranch Doritos",
+   "cost": 0,
+   "secs": 2.2,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0028400325042",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Cool Ranch Flavor Tortilla Chips - 3.38 Ounces\" vs \"Doritos, Cool Ranch Flavored, Tortilla Chips\" (similarity 0.57)"
+   ]
+  },
+  {
+   "code": "016000200050",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Cheerios Veggie Blends Blueberry Banana",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Cheerios Cheerios Veggie Blends Blueberry Banana",
+   "cost": 0,
+   "secs": 9.81,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0016000200050",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "00028400160131",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Munchies Cheese Fix Snack Mix",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "Lay's Barbecue Flavored Potato Chips 9.5 Ounce Plastic Bag",
+   "cost": 0,
+   "secs": 3.09,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0028400160131",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "00028400028141",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Lay's Barbecue Potato Chips",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "Munchies Rold Gold Doritos Cheetos Sun Chips Cheese Fix Snack Mix 3.25 Ounce Plastic Bag",
+   "cost": 0,
+   "secs": 1.32,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0028400028141",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "00016000179998",
+   "group": "owner",
+   "expected": "suggest-only",
+   "truth": "DISPUTED: fixture says Cheerios Veggie Blends Family Size; 8 models across 3 providers say Mott's Fruit Flavored Snacks Family Pack",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "Mottos Gummies",
+   "cost": 0,
+   "secs": 2.21,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0016000179998",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Gummies\" vs \"Mott&#039;s Assorted Fruit Fruit Flavored Snacks Family Pack\" (similarity 0.00)"
+   ]
+  },
+  {
+   "code": "00075391054567",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Jumbo Stone Crab Claws",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "Jumbo stone crab claws",
+   "cost": 0,
+   "secs": 0.79,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0075391054567",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0038000245534",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Pringles Scorchin' Cheddar Potato Crisps",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Pringles Pringles Scorchin' Hot Cheddar imp",
+   "cost": 0,
+   "secs": 1.37,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0038000245534",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "00051000212412",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Campbell's Cream of Chicken Soup, 22.6 oz",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "campbell’s heart healthy +  cream of chicken",
+   "cost": 0,
+   "secs": 2.68,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0051000212412",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"heart healthy +  cream of chicken\" vs \"CAMPBELL\" (similarity 0.00)"
+   ]
+  },
+  {
+   "code": "00070470001272",
+   "group": "owner",
+   "expected": "verified-ok",
+   "truth": "Yoplait Whips! Raspberry Lowfat Yogurt Mousse",
+   "codeType": "gtin14",
+   "outcome": "suggested",
+   "product": "Yoplait Yoplait Whips! Raspberry Low Fat Yogurt Mousse",
+   "cost": 0,
+   "secs": 1.45,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0070470001272",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Yoplait Whips! Raspberry Low Fat Yogurt Mousse\" vs \"Yoplait Whips! Reduced Fat Light &amp; Fluffy Raspberry Yogurt Mousse\" (similarity 0.55)"
+   ]
+  },
+  {
+   "code": "749000000015",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.55,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "749000000022",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.6,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "749000000039",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.98,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "749000000046",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.45,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "ZQX-99417-B",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (invented vendor part number)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.53,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "KMD-40521-X",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (invented vendor part number)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.85,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "VTR-88316-A",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (invented vendor part number)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.58,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "X00ZZZ9ZZ9",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X00QZ9WZ9Q",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X00Z9VZ0Z9",
+   "group": "canary",
+   "expected": "must-refuse",
+   "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+   "codeType": "canary",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "848983006257",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Falken Wildpeak A/T3W 265/70R17",
+   "codeType": "tire_barcode",
+   "outcome": "suggested",
+   "product": "Falken Falken Wildpeak AT3W Tires - 265/70R17 - 28034300",
+   "cost": 0,
+   "secs": 2.67,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.extremecustoms.com/product.php?item_id=106252",
+   "codeLocation": "page_text",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4981910515661",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Toyo Proxes R888R 255/40R17",
+   "codeType": "tire_barcode",
+   "outcome": "verified",
+   "product": "2 X 255/40/17 94w TOYO R888r - Nearly",
+   "cost": 0,
+   "secs": 6.07,
+   "guessConfidence": 0.9,
+   "v2Outcome": "verified",
+   "winningSource": "https://www.ebay.com/p/651990328",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "balanced: single strong source with proven code-to-product association"
+   ]
+  },
+  {
+   "code": "715459537587",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Hankook Ventus S1 AS H125 255/40R19",
+   "codeType": "tire_barcode",
+   "outcome": "suggested",
+   "product": "Hankook Hankook Ventus S1 AS H125 Tires - 255/40R19 - 1028571",
+   "cost": 0,
+   "secs": 34.06,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.extremecustoms.com/product.php?item_id=393409",
+   "codeLocation": "page_text",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4981910504887",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Nitto Ridge Grappler 265/60R18",
+   "codeType": "tire_barcode",
+   "outcome": "suggested",
+   "product": "Nitto Nitto Ridge Grappler Tires - 265/60R18 - 217700",
+   "cost": 0,
+   "secs": 2.84,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.extremecustoms.com/product.php?item_id=222002",
+   "codeLocation": "page_text",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "086699183804",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "BFGoodrich All-Terrain T/A KO3 LT275/70R17",
+   "codeType": "tire_barcode",
+   "outcome": "verified",
+   "product": "BFGoodrich BFGoodrich All-Terrain T/A KO3 - LT275/70-17",
+   "cost": 0,
+   "secs": 2.52,
+   "guessConfidence": 0.85,
+   "v2Outcome": "verified",
+   "winningSource": "https://mudify.com/products/bfgoodrich-all-terrain-t-a-ko3-lt275-70r17-124-121s",
+   "codeLocation": "json_ld.gtin",
+   "rules": [
+    "balanced: two independent medium sources agree"
+   ]
+  },
+  {
+   "code": "086699294739",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Michelin Pilot Sport 4 SUV 225/55R19 99V",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.07,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "092971270650",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Bridgestone Dueler H/T 685 LT265/75R16",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.4,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "191563015096",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Nexen Roadian HTX2 LT265/75R16",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.48,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "697662139348",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Goodyear Eagle F1 Supercar 3R 285/35R19",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.14,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342142453",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Continental ContiSportContact 5P 265/35R21",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.63,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "715459460670",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Laufenn X Fit AT (LC01) LT35x12.50R20",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 12.21,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "812561025343",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "Travelstar Ecopath ST ST185/80R13 (trailer)",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 32.49,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "054137043287",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Pirelli Winter 210 Snowcontrol Serie 3 195/65R15",
+   "codeType": "tire_barcode",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.3,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "28034300",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Falken Wildpeak A/T3W 265/70R17 115T",
+   "codeType": "tire_part",
+   "outcome": "suggested",
+   "product": "Falken 265/70R17 SL 115T Falken WILDPEAK A/T3W",
+   "cost": 0,
+   "secs": 3.47,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://otrusa.com/products/265-70r17-sl-115t-falken-wildpeak-a-t3w",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "T432158",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Nokian Hakkapeliitta R5 215/50R17 95R XL",
+   "codeType": "tire_part",
+   "outcome": "suggested",
+   "product": "Nokian Hakkapeliitta R5 215/50R-17 95 R",
+   "cost": 0,
+   "secs": 3.12,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://extremewheels.com/product/nokian-hakkapeliitta-r5-215-50r-17-95-r/",
+   "codeLocation": "json_ld.sku",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "265025944",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Dunlop SP Sport Maxx GT 265/45R20 104Y",
+   "codeType": "tire_part",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.71,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "312084142",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Goodyear Wrangler DuraTrac LT285/75R18 129Q",
+   "codeType": "tire_part",
+   "outcome": "suggested",
+   "product": "Goodyear Goodyear Wrangler DuraTrac LT285/75R18/10",
+   "cost": 0,
+   "secs": 10.15,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://wheelwiz.ca/products/g-312084142",
+   "codeLocation": "json_ld.sku",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "110160124",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Yokohama Advan Apex V601 255/30R19 91Y XL",
+   "codeType": "tire_part",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.07,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "2710800",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Pirelli Scorpion Winter 275/45R21 107V",
+   "codeType": "tire_part",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.11,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "170284047",
+   "group": "tire",
+   "expected": "suggest-only",
+   "truth": "Cooper Discoverer Stronghold AT LT285/75R16 126/123R",
+   "codeType": "tire_part",
+   "outcome": "suggested",
+   "product": "LT285/75R16 Cooper Discoverer Stronghold A/T 126R LRE White Letter Tire",
+   "cost": 0,
+   "secs": 4.19,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://shopcwo.com/lt285-75r16-cooper-discoverer-stronghold-a-t-126r-lre-white-letter-tire-170284047/",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "DCB205",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "DeWalt 20V MAX XR 5.0Ah Lithium-Ion Battery",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 36.36,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "48-11-1852",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Milwaukee M18 REDLITHIUM XC5.0 Battery two-pack (single = 48-11-1850)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.15,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "BL1850B",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Makita 18V LXT 5.0Ah Lithium-Ion Battery",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 22.36,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "P108",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Ryobi 18V ONE+ LITHIUM+ 4.0Ah Battery",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "My Store P108",
+   "cost": 0,
+   "secs": 3.03,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://sureshotsprayer.com/products/p108",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "51348",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "WIX Spin-On Engine Oil Filter 51348",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "WIX 51348 Oil Filter",
+   "cost": 0,
+   "secs": 3.06,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.murdochs.com/products/auto-towing/truck-automotive/automotive-replacement-parts/wix-51348-oil-filter/",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "PH7317",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "FRAM Extra Guard Spin-On Oil Filter PH7317",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "PH7317 FRAM Extra Guard Oil Filter",
+   "cost": 0,
+   "secs": 23.15,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://partsource.ca/products/ph7317-fram-extra-guard-oil-filter",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "PL14610",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Purolator PurolatorONE Spin-On Oil Filter PL14610",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "PL14610 Purolator One Oil Filter",
+   "cost": 0,
+   "secs": 2.58,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://crossfilters.com/products/pl14610-purolator-one-oil-filter",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "FL-820-S",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Motorcraft OE Engine Oil Filter FL-820-S (Ford)",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "FL820S Oil Filter",
+   "cost": 0,
+   "secs": 2.62,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.wheelerfleet.com/product/oil-filter/21729",
+   "codeLocation": "json_ld.sku",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "PF63E",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "ACDelco Professional Engine Oil Filter PF63E (superseded by PF63)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.42,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "HP-1002",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "K&N Performance Gold Spin-On Oil Filter HP-1002",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "K&N Engineering K&N Oil Filter HP-1002 - Mazda/Yugo Models (inc. 2010-2013 Mazdaspeed3 / 1986-1992 Yugo GV)",
+   "cost": 0,
+   "secs": 2.52,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.rallysportdirect.com/products/kn-hp-1002-k-n-oil-filter-hp-1002",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "3330",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Bosch Premium FILTECH Engine Oil Filter 3330 (candidate label 'spark plug' CORRECTED: it is an oil filter)",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "TeleTalker™ 330 High Performance Linemen&#39;s Test Set: Test Analog and POTS Phone Line and Systems - (3330)",
+   "cost": 0,
+   "secs": 2.58,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.triplett.com/products/3330-teletalker-330-high-performance-linemens-test-set",
+   "codeLocation": "page_text",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"TeleTalker™ 330 High Performance Linemen&#39;s Test Set: Test Analog and POTS Phone Line and Systems - (3330)\" vs \"3330\" (similarity 0.07)"
+   ]
+  },
+  {
+   "code": "6619",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "NGK Iridium IX Spark Plug LFR6AIX-11 (stock no. 6619)",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "NSW-6619 - Nora Lighting",
+   "cost": 0,
+   "secs": 2.11,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://noralighting.com/product/nsw-6619/",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "RC12YC",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Champion Copper Plus Spark Plug RC12YC (stock 71)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.57,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "K060841",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Gates Micro-V Serpentine Belt K060841 (6-rib, 84-9/16 in)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 22.11,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "555-070",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Dorman Steel Cup Expansion Plug 555-070 (2-1/8 in)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 23.3,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "1225",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Moen 1225 One-Handle Faucet Replacement Cartridge",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "1225 - Wikipedia",
+   "cost": 0,
+   "secs": 1.74,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://en.wikipedia.org/wiki/1225",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "GP1043211",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Kohler GP1043211 Simplice Pull-Down Sprayhead (spray head, not cartridge)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 22.92,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "2097",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "3M 2097 Particulate Filter P100 with nuisance-level OV relief (respirator filter)",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "AB 2097 - California YIMBY",
+   "cost": 0,
+   "secs": 2.38,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://cayimby.org/legislation/ab-2097/",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "1997061",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Andersen Gliding Patio Door Tandem Roller Assembly 1997061 (replaced unverifiable candidate 9134844)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.49,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "041A5273-1",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Chamberlain/LiftMaster Security+ Wall Control Panel 041A5273-1",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.65,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "BL1830B",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Makita 18V LXT 3.0Ah Lithium-Ion Battery (with fuel gauge)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 23.58,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "M1-110A",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Mobil 1 Extended Performance Oil Filter M1-110A",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.26,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "490057",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "WD-40 Multi-Use Smart Straw 12 oz (490057)",
+   "codeType": "part_number",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.29,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "67847",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "Weber Igniter Kit 67847 (Genesis 300 series, 2008-2010)",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "Weber Weber Genesis 300 Ignitor Kit, 2008-2010 (Side Control Knobs) - 67847",
+   "cost": 0,
+   "secs": 2.31,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.thebbqdepot.com/weber-genesis-300-ignitor-kit-67847/",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "PH3593A",
+   "group": "part",
+   "expected": "suggest-only",
+   "truth": "FRAM Extra Guard Spin-On Oil Filter PH3593A",
+   "codeType": "part_number",
+   "outcome": "suggested",
+   "product": "Engine Oil Filter-Extra Guard Fram PH3593A for sale online | eBay",
+   "cost": 0,
+   "secs": 7.32,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.ebay.com/p/19037509278",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "B00FLYWNYQ",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "Instant Pot Duo 7-in-1 Electric Pressure Cooker, 6 Quart",
+   "codeType": "asin",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "B00006JSUA",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "Lodge Seasoned Cast Iron Skillet, 10.25 inch",
+   "codeType": "asin",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.16,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "B09B8V1LZ3",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "Echo Dot (5th Gen, 2022 release) Smart Speaker, Charcoal",
+   "codeType": "asin",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.83,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "0399226907",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "The Very Hungry Caterpillar (board book) by Eric Carle",
+   "codeType": "asin",
+   "outcome": "suggested",
+   "product": "The Very Hungry Caterpillar (en Inglés)",
+   "cost": 0,
+   "secs": 3.23,
+   "guessConfidence": 0.45,
+   "v2Outcome": "suggested",
+   "winningSource": "https://www.buscalibre.us/libro-the-very-hungry-caterpillar/9780399226908/p/1549222",
+   "codeLocation": "page_text",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "B00006IFHD",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "Sharpie Permanent Markers, Fine Tip, Black, 12 Count",
+   "codeType": "asin",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.39,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "B00NHQF6MG",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "LEGO Classic Large Creative Brick Box 10698 Building Set",
+   "codeType": "asin",
+   "outcome": "suggested",
+   "product": "Toys &amp; Games LEGO Classic Large Creative Brick Box 10698",
+   "cost": 0,
+   "secs": 2.97,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://diversitoy.com/product/lego-classic-large-creative-brick-box-10698/",
+   "codeLocation": "json_ld.sku",
+   "rules": [
+    "non-public identifier: verification not allowed",
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "B004U3Y8OM",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "Nature Made Vitamin D3 1000 IU (25 mcg), 300 Softgels",
+   "codeType": "asin",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.66,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "B00IJ0ALYS",
+   "group": "asin",
+   "expected": "verified-ok",
+   "truth": "DEWALT 20V MAX Cordless Drill & Impact Driver Combo Kit (DCK240C2)",
+   "codeType": "asin",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.58,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "no findings"
+   ]
+  },
+  {
+   "code": "X004DY7YUT",
+   "group": "fnsku",
+   "expected": "suggest-only",
+   "truth": "NatureBell Magnesium Glycinate",
+   "codeType": "fnsku",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X000QKR8BT",
+   "group": "fnsku",
+   "expected": "suggest-only",
+   "truth": "Nested Super Greens",
+   "codeType": "fnsku",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X001YQ13KV",
+   "group": "fnsku",
+   "expected": "suggest-only",
+   "truth": "Minimalist Vitamin C Face Serum",
+   "codeType": "fnsku",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X001YQI3KV",
+   "group": "fnsku",
+   "expected": "suggest-only",
+   "truth": "Minimalist Vitamin C Face Serum (label variant string in same repo record)",
+   "codeType": "fnsku",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X002QW7HJ4",
+   "group": "fnsku",
+   "expected": "suggest-only",
+   "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+   "codeType": "fnsku",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X003MT5KP8",
+   "group": "fnsku",
+   "expected": "suggest-only",
+   "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+   "codeType": "fnsku",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "X004RB9LZ2",
+   "group": "fnsku",
+   "expected": "suggest-only",
+   "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+   "codeType": "fnsku",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 0,
+   "guessConfidence": 0,
+   "v2Outcome": "unsupported",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "identifier type \"fnsku_like\" is counted but not product-decoded"
+   ]
+  },
+  {
+   "code": "0011284003151",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "JTM Foods Lightly Glazed Snack Pies",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Jj's Bakery Lightly Glazed Boston Cream Pies 4oz Yummy Fruit Pie Snack 6 Pack",
+   "cost": 0,
+   "secs": 2.43,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://www.ebay.co.uk/p/1310208495",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Lightly glazed snack pies\" vs \"Jj's Bakery Lightly Glazed Boston Cream Pies 4oz Yummy Fruit Pie Snack 6 Pack\" (similarity 0.36)"
+   ]
+  },
+  {
+   "code": "0019600920106",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Van de Kamp's Crispy Battered Fish Fillets",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Van de Kamp's CRISPY BATTERED FILLETS",
+   "cost": 0,
+   "secs": 1.9,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0019600920106",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0021130281213",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Signature Select Old-Fashioned Oats",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Signature Select Old-Fashioned Oats",
+   "cost": 0,
+   "secs": 12.07,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0021130281213",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Old-Fashioned Oats\" vs \"UPC 021130281213\" (similarity 0.00)"
+   ]
+  },
+  {
+   "code": "0030223029076",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "readymeals! Chicken & Bacon Cobb Wrap",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "readymeals! CHICKEN & BACON COBB WRAP",
+   "cost": 0,
+   "secs": 12.69,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0030223029076",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0032917007841",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Traditional Medicinals Organic Immune Zoom Lemon Ginger Tea (16 ct)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Traditional Medicinals Immune Zoom",
+   "cost": 0,
+   "secs": 6.02,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0032917007841",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0035549812920",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "American Valley Creamy Peanut Butter",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "American Valley Creamy Peanut Butter",
+   "cost": 0,
+   "secs": 15.51,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0035549812920",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0036800412828",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Food Club Cherry Pre-Baked Pie",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Food Club Cherry pre-baked pie, cherry",
+   "cost": 0,
+   "secs": 9.86,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0036800412828",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0041220306794",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Hill Country Fare Buffalo Style Hot Chicken Wings",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Hill Country Fare CHICKEN WINGS Buffalo Style Hot",
+   "cost": 0,
+   "secs": 4.92,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0041220306794",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0041268707089",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Hannaford Bakery Double Blueberry Filled Muffins",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Hannaford Bakery Double Blueberry Filled Muffins",
+   "cost": 0,
+   "secs": 2.15,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0041268707089",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0041376201301",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Frankford Candy Marvel Avengers Assemble Mini Milk Chocolate Bar",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Frankford Candy  Llc Marvel, Avengers Assemble, Mini Milk Chocolate Bar",
+   "cost": 0,
+   "secs": 3.8,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0041376201301",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0041497400805",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Weis Markets Iodized Salt & Pepper",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Weis Iodized Salt & Pepper",
+   "cost": 0,
+   "secs": 10.92,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0041497400805",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0041735094315",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "PICS (Price Chopper) Hummus",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "PICS Hummus",
+   "cost": 0,
+   "secs": 9.11,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0041735094315",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0043119001568",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Byrne Dairy Ice Cream",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "BYRNE DAIRY Ice Cream",
+   "cost": 0,
+   "secs": 11.48,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0043119001568",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0046100358122",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Sargento Shareables (cheese snack)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Sargent Shareables",
+   "cost": 0,
+   "secs": 9.83,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0046100358122",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0049022596986",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Walgreens Fruit & Grain Cereal Bar",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Walgreens Co. Fruit & Grain Cereal Bar",
+   "cost": 0,
+   "secs": 8.2,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0049022596986",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0052548597887",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "7-Eleven Marshmallow Treat",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Marshmallow treat",
+   "cost": 0,
+   "secs": 14.77,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0052548597887",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0065776631513",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Flax4Life Carrot Raisin Flax Muffins",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Flax4life Flax Muffins, Carrot Raisin",
+   "cost": 0,
+   "secs": 7.07,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0065776631513",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0070253492471",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Nash Finch Lemon Sandwich Creme Cookies",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Lemon sandwich cremes cookies, lemon",
+   "cost": 0,
+   "secs": 8.99,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0070253492471",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0070784503288",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Tops Markets Conversation Hearts",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Tops Tops, conversation hearts",
+   "cost": 0,
+   "secs": 4.01,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0070784503288",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0075925304151",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Crystal Farms Muenster Cheese Slices (Muenster cheese; brand per go-upc, candidate 'Waldbaum' unverified)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Muenster Cheese",
+   "cost": 0,
+   "secs": 4.4,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0075925304151",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0077567001672",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Unilever Turmeric Chai Spiced Light Ice Cream",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Turmeric chai spiced light ice cream swirled with cinnamon streusel",
+   "cost": 0,
+   "secs": 3.45,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0077567001672",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0078197119232",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Camomile Flowers Herbal Tea",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Camomile Flowers Herbal Tea",
+   "cost": 0,
+   "secs": 2.76,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0078197119232",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0078783904273",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Cal-Organic Organic Green Chard",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Cal-Organic Organic Green Chard",
+   "cost": 0,
+   "secs": 1.96,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0078783904273",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "3014409009547",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Slaur Sardet Creme de cassis (France)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Slaur Sardet Crème de cassis",
+   "cost": 0,
+   "secs": 4.69,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/3014409009547",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Crème de cassis\" vs \"Crème de cassis – Slaur Sardet – 70 Cl\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "3027030038381",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Ancel Mon fondant au chocolat 300g (France)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "ANCEL Mon fondant au chocolat",
+   "cost": 0,
+   "secs": 17.82,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/3027030038381",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Mon fondant au chocolat\" vs \"Préparation gâteau fondant au chocolat 300g - ANCEL\" (similarity 0.38)"
+   ]
+  },
+  {
+   "code": "3041090898174",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Gallia Lait Bebe Expert AR 1 (France)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Gallia Gallia Lait Bébé Expert Ar 1",
+   "cost": 0,
+   "secs": 9.29,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/3041090898174",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Gallia Lait Bébé Expert Ar 1\" vs \"Gallia Bébé Expert AR 1er âge\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "3067163632032",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Delpeyrat Magret de canard fume au bois de hetre (France)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Delpeyrat Magret de canard fumé au bois de hêtre",
+   "cost": 0,
+   "secs": 3.04,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/3067163632032",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4000269100356",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Sangrita Classico (Germany)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Sangrita Sangrita classico",
+   "cost": 0,
+   "secs": 7.62,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/4000269100356",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Sangrita classico\" vs \"Sangrita Classic Green 0.5 Liter\" (similarity 0.17)"
+   ]
+  },
+  {
+   "code": "4001419007433",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Rodeo Energy Drink (Germany)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "rodeo Rodeo energy drink",
+   "cost": 0,
+   "secs": 10.82,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/4001419007433",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "4002471010003",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Weyengold Frisches Sauerkraut 500g (Germany)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Weyengold Frisches Sauerkraut",
+   "cost": 0,
+   "secs": 6.48,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/4002471010003",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Frisches Sauerkraut\" vs \"Frisches Sauerkraut, fassfrisch - milchsauer\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "4004154077952",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Burkhardt Mandel Sirup (Germany)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Burkhardt Mandel Sirup",
+   "cost": 0,
+   "secs": 4.05,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/4004154077952",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "5000129359190",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Coop Summer Squash (UK)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Coop Quad summer squash",
+   "cost": 0,
+   "secs": 2.45,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/5000129359190",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "5000169661659",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Waitrose Hot Cross Bunettone (UK)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Waitrose Hot Cross Bunettone",
+   "cost": 0,
+   "secs": 3.06,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/5000169661659",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "5000396053432",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "McVitie's Flipz Salted Caramel (UK)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "McVitie's Flipz Salted Caramel",
+   "cost": 0,
+   "secs": 1.81,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/5000396053432",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "8000130171061",
+   "group": "upcEan",
+   "expected": "verified-ok",
+   "truth": "Nicola Russo Linguine (Italy)",
+   "codeType": "ean",
+   "outcome": "suggested",
+   "product": "Nicola Russo Linguine",
+   "cost": 0,
+   "secs": 12.09,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/8000130171061",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "10016000507255",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Nature Valley Oats 'n Dark Chocolate Granola Bars (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.89,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10010700557466",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Jolly Rancher Gummies Minis (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.36,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10072100024009",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Imperial Sugar Extra Fine Granulated Cane Sugar (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.38,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10072830011430",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Tillamook Extra Sharp White Cheddar Shreds (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.41,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10028400668696",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Rold Gold Garlic Parmesan Pretzel Thins (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.39,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10040822342503",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Sabra Bold & Spicy Hummus (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.72,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10071430011505",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Dole Blueberries (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10085239054120",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Good & Gather Boneless Diced Pork Sirloin (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.56,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10011110835557",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Kroger Applesauce (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.71,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10051000231458",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Campbell's Pasta Chicken Alfredo (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.34,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10075130532735",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Krasdale Saltine Crackers (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.28,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "10058779144262",
+   "group": "case",
+   "expected": "suggest-only",
+   "truth": "case pack of Breyers Hazelnut Chocolate Ice Cream (no public listing found)",
+   "codeType": "gtin14",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.33,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "0078741352108",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Great Value Whole Milk",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Great Value Whole Milk",
+   "cost": 0,
+   "secs": 1.67,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0078741352108",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Whole Milk\" vs \"Whole Milk – Great Value\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "0194346253272",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Great Value Egg Noodles",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Great Value Egg Noodles",
+   "cost": 0,
+   "secs": 4.58,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0194346253272",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Egg Noodles\" vs \"Egg Noodles – Great Value\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "0681131811231",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Great Value Mild Seafood Sauce",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Great Value Seafood sauce",
+   "cost": 0,
+   "secs": 2.96,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0681131811231",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Seafood sauce\" vs \"Seafood sauce – Great Value\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "096619516698",
+   "group": "obscure",
+   "expected": "verified-ok",
+   "truth": "Kirkland Signature Protein Bar, Energy Variety Pack (20 ct)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Kirkland Signature CHOCOLATEY CHUNKS COOKIE DOUGH PROTEIN BAR",
+   "cost": 0,
+   "secs": 1.71,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0096619516698",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "096619510702",
+   "group": "obscure",
+   "expected": "verified-ok",
+   "truth": "Kirkland Signature Premium Chunk Chicken Breast in Water (6x12.5oz)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Kirkland Signature Seasoned Chunk Chicken Breast",
+   "cost": 0,
+   "secs": 1.77,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0096619510702",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "690284733673",
+   "group": "obscure",
+   "expected": "verified-ok",
+   "truth": "Trader Joe's Everything But The Bagel Sesame Seasoning Blend 2.3oz",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.95,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "009400000061",
+   "group": "obscure",
+   "expected": "verified-ok",
+   "truth": "Trader Joe's Dark Chocolate Peanut Butter Cups 16oz",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 7.46,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "0041498208059",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Clancy's (Aldi) Wavy Potato Chips",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Aldi-Benner Company Wavy Potato Chips",
+   "cost": 0,
+   "secs": 4.29,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0041498208059",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Wavy Potato Chips\" vs \"Wavy Potato Chips – Aldi-Benner Company – 28 g\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "0041498149208",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Millville (Aldi) Corn Flakes",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Millville Corn flakes",
+   "cost": 0,
+   "secs": 2.37,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0041498149208",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0078742313801",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Member's Mark Classic Hummus Singles (2.5oz, 16 ct)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Member's Mark Classic Hummus",
+   "cost": 0,
+   "secs": 2.65,
+   "guessConfidence": 0.4,
+   "v2Outcome": "needs_review",
+   "winningSource": "https://world.openfoodfacts.org/product/0078742313801",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "sibling guard: same-brand sibling variant: \"Classic Hummus\" vs \"Classic Hummus – Member's Mark\" (similarity 0.50)"
+   ]
+  },
+  {
+   "code": "0078742058221",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Member's Mark Organic Extra Virgin Olive Oil",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Member's Mark Organic Extra Virgin Olive Oil",
+   "cost": 0,
+   "secs": 1.96,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0078742058221",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  },
+  {
+   "code": "0077890338797",
+   "group": "obscure",
+   "expected": "suggest-only",
+   "truth": "Wegmans Beef Culinary Stock (32 fl oz)",
+   "codeType": "upc",
+   "outcome": "suggested",
+   "product": "Wegmans Beef Culinary Stock",
+   "cost": 0,
+   "secs": 3.91,
+   "guessConfidence": 0.6,
+   "v2Outcome": "suggested",
+   "winningSource": "https://world.openfoodfacts.org/product/0077890338797",
+   "codeLocation": "structured.openfoodfacts",
+   "rules": [
+    "usable identity without verification-grade proof"
+   ]
+  }
+ ]
+}

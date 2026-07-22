@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useScanStore } from "@/stores/scanStore";
 
 // Browse-and-reopen saved sessions. Lists every saved session; "Open" switches the live view to that
@@ -28,7 +29,7 @@ export function SessionsList() {
                 </div>
                 <div className="text-xs text-zinc-500">
                   {s.location} · {s.status}
-                  {s.startedAt ? ` · ${new Date(s.startedAt).toLocaleDateString()}` : ""}
+                  {s.startedAt ? ` · ${new Date(s.startedAt).toLocaleString()}` : ""}
                 </div>
               </div>
               <button
@@ -40,6 +41,13 @@ export function SessionsList() {
               >
                 {isCurrent ? "Current" : "Open"}
               </button>
+              <Link
+                href={`/sessions/${s.id}`}
+                data-testid={`view-session-${s.id}`}
+                className="inline-flex min-h-[36px] items-center rounded-lg border border-zinc-300 px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                View
+              </Link>
             </li>
           );
         })}

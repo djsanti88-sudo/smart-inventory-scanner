@@ -6,6 +6,7 @@ import { accessLevelServer } from "@/services/security/roleAccess";
 import { resolveScanForRole } from "@/services/security/resolveScanServer";
 import { toStoreProduct, toStoreAlias } from "@/services/db/firebase/storeMappers";
 import type { Product, Alias } from "@/types";
+import { logServerEvent } from "@/server/log";
 
 // Sec-5: PROTECTED server-side customer scan resolution.
 //
@@ -57,11 +58,13 @@ export async function POST(request: Request) {
     const msg = e instanceof Error ? e.message : String(e);
     // Distinguish "no server credentials configured" (ops/deploy gap) from "bad/expired token" (401).
     if (/credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(msg)) {
+      logServerEvent({ route: "/api/resolve-scan", event: "auth_unavailable", reasonCode: "server_resolution_unavailable", status: 503 });
       return Response.json(
         { ok: false, reason: "server_resolution_unavailable", error: "Server resolution is not configured." },
         { status: 503 },
       );
     }
+    logServerEvent({ route: "/api/resolve-scan", event: "auth_reject", reasonCode: "bad_token", status: 401 });
     return Response.json({ ok: false, error: "Invalid or expired ID token" }, { status: 401 });
   }
 
@@ -76,6 +79,7 @@ export async function POST(request: Request) {
     if (level !== "platform") {
       const member = await db.doc(`${COLLECTIONS.businessMembers}/${memberDocId(businessId, uid)}`).get();
       if (!member.exists) {
+        logServerEvent({ route: "/api/resolve-scan", event: "auth_reject", reasonCode: "not_member", businessId, status: 403 });
         return Response.json({ ok: false, error: "Not a member of this business" }, { status: 403 });
       }
     }
@@ -88,11 +92,13 @@ export async function POST(request: Request) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (/credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(msg)) {
+      logServerEvent({ route: "/api/resolve-scan", event: "auth_unavailable", reasonCode: "server_resolution_unavailable", businessId, status: 503 });
       return Response.json(
         { ok: false, reason: "server_resolution_unavailable", error: "Server resolution is not configured." },
         { status: 503 },
       );
     }
+    logServerEvent({ route: "/api/resolve-scan", event: "read_failed", reasonCode: "business_data_read_error", businessId, status: 500 });
     return Response.json({ ok: false, error: "Failed to read business data" }, { status: 500 });
   }
 

@@ -1,0 +1,339 @@
+"use client";
+
+import { useState } from "react";
+import { useScanStore } from "@/stores/scanStore";
+import { useReconcileStore } from "@/stores/reconcileStore";
+import { parseShopwareCsv } from "@/services/reconcile/shopwareCsvAdapter";
+import { buildReconcileReport, reconcileReportCsv, type ReconcileBucket, type ReconcileLine } from "@/services/reconcile/reconcileReport";
+import type { MatchResult } from "@/services/reconcile/identityMatcher";
+import { deriveCountedByUid } from "@/services/reconcile/countedByUid";
+import { resolveRawScan } from "@/services/resolver";
+import { cleanScanCode } from "@/services/scanCleaner";
+import { downloadCsv } from "@/services/exportFormats";
+
+// Reconcile panel (Task 7): upload a Shop-Ware CSV export, match it against the local tire corpus
+// server-side, and compare the expected quantities with what THIS session counted. Its own page,
+// far from the scan flow (scanner flow untouched).
+//
+// AM-R6 (Resolver Trust law): a reconcile match NEVER writes an alias by itself. Matched rows with
+// a corpus barcode appear in the "Confirm barcode links" list below; clicking Confirm routes
+// through the EXISTING scanStore human-approval path (reopenNeedsReview -> resolveUnknown
+// "link_existing", applyToCount false) - the exact machinery Needs Review resolution uses. No new
+// alias-approval path exists in this file, and nothing here counts inventory.
+
+const BUCKET_ORDER: ReconcileBucket[] = [
+  "variance",
+  "agreement",
+  "expected_not_counted",
+  "ambiguous",
+  "unmatched",
+  "non_tire",
+  "uom_review",
+  "unparseable",
+];
+
+const BUCKET_LABELS: Record<ReconcileBucket, string> = {
+  variance: "Variances (your count differs from Shop-Ware)",
+  agreement: "Matches in agreement",
+  expected_not_counted: "Expected but not counted in this session (out of scope, not shrinkage)",
+  ambiguous: "Ambiguous (needs review)",
+  unmatched: "Unmatched",
+  non_tire: "Not a tire product",
+  uom_review: "Quantity unit needs review",
+  unparseable: "Rows that could not be read",
+};
+
+function deltaClass(delta: number): string {
+  if (delta > 0) return "text-green-700";
+  if (delta < 0) return "text-red-700";
+  return "text-zinc-600";
+}
+
+function formatDelta(delta: number): string {
+  return delta > 0 ? `+${delta}` : String(delta);
+}
+
+export function ReconcilePanel() {
+  const session = useReconcileStore((s) => s.session);
+  const matches = useReconcileStore((s) => s.matches);
+  const report = useReconcileStore((s) => s.report);
+  const hydrated = useReconcileStore((s) => s._hasHydrated);
+  const startSession = useReconcileStore((s) => s.startSession);
+  const setResults = useReconcileStore((s) => s.setResults);
+
+  const products = useScanStore((s) => s.products);
+  const aliases = useScanStore((s) => s.aliases);
+  const finalCounts = useScanStore((s) => s.finalCounts);
+  const businessId = useScanStore((s) => s.businessId);
+
+  const [importError, setImportError] = useState("");
+  const [matchError, setMatchError] = useState("");
+  const [running, setRunning] = useState(false);
+
+  async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setImportError("Could not read this file. Try choosing it again.");
+      return;
+    }
+    const result = parseShopwareCsv(text);
+    if (result.rows.length === 0 && result.uomReview.length === 0) {
+      const reason = result.unparseable[0]?.reason ?? "no usable rows found";
+      setImportError(`Nothing was imported: ${reason}`);
+      return; // app state unchanged on a bad file
+    }
+    setImportError("");
+    setMatchError("");
+    startSession(result, file.name); // AM-R9: REPLACES any prior session
+    // Allow re-selecting the same file to re-import.
+    e.target.value = "";
+  }
+
+  async function onRunCompare() {
+    if (!session || running) return;
+    setRunning(true);
+    setMatchError("");
+    try {
+      const res = await fetch("/api/reconcile/match", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rows: session.adapter.rows }),
+      });
+      if (!res.ok) {
+        setMatchError(`The match request failed (status ${res.status}). Your imported file is still here - try again.`);
+        return;
+      }
+      const body = (await res.json()) as { matches: MatchResult[] };
+      const countedByUid = deriveCountedByUid(body.matches, products, aliases, finalCounts, businessId);
+      const builtReport = buildReconcileReport({ matches: body.matches, adapter: session.adapter, countedByUid });
+      setResults(body.matches, builtReport);
+    } catch {
+      setMatchError("Could not reach the server to run the match. Check your connection and try again. Your imported file is still here.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function onExportCsv() {
+    if (!report) return;
+    downloadCsv(reconcileReportCsv(report), "reconcile-report");
+  }
+
+  /** AM-R6: route confirmation through the EXISTING human-approval path. */
+  function onConfirmLink(barcode: string, partNumber: string, productId: string) {
+    const scan = useScanStore.getState();
+    const reviewId = scan.reopenNeedsReview(
+      barcode,
+      `Reconcile: confirm ${barcode} as a scan code for part number ${partNumber}.`,
+    );
+    if (!reviewId) return;
+    scan.resolveUnknown(reviewId, "link_existing", { productId, applyToCount: false });
+  }
+
+  // Linkage suggestions from matched rows (AM-R6): confirm-able only when the part number already
+  // resolves deterministically to a local product (approved alias or verified identifier).
+  const linkItems = (matches ?? []).flatMap((m) => {
+    const link = m.linkageSuggestion;
+    if (!link) return [];
+    const cleanBarcode = cleanScanCode(link.barcode).cleanCode;
+    const alreadyLinked = aliases.some((a) => a.cleanCode === cleanBarcode && a.approved);
+    const res = resolveRawScan(link.partNumber, products, aliases, businessId);
+    const target =
+      res.resolverStatus === "known" && res.productId
+        ? products.find((p) => p.id === res.productId) ?? null
+        : null;
+    return [{ link, cleanBarcode, alreadyLinked, target }];
+  });
+
+  if (!hydrated) {
+    return <p className="p-4 text-base text-zinc-600">Loading saved reconcile session...</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-zinc-200 bg-white p-4">
+        <h1 className="text-lg font-semibold text-zinc-900">Reconcile with Shop-Ware</h1>
+        <p className="mt-1 text-sm text-zinc-600">
+          Upload a Shop-Ware inventory export (CSV). The app matches each row against the tire
+          catalog and compares the expected quantities with what you counted in this session.
+          Importing a new file replaces the previous one.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            aria-label="Shop-Ware CSV file"
+            data-testid="reconcile-file"
+            onChange={(e) => void onFileChosen(e)}
+            className="text-sm"
+          />
+          {session && (
+            <button
+              type="button"
+              data-testid="reconcile-run"
+              onClick={() => void onRunCompare()}
+              disabled={running}
+              className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 text-base font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {running ? "Comparing..." : "Run compare"}
+            </button>
+          )}
+        </div>
+        {importError && (
+          <p data-testid="reconcile-import-error" className="mt-2 text-sm font-medium text-red-700">
+            {importError}
+          </p>
+        )}
+        {matchError && (
+          <p data-testid="reconcile-match-error" className="mt-2 text-sm font-medium text-red-700">
+            {matchError}
+          </p>
+        )}
+        {session && (
+          <p className="mt-2 text-sm text-zinc-600" data-testid="reconcile-session-summary">
+            Imported {session.fileName}: {session.adapter.rows.length} rows
+            {session.adapter.uomReview.length > 0 ? `, ${session.adapter.uomReview.length} held for unit review` : ""}
+            {session.adapter.unparseable.length > 0 ? `, ${session.adapter.unparseable.length} unreadable` : ""}.
+          </p>
+        )}
+      </div>
+
+      {!session && (
+        <p data-testid="reconcile-empty-state" className="rounded-lg border border-zinc-200 bg-white px-4 py-6 text-base text-zinc-600">
+          No file imported yet. Choose a Shop-Ware CSV export above to compare expected inventory
+          with what you counted.
+        </p>
+      )}
+
+      {session && !report && (
+        <p data-testid="reconcile-no-report-yet" className="rounded-lg border border-zinc-200 bg-white px-4 py-6 text-base text-zinc-600">
+          File imported. Click &quot;Run compare&quot; to match it against the catalog and your counted session.
+        </p>
+      )}
+
+      {report && (
+        <div data-testid="reconcile-report" className="rounded-lg border border-zinc-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3">
+            <h2 className="text-lg font-semibold text-zinc-900">Reconcile report</h2>
+            <button
+              type="button"
+              data-testid="reconcile-export-csv"
+              onClick={onExportCsv}
+              className="inline-flex min-h-[44px] items-center rounded-lg border border-zinc-300 px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              Export CSV
+            </button>
+          </div>
+
+          {report.assumptions.length > 0 && (
+            <p data-testid="reconcile-assumptions" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+              {report.assumptions.join(" ")}
+            </p>
+          )}
+
+          <div className="flex flex-col gap-4 p-4">
+            {BUCKET_ORDER.filter((b) => report.totals[b] > 0).map((bucket) => (
+              <BucketSection
+                key={bucket}
+                bucket={bucket}
+                label={BUCKET_LABELS[bucket]}
+                lines={report.lines.filter((l) => l.bucket === bucket)}
+              />
+            ))}
+            {report.lines.length === 0 && (
+              <p className="text-base text-zinc-600">The report has no rows.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {linkItems.length > 0 && (
+        <div data-testid="confirm-links" className="rounded-lg border border-zinc-200 bg-white p-4">
+          <h2 className="text-lg font-semibold text-zinc-900">Confirm barcode links</h2>
+          <p className="mt-1 text-sm text-zinc-600">
+            These barcodes came from catalog rows that matched your file. Nothing is saved until
+            you confirm a link. A confirmed link becomes an approved scan code for that product.
+          </p>
+          <ul className="mt-3 flex flex-col gap-2">
+            {linkItems.map(({ link, cleanBarcode, alreadyLinked, target }) => (
+              <li key={cleanBarcode} className="flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-100 px-3 py-2">
+                <span className="text-sm text-zinc-700">
+                  <span className="font-mono">{link.barcode}</span>
+                  {" for part number "}
+                  <span className="font-mono">{link.partNumber}</span>
+                  {target ? ` (${target.name})` : ""}
+                </span>
+                {alreadyLinked ? (
+                  <span className="text-sm font-medium text-green-700">Linked</span>
+                ) : target ? (
+                  <button
+                    type="button"
+                    data-testid={`confirm-link-${cleanBarcode}`}
+                    onClick={() => onConfirmLink(link.barcode, link.partNumber, target.id)}
+                    className="inline-flex min-h-[44px] items-center rounded-lg border border-blue-300 bg-blue-50 px-4 text-sm font-medium text-blue-800 hover:bg-blue-100"
+                  >
+                    Confirm link
+                  </button>
+                ) : (
+                  <span className="text-sm text-zinc-500">
+                    No product in your inventory matches part number {link.partNumber} yet, so
+                    there is nothing to link it to.
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BucketSection({ bucket, label, lines }: { bucket: ReconcileBucket; label: string; lines: ReconcileLine[] }) {
+  return (
+    <section data-testid={`bucket-${bucket}`}>
+      <h3 className="mb-2 text-base font-semibold text-zinc-800">
+        {label} ({lines.length})
+      </h3>
+      <div className="overflow-auto">
+        <table className="w-full border-collapse text-left text-sm">
+          <thead className="border-b border-zinc-200 bg-zinc-50 font-semibold text-zinc-700">
+            <tr>
+              <th scope="col" className="px-3 py-2">Part numbers</th>
+              <th scope="col" className="px-3 py-2">Brand</th>
+              <th scope="col" className="px-3 py-2">Model</th>
+              <th scope="col" className="px-3 py-2">Size</th>
+              <th scope="col" className="px-3 py-2">Shop-Ware qty</th>
+              <th scope="col" className="px-3 py-2">Counted qty</th>
+              <th scope="col" className="px-3 py-2">Delta</th>
+              <th scope="col" className="px-3 py-2">Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={`${bucket}-${i}`} className="border-t border-zinc-100 align-top">
+                <td className="px-3 py-2 font-mono">{l.partNumbers.join(", ")}</td>
+                <td className="px-3 py-2">{l.brand ?? ""}</td>
+                <td className="px-3 py-2">{l.model ?? ""}</td>
+                <td className="px-3 py-2">{l.sizeText ?? ""}</td>
+                <td className="px-3 py-2 tabular-nums">{l.expectedQty ?? ""}</td>
+                <td className="px-3 py-2 tabular-nums">{l.countedQty ?? ""}</td>
+                <td
+                  data-testid="reconcile-delta"
+                  className={`px-3 py-2 font-semibold tabular-nums ${l.delta === undefined ? "text-zinc-400" : deltaClass(l.delta)}`}
+                >
+                  {l.delta === undefined ? "" : formatDelta(l.delta)}
+                </td>
+                <td className="px-3 py-2 text-zinc-600">{l.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}

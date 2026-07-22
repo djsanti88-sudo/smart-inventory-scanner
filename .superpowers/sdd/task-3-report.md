@@ -1,137 +1,70 @@
-# Task 3 Report: Fast Brand-Anchored Grounded Spec Finder
+# Task 3 Report: provenanceTier stamped at every provisional mint site
 
-## Failing-then-passing parse test output
+NOTE: This file previously held a stale report from an older, unrelated plan (barcode trust
+gate / AM-4.2). It has been fully overwritten with this task's report.
 
-### Failing run (Step 2 - before implementation):
-```
-FAIL  |unit| src/services/ai/groundedSpecFinder.test.ts [ src/services/ai/groundedSpecFinder.test.ts ]
-Error: Cannot find module './groundedSpecFinder' imported from ...groundedSpecFinder.test.ts
-Test Files  1 failed (1)
-Tests  no tests
-Duration  143ms
-```
+## Status: DONE
 
-### Passing run (Step 4 - after implementation):
-```
-RUN  v4.1.8 C:/Users/djsan/inventory
-Test Files  1 passed (1)
-Tests  2 passed (2)
-Start at  19:49:49
-Duration  160ms (transform 28ms, setup 0ms, import 39ms, tests 2ms, environment 0ms)
-```
+## Ground truth verification (before editing)
+Grepped `provisional: true,` in `src/stores/scanStore.ts` before making any change. Confirmed
+exactly three mint sites, matching the brief's claim precisely:
+- Line 2614 (inside `runLiveDecodeOnce`, suggested-decode provisional)
+- Line 2887 (failed-decode mint sharing `provisionalPlaceholderName`)
+- Line 2954 (`ensureProvisionalCount`, already stamped `provenanceTier: "provisional"` by Task 2)
 
-Both parse cases pass:
-1. "maps a grounded JSON answer to a result + strong evidence when the exact code is grounded" - PASS
-2. "returns weak evidence when the exact code is NOT grounded" - PASS
+Both quoted anchor strings in the brief matched the file byte-for-byte at their stated line
+numbers (no line-shift materialized versus the brief's citations in this case). No NEEDS_CONTEXT
+condition was triggered.
 
-## Typecheck result
+## TDD sequence
+1. Created `src/stores/provenanceTier.store.test.ts` exactly as specified in the brief (BEHAVIOR
+   test + STATIC LOCK test).
+2. Ran `npx vitest run src/stores/provenanceTier.store.test.ts` before any implementation change:
+   - BEHAVIOR test passed (line 2954 already carried the tier from Task 2).
+   - STATIC LOCK test failed with the expected reason: the :2614 mint line was reported missing
+     `provenanceTier`.
+3. Applied the two one-line edits specified in the brief:
+   - Line 2614: appended `provenanceTier: "provisional",` after `provisional: true,`.
+   - Line 2887: appended `provenanceTier: "provisional",` after `provisional: true,`.
+4. Re-ran the focused test: both tests passed.
+5. Ran `npx tsc --noEmit`: no errors.
+6. Ran full `npm run test`: 247 test files passed, 8 skipped, 2493 tests passed, 32 skipped, 0
+   failures.
 
-```
-npx tsc --noEmit
-(no output - clean, exit 0)
-```
+## Files changed
+- `src/stores/scanStore.ts` - 2 lines changed (the two remaining provisional mint sites now
+  stamp `provenanceTier: "provisional"`).
+- `src/stores/provenanceTier.store.test.ts` - new file, static source-lock test plus a behavior
+  test, mirroring the `src/services/keySafety.test.ts` static-check idiom.
 
-No new type errors introduced.
+## Proof
+- `npx vitest run src/stores/provenanceTier.store.test.ts` -> 2 passed (pre-fix: 1 failed with
+  the exact predicted STATIC LOCK message quoting the :2614 line).
+- `npx tsc --noEmit` -> clean, no output.
+- `npm run test` -> 247 files passed / 8 skipped, 2493 tests passed / 32 skipped, 0 failed.
+- Post-edit grep of `provisional: true,` in scanStore.ts confirms all three lines (2614, 2887,
+  2954) now contain `provenanceTier: "provisional"`.
+- `git diff --stat -- src/stores/scanStore.ts` -> 1 file changed, 2 insertions(+), 2 deletions(-)
+  (exactly the two intended one-line edits, nothing else touched).
 
-## How groundedSpecFind is wired to the existing provider
+## Git
+- Commit: `d83b346` "feat(identity): provenanceTier stamped at all three provisional mint sites
+  (P2 tier fill-in)"
+- Staged explicitly: `src/stores/scanStore.ts`, `src/stores/provenanceTier.store.test.ts` only.
+- Pre-existing unrelated modifications (`.claude/settings.local.json`,
+  `.superpowers/sdd/task-3-report.md` pre-edit, `.superpowers/sdd/task-6-report.md`) were left
+  untouched and unstaged, per instruction not to sweep them in.
+- Local commit only. Not pushed.
 
-The live wrapper mirrors `src/services/ai/geminiProvider.ts` lines 29-59 exactly:
+## Self-review
+- Every quoted anchor in the brief matched the live file exactly before editing; no guessing.
+- The static-lock test uses `toBeGreaterThanOrEqual(3)` so it will not break as more provisional
+  mint sites are legitimately added later, while still catching any that omit the tier.
+- No em dash or en dash introduced in code, comments, or this report.
+- North-star (every scan appears and counts) is unaffected: this task only adds a metadata field
+  to already-minted provisional products; no gating, filtering, or suppression logic was touched.
+- Scope was held to exactly the two edits and one new test file specified in the brief. No other
+  refactoring performed.
 
-- Same API endpoint pattern: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-- Same `tools: [{ google_search: {} }]` grounding flag (geminiProvider.ts line 27)
-- Same `generationConfig: { temperature: ... }` structure (geminiProvider.ts line 26)
-- Same grounding-aware response extraction: `candidate?.content?.parts` text join (geminiProvider.ts lines 40-43)
-- Same `extractJson` function pattern as `safeParseJson` in geminiProvider.ts lines 69-81: tolerates code-fence wrapper, finds first `{...}` object
-
-Key difference: `groundedSpecFind` does NOT reuse `normalizeResult` from `provider.ts` because `parseSpecResponse` is a purpose-built pure mapper that sets `corroboratedByModel`, anchors brand, and returns an `EvidenceResult` alongside the result. Using `normalizeResult` would lose the `exactCodeGrounded -> fetched_source` evidence mapping.
-
-The provider reads `process.env.GEMINI_API_KEY` server-side only (same as geminiProvider.ts line 10). The file is guarded with `import "server-only"` so the Next.js bundler will reject client-side imports.
-
-## Commit
-
-Branch: `decode/prefix-anchored-fast`
-Commit hash: `9c2fa90`
-Message: `feat(decode): fast brand-anchored grounded spec finder (3s budget)`
-Files committed:
-- `src/services/ai/groundedSpecFinder.ts`
-- `src/services/ai/groundedSpecFinder.test.ts`
-
----
-
-# Task 3 FIX Report: Evidence via EvidenceVerifier, not model claim
-
-## verifyEvidence signature mirrored
-
-From `src/services/ai/evidenceVerifier.ts` lines 63-68:
-```ts
-export function verifyEvidence(
-  code: string,
-  codeType: CodeType,
-  evidence: ProviderEvidence,
-  opts?: { trustedHosts?: string[] },
-): EvidenceResult
-```
-
-Mirrored in `groundedSpecFind` at the call site (mirrors `decodeOrchestrator.ts` line 132):
-```ts
-const evidence = verifyEvidence(code, codeType, providerEvidence);
-```
-
-## Test output (fail then pass)
-
-### Failing run (new test with old implementation - parseSpecResponse called with 2 args but old code expected 3):
-```
-FAIL  |unit| src/services/ai/groundedSpecFinder.test.ts (2 tests | 1 failed) 5ms
-  x anchors the brand and builds productName from brand+model+size 4ms
-    AssertionError: expected 'WRONGBRAND' to be 'Cooper'
-Test Files  1 failed (1)
-Tests  1 failed | 1 passed (2)
-```
-
-### Passing run (after fix):
-```
-RUN  v4.1.8 C:/Users/djsan/inventory
-Test Files  1 passed (1)
-Tests  2 passed (2)
-Start at  20:05:54
-Duration  157ms
-```
-
-Full suite: 93 passed | 7 skipped (100), 679 passed | 30 skipped (709).
-
-## Typecheck result
-
-```
-npx tsc --noEmit
-(no output - clean, exit 0)
-```
-
-## Proof that no code path sets evidence.verified=true without an EvidenceVerifier call
-
-There is no code path in the fixed file where `evidence.verified` can become `true` without passing through `verifyEvidence`. Specifically:
-
-1. `parseSpecResponse` returns `{ result: AiLookupResult | null }` ONLY - it has no `evidence` field at all. The old code that set `evidence = { verified: true, strength: "fetched_source" }` when `exactCodeGrounded === true` has been deleted entirely.
-
-2. `groundedSpecFind` produces evidence in exactly one place (after the `res.ok` check):
-   ```ts
-   const evidence = verifyEvidence(code, codeType, providerEvidence);
-   ```
-   This is the ONLY assignment to `evidence` in the live path. The `nullResult()` helper always returns `verified: false`. The `catch` block calls `nullResult()` which also returns `verified: false`.
-
-3. `verifyEvidence` (read-only, not modified) returns `verified: true` only when the exact code appears in real grounding text or a trusted-host URL - never from the model's `exactCodeGrounded` field (which is not passed to it at all).
-
-## Key-in-URL and response-size-limit items
-
-Both match the existing `geminiProvider.ts` precedent (key appended to URL as `?key=`, no response size limit enforced). These are noted in inline comments in the fixed file for codebase-wide follow-up; this file does NOT diverge from the parent pattern.
-
-## Commit
-
-## Concerns for Task 4 (live wrapper)
-
-1. **`exactCodeGrounded` is model self-claim, not app-verified**: The `groundedSpecFind` wrapper sets `evidence.strength = "fetched_source"` when `json.exactCodeGrounded === true`, but this is the model's own claim - not independently verified by `EvidenceVerifier`. Task 4's integration test should confirm whether Gemini reliably sets this flag only when the UPC truly appears in a cited source. If not, the evidence strength should be downgraded to `grounding_chunk`.
-
-2. **No `EvidenceVerifier` call in the live path**: Unlike `decodeOrchestrator.ts` which calls `verifyEvidence(code, codeType, evidenceOf(r))` independently, `groundedSpecFind` trusts `exactCodeGrounded` from the model. For the fast/cheap path this is an acceptable trade-off (3s budget), but Task 4 should document it as a known gap vs. the full orchestrator path.
-
-3. **Grounding chunk text is not extracted**: The live wrapper extracts only the `text` from `content.parts` but does NOT extract `candidate.groundingMetadata.groundingSupports` (the support segment texts that `geminiProvider.ts` maps to `groundingChunks`). If the model sets `exactCodeGrounded: false` but the UPC actually appears in a grounding chunk, the evidence strength will be `"none"` instead of `"grounding_chunk"`. Task 4 should decide whether to add grounding metadata extraction.
-
-4. **`AbortSignal.timeout(3000)` behavior**: When no external signal is passed, the wrapper uses `AbortSignal.timeout(3000)`. If the Gemini call itself takes exactly 3s due to network conditions, the signal may fire mid-read. This is the intended 3s budget behavior per the brief, but Task 4 should verify the error is caught cleanly (it is - the `catch` block returns `nullResult()`).
+## Concerns
+None. The task matched the brief's ground truth exactly with no ambiguity.

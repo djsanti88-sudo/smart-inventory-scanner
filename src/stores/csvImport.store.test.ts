@@ -78,3 +78,39 @@ describe("Loop 5 CSV import (store)", () => {
     expect(events.some((e) => e.action === "csv_export" && e.entityId === "export-final-counts")).toBe(true);
   });
 });
+
+describe("importProductsCsv - optional unit_cost column", () => {
+  it("maps a unit_cost column onto Product.unitCost when present and numeric", () => {
+    const store = createTestScanStore({});
+    const csv = "name,brand,category,primary_sku,unit_cost\nWidget,Acme,Tools,SKU1,12.50\n";
+    store.getState().importProductsCsv(csv);
+    const imported = store.getState().products.find((p) => p.primarySku === "SKU1");
+    expect(imported?.unitCost).toBe(12.5);
+  });
+
+  it("recognizes case-insensitive unit cost header synonyms", () => {
+    for (const header of ["UNIT COST", "cost", "unitcost"]) {
+      const store = createTestScanStore({});
+      const csv = `name,primary_sku,${header}\nWidget,SKU-${header},7.25\n`;
+      store.getState().importProductsCsv(csv);
+      const imported = store.getState().products.find((p) => p.primarySku === `SKU-${header}`);
+      expect(imported?.unitCost).toBe(7.25);
+    }
+  });
+
+  it("leaves unitCost UNDEFINED (never 0) when the column is absent", () => {
+    const store = createTestScanStore({});
+    const csv = "name,brand,category,primary_sku\nGadget,Zeta,Electronics,SKU2\n";
+    store.getState().importProductsCsv(csv);
+    const imported = store.getState().products.find((p) => p.primarySku === "SKU2");
+    expect(imported?.unitCost).toBeUndefined();
+  });
+
+  it("leaves unitCost UNDEFINED when the column value is not a valid number", () => {
+    const store = createTestScanStore({});
+    const csv = "name,brand,category,primary_sku,unit_cost\nBroken,Acme,Tools,SKU3,not-a-number\n";
+    store.getState().importProductsCsv(csv);
+    const imported = store.getState().products.find((p) => p.primarySku === "SKU3");
+    expect(imported?.unitCost).toBeUndefined();
+  });
+});

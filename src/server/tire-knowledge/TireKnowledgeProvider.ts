@@ -2,6 +2,8 @@ import "server-only";
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
 import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
@@ -23,21 +25,55 @@ export interface CorpusDecodeResult {
 // these two tiers), so a low-trust row can never produce a corpus auto-count.
 const CONF: Record<string, number> = { verified_2src: 0.97, verified_1src_strong: 0.92 };
 
+// BUG FIX (PN-resolved suggestion's barcode never carried through, owner-reported live on preview):
+// the generator's REAL output convention for barcode_type is "upc"/"ean"/"gtin14" - 78,201 of 78,223
+// rows use it. Only 22 legacy rows use "upc_a"/"ean_13"/"gtin_14". The switch below previously only
+// recognized the legacy convention, so the row's barcode silently landed in NO result field for
+// almost every corpus row. Normalize both conventions here (one seam) and default any other
+// GTIN-shaped barcode_type value into the gtin field so a future generator convention still carries
+// through instead of silently dropping again.
+function barcodeField(row: TireKnowledgeRow): { upc: string; ean: string; gtin: string } {
+  const barcode = row.barcode || "";
+  if (!barcode) return { upc: "", ean: "", gtin: "" };
+  switch (row.barcode_type) {
+    case "upc":
+    case "upc_a":
+      return { upc: barcode, ean: "", gtin: "" };
+    case "ean":
+    case "ean_13":
+      return { upc: "", ean: barcode, gtin: "" };
+    case "gtin14":
+    case "gtin_14":
+      return { upc: "", ean: "", gtin: barcode };
+    default:
+      // Unrecognized/future barcode_type value: still carry the barcode (into gtin, the most
+      // general identifier field) rather than dropping it silently.
+      return { upc: "", ean: "", gtin: barcode };
+  }
+}
+
 function toResult(row: TireKnowledgeRow): AiLookupResult {
   const specs = [row.size, [row.load_index, row.speed_rating].filter(Boolean).join("")].filter(Boolean).join(" ").trim();
-  const name = [row.brand, row.model, specs].filter(Boolean).join(" ").trim();
+  // DISPLAY-ONLY prettify: the corpus stores model slugs ("wrangler_workhorse_at") and lowercase
+  // brands. Prettify here (new decode result construction), never rewrite the stored corpus row.
+  const brand = prettifyBrand(row.brand);
+  const model = prettifyProductName(row.model);
+  const name = [brand, model, specs].filter(Boolean).join(" ").trim();
+  const { upc, ean, gtin } = barcodeField(row);
   return {
     ...emptyResult(),
     productName: name,
-    brand: row.brand,
+    brand,
     category: "Tire",
     specsShort: specs,
     specsFull: row.raw_size_text || specs,
     primarySku: row.manufacturer_part_number || "",
-    primaryBarcode: row.barcode,
-    upc: row.barcode_type === "upc_a" ? row.barcode : "",
-    ean: row.barcode_type === "ean_13" ? row.barcode : "",
-    gtin: row.barcode_type === "gtin_14" ? row.barcode : "",
+    // ALWAYS carry the corpus row's barcode into primaryBarcode when present, regardless of which
+    // barcode_type convention the row uses - this is the field the client actually surfaces.
+    primaryBarcode: row.barcode || "",
+    upc,
+    ean,
+    gtin,
     confidence: CONF[row.confidence] ?? 0.92,
     // NOT a customer-facing source URL: the corpus carries no external source URLs into the runtime result,
     // so a customer decode response can never leak the global corpus's sources.
@@ -73,23 +109,46 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
   return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode" };
 }
 
+// RC4 (owner-ratified, pilot PN recall): "if only the distributor affix differs and the digits are
+// identical, approve" - a part-number identity match is high-trust. 0.85 when the scanned PN matches
+// the corpus's manufacturer_part_number exactly (modulo space/hyphen normalization only); 0.8 when
+// only the affix-stripped numeric core matched (a distributor prefix/suffix was removed to get
+// there). Both tiers clear the >=0.8 auto-apply-suggestion gate elsewhere, but NEITHER ever reaches
+// "verified" here - a PN match has no barcode evidence, so it stays a suggestion the human/UI can
+// approve or decline on the counted row.
+const PLAIN_PN_CONFIDENCE = 0.85;
+const AFFIX_CORE_PN_CONFIDENCE = 0.8;
+
 /**
  * EXACT trusted manufacturer-part-number resolution. Returns a SUGGESTED decode (deterministic identity,
- * routed to Needs Review for human confirmation) by default - part numbers are not globally unique like
- * barcodes, so auto-counting them silently is unsafe (Phase 4: "if policy is unclear, route to Needs
- * Review"). No AI, no page fetch.
+ * routed to Needs Review / suggestion-row confirmation) - part numbers are not globally unique like
+ * barcodes, so this NEVER returns "verified" and NEVER marks exactCodeEvidenceVerifiedByApp true. No AI,
+ * no page fetch.
  */
 export async function resolveExactPartNumber(partNumber: string): Promise<CorpusDecodeResult | null> {
   const row = await lookupByExactPartNumber(partNumber);
   if (!row) return null;
   const result = toResult(row);
+
+  // Determine which tier applies by comparing the scanned PN's plain normalized key against the
+  // corpus row's own normalized key. If they match, the raw key was the hit (no affix stripped). If
+  // they differ, lookupByExactPartNumber only could have hit via the affix-core variant.
+  const scannedPlainKey = basePartNumberKey(partNumber);
+  const corpusPlainKey = basePartNumberKey(row.manufacturer_part_number);
+  const isAffixCoreHit = scannedPlainKey !== corpusPlainKey;
+
+  const confidence = isAffixCoreHit ? AFFIX_CORE_PN_CONFIDENCE : PLAIN_PN_CONFIDENCE;
+  const reason = isAffixCoreHit
+    ? "Matched by part number in the tire knowledge base (distributor prefix stripped). Confirm before counting (part numbers are not unique like barcodes)."
+    : "Matched by part number in the tire knowledge base. Confirm before counting (part numbers are not unique like barcodes).";
+
   const decision: DecodeDecision = {
     status: "suggested",
-    confidence: 0.6,
-    reason: "Matched a part number in the trusted tire knowledge base. Confirm before counting (part numbers are not unique like barcodes).",
+    confidence,
+    reason,
     evidenceStrength: "fetched_source",
     exactCodeEvidenceVerifiedByApp: false,
-    crossCheck: { decision: "single_provider", confidence: 0.6, reason: "Trusted corpus exact part number.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+    crossCheck: { decision: "single_provider", confidence, reason: "Trusted corpus exact part number.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
   };
   return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_part_number" };
 }

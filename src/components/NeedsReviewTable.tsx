@@ -2,32 +2,11 @@
 
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { normalizeCode } from "@/services/codeNormalizer";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
+import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
+import { prettifyProductName } from "@/services/format/productDisplay";
 import type { UnknownCodeReview } from "@/types";
-
-// W2: collect the discovered identifiers a decode/page-fetch surfaced (extra UPC/EAN/GTIN/SKU/codes),
-// deduped by clean code and excluding the scanned code itself (aliased on resolve). These are
-// SUGGESTIONS only - a human selects which to approve; nothing here is trusted or saved automatically.
-function buildDiscoveredIdentifiers(review: UnknownCodeReview): { code: string; label: string }[] {
-  const raw: { code: string; label: string }[] = [];
-  if (review.suggestedPrimarySku) raw.push({ code: review.suggestedPrimarySku, label: "Suggested SKU / part number" });
-  if (review.suggestedUpc) raw.push({ code: review.suggestedUpc, label: "Suggested UPC" });
-  if (review.suggestedEan) raw.push({ code: review.suggestedEan, label: "Suggested EAN" });
-  if (review.suggestedGtin) raw.push({ code: review.suggestedGtin, label: "Suggested GTIN" });
-  for (const a of review.suggestedAliases ?? []) raw.push({ code: a, label: "Suggested code" });
-  const scanned = normalizeCode(review.cleanCode).clean;
-  const seen = new Set<string>();
-  const out: { code: string; label: string }[] = [];
-  for (const r of raw) {
-    const clean = normalizeCode(r.code).clean;
-    if (!clean || clean === scanned || seen.has(clean)) continue;
-    seen.add(clean);
-    out.push(r);
-  }
-  return out;
-}
 
 // Shows the decode pipeline outcome. Two visible states only: "Verified" (app-confirmed) and
 // "Suggested" (everything else, including a provider conflict) - Plan C collapses the old
@@ -59,9 +38,13 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
 export function NeedsReviewTable() {
   const allReviews = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
-  // Owner rule: an item that is ALREADY solved AND synced is done - it must not linger in Needs Review.
-  // A resolved item that is NOT yet synced stays visible (so nothing looks lost before it saves).
-  const reviews = allReviews.filter((r) => r.status === "open" || r.syncStatus !== "synced");
+  // Owner rule: an item that is ALREADY solved (resolved or ignored) is done - it must never linger in
+  // Needs Review, regardless of sync state. Review status is identity metadata only; it never affects
+  // the scan feed or session counts (those stay independent, keyed by cleanCode). Task 9b
+  // (owner-ratified 2026-07-14): a review PARKED at status "suggested" (pending inline suggestion) also
+  // never belongs in this queue - it lives on the feed row's inline controls + the
+  // SuggestedApprovalPanel. Only "open" reviews render here.
+  const reviews = allReviews.filter((r) => r.status === "open");
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -73,12 +56,18 @@ export function NeedsReviewTable() {
             : "These codes already count. Confirm the right product once if you like, and from then on scanning that code is automatic."}
         </p>
       </div>
-      <div className="overflow-auto">
+      <div
+        className="overflow-auto shadow-[inset_-8px_0_6px_-6px_rgba(0,0,0,0.08)]"
+        tabIndex={0}
+        role="region"
+        aria-label="Suggested items table, scroll horizontally for more columns"
+      >
         <table className="w-full border-collapse text-left text-base" aria-labelledby="review-heading">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
               {isPlatform && <th scope="col" className="px-4 py-3">Raw code</th>}
               {isPlatform && <th scope="col" className="px-4 py-3">Normalised barcode</th>}
+              <th scope="col" className="px-4 py-3">Barcode</th>
               <th scope="col" className="px-4 py-3">Reason</th>
               <th scope="col" className="px-4 py-3">Suggested product</th>
               <th scope="col" className="px-4 py-3">Confidence</th>
@@ -91,7 +80,7 @@ export function NeedsReviewTable() {
           <tbody data-testid="review-body">
             {reviews.length === 0 ? (
               <tr>
-                <td colSpan={isPlatform ? 9 : 6} className="px-4 py-6 text-center text-base text-zinc-600">
+                <td colSpan={isPlatform ? 10 : 7} className="px-4 py-6 text-center text-base text-zinc-600">
                   Nothing to review. Unrecognised codes will appear here for you to identify.
                 </td>
               </tr>
@@ -130,8 +119,17 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
     setDeselected((prev) => (on ? prev.filter((c) => c !== code) : Array.from(new Set([...prev, code]))));
   const aliasConflicts = useScanStore((s) => s.lastAliasConflicts);
   const myConflicts = (aliasConflicts ?? []).filter((c) => c.reviewId === review.id);
+  // Phase 4 (C4, plan-review-mandated): a review carrying importQuantity came from a universal-import
+  // row, not a scan. Its confirmation must be explicitly human-origin (so the poison guard / weak-guess
+  // check never treats an import row as an AI suggestion), and it must NEVER expose live-decode or
+  // correction-recheck - Phase 4 makes ZERO /api/ai-lookup calls, and those two actions POST the code to
+  // that route. importQuantity !== undefined is the store's own import-origin marker (see types.ts).
+  const isImportOrigin = review.importQuantity !== undefined;
+  const importHumanOrigin = isImportOrigin ? { origin: "human" as const } : {};
 
-  const resolved = review.status !== "open";
+  // Task 9b: a parked "suggested" review is still AWAITING the human (never styled/treated as
+  // resolved). Defense in depth - the table filter above already excludes suggested reviews.
+  const resolved = review.status !== "open" && review.status !== "suggested";
 
   // P4: elderly-readable controls. One PRIMARY action per row (blue filled, >=44px, text-base); everything
   // else is a same-size outline so nothing scary competes with the primary. Approve is primary when there is
@@ -145,9 +143,13 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
     <tr className="border-t border-zinc-100 align-top hover:bg-zinc-50" data-testid={`review-row-${review.cleanCode}`}>
       {isPlatform && <td className="px-4 py-3 font-mono text-sm">{review.rawCode}</td>}
       {isPlatform && <td className="px-4 py-3 font-mono text-sm">{review.cleanCode}</td>}
+      <td className="px-4 py-3 font-mono text-sm" data-testid="review-barcode">{review.cleanCode || review.rawCode || "-"}</td>
       <td className="max-w-48 px-4 py-3 text-sm text-zinc-700" data-testid="review-reason">
         {review.reason || "Unknown code."}
-        {typeof review.autoVerifyScore === "number" && (
+        {/* Task 9 copy fix: never show the "confidence too low" demotion next to a decode the app actually
+            VERIFIED. The old demotion rendered a bogus "50/100" beside a real 90% app-verified decode (the
+            hot-sauce incident). A verified decode is not "too low to save" - its confidence is honest. */}
+        {typeof review.autoVerifyScore === "number" && review.decodeStatus !== "verified" && (
           <span className="mt-1 block text-zinc-600" data-testid="review-score">
             Confidence too low to save automatically ({review.autoVerifyScore}/100)
           </span>
@@ -223,7 +225,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
       </td>
       {isPlatform && <td className="px-4 py-3 text-sm">{review.providerName || "-"}</td>}
       <td className="px-4 py-3">
-        <StatusBadge status={review.status === "open" ? "needs_review" : (review.status as "resolved" | "ignored")} />
+        {/* Task 9b: StatusBadge is "suggested"-aware, so the raw review status passes through
+            without the old unsafe cast (which fed "suggested" into undefined map/label lookups). */}
+        <StatusBadge status={review.status === "open" ? "needs_review" : review.status} />
       </td>
       <td className="px-4 py-3">
         <SyncBadge status={review.syncStatus} />
@@ -237,7 +241,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               <button
                 type="button"
                 data-testid="mismatch-override"
-                onClick={() => resolveUnknown(review.id, "link_existing", { productId: warn.productId, applyToCount, confirmedMismatch: true })}
+                onClick={() => resolveUnknown(review.id, "link_existing", { productId: warn.productId, applyToCount, confirmedMismatch: true, ...importHumanOrigin })}
                 className="rounded bg-red-600 px-2 py-1 font-medium text-white hover:bg-red-700"
               >
                 Link anyway
@@ -310,6 +314,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 data-testid="create-save"
                 onClick={() =>
                   resolveUnknown(review.id, "create_new", {
+                    ...importHumanOrigin,
                     newProduct: { name: np.name || review.cleanCode, brand: np.brand, category: np.category },
                     applyToCount,
                     selectedAliasCodes: selectedCodes,
@@ -336,6 +341,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 data-testid="approve-suggestion"
                 onClick={() =>
                   resolveUnknown(review.id, "create_new", {
+                    ...importHumanOrigin,
                     applyToCount,
                     newProduct: {
                       name: review.suggestedProductName,
@@ -367,14 +373,14 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             >
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {prettifyProductName(p.name)}
                 </option>
               ))}
             </select>
             <button
               type="button"
               data-testid="link-existing"
-              onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes })}
+              onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes, ...importHumanOrigin })}
               className={primaryIsApprove ? btnSecondary : btnPrimary}
             >
               Link
@@ -403,7 +409,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             >
               Ignore
             </button>
-            {isPlatform && (
+            {/* C4: an import-origin review NEVER shows live-decode or correction-recheck - both POST the
+                code to /api/ai-lookup, and Phase 4 makes ZERO such calls. Human link/confirm only. */}
+            {isPlatform && !isImportOrigin && (
               <button
                 type="button"
                 data-testid="live-decode"
@@ -419,7 +427,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 Look up with AI
               </button>
             )}
-            {isPlatform && (
+            {isPlatform && !isImportOrigin && (
               <button
                 type="button"
                 data-testid="stronger-redecode"

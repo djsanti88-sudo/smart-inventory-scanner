@@ -68,8 +68,6 @@ Why each choice was made. Newest decisions at the bottom of each section.
   contradiction detection (no productName string equality) -> agree/conflict/single_provider/weak.
 - **decideDecode** gate: "verified" requires public barcode + strong app-verified evidence +
   agreement (or single) + identity + confidence>=threshold. Vendor/FNSKU/internal never verified.
-- **Auto-accept of verified decodes** is a setting (`autoAcceptVerifiedDecodes`, default OFF). Even
-  a Verified AI Decode needs human approval by default - this preserves the prior trust boundary.
 - **Route** gained a "decode" mode (dual provider + server-side verify + cross-check). `IS_E2E=1`
   forces mock-only so E2E can never spend tokens; `page.route` mocks the endpoint in E2E; unit tests
   mock the engines and `fetch`. No live tokens in `npm run test` or `npm run test:e2e`.
@@ -267,3 +265,59 @@ Why each choice was made. Newest decisions at the bottom of each section.
 - **Admin SDK server-only**; client never imports it; keySafety enforces it. E2E bypass reused unchanged
   (production-impossible).
 - **Roles owner|admin|counter|viewer** per the owner's model.
+
+## Decode ladder v2: cost-ordered rungs, Gemini out of decode (2026-07-08)
+- **Ordered rungs, first settled answer stops the ladder** (`src/server/upc/ladder.ts`): local tire
+  corpus / decode cache (free) -> `goupc` -> `fetchv2` -> `gpt` (GPT-5.5). Owner rule: never pay for
+  a rung when an earlier one already answered. Every rung that ran records its reason, surfaced in
+  the decode payload and Settings.
+- **Go-UPC is GTIN-gated at the caller**: the rung is only added for a real GTIN shape with a valid
+  GS1 check digit, so `runLadder` stays shape-agnostic and vendor/internal codes never hit the paid API.
+- **Gemini is permanently out of decode.** Grounding billed every EXECUTED search query (~$14/1k)
+  while `webSearchQueries` reported only cited ones (~100x undercount, see LESSONS_LEARNED L11), and
+  it has no tool-call cap. Settings explicitly labels Gemini "not used for decode".
+- **Daily cap charges paid rungs only** (`2dcf714`): corpus/cache hits are free; the counter is an
+  atomic storage-backed increment charged INSIDE the paid rung (one charge per genuine compute -
+  fixes the route-level double-billing and cap-before-cache-read classes). Default raised 200 -> 500
+  (owner authorized 2026-07-10); `AI_LOOKUP_DAILY_LIMIT` still overrides.
+- **Cap-blocked scans are honest**: a 429/cap block shows its real reason, never "Unidentified item"
+  masquerading as a resolver miss (an all-`other`/~10ms mass-scan pattern means cap exhaustion).
+
+## Size-aware identity merge + evidenced brand families (2026-07-10)
+- **Why:** on a 100-code preview run the server verified 99/100 but the UI counted only 40 - every
+  additional SIZE of an already-seen tire model collapsed into a fuzzy "link to existing product?"
+  suggestion, and `086699998538` fired a false prefix conflict (Go-UPC said "Michelin", prefix owner
+  "bfgoodrich" - the same company).
+- **Sizes live in specs, not names.** Corpus product names are slugs (`wrangler_steadfast_ht`), so the
+  name-parse tire rule never fires. `findIdentityMerge` now derives size from `specsShort`/`specsFull`;
+  size-distinct fuzzy matches MINT NEW PRODUCTS instead of queueing review suggestions. scanStore
+  passes the decoded specs into the merge (`1782c11`).
+- **Brand families are evidence-backed corporate ownership**, not lookalike names: Michelin owns
+  BFGoodrich + Uniroyal (NA), Continental owns General, Goodyear owns Cooper; Dunlop unfamilied after
+  the 2025 Sumitomo trademark purchase. `sameBrandFamily` feeds `evaluatePrefix` so shared GS1
+  prefixes inside one company never conflict. (Prefix->company is many-to-one: one company owns many
+  prefixes across many countries.)
+- **Never weaken a real-conflict path:** unrelated brands (Michelin vs Goodyear) still conflict.
+
+## Suggested-identity display + high-trust auto-apply (2026-07-09)
+- **Show the candidate, decouple it from counting.** Suggested identities render on the scan feed and
+  Your counts with a "(suggested)" tag only when confidence is genuinely low (< 0.8). Counting stays
+  gated: high-trust suggestions (>= 0.8 or app-verified exact code) auto-apply to the COUNTED row
+  (`c232b5d`); everything else remains review-first. Rationale: a review row showing "92%" was a
+  VERIFIED decode a store safety gate had held - the UI just never said so; now the reason + barcode
+  are visible (Needs Review barcode column, Status column on Your counts).
+- **Corpus slug names are prettified at display time** (digit model-code rule bounded to short
+  tokens; hyphen parts cased individually) - stored identity is unchanged.
+
+## Count snapshots persist for every access level (2026-07-12, owner-ratified)
+- `countSnapshots` (variance report) stays in the shared persisted store for ALL roles. Sanity-check
+  performed and passed: snapshot lines carry ONLY productId / display name / qty (scanStore.ts
+  snapshotCount) - no raw codes, no aliases, no provider diagnostics - so the customer data firewall
+  is not widened. Cap 12 bounds growth. Revisit only if snapshot lines ever gain code-bearing fields.
+
+## CSV import: merge-by-sku-alone stays (2026-07-12, owner-ratified)
+- A CSV row with a SKU matching an existing product and NO barcode merges quantity into that product.
+  Rationale: the CSV is the owner's own human-supplied list (same trust basis as the approved-alias
+  rule); SKU is a human-assigned identity in their catalog. Guardrails unchanged: barcode conflicts
+  never re-point (error list), idempotent re-import, preview + explicit confirm. Revisit if
+  multi-tenant catalogs ever share SKUs across businesses.

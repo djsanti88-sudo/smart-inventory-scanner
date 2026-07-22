@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { lookupPrefix, recordLearnedPrefix, clearLearnedPrefixes, type PrefixEntry } from "@/services/catalog/prefixIndex";
+import { lookupPrefix, recordLearnedPrefix, clearLearnedPrefixes, setDerivedPrefixes, type PrefixEntry } from "@/services/catalog/prefixIndex";
 
 // The prefix index is MANY-TO-MANY and statistical, NOT official GS1 truth: one prefix can carry
 // several candidate brand/manufacturer/OEM names with confidence weights, and the same owner can hold
@@ -30,11 +30,31 @@ describe("prefixIndex (curated seed, many-to-many)", () => {
     expect(lookupPrefix("000000000000")).toBeNull();
   });
 
-  it("loads the derived (OFF) map: a known food prefix resolves to its dominant brand", () => {
-    const e = lookupPrefix("0029700016315"); // prefix 0029700 - recovered from OFF enrichment
-    expect(e).not.toBeNull();
-    expect(e?.source).toBe("derived_catalog");
-    expect(e?.dominant?.name.toLowerCase()).toContain("idahoan");
+  // F5 bundle-surgery (wave 2, 2026-07-20): the DERIVED_CATALOG tier (2.3MB derivedPrefixMap.json) no
+  // longer loads into this CLIENT-SAFE module (see prefixIndexServer.test.ts for the full-index
+  // coverage of this exact prefix, "0029700 -> idahoan"). This module's own DERIVED map stays an empty
+  // {} in production; setDerivedPrefixes exists only as a test seam.
+  it("the derived tier is empty by default (moved server-only; see prefixIndexServer.test.ts)", () => {
+    expect(lookupPrefix("0029700016315")).toBeNull();
+  });
+
+  it("setDerivedPrefixes (test seam) can inject a derived entry without the 2.3MB file", () => {
+    setDerivedPrefixes({
+      "0029700": {
+        prefix: "0029700",
+        candidates: [{ name: "idahoan", kind: "manufacturer", productCount: 10, confidence: 0.9 }],
+        dominant: { name: "idahoan", kind: "manufacturer", productCount: 10, confidence: 0.9 },
+        productCount: 10, categoryDist: {}, countryHints: [], confidence: 0.9, ambiguity: 0.1, source: "derived_catalog",
+      },
+    });
+    try {
+      const e = lookupPrefix("0029700016315");
+      expect(e).not.toBeNull();
+      expect(e?.source).toBe("derived_catalog");
+      expect(e?.dominant?.name.toLowerCase()).toContain("idahoan");
+    } finally {
+      setDerivedPrefixes({}); // never leak test state into other tests
+    }
   });
 
   it("matches the SAME company for a UPC-12 and its GTIN-13 form (normalization)", () => {

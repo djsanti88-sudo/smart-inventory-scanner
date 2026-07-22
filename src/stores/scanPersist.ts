@@ -13,6 +13,8 @@ export interface PersistableScanState {
   businessId: string;
   sessionId: string;
   currentSession: unknown;
+  location: string;
+  recentLocations: string[];
   settings: unknown;
   pendingSyncQueue: unknown[];
   syncedScanEventIds: unknown[];
@@ -26,11 +28,29 @@ export interface PersistableScanState {
   catalog: unknown[];
   shopOverrides: unknown[];
   feedbackEvents: unknown[];
+  countSnapshots: unknown[];
+  firstScanAt: string | null;
 }
 
 /** Resolve the persistence access level from the signed-in uid (defaults to customer when unknown). */
 export function persistAccessLevel(userId: string | null): AccessLevel {
   return effectiveClientAccessLevel({ uid: userId });
+}
+
+// Finding #16 mitigation (c): cap the APPEND-ONLY DIAGNOSTIC ledgers that grow one entry per scan so the
+// persisted blob stops scaling linearly with session length. Only the newest entries are kept (ring
+// buffer), the same convention countSnapshots/feedbackEvents already use in-memory. These ledgers are
+// safe to bound: syncedScanEventIds is a dedup ledger whose only job is to stop re-applying items STILL
+// in pendingSyncQueue (applied items leave the queue, so old ids are dead weight); feedbackEvents is a
+// private local event log. CUSTOMER DATA (scanFeed / finalCounts / needsReviewQueue / pendingSyncQueue)
+// is NEVER capped here - dropping any of it would lose counts, unfinished review work, or unsynced
+// writes, which the TOP-LEVEL LAW forbids.
+const SYNCED_SCAN_ID_CAP = 1000;
+const FEEDBACK_EVENT_PERSIST_CAP = 500;
+
+/** Keep only the last `cap` entries of an append-only array (newest retained). Pure. */
+function capTail<T>(arr: T[], cap: number): T[] {
+  return arr.length > cap ? arr.slice(arr.length - cap) : arr;
 }
 
 /**
@@ -47,10 +67,19 @@ export function buildPersistedScanState(
     businessId: s.businessId,
     sessionId: s.sessionId,
     currentSession: s.currentSession,
+    location: s.location,
+    recentLocations: s.recentLocations,
     settings: s.settings,
     pendingSyncQueue: s.pendingSyncQueue,
-    syncedScanEventIds: s.syncedScanEventIds,
+    // #16: bounded diagnostic dedup ledger (not customer data - see cap note above).
+    syncedScanEventIds: capTail(s.syncedScanEventIds, SYNCED_SCAN_ID_CAP),
     simulateSyncFailure: s.simulateSyncFailure,
+    // Task 3.5: snapshot lines are already the product-facing shape (productId, name, qty - no raw
+    // codes), the same fields a customer already sees in finalCounts, so this is safe for every role.
+    countSnapshots: s.countSnapshots,
+    // P6 C2: a single ISO timestamp, no codes/identities - safe for every role (drives the /scan
+    // first-run banner across reloads).
+    firstScanAt: s.firstScanAt,
   };
   if (level === "platform") {
     return {
@@ -63,7 +92,8 @@ export function buildPersistedScanState(
       lastCleanupBackup: s.lastCleanupBackup,
       catalog: s.catalog,
       shopOverrides: s.shopOverrides,
-      feedbackEvents: s.feedbackEvents,
+      // #16: bounded diagnostic event log (private, local; not customer inventory data).
+      feedbackEvents: capTail(s.feedbackEvents as unknown[], FEEDBACK_EVENT_PERSIST_CAP),
     };
   }
   return {

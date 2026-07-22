@@ -19,9 +19,44 @@ const OUT_META = join(OUT_DIR, "retailKnowledge.generated.meta.json");
 
 mkdirSync(OUT_DIR, { recursive: true });
 
+// QA HARDENING FIX #5 (2026-07-16, live-proven): the crowdsourced Open Food Facts dump also contains
+// literal GS1 TEXTBOOK EXAMPLE barcodes and demo/test/placeholder rows (contributors testing the
+// submission form), previously ingested VERBATIM - only barcode shape + name length were checked. Live
+// bug: 4006381333931 -> "Test Shopidoo", 5901234123457 -> "Sauce chiltepin"/"La lumbre",
+// 0012345670121/0012345674020/0012345674037 -> brand "Healthyholics", plus rows literally named
+// "Test"/"Fakeer"/"Fakewine"/"BrandTest". Skip these at BUILD time too (the read-time guard in
+// src/services/ai/decode.ts's isExampleOrTestRow / src/server/decode/pipeline.ts / retailKnowledgeIndex.ts
+// is the fix that ships immediately without a regen; this is belt-and-suspenders for the NEXT regen).
+// EXACT-VALUE barcode blocklist only (never a fuzzy prefix - could suppress a real GTIN); whole-word
+// name/brand markers only (never a substring - "Latest"/"Testarossa"/"contest" must survive).
+const EXAMPLE_BARCODE_BLOCKLIST = new Set([
+  "012345678905",
+  "4006381333931",
+  "5901234123457",
+  "0012345670121",
+  "0012345674020",
+  "0012345674037",
+]);
+const TEST_NAME_PATTERN = /\b(test|fakeer|fake ?wine|dummy|sample product|placeholder|brandtest|shopidoo)\b/i;
+function isDegenerateBarcodeShape(digits) {
+  if (!digits) return false;
+  if (/^0+$/.test(digits)) return true;
+  if (/^(\d)\1+$/.test(digits)) return true;
+  if (digits === "0123456789012" || digits === "1234567890128") return true;
+  return false;
+}
+function isExampleOrTestRow(code, name, brand) {
+  const digits = (code || "").replace(/\D/g, "");
+  if (digits && isDegenerateBarcodeShape(digits)) return true;
+  if (EXAMPLE_BARCODE_BLOCKLIST.has(code)) return true;
+  if (name && TEST_NAME_PATTERN.test(name)) return true;
+  if (brand && TEST_NAME_PATTERN.test(brand)) return true;
+  return false;
+}
+
 // Compact format: barcode -> [name, brand, category]  (array to save ~40% JSON size vs object keys)
 const index = {};
-let total = 0, valid = 0, noCode = 0, noName = 0, dupes = 0, conflicts = 0;
+let total = 0, valid = 0, noCode = 0, noName = 0, dupes = 0, conflicts = 0, skippedExampleOrTest = 0;
 
 const rl = createInterface({ input: createReadStream(INPUT), crlfDelay: Infinity });
 
@@ -41,6 +76,8 @@ for await (const line of rl) {
   const brand = (d.brands || d.brand_owner || "").trim();
   const category = (d.main_category_en || d.categories_en || "").split(",")[0].trim();
 
+  if (isExampleOrTestRow(code, name, brand)) { skippedExampleOrTest++; continue; }
+
   if (index[code]) {
     dupes++;
     // Keep the entry with more info (longer name + brand)
@@ -55,7 +92,7 @@ for await (const line of rl) {
   valid++;
 }
 
-console.log(`\n[build-retail-knowledge] Parsed ${total} rows, ${valid} unique barcodes, ${dupes} dupes merged, ${noCode} no-code, ${noName} no-name`);
+console.log(`\n[build-retail-knowledge] Parsed ${total} rows, ${valid} unique barcodes, ${dupes} dupes merged, ${noCode} no-code, ${noName} no-name, ${skippedExampleOrTest} skipped-example-or-test`);
 
 // Write atomically
 const generated_at = new Date().toISOString();
@@ -85,6 +122,7 @@ const meta = {
   duplicates_merged: dupes,
   skipped_no_code: noCode,
   skipped_no_name: noName,
+  skipped_example_or_test: skippedExampleOrTest,
   conflicts,
   index_file: "retailKnowledge.generated.json",
 };

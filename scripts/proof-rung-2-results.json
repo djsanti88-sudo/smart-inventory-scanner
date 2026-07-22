@@ -1,0 +1,852 @@
+{
+  "startedAt": "2026-07-09T05:23:32.134Z",
+  "port": 3106,
+  "goUpcUsageBefore": {
+    "backend": "turso",
+    "month": "2026-07",
+    "used": 0
+  },
+  "gptActualsBefore": {
+    "spentTodayUsd": 0,
+    "callsToday": 0
+  },
+  "rows": [
+    {
+      "code": "051596320812",
+      "group": "known_good_gtin",
+      "truth": "Home Depot 5 Gal Orange Homer Bucket / 05GLHD2",
+      "httpStatus": 200,
+      "wallMs": 9703,
+      "corroborationPath": "fetchv2",
+      "ladderPath": "fetchv2",
+      "ladderReasons": [
+        {
+          "rung": "goupc",
+          "reason": "Go-UPC miss (negative-cached 30d) -> fall through"
+        },
+        {
+          "rung": "fetchv2",
+          "reason": "Fetch V2 needs_review"
+        }
+      ],
+      "status": "suggested",
+      "productName": "Ryobi stick vacuum clearance deal found - Facebook",
+      "reasonCode": "needs_review",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:floor",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        },
+        {
+          "provider": "go-upc",
+          "status": "skipped",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "Go-UPC miss (negative-cached 30d) -> fall through"
+        },
+        {
+          "provider": "fetchv2",
+          "status": "ok",
+          "latencyMs": 4567,
+          "sourceUrlsReturned": 8,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:floor",
+          "fetchv2"
+        ],
+        "evidenceStrengths": [
+          "snippet"
+        ],
+        "sourceCounts": [
+          1
+        ],
+        "corroborationPath": "fetchv2",
+        "ladderPath": "fetchv2",
+        "ladderReasons": [
+          {
+            "rung": "goupc",
+            "reason": "Go-UPC miss (negative-cached 30d) -> fall through"
+          },
+          {
+            "rung": "fetchv2",
+            "reason": "Fetch V2 needs_review"
+          }
+        ],
+        "aiCalled": false,
+        "pageFetched": true,
+        "cached": false,
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "fetchv2",
+      "classification": "hit_inferred_or_suggestion"
+    },
+    {
+      "code": "078742051451",
+      "group": "known_good_gtin",
+      "truth": "Member's Mark Purified Water 500ml / 16.9 oz",
+      "httpStatus": 200,
+      "wallMs": 899,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "PURIFIED WATER – Member's Mark – 40 pk. 16.9oz",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:firecrawl",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:firecrawl"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "sqlite_hit"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "078742028477",
+      "group": "known_good_gtin",
+      "truth": "Member's Mark Purified Water 40 Pack / 16.9 oz",
+      "httpStatus": 200,
+      "wallMs": 31767,
+      "corroborationPath": "single_source",
+      "ladderPath": "goupc",
+      "ladderReasons": [
+        {
+          "rung": "goupc",
+          "reason": "Go-UPC exact barcode match -> verified auto-count candidate"
+        }
+      ],
+      "status": "verified",
+      "productName": "Member's Mark Purified Water 40 Pack / 16.9 Oz",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:barcode_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": true
+        },
+        {
+          "provider": "go-upc",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:barcode_db",
+          "go-upc"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "ladderPath": "goupc",
+        "ladderReasons": [
+          {
+            "rung": "goupc",
+            "reason": "Go-UPC exact barcode match -> verified auto-count candidate"
+          }
+        ],
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "goupc",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "009800120871",
+      "group": "known_good_gtin",
+      "truth": "Ferrero Rocher Valentine's Fine Hazelnut Chocolate Hearts, 2.6 oz",
+      "httpStatus": 200,
+      "wallMs": 641,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "Ferrero Rocher Valentine's Fine Hazelnut Chocolate Hearts - 2.6oz",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:barcode_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:barcode_db"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "044000072742",
+      "group": "known_good_gtin",
+      "truth": "Nabisco Oreo / club pack sandwich cookies",
+      "httpStatus": 200,
+      "wallMs": 1665,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "Club sandwich cookies",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:retail_db"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "sqlite_hit"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "072554159725",
+      "group": "known_good_gtin",
+      "truth": "Oreo King Cone ice cream cone 7.5 oz",
+      "httpStatus": 200,
+      "wallMs": 1659,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "Oreo ice cream cone",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:retail_db"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "sqlite_hit"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "028400325042",
+      "group": "known_good_gtin",
+      "truth": "Doritos Cool Ranch tortilla chips (Frito-Lay)",
+      "httpStatus": 200,
+      "wallMs": 1887,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "Cool ranch Doritos",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:retail_db"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "sqlite_hit"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "016000200050",
+      "group": "known_good_gtin",
+      "truth": "Cheerios Veggie Blends Blueberry Banana",
+      "httpStatus": 200,
+      "wallMs": 1646,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "Cheerios Veggie Blends Blueberry Banana",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:retail_db",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:retail_db"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "sqlite_hit"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "096619516698",
+      "group": "known_good_gtin",
+      "truth": "Kirkland Signature Protein Bar, Energy Variety Pack (20 ct)",
+      "httpStatus": 200,
+      "wallMs": 1618,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "Kirkland Signature Protein bar energy variety pack, 20 Count - eBay",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:firecrawl",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:firecrawl"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "sqlite_hit"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "690284733673",
+      "group": "known_good_gtin",
+      "truth": "Trader Joe's Everything But The Bagel Sesame Seasoning Blend 2.3oz",
+      "httpStatus": 200,
+      "wallMs": 2010,
+      "corroborationPath": "single_source",
+      "ladderPath": null,
+      "ladderReasons": null,
+      "status": "verified",
+      "productName": "Trader Joe's Everything but the Bagel Sesame Sierra Leone",
+      "reasonCode": "ok",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "parallel:firecrawl",
+          "status": "ok",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "parallel:firecrawl"
+        ],
+        "evidenceStrengths": [
+          "fetched_source"
+        ],
+        "sourceCounts": [
+          0
+        ],
+        "corroborationPath": "single_source",
+        "aiCalled": true,
+        "pageFetched": false,
+        "cached": false,
+        "groundingStatus": "idle",
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "single_source",
+      "classification": "hit_exact"
+    },
+    {
+      "code": "B00FLYWNYQ",
+      "group": "non_gtin",
+      "kind": "asin",
+      "httpStatus": 200,
+      "wallMs": 4306,
+      "corroborationPath": null,
+      "ladderPath": "none",
+      "ladderReasons": [
+        {
+          "rung": "fetchv2",
+          "reason": "Fetch V2 unknown (no usable identity) -> fall through"
+        },
+        {
+          "rung": "gpt",
+          "reason": "gpt-5.5 skipped: non_public_code_type"
+        }
+      ],
+      "status": "needs_review",
+      "productName": null,
+      "reasonCode": "no_result",
+      "reasonText": "No rung resolved the code. fetchv2: Fetch V2 unknown (no usable identity) -> fall through; gpt: gpt-5.5 skipped: non_public_code_type",
+      "providerStatuses": [
+        {
+          "provider": "fetchv2",
+          "status": "skipped",
+          "latencyMs": 4253,
+          "sourceUrlsReturned": 6,
+          "exactCodeFound": true,
+          "identityFound": false,
+          "errorCode": "unknown"
+        },
+        {
+          "provider": "gpt-5.5-ladder",
+          "status": "skipped",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "non_public_code_type"
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "fetchv2",
+          "gpt"
+        ],
+        "evidenceStrengths": [],
+        "sourceCounts": [],
+        "ladderPath": "none",
+        "ladderReasons": [
+          {
+            "rung": "fetchv2",
+            "reason": "Fetch V2 unknown (no usable identity) -> fall through"
+          },
+          {
+            "rung": "gpt",
+            "reason": "gpt-5.5 skipped: non_public_code_type"
+          }
+        ],
+        "aiCalled": true,
+        "pageFetched": true,
+        "cached": false,
+        "gptLadderSkipReason": "non_public_code_type",
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "none"
+    },
+    {
+      "code": "B00006JSUA",
+      "group": "non_gtin",
+      "kind": "asin",
+      "httpStatus": 200,
+      "wallMs": 3586,
+      "corroborationPath": null,
+      "ladderPath": "none",
+      "ladderReasons": [
+        {
+          "rung": "fetchv2",
+          "reason": "Fetch V2 rejected (no usable identity) -> fall through"
+        },
+        {
+          "rung": "gpt",
+          "reason": "gpt-5.5 skipped: non_public_code_type"
+        }
+      ],
+      "status": "needs_review",
+      "productName": null,
+      "reasonCode": "no_result",
+      "reasonText": "No rung resolved the code. fetchv2: Fetch V2 rejected (no usable identity) -> fall through; gpt: gpt-5.5 skipped: non_public_code_type",
+      "providerStatuses": [
+        {
+          "provider": "fetchv2",
+          "status": "skipped",
+          "latencyMs": 3394,
+          "sourceUrlsReturned": 6,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "rejected"
+        },
+        {
+          "provider": "gpt-5.5-ladder",
+          "status": "skipped",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "non_public_code_type"
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "fetchv2",
+          "gpt"
+        ],
+        "evidenceStrengths": [],
+        "sourceCounts": [],
+        "ladderPath": "none",
+        "ladderReasons": [
+          {
+            "rung": "fetchv2",
+            "reason": "Fetch V2 rejected (no usable identity) -> fall through"
+          },
+          {
+            "rung": "gpt",
+            "reason": "gpt-5.5 skipped: non_public_code_type"
+          }
+        ],
+        "aiCalled": true,
+        "pageFetched": true,
+        "cached": false,
+        "gptLadderSkipReason": "non_public_code_type",
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "none"
+    },
+    {
+      "code": "B09B8V1LZ3",
+      "group": "non_gtin",
+      "kind": "asin",
+      "httpStatus": 200,
+      "wallMs": 3441,
+      "corroborationPath": null,
+      "ladderPath": "none",
+      "ladderReasons": [
+        {
+          "rung": "fetchv2",
+          "reason": "Fetch V2 unknown (no usable identity) -> fall through"
+        },
+        {
+          "rung": "gpt",
+          "reason": "gpt-5.5 skipped: non_public_code_type"
+        }
+      ],
+      "status": "needs_review",
+      "productName": null,
+      "reasonCode": "no_result",
+      "reasonText": "No rung resolved the code. fetchv2: Fetch V2 unknown (no usable identity) -> fall through; gpt: gpt-5.5 skipped: non_public_code_type",
+      "providerStatuses": [
+        {
+          "provider": "fetchv2",
+          "status": "skipped",
+          "latencyMs": 3355,
+          "sourceUrlsReturned": 6,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "unknown"
+        },
+        {
+          "provider": "gpt-5.5-ladder",
+          "status": "skipped",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "non_public_code_type"
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "fetchv2",
+          "gpt"
+        ],
+        "evidenceStrengths": [],
+        "sourceCounts": [],
+        "ladderPath": "none",
+        "ladderReasons": [
+          {
+            "rung": "fetchv2",
+            "reason": "Fetch V2 unknown (no usable identity) -> fall through"
+          },
+          {
+            "rung": "gpt",
+            "reason": "gpt-5.5 skipped: non_public_code_type"
+          }
+        ],
+        "aiCalled": true,
+        "pageFetched": true,
+        "cached": false,
+        "gptLadderSkipReason": "non_public_code_type",
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "none"
+    },
+    {
+      "code": "B00006IFHD",
+      "group": "non_gtin",
+      "kind": "asin",
+      "httpStatus": 200,
+      "wallMs": 2104,
+      "corroborationPath": null,
+      "ladderPath": "none",
+      "ladderReasons": [
+        {
+          "rung": "fetchv2",
+          "reason": "Fetch V2 unknown (no usable identity) -> fall through"
+        },
+        {
+          "rung": "gpt",
+          "reason": "gpt-5.5 skipped: non_public_code_type"
+        }
+      ],
+      "status": "needs_review",
+      "productName": null,
+      "reasonCode": "no_result",
+      "reasonText": "No rung resolved the code. fetchv2: Fetch V2 unknown (no usable identity) -> fall through; gpt: gpt-5.5 skipped: non_public_code_type",
+      "providerStatuses": [
+        {
+          "provider": "fetchv2",
+          "status": "skipped",
+          "latencyMs": 2048,
+          "sourceUrlsReturned": 6,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "unknown"
+        },
+        {
+          "provider": "gpt-5.5-ladder",
+          "status": "skipped",
+          "latencyMs": 0,
+          "sourceUrlsReturned": 0,
+          "exactCodeFound": false,
+          "identityFound": false,
+          "errorCode": "non_public_code_type"
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "fetchv2",
+          "gpt"
+        ],
+        "evidenceStrengths": [],
+        "sourceCounts": [],
+        "ladderPath": "none",
+        "ladderReasons": [
+          {
+            "rung": "fetchv2",
+            "reason": "Fetch V2 unknown (no usable identity) -> fall through"
+          },
+          {
+            "rung": "gpt",
+            "reason": "gpt-5.5 skipped: non_public_code_type"
+          }
+        ],
+        "aiCalled": true,
+        "pageFetched": true,
+        "cached": false,
+        "gptLadderSkipReason": "non_public_code_type",
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "none"
+    },
+    {
+      "code": "B00NHQF6MG",
+      "group": "non_gtin",
+      "kind": "asin",
+      "httpStatus": 200,
+      "wallMs": 4176,
+      "corroborationPath": "fetchv2",
+      "ladderPath": "fetchv2",
+      "ladderReasons": [
+        {
+          "rung": "fetchv2",
+          "reason": "Fetch V2 suggested"
+        }
+      ],
+      "status": "suggested",
+      "productName": "LEGO Classic Large Creative Brick Box 10698",
+      "reasonCode": "needs_review",
+      "reasonText": "",
+      "providerStatuses": [
+        {
+          "provider": "fetchv2",
+          "status": "ok",
+          "latencyMs": 4080,
+          "sourceUrlsReturned": 6,
+          "exactCodeFound": true,
+          "identityFound": true
+        }
+      ],
+      "debug": {
+        "providersAttempted": [
+          "fetchv2"
+        ],
+        "evidenceStrengths": [
+          "snippet"
+        ],
+        "sourceCounts": [
+          1
+        ],
+        "corroborationPath": "fetchv2",
+        "ladderPath": "fetchv2",
+        "ladderReasons": [
+          {
+            "rung": "fetchv2",
+            "reason": "Fetch V2 suggested"
+          }
+        ],
+        "aiCalled": false,
+        "pageFetched": true,
+        "cached": false,
+        "retailLookup": "turso_miss"
+      },
+      "settledBy": "fetchv2"
+    }
+  ],
+  "goUpcUsageAfter": {
+    "backend": "turso",
+    "month": "2026-07",
+    "used": 2
+  },
+  "gptActualsAfter": {
+    "spentTodayUsd": 0,
+    "callsToday": 0
+  },
+  "gptSpentThisRunUsd": 0,
+  "usageDelta": 2,
+  "deltaWithinCap": true,
+  "gtinCallsMade": 10,
+  "summary": {
+    "knownGoodHits": 9,
+    "knownGoodSuggestedOrInferred": 1,
+    "knownGoodMisses": 0,
+    "settledByStage": {
+      "fetchv2": 1,
+      "single_source": 8,
+      "goupc": 1
+    },
+    "nonGtinCount": 5,
+    "nonGtinGatedProof": "usage delta 2 reflects ONLY the 10 GTIN calls (non-GTIN calls never reach the client, so they contribute 0 to the counter)"
+  }
+}

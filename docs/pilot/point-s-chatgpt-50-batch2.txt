@@ -1,0 +1,57 @@
+Task: for each tire below, find the manufacturer UPC / EAN / GTIN barcode (the number printed on the tire's box/label).
+Give the barcode as digits only, plus your confidence (high/med/low) and the source. If you cannot find it, say UNKNOWN - do not guess.
+IMPORTANT: do NOT construct or infer a barcode from a SKU/pattern. Only report a barcode you actually found on a real page; otherwise UNKNOWN.
+Format: <line#> | <part number> | <barcode or UNKNOWN> | <confidence> | <source URL/site>
+
+Part number  |  Description (brand model size)
+----------------------------------------------
+ 1. BH4120877  |  Blackhawk Ridgecrawler A/T BSW LT275/70R18 125R E
+ 2. 5543069  |  Sailun Atrezzo SVA1 235/45R18 98V XL
+ 3. D10022267  |  Dunlop Blue Response A/S 235/45R18 98V XL
+ 4. 3415030603  |  Fortune Perfectus FSR-602 BSW 185/60R15 84H SL
+ 5. BH4120191  |  Blackhawk Agility SUV BSW 235/55R19 105V XL
+ 6. 9245030404  |  Fortune Tormenta H/T FSR-305 BSW LT245/75R16 120S E
+ 7. BH5546805  |  Blackhawk Street-H HH11 BSW 225/50R17 94V SL
+ 8. BH5546779  |  Blackhawk Street-H HH11 BSW 205/55R16 94V XL
+ 9. NX14079  |  Nexen Roadian GTX BSW 245/50R20 102V SL
+10. 401VMP0005  |  Mileplus EcoTrail ST205/75R15 111M E
+11. BH1601012  |  Blackhawk Agility UHP AS 245/45R20 103Y XL
+12. F-28105023  |  Falken Azenis FK460 A/S BSW 245/45R20 103Y XL
+13. NX17103  |  Nexen Roadian HTX2 OWL 265/70R17 115T SL
+14. BH5546778  |  Blackhawk Street-H HH11 BSW 215/60R16 95H SL
+15. BH1602513  |  Blackhawk Ridgecrawler HT02 BSW 245/70R17 110T SL
+16. BH1602491  |  Blackhawk Ridgecrawler HT02 BSW TL LT225/75R16 115R E
+17. 3634030712  |  Fortune Perfectus FSR-602 BSW TL 225/50R17 98V XL
+18. 3357030504  |  Fortune Tormenta H/T FSR-305 BSW 275/65R18 116T SL
+19. 3521030703  |  Fortune Perfectus FSR-602 BSW 205/55R16 94V XL
+20. PT151287  |  Pantera Platinum Touring A/S BSW TL 245/45R18 100V XL
+21. NX17957  |  Nexen Roadian HTX2 BSW 275/60R20 115H SL
+22. BH1602524  |  Blackhawk Ridgecrawler HT02 BSW 275/60R20 115T SL
+23. D10022847  |  Dunlop Blue Response A/S 215/55R17 94V SL
+24. NX17962  |  Nexen Roadian HTX2 BSW 265/60R18 110H SL
+25. TH19777  |  Arisun Aresta ZG02 BSW 235/65R18 106H SL
+26. BH4120147  |  Blackhawk Agility SUV BSW 235/65R18 106H SL
+27. 3347030603  |  Fortune Perfectus FSR-602 BSW 235/65R18 106H SL
+28. 3260030504  |  Fortune Tormenta H/T FSR-305 245/70R17 110T SL
+29. BH4120146  |  Blackhawk Agility SUV BSW 255/50R20 109V XL
+30. NX17948  |  Nexen Roadian HTX2 BSW TL 255/50R20 105H SL
+31. BH1600993  |  Blackhawk Agility UHP AS BSW TL 235/45R18 98W XL
+32. 275-30-20 ARROYO  |  Arroyo Grand Sport A/S BSW 275/30R20 97W XL
+33. 3468030604  |  Fortune Tormenta H/T FSR-305 BSW 275/60R20 115H SL
+34. NX13313  |  Nexen Aria AH7 BSW 235/60R18 103H SL
+35. 3446030703  |  Fortune Perfectus FSR-602 BSW 235/60R18 103V SL
+36. BH1600979  |  Blackhawk Agility UHP AS 225/40R18 92W XL
+37. ARST022  |  Arroyo All Steel Trailer Tire ST235/80R16 H
+38. TH41266  |  Arisun Aresta A/T ZG06 BSW LT265/70R17 121S E
+39. ZCLNM0210  |  Nama NM394 Trailer Radial 10 Ply ST205/75R15/E 111/106M
+40. BH4120170  |  Blackhawk Agility SUV BSW 225/65R17 102H SL
+41. BH5546800  |  Blackhawk Street-H HH11 BSW 205/50R17 89V SL
+42. BH5546787  |  Blackhawk Street-H HH11 BSW 185/65R15 92H XL
+43. BH5546786  |  Blackhawk Street-H HH11 BSW 205/65R16 95H SL
+44. BH5546783  |  Blackhawk Street-H HH11 BSW 195/60R15 88H SL
+45. BH4120165  |  Blackhawk Agility SUV BSW 100H TL 215/70R16 100H SL
+46. BH4120149  |  Blackhawk Agility SUV BSW 255/50R19 107V XL
+47. BH1602535  |  Blackhawk Ridgecrawler HT02 BSW LT215/85R16 115R E
+48. BH1602532  |  Blackhawk Ridgecrawler HT02 BSW 265/70R17 115T SL
+49. BH1602490  |  Blackhawk Ridgecrawler HT02 BSW TL 275/55R20 117T XL
+50. BH1601022  |  Blackhawk Agility UHP AS BSW TL 275/35R20 102Y XL

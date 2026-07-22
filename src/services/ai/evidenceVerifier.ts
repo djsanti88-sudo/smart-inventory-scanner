@@ -42,7 +42,7 @@ function numericVariants(code: string): string[] {
 // channel carries such an invalidation, the code's presence there must NOT count as strong evidence.
 const INVALIDATION_RE =
   /\bnot a valid\b|\binvalid (?:upc|ean|gtin|barcode|code|product)\b|\bdid you mean\b|\bisn'?t a valid\b|\bno such (?:upc|product|barcode)\b/i;
-function looksInvalidating(text: string): boolean {
+export function looksInvalidating(text: string): boolean {
   return INVALIDATION_RE.test(text || "");
 }
 
@@ -52,7 +52,12 @@ function looksInvalidating(text: string): boolean {
 // Such a page must NOT count as verifying evidence - it can still name a Suggested candidate downstream,
 // but it can never auto-verify permanent truth + an approved alias. (Clean single-product pages, which do
 // not carry this multi-product marker, are unaffected and still verify.)
-const RECYCLED_RE = /\bproduct name variations\b|\bhas (?:the )?following product name\b|\b(?:also|other) product name variation/i;
+// NUTRITION-FACTS DBs are the SINGLE-PRODUCT variant of the same disease (2026-07-04 ladder dry run):
+// they index recycled UPCs against the wrong same-brand product - "nutrition facts and analysis" pages
+// returned Lay's for a Munchies code and vice versa (identities swapped between two codes in one batch).
+// The page text has no self-contradiction to detect, so the page CLASS is distrusted for identity.
+const RECYCLED_RE =
+  /\bproduct name variations\b|\bhas (?:the )?following product name\b|\b(?:also|other) product name variation|\bnutrition facts and analysis\b|\bnutrition facts for\b/i;
 export function looksRecycledUpc(text: string): boolean {
   return RECYCLED_RE.test(text || "");
 }

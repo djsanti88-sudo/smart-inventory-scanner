@@ -24,14 +24,37 @@ vi.mock("@/server/knowledgeDb", () => ({
 // The route imports server-only modules (groundedSpecFinder). Stub the marker so it can load in vitest.
 vi.mock("server-only", () => ({}));
 
+// v2 daily cap (Task 1): route.ts now reads/writes the cap counter through ladderStorage(). This file
+// does NOT set TURSO_DATABASE_URL, so an unmocked ladderStorage() would default to the file adapter
+// rooted at process.cwd() - the REAL repo root - and pollute the working tree on every test run (same
+// hazard route.test.ts's existing mock guards against). Redirect at a per-process tmp dir instead.
+vi.mock("@/server/upc/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/upc/storage")>();
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-decode-corpus-test-${process.pid}`);
+  return {
+    ...actual,
+    ladderStorage: async () => actual.fileLadderStorage(tmpLadderDir),
+  };
+});
+
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
 import { POST } from "@/app/api/ai-lookup/route";
-import { __resetForTest } from "@/services/security/aiSpendGuard";
+import { __resetForTest, readDailyUsed } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
 import { __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
+import { clearDecodeCache } from "@/services/ai/decodeCache";
+
+/** Reads today's daily-cap usage through the SAME (mocked, tmp-dir) ladderStorage() the route uses. */
+async function dailyUsedNow(): Promise<number> {
+  return readDailyUsed(await ladderStorage());
+}
 
 // A barcode confirmed present in the committed barcodeIndex (see tireKnowledge.generated.json /
 // tireKnowledgeIndex.jsonfallback.test.ts).
@@ -46,14 +69,25 @@ function makeDecodeRequest(cleanCode: string, ip = "9.9.9.9") {
 }
 
 describe("/api/ai-lookup decode: a committed tire barcode resolves from the corpus with ZERO AI spend", () => {
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"];
   const saved: Record<string, string | undefined> = {};
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
+  let tmpDecodeCacheFile: string;
+  // Same fixed-per-process shared mocked ladderStorage() dir as route.test.ts - wipe the v2 daily-cap
+  // kv file per test so tests in this file don't accumulate onto the same TODAY-dated counter key.
+  const ladderKvFile = () => path.join(os.tmpdir(), `ladder-storage-decode-corpus-test-${process.pid}`, ".ladder-kv.json");
 
   beforeEach(() => {
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     __resetTireKnowledgeCacheForTests();
+    // L1 in-memory decode cache (route.ts's withDecodeCache) is a MODULE-LEVEL singleton, not reset by
+    // __resetDecodeCacheStoreForTest (that's the L2 persistent store). Without this, a code resolved by
+    // an earlier test in this file stays warm in L1 and every later POST for that same code short-circuits
+    // via the (correct) L1-cache cap bypass - masking whether the CORPUS lookup itself bypasses the cap.
+    clearDecodeCache();
+    try { fs.unlinkSync(ladderKvFile()); } catch {}
     for (const k of keys) saved[k] = process.env[k];
     // Real (non-E2E) code path so the corpus check in computeDecode() actually runs: the E2E branch
     // (`IS_E2E=1`) short-circuits straight to the mock provider and SKIPS the corpus check entirely, which
@@ -64,9 +98,15 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
     delete process.env.OPENAI_API_KEY;
     delete process.env.FIRECRAWL_API_KEY;
     delete process.env.AI_LOOKUP_KILL_SWITCH;
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     tmpCounter = path.join(os.tmpdir(), `ai-usage-decode-corpus-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
     process.env.AI_LOOKUP_COUNTER_FILE = tmpCounter;
+    // Task 4: a real (non-E2E) decode now write-throughs to the persistent L2 cache - point it at a tmp
+    // file so this test never touches the repo's real .decode-cache.json.
+    tmpDecodeCacheFile = path.join(os.tmpdir(), `decode-cache-corpus-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
+    process.env.DECODE_CACHE_FILE = tmpDecodeCacheFile;
     // No real network at all: if ANY code path reached fetch (i.e. the AI/page-fetch path), this spy
     // would record the call and the assertions below would fail. A corpus hit must never touch this.
     fetchSpy = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
@@ -76,7 +116,9 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
   afterEach(() => {
     for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
     try { fs.unlinkSync(tmpCounter); } catch {}
+    try { fs.unlinkSync(tmpDecodeCacheFile); } catch {}
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     vi.restoreAllMocks();
   });
 
@@ -107,6 +149,34 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
     expect(json.providerNames).not.toEqual(["tire-corpus"]);
     expect(json.debug?.corroborationPath).not.toBe("corpus_exact_barcode");
   }, 20000);
+
+  // Daily-cap-vs-free-resolution fix: the cap must bound only PAID work (Go-UPC/Fetch V2/GPT-5.5), never
+  // a $0 corpus/cache hit. Before the fix the cap was checked BEFORE computeDecode() ran the corpus
+  // lookup, so an exhausted cap (limit 0) 429'd even a code the corpus could answer for free.
+  it("a corpus hit STILL resolves (verified, aiCalled:false) even when the daily cap is fully exhausted (limit 0)", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "0"; // cap already exhausted
+    const res = await POST(makeDecodeRequest(KNOWN_TIRE_BARCODE));
+    expect(res.status).not.toBe(429);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.decision.status).toBe("verified");
+    expect(json.providerNames).toEqual(["tire-corpus"]);
+    expect(json.debug.aiCalled).toBe(false);
+    expect(json.reasonCode).not.toBe("daily_cap");
+    // No provider/network call at all - a free corpus hit never touches fetch.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  }, 20000);
+
+  // A corpus/free hit must not consume a cap slot at all (not just "not be blocked by" one) - the
+  // counter should read the SAME before and after the decode.
+  it("a corpus hit does NOT increment the daily-cap counter", async () => {
+    process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+    const before = await dailyUsedNow();
+    const res = await POST(makeDecodeRequest(KNOWN_TIRE_BARCODE));
+    expect(res.status).toBe(200);
+    const after = await dailyUsedNow();
+    expect(after).toBe(before);
+  }, 20000);
 });
 
 // FIX 2 (2026-07-01): the parallel resolver is TERMINAL for public barcodes. A public-barcode miss that
@@ -114,23 +184,34 @@ describe("/api/ai-lookup decode: a committed tire barcode resolves from the corp
 // expensive legacy Gemini/OpenAI fast path. With no provider keys, the legacy fast path uses mockProvider
 // (providerNames ["mock"], a fabricated product name) - so a floor return proves the legacy path was skipped.
 describe("/api/ai-lookup decode: parallel resolver is TERMINAL for public barcodes (no legacy money-pit)", () => {
-  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE"];
+  const keys = ["IS_E2E", "AI_LOOKUP_KILL_SWITCH", "AI_LOOKUP_DAILY_LIMIT", "GEMINI_API_KEY", "OPENAI_API_KEY", "FIRECRAWL_API_KEY", "AI_LOOKUP_COUNTER_FILE", "DECODE_CACHE_FILE", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"];
   const saved: Record<string, string | undefined> = {};
   let fetchSpy: ReturnType<typeof vi.fn>;
   let tmpCounter: string;
+  let tmpDecodeCacheFile: string;
 
   beforeEach(() => {
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     __resetTireKnowledgeCacheForTests();
+    // L1 in-memory decode cache (route.ts's withDecodeCache) is a MODULE-LEVEL singleton, not reset by
+    // __resetDecodeCacheStoreForTest (that's the L2 persistent store). Without this, a code resolved by
+    // an earlier test in this file stays warm in L1 and every later POST for that same code short-circuits
+    // via the (correct) L1-cache cap bypass - masking whether the CORPUS lookup itself bypasses the cap.
+    clearDecodeCache();
     for (const k of keys) saved[k] = process.env[k];
     delete process.env.IS_E2E;
     delete process.env.GEMINI_API_KEY; // no keys: grounding leg + legacy Gemini/OpenAI are all inert
     delete process.env.OPENAI_API_KEY;
     delete process.env.FIRECRAWL_API_KEY;
     delete process.env.AI_LOOKUP_KILL_SWITCH;
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
     process.env.AI_LOOKUP_DAILY_LIMIT = "100";
     tmpCounter = path.join(os.tmpdir(), `ai-usage-terminal-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
     process.env.AI_LOOKUP_COUNTER_FILE = tmpCounter;
+    tmpDecodeCacheFile = path.join(os.tmpdir(), `decode-cache-terminal-${process.pid}-${Math.floor(Math.random() * 1e9)}.json`);
+    process.env.DECODE_CACHE_FILE = tmpDecodeCacheFile;
     // The only fetch a floor-return path may touch is the free upcitemdb barcode-DB leg. This spy returns
     // an EMPTY body so that leg misses; any call to a legacy AI endpoint would be visibly wrong.
     fetchSpy = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
@@ -140,7 +221,9 @@ describe("/api/ai-lookup decode: parallel resolver is TERMINAL for public barcod
   afterEach(() => {
     for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
     try { fs.unlinkSync(tmpCounter); } catch {}
+    try { fs.unlinkSync(tmpDecodeCacheFile); } catch {}
     __resetForTest();
+    __resetDecodeCacheStoreForTest();
     vi.restoreAllMocks();
   });
 

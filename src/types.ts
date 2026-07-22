@@ -61,8 +61,10 @@ export type AliasType =
   | "messy_label"
   | "shelf_code";
 
-/** Where a record came from. */
-export type Source = "seed" | "manual" | "scan" | "human_review" | "ai_mock" | "ai_gemini" | "ai_openai" | "catalog";
+/** Where a record came from. "csv_import" (Task 3.6) = a human-uploaded onboarding CSV row; trusted
+ *  like "manual" (aliases from it may be approved: true immediately), but tagged distinctly so the
+ *  origin of a mapping stays auditable. */
+export type Source = "seed" | "manual" | "scan" | "human_review" | "ai_mock" | "ai_gemini" | "ai_openai" | "catalog" | "csv_import";
 
 /** Operations that get queued for idempotent sync. */
 export type SyncOperation =
@@ -80,6 +82,16 @@ export type AiCircuitState = "closed" | "open" | "half_open";
 // ----------------------------------------------------------------------------------------------
 // Core entities
 // ----------------------------------------------------------------------------------------------
+
+// Provenance of a product's identity, from birth. P2's resolver tier interface reads this to rank
+// tenant truth vs master truth; Phase 1 defaults every provisional mint to "provisional". Optional
+// so older persisted rows (no tier yet) fall back to undefined = treat as lowest trust.
+export type ProvenanceTier =
+  | "provisional"
+  | "ai_suggested"
+  | "ladder_verified_strong"
+  | "corpus_verified"
+  | "human_verified";
 
 export interface Product {
   id: string;
@@ -100,6 +112,9 @@ export interface Product {
   productUrl: string;
   location: string;
   notes: string;
+  /** Phase 3: optional owner-entered per-unit cost for Boss Report inventory value. Platform/owner
+   *  scoped - NEVER sent to AI (sanitizer strips it) and never in a customer-safe export/persist path. */
+  unitCost?: number;
   status: "active" | "archived";
   source: Source;
   confidence: number; // 0..1
@@ -112,6 +127,21 @@ export interface Product {
   // (which flips provisional->false, verified->true, + creates the approved alias). Distinguishes it from an
   // ORPHANED verified product (verified lost on persist reset) which must still re-alias via resolveUnknown.
   provisional?: boolean;
+  provenanceTier?: ProvenanceTier;
+  // Build 2 (product-name polish): fields split out of `name` by the deterministic structurer
+  // (src/services/polish/structurer.ts) or, as a fallback, the LLM polish path. All optional so
+  // older persisted products (no structuring run yet) fall back to `brand` / `name` at display time.
+  structuredBrand?: string;
+  structuredModel?: string;
+  structuredDescription?: string;
+  sizeTag?: string; // glued-digits tire size ("2657017") or weight/count/volume tag; "" / undefined = none
+  // Who last produced the structured fields above. "human" is a PERMANENT lock: automatic
+  // re-structuring (hot path AND the offline backfill) must skip a row stamped "human".
+  structuredBy?: "deterministic" | "llm" | "human";
+  // The structurer's own confidence (0..1) in the split above. Stamped by structuredFieldsFor
+  // whenever it runs (deterministic pass); identifies rows eligible for the LLM backfill fallback
+  // (confidence < 0.6, see src/services/polish/backfillLlm.ts). Undefined for a row never structured.
+  structuredConfidence?: number;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -154,6 +184,30 @@ export interface ScanEvent {
   reason: string; // customer-safe, product-facing explanation (no AI/provider/Settings mechanics)
   decodeNote?: string; // platformOwner-only auto-decode detail (why AI did/didn't run); never shown to customers
   decodeStatus?: FeedDecodeStatus; // live-decode pipeline state for this scan row
+  // P5 Task 5 (honest provenance badges, 2026-07-20): honest provenance signal for the feed row's
+  // badge (see src/components/badges.tsx DecodeProvenance). Populated ONLY at the primary
+  // live-decode write site (runLiveDecodeOnce) where a DecodeDecision is in scope - optional
+  // because the ~15 other decodeStatus write sites (relabel/mark-wrong/suggest-link/etc.) do not
+  // have a DecodeDecision in scope; full threading is deferred to P6. Display only, never gates
+  // counting or identity.
+  provenance?: "app_verified" | "ai_self_report" | "db_self_report";
+  // Task 9 (owner-ratified 2026-07-14, decode-anything): true when an app-verified exact-code decode
+  // counted even though its product domain is off the business scan context (e.g. hot sauce in a tire
+  // shop). The category firewall was CLEARED by verification, not skipped - the row still shows an
+  // "Off-category item" tag so the operator sees it is not a tire.
+  offCategory?: boolean;
+  // Task 9b (owner-ratified 2026-07-14): inline suggestion on the counted feed row. A decode whose
+  // decision is "suggested" (usable identity, no firewall conflict, not auto-applied, not awaiting the
+  // tire background verify) no longer sits in Needs Review - it tags the row "(suggested, NN%)" with
+  // pointer-only approve/decline controls. Approve routes through the EXISTING human-approval core
+  // (resolveUnknown via batchApprove); decline renames the row to the prefix floor and ONLY THEN
+  // creates the open review. Both actions no-op unless status is "pending" (double-tap safe).
+  suggestion?: {
+    productName: string;
+    brand: string;
+    confidence: number; // 0..1 decision confidence, shown honestly in the tag
+    status: "pending" | "approved" | "declined";
+  };
   quantityDelta: number;
   quantityAfterScan: number;
   createdAt: string;
@@ -162,6 +216,13 @@ export interface ScanEvent {
   syncStatus: SyncStatus;
   syncError: string | null;
   idempotencyKey: string;
+  /** Phase 3: the device that produced this scan (getOrCreateDeviceId). Attribution/debugging only -
+   *  never used to decide whether a scan counts (that guarantee is the idempotencyKey/_appliedKeys
+   *  transaction, unrelated to this field). Optional: older persisted events lack it. */
+  deviceId?: string;
+  /** Phase 3: free-text location captured at scan time (defaults to the session's location until
+   *  changed - see Task 9). Optional: older persisted events lack it. */
+  location?: string;
 }
 
 export interface InventorySession {
@@ -179,6 +240,9 @@ export interface InventorySession {
    *  edited until it is unlocked with the owner PIN. Optional for back-compat with older persisted sessions. */
   locked?: boolean;
   lockedAt?: string | null;
+  /** Phase 3: the device that auto-opened this session (getOrCreateDeviceId). Undefined for
+   *  manually-started or pre-Phase-3 sessions - those are never auto-reused (see autoSession.ts). */
+  deviceId?: string;
 }
 
 export interface InventoryCount {
@@ -195,6 +259,9 @@ export interface InventoryCount {
   syncStatus: SyncStatus;
   syncError: string | null;
   appliedIdempotencyKeys: string[];
+  /** Phase 3: the most recent location a scan for this product/session was recorded at. Optional:
+   *  older persisted counts lack it. Display-only; never part of the ledger identity. */
+  location?: string;
 }
 
 export interface UnknownCodeReview {
@@ -239,10 +306,20 @@ export interface UnknownCodeReview {
   prefixConflictReason?: string;
   // platformOwner-only: the proposed product already exists in the shop's catalog under a different code.
   reverseUpcConflictNote?: string;
+  // Identity-merge (decode ladder Task 9) suggest_link: a decode that fuzzily matches an existing product
+  // (same brand + name similarity, or a plus-generation / tire-size difference on a GTIN match) attaches
+  // that product id here so the UI can offer a one-tap "link to existing product?" instead of a duplicate.
+  // A suggestion only - it never auto-links or counts. Cleared when the review is resolved.
+  suggestedLinkProductId?: string;
   // Confidence-based auto-verify outcome (when a decode was scored but did NOT auto-save).
   autoVerifyScore?: number;
   blockingReasons?: string[];
-  status: "open" | "resolved" | "ignored";
+  // "suggested" (Task 9b, owner-ratified 2026-07-14): a PENDING inline suggestion. The review record
+  // is PARKED here (kept for the audit trail + the batch-approve surface) instead of sitting "open" in
+  // the Needs Review queue/badge. It is still awaiting a human: resolveUnknown accepts it exactly like
+  // "open" (inline approve routes through that same core); decline flips it back to "open" with the
+  // decline reason. Additive value - old persisted snapshots only carry the original three.
+  status: "open" | "suggested" | "resolved" | "ignored";
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
@@ -255,6 +332,22 @@ export interface UnknownCodeReview {
   correctionRecheckMissingKeys?: string[];
   // Phase 7: set when this review was reopened by Mark wrong -> the re-decode escalates to the stronger model.
   reopenedFromWrong?: boolean;
+  // STABLE-ID FIX (kills prefix-floor placeholder-name collision): the id of the provisional
+  // "Unidentified item" / prefix-floor placeholder Product that THIS review's own scan minted via
+  // ensureProvisionalCount, captured at review-creation time (the placeholder already exists by then -
+  // ensureProvisionalCount runs synchronously before the review is created). resolveUnknown's
+  // reload-resilient provOrphanId lookup matches on THIS id first (bulletproof - a local product id,
+  // never a barcode/gtin, so it is safe to persist to a customer's disk). The old name-based fallback
+  // (provisionalPlaceholderName match) is kept ONLY for reviews created before this field existed,
+  // because a prefix-floor name is brand-only ("<Brand> / product unconfirmed") and NOT code-specific -
+  // two different unresolved codes sharing a GS1-prefix brand mint the identical name, so the name match
+  // can attribute one code's count to the other's review. A plain local id has no such collision.
+  provisionalProductId?: string | null;
+  /** Phase 4 import-only quantity. Absent for scans and reconcile links. A fuzzy import row keeps
+   *  this quantity pending until an explicit human confirmation applies it. Its presence (not undefined)
+   *  is also the import-origin marker: NeedsReviewTable hides liveDecode/correctionRecheck for any
+   *  review carrying it, because Phase 4 must make zero /api/ai-lookup calls (C4). */
+  importQuantity?: number;
 }
 
 export type ResolutionAction =
@@ -318,9 +411,6 @@ export interface Settings {
   // When true, AI is queried automatically for unknown codes (still only as a SUGGESTION that a
   // human must approve - it never auto-saves). Default false to keep AI manual and cheap.
   autoSuggestUnknowns: boolean;
-  // When true, a "verified" decode (app-verified strong evidence + provider agreement, public
-  // barcode only) is auto-approved. Default FALSE - a human still approves even verified decodes.
-  autoAcceptVerifiedDecodes: boolean;
   // When true, ANY decoded product (verified OR suggested-with-sources) is auto-added to the count -
   // only a provider conflict or a total no-result goes to Needs Review. Default TRUE (owner choice).
   autoAddDecodedProducts: boolean;
@@ -479,6 +569,21 @@ export interface AiStatus {
   lastAttemptAt: string | null;
   lastProvider: string;
   lastFailureReason: string;
+  /** GPT-5.5 ladder rung's own daily dollar/call status (Task 6 Settings spend panel). Optional
+   *  because it is a newer server field; a stale/mocked GET response without it is still valid. */
+  gptLadder?: {
+    spentTodayUsd: number;
+    capUsd: number;
+    callsToday: number;
+    enabled: boolean;
+  };
+  /** Task 8: the real decode ladder order (MASTER BASELINE v1). Gemini is never in it - decode is
+   *  corpus -> Go-UPC -> Fetch V2 -> GPT only. Optional because it is a newer server field; a stale
+   *  GET response without it is still valid. */
+  decodeLadder?: string[];
+  /** Task 8: always false. Gemini fields above (geminiEnabled/geminiConfigured/geminiModel) stay for
+   *  Settings + refreshAiStatus's gate, but Gemini is permanently out of decode (enrichment only). */
+  geminiUsedForDecode?: boolean;
 }
 
 /** Which approved corroboration path produced a "verified" decode (for honest reporting). */
@@ -490,7 +595,8 @@ export type CorroborationPath =
   | "corpus_exact_barcode"
   | "corpus_exact_part_number"
   | "internet_two_source_size"
-  | "non_public_trusted_source";
+  | "non_public_trusted_source"
+  | "gpt_self_report";
 
 export interface DecodeDecision {
   status: DecodeStatus;

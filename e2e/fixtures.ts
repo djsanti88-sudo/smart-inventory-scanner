@@ -12,7 +12,7 @@ import { test as base, expect } from "@playwright/test";
 // that module instantiates the persisted store, which touches `localStorage` and crashes in Node. Keep
 // in sync with DEFAULT_SETTINGS; only `scanContext` differs ("any" here vs "tire" in production).
 const PERSIST_KEY = "sis-scan-v1";
-const PERSIST_VERSION = 5;
+const PERSIST_VERSION = 7;
 
 const GENERIC_SETTINGS = {
   businessId: "demo-business",
@@ -30,9 +30,8 @@ const GENERIC_SETTINGS = {
   enablePendingSyncQueue: true,
   enableIdempotentSync: true,
   autoSuggestUnknowns: false,
-  autoAcceptVerifiedDecodes: false,
   autoAddDecodedProducts: true,
-  decodeBudgetMs: 13000,
+  decodeBudgetMs: 8000, // AM-9: keep in sync with production DEFAULT_SETTINGS (drift fix 2026-07-15)
   autoCatalogLearningEnabled: true,
   autoVerifyConfidenceThreshold: 80,
   scanContext: "any", // <-- the only deliberate difference from production DEFAULT_SETTINGS ("tire")

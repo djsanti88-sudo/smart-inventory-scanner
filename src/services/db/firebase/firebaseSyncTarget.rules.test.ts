@@ -113,6 +113,33 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
     expect((got.data() as { name: string }).name).toBe("Widget");
   });
 
+  it("SAVE_PRODUCT: two DISTINCT sequential edits (different idempotency keys) both persist (Task 1)", async () => {
+    // Mirrors the retry test above, but proves the OTHER half of the idempotency contract: a second,
+    // CONTENT-DIFFERENT edit to the same product must mint a distinct key (per buildIdempotencyKey's
+    // call site in scanStore.ts correctProduct, which folds an edit fingerprint into the key) so
+    // FirebaseSyncTarget's _appliedKeys dedupe does not swallow it as alreadyApplied the way a same-key
+    // retry correctly does.
+    const t = target();
+    const first: PendingSyncItem = {
+      ...incItem("sp3-edit1", "pp3a", 0),
+      operation: "SAVE_PRODUCT",
+      entityType: "Product",
+      entityId: "prod3",
+      payload: { id: "prod3", businessId: BIZ, name: "Edited Once", primaryBarcode: "012345678905", verified: true },
+    };
+    const second: PendingSyncItem = {
+      ...incItem("sp3-edit2", "pp3b", 0), // DISTINCT idempotency key - simulates the fingerprinted key
+      operation: "SAVE_PRODUCT",
+      entityType: "Product",
+      entityId: "prod3",
+      payload: { id: "prod3", businessId: BIZ, name: "Edited Twice", primaryBarcode: "012345678905", verified: true },
+    };
+    expect((await t.apply(first)).alreadyApplied).toBe(false);
+    expect((await t.apply(second)).alreadyApplied, "distinct edit is NOT swallowed as alreadyApplied").toBe(false);
+    const got = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "products", "prod3"));
+    expect((got.data() as { name: string }).name, "the SECOND edit's content is what actually persisted").toBe("Edited Twice");
+  });
+
   it("SAVE_PRODUCT fails cleanly with a missing businessId", async () => {
     const t = target();
     const bad: PendingSyncItem = { ...incItem("sp2", "pp2", 0), operation: "SAVE_PRODUCT", entityType: "Product", payload: { id: "prodX", name: "X" }, businessId: "" };
@@ -129,5 +156,14 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
     const t = target();
     expect((await t.apply({ ...incItem("k", "e", 1), businessId: "" })).ok).toBe(false);
     expect((await t.apply({ ...incItem("", "e", 1), idempotencyKey: "" })).ok).toBe(false);
+  });
+
+  it("getScanEventsBySession returns only this session's events, oldest first", async () => {
+    const t = target();
+    await t.apply({ ...incItem("gs1", "gev1", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "gev1", businessId: BIZ, sessionId: SID, cleanCode: "111", createdAt: "2026-07-19T16:00:00.000Z" } });
+    await t.apply({ ...incItem("gs2", "gev2", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "gev2", businessId: BIZ, sessionId: SID, cleanCode: "222", createdAt: "2026-07-19T16:05:00.000Z" } });
+    await t.apply({ ...incItem("gs3", "gev3", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "gev3", businessId: BIZ, sessionId: "other-session", cleanCode: "333", createdAt: "2026-07-19T16:01:00.000Z" } });
+    const events = await t.getScanEventsBySession!(BIZ, SID);
+    expect(events.map((e) => e.id)).toEqual(["gev1", "gev2"]);
   });
 });

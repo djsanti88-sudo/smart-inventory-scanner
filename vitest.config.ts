@@ -30,7 +30,10 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts", "src/server/**/*.test.ts", "src/app/**/*.test.ts", "scripts/**/*.test.mjs"],
+          include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts", "src/server/**/*.test.ts", "src/app/**/*.test.ts", "src/lib/**/*.test.ts", "scripts/**/*.test.mjs"],
+          // src/services/camera touches window.BarcodeDetector and HTMLVideoElement, which need a DOM -
+          // excluded here and picked up by the "dom" project below instead.
+          exclude: ["src/services/camera/**"],
         },
       },
       {
@@ -38,7 +41,7 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "jsdom",
-          include: ["src/components/**/*.test.tsx", "src/stores/**/*.test.ts"],
+          include: ["src/components/**/*.test.tsx", "src/app/**/*.test.tsx", "src/stores/**/*.test.ts", "src/services/camera/**/*.test.ts"],
           setupFiles: ["./vitest.setup.ts"],
         },
       },

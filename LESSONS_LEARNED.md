@@ -87,7 +87,8 @@ the expensive path a one-time cost per code. Proven: 2nd live call returned in 7
 its access permissions." That is NOT a port-in-use error - Windows WinNAT/Hyper-V reserves port ranges
 (`netsh interface ipv4 show excludedportrange protocol=tcp`), and the default Supabase 542xx ports fell
 inside them. Fix: remap all ports in `supabase/config.toml` to 553xx (above every excluded range). Check
-the excluded ranges first rather than guessing.
+the excluded ranges first rather than guessing. (The Supabase stack now lives in
+`archive/supabase-foundation/`; the WinNAT lesson applies to ANY local service ports.)
 
 ## L7 - This CLI gates `gen types` behind a token even for local (2026-06-14)
 
@@ -118,3 +119,86 @@ Two test files using the same projectId (+ singleProjectMode) and running in par
 `clearFirestore()` calls race, producing intermittent "evaluation error"/denials. Fix: a unique
 `projectId` per test file in `initializeTestEnvironment` (and drop `singleProjectMode`) so each file gets
 an isolated emulator namespace. Deterministic and parallel-safe.
+
+---
+
+## L11 - Never compute live-API spend from response metadata; unmeterable units get worst-case reserves (2026-07-05)
+
+Gemini 3 grounding billed ~$6 while the response metadata computed $0.53. Gemini bills EVERY executed
+search query ($14/1K) but `webSearchQueries` lists only CITED queries (~3 reported vs ~394 billed) - a
+~100x undercount. The rules now (also in the global CLAUDE.md cost-truth rule):
+1. Before the FIRST live run on any provider/feature, read the pricing page for per-use fees billed
+   outside token counts and verify each billed unit is observable in the response. Not observable =
+   UNMETERABLE: budget guards reserve the documented WORST CASE per call, not the observed average.
+2. Prefer providers with enforceable tool-call caps (OpenAI `max_tool_calls`). Gemini grounding has NO
+   cap control - never run it unattended on hard/unfindable inputs. (This is why Gemini is permanently
+   out of the decode ladder.)
+3. A client-aborted or timed-out call is still billed server-side - count it at worst case.
+4. Reconcile every live run against the provider's billing console BEFORE quoting spend: report
+   "computed floor $X; true spend = provider console".
+
+---
+
+## L12 - Charge a usage cap exactly once, inside the paid compute; fast 429s poison mass-scan results (2026-07-09)
+
+`checkAndIncrementDaily` is a side-effecting check: calling it on two paths of one request double-billed
+the daily cap, and charging it BEFORE the decode-cache peek made cached zero-spend repeats burn slots.
+The counter showed 232/200 when only ~27 paid computes had happened, and every subsequent scan returned
+a fast 429 the UI displayed as "Unidentified item". Rules:
+1. Exactly ONE cap charge per genuine paid compute, applied INSIDE the paid rung, AFTER the free
+   corpus/cache peek. Free hits are never charged.
+2. In a mass-scan harness, an all-`other`/~10ms result pattern means CAP EXHAUSTION, not a resolver
+   failure - check the counter before concluding anything about decode quality.
+3. Cap blocks must surface their honest reason in the UI, never a generic unknown label.
+
+---
+
+## L13 - Server truth can be 99% right while the UI shows 40%; prove through the real UI (2026-07-10)
+
+On a 100-code preview run the SERVER verified 99/100, but the UI counted only 40: every additional size
+of an already-verified tire model collapsed into a fuzzy "link to existing product?" review suggestion
+(sizes live in `specs*` fields, not in slug product names), plus one false brand-prefix conflict between
+Michelin and its own subsidiary BFGoodrich. Neither defect is visible in unit tests or server logs -
+only the browser bot run caught them. Rules:
+1. The UI proof gate (qa bots / Playwright through the real preview) is NOT optional for
+   resolution-path changes; unit green + server logs are insufficient.
+2. When merging identities, ask what field actually distinguishes real-world variants (size, pack
+   count) and whether that field even appears in the name being compared.
+3. Corporate brand families (one company, many brands, many GS1 prefixes) must be modeled from
+   evidence, or the firewall rejects a company's own products.
+
+## L14 - A persist version bump can wake dormant migrations (2026-07-12)
+
+**What happened.** The variance feature bumped scanStore persist v6 -> v7. That bump made a
+pre-existing product-structuring backfill run for the first time on fresh installs, which leaked a
+raw "UPC ... Fits ..." string into the customer-facing Model column. The feature itself was clean;
+the bump activated old code nobody was looking at. Caught only because qa:bots ran at the merge gate.
+
+**Rule.** Any persist version bump gets the customer-clean-names bot (and qa:bots:security) run
+against a FRESH profile before merge, not just unit tests. Migrations are execution triggers, not
+just data reshapes.
+
+## L15 - Idempotency must be proven against the REAL store target (2026-07-12)
+
+**What happened.** CSV import's double-apply test passed against a hand-mocked ImportTarget while
+the real buildStoreImportTarget silently dropped the importId parameter - genuine re-uploads were
+double-merging quantities. The mock proved the algorithm; the real wiring was broken.
+
+**Rule.** Every idempotency claim needs a test through the real store/component wiring (upload
+twice, assert deep-equal state), not only through a mocked target interface.
+
+## L16 (2026-07-15) - Parallel-subagent hygiene on one working tree
+- A shared git index races: two agents' commits swept each other's staged files. Rule now standing:
+  subagents commit ONLY via pathspec (git commit -m ... -- <files>) and verify git show --stat HEAD.
+- Self-check sweeps must include src/app/ (route tests were outside two agents' sweeps and broke silently).
+- Background Bash inside subagents may never re-notify them; long verifications belong to the orchestrator.
+- Intentional behavior changes (L6, AM-7, A3) each broke sibling tests asserting the OLD behavior; the fix
+  is value-level fixture updates with assertions intact - never weakening, never forcing green.
+
+## L17 (2026-07-15) - Request-shape traps on /api/ai-lookup
+- The route reads cleanCode/rawCode, never body.code; omitting mode:"decode" routes to LEGACY Gemini lookup
+  (3 accidental legacy calls made this session - always read the route contract before curling an API).
+
+## L18 (2026-07-15) - E2E fixture codes must be real GS1
+- Any 12-14 digit fixture code in tests must carry a valid check digit now (A3 refuses misreads at 0ms);
+  generators should compute the check digit, not hardcode it.

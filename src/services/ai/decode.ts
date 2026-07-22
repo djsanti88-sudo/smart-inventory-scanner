@@ -3,6 +3,7 @@ import { crossCheck } from "@/services/ai/crossCheckEngine";
 import { isStrongEvidence, strongestEvidence } from "@/services/ai/evidenceVerifier";
 import { isTireContext, hasRequiredTireSpecs, hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
+import { isTrustedProductHost } from "@/services/ai/trustedProductHosts";
 
 // decideDecode: the gate that turns provider results + APP-verified evidence into a final decode
 // status. MASTER BASELINE v1 (owner-locked, supersedes the older two-provider rule): a "verified"
@@ -20,6 +21,17 @@ import { isBrandInPrefixFamily } from "@/services/tire/tirePrefixLookup";
 // disagreement is a conflict.
 
 const PUBLIC_BARCODE_TYPES: CodeType[] = ["upc_a", "ean_13", "gtin_14"];
+
+// LANE C ITEM C3 (owner data review, 2026-07-20): a suggestion with confidence EXACTLY 0 has no signal
+// behind it at all - live regression 6959956718368 stored "Pneu 195X40 R17 81V - LINGLONG ...
+// (suggested, 0%)" because both maxConfidence and cc.confidence were 0, so `Math.max(0*0.6, 0*0.6)`
+// computed exactly 0. A confidence of 0 must never be treated as "this identity was suggested with
+// some (if weak) signal" - it reads to a human reviewer as "the app found nothing", which is honest,
+// but storing/showing it as a numeric "0%" on an otherwise-named suggestion misrepresents it as an
+// evaluated-and-rejected guess rather than "no signal". Floor every suggestion's confidence at this
+// minimum so a suggestion is never indistinguishable from a hard needs_review with 0 confidence. Only
+// RAISES a computed value that would otherwise round to (near) zero; never lowers a stronger signal.
+export const MIN_SUGGESTION_CONFIDENCE = 0.2;
 
 export interface DecodeParams {
   codeType: CodeType;
@@ -49,8 +61,11 @@ const HEDGE_PAREN = /\s*\((?:likely|possibly|probably|maybe|uncertain|unverified
 const HEDGE_TAIL = /\s*[-–—]\s*(?:exact variant unknown|variant unknown|unverified|unconfirmed|best guess)\s*$/i;
 
 // Barcode-site / search / error / store-nav titles that are NOT products.
+// "search for", "suchergebnisse" (German search results), "codecheck", "upc database" observed live
+// verifying as products in the 2026-07-04 ladder dry run (barcode-list.com "Search For:<code>",
+// codecheck.info "CodeCheck - Suchergebnisse", upcdatabase.org "UPC Database | <code>").
 const SITE_BLOCKLIST =
-  /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|search results|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
+  /\b(upc barcode search|barcode lookup|look ?up any (upc|ean|isbn)|go-?upc|upcitemdb|barcodefinder|barcode finder|barcodespider|barcodes? database|barcode database|upc database|ean-?search|eandata|barcodes?\.(com|net|org)|gtin ?lookup|buy ?upc|product ?lookup|barcode ?india|barcodable|scandit|codecheck|search results|search for|suchergebnisse?|results for|page not found|404 (not found|error)|error 404|add to cart|your cart|shopping cart|all categories)\b/i;
 const PLACEHOLDER_NAME = /^\s*(unknown|unidentified|n\/a)\b|no (public )?match|not found|no result/i;
 
 // A SCRAPED page can hand back an error / bot-challenge / maintenance TITLE (e.g. "Error", "Error 500",
@@ -58,7 +73,18 @@ const PLACEHOLDER_NAME = /^\s*(unknown|unidentified|n\/a)\b|no (public )?match|n
 // product that merely CONTAINS a word (e.g. "Error Coin 1955 Double Die") is not blocked. Observed live:
 // a scrape titled "Error" auto-counted as a Verified product (2026-07-01).
 const SCRAPE_ERROR_TITLE =
-  /^(?:error(?:\s*\d{3})?|oops|access denied|forbidden|unauthorized|just a moment|attention required|are you (?:a )?(?:human|robot)|(?:please )?enable javascript|service unavailable|bad gateway|gateway timeout|temporarily unavailable|(?:site )?under maintenance)\s*$/i;
+  /^(?:error(?:\s*\d{3})?|oops|access denied|forbidden|unauthorized|just a moment|attention required(?:\s*[|!].*)?|are you (?:a )?(?:human|robot)|robot check|(?:please )?enable javascript|service unavailable|bad gateway|gateway timeout|temporarily unavailable|(?:site )?under maintenance)\s*$/i;
+
+// LANE C ITEM C1 (owner data review, 268-code stress batch, 2026-07-20): a client-side or CDN 404/
+// error-page TITLE passed the junk gate whole and was stored as a product identity for 721749249238
+// ("We couldn't find this page" - a curly-apostrophe React/Next.js style 404 title, not caught by any
+// existing pattern since it names neither "404" nor "not found" literally). This is a SEPARATE, NOT
+// whole-name-anchored pattern (unlike SCRAPE_ERROR_TITLE) because "not found"/"not available" phrasing
+// can appear mid-sentence in a page's error copy, not only as the entire title. Covers the exact live
+// string plus the owner-named localized/provider variants ("page not found", "404", "not available",
+// "access denied", "robot check", "attention required").
+const ERROR_PAGE_NAME_RE =
+  /\b(?:we (?:couldn['’]?t|can['’]?t|could not|cannot) find (?:this|that|the) page|(?:this|that) page (?:is(?:n['’]?t| not)|does not exist|cannot be found)|page not found|404(?:\s*(?:error|not found))?|not available\b|access denied|robot check|attention required)\b/i;
 
 // AI REFUSAL sentences returned as if they were product names ("Unable to identify product for
 // UPC ...", "... is not a recognized product ..."). Observed live in the preview mass-scan bots
@@ -67,9 +93,17 @@ const SCRAPE_ERROR_TITLE =
 const REFUSAL_NAME =
   /\b(?:unable to (?:identify|find|determine|locate)|cannot (?:identify|find|determine|locate)|can(?:no|')t (?:identify|find|determine|locate)|could not (?:identify|find|determine|locate)|not a recognized product|not recognized as a product|does not (?:correspond|match|appear)|no product (?:information|match|listing)|no information (?:is )?available)\b/i;
 
+// Nutrition-facts DB page titles ("Nutrition Facts for <brand> - <product>", "<product> by <brand>
+// nutrition facts and analysis."). These sites map RECYCLED UPCs to the wrong same-brand product
+// (2026-07-04 dry run: Lay's <-> Munchies identity swap), so their titles never name a product here.
+const NUTRITION_DB_TITLE = /^\s*nutrition facts for\b|\bnutrition facts (?:and analysis|for)\b/i;
+
 // Barcode-site title cruft appended after a separator (incl. em/en dash), e.g.
 // "Bic Lighter Texas — UPC 70330645936 — Go-UPC" or "Widget | Barcode Lookup".
 const TITLE_CODE_SUFFIX = /\s*[|–—-]\s*(?:upc|ean|gtin|isbn|barcode)\b[\s\S]*$/i;
+// Leading code cruft ("UPC 745125495781 - Manstel Rivet Kit"): stripped so the real product behind it
+// survives the code-echo check below.
+const TITLE_CODE_PREFIX = /^\s*(?:upc|ean|gtin|isbn|barcode)?[\s#:]*\d{8,14}\s*[|–—:-]\s*/i;
 const TITLE_SITE_SUFFIX =
   /\s*[|–—-]\s*(?:barcode lookup|upcitemdb|go-?upc|buycott|barcodespider|barcode ?finder|barcodes? ?database|ean-?search|eandata|barcodes?\.(?:com|net|org)|gtin ?lookup)\b[\s\S]*$/i;
 
@@ -80,30 +114,115 @@ export function cleanProductName(name: string): string {
     .replace(HEDGE_TAIL, "")
     .replace(TITLE_CODE_SUFFIX, "")
     .replace(TITLE_SITE_SUFFIX, "")
+    .replace(TITLE_CODE_PREFIX, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** True only for a clean, real product name (not a website title, hedge, placeholder, or junk). */
-export function isUsableProductName(raw: string): boolean {
+/**
+ * True only for a clean, real product name (not a website title, hedge, placeholder, or junk).
+ * When the scanned `code` is passed, a name that still CONTAINS that code after cleaning is
+ * rejected: search/lookup pages echo the queried code in their title ("Search For:<code>",
+ * "UPC Database | <code>"), and a real product name never carries the full barcode.
+ */
+export function isUsableProductName(raw: string, code?: string): boolean {
   const name = cleanProductName(raw);
   if (name.length < 3 || name.length > 120) return false;
   if (PLACEHOLDER_NAME.test(name)) return false;
   if (REFUSAL_NAME.test(name)) return false;
   if (SCRAPE_ERROR_TITLE.test(name)) return false;
+  if (ERROR_PAGE_NAME_RE.test(name)) return false;
   if (SITE_BLOCKLIST.test(name)) return false;
+  if (NUTRITION_DB_TITLE.test(name)) return false;
   if (/^https?:\/\//i.test(name) || /^[a-z0-9.-]+\.(com|org|net|io)\b/i.test(name)) return false; // bare domain/url
+  if (code) {
+    const digits = code.replace(/\D/g, "");
+    const echoes = [code.trim(), digits, digits.padStart(12, "0"), digits.padStart(13, "0"), digits.padStart(14, "0")]
+      .filter((v) => v.length >= 8); // short fragments would false-positive on sizes/quantities
+    if (echoes.some((v) => name.includes(v))) return false;
+  }
   return true;
 }
 
-function identityOf(r: AiLookupResult): string {
-  const name = isUsableProductName(r.productName) ? cleanProductName(r.productName) : "";
+// --- Example/test-row firewall (QA hardening fix #5, 2026-07-16) -----------------------------
+// The 4M-row Open Food Facts retail corpus is a crowdsourced dump that includes literal GS1-standard
+// TEXTBOOK EXAMPLE barcodes and demo/placeholder rows contributed by testers, ingested VERBATIM by
+// scripts/build-retail-knowledge.mjs (which only checks barcode shape + name length - never checks for
+// a test/example row). Live-proven: 4006381333931 -> "Test Shopidoo", 5901234123457 -> "Sauce
+// chiltepin"/"La lumbre", 0012345670121/0012345674020/0012345674037 -> brand "Healthyholics", plus rows
+// literally named "Test"/"Fakeer"/"Fakewine"/"BrandTest". A confident retail-rung match on one of these
+// is a WRONG IDENTITY, which is worse than Unidentified. This is a READ-TIME guard (not a corpus edit):
+// it rejects the hit and falls through to an honest "no identity", never a leaked "test row" reason.
+
+// EXACT-VALUE barcode blocklist. Deliberately NOT a fuzzy prefix (e.g. never `/^0012345/`) - a fuzzy
+// prefix could suppress a real GTIN that happens to share the same leading digits. Every entry here is
+// either a well-known GS1/ISBN textbook example, a degenerate shape (all-zero/all-same-digit/fully
+// sequential), or one of the exact live-proven Healthyholics example codes.
+const EXAMPLE_BARCODE_BLOCKLIST = new Set<string>([
+  "012345678905", // classic GS1 UPC-A textbook example
+  "4006381333931", // classic GS1/GTIN EAN-13 textbook example ("Test Shopidoo")
+  "5901234123457", // classic GS1 EAN-13 textbook example ("Sauce chiltepin" / "La lumbre")
+  "0012345670121", // documented Healthyholics example GTIN
+  "0012345674020", // documented Healthyholics example GTIN
+  "0012345674037", // documented Healthyholics example GTIN
+]);
+
+/** Zero-pad `code` to 12/13/14 digits, mirroring retailKnowledgeIndex.ts's barcodeVariants so the same
+ *  normalized shapes that the retail lookup itself tries are checked against the blocklist. */
+function exampleBarcodeVariants(code: string): string[] {
+  const digits = code.replace(/\D/g, "");
+  if (!digits) return [];
+  const stripped = digits.replace(/^0+/, "") || "0";
+  const variants = new Set<string>([digits, stripped]);
+  for (const base of [digits, stripped]) {
+    if (base.length <= 14) variants.add(base.padStart(14, "0"));
+    if (base.length <= 13) variants.add(base.padStart(13, "0"));
+    if (base.length <= 12) variants.add(base.padStart(12, "0"));
+  }
+  return [...variants];
+}
+
+/** True for an all-zero, all-same-digit, or fully-sequential barcode shape (degenerate placeholder,
+ *  never a real product's GTIN). Checked on the raw digit string, not zero-padded variants, so a
+ *  genuinely short real code is never coincidentally caught by padding. */
+function isDegenerateBarcodeShape(digits: string): boolean {
+  if (!digits) return false;
+  if (/^0+$/.test(digits)) return true; // all-zero (any length 8-14)
+  if (/^(\d)\1+$/.test(digits)) return true; // all-same-digit (e.g. 1111111111111)
+  if (digits === "0123456789012" || digits === "1234567890128") return true; // fully sequential GS1 examples
+  return false;
+}
+
+// WHOLE-WORD strong test/demo markers. Word-boundary anchored so "Latest"/"Testarossa"/"contest"/
+// "attesting" never false-positive - only a standalone marker word matches.
+const TEST_NAME_PATTERN =
+  /\b(test|fakeer|fake ?wine|dummy|sample product|placeholder|brandtest|shopidoo)\b/i;
+
+/**
+ * True when a retail-corpus row is a textbook GS1 EXAMPLE barcode or a demo/test/placeholder row that
+ * must never be surfaced as a confident product match. Checks the barcode (exact-value blocklist +
+ * degenerate shapes, using the same zero-pad normalization the retail index itself uses) OR the name OR
+ * the brand (whole-word test/demo markers). Pure function: no I/O, no imports beyond what this module
+ * already has.
+ */
+export function isExampleOrTestRow(code: string, name: string, brand?: string): boolean {
+  const digits = (code ?? "").replace(/\D/g, "");
+  if (digits && isDegenerateBarcodeShape(digits)) return true;
+  const variants = exampleBarcodeVariants(code ?? "");
+  if (variants.some((v) => EXAMPLE_BARCODE_BLOCKLIST.has(v))) return true;
+  if (name && TEST_NAME_PATTERN.test(name)) return true;
+  if (brand && TEST_NAME_PATTERN.test(brand)) return true;
+  return false;
+}
+
+function identityOf(r: AiLookupResult, code?: string): string {
+  const name = isUsableProductName(r.productName, code) ? cleanProductName(r.productName) : "";
   return `${name} ${r.brand}`.trim();
 }
 
 export function decideDecode(params: DecodeParams): DecodeDecision {
   const { codeType, confidenceThreshold, code, scanContext } = params;
-  const present = params.results.filter((r) => r && identityOf(r).length > 0);
+  const present = params.results.filter((r) => r && identityOf(r, code).length > 0);
   const a = present[0] ?? null;
   const b = present[1] ?? null;
   const cc = crossCheck(a, b);
@@ -252,9 +371,38 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
             : internetTwoSourceSize
               ? "internet_two_source_size"
               : "non_public_trusted_source";
+    const exactCodeEvidenceVerifiedByApp = canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || nonPublicTrustedVerified;
+    const computedConfidence = Math.min(1, Math.max(maxConfidence, cc.confidence));
+
+    // TASK 21 (owner-ratified 2026-07-15): TRUSTED-SOURCE CONFIDENCE FLOOR. One LEGIT source
+    // (manufacturer site, Walmart, Target, Discount Tire, Tire Rack class) that the app itself
+    // FETCHED and independently confirmed carries the exact code deserves near-certain confidence -
+    // 0.95, never higher (retail pages still carry a small wrong-UPC rate; human override stays
+    // supreme, so this NEVER floors to a literal 1.0) and never LOWER than whatever was already
+    // computed (a stronger signal must never be pulled down to the floor). The floor applies ONLY
+    // when ALL of these hold simultaneously:
+    //   - evidence strength is "fetched_source" (the app actually retrieved and read the page -
+    //     "strong association" for the fetchv2 rung specifically, since fetchv2's own scoring
+    //     (scoring.ts) only ever emits a verified fetched_source evidence off a strong-association
+    //     winner - a snippet/grounding_chunk/url_only match never qualifies, no matter how trusted
+    //     the host, because the app never actually fetched and read that page);
+    //   - exactCodeEvidenceVerifiedByApp is true (the APP's own verifier confirmed the code, never
+    //     the model's self-claim);
+    //   - the winning source URL's host is on the curated trusted-product allowlist
+    //     (trustedProductHosts.ts - major retailers + the KNOWN_TIRE_BRANDS manufacturer domains);
+    //   - there is NO catalog-derived brand-prefix conflict (params.brandPrefixConflict) - a wrong
+    //     brand for this barcode's GS1 prefix must never be floored to near-certain, even if a
+    //     trusted host happened to also confirm the code (a recycled/scanned-wrong-item case).
+    const trustedFetchedSource =
+      bestEvidence.strength === "fetched_source" &&
+      exactCodeEvidenceVerifiedByApp &&
+      !params.brandPrefixConflict &&
+      (bestEvidence.matchedSources ?? []).some((u) => isTrustedProductHost(u));
+    const confidence = trustedFetchedSource ? Math.max(computedConfidence, 0.95) : computedConfidence;
+
     return {
       status: "verified",
-      confidence: Math.min(1, Math.max(maxConfidence, cc.confidence)),
+      confidence,
       reason: canVerify
         ? "Verified AI Decode: both providers independently agree and the app confirmed the exact code in real evidence."
         : singleSourceVerified
@@ -267,7 +415,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
                 ? "Verified AI Decode: brand from the strong GS1 prefix and two independent Internet sources agree on the size."
                 : "Verified AI Decode: the app confirmed the exact code in a trusted source (one trusted source is enough for this code type).",
       evidenceStrength: bestEvidence.strength,
-      exactCodeEvidenceVerifiedByApp: canVerify || singleSourceVerified || tireCorroborated || pageFetchModelAgreement || nonPublicTrustedVerified,
+      exactCodeEvidenceVerifiedByApp,
       crossCheck: baseCrossCheck,
       corroborationPath,
     };
@@ -286,7 +434,7 @@ export function decideDecode(params: DecodeParams): DecodeDecision {
           : "Needs human confirmation.";
     return {
       status: "suggested",
-      confidence: Math.max(maxConfidence * 0.6, cc.confidence * 0.6),
+      confidence: Math.max(maxConfidence * 0.6, cc.confidence * 0.6, MIN_SUGGESTION_CONFIDENCE),
       reason: `Suggested, not trusted. ${why} Review the sources and approve to save.`,
       evidenceStrength: bestEvidence.strength,
       exactCodeEvidenceVerifiedByApp: false,

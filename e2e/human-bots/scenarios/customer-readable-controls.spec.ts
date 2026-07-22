@@ -27,10 +27,14 @@ test("CustomerReadableControlsBot: Needs Review + Counts controls are >= 44px (P
   await page.goto("/scan");
 
   // Counts actions (scan a known TIRE seed -> a count row; default scanContext is "tire").
+  // The button was relabeled "Correct" -> "Edit details" in the Polish sprint (8e0060b/4c278a9);
+  // its data-testid (`correct-${productId}`) stayed stable, so target that instead of the visible
+  // text, which is expected to keep improving with future copy polish.
   await scan(page, "6419440485331"); // seed tire
   const countBody = page.getByTestId("final-count-body");
-  await expect(countBody.getByRole("button", { name: "Correct" }).first()).toBeVisible();
-  await expectTall(countBody.getByRole("button", { name: "Correct" }).first(), "Correct button");
+  const editDetailsButton = countBody.getByRole("button", { name: "Edit details" }).first();
+  await expect(editDetailsButton).toBeVisible();
+  await expectTall(editDetailsButton, "Edit details button");
   await expectTall(countBody.getByRole("button", { name: "Remove from count" }).first(), "Remove-from-count button");
   await page.screenshot({ path: `${PROOF}/08-counts-controls.png`, fullPage: true });
 

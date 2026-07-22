@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeCatalogEntry, safeHttpUrl, isCatalogWritable } from "@/services/catalog/sanitizeCatalog";
+import { sanitizeCatalogEntry, safeHttpUrl, isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import type { CatalogCandidate, CatalogEntryMeta } from "@/services/catalog/catalogTypes";
 
 const META: CatalogEntryMeta = { now: "2026-06-14T00:00:00.000Z", verificationStatus: "verified", verifiedBy: "owner", by: "owner" };
@@ -57,5 +57,33 @@ describe("sanitizeCatalogEntry (global catalog stays clean + non-private)", () =
     expect(entry.verificationStatus).toBe("pending");
     expect(entry.timesConfirmed).toBe(0);
     expect(entry.auditLog[0]).toMatchObject({ action: "created", by: "ai" });
+  });
+});
+
+// FIX 1 (review HIGH, retail provenance): toMasterAwareStoreEntry must tag masterId/masterProvenanceTier
+// ONLY when the caller marks the hit as coming from the TIRE master catalog. A retail (Open Food Facts)
+// hit must never carry a masterId - doing so would run it through the tire-master cross-tier conflict
+// machinery under a defaulted "corpus_verified" tier it never earned.
+describe("toMasterAwareStoreEntry (Phase 5b GC4 - master provenance tagging)", () => {
+  const raw = {
+    id: "gtin_012345678905",
+    normalizedBarcode: "012345678905",
+    name: "Some Product",
+    brand: "SomeBrand",
+    category: "",
+    verificationStatus: "verified",
+    provenanceTier: "ladder_verified_strong" as const,
+  };
+
+  it("tire-master hit (isMaster:true) carries masterId + masterProvenanceTier", () => {
+    const entry = toMasterAwareStoreEntry(raw, true, "2026-07-20T00:00:00.000Z");
+    expect(entry.masterId).toBe("gtin_012345678905");
+    expect(entry.masterProvenanceTier).toBe("ladder_verified_strong");
+  });
+
+  it("retail hit (isMaster:false) never carries masterId or masterProvenanceTier", () => {
+    const entry = toMasterAwareStoreEntry(raw, false, "2026-07-20T00:00:00.000Z") as unknown as Record<string, unknown>;
+    expect(entry.masterId).toBeUndefined();
+    expect(entry.masterProvenanceTier).toBeUndefined();
   });
 });

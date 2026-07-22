@@ -56,3 +56,27 @@ doctrine and the owner's current instructions.
 - **Open questions / blockers:** none. Direct trusted-source fetching (manufacturer/registry) remains a documented
   placeholder (SSRF-sensitive) - tiers are classified from the decode's existing cited URLs.
 - **Marker:** auto-verify reconciliation complete 2026-06-14.
+
+## 2026-07-12 - Docs reorganization + decode-ladder reconciliation
+
+- **Trigger:** owner order to update and organize all MD files to current standards and progress.
+- **Files inspected:** ENGINEERING_DOCTRINE.md (global), CLAUDE.md, AGENTS.md, README.md, PROGRESS.md,
+  DECISIONS.md, TESTING.md, CHANGELOG.md, LESSONS_LEARNED.md, RISK_REGISTER.md, docs/CURRENT_CONTEXT.md,
+  docs/superpowers/plans/2026-07-09 + 2026-07-10, src/server/upc/ladder.ts (source-verified rung order).
+- **Conflict found + resolved:** CLAUDE.md's "MASTER BASELINE v1" said decode is GEMINI-FIRST then
+  ChatGPT sequential. The built reality on `feat/decode-ladder-goupc` is the cost-ordered ladder
+  (local corpus -> Go-UPC -> Fetch V2 -> GPT-5.5) with Gemini permanently OUT of decode (hidden
+  grounding billing, L11). Resolution: current owner-approved ladder spec + built code outrank the
+  older baseline note; CLAUDE.md updated to LADDER BASELINE v2 with the v1 note kept as history.
+  Guardrails carry over unchanged (brand-prefix/family sanity, store auto-count gate, evidence
+  verification, test safety).
+- **Stale docs resolved:** historical point-in-time reports moved to `docs/archive/` (git mv, history
+  preserved) with an index README; PROGRESS.md's 2026-06 phase log archived verbatim to
+  `docs/archive/PROGRESS_HISTORY_2026-06.md`; README.md rewritten from create-next-app boilerplate;
+  docs/CURRENT_CONTEXT.md rewritten from the 2026-06-15 Track-1 snapshot (durable outcomes folded in).
+- **Rules adopted:** doc-hygiene ownership zones (machine-regenerable vs human-owned; flag stale human
+  prose, never delete); LESSONS_LEARNED L11-L13 added (the risk register already cited L11).
+- **Rules overridden:** the two-provider/Gemini-first decode baseline text only.
+- **Open questions / blockers:** push/deploy/T9-backfill/harvest-schedule remain owner decisions
+  (PROGRESS.md "Pending owner decisions").
+- **Marker:** docs reconciliation complete 2026-07-12.

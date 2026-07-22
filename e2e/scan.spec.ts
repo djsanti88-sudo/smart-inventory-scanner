@@ -77,10 +77,14 @@ test("full inventory scan proof", async ({ page }) => {
   await page.screenshot({ path: `${PROOF}/03-live-feed.png`, fullPage: true });
   await page.screenshot({ path: `${PROOF}/04-final-counts.png`, fullPage: true });
 
-  // 4. Image hover preview (front-end only; falls back gracefully for unreachable URLs).
+  // 4. Image hover preview (front-end only; falls back gracefully for unreachable URLs). Owner rule
+  // (fc2188a, 2026-07-01, predates this test's last update) dropped the Image column from the scan
+  // page's Final Count table - the image-hover preview now lives on the Products page instead.
+  await page.goto("/products");
   await page.getByTestId("image-link").first().hover();
   await expect(page.getByTestId("image-hover-card").first()).toBeVisible();
   await page.screenshot({ path: `${PROOF}/06-image-hover.png`, fullPage: true });
+  await page.goto("/scan");
 
   // 5. CSV export works from local state (even before any sync concerns). Exports now live in the
   // unified "Export" dropdown; open it first. The CSV chip keeps the legacy export-final-counts testid.
@@ -119,7 +123,10 @@ test("full inventory scan proof", async ({ page }) => {
   const row = page.getByTestId("review-row-UNKNOWN123");
   await row.getByLabel("link to product").selectOption({ label: "Coca-Cola 12 pack 12 oz cans" });
   await row.getByTestId("link-existing").click();
-  await expect(row).toContainText("Resolved");
+  // Owner rule (fc2188a, 2026-07-01, predates this test's last update): Needs Review hides items that
+  // are already resolved AND synced, so the row disappears from the queue entirely instead of lingering
+  // with a "Resolved" badge.
+  await expect(row).toHaveCount(0);
 
   // Future scans of the learned code are deterministic (match Coca-Cola, no new review).
   await page.goto("/scan");

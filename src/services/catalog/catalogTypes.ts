@@ -5,6 +5,8 @@
 // sanitized barcode/product/evidence data - never businessId, prices, margins, notes, or any
 // shop/customer data. Private, shop-scoped data lives in `ShopOverride` (carries businessId).
 
+import type { ProvenanceTier } from "@/types";
+
 export type CatalogVerificationStatus = "pending" | "verified" | "conflict";
 export type CatalogVerifiedBy = "owner" | "admin" | "trusted_source" | "community" | "evidence_score" | null;
 
@@ -49,6 +51,11 @@ export interface CatalogEntry {
   sourceTier: CatalogSourceTier;
   evidenceSummary: string;
   blockingReasons: string[]; // why it was NOT auto-verified (for pending/review candidates)
+  // Phase 5b (GC4 boundary): optional pass-through of the master-catalog (db/types.ts CatalogEntry)
+  // identity, populated by toStoreEntry when this entry came from the top-level `catalogEntries`
+  // master collection. Both optional - every existing constructor of this type is unaffected.
+  masterId?: string;
+  masterProvenanceTier?: ProvenanceTier;
 }
 
 /** PRIVATE, shop-scoped override. Wins over the global catalog for that shop. Never shared upward. */

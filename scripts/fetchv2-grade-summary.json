@@ -1,0 +1,247 @@
+{
+  "spent": 0.0174,
+  "totalRows": 150,
+  "gates": {
+    "wrongVerified": 0,
+    "autoCountRate": 0.02631578947368421,
+    "verifiedOk": 2,
+    "findable": 76,
+    "cheapVerifyRate": 0.013333333333333334,
+    "cheapVerify": 2,
+    "cheapTried": 150,
+    "wrongLoudSuggest": 11,
+    "avgCostPerCode": 0.00011599999999999999,
+    "totalSpend": 0.0174
+  },
+  "junkTitleVerifies": 0,
+  "strictExpectationOverrides": 0,
+  "errorRows": 0,
+  "reconstructedCount": 0,
+  "byGroup": {
+    "owner": {
+      "n": 21,
+      "verified": 0,
+      "suggested": 17,
+      "refused": 4,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 10
+    },
+    "canary": {
+      "n": 10,
+      "verified": 0,
+      "suggested": 0,
+      "refused": 10,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 0
+    },
+    "tire": {
+      "n": 20,
+      "verified": 2,
+      "suggested": 7,
+      "refused": 11,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 9
+    },
+    "part": {
+      "n": 25,
+      "verified": 0,
+      "suggested": 12,
+      "refused": 13,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 7
+    },
+    "asin": {
+      "n": 8,
+      "verified": 0,
+      "suggested": 2,
+      "refused": 6,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 2
+    },
+    "fnsku": {
+      "n": 7,
+      "verified": 0,
+      "suggested": 0,
+      "refused": 7,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 0
+    },
+    "upcEan": {
+      "n": 35,
+      "verified": 0,
+      "suggested": 35,
+      "refused": 0,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 34
+    },
+    "case": {
+      "n": 12,
+      "verified": 0,
+      "suggested": 0,
+      "refused": 12,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 0
+    },
+    "obscure": {
+      "n": 12,
+      "verified": 0,
+      "suggested": 10,
+      "refused": 2,
+      "error": 0,
+      "wrong": 0,
+      "junk": 0,
+      "override": 0,
+      "matched": 10
+    }
+  },
+  "wrongVerifiedRows": [],
+  "junkTitleRows": [],
+  "overrideRows": [],
+  "wrongLoudRows": [
+    {
+      "code": "016000462427",
+      "group": "owner",
+      "product": "Cheerios Protein Cereal, Oats & Honey",
+      "truth": "General Mills product",
+      "guessConfidence": 0.6
+    },
+    {
+      "code": "00028400234306",
+      "group": "owner",
+      "product": "Lay's Pico de Gallo Potato Chips 2.875 Ounces",
+      "truth": "Doritos / Frito-Lay product",
+      "guessConfidence": 0.6
+    },
+    {
+      "code": "0028400199247",
+      "group": "owner",
+      "product": "Fritolay Flamin' hot nacho flavored tortilla chips",
+      "truth": "Lay's Kettle Cooked Potato Chips",
+      "guessConfidence": 0.6
+    },
+    {
+      "code": "00028400076388",
+      "group": "owner",
+      "product": "Lay's Kettle Cooked Party Size Original Potato Chips 14 Ounce Plastic Bag",
+      "truth": "Doritos Cool Ranch Tortilla Chips",
+      "guessConfidence": 0.6
+    },
+    {
+      "code": "00028400160131",
+      "group": "owner",
+      "product": "Lay's Barbecue Flavored Potato Chips 9.5 Ounce Plastic Bag",
+      "truth": "Munchies Cheese Fix Snack Mix",
+      "guessConfidence": 0.6
+    },
+    {
+      "code": "00028400028141",
+      "group": "owner",
+      "product": "Munchies Rold Gold Doritos Cheetos Sun Chips Cheese Fix Snack Mix 3.25 Ounce Plastic Bag",
+      "truth": "Lay's Barbecue Potato Chips",
+      "guessConfidence": 0.6
+    },
+    {
+      "code": "P108",
+      "group": "part",
+      "product": "My Store P108",
+      "truth": "Ryobi 18V ONE+ LITHIUM+ 4.0Ah Battery",
+      "guessConfidence": 0.45
+    },
+    {
+      "code": "6619",
+      "group": "part",
+      "product": "NSW-6619 - Nora Lighting",
+      "truth": "NGK Iridium IX Spark Plug LFR6AIX-11 (stock no. 6619)",
+      "guessConfidence": 0.45
+    },
+    {
+      "code": "1225",
+      "group": "part",
+      "product": "1225 - Wikipedia",
+      "truth": "Moen 1225 One-Handle Faucet Replacement Cartridge",
+      "guessConfidence": 0.45
+    },
+    {
+      "code": "2097",
+      "group": "part",
+      "product": "AB 2097 - California YIMBY",
+      "truth": "3M 2097 Particulate Filter P100 with nuisance-level OV relief (respirator filter)",
+      "guessConfidence": 0.45
+    },
+    {
+      "code": "0046100358122",
+      "group": "upcEan",
+      "product": "Sargent Shareables",
+      "truth": "Sargento Shareables (cheese snack)",
+      "guessConfidence": 0.6
+    }
+  ],
+  "canaryRows": [
+    {
+      "code": "749000000015",
+      "outcome": "refused"
+    },
+    {
+      "code": "749000000022",
+      "outcome": "refused"
+    },
+    {
+      "code": "749000000039",
+      "outcome": "refused"
+    },
+    {
+      "code": "749000000046",
+      "outcome": "refused"
+    },
+    {
+      "code": "ZQX-99417-B",
+      "outcome": "refused"
+    },
+    {
+      "code": "KMD-40521-X",
+      "outcome": "refused"
+    },
+    {
+      "code": "VTR-88316-A",
+      "outcome": "refused"
+    },
+    {
+      "code": "X00ZZZ9ZZ9",
+      "outcome": "refused"
+    },
+    {
+      "code": "X00QZ9WZ9Q",
+      "outcome": "refused"
+    },
+    {
+      "code": "X00Z9VZ0Z9",
+      "outcome": "refused"
+    }
+  ],
+  "canaryFails": 0,
+  "verdict": "cheap-verify weak - consider Option C or owner call"
+}

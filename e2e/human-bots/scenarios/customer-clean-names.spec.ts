@@ -25,7 +25,7 @@ const seed = {
       syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
     }],
   },
-  version: 5,
+  version: 6,
 };
 
 test("CustomerCleanNamesBot: Counts shows clean Brand Model Size, no UPC/Fits (P5)", async ({ page }) => {

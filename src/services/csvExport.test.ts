@@ -5,7 +5,10 @@ import {
   exportFinalCounts,
   exportQuantityAdjustments,
   exportRawScanLog,
+  exportSessionScanLog,
+  exportSessionScanLogCustomer,
 } from "@/services/csvExport";
+import { isSensitiveKey } from "@/services/security/sensitiveFields";
 import type { InventoryCount, Product, ScanEvent } from "@/types";
 
 describe("escapeCsvField", () => {
@@ -127,5 +130,56 @@ describe("exportRawScanLog", () => {
     const csv = exportRawScanLog([e]);
     expect(csv).toContain("biz:sess:e1:INCREMENT_COUNT");
     expect(csv).toContain("T432119%RU1%");
+  });
+});
+
+describe("exportSessionScanLog", () => {
+  it("includes a location column and the scan's stamped location value", () => {
+    const event: ScanEvent = {
+      id: "e1", businessId: "b1", sessionId: "s1", rawCode: "123", cleanCode: "123",
+      normalizedCandidates: ["123"], matchedProductId: "p1", matchType: "upc", status: "known",
+      resolverStatus: "known", codeType: "upc_a", reason: "matched", quantityDelta: 1,
+      quantityAfterScan: 1, createdAt: "2026-07-19T16:00:00.000Z", source: "scan", notes: "",
+      syncStatus: "synced", syncError: null, idempotencyKey: "k1", location: "Bay A",
+    };
+    const csv = exportSessionScanLog([event]);
+    expect(csv).toContain("location");
+    expect(csv).toContain("Bay A");
+  });
+
+  it("renders an empty location as a blank field, never the literal 'undefined'", () => {
+    const event: ScanEvent = {
+      id: "e1", businessId: "b1", sessionId: "s1", rawCode: "123", cleanCode: "123",
+      normalizedCandidates: ["123"], matchedProductId: null, matchType: "unknown", status: "unknown",
+      resolverStatus: "needs_review", codeType: "numeric_sku", reason: "no match", quantityDelta: 1,
+      quantityAfterScan: 1, createdAt: "2026-07-19T16:00:00.000Z", source: "scan", notes: "",
+      syncStatus: "synced", syncError: null, idempotencyKey: "k1",
+    };
+    const csv = exportSessionScanLog([event]);
+    expect(csv).not.toContain("undefined");
+  });
+
+  it("keeps the customer export free of platform-only scan fields", () => {
+    const event: ScanEvent = {
+      id: "e1", businessId: "b1", sessionId: "s1", rawCode: "secret-raw", cleanCode: "secret-clean",
+      normalizedCandidates: ["secret-normalized"], matchedProductId: "p1", matchType: "upc", status: "known",
+      resolverStatus: "known", codeType: "upc_a", reason: "matched", quantityDelta: 1,
+      quantityAfterScan: 1, createdAt: "2026-07-19T16:00:00.000Z", source: "scan", notes: "",
+      syncStatus: "synced", syncError: null, idempotencyKey: "secret-key", location: "Bay A",
+      deviceId: "private-device",
+    };
+    const csv = exportSessionScanLogCustomer([event]);
+    const headers = csv.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0].split(",");
+
+    for (const header of headers) expect(isSensitiveKey(header)).toBe(false);
+    expect(headers).toContain("location");
+    expect(headers).not.toContain("raw_code");
+    expect(headers).not.toContain("clean_code");
+    expect(csv).toContain("Bay A");
+    expect(csv).not.toContain("secret-raw");
+    expect(csv).not.toContain("secret-clean");
+    expect(csv).not.toContain("secret-normalized");
+    expect(csv).not.toContain("secret-key");
+    expect(csv).not.toContain("private-device");
   });
 });

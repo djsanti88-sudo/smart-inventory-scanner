@@ -97,7 +97,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     } finally {
       restore();
     }
-    expect(lastReview(store).status).toBe("open"); // review stays open for human confirmation
+    expect(lastReview(store).status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().finalCounts).toHaveLength(1);
     const prov = store.getState().products.find((p) => p.name === "Maybe Snack");
     expect(prov).toBeDefined();
@@ -191,6 +191,33 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect(s.dailyLookupLimit).toBe(200);    // adopts AI_LOOKUP_DAILY_LIMIT from the server
     expect(s.primaryProvider).toBe("gemini");
     expect(s.fallbackProvider).toBe("openai");
+  });
+
+  it("refreshAiStatus (Task 6) adopts the GET response's gptLadder spend/call status", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const { restore } = stub({
+      liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true,
+      dailyLimit: 200, missingKeys: [],
+      gptLadder: { spentTodayUsd: 0.42, capUsd: 3, callsToday: 5, enabled: true },
+    });
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    expect(store.getState().aiStatus.gptLadder).toEqual({ spentTodayUsd: 0.42, capUsd: 3, callsToday: 5, enabled: true });
+  });
+
+  it("refreshAiStatus keeps the PRIOR gptLadder value when a GET response omits the field (older/mocked server)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, gptLadder: { spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true } } }));
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [] });
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    expect(store.getState().aiStatus.gptLadder).toEqual({ spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true });
   });
 
   it("a KNOWN (approved) scan never calls AI", () => {

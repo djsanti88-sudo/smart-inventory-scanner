@@ -3,8 +3,9 @@
 The backend foundation runs on Firebase: **Firebase Auth** (login) + **Cloud Firestore** (data) +
 **Firestore Security Rules** (tenant isolation), proven on the **Firebase Emulator Suite**. Phase 1 is
 emulator-first and SECRET-FREE: a `demo-` project never touches the cloud, so no service account / web
-config / production credentials are needed. The live scan/count flow is NOT wired to Firebase yet
-(Phase 2).
+config / production credentials are needed. The live scan/count sync path IS wired
+(`FirebaseSyncTarget` + the scanStore cloud drain) behind the opt-in `dev:emulator`/`dev:prod`
+modes; mock remains the default backend, and master plan Phase 2 completes accounts/tenancy on top.
 
 ## Prerequisites
 - Firebase CLI (`firebase --version`; already installed: 15.x) and a Firebase login (`firebase login`).

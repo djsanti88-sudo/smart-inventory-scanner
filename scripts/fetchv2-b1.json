@@ -1,0 +1,63 @@
+{
+ "spent": 0.0075,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "092971144814",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone r280 295/75R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.9,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": []
+  },
+  {
+   "code": "051342118137",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental contisportcontact 3 275/35R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.42,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": []
+  },
+  {
+   "code": "746573269979",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "doral road ranger at 285/45R22",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 9.17,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ],
+   "sources": []
+  }
+ ]
+}

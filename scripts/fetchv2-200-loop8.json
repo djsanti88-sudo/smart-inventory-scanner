@@ -1,0 +1,888 @@
+{
+ "spent": 0.0772,
+ "engine": "fetch_v2_web_only",
+ "rows": [
+  {
+   "code": "092971262761",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "firestone firehawk as 215/50R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.71,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "690677301168",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodride st100 ST225/75R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.74,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "4981910884903",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "toyo eclipse 185/65R14",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.39,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "887613441402",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "nexen nfera au7 255/45R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.58,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "086699058874",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich dr454 275/80R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.05,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "092971191016",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone blizzak dm v1 275/60R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.37,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "092971144814",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone r280 295/75R22.5",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.49,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342118137",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental contisportcontact 3 275/35R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.33,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "746573269979",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "doral road ranger at 285/45R22",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.83,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342084333",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "general grabber uhp 265/70R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.78,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "5420068601394",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "minerva transporter rf09 225/65R16",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.87,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "842925103042",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "paragon tour cuv a s 225/60R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.94,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "450862674947",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "fortune tormenta a t2 LT35/12.50R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.46,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "8904239718519",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "tvs eurogrip im 45 420/55R17",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.48,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "086699976529",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "uniroyal laredo hd h LT225/75R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.37,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "086699870391",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich g force comp 2 a s plus 255/45R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 42.51,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "054137076483",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli scorpion zero all season 285/40R22",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.59,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342120505",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental vancowinter 2 225/70R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.33,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "460827726604",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "forceland vitality f22 165/50R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.51,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "461996427194",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "wanli wanli flash as028 245/65R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.74,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "990498681518",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "ovation tires 225/45R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.71,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "733569617791",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "lanvigator performax P285/65R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.14,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "877184004748",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "falken azenis pt722 a s 255/40R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.27,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "4981910865001",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "toyo open country h t 225/65R17",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.36,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "697662097136",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "dunlop graspic ds 3 185/60R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 6.32,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "887613517107",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "nexen nfera sur4 225/50R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.21,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "5060330613580",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "atturo az850 315/35R21",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 41.63,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "no findings"
+   ]
+  },
+  {
+   "code": "086699969651",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bfgoodrich radial t a 245/60R14",
+   "codeType": "upc",
+   "outcome": "verified",
+   "product": "BFGoodrich Radial T/A All-Season Radial Tire - P245/60R14 98S",
+   "cost": 0,
+   "secs": 2.83,
+   "guessConfidence": 0.9,
+   "v2Outcome": "verified",
+   "winningSource": "https://www.amazon.ae/BFGoodrich-Radial-All-Season-Tire-60R14/dp/B008C2842Y",
+   "codeLocation": "detail_table.gtin",
+   "rules": [
+    "balanced: single strong source with proven code-to-product association"
+   ]
+  },
+  {
+   "code": "8903094014750",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bkt mp 567 10/75R15.3",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 20.3,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "092971323936",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "bridgestone potenza sport 245/35R19",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.79,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "033259720450",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "carlstar tour max 205/50R10",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.85,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342132706",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental contact cst17 125/90R16",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.44,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "051342114207",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "continental crosscontact lx 275/70R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.98,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "029142714965",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "cooper zeon rs3 a 225/50R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.22,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "4713959003720",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "federal couragia f x 275/45R19",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.88,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "697662112860",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodyear eagle f1 asymmetric a s 245/40R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.84,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "697662076070",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "goodyear wrangler sr a 265/70R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 8.53,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "758823103063",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "milestar weatherguard as710 sport 245/45R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.12,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "746573219165",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "multi-mile supreme tour lsx csx 215/60R17",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.92,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "8859384901524",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "otani kc2000 205/60R15",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 2.63,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "054137061182",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli cinturato p7 all season plus 215/50R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.91,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "054137044055",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "pirelli pzero nero all season 275/35R20",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 1.63,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "4717784331249",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "presa ps01 185/65R15",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.31,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "769382907580",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "rbp semi steel st 225/75R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 4.61,
+   "guessConfidence": 0,
+   "v2Outcome": "rejected",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "all sources junk-rejected"
+   ]
+  },
+  {
+   "code": "6959655491678",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "rovelo rhp a68 185/60R14",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.13,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "778469007280",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "transeagle st radial all steel 225/75R15",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 20.26,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "086699543356",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "uniroyal power paw a s 225/40R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 10.16,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "6950306315770",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "wanli s 1087 245/30R24",
+   "codeType": "ean",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 3.25,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  },
+  {
+   "code": "721506561542",
+   "group": "tire",
+   "expected": "verified-ok",
+   "truth": "yokohama geolandar cv 4s g061 255/55R18",
+   "codeType": "upc",
+   "outcome": "refused",
+   "product": "",
+   "cost": 0,
+   "secs": 5.84,
+   "guessConfidence": 0,
+   "v2Outcome": "unknown",
+   "winningSource": "",
+   "codeLocation": "",
+   "rules": [
+    "sources fetched but no identity/evidence found"
+   ]
+  }
+ ]
+}

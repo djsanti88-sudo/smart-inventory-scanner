@@ -3,6 +3,7 @@
 // Replaces running `qa:weekly-report` and `intel:now` separately.
 // Usage: node scripts/weekly-report.mjs   (or: npm run weekly-report)
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const sh = (cmd, optional = false) => {
   console.log('\n> ' + cmd);
@@ -19,7 +20,17 @@ const sh = (cmd, optional = false) => {
 //    the weekly report to show.
 sh('npm run qa:bots:all', true);
 
-// 2. Product-intelligence pipeline: ensures a dev server, runs a live FRESH-code decode scan, then builds
+// 2. Fresh Fable 5 PR review. This remains optional so a missing Python executable cannot prevent the
+//    existing weekly report from running. LATEST.json points at report.md for the review just produced.
+sh('python -m tools.fable5 review-build --gate pr --no-cache', true);
+try {
+  const latest = JSON.parse(readFileSync('docs/reviews/LATEST.json', 'utf8'));
+  console.log(`Fable 5 review: [${latest.verdict}](${latest.report})`);
+} catch (e) {
+  console.warn('(continuing) Fable 5 report pointer unavailable: ' + e.message);
+}
+
+// 3. Product-intelligence pipeline: ensures a dev server, runs a live FRESH-code decode scan, then builds
 //    the report (which now folds in the QA-health section), renders the PDF, and emails it. Reuses the
 //    existing, tested pipeline (scripts/weekly-intel.mjs -> build-report-html.mjs).
 sh('node scripts/weekly-intel.mjs');

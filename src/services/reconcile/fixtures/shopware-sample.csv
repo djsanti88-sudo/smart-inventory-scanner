@@ -1,0 +1,6 @@
+part_number,alias_part_numbers,brand,model,size,specs,qty_on_hand,qty_available,location,unit,cost,retail
+MICH-XT2-21555R17,MICH-XT2-21555R17-ALT,Michelin,Defender XT2,215/55R17,All-Season Touring,12,10,Bay 3,each,85.00,129.99
+MICH-XT2-21555R17,,Michelin,Defender XT2,215/55R17,All-Season Touring,4,4,Bay 7,each,85.00,129.99
+GY-EAG-22545R18,,Goodyear,Eagle Sport,225/45R18,Performance,6,5,Bay 1,each,,
+CONT-PC6-23545R18,,Continental,PureContact LX,235/45R18,Touring,8,8,Bay 2,box,60.00,110.00
+BAD-ROW-NO-QTY,,BadBrand,Model X,,,,,,,,

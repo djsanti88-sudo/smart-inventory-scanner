@@ -6,6 +6,7 @@ import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
 import { ImageHoverPreview } from "@/components/ImageHoverPreview";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
+import { UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
 import type { Product } from "@/types";
 
 export default function ProductsPage() {
@@ -19,6 +20,7 @@ export default function ProductsPage() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
       {isPlatform && <UndoDeleteBanner />}
+      <UniversalImportPanelContainer />
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
         <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
           <h2 id="products-heading" className="text-lg font-semibold text-zinc-900">Your products</h2>

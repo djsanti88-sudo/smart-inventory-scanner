@@ -1,4 +1,9 @@
-# Decode pipeline — the REAL architecture (intent vs reality)
+# [SUPERSEDED 2026-07-19] Decode pipeline — the REAL architecture (intent vs reality)
+
+> **THIS DOCUMENT IS SUPERSEDED.** It describes the OLD pre-ladder architecture (concurrent
+> Gemini + OpenAI orchestrator on branch `decoder-hardening-v1-local`), which was replaced by the
+> cost-ordered decode ladder. The current canonical docs are `docs/DECODER_ARCHITECTURE.md` and
+> `docs/ARCHITECTURE.md` section 3. Kept for history only; do not build a mental model from it.
 
 > Reverse-engineered from the code on branch `decoder-hardening-v1-local`. Every hop cites `file:line`.
 > This documents what the pipeline ACTUALLY does at runtime, and reconciles it with the intended design.

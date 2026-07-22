@@ -1,13 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { customerDisplayName } from "@/services/displayName";
-import { SyncBadge } from "@/components/badges";
-import { plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
+import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { DecodeStatusBadge, SyncBadge } from "@/components/badges";
+import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
-import type { InventoryCount, Product } from "@/types";
+import { filterProducts } from "@/services/polish/filterProducts";
+import { requiresOwnerPin } from "@/services/security/destructiveGuard";
+import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
+
+// Task 4 (product-name polish): resolves the display Brand / Model / Size for one row, preferring
+// the deterministic-structurer fields and falling back to the existing product.brand/name/specsShort
+// so older (pre-structuring) products still render sensibly.
+function resolvedBrand(product: Product): string {
+  return prettifyBrand(product.structuredBrand || product.brand);
+}
+// Task 4 review fix: the Model column shows the table's existing empty-cell convention ("-") for a
+// row with no structuredModel yet, rather than duplicating the full Product-column name. Filtering
+// by name still works via the description field (structuredDescription falls back to product.name).
+//
+// Regression fix (2026-07-12 merge-train gate, P5 bot): the deterministic structurer
+// (structureProduct, run by the polish backfill migration) parses the RAW stored name, so a messy
+// legacy name like "UPC 086699205636 - Defender LTX M/S Fits: 2004 Chevrolet" can produce a
+// structuredModel that still carries the UPC prefix / fitment clause when the structurer's brand/
+// junk heuristics do not fully strip them. The Name column already cleans via customerDisplayName()
+// for non-platform roles; the Model column now gets the same treatment so a customer never sees a
+// raw UPC or "Fits" clause leak in through this column instead.
+function resolvedModel(product: Product, isPlatform: boolean): string {
+  if (!product.structuredModel) return "";
+  const model = prettifyProductName(product.structuredModel);
+  return isPlatform ? model : prettifyProductName(customerDisplayName(model));
+}
+function resolvedSizeTag(product: Product): string {
+  return product.sizeTag || plainTireSizeDigits(product.specsShort);
+}
+// Task 6: the Size cell shows the canonical, human-readable size ("245/70R16") instead of the
+// digit-mash ("2457016") the Specs column already spells out in full. Falls back to the raw
+// sizeTag when specsShort has no parseable tire size (e.g. legacy rows, non-tire products), and
+// finally to "-" so the cell never renders blank or throws. The digit form still exists via
+// resolvedSizeTag() for the filter box and moves to the cell's title tooltip (some owners search
+// tires by the plain sidewall digits).
+function resolvedSizeDisplay(product: Product): string {
+  return matchTireSize(product.specsShort)?.canonical.split(" ")[0] ?? product.sizeTag ?? "-";
+}
 
 // Final count database: spreadsheet-style, grouped by PRODUCT (not by code). Raw codes (barcode +
 // aliases) are platformOwner-only. Row actions let the owner fix a wrong saved decode safely:
@@ -15,54 +53,103 @@ import type { InventoryCount, Product } from "@/types";
 // the bad alias + reopen Needs Review + Gemini Pro recheck).
 export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
+  const currentSession = useScanStore((s) => s.currentSession);
   const getProduct = useScanStore((s) => s.getProduct);
+  const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
+  const [filterQuery, setFilterQuery] = useState("");
 
-  const rows = finalCounts
+  // F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge into
+  // finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts). This table
+  // must show only the CURRENT session's counts, not every session's counts merged into the store.
+  const sessionCounts = currentSession
+    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
+    : finalCounts;
+
+  const rows = sessionCounts
     .map((c) => ({ count: c, product: getProduct(c.productId) }))
     .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
     .sort((a, b) => b.count.quantity - a.count.quantity);
+
+  // Task 4: digits-only query filters by sizeTag prefix; any other text filters brand/model/description.
+  const visibleRows = useMemo(() => {
+    const filterable = rows.map((r) => ({
+      id: r.count.id,
+      brand: resolvedBrand(r.product),
+      // Filtering always searches the raw structured model (not the customer-cleaned display value):
+      // the filter box is a search index, not a rendered cell, and this keeps filter behavior
+      // unchanged for both roles.
+      model: resolvedModel(r.product, true),
+      description: r.product.structuredDescription || r.product.name,
+      sizeTag: resolvedSizeTag(r.product),
+    }));
+    const kept = new Set(filterProducts(filterable, filterQuery).map((f) => f.id));
+    return rows.filter((r) => kept.has(r.count.id));
+  }, [rows, filterQuery]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
         <h2 id="counts-heading" className="text-lg font-semibold text-zinc-900">Your counts</h2>
-        <span className="text-sm text-zinc-600">{rows.length} products</span>
+        <span className="text-sm text-zinc-600">{visibleRows.length} of {rows.length} products</span>
       </div>
       {isPlatform && (
         <div className="px-4 pt-3">
           <UndoDeleteBanner />
         </div>
       )}
-      <div className="overflow-auto">
+      <div className="px-4 pt-3">
+        <input
+          type="text"
+          data-testid="polish-filter"
+          value={filterQuery}
+          onChange={(e) => setFilterQuery(e.target.value)}
+          placeholder="Filter by brand, model, description, or size (e.g. 205)"
+          aria-label="Filter counts"
+          className="min-h-[44px] w-full max-w-md rounded-lg border border-zinc-300 px-3 text-base"
+        />
+      </div>
+      <div
+        className="overflow-auto shadow-[inset_-8px_0_6px_-6px_rgba(0,0,0,0.08)]"
+        tabIndex={0}
+        role="region"
+        aria-label="Your counts table, scroll horizontally for more columns"
+      >
         <table className="w-full border-collapse text-left text-base" aria-labelledby="counts-heading">
           <thead className="border-b border-zinc-200 bg-zinc-50 text-sm font-semibold text-zinc-700">
             <tr>
               <th scope="col" className="px-4 py-3">Qty</th>
               <th scope="col" className="px-4 py-3">Product</th>
               <th scope="col" className="px-4 py-3">Brand</th>
+              <th scope="col" className="px-4 py-3">Model</th>
               <th scope="col" className="px-4 py-3">Category</th>
               <th scope="col" className="px-4 py-3">Specs</th>
               <th scope="col" className="px-4 py-3">Size</th>
               <th scope="col" className="px-4 py-3">{isPlatform ? "SKU" : "Part number"}</th>
-              {isPlatform && <th scope="col" className="px-4 py-3">Barcode</th>}
+              {/* Owner order 2026-07-10: the code the shop scanned is THEIR data - visible to all
+                  roles (same rule the feed applies to its Barcode column). The alias DB column
+                  below stays platformOwner-only. */}
+              <th scope="col" className="px-4 py-3">Barcode</th>
               {isPlatform && <th scope="col" className="px-4 py-3">Other codes scanned</th>}
               <th scope="col" className="px-4 py-3">Location</th>
               <th scope="col" className="px-4 py-3">Last scanned</th>
+              <th scope="col" className="px-4 py-3">Status</th>
               <th scope="col" className="px-4 py-3">Sync</th>
               <th scope="col" className="px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody data-testid="final-count-body">
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <tr>
-                <td colSpan={isPlatform ? 13 : 11} className="px-4 py-6 text-center text-base text-zinc-600">
-                  No counts yet. Scan a barcode to start counting your inventory.
+                <td colSpan={isPlatform ? 15 : 14} className="px-4 py-6 text-center text-base text-zinc-600">
+                  {rows.length === 0
+                    ? "No counts yet. Scan a barcode to start counting your inventory."
+                    : "No products match this filter."}
                 </td>
               </tr>
             ) : (
-              rows.map(({ count, product }) => (
-                <CountRow key={count.id} count={count} product={product} isPlatform={isPlatform} />
+              visibleRows.map(({ count, product }) => (
+                <CountRow key={count.id} count={count} product={product} isPlatform={isPlatform} needsReviewQueue={needsReviewQueue} />
               ))
             )}
           </tbody>
@@ -72,12 +159,24 @@ export function FinalCountTable() {
   );
 }
 
-function CountRow({ count, product, isPlatform }: { count: InventoryCount; product: Product; isPlatform: boolean }) {
+function CountRow({
+  count,
+  product,
+  isPlatform,
+  needsReviewQueue,
+}: {
+  count: InventoryCount;
+  product: Product;
+  isPlatform: boolean;
+  needsReviewQueue: UnknownCodeReview[];
+}) {
   const removeFromCount = useScanStore((s) => s.removeFromCount);
   const correctProduct = useScanStore((s) => s.correctProduct);
   const markWrong = useScanStore((s) => s.markWrong);
   const aliases = useScanStore((s) => s.aliases);
   const approveDiscoveredIdentifiers = useScanStore((s) => s.approveDiscoveredIdentifiers);
+  const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
+  const verifyOwnerPin = useScanStore((s) => s.verifyOwnerPin);
   // Discovered (grounded, not-yet-approved) identifiers for this product: offered for one-click approval.
   // They do NOT match or count until approved (the resolver ignores approved !== true).
   const discovered = aliases.filter((a) => a.productId === product.id && !a.approved);
@@ -88,10 +187,26 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
   // actions (Mark wrong, hard product delete) are hidden behind this flag (code kept). Set true to restore.
   const SHOW_ADVANCED_ACTIONS = false;
 
+  const [removePinPrompt, setRemovePinPrompt] = useState(false);
+  const [removePin, setRemovePin] = useState("");
+  const [removePinErr, setRemovePinErr] = useState("");
+
   const onRemove = () => {
     if (window.confirm("Remove this product from the count? The product stays in your catalog. Scan it again to add it back.")) {
+      if (requiresOwnerPin("removeFromCount", hasPin)) {
+        setRemovePinPrompt(true);
+        return;
+      }
       removeFromCount(product.id);
     }
+  };
+  const submitRemovePin = async () => {
+    const ok = await verifyOwnerPin(removePin);
+    if (!ok) { setRemovePinErr("Wrong PIN"); return; }
+    removeFromCount(product.id);
+    setRemovePinPrompt(false);
+    setRemovePin("");
+    setRemovePinErr("");
   };
   const onMarkWrong = () => {
     if (
@@ -107,20 +222,78 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
     setEditing(false);
   };
 
+  // Same render-time suggestion lookup LiveScanFeed uses (LiveScanFeed.tsx:59-83), applied only for
+  // provisional rows: prefer a review keyed by this product's id (auto-applied identity still resolves
+  // to the correct review for its confidence/tag), falling back to a cleanCode match on this product's
+  // barcode with a usable suggested name.
+  const suggestion = product.provisional
+    ? needsReviewQueue.find(
+        (r) => r.provisionalProductId === product.id || (r.cleanCode === product.primaryBarcode && r.suggestedProductName),
+      )
+    : undefined;
+  const hasAppliedIdentity = product.provisional && !product.name.startsWith("Unidentified item");
+  // Owner order 2026-07-10 refinement: "all rows showing something if possible... whats available
+  // suggested or if full specs suggested everything". A row with a findable suggestion (and no
+  // already-applied identity) displays through a MERGED product - the suggestion's fields overlaid
+  // on the real (mostly-empty placeholder) product fields - fed through the SAME resolver pipelines
+  // (resolvedBrand/resolvedModel/resolvedSizeTag/resolvedSizeDisplay) the real columns use, so every
+  // mappable column (Brand, Model, Category, Specs, Size, Part number) fills in identically to a real
+  // product row instead of showing "-" across the board. Fields the suggestion doesn't carry keep the
+  // product's own (placeholder) value, preserving the existing "-" convention.
+  const displayProduct: Product =
+    suggestion && !hasAppliedIdentity
+      ? {
+          ...product,
+          name: suggestion.suggestedProductName || product.name,
+          brand: suggestion.suggestedBrand || product.brand,
+          structuredBrand: undefined,
+          structuredModel: undefined,
+          category: suggestion.suggestedCategory || product.category,
+          specsShort: suggestion.suggestedSpecsShort || product.specsShort,
+          primarySku: suggestion.suggestedPrimarySku || product.primarySku,
+        }
+      : product;
+  const displayName = prettifyProductName(hasAppliedIdentity ? product.name : displayProduct.name);
+  const displayBrand = resolvedBrand(displayProduct);
+  // Trust rule (same as the feed): confidence >= 0.8 -> neutral "unconfirmed"; < 0.8 -> amber
+  // "(suggested)". No tag when no suggestion/review is findable for a provisional row.
+  const suggestionTag = suggestion ? (suggestion.confidence >= 0.8 ? "unconfirmed" : "(suggested)") : null;
+  const statusBadge = product.verified ? (
+    <DecodeStatusBadge status="verified" />
+  ) : product.provisional && (suggestion || hasAppliedIdentity) ? (
+    <DecodeStatusBadge status="suggested" />
+  ) : product.provisional ? (
+    <DecodeStatusBadge status="needs_review" />
+  ) : (
+    "-"
+  );
+
   return (
     <tr className="border-t border-zinc-100 align-top hover:bg-zinc-50" data-testid={`count-row-${product.id}`}>
       <td className="px-4 py-3 text-lg font-semibold tabular-nums" data-testid={`qty-${product.id}`}>
         {count.quantity}
       </td>
-      <td className="px-4 py-3 font-medium text-zinc-800">{isPlatform ? product.name : customerDisplayName(product.name)}</td>
-      <td className="px-4 py-3">{product.brand}</td>
-      <td className="px-4 py-3">{product.category}</td>
-      <td className="px-4 py-3">{product.specsShort}</td>
-      <td className="px-4 py-3 font-mono text-sm tabular-nums" data-testid={`size-${product.id}`}>
-        {plainTireSizeDigits(product.specsShort) || "-"}
+      <td className="px-4 py-3 font-medium text-zinc-800">
+        {isPlatform ? displayName : prettifyProductName(customerDisplayName(displayName))}
+        {suggestionTag === "unconfirmed" ? (
+          <span className="ml-1 rounded px-1 text-xs text-zinc-600">unconfirmed</span>
+        ) : suggestionTag === "(suggested)" ? (
+          <span className="ml-1 text-xs text-amber-700">(suggested)</span>
+        ) : null}
+      </td>
+      <td className="px-4 py-3" data-testid={`brand-${product.id}`}>{displayBrand}</td>
+      <td className="px-4 py-3" data-testid={`model-${product.id}`}>{resolvedModel(displayProduct, isPlatform) || "-"}</td>
+      <td className="px-4 py-3">{displayProduct.category || "-"}</td>
+      <td className="px-4 py-3">{displayProduct.specsShort || "-"}</td>
+      <td
+        className="px-4 py-3 font-mono text-sm tabular-nums"
+        data-testid={`size-${product.id}`}
+        title={resolvedSizeTag(displayProduct) || undefined}
+      >
+        {resolvedSizeDisplay(displayProduct) || "-"}
       </td>
       <td className="px-4 py-3 font-mono text-sm">
-        <div>{product.primarySku || "-"}</div>
+        <div>{displayProduct.primarySku || "-"}</div>
         {discovered.length > 0 && (
           <div className="mt-1 flex flex-col items-start gap-1" data-testid={`discovered-${product.id}`}>
             {discovered.map((a) => (
@@ -138,12 +311,13 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
           </div>
         )}
       </td>
-      {isPlatform && <td className="px-4 py-3 font-mono text-sm">{product.primaryBarcode || "-"}</td>}
+      <td className="px-4 py-3 font-mono text-sm" data-testid={`count-barcode-${product.id}`}>{product.primaryBarcode || "-"}</td>
       {isPlatform && <td className="px-4 py-3 font-mono text-sm text-zinc-600">{count.aliasesSeen.join(", ")}</td>}
       <td className="px-4 py-3">{product.location || "-"}</td>
       <td className="px-4 py-3 text-sm text-zinc-600">
         {count.lastScannedAt ? new Date(count.lastScannedAt).toLocaleTimeString() : "-"}
       </td>
+      <td className="px-4 py-3">{statusBadge}</td>
       <td className="px-4 py-3">
         <SyncBadge status={count.syncStatus} />
       </td>
@@ -180,6 +354,23 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
               placeholder="Location"
               className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
             />
+            {isPlatform && (
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                aria-label="unit cost"
+                data-testid={`edit-unit-cost-${product.id}`}
+                defaultValue={product.unitCost ?? ""}
+                placeholder="Unit cost"
+                onBlur={(e) => {
+                  const value = e.target.value.trim();
+                  const parsed = value ? Number(value) : undefined;
+                  correctProduct(product.id, { unitCost: Number.isFinite(parsed) ? parsed : undefined });
+                }}
+                className="min-h-[36px] w-24 rounded border border-zinc-300 px-2 text-sm"
+              />
+            )}
             <div className="flex gap-2">
               <button type="button" data-testid={`correct-save-${product.id}`} onClick={onSave} className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 text-base font-medium text-white hover:bg-blue-700 active:scale-95">
                 Save
@@ -197,6 +388,19 @@ function CountRow({ count, product, isPlatform }: { count: InventoryCount; produ
             <button type="button" data-testid={`remove-count-${product.id}`} onClick={onRemove} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-800 hover:bg-red-100 active:scale-95">
               Remove from count
             </button>
+            {removePinPrompt && (
+              <div className="flex items-center gap-2" data-testid={`remove-pin-row-${product.id}`}>
+                <input aria-label="owner PIN" inputMode="numeric" value={removePin}
+                  onChange={(e) => setRemovePin(e.target.value.replace(/\D/g, ""))} maxLength={6}
+                  placeholder="Owner PIN" data-testid="remove-pin"
+                  className="min-h-[44px] w-28 rounded-lg border border-zinc-300 px-3 text-base" />
+                <button type="button" data-testid="remove-pin-confirm" onClick={submitRemovePin}
+                  className="inline-flex min-h-[44px] items-center rounded-lg bg-red-600 px-4 text-base font-medium text-white hover:bg-red-700">
+                  Confirm remove
+                </button>
+                {removePinErr && <span className="text-sm text-red-600" data-testid="remove-pin-error">{removePinErr}</span>}
+              </div>
+            )}
             {SHOW_ADVANCED_ACTIONS && isPlatform && (
               <button type="button" data-testid={`mark-wrong-${product.id}`} onClick={onMarkWrong} className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-700 hover:bg-red-100">
                 Mark wrong

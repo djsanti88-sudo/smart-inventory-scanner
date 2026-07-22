@@ -27,8 +27,14 @@ test("CustomerReviewPersistenceBot: pending reviews + badge survive a full reloa
 
   await page.goto("/scan");
   for (const c of codes) await scan(page, c);
-  // Sanity: the most recent scan is in the feed as Needs Review (feed prepends).
-  await expect(page.getByTestId("scan-feed-body").locator("tr").first()).toContainText(/needs review|not recognised/i);
+  // Sanity: the most recent scan is in the feed as an uncounted/pending row, never auto-resolved.
+  // The DecodeStatusBadge label reads "Suggested" for needs_review/conflict (Plan C Task 1,
+  // 2026-07-01, src/components/badges.tsx - intentionally collapsed so customers never see a wall
+  // of alarming statuses). Assert on the label that is actually current, and also assert the real
+  // safety property this sanity check exists for: the code was not counted.
+  const latestFeedRow = page.getByTestId("scan-feed-body").locator("tr").first();
+  await expect(latestFeedRow).toContainText(/suggested|needs review|not recognised/i);
+  await expect(latestFeedRow).not.toContainText(/counted/i);
 
   await page.goto("/review");
   await expect(reviewRows(page).first()).toBeVisible();

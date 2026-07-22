@@ -1,7 +1,37 @@
 # Changelog
 
 Notable changes to the Smart Inventory Scanner decode pipeline, grouped by the Architecture Version
-stamped on the work. Git history is the source of truth for timing.
+stamped on the work. Git history is the source of truth for timing. Newest first.
+
+## v2.0.0 - Decode ladder (Go-UPC) + size-merge + UX truth (branch `feat/decode-ladder-goupc`, 2026-07-08..10, NOT pushed)
+
+### Decode ladder
+- New `src/server/upc/` module: ordered rungs local corpus/cache -> `goupc` (GTIN-gated with GS1
+  check digit) -> `fetchv2` -> `gpt` (GPT-5.5). First settled rung stops the ladder; per-rung reasons
+  recorded and surfaced. Gemini permanently removed from decode (hidden grounding billing, no cap
+  control); Settings labels it "not used for decode" (`95de508`, `1a9048d`).
+- Daily AI cap: atomic storage-backed counter charged only inside paid rungs; corpus/cache hits free
+  (`2dcf714`); default 200 -> 500, env override kept (`456b8a7`).
+
+### Identity correctness
+- Size-aware identity merge: tire size derived from `specsShort`/`specsFull`; size-distinct fuzzy
+  matches mint new products instead of Needs Review suggestions (`7b31189`, `1782c11`).
+- Evidenced brand families (Michelin/BFGoodrich/Uniroyal-NA, Continental/General, Goodyear/Cooper;
+  Dunlop unfamilied post-2025 Sumitomo purchase) end the `086699*` false prefix conflicts
+  (`a67c490`, `de3c72d`).
+
+### Scan/Review UX truth
+- Honest decode-failure reasons; suggested identities shown on the scan page with a low-confidence
+  "(suggested)" tag; high-trust suggestions (>=0.8 or app-verified exact) auto-apply to the counted
+  row (`c232b5d`); Brand column on the feed; Barcode column on Your counts + Needs Review (all
+  roles); Status column on Your counts (`c592b26`, `222d7fa`); corpus slug names prettified
+  (`cd09141`, `ab8b4a6`).
+- Owner-gated backfill script for the 16 missing tire codes (review-first, strict criteria,
+  `83d3d62`) - NOT run (paid).
+
+### Proof
+- 2026-07-10 preview `inventory-5tk3c3vxf`, 100 owner codes via the real UI: 100/100 verified,
+  0 review, 98s (owner-loved baseline).
 
 ## v1.0.0 - Decoder hardening
 

@@ -4,16 +4,24 @@ import { useEffect, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ScannerInput } from "@/components/ScannerInput";
+import { CameraScanButton } from "@/components/CameraScanButton";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { FinalCountTable } from "@/components/FinalCountTable";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { ExportMenu } from "@/components/ExportMenu";
+import { VarianceReport } from "@/components/VarianceReport";
 import { SessionLockControl } from "@/components/SessionLockControl";
 import { SessionsList } from "@/components/SessionsList";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
+import { planScanBatch } from "./planScan";
+import { resolveRawScan } from "@/services/resolver";
+import { computeMoatStats } from "@/services/moatStats";
 
 export default function ScanPage() {
   const processScan = useScanStore((s) => s.processScan);
+  const products = useScanStore((s) => s.products);
+  const aliases = useScanStore((s) => s.aliases);
+  const businessId = useScanStore((s) => s.businessId);
   const startSession = useScanStore((s) => s.startSession);
   const finishSession = useScanStore((s) => s.finishSession);
   const clearSession = useScanStore((s) => s.clearSession);
@@ -26,17 +34,28 @@ export default function ScanPage() {
   const clearCategoryWarning = useScanStore((s) => s.clearCategoryWarning);
 
   const [name, setName] = useState("");
-  const [location, setLocation] = useState("Main");
+  const location = useScanStore((s) => s.location);
+  const setLocation = useScanStore((s) => s.setLocation);
+  const recentLocations = useScanStore((s) => s.recentLocations);
+  const ensureAutoSession = useScanStore((s) => s.ensureAutoSession);
+  const scanFeed = useScanStore((s) => s.scanFeed);
+  const firstScanAt = useScanStore((s) => s.firstScanAt);
 
   // BULK SCAN: paste/type several codes separated by spaces or newlines and each becomes its OWN row
   // (one processScan per code). A single hardware-scanned barcode contains no whitespace, so normal
   // one-at-a-time scanning is unchanged. Returns the LAST result so the success panel reflects it.
+  //
+  // A whitespace-containing string is NOT automatically a multi-code paste: some single codes in this
+  // domain legitimately contain an internal space (e.g. a tire part number printed "2881 6861" - one
+  // of several separator shapes the resolver already treats as equivalent, see scanCleaner's
+  // buildNormalizedCandidates). planScanBatch tries the whole trimmed string as ONE code first (via
+  // the same deterministic resolver processScan uses) and only falls back to splitting into N scans
+  // when the whole string does not resolve as a single known code.
   const handleScan = (raw: string) => {
-    const codes = raw
-      .split(/\s+/)
-      .map((c) => c.trim())
-      .filter(Boolean);
-    if (codes.length <= 1) return processScan(raw);
+    const resolvesAsSingleCode = (code: string) => resolveRawScan(code, products, aliases, businessId).resolverStatus === "known";
+    const codes = planScanBatch(raw, resolvesAsSingleCode);
+    if (codes.length === 0) return processScan(raw);
+    if (codes.length === 1) return processScan(codes[0]);
     let last = null as ReturnType<typeof processScan>;
     for (const code of codes) last = processScan(code);
     return last;
@@ -47,6 +66,10 @@ export default function ScanPage() {
     void refreshAiStatus();
   }, [refreshAiStatus]);
 
+  useEffect(() => {
+    ensureAutoSession();
+  }, [ensureAutoSession]);
+
   const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
   const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page
   // P4: keep the scan box the single hero - collapse the secondary controls by default for real users.
@@ -55,17 +78,21 @@ export default function ScanPage() {
   const expandSecondary = process.env.NEXT_PUBLIC_E2E_AUTH_BYPASS === "1";
   const autoDecodeOn = settings.aiLookupEnabled && aiStatus.autoDecodeOnScan && aiStatus.liveEnabled && hasKey && !aiStatus.emergencyStop;
 
-  // CATEGORY FEATURE HIDDEN (owner request): scanning is category-agnostic for now. The dropdown +
-  // the "wrong category" warning are hidden (code kept), and scanContext is forced to "any" so a scan
-  // is NEVER routed to review for not matching a category. Set SHOW_CATEGORY = true (and remove the
-  // force-effect) to restore the Tires / Not-specialized selector.
+  // CATEGORY SELECTOR HIDDEN (owner request, aeb3218 2026-06-25): the dropdown + the "wrong category"
+  // warning banner are hidden on this page (code kept - set SHOW_CATEGORY = true to restore them).
+  // scanContext itself is NO LONGER force-reset to "any" here: that force-effect silently neutered the
+  // documented tire-context auto-count firewall (CLAUDE.md "Master Baseline v1" guardrail #2 - a
+  // non-tire result while scanning in Tire context must hard-block auto-count) for every scan, and it
+  // made the still-visible Settings > "Scan category" control a dead no-op (it looked functional but
+  // was silently overwritten back to "any" the instant /scan re-rendered). scanContext now simply
+  // follows settings.scanContext (default "tire" per DEFAULT_SETTINGS, or whatever the shop chose on
+  // Settings). Root-caused during the scan-category e2e triage (see
+  // .superpowers/sdd/scan-category-triage-report.md).
   const SHOW_CATEGORY = false;
-  useEffect(() => {
-    if (settings.scanContext !== "any") updateSettings({ scanContext: "any" });
-  }, [settings.scanContext, updateSettings]);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
+      <h1 className="sr-only">Scan</h1>
       <BusinessContextGate>
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
         {SHOW_CATEGORY && categoryWarning && (
@@ -98,9 +125,24 @@ export default function ScanPage() {
             </button>
           </div>
         )}
+        {/* C2 first-run banner (GC-D): shown only before this business's first EVER counted scan. Plain,
+            passive, non-interactive div - never a modal/overlay, never focusable, never intercepts keys,
+            never steals focus from the scanner input. Disappears once a scan exists (feed non-empty or
+            firstScanAt set), so it can never linger or block the scan loop. */}
+        {scanFeed.length === 0 && firstScanAt == null && (
+          <div
+            data-testid="first-run-banner"
+            className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-base text-blue-900"
+          >
+            Scan your first barcode to start counting. The scan box is already focused and ready.
+          </div>
+        )}
         <div className="flex flex-wrap items-end gap-3">
           <div className="grow">
             <ScannerInput onScan={handleScan} submitMode={settings.scannerSubmitMode} debounceMs={settings.scannerDebounceMs} />
+          </div>
+          <div className="shrink-0">
+            <CameraScanButton onScan={handleScan} />
           </div>
           {SHOW_CATEGORY && (
             <div className="flex flex-col gap-1">
@@ -138,18 +180,19 @@ export default function ScanPage() {
             placeholder="New session name"
             className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
           />
-          <select
+          <input
             aria-label="location"
+            list="recent-locations"
             value={location}
             onChange={(e) => setLocation(e.target.value)}
+            placeholder="Location (e.g. Bay A)"
             className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
-          >
-            <option>Main</option>
-            <option>Bay A</option>
-            <option>Bay B</option>
-            <option>Cooler 1</option>
-            <option>Warehouse</option>
-          </select>
+          />
+          <datalist id="recent-locations">
+            {recentLocations.map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
+          </datalist>
           <button
             type="button"
             data-testid="start-session"
@@ -212,8 +255,14 @@ export default function ScanPage() {
         </details>
       </div>
 
+      {scanFeed.length > 0 && (
+        <p className="px-1 text-sm font-medium text-zinc-700" data-testid="moat-line">
+          {computeMoatStats(scanFeed).identified} of {computeMoatStats(scanFeed).total} identified automatically
+        </p>
+      )}
       <LiveScanFeed />
       <FinalCountTable />
+      <VarianceReport />
       </BusinessContextGate>
     </div>
   );

@@ -11,6 +11,7 @@ import type {
   InventorySession,
   PendingSyncItem,
   Product,
+  ProvenanceTier,
   ScanEvent,
   Settings,
   SyncOperation,
@@ -21,8 +22,12 @@ import { normalizeCode } from "@/services/codeNormalizer";
 import { evaluateMismatch, type MismatchVerdict } from "@/services/productMismatchGuard";
 import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector";
 import { resolveScan } from "@/services/resolver";
+import { isLikelyMisreadGtin } from "@/services/upc/misread";
+import { gradeBarcode } from "@/services/upc/barcodeTrust";
+import { canonicalGtin } from "@/services/upc/gtin";
+import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
-import { resolveScanToProduct } from "@/services/aliasMatcher";
+import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { blobContainsCodeToken, codeFromNamePrefix, normCodeToken } from "@/services/productDedup";
 import { incrementInventoryCount } from "@/services/inventory";
 import { buildIdempotencyKey } from "@/services/idempotency";
@@ -43,6 +48,7 @@ import {
   type BreakerState,
 } from "@/services/circuitBreaker";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
+import { sanitizeCustomerReason } from "@/services/ai/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
 import type { CatalogEntry, CatalogHit, ShopOverride } from "@/services/catalog/catalogTypes";
@@ -54,16 +60,36 @@ import { extractTireFields } from "@/services/tire/extractTireFields";
 import { collectGroundedIdentifiers, discoverableIdentifiers } from "@/services/aliasDiscovery";
 import { lookupTirePrefix } from "@/services/tire/tirePrefixLookup";
 import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/barcodeAnatomy";
-import { prefixFloorName } from "@/services/catalog/prefixFloor";
-import { detectScanContextConflict, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
-import { isCatalogWritable, sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
+import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
+import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
+import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
+import { isCatalogWritable, sanitizeCatalogEntry, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
+import { findIdentityMerge } from "@/services/catalog/identityMerge";
+import { enrichProductIdentity } from "@/services/catalog/enrichProductIdentity";
+import { toMasterCandidates } from "@/services/catalog/masterCandidates";
+import {
+  canAutoCount,
+  shouldAutoApplySuggestion,
+  decodeCorroborated as decodeCorroboratedGate,
+} from "@/stores/scanGates";
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
+import type { CountSnapshot } from "@/services/reports/varianceReport";
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
+import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
+import { emptyTenantState } from "@/stores/scanReset";
+import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
+import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
+import { getOrCreateDeviceId } from "@/services/deviceIdentity";
+import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
+import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
+import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
+import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
+import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/services/importSchema";
 
 /** Result summary of a CSV product import (shown in the UI). */
 export interface CsvImportSummary {
@@ -72,6 +98,55 @@ export interface CsvImportSummary {
   aliasesCreated: number;
   duplicates: number;
   conflicts: ImportConflict[];
+}
+
+const UNIT_COST_HEADERS = ["unit_cost", "unit cost", "cost", "unitcost"];
+
+function parseUnitCost(row: Record<string, string>): number | undefined {
+  for (const key of Object.keys(row)) {
+    if (UNIT_COST_HEADERS.includes(key.trim().toLowerCase())) {
+      const raw = row[key]?.trim();
+      if (!raw) continue;
+      const value = Number(raw);
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  return undefined;
+}
+
+function importedRowCodes(row: Record<string, string>): Set<string> {
+  const vendorRaw = row.vendor_codes || row.vendor || row.vendor_code || "";
+  const values = [
+    row.sku,
+    row.primary_sku,
+    row.barcode,
+    row.primary_barcode,
+    row.gtin,
+    row.upc,
+    row.ean,
+    ...vendorRaw.split(/[|;]/),
+  ];
+  const codes = new Set<string>();
+  for (const raw of values) {
+    if (!raw?.trim()) continue;
+    const cleaned = cleanScanCode(raw);
+    if (cleaned.cleanCode) codes.add(cleaned.cleanCode);
+    for (const candidate of cleaned.normalizedCandidates) codes.add(candidate);
+  }
+  return codes;
+}
+
+function applyImportedUnitCosts(rows: Record<string, string>[], products: Product[]): void {
+  const costsByCode = new Map<string, number>();
+  for (const row of rows) {
+    const unitCost = parseUnitCost(row);
+    if (unitCost === undefined) continue;
+    for (const code of importedRowCodes(row)) costsByCode.set(code, unitCost);
+  }
+  for (const product of products) {
+    const unitCost = product.aliases.map((code) => costsByCode.get(code)).find((value) => value !== undefined);
+    if (unitCost !== undefined) product.unitCost = unitCost;
+  }
 }
 
 /** Snapshot of rows removed by a junk cleanup, so the action is fully reversible (Undo). */
@@ -91,6 +166,48 @@ export interface ProductDeleteBackup {
   shopOverrides: ShopOverride[]; // removed private shop-override entries keyed to their codes
   feed: ScanEvent[]; // scan-feed rows (full prior value) that referenced the deleted product(s)
   deletedAt: string;
+}
+
+/**
+ * Task 2 (honest daily-cap copy): thrown by decodeOnce when /api/ai-lookup returns 429 with
+ * reasonCode "daily_cap" (the server-side daily AI spend cap, not a self-inflicted rate limit).
+ * This is a genuinely different failure than a transient rate limit - there is NO automatic
+ * decode-on-cap-reset queue anywhere in the app (verified: only the sync retry queue and the
+ * manual "Retry live decode" button exist), so the caught reason must not retry and must not
+ * promise a retry that will never happen.
+ */
+export class DailyCapReachedError extends Error {
+  readonly reasonCode: "daily_cap" | "account_daily_cap";
+  /** P2 (Task 8): the $0 prefix floor the server threaded through the 429 body when the GS1 company
+   *  prefix knows the company, so the cap-blocked row is named "<Brand> / product unconfirmed" instead
+   *  of a bare "Unidentified item". Undefined when the code has no known prefix (unchanged behavior). */
+  readonly floor?: PrefixFloorResult;
+  /** F1/F4: distinguishes the GLOBAL server cap ("daily_cap") from the PER-ACCOUNT cap
+   *  ("account_daily_cap", route.ts:311/331) so the row can carry the honest, account-specific copy. */
+  readonly accountScoped: boolean;
+  constructor(message = "Daily AI lookup cap reached", floor?: PrefixFloorResult, accountScoped = false) {
+    super(message);
+    this.name = "DailyCapReachedError";
+    this.floor = floor;
+    this.accountScoped = accountScoped;
+    this.reasonCode = accountScoped ? "account_daily_cap" : "daily_cap";
+  }
+}
+
+/**
+ * AM-1(a) (owner-reported 36-70s browser blocks): thrown when the client-side decode fetch is
+ * aborted by our own AbortController (timeout = decodeBudgetMs + 7000ms margin). The server-side
+ * ladder deadline (L2, see pipeline.ts) is the primary fix - it bounds the SUM of every rung so the
+ * request itself finishes fast - but the client must never trust the network to behave: an abort
+ * here is NOT a retry case (the decode keeps running server-side; there is nowhere to retry TO), it
+ * is an honest "still working, check back" signal that keeps the scan row open and reviewable.
+ */
+export class DecodeAbortedError extends Error {
+  readonly reasonCode = "decode_aborted" as const;
+  constructor(message = "Decode client-side abort timeout") {
+    super(message);
+    this.name = "DecodeAbortedError";
+  }
 }
 
 const DEFAULT_AI_STATUS: AiStatus = {
@@ -153,14 +270,115 @@ function tireAutoCountOk(best: AiLookupResult | null | undefined): boolean {
 }
 
 /**
+ * BUG FIX (badge/reason contradiction, live-proven 115-code preview run): a raw decode `decision.reason`
+ * describes the SOURCE's own confidence tier ("Verified from the trusted tire knowledge base (exact
+ * barcode). No AI lookup needed.") - that text is only honest on a row actually badged "verified". The
+ * feed-row write site downgrades a raw "verified" decision.status to a "suggested" display badge the
+ * INSTANT the decode response lands (a raw verified decode still has to clear the app's own auto-count
+ * gate / resolveUnknown before it can honestly claim "Verified match" - see the "BUG FIX
+ * (verified-shows-Unidentified, burst report)" comment on the same write site). Without this, the row
+ * showed decodeStatus "suggested" (or a later "needs_review"/"conflict") while `reason` kept the raw
+ * "Verified...No AI lookup needed" claim - a direct contradiction the owner caught live. This function is
+ * the SINGLE choke point that reframes a verified-tier reason into an honest suggested-tier one whenever
+ * the displayed badge is not (or no longer) "verified". Never invents a new reason - reuses the same text,
+ * relabeled, so a corpus/trusted-source hit is still traceable, just described accurately for the tier
+ * actually shown. A non-"verified" raw decision's reason is already honest for its own tier and passes
+ * through unchanged.
+ */
+function honestReasonForBadge(rawReason: string | undefined | null, rawStatus: string | undefined, displayedBadge: string | undefined): string {
+  const reason = rawReason ?? "";
+  if (!reason) return reason;
+  if (rawStatus !== "verified" || displayedBadge === "verified") return reason;
+  // The source found an exact/strong match, but the app has not (yet, or ever) independently resolved it
+  // to a real counted product - state that honestly instead of echoing the source's own "Verified"/"No AI
+  // lookup needed" framing over a non-verified badge.
+  return `Matched from a trusted source (${reason.replace(/^Verified\s+/i, "").replace(/\.\s*No AI lookup needed\.?$/i, "")}). Needs confirmation before it counts as verified.`;
+}
+
+/**
  * What counts as "corroborated" for auto-count, shared by liveDecode + backgroundVerifyDeep so the rule
  * cannot drift. The app-verified exact code OR the internet_two_source_size path (brand from the strong GS1
  * prefix + two independent Internet sources agreeing on the size, set app-side by the route race). The
  * local DB is never involved. Every OTHER gate clause (verified status, confidence >= 0.8, tireOk,
  * no context conflict, autoAddOn) is enforced separately and unchanged.
  */
-export function decodeCorroborated(decision: { exactCodeEvidenceVerifiedByApp?: boolean; corroborationPath?: string } | null | undefined): boolean {
-  return Boolean(decision?.exactCodeEvidenceVerifiedByApp) || decision?.corroborationPath === "internet_two_source_size";
+// Re-exported from the pure gate module (src/stores/scanGates.ts) so existing importers
+// (scanStore.autocount.test.ts imports it from "./scanStore") keep working unchanged.
+export const decodeCorroborated = decodeCorroboratedGate;
+
+/**
+ * Thin store-side wrapper over the pure shouldAutoApplySuggestion gate (src/stores/scanGates.ts): it only
+ * computes productNameUsable from the raw productName and delegates. The trust rules live in the pure
+ * module; keeping this wrapper preserves the two identical call sites (liveDecode + backgroundVerifyDeep).
+ */
+function autoSuggestApplyOk(params: {
+  autoAddOn: boolean;
+  contextConflict: unknown;
+  productName: string;
+  confidence: number;
+  status: string | undefined;
+  exactCodeEvidenceVerifiedByApp: boolean;
+}): boolean {
+  return shouldAutoApplySuggestion({
+    autoAddOn: params.autoAddOn,
+    contextConflict: params.contextConflict,
+    productNameUsable: isUsableProductName(params.productName),
+    confidence: params.confidence,
+    status: params.status,
+    exactCodeEvidenceVerifiedByApp: params.exactCodeEvidenceVerifiedByApp,
+  });
+}
+
+/**
+ * Bounded decode queue (Task 5): a rapid multi-scan burst must not fire unlimited concurrent
+ * `/api/ai-lookup` network calls. The public `liveDecode` action is a thin wrapper that ENQUEUES the
+ * real decode work (`runLiveDecodeOnce`) here; `drainDecodeQueue` runs at most MAX_CONCURRENT_DECODES
+ * tasks at a time, FIFO. Module-level (not per-store-instance) is intentional and harmless: review ids
+ * are globally unique per scan, and the queue always fully drains, so nothing leaks across store
+ * instances or tests. Counting/persistence NEVER waits on this queue - `ensureProvisionalCount` already
+ * ran SYNCHRONOUSLY at scan time, before `liveDecode` is ever invoked (see `processScan`), so a
+ * queued/delayed decode only delays the AI enrichment, never the count or the "Decoding..." badge.
+ */
+const MAX_CONCURRENT_DECODES = 2;
+// Task 3.5: cap the count-snapshot ring buffer (same pattern as FEEDBACK_EVENT_CAP) so the variance/
+// shrinkage report's history stays useful without growing localStorage unbounded.
+const COUNT_SNAPSHOT_CAP = 12;
+const pendingDecodeIds: string[] = [];
+let activeDecodes = 0;
+const decodeTasks = new Map<string, { run: () => Promise<void>; resolve: () => void; reject: (e: unknown) => void }>();
+// Dedupe: a reviewId already queued OR in flight resolves to the SAME promise instead of being queued
+// twice - a duplicate liveDecode call for a review already being decoded is a no-op, not a second fetch.
+const decodeTaskPromises = new Map<string, Promise<void>>();
+
+function drainDecodeQueue(): void {
+  while (activeDecodes < MAX_CONCURRENT_DECODES && pendingDecodeIds.length > 0) {
+    const reviewId = pendingDecodeIds.shift()!;
+    const task = decodeTasks.get(reviewId);
+    decodeTasks.delete(reviewId);
+    if (!task) continue;
+    activeDecodes++;
+    task
+      .run()
+      .then(task.resolve, task.reject)
+      .finally(() => {
+        activeDecodes--;
+        drainDecodeQueue();
+      });
+  }
+}
+
+function enqueueDecode(reviewId: string, run: () => Promise<void>): Promise<void> {
+  const existing = decodeTaskPromises.get(reviewId);
+  if (existing) return existing;
+  const promise = new Promise<void>((resolve, reject) => {
+    pendingDecodeIds.push(reviewId);
+    decodeTasks.set(reviewId, { run, resolve, reject });
+  });
+  decodeTaskPromises.set(reviewId, promise);
+  const cleanup = () => decodeTaskPromises.delete(reviewId);
+  promise.then(cleanup, cleanup);
+  drainDecodeQueue();
+  return promise;
 }
 
 /**
@@ -184,6 +402,74 @@ function isWeakGuess(review: UnknownCodeReview, np: Partial<Product>): boolean {
     [review.suggestedGtin, review.suggestedUpc, review.suggestedEan].some((c) => (c ?? "").trim().length > 0) ||
     (review.sourceUrls?.length ?? 0) > 0;
   return acceptingSuggestion && !suggestionHasRealEvidence;
+}
+
+/** TRUST GATE (spec v3 AM-4.2): rejected barcode identity fields are blanked, never stored. This is
+ *  the single choke point for both resolveUnknown minting sites (provisional upgrade + fresh mint) -
+ *  a phantom/misread barcode never becomes searchable/trusted product identity. The scanned cleanCode
+ *  alias is NOT gated here (physically scanned; vendor labels must keep aliasing - Resolver Trust Rules
+ *  unchanged). Blanking a field never blocks minting, counting, or alias teaching. */
+function gateIdentityBarcodeFields(
+  np: { gtin?: string; upc?: string; ean?: string; primarySku?: string },
+): { gtin: string; upc: string; ean: string } {
+  const gate = (v?: string): string => {
+    const value = (v ?? "").trim();
+    if (!value) return "";
+    return gradeBarcode({ barcode: value, partNumber: np.primarySku }).verdict === "rejected" ? "" : value;
+  };
+  return { gtin: gate(np.gtin), upc: gate(np.upc), ean: gate(np.ean) };
+}
+
+/** Defense in depth (AM-4.4): a decode-provided barcode field that fails the trust gate is scrubbed
+ *  from the review's suggested* fields so no approve path can launder it into identity. */
+function scrubSuggestedBarcode(value: string | undefined, partNumber?: string): string {
+  const v = (value ?? "").trim();
+  if (!v) return "";
+  return gradeBarcode({ barcode: v, partNumber }).verdict === "rejected" ? "" : v;
+}
+
+/** PN-BARCODE-CARRY (owner-reported: a PN-resolved suggestion's corpus barcode never carried through
+ *  to the counted provisional row). Decides whether a decode's suggested barcode may be carried onto
+ *  a provisional product's primaryBarcode. Guard rules:
+ *  1. Never clobber a REAL scanned barcode: only carries when the row's current primaryBarcode is
+ *     empty, OR equals the scanned cleanCode AND that cleanCode is not itself GTIN-shaped (i.e. it is
+ *     a PN/vendor-label placeholder the corpus may upgrade, never a physically-scanned barcode).
+ *  2. Must clear the same trust gate as the suggested* fields (scrubSuggestedBarcode /
+ *     gradeBarcode) - a bad-check-digit or rejected barcode is never carried.
+ *  Returns "" when the carry should NOT happen (caller keeps the existing value). */
+function carriedProvisionalBarcode(params: {
+  currentPrimaryBarcode: string;
+  scannedCleanCode: string;
+  scannedCodeType: string;
+  candidateBarcode: string | undefined;
+  partNumber?: string;
+}): string {
+  const current = (params.currentPrimaryBarcode ?? "").trim();
+  const scannedIsGtin = (["upc_a", "ean_13", "gtin_14"] as string[]).includes(params.scannedCodeType);
+  const currentIsPlaceholder = current === "" || (current === params.scannedCleanCode.trim() && !scannedIsGtin);
+  if (!currentIsPlaceholder) return ""; // real scanned barcode already present - never clobber
+  return scrubSuggestedBarcode(params.candidateBarcode, params.partNumber);
+}
+
+/**
+ * The exact SAME safe, non-hallucinated placeholder label `ensureProvisionalCount` mints for an
+ * unresolved code ("Unidentified item (barcode/code CODE)", or a prefix-floor brand guess when the GS1
+ * prefix maps to a known brand). Pure function of the code alone, so it can be recomputed later purely
+ * from `review.cleanCode` - used as a reload-resilient fallback to re-identify a scan's own provisional
+ * placeholder product when its `provisional` flag and identifier fields (primaryBarcode/gtin/upc/ean/
+ * primarySku) were stripped by the customer-role localStorage split (buildPersistedScanState /
+ * CUSTOMER_SAFE_PRODUCT_FIELDS never persists those product-identity fields to a customer's disk).
+ */
+// F5 bundle-surgery: productIds with an /api/prefix-floor enrichment round-trip currently in flight.
+// Module-level (not store state - transient network bookkeeping, never persisted): multiple call sites
+// can request enrichment for the same freshly minted row in one scan flow; only one fetch ever fires.
+const enrichInFlight = new Set<string>();
+
+function provisionalPlaceholderName(code: string): string {
+  const ct = detectCodeType(code);
+  const struct = decodeBarcodeStructure(code, ct);
+  const floor = prefixFloorName(code, ct);
+  return floor ? floor.name : struct.checkDigitValid ? `Unidentified item (barcode ${code})` : `Unidentified item (code ${code})`;
 }
 
 // The local optimistic session store. Known scans update this store immediately - the UI never
@@ -241,9 +527,14 @@ export const DEFAULT_SETTINGS: Settings = {
   enablePendingSyncQueue: true,
   enableIdempotentSync: true,
   autoSuggestUnknowns: false,
-  autoAcceptVerifiedDecodes: false,
   autoAddDecodedProducts: true,
-  decodeBudgetMs: 13000,
+  // AM-9 (2026-07-15): the server has always clamped decode budget to [5000, 8000] (owner cost rule
+  // 2026-06-28); this default previously drifted to 13000, which the server silently clamped down to
+  // 8000 on every request. New installs now get the real default. Existing installs with a persisted
+  // 13000 are NOT reset here (persist migrate would also wipe learned products/aliases per CLAUDE.md -
+  // never trigger that just to fix a settings number) - instead every read site below clamps at
+  // consumption time via clampDecodeBudgetMs, so a stale persisted value can never leave [5000, 8000].
+  decodeBudgetMs: DECODE_BUDGET_DEFAULT_MS,
   autoCatalogLearningEnabled: true,
   autoVerifyConfidenceThreshold: 80,
   scanContext: "tire", // Phase 9: default to Tires so the category firewall protects from day one (no setup)
@@ -251,6 +542,9 @@ export const DEFAULT_SETTINGS: Settings = {
   aiOnlyAutoVerifyAllowed: false,
   autoCountNonPublicWithEvidence: true,
 };
+
+const AUTO_SESSION_INACTIVITY_MINUTES = 30;
+const RECENT_LOCATIONS_CAP = 8;
 
 export interface ScanState {
   // identity / config
@@ -262,6 +556,9 @@ export interface ScanState {
   // true on the mock/local path.
   businessDataLoaded: boolean;
   currentSession: InventorySession | null;
+  /** Phase 3: refresh-populated cloud session history (Task 7's refreshFromCloud writes it; the
+   *  cloud paths of listSessions/reopenSession read it). Always [] on the mock/local path. */
+  sessions: InventorySession[];
   sessionId: string;
   settings: Settings;
 
@@ -273,6 +570,9 @@ export interface ScanState {
   scanFeed: ScanEvent[]; // newest first
   finalCounts: InventoryCount[];
   needsReviewQueue: UnknownCodeReview[];
+  // Task 3.5: rolling snapshots of finalCounts for the variance/shrinkage report. Capped ring buffer
+  // (same append-and-slice-oldest pattern as feedbackEvents/appendFeedback), most-recent-last.
+  countSnapshots: CountSnapshot[];
 
   // sync
   pendingSyncQueue: PendingSyncItem[];
@@ -309,11 +609,39 @@ export interface ScanState {
 
   // hydration guard
   _hasHydrated: boolean;
+  // Phase 3: this device's stable identity (localStorage-persisted UUID). Null until first read
+  // (e.g. non-browser/test contexts, or before the store has touched deviceIdentity). Used only to
+  // derive idempotent auto-session ownership - never part of the count/ledger identity.
+  deviceId: string | null;
+  /** Phase 3: the location to stamp on the NEXT scan (defaults to the session's location; changing
+   *  it does not retroactively edit past scans). */
+  location: string;
+  /** Phase 3: capped ring buffer of recently-used location strings for this business, newest last -
+   *  same append-and-slice-oldest pattern as countSnapshots (scanStore.ts:1289-1309). */
+  recentLocations: string[];
+  /** P6 C2: ISO timestamp of this business's FIRST counted scan (any path - known, provisional, or
+   *  conflict), set exactly once. Null until then. Drives the /scan first-run banner
+   *  (scanFeed.length === 0 && firstScanAt === null). Local Zustand-persisted state only (MOCK-BACKEND
+   *  rule, review F5) - live-auth mode mirroring this to the business doc is explicitly deferred to a
+   *  future task, not built here. Reset to null on business switch / sign-out via emptyTenantState. */
+  firstScanAt: string | null;
 
   // actions
   setHasHydrated: (v: boolean) => void;
   /** Set the signed-in business context (Firebase backend). Enables cloud sync + drains the queue. */
   setBusinessContext: (businessId: string, userId: string) => void;
+  /** Pre-sign-out drain guard (F1): if the pending-sync queue is non-empty, attempt one awaited cloud
+   *  drain (wrapped so a network failure cannot throw out of sign-out), then return how many items STILL
+   *  could not sync. Returns 0 for an empty queue without touching the drain. The UI uses the count to
+   *  decide the honest confirm copy - resetForSignOut itself stays a full, unconditional wipe. */
+  prepareSignOut: () => Promise<number>;
+  /** Sign-out: wipes tenant state to the anon baseline, clears the selected-business key, removes the
+   *  signed-out user's per-uid localStorage key, and re-points persist at the anon key. */
+  resetForSignOut: () => void;
+  /** Re-point persist at this uid's key and rehydrate (no legacy-blob migration). */
+  rehydrateForUid: (uid: string) => void;
+  /** Owner-initiated: migrate the legacy pre-account blob into this uid's key, then rehydrate. */
+  adoptLegacyLocalData: (uid: string) => void;
   startSession: (name: string, location: string) => void;
   /** Mark the current session completed (status=completed, completedAt set) and persist it. */
   finishSession: () => void;
@@ -329,6 +657,21 @@ export interface ScanState {
    *  active context to a saved session and reloads its counts from the durable store. */
   listSessions: () => InventorySession[];
   reopenSession: (sessionId: string) => boolean;
+  /** Idempotent per (account, device, time-window): reuses the current session if it is still
+   *  ACTIVE, owned by THIS device, and within the inactivity window; otherwise auto-opens a fresh
+   *  auto-named session stamped with this device's id. Safe to call on every mount/scan - a no-op
+   *  when a valid session already exists. */
+  ensureAutoSession: () => void;
+  /** Phase 3 cross-device inbound sync: a manual, one-shot refresh (NOT a live listener - see the
+   *  sync scout's Trap C on why a listener wired to a naive replace would violate the TOP-LEVEL LAW).
+   *  MERGES additively: products/aliases/sessions upsert by id; finalCounts upsert by
+   *  (sessionId,productId) EXCEPT rows this device still has an unsynced pendingSyncQueue entry for,
+   *  which are left untouched (a stale remote read must never regress a not-yet-synced local count).
+   *  No-op on the mock/local backend. Never touches scanFeed. */
+  refreshFromCloud: () => Promise<void>;
+  /** Set the location to stamp on subsequent scans, and record it in recentLocations (capped,
+   *  deduped, most-recent-last). Empty/whitespace-only input is ignored (never stored). */
+  setLocation: (location: string) => void;
   processScan: (rawInput: string) => ScanEvent | null;
   syncPending: (force?: boolean) => void;
   retrySync: () => void;
@@ -336,7 +679,13 @@ export interface ScanState {
   setSimulateSyncFailure: (on: boolean) => void;
   updateSettings: (partial: Partial<Settings>) => void;
   lookupUnknown: (reviewId: string) => Promise<void>;
+  /** Public entry point: ENQUEUES the decode (see the module-level bounded decode queue) and resolves
+   *  once it actually runs. Never call `runLiveDecodeOnce` directly outside this queue - that would
+   *  bypass the MAX_CONCURRENT_DECODES bound a rapid scan burst relies on. */
   liveDecode: (reviewId: string) => Promise<void>;
+  /** The real decode work (network call + evidence gate + count/needs-review routing). Only ever
+   *  invoked FROM the `liveDecode` queue wrapper - see the module-level `enqueueDecode`/`drainDecodeQueue`. */
+  runLiveDecodeOnce: (reviewId: string) => Promise<void>;
   /** DECODE-EVERYTHING fallback: when the AI decode is SKIPPED (circuit breaker open / rate-limited / AI
    *  unavailable / offline / cap), still COUNT the scan as an UNVERIFIED, reviewable provisional row with a
    *  SAFE label (never fabricated manufacturer anatomy for non-GS1 codes; never an approved alias / verified
@@ -344,13 +693,28 @@ export interface ScanState {
   applyDecodeFallback: (reviewId: string, reason: string) => void;
   /** Idempotent primitive: count one provisional row for `code` (create it if absent), keyed by an
    *  already-existing scan-feed row. Safe to call any number of times for the same code (never double
-   *  counts). Used synchronously by processScan and by applyDecodeFallback. */
-  ensureProvisionalCount: (code: string, reason: string) => void;
+   *  counts). Used synchronously by processScan and by applyDecodeFallback. Returns the product id the
+   *  code is counted under: the already-counted product on the idempotent-hit path, else the freshly
+   *  minted provisional's id. markWrong depends on this return to target the CORRECT provisional when
+   *  the marked-wrong product is itself a provisional sharing the same primaryBarcode (Task 9 finding:
+   *  an unordered products.find could pick the OLD provisional and inflate the total). */
+  ensureProvisionalCount: (code: string, reason: string) => string;
+  /** F5 bundle-surgery (wave 2, 2026-07-20): fire-and-forget enrichment for a provisional row's bare
+   *  "Unidentified item (...)" label. Called AFTER the row already appears + counts (never before -
+   *  TOP-LEVEL LAW is unaffected). Fetches /api/prefix-floor for the DERIVED-tier (2.3MB corpus) brand
+   *  the client-safe SEED/LEARNED lookup couldn't see, and upgrades the row's name/brand ONLY if the
+   *  row still carries the exact bare fallback label for this code (never clobbers a decoded name, an
+   *  already-resolved prefix-floor name, or a human edit that happened while the fetch was in flight).
+   *  Offline/failed fetch/no-hit = silent no-op, never an error, never a re-throw. */
+  enrichPrefixFloorLabel: (code: string, productId: string) => void;
   /** Flip every not-yet-resolved scan-feed row for `cleanCode` to the "verified" decode badge (shared by
    *  the 4 auto-verify / catalog-hit sites so their badge-flip guard cannot drift). A row already counted
    *  synchronously is status "known" (not "resolved"), so it is still flipped; a row already "verified" or
-   *  "resolved" is left untouched. `reason` overrides the row reason when non-empty, else keeps the row's. */
-  markFeedRowVerified: (cleanCode: string, reason: string) => void;
+   *  "resolved" is left untouched. `reason` overrides the row reason when non-empty, else keeps the row's.
+   *  P5 Task 5: `provenance` is optional and additive - only the runLiveDecodeOnce call site (which has a
+   *  DecodeDecision in scope) passes "app_verified"; the other call sites (global-catalog hit, etc.) omit
+   *  it and the row's provenance is simply left unset (badge falls back to the plain "Verified" label). */
+  markFeedRowVerified: (cleanCode: string, reason: string, provenance?: ScanEvent["provenance"]) => void;
   /** Tasks 5+6: client-orchestrated background verify. After a tire scan's fast decode lands as
    *  suggested/needs_review, fire ONE `mode:"decode-deep"` request WITH `scanContext:"tire"` (the
    *  page-fetch verify gate cannot fire without it). On a `verified` decideDecode result, route it
@@ -388,6 +752,25 @@ export interface ScanState {
       selectedAliasCodes?: string[];
     },
   ) => void;
+  /** Build 3: batch-approve the Suggested pile. Groups `reviewIds` into slices of 25 (readability/per-row
+   *  containment only - no per-chunk commit, no state isolation between chunks, one synchronous pass) and
+   *  calls the EXACT same path as the single-row "Approve suggestion" button (resolveUnknown "create_new",
+   *  applyToCount: true, NO origin field, newProduct built from the review's suggested* fields,
+   *  selectedAliasCodes = every discovered identifier) for each id - no new approval semantics, no change
+   *  to the trust/poison-guard rules, idempotency is resolveUnknown's own open-status guard. A row that
+   *  throws, has no open suggestion, or is already resolved/ignored is recorded and the loop continues; it
+   *  never aborts the rest of the batch. */
+  batchApprove: (reviewIds: string[]) => { approved: string[]; failed: Array<{ id: string; reason: string }> };
+  /** Task 9b (owner-ratified 2026-07-14): approve the feed row's PENDING inline suggestion. Routes
+   *  through the EXISTING human-approval core (batchApprove -> resolveUnknown "create_new"), so the
+   *  idempotency-keyed alias write, poison guard, dedup guard, and provisional upgrade are inherited,
+   *  never re-implemented. No-op unless the row's suggestion.status is "pending" (double-tap safe). */
+  approveSuggestion: (scanEventId: string) => void;
+  /** Task 9b: decline the feed row's PENDING inline suggestion ("Not this product"). Renames the
+   *  counted provisional row to the prefix floor (or the safe Unidentified placeholder) FIRST, and
+   *  ONLY THEN creates/reopens the OPEN Needs Review item (decline is now the only suggestion path
+   *  that creates one). No-op unless suggestion.status is "pending" (double-tap safe). */
+  declineSuggestion: (scanEventId: string) => void;
   /** Evaluate (without committing) whether linking a review's code to a product looks like a mistake. */
   evaluateLinkMismatch: (reviewId: string, productId: string) => MismatchVerdict | null;
   /** Clear a pending mismatch warning (e.g. the user cancelled the risky link). */
@@ -405,16 +788,25 @@ export interface ScanState {
   moveAlias: (aliasId: string, toProductId: string) => void;
   /** Phase 6: remove a product's count from the current session only (keeps product + aliases). Audited. */
   removeFromCount: (productId: string) => void;
-  /** Phase 6: edit safe product fields (name/brand/category/specs/sku/image/location). No alias trust change. */
+  /** Phase 6: edit safe product fields (name/brand/category/specs/sku/image/location/unit cost). No alias trust change. */
   correctProduct: (
     productId: string,
-    fields: Partial<Pick<Product, "name" | "brand" | "category" | "specsShort" | "specsFull" | "primarySku" | "imageUrl" | "location">>,
+    fields: Partial<Pick<Product, "name" | "brand" | "category" | "specsShort" | "specsFull" | "primarySku" | "imageUrl" | "location" | "unitCost">>,
   ) => void;
   /** Phase 6: mark a counted product wrong - deactivate its scanned-code aliases, remove the session count,
    *  reopen Needs Review for the code, and request a Gemini Pro correction recheck. Returns the reopened review id. */
   markWrong: (productId: string, opts?: { reason?: string }) => Promise<string | null>;
-  /** Phase 6: reopen (or create) an OPEN Needs Review item for a clean code; clears stale suggestions. */
-  reopenNeedsReview: (cleanCode: string, reason: string) => string | null;
+  /** Phase 6: reopen (or create) an OPEN Needs Review item for a clean code; clears stale suggestions.
+   *  Phase 4: an optional importContext carries the import row's quantity + suggestion so an import-origin
+   *  review is fully staged (never live-decoded - Phase 4 makes zero /api/ai-lookup calls). */
+  reopenNeedsReview: (cleanCode: string, reason: string, importContext?: ImportReviewContext) => string | null;
+  /** Phase 4 Task 10: resolve a universal-import preview into store writes. Exact rows resolve via the
+   *  human-origin create path (approved) and may auto-count; every non-exact/unmatched row is staged as
+   *  Needs Review carrying its quantity and never auto-counts. Duplicate cleanCodes across rows are
+   *  aggregated BEFORE any review/count is created so each unique code yields exactly one review/count
+   *  carrying the TOTAL quantity (C5). The only write path for a universal import - preview/mapping/match
+   *  stay read-only until this is called. */
+  applyUniversalImport: (rows: ImportPreviewRow[]) => UniversalImportApplySummary;
   /** Phase 6: correction-only Gemini Pro recheck. Cost-guarded (one per code unless retry). Never auto-saves. */
   correctionRecheck: (reviewId: string, opts?: { retry?: boolean; reason?: string }) => Promise<void>;
   /** Append a private feedback/event-log entry (the "smarter over time" substrate). */
@@ -422,6 +814,9 @@ export interface ScanState {
     type: FeedbackEventType,
     payload: { code: string; productId?: string | null; meta?: Record<string, string | number | boolean> },
   ) => void;
+  /** Task 3.5: capture the CURRENT finalCounts as a labeled CountSnapshot for the variance/shrinkage
+   *  report. Prepends to countSnapshots (capped at 12, oldest evicted) and returns the created snapshot. */
+  snapshotCount: (label: string) => CountSnapshot;
   /** Import products + approved aliases from CSV text (MVP). Writes via the durable queue + audits. */
   importProductsCsv: (text: string) => CsvImportSummary;
   /** Audit a CSV export (called by the export UI). Fire-and-forget; never blocks. */
@@ -457,6 +852,20 @@ export interface ScanState {
   undoIdentifierBackfill: () => boolean;
 }
 
+/** Phase 3: stamp the current location + deviceId onto a freshly-built ScanEvent. Applied uniformly
+ *  to every fresh ScanEvent literal inside processScan. Spread-built events inherit the stamp from
+ *  their base; the markWrong residual literal outside processScan is deliberately unstamped. Pure -
+ *  takes the values, does not read the store itself. */
+// Stamp Phase 3 attribution onto a fresh ScanEvent. Concrete (not generic) so an inline object
+// literal is type-checked against the full ScanEvent shape, not just the two stamped fields.
+function stampScanEventLocation(
+  event: ScanEvent,
+  location: string,
+  deviceId: string | null,
+): ScanEvent {
+  return { ...event, location, deviceId: deviceId ?? undefined };
+}
+
 function makeQueueItem(params: {
   idFactory: () => string;
   now: () => string;
@@ -485,6 +894,41 @@ function makeQueueItem(params: {
     idempotencyKey: params.idempotencyKey,
     scanEventId: params.scanEventId,
   };
+}
+
+// D3 FIX (shared by ALL THREE orphan-transfer sites: runLiveDecodeOnce's fast-decode auto-link merge,
+// backgroundVerifyDeep's deep-verify merge, and resolveUnknown's merge): move an orphan placeholder's
+// count onto the merge target, UNIONING the anti-double-count ledger fields (scanEventIds / aliasesSeen /
+// appliedIdempotencyKeys) so orphan history survives the merge and a replayed event id stays a no-op.
+// Deduped unions keep a repeated merge idempotent. Pure: returns a new array, never mutates. A null
+// targetId (or a zero-quantity orphan) just drops the orphan row - identical to each site's old behavior.
+function transferOrphanCount(
+  finalCounts: InventoryCount[],
+  oid: string,
+  targetId: string | null,
+  nowIso: string,
+): InventoryCount[] {
+  const orphanRow = finalCounts.find((c) => c.productId === oid);
+  const orphanQty = orphanRow?.quantity ?? 0;
+  let next = finalCounts.filter((c) => c.productId !== oid);
+  if (targetId && orphanRow && orphanQty > 0) {
+    const targetRow = next.find((c) => c.productId === targetId);
+    next = targetRow
+      ? next.map((c) =>
+          c.productId === targetId
+            ? {
+                ...c,
+                quantity: c.quantity + orphanQty,
+                scanEventIds: Array.from(new Set([...c.scanEventIds, ...orphanRow.scanEventIds])),
+                aliasesSeen: Array.from(new Set([...c.aliasesSeen, ...orphanRow.aliasesSeen])),
+                appliedIdempotencyKeys: Array.from(new Set([...c.appliedIdempotencyKeys, ...orphanRow.appliedIdempotencyKeys])),
+                updatedAt: nowIso,
+              }
+            : c,
+        )
+      : [...next, { ...orphanRow, productId: targetId, updatedAt: nowIso }];
+  }
+  return next;
 }
 
 /**
@@ -707,6 +1151,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       }
     };
 
+    // P6 C2: set-once stamp of this business's first EVER counted scan (any path). Called AFTER the
+    // count has already been applied at each call site (never before - TOP-LEVEL LAW: counting is never
+    // gated on this). Idempotent: a no-op once firstScanAt is already set, so re-scans/re-entries never
+    // overwrite the original timestamp. Local Zustand-persisted state only (MOCK-BACKEND rule, review
+    // F5) - live-auth mode mirroring this to the business doc is deferred, not built here.
+    const markFirstScanIfNeeded = () => {
+      if (get().firstScanAt != null) return;
+      set({ firstScanAt: now() });
+    };
+
     // Serialize cloud drains: rapid scans each call syncPending, and overlapping async drains would
     // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
     // each drain after the previous completes; every enqueue still triggers a drain that picks up the
@@ -787,12 +1241,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         notes: "",
         syncStatus: "synced",
       },
+      sessions: [],
       settings: DEFAULT_SETTINGS,
       products: seed.products,
       aliases: seed.aliases,
       scanFeed: [],
       finalCounts: [],
       needsReviewQueue: [],
+      countSnapshots: [],
       pendingSyncQueue: [],
       syncedScanEventIds: [],
       online: true,
@@ -811,12 +1267,32 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       lastProductDeleteBackup: null,
       lastIdentifierBackfill: null,
       _hasHydrated: deps.persistName ? false : true,
+      deviceId: null,
+      location: "Main",
+      recentLocations: [],
+      firstScanAt: null,
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
       setBusinessContext: (businessId, userId) => {
         const needsLoad = cloudBackend && !!deps.loadBusinessData;
-        set({ businessId, userId, businessContextReady: true, businessDataLoaded: !needsLoad, lastSyncError: null });
+        // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
+        // finalCounts linger when no session restores, so a context switch must REPLACE all four or
+        // the previous tenant's rows bleed through (two users OR one user with two businesses).
+        const cleared = emptyTenantState();
+        set({
+          businessId,
+          userId,
+          businessContextReady: true,
+          businessDataLoaded: !needsLoad,
+          lastSyncError: null,
+          scanFeed: cleared.scanFeed,
+          finalCounts: cleared.finalCounts,
+          needsReviewQueue: cleared.needsReviewQueue,
+          settings: cleared.settings,
+          firstScanAt: cleared.firstScanAt,
+          recentLocations: cleared.recentLocations,
+        });
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
           // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
@@ -850,6 +1326,105 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
       },
 
+      prepareSignOut: async () => {
+        // F1: never destroy unsynced work silently. An empty queue is the common case - return 0 WITHOUT
+        // invoking the drain at all (no needless network on a clean sign-out). Otherwise attempt exactly
+        // one awaited drain via the established retry path (force=true so an offline flag does not skip
+        // it), then report how many items STILL could not sync so the UI can warn honestly. The whole
+        // drain is wrapped so a network/provider failure can never throw out of the sign-out handler.
+        if (get().pendingSyncQueue.length === 0) return 0;
+        try {
+          // Cloud path: syncPendingCloud returns the awaitable mutex-chained drain. Mock/local path:
+          // syncPending(true) is synchronous, so there is nothing to await - the queue is already
+          // reconciled by the time this returns. Either way we then re-read the queue length.
+          if (cloudBackend) {
+            await syncPendingCloud(true);
+          } else {
+            get().syncPending(true);
+          }
+        } catch {
+          // Swallow: a failed drain must not abort sign-out. The count below reflects what survived.
+        }
+        return get().pendingSyncQueue.length;
+      },
+
+      resetForSignOut: () => {
+        // Capture identity BEFORE the reset wipes it: the per-uid key must be removed and the persist
+        // middleware re-pointed to the anon key, or the fail-soft coalesced storage would simply
+        // rewrite sis-scan-<uid> on the next tick and the "cleared" state would leak right back.
+        const uid = get().userId;
+        // Re-point persist at the anon key BEFORE the wipe below. Firebase's own SDK auth persistence
+        // is cleared by fbSignOut (auth.ts:66-69) in the UI sign-out handlers - that call is the
+        // authority for SDK state; this action owns only app state. Guarded on deps.persistName so the
+        // non-persisted test store (createTestScanStore, persistName: null) never touches the
+        // module-level app store. Doing this BEFORE the wipe (not after) is what stops the coalesced
+        // writer from resurrecting the uid key: the coalescer keeps only one pending slot (latest
+        // name+value), so once persist is re-pointed, the wipe's own write below targets the anon key
+        // and overwrites any older pending write still queued for the uid key. The direct
+        // localStorage.removeItem(persistKeyForUid(uid)) further down stays authoritative regardless.
+        if (deps.persistName) {
+          const persistApi = (useScanStore as unknown as {
+            persist?: { setOptions: (o: { name: string }) => void };
+          }).persist;
+          if (persistApi) persistApi.setOptions({ name: persistKeyForUid(null) });
+        }
+        const cleared = emptyTenantState();
+        set({
+          businessId: DEMO_BUSINESS_ID,
+          userId: null,
+          businessContextReady: !cloudBackend,
+          businessDataLoaded: !cloudBackend,
+          scanFeed: cleared.scanFeed,
+          finalCounts: cleared.finalCounts,
+          needsReviewQueue: cleared.needsReviewQueue,
+          settings: cleared.settings,
+          firstScanAt: cleared.firstScanAt,
+          recentLocations: cleared.recentLocations,
+          pendingSyncQueue: [],
+          syncedScanEventIds: [],
+          lastSyncError: null,
+          // N2: the wipe write also deposits tenant-scoped SESSION IDENTITY + variance SNAPSHOTS into the
+          // persisted blob. Clear them too so a signed-out browser holds no residue of the prior tenant's
+          // session/report data (and does not spuriously look "non-empty" to hasLegacyBlob). countSnapshots
+          // is the variance ring buffer; currentSession/sessionId are the active-session identity.
+          // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
+          countSnapshots: [],
+          currentSession: null,
+          sessionId: "",
+        });
+        if (typeof window !== "undefined" && window.localStorage) {
+          try {
+            clearSelectedBusinessId(); // sis-selected-business-v1 is NOT uid-namespaced: explicit clear
+            if (uid) window.localStorage.removeItem(persistKeyForUid(uid));
+          } catch {
+            // ignore storage errors: the in-memory reset above already holds
+          }
+        }
+      },
+
+      rehydrateForUid: (uid: string) => {
+        if (typeof window === "undefined" || !window.localStorage) return;
+        // Re-point storage at this uid's key and rehydrate from it. NO legacy migration here:
+        // adopting the pre-account blob is an explicit owner action (adoptLegacyLocalData), never an
+        // automatic side effect of signing in (shared-browser inheritance hazard).
+        if (!deps.persistName) return; // non-persisted test store: nothing to re-point
+        const persistApi = (useScanStore as unknown as {
+          persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
+        }).persist;
+        if (persistApi) {
+          persistApi.setOptions({ name: persistKeyForUid(uid) });
+          void persistApi.rehydrate();
+        }
+      },
+
+      adoptLegacyLocalData: (uid: string) => {
+        if (typeof window === "undefined" || !window.localStorage) return;
+        // OWNER-INITIATED adopt: copy sis-scan-v1 into this uid's key (normalizing quantityDelta:0),
+        // DELETE the legacy blob, then hydrate from the adopted key.
+        migrateLegacyBlobOnce(uid, window.localStorage);
+        get().rehydrateForUid(uid);
+      },
+
       recordFeedback: (type, payload) =>
         set((s) => ({
           feedbackEvents: appendFeedback(s.feedbackEvents, {
@@ -862,6 +1437,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             meta: payload.meta,
           }),
         })),
+
+      snapshotCount: (label) => {
+        const s = get();
+        const productById = new Map(s.products.map((p) => [p.id, p]));
+        const snapshot: CountSnapshot = {
+          id: idFactory(),
+          label,
+          takenAt: now(),
+          lines: s.finalCounts.map((c) => ({
+            productId: c.productId,
+            name: productById.get(c.productId)?.name ?? "",
+            qty: c.quantity,
+          })),
+        };
+        // Same capped-ring-buffer shape as appendFeedback: append newest, slice off the oldest once
+        // over the cap, so the most recent snapshot is always last.
+        set((cur) => {
+          const next = [...cur.countSnapshots, snapshot];
+          return { countSnapshots: next.length > COUNT_SNAPSHOT_CAP ? next.slice(next.length - COUNT_SNAPSHOT_CAP) : next };
+        });
+        return snapshot;
+      },
 
       startSession: (name, location) => {
         const id = `session-${idFactory()}`;
@@ -992,17 +1589,45 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       // --- Browse + reopen saved sessions --------------------------------------------------------------
-      listSessions: () =>
-        getMockDb()
+      // PHASE 3 FIX (scout-sessions gap #6): on the cloud backend these MUST NOT read getMockDb() directly
+      // (that silently returns an empty/stale local mock DB for a Firebase-backed account). The mock/local
+      // path is unchanged (still getMockDb(), which IS the real backing store there). Task 7's
+      // refreshFromCloud populates `sessions`; before the first refresh, the current session is the
+      // honest fallback. After refresh, the full cloud session history is the read source.
+      listSessions: () => {
+        if (cloudBackend) {
+          const sessions = get().sessions;
+          if (sessions.length > 0) return sessions;
+          const cur = get().currentSession;
+          return cur ? [cur] : [];
+        }
+        return getMockDb()
           .getSessions(get().businessId)
-          .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? "")),
+          .sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+      },
 
       reopenSession: (sessionId) => {
+        if (cloudBackend) {
+          // Cloud path: Task 7 refreshes full session history and counts into store state. Look up the
+          // requested history row there, with currentSession only as the pre-refresh fallback.
+          const state = get();
+          const session =
+            state.sessions.find((candidate) => candidate.id === sessionId) ??
+            (state.currentSession?.id === sessionId ? state.currentSession : null);
+          if (!session) return false;
+          set({
+            currentSession: session,
+            sessionId: session.id,
+            finalCounts: state.finalCounts.filter((c) => c.sessionId === session.id),
+            scanFeed: [],
+            needsReviewQueue: [],
+          });
+          emitAudit({ entityType: "CountSession", entityId: session.id, action: "session_reopened", metadata: {} });
+          return true;
+        }
         const db = getMockDb();
         const session = db.getSession(sessionId);
         if (!session || session.businessId !== get().businessId) return false;
-        // Reload this session's counts from the durable store into the live view. The counts we leave behind
-        // are already saved (synced), so switching never loses data.
         const finalCounts: InventoryCount[] = db.getSessionCounts(sessionId).map((c) => ({
           id: `count-${c.sessionId}-${c.productId}`,
           businessId: c.businessId,
@@ -1023,10 +1648,202 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         return true;
       },
 
+      ensureAutoSession: () => {
+        if (typeof window === "undefined" || !window.localStorage) return; // non-browser/test context: no-op
+        const deviceId = getOrCreateDeviceId(window.localStorage);
+        set({ deviceId });
+        const cur = get().currentSession;
+        const nowIso = now();
+        if (
+          cur &&
+          shouldReuseSession(
+            { status: cur.status, deviceId: cur.deviceId, startedAt: cur.startedAt, locked: cur.locked },
+            { deviceId, nowIso, inactivityMinutes: AUTO_SESSION_INACTIVITY_MINUTES },
+          )
+        ) {
+          return; // idempotent: this device's session is still fresh and active, reuse it
+        }
+        // ADOPT an UNCLAIMED active session still within the window (a legacy/default/mock session with
+        // no deviceId): claim it for this device and KEEP its counts, instead of rotating to a fresh
+        // session and wiping the visible finalCounts. Rotating-with-wipe is correct only for a genuinely
+        // new session (none active), a DIFFERENT device's session, or one past the inactivity window.
+        // Without this, ensureAutoSession on scan-page mount would erase a hydrated in-progress count.
+        // A LOCKED session is never adopted either (F1) - it must rotate to a fresh session, same as completed.
+        if (cur && cur.status === "active" && !cur.locked && !cur.deviceId) {
+          const startedMs = Date.parse(cur.startedAt);
+          const withinWindow =
+            !Number.isNaN(startedMs) &&
+            (Date.parse(nowIso) - startedMs) / 60000 <= AUTO_SESSION_INACTIVITY_MINUTES;
+          if (withinWindow) {
+            // Adopt keeps id/counts, but the boot placeholder name ("Default Session") must NOT leak
+            // to the UI - rename an unnamed/placeholder adopted session to a real auto-session name.
+            const adopted: InventorySession = {
+              ...cur,
+              deviceId,
+              name: cur.name === "Default Session" ? buildAutoSessionName(nowIso) : cur.name,
+            };
+            set({ currentSession: adopted });
+            enqueueAndSync([
+              makeQueueItem({
+                idFactory,
+                now,
+                businessId: adopted.businessId,
+                sessionId: adopted.id,
+                entityType: "CountSession",
+                entityId: adopted.id,
+                operation: "SAVE_SESSION",
+                payload: adopted,
+                idempotencyKey: buildIdempotencyKey(adopted.businessId, adopted.id, `${adopted.id}-adopted-${deviceId}`, "SAVE_SESSION"),
+                scanEventId: null,
+              }),
+            ]);
+            emitAudit({ entityType: "CountSession", entityId: adopted.id, action: "session_adopted", metadata: { deviceId } });
+            return;
+          }
+        }
+        const id = `session-${idFactory()}`;
+        const businessId = get().businessId;
+        const session: InventorySession = {
+          id,
+          businessId,
+          name: buildAutoSessionName(nowIso),
+          location: cur?.location || "Main",
+          status: "active",
+          startedAt: nowIso,
+          completedAt: null,
+          createdBy: get().userId ?? "demo",
+          notes: "",
+          syncStatus: "synced",
+          locked: false,
+          lockedAt: null,
+          deviceId,
+        };
+        set({
+          sessionId: id,
+          currentSession: session,
+          scanFeed: [],
+          finalCounts: [],
+          needsReviewQueue: [],
+          lastSyncError: null,
+        });
+        enqueueAndSync([
+          makeQueueItem({
+            idFactory,
+            now,
+            businessId,
+            sessionId: id,
+            entityType: "CountSession",
+            entityId: id,
+            operation: "SAVE_SESSION",
+            payload: session,
+            idempotencyKey: buildIdempotencyKey(businessId, id, `${id}-active`, "SAVE_SESSION"),
+            scanEventId: null,
+          }),
+        ]);
+        emitAudit({ entityType: "CountSession", entityId: id, action: "session_auto_started", metadata: { name: session.name, deviceId } });
+      },
+
+      refreshFromCloud: async () => {
+        if (!cloudBackend || !deps.loadBusinessData) return; // mock/local path: already the source of truth
+        const state = get();
+        if (!state.businessContextReady || !state.userId || !state.businessId) return;
+        let data;
+        try {
+          data = await deps.loadBusinessData(state.businessId, state.userId);
+        } catch (e) {
+          set({ lastSyncError: e instanceof Error ? e.message : "Failed to refresh from the cloud" });
+          return;
+        }
+        set((cur) => {
+          // Products/aliases: upsert by id over the existing arrays (additive - a product this
+          // device does not know about yet is ADDED; an existing id is refreshed to the remote's
+          // version, since products/aliases are not counted-quantity state and always safe to take
+          // the server's word for, matching the trust model everywhere else in this app) - EXCEPT a
+          // product this device still has a pending (unsynced) SAVE_PRODUCT edit for. Mirrors the
+          // finalCounts pending-queue exclusion below: an unsynced local edit is authoritative until it
+          // syncs, otherwise refreshFromCloud would clobber a human's correctProduct edit with the stale
+          // remote value that has not seen it yet (Task 1 refresh-race guard).
+          const pendingProductIds = new Set(
+            cur.pendingSyncQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
+          );
+          const productsById = new Map(cur.products.map((p) => [p.id, p]));
+          for (const p of data.products) {
+            if (pendingProductIds.has(p.id)) continue; // guard: unsynced local edit wins
+            productsById.set(p.id, p);
+          }
+          const aliasesById = new Map(cur.aliases.map((a) => [a.id, a]));
+          for (const a of data.aliases) aliasesById.set(a.id, a);
+          const sessionsById = new Map(cur.sessions.map((s) => [s.id, s]));
+          // Preserve previously refreshed history and fold in the current session before applying
+          // the remote list, so a refresh never silently drops this device's own active session.
+          if (cur.currentSession) sessionsById.set(cur.currentSession.id, cur.currentSession);
+          for (const s of data.sessions) sessionsById.set(s.id, s);
+
+          // finalCounts: additive upsert by (sessionId,productId), EXCEPT any row still referenced by
+          // a pending (unsynced) queue item - that row's local value is authoritative until it syncs.
+          const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+          const pendingCountKeys = new Set(
+            pendingCountItems
+              .map((it) => {
+                const payload = it.payload as Partial<IncrementPayload> | undefined;
+                const productId = payload?.productId;
+                if (!productId) return null;
+                return `${payload.sessionId ?? it.sessionId}|${productId}`;
+              })
+              .filter((key): key is string => !!key),
+          );
+          const pendingCountEntityIds = new Set(pendingCountItems.map((it) => it.entityId));
+          const countsByKey = new Map(cur.finalCounts.map((c) => [`${c.sessionId}|${c.productId}`, c]));
+          for (const remote of data.counts) {
+            const key = `${remote.sessionId}|${remote.productId}`;
+            const local = countsByKey.get(key);
+            const localIsPending =
+              !!local &&
+              (pendingCountKeys.has(key) ||
+                pendingCountEntityIds.has(local.id) ||
+                pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`));
+            if (localIsPending) continue; // guard: unsynced local wins
+            countsByKey.set(key, remote);
+          }
+
+          return {
+            products: [...productsById.values()],
+            aliases: [...aliasesById.values()],
+            sessions: [...sessionsById.values()],
+            finalCounts: [...countsByKey.values()],
+            lastSyncError: null,
+          };
+        });
+      },
+
+      setLocation: (location) => {
+        const trimmed = location.trim();
+        if (!trimmed) return;
+        set((s) => {
+          const withoutDup = s.recentLocations.filter((l) => l !== trimmed);
+          const next = [...withoutDup, trimmed];
+          return {
+            location: trimmed,
+            recentLocations: next.length > RECENT_LOCATIONS_CAP ? next.slice(next.length - RECENT_LOCATIONS_CAP) : next,
+          };
+        });
+      },
+
       processScan: (rawInput) => {
-        // OWNER PIN LOCK: a locked session is read-only - no new scan may land in it. Block before any work
-        // so a locked count can never change until it is unlocked with the owner PIN.
-        if (get().currentSession?.locked) return null;
+        // TOP-LEVEL LAW / Phase 3 defect F1: a scanned code must ALWAYS appear on the feed and count,
+        // even when the current session is locked (owner PIN) or completed (Finish). Those guards
+        // decide the session's own frozen/read-only status; they must never make a physical scan
+        // vanish. So instead of dropping the scan, ROTATE to a fresh active session and count it
+        // there - reusing the exact mechanism ensureAutoSession/mount already use for a stale/absent
+        // session - leaving the locked/completed session and its counts untouched and auditable.
+        // Callers (the scan page) also call ensureAutoSession before every scan batch; this is the
+        // hard backstop for any path (including the internal resolveUnknown -> processScan re-apply
+        // call) that does not.
+        if (get().currentSession?.locked || get().currentSession?.status === "completed") {
+          get().ensureAutoSession();
+        }
+        const scanLocation = get().location;
+        const scanDeviceId = get().deviceId;
         const cleaned = cleanScanCode(rawInput);
         if (!cleaned.cleanCode) return null;
 
@@ -1077,29 +1894,33 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           set({ lastCategoryWarning: { code: cleaned.cleanCode, productName: matchedProduct?.name ?? "this product", reason: knownConflict } });
         }
 
-        const event: ScanEvent = {
-          id: scanEventId,
-          businessId,
-          sessionId,
-          rawCode: cleaned.rawCode,
-          cleanCode: cleaned.cleanCode,
-          normalizedCandidates: cleaned.normalizedCandidates,
-          matchedProductId: effectiveProductId,
-          matchType: resolution.matchType,
-          status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
-          resolverStatus: resolution.resolverStatus,
-          codeType: resolution.codeType,
-          reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
-          decodeStatus: provMatchId ? "suggested" : undefined,
-          quantityDelta: effectiveCountable ? 1 : 0,
-          quantityAfterScan: 0,
-          createdAt,
-          source: "scan",
-          notes: resolution.reason,
-          syncStatus: "pending",
-          idempotencyKey: keyFor("INCREMENT_COUNT"),
-          syncError: null,
-        };
+        const event: ScanEvent = stampScanEventLocation(
+          {
+            id: scanEventId,
+            businessId,
+            sessionId,
+            rawCode: cleaned.rawCode,
+            cleanCode: cleaned.cleanCode,
+            normalizedCandidates: cleaned.normalizedCandidates,
+            matchedProductId: effectiveProductId,
+            matchType: resolution.matchType,
+            status: effectiveCountable ? "known" : resolution.resolverStatus === "conflict" ? "conflict" : "needs_review",
+            resolverStatus: resolution.resolverStatus,
+            codeType: resolution.codeType,
+            reason: provMatchId ? "Counted (suggested - awaiting your confirmation)." : resolution.reason,
+            decodeStatus: provMatchId ? "suggested" : undefined,
+            quantityDelta: effectiveCountable ? 1 : 0,
+            quantityAfterScan: 0,
+            createdAt,
+            source: "scan",
+            notes: resolution.reason,
+            syncStatus: "pending",
+            idempotencyKey: keyFor("INCREMENT_COUNT"),
+            syncError: null,
+          },
+          scanLocation,
+          scanDeviceId,
+        );
 
         if (effectiveCountable && effectiveProductId) {
           // Deterministic increment in local state FIRST (instant UI, no server round-trip).
@@ -1108,8 +1929,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           set((s) => ({
             scanFeed: [event, ...s.scanFeed],
-            finalCounts: counts,
+            finalCounts: counts.map((c) =>
+              c.productId === event.matchedProductId && c.sessionId === event.sessionId
+                ? { ...c, location: scanLocation }
+                : c,
+            ),
           }));
+          // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW).
+          markFirstScanIfNeeded();
 
           const incPayload: IncrementPayload = {
             businessId,
@@ -1228,6 +2055,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // never against the suspect/poisoned matched product - and keep the review open so a human confirms
           // the real identity. ensureProvisionalCount is idempotent, so this never double-counts.
           get().ensureProvisionalCount(cleaned.cleanCode, conflictText);
+          // STABLE-ID FIX: the placeholder now exists (minted just above); stamp its id onto this review
+          // (new or pre-existing open one) so resolveUnknown can re-link by id after a customer reload
+          // instead of by reconstructed name (see provisionalProductId doc comment in types.ts).
+          const conflictPlaceholder = get().products.find(
+            (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === cleaned.cleanCode,
+          );
+          if (conflictPlaceholder) {
+            set((s) => ({
+              needsReviewQueue: s.needsReviewQueue.map((r) =>
+                r.cleanCode === cleaned.cleanCode && r.status === "open" && !r.provisionalProductId
+                  ? { ...r, provisionalProductId: conflictPlaceholder.id }
+                  : r,
+              ),
+            }));
+          }
           get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
           return event;
         }
@@ -1237,7 +2079,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const settings = get().settings;
         const today = createdAt.slice(0, 10);
         const dailyCount = settings.lastResetDate === today ? settings.dailyLookupCount : 0;
-        const autoGate = evaluateAutoDecode({
+        let autoGate = evaluateAutoDecode({
           aiEnabled: settings.aiLookupEnabled,
           status: get().aiStatus,
           online: get().online,
@@ -1246,6 +2088,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           breaker: get().breaker,
           now: new Date(createdAt).getTime(),
         });
+        // A3 (owner-ratified 2026-07-15, narrowed by AM-2): a code whose GS1 check digit fails can
+        // never decode via any GTIN rung (Go-UPC/fetchV2/GPT all key off the code) - dispatching the
+        // ladder here only burns time and cap budget chasing a doomed lookup. Skip auto-decode
+        // entirely; the row stays a normal, aliasable needs_review row (never "decoding") with the
+        // additive misread reason already set by the resolver. Overriding here (rather than after
+        // row creation) keeps decodeStatus honest from the very first render - never "decoding" then
+        // silently reverted. A valid unknown GTIN is never affected by this check.
+        // QA HARDENING FIX #6 (live-proven): captured once and reused below at the catalog-first seam -
+        // a misread code must never mint a fabricated identity there either (see that call site).
+        const misread = isLikelyMisreadGtin(cleaned.cleanCode);
+        if (misread) {
+          autoGate = { allowed: false, reason: "Scan misread - decode was not attempted." };
+        }
 
         const existingOpen = get().needsReviewQueue.find(
           (r) => r.cleanCode === cleaned.cleanCode && r.status === "open",
@@ -1268,6 +2123,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         get().ensureProvisionalCount(cleaned.cleanCode, resolution.reason);
 
         if (!existingOpen) {
+          // STABLE-ID FIX: ensureProvisionalCount just ran synchronously above, so this code's placeholder
+          // product (if one was minted) already exists in state. Capture its id now so resolveUnknown can
+          // re-link this review to it by id later, even after a customer reload strips the placeholder's
+          // `provisional` flag and identifier fields (see provisionalProductId doc comment in types.ts).
+          const mintedPlaceholder = get().products.find(
+            (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === cleaned.cleanCode,
+          );
           const review: UnknownCodeReview = {
             id: idFactory(),
             businessId,
@@ -1307,6 +2169,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             resolutionAction: null,
             syncStatus: "pending",
             idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"),
+            provisionalProductId: mintedPlaceholder?.id ?? null,
           };
           set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
           enqueueAndSync([
@@ -1332,8 +2195,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // CATALOG-FIRST (offline-first, saves AI tokens): private shop override -> verified shared
           // catalog. A verified hit resolves + counts with NO AI, even with no key / offline. AI only
           // runs on a miss or a weak/conflicting catalog hit.
+          // QA HARDENING FIX #6 (live-proven, 2026-07-16): a misread (bad-check-digit) GTIN must NEVER
+          // attach a fabricated identity here either. `codeSet.has(entry.normalizedBarcode)` in
+          // localCatalogProvider.ts has no check-digit awareness, so a bad code that happens to
+          // string-match a seeded catalog entry's normalizedBarcode (e.g. a coincidental zero-pad
+          // collision) would otherwise mint a named product via resolveUnknown("create_new",
+          // {origin:"catalog"}) - the exact bug that attached "Healthyholics" to an invalid UPC. Skip
+          // computing `decision` entirely when misread (cleaner than gating the `if` below): this also
+          // avoids polluting the catalog's timesScanned/observeScan bookkeeping with a bad-code hit.
+          // The row already fell through to needs_review with the honest misread reason set above.
           const codes = [cleaned.cleanCode, ...cleaned.normalizedCandidates];
-          const decision = decideLookup(get().catalog, get().shopOverrides, codes, businessId);
+          const decision = misread
+            ? { source: "none" as const, hit: null, shouldResolveWithoutAi: false, shouldTryAi: true }
+            : decideLookup(get().catalog, get().shopOverrides, codes, businessId);
           // Phase 8C: a verified-catalog / shop-override hit is also a NON-AI auto-count path - apply the
           // same context firewall. A clearly non-tire hit in tire context must not shortcut-count; let it
           // fall through to the AI decode path (where the firewall + human review handle it).
@@ -1373,7 +2247,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Option 1 wiring: if the cloud dep is present and we're online, try the global catalog first;
           // cloudCatalogResolve falls through to AI internally on a miss / firewall conflict.
           if (deps.lookupGlobalCatalog && get().online) {
-            void get().cloudCatalogResolve(review.id, codes);
+            // FIX 5: swallow a rejection here (e.g. a dev-assert throw from the GC1 hard invariant)
+            // so it never becomes an unhandled promise rejection - siblings already do this (line ~1138).
+            void get().cloudCatalogResolve(review.id, codes).catch(() => {});
           } else if (autoGate.allowed) {
             void get().liveDecode(review.id);
           } else {
@@ -1477,6 +2353,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 mode: typeof d.mode === "string" ? d.mode : s.aiStatus.mode,
                 dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
                 missingKeys: Array.isArray(d.missingKeys) ? d.missingKeys : s.aiStatus.missingKeys,
+                // Task 8: honest decode-ladder fields. Gemini stays in geminiConfigured/geminiEnabled
+                // above (still read by the autoDecode gate below); these two only describe the real
+                // ladder order and confirm Gemini is never called during decode.
+                decodeLadder: Array.isArray(d.decodeLadder) ? d.decodeLadder : s.aiStatus.decodeLadder,
+                geminiUsedForDecode: Boolean(d.geminiUsedForDecode),
+                gptLadder:
+                  d.gptLadder && typeof d.gptLadder === "object"
+                    ? {
+                        spentTodayUsd: Number(d.gptLadder.spentTodayUsd) || 0,
+                        capUsd: Number(d.gptLadder.capUsd) || 0,
+                        callsToday: Number(d.gptLadder.callsToday) || 0,
+                        enabled: Boolean(d.gptLadder.enabled),
+                      }
+                    : s.aiStatus.gptLadder,
               },
               // Live AI config is SERVER-AUTHORITATIVE so a stale persisted client value can't disable lookup
               // or pin an old daily cap. When the server confirms a provider key, force lookup ON (always-on),
@@ -1585,10 +2475,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     suggestedSpecsShort: result.specsShort,
                     suggestedSpecsFull: result.specsFull,
                     suggestedPrimarySku: result.primarySku,
-                    suggestedPrimaryBarcode: result.primaryBarcode,
-                    suggestedGtin: result.gtin,
-                    suggestedUpc: result.upc,
-                    suggestedEan: result.ean,
+                    suggestedPrimaryBarcode: scrubSuggestedBarcode(result.primaryBarcode, result.primarySku),
+                    suggestedGtin: scrubSuggestedBarcode(result.gtin, result.primarySku),
+                    suggestedUpc: scrubSuggestedBarcode(result.upc, result.primarySku),
+                    suggestedEan: scrubSuggestedBarcode(result.ean, result.primarySku),
                     suggestedImageUrl: result.imageUrl,
                     suggestedProductUrl: result.productUrl,
                     suggestedAliases: result.aliases,
@@ -1634,6 +2524,56 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const review = get().needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
 
+        // Phase 5b Task 4 (AC4/GC1/GC9): before applying a master-catalog hit, check whether the
+        // master identity DISAGREES with a tenant product this account already has resolvable for
+        // this code. toMasterCandidates only ever emits a non-empty candidate when a tenant
+        // candidate existed first (GC1 hard invariant) - see masterCandidates.ts. Agreement or no
+        // tenant candidate falls through to existing behavior, byte-identical.
+        if (entry && entry.masterId) {
+          const cleanedForCandidates = { rawCode: review.rawCode, cleanCode: review.cleanCode, normalizedCandidates: review.normalizedCandidates };
+          const master = get();
+          const masterCandidates = toMasterCandidates(
+            { masterId: entry.masterId, name: entry.name, brand: entry.brand, masterProvenanceTier: entry.masterProvenanceTier },
+            master.products,
+            master.aliases,
+            cleanedForCandidates,
+            master.businessId,
+          );
+          const loneMasterCandidate = masterCandidates.length > 0 && masterCandidates.every((c) => c.productId.startsWith("master:"));
+          if (loneMasterCandidate) {
+            // HARD INVARIANT (GC1/review F3): toMasterCandidates guarantees this only happens when a
+            // tenant candidate already resolved for this code (it never emits a lone "master:"
+            // candidate for a code with zero tenant candidates). Dev-assert the invariant holds;
+            // never throw in prod (a violated assumption here must never crash a scan).
+            if (process.env.NODE_ENV !== "production") {
+              const tenantOnlyCheck = resolveScanToProductTiered(cleanedForCandidates, { products: master.products, aliases: master.aliases, masterCandidates: [] }, master.businessId);
+              if (!tenantOnlyCheck.productId) {
+                throw new Error("toMasterCandidates invariant violated: lone master: candidate with no tenant-origin candidate");
+              }
+            }
+            const tiered = resolveScanToProductTiered(cleanedForCandidates, { products: master.products, aliases: master.aliases, masterCandidates }, master.businessId);
+            if (tiered.matchType === "conflict") {
+              const conflictReasonText = "Cross-tier conflict: master catalog identity disagrees with this account's product";
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) => (r.id === reviewId ? { ...r, reason: conflictReasonText } : r)),
+                // Match by cleanCode + not-yet-resolved (same guard shape as markFeedRowVerified above) -
+                // the row here is the scan's own provisional placeholder (status "known" against that
+                // placeholder, per TOP-LEVEL LAW), never a real approved-alias match: the review is still
+                // open, so this code has no trusted resolution yet.
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.status !== "resolved"
+                    ? { ...e, decodeStatus: "needs_review" as const, reason: conflictReasonText }
+                    : e,
+                ),
+              }));
+              // Identity-only outcome (GC9/TOP-LEVEL LAW): the row already appeared and counted
+              // synchronously before this async resolve ran. Skip the enrichment apply below entirely
+              // - never overwrite a disagreeing tenant identity with the master's.
+              return;
+            }
+          }
+        }
+
         const scanContext = get().settings.scanContext ?? "any";
         if (entry && entry.verificationStatus === "verified") {
           // Build a CatalogHit for the Phase-8C identity-context firewall check.
@@ -1653,7 +2593,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // Cache into in-memory catalog so repeat scans are instant (no second cloud round-trip).
             set((s) => ({ catalog: [...s.catalog, entry!] }));
             get().recordFeedback("found_from_catalog", { code: review.cleanCode });
-            get().markFeedRowVerified(review.cleanCode, "Matched from global catalog - no AI used.");
             get().resolveUnknown(reviewId, "create_new", {
               applyToCount: true,
               origin: "catalog",
@@ -1667,6 +2606,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 source: "catalog",
               },
             });
+            // BUG FIX (verified-shows-Unidentified): only stamp the feed badge "Verified match" when
+            // resolveUnknown ACTUALLY resolved this review. resolveUnknown can silently no-op and leave
+            // the review "open" - a fuzzy identity-merge suggest_link (two different products sharing a
+            // name/brand), or a dedup conflict (matchedIds.size > 1) - in which case the row's REAL
+            // product/name never changed (still the provisional placeholder) and forcing the badge to
+            // "verified" here would lie about the row's status (the exact owner-reported bug: "Verified
+            // match" + "Unidentified item" on the same row). Only mark verified once the review is
+            // actually "resolved".
+            if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
+              get().markFeedRowVerified(review.cleanCode, "Matched from global catalog - no AI used.");
+            }
             return;
           }
           // Firewall conflict: fall through to AI below (same as a miss).
@@ -1686,10 +2636,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           breaker: state.breaker,
           now: nowMs,
         });
-        if (autoGate.allowed) void get().liveDecode(reviewId);
+        // A3 (owner-ratified 2026-07-15): same misread gate as processScan's direct dispatch - a
+        // bad-check-digit code cannot decode via any GTIN rung even after a cloud-catalog miss.
+        if (autoGate.allowed && !isLikelyMisreadGtin(review.cleanCode)) void get().liveDecode(reviewId);
       },
 
-      liveDecode: async (reviewId) => {
+      // Thin wrapper: enqueue the real work on the bounded decode queue (module-level, MAX_CONCURRENT_DECODES
+      // = 2) so a burst of unknown scans never fires unlimited concurrent /api/ai-lookup calls. Resolves once
+      // the queued task actually runs and completes. Counting/persistence never waits on this - see the
+      // queue doc comment above `decodeCorroborated`.
+      liveDecode: (reviewId) => enqueueDecode(reviewId, () => get().runLiveDecodeOnce(reviewId)),
+
+      runLiveDecodeOnce: async (reviewId) => {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
@@ -1766,36 +2724,75 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             .join(". ") || undefined;
 
         try {
+          // AM-1(a) (owner-reported 36-70s browser blocks): the decode fetch had no client-side
+          // timeout at all - a slow/hung server response could block the scan row (and the browser
+          // connection) indefinitely. Timeout margin gives the server-side L2 ladder deadline
+          // (DECODE_LADDER_TOTAL_MS, see pipeline.ts) room to finish and reply honestly before the
+          // client gives up; the abort is a client-local giveup only - the server keeps computing and
+          // caches its answer for the next scan, so nothing is lost.
+          // AM-9: clamp a possibly-stale persisted decodeBudgetMs (e.g. an old 13000 default) into the
+          // real [5000, 8000] server-enforced range before using it for anything client-side.
+          const clampedBudgetMs = clampDecodeBudgetMs(s.decodeBudgetMs);
+          const abortController = new AbortController();
+          const abortTimer = setTimeout(() => abortController.abort(), clampedBudgetMs + 7000);
           const decodeOnce = async () => {
-            const res = await fetch("/api/ai-lookup", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                mode: "decode",
-                proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
-                rawCode: rawCodeSanitized,
-                cleanCode: cleanCodeSanitized,
-                codeType,
-                confidenceThreshold: 0.8,
-                allowImageSuggestions: s.allowImageSuggestions,
-                budgetMs: s.decodeBudgetMs ?? 8000,
-                scanContext,
-                brandPrefixHint,
-                autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
-              }),
-            });
-            // 429 = self-inflicted rate limit (costs $0). Single retry with backoff, respecting Retry-After.
+            let res: Response;
+            try {
+              res = await fetch("/api/ai-lookup", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                signal: abortController.signal,
+                body: JSON.stringify({
+                  mode: "decode",
+                  proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
+                  rawCode: rawCodeSanitized,
+                  cleanCode: cleanCodeSanitized,
+                  codeType,
+                  confidenceThreshold: 0.8,
+                  allowImageSuggestions: s.allowImageSuggestions,
+                  budgetMs: clampedBudgetMs,
+                  scanContext,
+                  brandPrefixHint,
+                  autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
+                }),
+              });
+            } catch (fetchErr) {
+              // An abort is NEVER a retry case (there is nowhere to retry TO - the decode keeps
+              // running server-side and the client just gave up waiting). Every other fetch-level
+              // failure (network down, DNS, etc.) falls through to the existing generic catch below.
+              if (fetchErr instanceof Error && fetchErr.name === "AbortError") {
+                throw new DecodeAbortedError();
+              }
+              throw fetchErr;
+            }
+            // 429 has two distinct causes that must NOT be treated the same:
+            //  - daily_cap: the server-side daily AI spend cap is reached. There is no automatic
+            //    decode-on-cap-reset queue anywhere in the app, so retrying now is pointless (it will
+            //    just 429 again) - fail fast with an honest reason instead of burning a wait.
+            //  - anything else: a self-inflicted rate limit (costs $0). Keep the single retry with
+            //    backoff, respecting Retry-After, exactly as before.
             if (res.status === 429) {
+              const body = await res.json().catch(() => ({}) as { reasonCode?: string; floor?: PrefixFloorResult });
+              // P2: thread the server's $0 prefix floor into the error so the cap-blocked row is named
+              // "<Brand> / product unconfirmed" from the GS1 company prefix, not a bare "Unidentified item".
+              // F4: the per-account cap (route.ts:311/331) is a distinct 429 the client must ALSO honor -
+              // it is not a self-inflicted rate limit, so it must NOT retry. Route it to Needs Review with
+              // its own honest account-scoped copy (accountScoped=true drives the message below).
+              if (body?.reasonCode === "account_daily_cap") throw new DailyCapReachedError(undefined, body?.floor, true);
+              if (body?.reasonCode === "daily_cap") throw new DailyCapReachedError(undefined, body?.floor);
               const retryAfterSec = Math.min(Number(res.headers.get("Retry-After") || "5"), 30);
               await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
               const retry = await fetch("/api/ai-lookup", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                // Review hardening 2026-07-15: the retry leg carries the same abort signal as the
+                // initial call so a hung retry can never block the scanner past the abort window.
+                signal: abortController.signal,
                 body: JSON.stringify({
                   mode: "decode", proRecheck: review.reopenedFromWrong === true,
                   rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
                   confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
-                  budgetMs: s.decodeBudgetMs ?? 8000, scanContext, brandPrefixHint,
+                  budgetMs: clampedBudgetMs, scanContext, brandPrefixHint,
                 }),
               });
               if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);
@@ -1808,7 +2805,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // to ~70s, which dropped the browser connection -> "Failed to fetch") and the token spend. One
           // call only; a miss is shown fast with its honest reason and is briefly miss-cached server-side
           // so an immediate re-scan does not re-pay.
-          const data = await decodeOnce();
+          let data: Awaited<ReturnType<typeof decodeOnce>>;
+          try {
+            data = await decodeOnce();
+          } finally {
+            clearTimeout(abortTimer);
+          }
+          // BUG #14 (QA hardening 2026-07-16): CLIENT-SIDE defense in depth. The server already
+          // sanitizes reasonText/decision.reason (pipeline.ts) before responding, but this store must
+          // not trust that unconditionally - sanitize both here too, ONCE, right at the response
+          // boundary, so every downstream read (needsReviewQueue[].reason, scanFeed[].reason, the
+          // honestReasonForBadge composition below) is already clean. Honest hand-written prose (no
+          // vendor/service/model tokens) passes through unchanged; only a raw/internal string is
+          // replaced with an honest fixed fallback - never empty, never the raw value.
+          if (data.decision) {
+            data = { ...data, decision: { ...data.decision, reason: sanitizeCustomerReason(data.decision.reason ?? "", { status: data.decision.status }) } };
+          }
+          if (typeof data.reasonText === "string") {
+            data = { ...data, reasonText: sanitizeCustomerReason(data.reasonText, { status: data.decision?.status }) };
+          }
           const decision = data.decision;
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
@@ -1818,6 +2833,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const tireFields = best && s.scanContext === "tire" && isTireContext(best) ? extractTireFields(best) : null;
           const providerNamesArr = (data.providerNames as string[]) ?? [];
           const providerName = providerNamesArr.join("+") || "mock";
+          // P5 Task 5 (honest provenance badges): derive the honest provenance signal for the feed
+          // row's badge from the SAME DecodeDecision already in scope here (the primary live-decode
+          // write site). App-verified exact-code evidence wins first (it is the strongest, real
+          // signal); otherwise a bare self-report is labeled by which provider produced it. Display
+          // only - never gates counting/auto-count (that stays in scanGates.ts's canAutoCount).
+          const decodeProvenance: ScanEvent["provenance"] = decision?.exactCodeEvidenceVerifiedByApp
+            ? "app_verified"
+            : decision?.corroborationPath === "gpt_self_report"
+              ? "ai_self_report"
+              : providerNamesArr.includes("go-upc")
+                ? "db_self_report"
+                : undefined;
           const decodeProviderSummaries = results.map((r, i) => ({
             provider: providerNamesArr[i] ?? "?",
             productName: r.productName,
@@ -1835,31 +2862,49 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             : { conflict: false, knownUpcs: [] as string[] };
           const reverseUpcConflictNote = shopRev.conflict ? `Already in your catalog under: ${shopRev.knownUpcs.slice(0, 3).join(", ")}` : "";
 
+          // GPT LADDER (owner order 2026-07-06): the info_only tier is DELETED - every GPT answer
+          // with a productName now arrives as a normal verified/suggested result and populates the
+          // candidate fields like any other suggestion. Only the skip-reason transparency remains:
+          // the route may append a {provider:"gpt-5.5-ladder", status:"skipped", errorCode} entry to
+          // providerStatuses whenever the paid rung did not run at all. Surface WHY in decodeNote.
+          const gptSkipEntry = Array.isArray(data.providerStatuses)
+            ? (data.providerStatuses as Array<{ provider?: string; status?: string; errorCode?: string }>).find(
+                (p) => p?.provider === "gpt-5.5-ladder" && p?.status === "skipped",
+              )
+            : undefined;
+          const gptSkipNote = gptSkipEntry?.errorCode ? `gpt-5.5-ladder skipped: ${gptSkipEntry.errorCode}` : "";
+          const decodeNoteUpdate = gptSkipNote || undefined;
+
+          const suggestedPartNumberForGate = tireFields?.partNumber ?? best?.primarySku;
+          const suggestionFields = {
+                suggestedProductName: tireFields?.description || (best?.productName ?? ""),
+                suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
+                suggestedCategory: best?.category ?? "",
+                suggestedSpecsShort: tireFields?.size ?? best?.specsShort ?? "",
+                suggestedSpecsFull: best?.specsFull ?? "",
+                suggestedPrimarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
+                suggestedPrimaryBarcode: scrubSuggestedBarcode(best?.primaryBarcode, suggestedPartNumberForGate),
+                suggestedGtin: scrubSuggestedBarcode(best?.gtin, suggestedPartNumberForGate),
+                suggestedUpc: scrubSuggestedBarcode(best?.upc, suggestedPartNumberForGate),
+                suggestedEan: scrubSuggestedBarcode(best?.ean, suggestedPartNumberForGate),
+                suggestedImageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
+                suggestedProductUrl: best?.productUrl ?? "",
+                suggestedAliases: best?.aliases ?? [],
+                hasSuggestion: true,
+              };
+
           set((st) => ({
             needsReviewQueue: st.needsReviewQueue.map((r) =>
               r.id === reviewId
                 ? {
                     ...r,
-                    suggestedProductName: tireFields?.description || (best?.productName ?? ""),
-                    suggestedBrand: tireFields?.brand ?? best?.brand ?? "",
-                    suggestedCategory: best?.category ?? "",
-                    suggestedSpecsShort: tireFields?.size ?? best?.specsShort ?? "",
-                    suggestedSpecsFull: best?.specsFull ?? "",
-                    suggestedPrimarySku: tireFields?.partNumber ?? best?.primarySku ?? "",
-                    suggestedPrimaryBarcode: best?.primaryBarcode ?? "",
-                    suggestedGtin: best?.gtin ?? "",
-                    suggestedUpc: best?.upc ?? "",
-                    suggestedEan: best?.ean ?? "",
-                    suggestedImageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
-                    suggestedProductUrl: best?.productUrl ?? "",
-                    suggestedAliases: best?.aliases ?? [],
+                    ...suggestionFields,
                     sourceUrls: best?.sourceUrls ?? [],
                     verifiedFacts: best?.verifiedFacts ?? [],
                     guesses: best?.guesses ?? [],
                     reason: decision?.reason ?? "",
                     providerName,
                     confidence: decision?.confidence ?? 0,
-                    hasSuggestion: true,
                     decodeStatus: decision?.status ?? "needs_review",
                     evidenceStrength: decision?.evidenceStrength ?? "none",
                     exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
@@ -1868,19 +2913,53 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     prefixHint: (data.debug?.prefixHint as string) || "",
                     prefixConflictReason: (data.debug?.firewallReason as string) || "",
                     reverseUpcConflictNote,
+                    decodeNote: decodeNoteUpdate ?? r.decodeNote,
                   }
                 : r,
             ),
             // Update the originating scan-feed row(s) from "Decoding..." / provisional "suggested" (the row
             // may already have been counted synchronously by ensureProvisionalCount) to the REAL fast-decode
-            // outcome (needs_review / suggested / conflict / verified). Never downgrade a row already flipped
-            // to "verified" by the auto-verify pass.
-            scanFeed: st.scanFeed.map((e) =>
-              e.cleanCode === review.cleanCode &&
-              (e.decodeStatus === "decoding" || e.decodeStatus === "needs_review" || e.decodeStatus === "suggested")
-                ? { ...e, decodeStatus: (decision?.status ?? "needs_review") as ScanEvent["decodeStatus"], reason: decision?.reason ?? e.reason }
-                : e,
-            ),
+            // outcome (needs_review / suggested / conflict). Never downgrade a row already flipped to
+            // "verified" by the auto-verify pass.
+            //
+            // BUG FIX (verified-shows-Unidentified, burst report): a provider's raw decision.status
+            // "verified" is NEVER written to the feed badge here. "Verified match" must mean the APP's own
+            // auto-count gate (below) actually resolved this scan to a real product - a raw "verified"
+            // decision can still fail to auto-count (weak/no evidence, context conflict, tireOk false) or
+            // resolveUnknown can still no-op (fuzzy identity-merge suggest_link, dedup conflict), in which
+            // case the row must keep showing its honest pending state, not a "Verified match" lie over the
+            // unresolved "Unidentified item" placeholder. Only `markFeedRowVerified` - now called ONLY
+            // after resolveUnknown actually resolves the review - is allowed to write "verified" here.
+            scanFeed: st.scanFeed.map((e) => {
+              if (
+                e.cleanCode !== review.cleanCode ||
+                !(e.decodeStatus === "decoding" || e.decodeStatus === "needs_review" || e.decodeStatus === "suggested")
+              ) {
+                return e;
+              }
+              const displayedBadge = (decision?.status === "verified"
+                ? "suggested"
+                : (decision?.status ?? "needs_review")) as ScanEvent["decodeStatus"];
+              return {
+                ...e,
+                decodeStatus: displayedBadge,
+                // P5 Task 5: honest provenance signal for the badge (display only). A raw "verified"
+                // decision is displayed as "suggested" above (displayedBadge), so app_verified here
+                // would be misleading on THIS provisional row - only attach it when the badge is
+                // actually settled to "suggested" so DecodeStatusBadge's app_verified branch (which
+                // only fires for status "verified") never mismatches this row's shown status.
+                provenance: displayedBadge === "suggested" ? decodeProvenance : undefined,
+                // BADGE/REASON INVARIANT: never write a "Verified...No AI lookup needed" reason under a
+                // non-verified badge (see honestReasonForBadge above - the owner-caught contradiction).
+                reason: honestReasonForBadge(decision?.reason, decision?.status, displayedBadge) || e.reason,
+                // STALE-NOTE FIX (goupc-cap-rootcause item 3): decodeNote was set once at scan time to the
+                // in-flight "Decoding with AI..." note and never refreshed - platformOwner saw that note
+                // forever on every settled row. The decode has now settled, so replace the in-flight note
+                // with the honest post-decode transparency note (the skipped-paid-rung note when present),
+                // or clear it. Never leave "Decoding with AI..." on a row that is no longer decoding.
+                decodeNote: decodeNoteUpdate || undefined,
+              };
+            }),
             aiLookupLogs: [mkLog("success", providerName, decision?.confidence ?? 0, recordSuccess()), ...st.aiLookupLogs],
             breaker: recordSuccess(),
             aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastProvider: providerName, lastFailureReason: "" },
@@ -1937,21 +3016,40 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const tireOk = tireAutoCountOk(best);
           // Phase 8 FIREWALL: exact-code evidence is necessary but NOT sufficient. If the decoded product
           // contradicts the business scan context (tire) or a learned brand-prefix hint, block auto-count.
-          const contextConflict = detectScanContextConflict({
+          // Task 9 (owner-ratified 2026-07-14, decode-anything): strong APP-VERIFIED exact-code evidence
+          // clears the tire category hard-block - a tire shop can really stock hot sauce. Weak/unverified
+          // single-source identities (the go-upc-poison / coconut-oil class) still hard-block.
+          const exactCodeVerifiedByApp =
+            decision?.exactCodeEvidenceVerifiedByApp === true && decision?.status === "verified";
+          const firewallParams = {
             scanContext: s.scanContext ?? "any",
             code: review.cleanCode,
             codeType,
             result: best,
             brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
-          });
-          const evidenceGatePassed =
-            decision?.status === "verified" &&
-            decodeCorroborated(decision) &&
-            (decision?.confidence ?? 0) >= 0.8 &&
-            isUsableProductName(best?.productName ?? "") &&
-            tireOk &&
-            !contextConflict;
-          if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
+            exactCodeVerifiedByApp,
+          };
+          const contextConflict = detectScanContextConflict(firewallParams);
+          // True exactly when the category conflict was CLEARED by verification -> the row still counts but
+          // is tagged "Off-category item" so the operator sees it is not a tire.
+          const offCategory = detectOffCategoryAdvisory(firewallParams);
+          // PHASE-7 EVIDENCE GATE + GPT-ladder trust tier + T20/code-1225 public-barcode firewall, now in
+          // one pure function (src/stores/scanGates.ts) shared with backgroundVerifyDeep so the two paths
+          // cannot drift. tireOk + contextConflict are computed here (they need store services) and passed in.
+          const evidenceGatePassed = canAutoCount({
+            codeType,
+            decision,
+            productName: best?.productName ?? "",
+            productNameUsable: isUsableProductName(best?.productName ?? ""),
+            tireOk,
+            contextConflict,
+          }).allowed;
+          // MULTI-VARIANT GATE (Group C, owner mandate 2026-07-21): a listing naming several
+          // distinct speed ratings for one size (e.g. "93V, 93W, 93H") describes MULTIPLE product
+          // variants, not one confident identity - it must NEVER auto-apply/auto-count as a clean
+          // verified match, regardless of how strong the evidence/confidence otherwise looks.
+          const multiVariantIdentity = enrichProductIdentity({ payload: { name: best?.productName ?? "" } }).multiVariant;
+          if (autoAddOn && evidenceGatePassed && !multiVariantIdentity && (plan.status === "auto_verify" || plan.status === "auto_count")) {
             // Origin decides the catalog write: exact app-confirmed evidence -> VERIFIED global catalog
             // entry; a trusted-but-non-exact AI product -> still counted + aliased, PENDING catalog
             // entry ("ai"); learning off -> count only, no catalog write ("auto_count").
@@ -1984,7 +3082,49 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // TASK 3: the scan was counted synchronously, so its feed row is already "known" (which
             // resolveUnknown's resolved-row remap skips). Flip that row's badge to "verified" so the feed
             // shows the auto-verified decode instead of the stale "suggested" placeholder badge.
-            get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "");
+            //
+            // BUG FIX (verified-shows-Unidentified, burst report): resolveUnknown can silently no-op and
+            // leave the review "open" instead of "resolved" - most commonly the identity-merge fuzzy
+            // suggest_link path (two different products/codes with a very similar name+brand, e.g. the
+            // SAME tire model in different sizes scanned back-to-back) or a dedup conflict
+            // (matchedIds.size > 1). In either case the row's product/name is UNCHANGED (still the
+            // provisional "Unidentified item" placeholder) and the review is left open for a human
+            // decision - forcing the badge to "verified" here would show "Verified match" over an
+            // unresolved placeholder name, exactly the owner-reported burst bug. Only mark the row
+            // verified when resolveUnknown actually resolved it.
+            if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
+              // P5 Task 5: this branch only runs after the Phase-7 evidence gate (evidenceGatePassed /
+              // canAutoCount) passed, i.e. the app itself verified the exact-code evidence - honest
+              // "app_verified" provenance for the badge.
+              get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "", "app_verified");
+            } else {
+              // OWNER RULE ("if it is resolved, it does not go to review"): the evidence gate already
+              // verified this scan's identity above, so it is genuinely settled even when resolveUnknown
+              // itself no-opped (suggest_link / dedup conflict left the review "open" or "suggested" for a
+              // human link decision). A settled identity must never linger in the Needs Review queue -
+              // stamp it resolved directly, same shape as the other direct-stamp sites (e.g. the
+              // auto-suggest-apply branch below). This ONLY changes review-row status metadata; it never
+              // touches scanFeed or finalCounts (those are independent, keyed by cleanCode).
+              const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
+              if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested")) {
+                set((st) => ({
+                  needsReviewQueue: st.needsReviewQueue.map((r) =>
+                    r.id === reviewId
+                      ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+                      : r,
+                  ),
+                }));
+              }
+            }
+            // Task 9: an app-verified off-category decode counts, but flag the row so the feed shows the
+            // "Off-category item" tag (the product is not a tire, even though it cleared the firewall).
+            if (offCategory) {
+              set((st) => ({
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode ? { ...e, offCategory: true } : e,
+                ),
+              }));
+            }
           } else {
             // DECODE-EVERYTHING provisional count: EVERY scan that reached decode gets counted, even if
             // the AI returned a weak/empty product or no product at all. Owner rule: scan 10 = count 10.
@@ -2014,15 +3154,118 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   p.status !== "archived" &&
                   [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
               )?.id;
-              if (!provId) {
+              // BUG FIX (scan-order merge asymmetry, live-proven: barcode-then-PN left 2 rows while
+              // PN-then-barcode correctly merged into 1): `provId` above is almost always already this
+              // SCAN'S OWN placeholder - ensureProvisionalCount mints it synchronously at scan time
+              // (before decode ever runs), keyed on the literal scanned code. So an exact-code dedup miss
+              // against any OTHER product never happens here; every decode that reaches this branch (never
+              // "verified" - e.g. every corpus PN hit, which is a "suggested" decision by design) instead
+              // needs to check whether the DECODED identity (not the raw scanned code) matches an existing,
+              // already-verified product from an earlier scan of a DIFFERENT code for the SAME physical
+              // item (the barcode-first case: a distributor-prefixed PN's own canonical part number was
+              // never going to equal the scanned string). resolveUnknown's create_new path already runs
+              // findIdentityMerge for exactly this reason; this fast "decode-everything" branch never did.
+              // Reuse the SAME size-aware identity-merge primitive here - auto_link (canonical GTIN/barcode
+              // equality, tire size agreeing) merges deterministically into the existing product (its own
+              // fields are trusted and never overwritten by this weaker suggestion); anything fuzzier
+              // (suggest_link) is left alone (never guessed), matching resolveUnknown's own trust rule.
+              let mergeOrphanId: string | null = null;
+              let mergeTargetId: string | null = null;
+              if (best) {
+                const mergeCandidates = cur.products.filter(
+                  (p) => p.status !== "archived" && p.provisional !== true && p.id !== provId,
+                );
+                // NOTE: deliberately OMITS primaryBarcode - canonicalOf (identityMerge.ts) reads it, and a
+                // carried/decoded barcode must never become a merge key here (probe-B footgun); only the
+                // decoded identity fields below are trusted for matching.
+                const merge = findIdentityMerge(mergeCandidates, {
+                  gtin: best.gtin ?? null,
+                  upc: best.upc ?? null,
+                  ean: best.ean ?? null,
+                  brand: best.brand ?? null,
+                  name: best.productName ?? null,
+                  specsShort: best.specsShort ?? null,
+                  specsFull: best.specsFull ?? null,
+                });
+                if (merge.kind === "auto_link" && countedIds.has(merge.productId) && merge.productId !== provId) {
+                  mergeTargetId = merge.productId;
+                  mergeOrphanId = provId ?? null; // this scan's own placeholder (if any) gets merged away
+                  provId = merge.productId;
+                  emitAudit({ entityType: "Product", entityId: merge.productId, action: "identity_merge_auto_link", metadata: { code } });
+                }
+              }
+              if (mergeTargetId) {
+                // BUG FIX (scan-order merge asymmetry): reuse the EXISTING verified product discovered
+                // above. Its fields are already correct and trusted - only add this code as a new alias
+                // (via the SAME buildAliasesForCodes helper resolveUnknown's own multi-code aliasing uses)
+                // so a future scan of the same code resolves deterministically. Never overwrite the
+                // existing product's name/brand/specs from this weaker (suggested-tier) decode.
+                const targetProduct = cur.products.find((p) => p.id === mergeTargetId);
+                if (targetProduct) {
+                  const built = buildAliasesForCodes({
+                    product: targetProduct,
+                    codes: [code],
+                    existingAliases: cur.aliases,
+                    businessId: cur.businessId,
+                    sessionId: cur.sessionId,
+                    idFactory,
+                    now,
+                    source: "ai_gemini",
+                    createdBy: "ai",
+                  });
+                  if (built.aliases.length > 0) {
+                    set((st) => ({
+                      aliases: [...st.aliases, ...built.aliases],
+                      pendingSyncQueue: [...st.pendingSyncQueue, ...built.queued],
+                    }));
+                  }
+                }
+                // If this scan already had its OWN provisional placeholder (minted synchronously by
+                // ensureProvisionalCount before this decode landed), transfer its retained count onto the
+                // merge target and remove the now-redundant placeholder row - the SAME orphan-transfer
+                // pattern resolveUnknown uses (never lose a count, never leave two rows for one identity).
+                if (mergeOrphanId && mergeOrphanId !== mergeTargetId) {
+                  const oid = mergeOrphanId;
+                  const targetId = mergeTargetId;
+                  set((st) => ({
+                    products: st.products.filter((p) => p.id !== oid),
+                    finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
+                    scanFeed: st.scanFeed.map((e) =>
+                      e.matchedProductId === oid ? { ...e, matchedProductId: targetId } : e,
+                    ),
+                  }));
+                }
+              } else if (!provId) {
                 provId = `prod-${idFactory()}`;
+                // PN-BARCODE-CARRY: mint time - the scanned code itself is the only barcode so far
+                // (current primaryBarcode is empty, i.e. "" as far as carriedProvisionalBarcode is
+                // concerned), so a decode-provided barcode may carry through subject to the trust gate.
+                const mintedBarcode =
+                  carriedProvisionalBarcode({
+                    currentPrimaryBarcode: "",
+                    scannedCleanCode: code,
+                    scannedCodeType: codeType,
+                    candidateBarcode: best?.primaryBarcode,
+                    partNumber: best?.primarySku,
+                  }) || code;
+                // FALKEN FIX (owner-reported live bug, 2026-07-20): this is the DECODE-EVERYTHING
+                // provisional mint - the exact path a single fresh scan with a name-only decode
+                // payload (no separate brand/category/specsShort/specsFull) takes. Previously every
+                // structured column defaulted straight to "" with no fallback, leaving Brand/Model/
+                // Category/Specs/Size permanently blank even though they are cleanly parseable from
+                // the decoded name. Route through the shared helper: the payload's own field always
+                // wins; a still-empty field falls back to a deterministic name parse, never a guess.
+                const mintEnriched = enrichProductIdentity({
+                  payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
+                });
                 const provProduct: Product = {
-                  id: provId, businessId: cur.businessId, name: provName, brand: best?.brand || (floor?.brand ?? ""),
-                  category: best?.category ?? "", specsShort: best?.specsShort ?? "", specsFull: best?.specsFull ?? "",
-                  primarySku: best?.primarySku ?? "", primaryBarcode: code, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
+                  id: provId, businessId: cur.businessId, name: provName, brand: mintEnriched.brand || (floor?.brand ?? ""),
+                  category: mintEnriched.category, specsShort: mintEnriched.specsShort, specsFull: mintEnriched.specsFull,
+                  primarySku: best?.primarySku ?? "", primaryBarcode: mintedBarcode, gtin: best?.gtin ?? "", upc: best?.upc ?? "",
                   ean: best?.ean ?? "", vendorCodes: [], aliases: [], imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? "") : "",
                   productUrl: best?.productUrl ?? "", location: "", notes: "", status: "active", source: "ai_gemini",
-                  confidence: decision?.confidence ?? 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+                  confidence: decision?.confidence ?? 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+                  ...(mintEnriched.structuredModel ? { structuredModel: mintEnriched.structuredModel, structuredBy: "deterministic" as const } : {}),
                 };
                 set((st) => ({ products: [...st.products, provProduct] }));
                 emitAudit({ entityType: "Product", entityId: provId, action: "product_created", metadata: { code, origin: "ai_suggested_provisional" } });
@@ -2033,16 +3276,52 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // provisional + unverified; the review stays open for human confirmation.
                 const enrichId = provId;
                 set((st) => ({
-                  products: st.products.map((p) =>
-                    p.id === enrichId
-                      ? {
+                  products: st.products.map((p) => {
+                    if (p.id !== enrichId) return p;
+                    // FALKEN FIX (owner-reported live bug, 2026-07-20): same gap as the mint branch
+                    // above - a name-only decode payload used to leave brand/category/specsShort/
+                    // specsFull permanently blank on the upgraded row. Fill-if-empty via the shared
+                    // helper: a field the row already carries a value for is preserved untouched.
+                    //
+                    // PREFIX-FLOOR BRAND LOCK FIX (owner-reported live bug, 2026-07-21, 310-row review:
+                    // rows 049000242201/049000245462 showed a real tire's decoded name next to Brand
+                    // "Coca-Cola" - 049000 is Coca-Cola's GS1 prefix): p.brand at this point may be
+                    // NOTHING MORE than the statistical prefix-floor guess ensureProvisionalCount wrote
+                    // synchronously BEFORE this decode ever ran (p.name is still exactly the floor's own
+                    // placeholder text). That guess is not "another source" that fill-if-empty must
+                    // protect - it must yield to whatever THIS decode determines (its own brand, or a
+                    // name-parsed brand, or genuinely empty), never silently lock in the wrong brand next
+                    // to a now-correct decoded name. A brand set by any OTHER means (a prior real decode,
+                    // a human edit) still wins untouched, since p.name would no longer equal the floor text.
+                    const brandIsOnlyFloorGuess = isBareUnidentifiedLabel(p.name, code) || p.name === provisionalPlaceholderName(code);
+                    const enrichIdentity = enrichProductIdentity({
+                      payload: { name: provName, brand: best?.brand, category: best?.category, specsShort: best?.specsShort, specsFull: best?.specsFull },
+                      existing: {
+                        name: p.name,
+                        brand: brandIsOnlyFloorGuess ? "" : p.brand,
+                        category: p.category, specsShort: p.specsShort, specsFull: p.specsFull,
+                      },
+                    });
+                    return {
                           ...p,
                           name: provName,
-                          brand: best?.brand ?? p.brand,
-                          category: best?.category ?? p.category,
-                          specsShort: best?.specsShort ?? p.specsShort,
-                          specsFull: best?.specsFull ?? p.specsFull,
+                          brand: enrichIdentity.brand,
+                          category: enrichIdentity.category,
+                          specsShort: enrichIdentity.specsShort,
+                          specsFull: enrichIdentity.specsFull,
+                          ...(!p.structuredModel && enrichIdentity.structuredModel ? { structuredModel: enrichIdentity.structuredModel } : {}),
                           primarySku: p.primarySku || (best?.primarySku ?? ""),
+                          // PN-BARCODE-CARRY: upgrade the placeholder primaryBarcode (empty, or the
+                          // scanned PN itself) to the decode's corpus barcode - never a real scanned
+                          // GTIN (carriedProvisionalBarcode returns "" in that case, keeping p.primaryBarcode).
+                          primaryBarcode:
+                            carriedProvisionalBarcode({
+                              currentPrimaryBarcode: p.primaryBarcode,
+                              scannedCleanCode: code,
+                              scannedCodeType: codeType,
+                              candidateBarcode: best?.primaryBarcode,
+                              partNumber: best?.primarySku ?? p.primarySku,
+                            }) || p.primaryBarcode,
                           gtin: p.gtin || (best?.gtin ?? ""),
                           upc: p.upc || (best?.upc ?? ""),
                           ean: p.ean || (best?.ean ?? ""),
@@ -2051,16 +3330,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                           confidence: decision?.confidence ?? p.confidence,
                           updatedAt: now(),
                           updatedBy: "ai",
-                        }
-                      : p,
-                  ),
+                    };
+                  }),
                 }));
               }
               // Count it on the EXISTING scan event for this code (idempotent by event id), and surface the
               // provisional product + qty on that feed row while keeping the "Suggested" badge.
               const ev = get().scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
               if (ev) {
-                const countEvent: ScanEvent = { ...ev, matchedProductId: provId, status: "known", quantityDelta: 1 };
+                const countEvent: ScanEvent = { ...ev, matchedProductId: provId!, status: "known", quantityDelta: 1 };
                 const { counts, count } = incrementInventoryCount(get().finalCounts, countEvent, idFactory);
                 set((st) => ({
                   finalCounts: counts,
@@ -2084,7 +3362,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   ),
                 }));
               }
+              // F5 bundle-surgery: no usable AI name and the client-safe (SEED/LEARNED) lookup found no
+              // brand - worth an async check for a DERIVED-tier hit. The row already appeared + counted
+              // above either way (TOP-LEVEL LAW unaffected).
+              if (!hasUsableName && !floor && provId) get().enrichPrefixFloorLabel(code, provId);
             }
+            // STABLE-ID FIX: the decode-everything block just above minted/reused this code's provisional
+            // placeholder. Look its id up fresh (it is scoped inside the block above) so resolveUnknown can
+            // re-link by id after a customer reload, instead of by reconstructed name.
+            const provIdForReview = get().products.find(
+              (p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === review.cleanCode,
+            )?.id;
             // Needs Review: keep it in the queue, show the score + why; write a PENDING catalog
             // candidate when the name is usable so the catalog still accumulates knowledge.
             get().recordFeedback("catalog_candidate_blocked", { code: review.cleanCode, meta: { score: plan.score } });
@@ -2126,7 +3414,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : st.lastCategoryWarning,
               needsReviewQueue: st.needsReviewQueue.map((r) =>
                 r.id === reviewId
-                  ? { ...r, autoVerifyScore: plan.score, blockingReasons: plan.blockingReasons, reason: reviewReason }
+                  ? {
+                      ...r,
+                      autoVerifyScore: plan.score,
+                      blockingReasons: plan.blockingReasons,
+                      reason: reviewReason,
+                      provisionalProductId: r.provisionalProductId ?? provIdForReview ?? null,
+                    }
                   : r,
               ),
               // Never leave a "Verified AI Decode + Unknown" feed row: if the decode said "verified" but
@@ -2142,6 +3436,38 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   : st.scanFeed,
             }));
 
+            // AUTO-SUGGEST-APPLY (owner order 2026-07-10): this decode did NOT clear the full auto-count
+            // gate above, but it may still be high-trust enough to skip Needs Review entirely. The
+            // identity was ALREADY applied onto the provisional row in place a few lines up (the
+            // hasUsableName enrich branch runs regardless of this gate) - the only thing left is to close
+            // the review instead of leaving it open, when confidence >= 0.8 OR this is an app-verified
+            // exact decode (Go-UPC exact class: status "verified" + exactCodeEvidenceVerifiedByApp true).
+            // TRUST RULES: no alias is created here, the product stays provisional:true/verified:false,
+            // and the feed badge stays "suggested" (never "verified") - markFeedRowVerified is not called.
+            // MULTI-VARIANT GATE (Group C): a listing naming several distinct speed ratings for one
+            // size describes multiple product variants, not one confident identity - never let it
+            // skip Needs Review via auto-suggest-apply, regardless of confidence/evidence.
+            const multiVariantIdentity = enrichProductIdentity({ payload: { name: best?.productName ?? "" } }).multiVariant;
+            const autoSuggestApplied =
+              !multiVariantIdentity &&
+              autoSuggestApplyOk({
+                autoAddOn,
+                contextConflict,
+                productName: best?.productName ?? "",
+                confidence: decision?.confidence ?? 0,
+                status: decision?.status,
+                exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
+              });
+            if (autoSuggestApplied) {
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                    : r,
+                ),
+              }));
+            }
+
             // Tasks 5+6: CLIENT-ORCHESTRATED BACKGROUND VERIFY. The fast hot path (mode:"decode") did
             // NOT auto-count this scan (the else branch ran -> not verified-and-clean). For a TIRE scan
             // that is still open, fire ONE background `mode:"decode-deep"` request WITH scanContext
@@ -2153,35 +3479,90 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // identity in tire context): re-fetching would just re-confirm the poison and the firewall
             // would block the count anyway, so we keep it in human review instead of spending a fetch.
             // The tire trigger reads BOTH the scan context (tire) and the decoded identity, so a clearly
-            // non-tire decode in tire context does not escalate.
+            // non-tire decode in tire context does not escalate. Also skip when this decode was just
+            // auto-suggest-applied above: the review is already closed, so a deep re-check would find
+            // status !== "open" and no-op anyway (idempotency guard) - skip the wasted network call.
             const tireScan =
               (s.scanContext ?? "any") === "tire" && (isTireContext(best) || lookupTirePrefix(review.cleanCode) !== null);
             const fastWasVerified = decision?.status === "verified";
-            if (tireScan && !fastWasVerified && !contextConflict) {
+            if (tireScan && !fastWasVerified && !contextConflict && !autoSuggestApplied) {
               // Fire-and-forget: it must NEVER block the scan UI or throw into this flow. The action
               // self-guards on the review still being open (idempotent against a late/duplicate response).
               void get().backgroundVerifyDeep(reviewId);
             }
+
+            // Task 9b (owner-ratified 2026-07-14): a suggestion-bearing decode NO LONGER sits in Needs
+            // Review. The scan already counted (count-decouple, above); the suggestion concerns only the
+            // NAME, so it moves onto the counted feed row as a PENDING inline suggestion (approve/decline
+            // controls) and the review record is PARKED at status "suggested" (kept for the audit trail +
+            // the batch-approve surface; dropped from the open queue/badge). APPROVED SEAM: only a decision
+            // that is honestly "suggested", with a usable name, no firewall conflict, not auto-suggest-
+            // applied, and NOT a tire scan awaiting the background deep-verify escalation just fired above
+            // (that proven owner-loved path keeps its open review until it completes; backgroundVerifyDeep
+            // performs the same conversion itself when it finishes WITHOUT verifying). Conflicts, empty
+            // decodes, and blocked-verified decodes still create/keep open reviews (unchanged).
+            // autoAddOn gate: with autoAddDecodedProducts OFF the owner asked for EVERY decode to go to
+            // manual review (documented master switch) - suggestions then keep landing in the open queue.
+            const suggestionInline =
+              autoAddOn &&
+              !autoSuggestApplied &&
+              !multiVariantIdentity &&
+              decision?.status === "suggested" &&
+              isUsableProductName(best?.productName ?? "") &&
+              !contextConflict &&
+              !(tireScan && !fastWasVerified);
+            if (suggestionInline) {
+              const pendingSuggestion = {
+                productName: suggestionFields.suggestedProductName,
+                brand: suggestionFields.suggestedBrand,
+                confidence: decision?.confidence ?? 0,
+                status: "pending" as const,
+              };
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId && r.status === "open" ? { ...r, status: "suggested" as const } : r,
+                ),
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.decodeStatus !== "verified" && !e.suggestion
+                    ? { ...e, suggestion: pendingSuggestion }
+                    : e,
+                ),
+              }));
+            }
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
-          const failReason = `Live decode failed (network / rate-limit / provider error). Counted as unverified; retry to identify. ${
-            e instanceof Error ? e.message : ""
-          }`.trim();
+          // Task 2: a daily_cap 429 gets its own honest, non-retry-promising copy - there is no
+          // automatic decode-on-cap-reset queue, so telling the user to just wait would be false.
+          // Every other failure (network / self-inflicted rate limit / provider error) keeps the
+          // existing generic copy unchanged.
+          const failReason =
+            e instanceof DailyCapReachedError
+              ? e.accountScoped
+                ? "Your account's daily AI lookup cap is reached. This scan is saved and counted as unverified. Retry after the cap resets."
+                : "Daily AI lookup cap reached. This scan is saved and counted as unverified. Retry after the cap resets."
+              : e instanceof DecodeAbortedError
+                ? "Decode is taking longer than expected - it keeps working in the background; check Needs Review shortly"
+                : // DEFECT 2 (untrusted string leak): NEVER surface the raw browser/provider error
+                  // ("Failed to fetch", DNS errors, etc.) in the user-facing Reason column. Map every
+                  // network/provider failure to honest human copy; the technical detail stays only in
+                  // the debug-only aiLookupLogs error entry written below (mkLog), never on the row.
+                  "Live decode failed (network / rate-limit / provider error). Saved locally and counted as unverified; retry to identify when back online.";
           // DECODE-EVERYTHING (owner): a FAILED decode (timeout / 429 rate-limit / provider error / AI down)
           // must NOT leave the scan blank. We still COUNT it as an UNVERIFIED, reviewable provisional row with
           // a SAFE label and the scanned code - never a fabricated product identity, never an approved alias,
           // never a verified product. The review STAYS OPEN so a retry can identify it.
           const code = review.cleanCode;
-          const struct = decodeBarcodeStructure(code, codeType);
           // PREFIX FLOOR (Plan C Task 3): a failed decode must not leave a bare "Unidentified item"
-          // when the GS1 prefix maps to a known brand - see prefixFloorName.
-          const floor = prefixFloorName(code, codeType);
-          const fbName = floor
-            ? floor.name
-            : struct.checkDigitValid
-              ? `Unidentified item (barcode ${code})`
-              : `Unidentified item (code ${code})`;
+          // when the GS1 prefix maps to a known brand - see prefixFloorName. Label text comes from the
+          // shared provisionalPlaceholderName helper (same one ensureProvisionalCount uses) so this
+          // mint can never drift from what resolveUnknown's reload-resilient fallback expects to match.
+          // P2 (Task 8): on a daily_cap block the SERVER already resolved the floor and threaded it through
+          // the 429 body; prefer that authoritative floor when present (falls back to the identical local
+          // recompute for every other failure). The honest cap reason text (failReason) is unchanged.
+          const capFloor = e instanceof DailyCapReachedError ? e.floor : undefined;
+          const floor = capFloor ?? prefixFloorName(code, codeType);
+          const fbName = capFloor?.name ?? provisionalPlaceholderName(code);
           const cur = get();
           const countedIds = new Set(cur.finalCounts.map((c) => c.productId));
           let provId = cur.products.find(
@@ -2196,9 +3577,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               id: provId, businessId: cur.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
               specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
               aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
-              confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+              confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
             };
             set((st) => ({ products: [...st.products, provProduct] }));
+          } else if (floor) {
+            // F5 bundle-surgery: the row was pre-counted at scan time by ensureProvisionalCount, whose
+            // CLIENT-SAFE (SEED/LEARNED) lookup may have missed a DERIVED-tier brand the server knows
+            // (capFloor from the 429 body, or a local hit). If the existing row still carries the bare
+            // "Unidentified item" fallback for this code, upgrade it in place with the floor's
+            // brand-confident naming aid - exactly what the pre-split synchronous path produced. Never
+            // clobbers a real decoded/human name (bare-label guard), never verified, never a re-count.
+            const targetId = provId;
+            set((st) => ({
+              products: st.products.map((p) =>
+                p.id === targetId && p.provisional === true && p.verified !== true && isBareUnidentifiedLabel(p.name, code)
+                  ? { ...p, name: floor.name, brand: floor.brand, updatedAt: now(), updatedBy: "ai" }
+                  : p,
+              ),
+            }));
           }
           const evF = get().scanFeed.find((ev) => ev.cleanCode === code && ev.status !== "known");
           let countsF = get().finalCounts;
@@ -2211,7 +3607,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           set((st) => ({
             finalCounts: countsF,
             needsReviewQueue: st.needsReviewQueue.map((r) =>
-              r.id === reviewId ? { ...r, decodeStatus: "needs_review", reason: failReason, suggestedProductName: r.suggestedProductName || fbName } : r,
+              r.id === reviewId
+                ? {
+                    ...r,
+                    decodeStatus: "needs_review",
+                    reason: failReason,
+                    // F5 bundle-surgery: a bare "Unidentified item" suggestion (stamped at scan time by
+                    // the client-safe SEED/LEARNED lookup) upgrades to the floor's brand-confident name
+                    // (fbName carries the server-authoritative capFloor when present) - exactly what the
+                    // pre-split synchronous path produced. A REAL suggestion is never overwritten.
+                    suggestedProductName:
+                      r.suggestedProductName && !isBareUnidentifiedLabel(r.suggestedProductName, code)
+                        ? r.suggestedProductName
+                        : fbName,
+                    // STABLE-ID FIX: capture the placeholder id (freshly minted above, or reused if one
+                    // already existed) so resolveUnknown can re-link by id after a customer reload.
+                    provisionalProductId: r.provisionalProductId ?? provId ?? null,
+                  }
+                : r,
             ),
             scanFeed: st.scanFeed.map((ev) =>
               evF && ev.id === evF.id
@@ -2225,6 +3638,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             aiStatus: { ...st.aiStatus, lastAttemptAt: nowIso, lastFailureReason: failReason },
             settings: { ...st.settings, dailyLookupCount: dailyCount, lastResetDate: today },
           }));
+          // F5 bundle-surgery: only worth enriching when neither the server-authoritative cap floor nor
+          // the client-safe (SEED/LEARNED) lookup found a brand - capFloor already used the FULL index.
+          if (!capFloor && !floor && provId) get().enrichPrefixFloorLabel(code, provId);
         }
       },
 
@@ -2238,41 +3654,56 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             p.status !== "archived" &&
             [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).includes(code),
         );
-        if (existing) return;
+        if (existing) return existing.id;
         // Code-type aware label: a SAFE "Unidentified item" + the scanned code. NEVER fabricate manufacturer
-        // anatomy here (no decode response). checkDigitValid only tags whether it is a structurally-valid
-        // public barcode vs any other code; either way the label is non-hallucinated.
-        // PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a known brand, in which case the
-        // row states the brand with confidence and flags the product unconfirmed - see prefixFloorName.
+        // anatomy here (no decode response). PREFIX FLOOR (Plan C Task 3): unless the GS1 prefix maps to a
+        // known brand, in which case the row states the brand with confidence and flags the product
+        // unconfirmed - see prefixFloorName. Label text comes from the shared provisionalPlaceholderName
+        // helper so resolveUnknown's reload-resilient provOrphanId fallback can reconstruct the identical
+        // name purely from the code, even after the customer persist split strips this row's identity fields.
         const ct = detectCodeType(code);
-        const struct = decodeBarcodeStructure(code, ct);
         const floor = prefixFloorName(code, ct);
-        const fbName = floor
-          ? floor.name
-          : struct.checkDigitValid
-            ? `Unidentified item (barcode ${code})`
-            : `Unidentified item (code ${code})`;
+        const fbName = provisionalPlaceholderName(code);
         const provId = `prod-${idFactory()}`;
         const provProduct: Product = {
           id: provId, businessId: st0.businessId, name: fbName, brand: floor?.brand ?? "", category: "", specsShort: "",
           specsFull: "", primarySku: "", primaryBarcode: code, gtin: "", upc: "", ean: "", vendorCodes: [],
           aliases: [], imageUrl: "", productUrl: "", location: "", notes: "", status: "active", source: "ai_gemini",
-          confidence: 0, verified: false, provisional: true, createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
+          confidence: 0, verified: false, provisional: true, provenanceTier: "provisional", createdAt: now(), createdBy: "ai", updatedAt: now(), updatedBy: "ai",
         };
         const ev = st0.scanFeed.find((e) => e.cleanCode === code && e.status !== "known");
         let counts = st0.finalCounts;
         let qty = 0;
-        if (ev) {
-          const r = incrementInventoryCount(counts, { ...ev, matchedProductId: provId, status: "known", quantityDelta: 1 }, idFactory);
-          counts = r.counts;
+        let countId: string | null = null;
+        const countedEvent = ev
+          ? { ...ev, matchedProductId: provId, status: "known" as const, quantityDelta: 1 }
+          : null;
+        if (countedEvent) {
+          const r = incrementInventoryCount(counts, countedEvent, idFactory);
+          counts = r.counts.map((c) =>
+            c.productId === countedEvent.matchedProductId && c.sessionId === countedEvent.sessionId
+              ? { ...c, location: countedEvent.location }
+              : c,
+          );
           qty = r.count.quantity;
+          countId = r.count.id;
         }
         set((st) => ({
           products: [...st.products, provProduct],
           finalCounts: counts,
           needsReviewQueue: st.needsReviewQueue.map((r) =>
             r.cleanCode === code && r.status === "open"
-              ? { ...r, decodeStatus: "needs_review", reason: r.reason || reason, suggestedProductName: r.suggestedProductName || fbName }
+              ? {
+                  ...r,
+                  decodeStatus: "needs_review",
+                  reason: r.reason || reason,
+                  suggestedProductName: r.suggestedProductName || fbName,
+                  // STABLE-ID FIX: this placeholder (provId, minted just above) belongs to THIS review's
+                  // code. Stamp its id so resolveUnknown can re-link by id after a customer reload, instead
+                  // of by reconstructed name (see provisionalProductId doc comment in types.ts). Only set
+                  // when not already stamped (idempotent; never clobber a value set earlier).
+                  provisionalProductId: r.provisionalProductId ?? provId,
+                }
               : r,
           ),
           scanFeed: st.scanFeed.map((e) =>
@@ -2286,19 +3717,96 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // documented "Decoding -> Verified / Suggested / Conflict / Needs review" UI stays visible;
                   // only stamp "suggested" when there is no decode in flight.
                   decodeStatus: e.decodeStatus === "decoding" ? "decoding" : "suggested",
-                  syncStatus: "synced" as const,
+                  // D1 FIX: the stored feed event and the counted delta are the SAME FACT - the row a
+                  // provisional count was applied from must carry the delta it contributed (North-star #2:
+                  // sum(feed deltas) === quantity). And the fake optimistic "synced" stamp is GONE: the
+                  // row's syncStatus is derived from pendingSyncQueue membership (see the reconcile at
+                  // scanStore.ts:907-922) and only reads "synced" after a real sync ack.
+                  quantityDelta: 1,
                   reason: e.reason || reason,
                 }
               : e,
           ),
         }));
+        // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW) - and only
+        // when this call actually counted something (countedEvent), never on a no-op/idempotent re-entry.
+        if (countedEvent) markFirstScanIfNeeded();
+        // D1 FIX: a provisional count is real inventory. Enqueue its ledger writes through the SAME sync
+        // queue mechanism every counted scan uses. SAVE_SCAN_EVENT + INCREMENT_COUNT mirror the countable
+        // branch's two ops (scanStore.ts:1397-1422); SAVE_PRODUCT for the freshly minted provisional is a
+        // NEW op on the scan path (precedent: resolveUnknown's SAVE_PRODUCT enqueue, :3912-3930). The
+        // INCREMENT_COUNT key is the event's own key minted in processScan - reused verbatim, never
+        // regenerated (Idempotent Sync Rules).
+        if (countedEvent && countId) {
+          const bId = st0.businessId;
+          const sId = st0.sessionId;
+          const incPayload: IncrementPayload = {
+            businessId: bId, sessionId: sId, productId: provId, scanEventId: countedEvent.id,
+            quantityDelta: 1, idempotencyKey: countedEvent.idempotencyKey,
+          };
+          enqueueAndSync([
+            // Task 1b fix (same recipe as correctProduct, commit 024c849): a bare
+            // `businessId:sessionId:provId:SAVE_PRODUCT` key collides with resolveUnknown's later
+            // orphan-merge SAVE_PRODUCT for this SAME id (it reuses provOrphanId - scanStore.ts ~4791),
+            // which would otherwise be swallowed as "alreadyApplied" and the resolved identity would
+            // never reach the backend. Suffix `:provisional` so the first (placeholder) write and any
+            // later distinct write to this id mint different keys; the key is still minted once here and
+            // reused verbatim on every retry of THIS item, so retry dedupe is unaffected.
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT"), scanEventId: countedEvent.id }),
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
+          ]);
+        }
+        // F5 bundle-surgery: the row already appeared + counted above (TOP-LEVEL LAW unaffected). Only
+        // worth an enrichment fetch when the client-safe (SEED/LEARNED) lookup found nothing - a
+        // DERIVED-tier hit is still possible server-side.
+        if (!floor) get().enrichPrefixFloorLabel(code, provId);
+        return provId;
       },
 
-      markFeedRowVerified: (cleanCode, reason) => {
+      enrichPrefixFloorLabel: (code, productId) => {
+        // Fire-and-forget: never awaited by any caller, never blocks/delays the row that already
+        // appeared + counted synchronously. Deferred a tick so any SYNCHRONOUS same-call resolution
+        // (catalog-first hit, deterministic alias, a decode landing in the same stack) renames the row
+        // first and the pre-fetch bare-label check below skips the network call entirely - the fetch
+        // only fires for a row that genuinely settled as a bare "Unidentified item".
+        setTimeout(() => {
+          if (!get().online) return; // offline: no fetch, label silently stays (retry is not needed - naming aid only)
+          if (enrichInFlight.has(productId)) return; // one enrichment round-trip per row, never a duplicate fetch
+          const before = get().products.find((p) => p.id === productId);
+          if (!before || !isBareUnidentifiedLabel(before.name, code)) return; // already identified: no fetch
+          enrichInFlight.add(productId);
+          void fetchPrefixFloorEnrichment(code).finally(() => enrichInFlight.delete(productId)).then((floor) => {
+            if (!floor) return; // offline / no derived-tier hit / non-barcode-shaped code: silent no-op
+            const prod = get().products.find((p) => p.id === productId);
+            // Re-check after the round-trip too: only upgrade if the row STILL carries the exact bare
+            // fallback label for this code - a decode may have landed (real name), or a human may have
+            // edited it, while the fetch was in flight. Never clobber anything but the bare placeholder.
+            if (!prod || !isBareUnidentifiedLabel(prod.name, code)) return;
+            set((s) => ({
+              products: s.products.map((p) =>
+                p.id === productId ? { ...p, name: floor.name, brand: floor.brand } : p,
+              ),
+            }));
+          });
+        }, 0);
+      },
+
+      markFeedRowVerified: (cleanCode, reason, provenance) => {
         set((s) => ({
           scanFeed: s.scanFeed.map((e) =>
             e.cleanCode === cleanCode && e.status !== "resolved" && e.decodeStatus !== "verified"
-              ? { ...e, decodeStatus: "verified" as ScanEvent["decodeStatus"], reason: reason || e.reason }
+              ? {
+                  ...e,
+                  decodeStatus: "verified" as ScanEvent["decodeStatus"],
+                  reason: reason || e.reason,
+                  // STALE-NOTE FIX (goupc-cap-rootcause item 3): the row just settled to verified - drop
+                  // any leftover in-flight "Decoding with AI..." note (see the main settle block above).
+                  decodeNote: undefined,
+                  // P5 Task 5: additive, optional. Only set when the caller passed one (see the
+                  // interface comment) - display only, never gates counting/auto-count.
+                  provenance,
+                }
               : e,
           ),
         }));
@@ -2411,6 +3919,58 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               ),
             }));
           }
+          // Task 9b (owner-ratified 2026-07-14 addition): the deep pass has now COMPLETED without
+          // verifying - the identity is still only a suggestion, and suggestions never sit in Needs
+          // Review. Convert this review to the same PENDING inline-suggestion state the fast path
+          // uses (status "suggested" + approve/decline controls on the counted feed row). Guarded on
+          // the review still being open (idempotent against duplicate/late deep responses) and on a
+          // usable suggested identity; a deep result that returned a NEW identity is re-checked
+          // against the context firewall first (the fast identity was already cleared before this
+          // escalation ever fired - see the backgroundVerifyDeep trigger in runLiveDecodeOnce).
+          const freshAfter = get().needsReviewQueue.find((r) => r.id === reviewId);
+          // Same autoAddOn master-switch gate as the fast path: with autoAddDecodedProducts OFF the
+          // owner asked for every decode to sit in manual review, so no inline conversion happens.
+          // MULTI-VARIANT GATE (Group C): same rule as the fast path - never convert a multi-variant
+          // listing into a pending inline suggestion, regardless of confidence/evidence.
+          const deepMultiVariant = enrichProductIdentity({ payload: { name: freshAfter?.suggestedProductName ?? "" } }).multiVariant;
+          if (
+            (s.autoAddDecodedProducts ?? true) &&
+            freshAfter &&
+            freshAfter.status === "open" &&
+            freshAfter.hasSuggestion &&
+            isUsableProductName(freshAfter.suggestedProductName) &&
+            !deepMultiVariant
+          ) {
+            const deepConflict =
+              best && isUsableProductName(best.productName ?? "")
+                ? detectScanContextConflict({
+                    scanContext: s.scanContext ?? "any",
+                    code: review.cleanCode,
+                    codeType,
+                    result: best,
+                    brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
+                    exactCodeVerifiedByApp: false,
+                  })
+                : null; // no new deep identity: the fast pass already cleared the firewall before escalating
+            if (!deepConflict) {
+              const pendingSuggestion = {
+                productName: freshAfter.suggestedProductName,
+                brand: freshAfter.suggestedBrand,
+                confidence: freshAfter.confidence,
+                status: "pending" as const,
+              };
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId && r.status === "open" ? { ...r, status: "suggested" as const } : r,
+                ),
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.decodeStatus !== "verified" && !e.suggestion
+                    ? { ...e, suggestion: pendingSuggestion }
+                    : e,
+                ),
+              }));
+            }
+          }
           return;
         }
 
@@ -2461,20 +4021,31 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // SAME Phase 7 evidence gate + Phase 8 firewall as liveDecode. A non-verified result never reaches
         // here, and a firewall/brand-prefix conflict (poison in tire context) still blocks the count.
         const tireOk = tireAutoCountOk(best);
-        const contextConflict = detectScanContextConflict({
+        // Task 9 (owner-ratified 2026-07-14, decode-anything): app-verified exact-code evidence clears the
+        // tire category hard-block; weak/unverified identities still hard-block (poison guard intact).
+        const exactCodeVerifiedByApp =
+          decision?.exactCodeEvidenceVerifiedByApp === true && decision?.status === "verified";
+        const firewallParams = {
           scanContext: s.scanContext ?? "any",
           code: review.cleanCode,
           codeType,
           result: best,
           brandPrefixHints: deriveBrandPrefixHints(get().products, get().aliases),
-        });
-        const evidenceGatePassed =
-          decision.status === "verified" &&
-          decodeCorroborated(decision) &&
-          (decision.confidence ?? 0) >= 0.8 &&
-          isUsableProductName(best?.productName ?? "") &&
-          tireOk &&
-          !contextConflict;
+          exactCodeVerifiedByApp,
+        };
+        const contextConflict = detectScanContextConflict(firewallParams);
+        const offCategory = detectOffCategoryAdvisory(firewallParams);
+        // SAME pure evidence gate as liveDecode (src/stores/scanGates.ts): Phase-7 corroboration + GPT
+        // trust tier + T20/code-1225 public-barcode firewall, kept in sync so the two decode paths can
+        // never drift apart again. tireOk + contextConflict are computed here and passed in.
+        const evidenceGatePassed = canAutoCount({
+          codeType,
+          decision,
+          productName: best?.productName ?? "",
+          productNameUsable: isUsableProductName(best?.productName ?? ""),
+          tireOk,
+          contextConflict,
+        }).allowed;
 
         if (autoAddOn && evidenceGatePassed && (plan.status === "auto_verify" || plan.status === "auto_count")) {
           // OPTION 3: non-public codes never write the global catalog ("auto_verify") - shop-local "ai" only.
@@ -2484,10 +4055,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (origin === "auto_verify") {
             get().recordFeedback("auto_verified_catalog_entry", { code: review.cleanCode, meta: { score: plan.score, tier: plan.sourceTier } });
           }
-          // Flip the scan-feed badge to verified BEFORE resolveUnknown re-scans (it would otherwise stay
-          // on the suggested/needs_review badge the fast pass left). The row may be "known" (counted
-          // synchronously) - markFeedRowVerified flips it regardless, as long as it is not already resolved.
-          get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
           get().resolveUnknown(reviewId, "create_new", {
             applyToCount: true,
             origin,
@@ -2504,6 +4071,38 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 : undefined,
             newProduct,
           });
+          // Flip the scan-feed badge to verified AFTER resolveUnknown, and ONLY when it actually resolved
+          // the review (status "resolved"). The row may be "known" (counted synchronously) - markFeedRowVerified
+          // flips it regardless of that, as long as it is not already resolved. BUG FIX (verified-shows-
+          // Unidentified): resolveUnknown can silently no-op (fuzzy identity-merge suggest_link, or a dedup
+          // conflict) and leave the review "open" with the placeholder product untouched - marking the row
+          // "verified" in that case would show "Verified match" over the unresolved placeholder name.
+          if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
+            get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
+          } else {
+            // OWNER RULE ("if it is resolved, it does not go to review"): the evidence gate already
+            // verified this scan's identity above, so it is genuinely settled even when resolveUnknown
+            // itself no-opped (suggest_link / dedup conflict). Stamp it resolved directly so it never
+            // lingers in the Needs Review queue - status metadata only, never scanFeed/finalCounts.
+            const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
+            if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested")) {
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+                    : r,
+                ),
+              }));
+            }
+          }
+          // Task 9: tag an app-verified off-category decode so the feed shows "Off-category item".
+          if (offCategory) {
+            set((st) => ({
+              scanFeed: st.scanFeed.map((e) =>
+                e.cleanCode === review.cleanCode ? { ...e, offCategory: true } : e,
+              ),
+            }));
+          }
         } else if (contextConflict) {
           // FALSE-AUTO-COUNT BACKSTOP: a "verified" deep decode that contradicts the tire context (poison)
           // must NOT count. Keep it open with the safe conflict reason; the human relinks. Never weaken.
@@ -2516,19 +4115,155 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               r.id === reviewId && r.status === "open" ? { ...r, reason: conflictReason(contextConflict) } : r,
             ),
           }));
+        } else {
+          // AUTO-SUGGEST-APPLY (owner order 2026-07-10, kept in sync with the same gate in liveDecode):
+          // a verified deep decode that missed the full auto-count gate above (e.g. tireOk failed) can
+          // still skip Needs Review as a SUGGESTION when confidence >= 0.8, OR this is an app-verified
+          // exact decode (Go-UPC exact class). Apply the identity onto the existing provisional row IN
+          // PLACE - product stays provisional:true/verified:false - and close the review. TRUST RULES:
+          // no alias created, markFeedRowVerified never called, feed badge stays "suggested".
+          const autoSuggestApplied = autoSuggestApplyOk({
+            autoAddOn,
+            contextConflict,
+            productName: best?.productName ?? "",
+            confidence: decision.confidence ?? 0,
+            status: decision.status,
+            exactCodeEvidenceVerifiedByApp: Boolean(decision.exactCodeEvidenceVerifiedByApp),
+          });
+          if (autoSuggestApplied) {
+            const ownProvId =
+              review.provisionalProductId ??
+              get().products.find((p) => p.provisional === true && p.status !== "archived" && p.primaryBarcode === review.cleanCode)?.id;
+            // BUG FIX (scan-order merge asymmetry, same class as the fast-path decode-everything branch):
+            // before enriching THIS scan's own placeholder in place, check whether the decoded identity
+            // already matches a DIFFERENT, already-verified product (e.g. an earlier scan of this same
+            // physical item's barcode). Reuse the SAME size-aware findIdentityMerge primitive; auto_link
+            // only (never the fuzzy suggest_link - that stays a human decision, unchanged).
+            const countedIds = new Set(get().finalCounts.map((c) => c.productId));
+            let mergeTargetId: string | null = null;
+            if (best) {
+              const mergeCandidates = get().products.filter(
+                (p) => p.status !== "archived" && p.provisional !== true && p.id !== ownProvId,
+              );
+              // NOTE: deliberately OMITS primaryBarcode - canonicalOf (identityMerge.ts) reads it, and a
+              // carried/decoded barcode must never become a merge key here (probe-B footgun); only the
+              // decoded identity fields below are trusted for matching.
+              const merge = findIdentityMerge(mergeCandidates, {
+                gtin: best.gtin ?? null,
+                upc: best.upc ?? null,
+                ean: best.ean ?? null,
+                brand: best.brand ?? null,
+                name: best.productName ?? null,
+                specsShort: best.specsShort ?? null,
+                specsFull: best.specsFull ?? null,
+              });
+              if (merge.kind === "auto_link" && countedIds.has(merge.productId) && merge.productId !== ownProvId) {
+                mergeTargetId = merge.productId;
+                emitAudit({ entityType: "Product", entityId: merge.productId, action: "identity_merge_auto_link", metadata: { code: review.cleanCode } });
+              }
+            }
+            if (mergeTargetId) {
+              const targetProduct = get().products.find((p) => p.id === mergeTargetId);
+              if (targetProduct) {
+                const built = buildAliasesForCodes({
+                  product: targetProduct,
+                  codes: [review.cleanCode],
+                  existingAliases: get().aliases,
+                  businessId: state.businessId,
+                  sessionId: state.sessionId,
+                  idFactory,
+                  now,
+                  source: "ai_gemini",
+                  createdBy: "ai",
+                });
+                if (built.aliases.length > 0) {
+                  set((st) => ({
+                    aliases: [...st.aliases, ...built.aliases],
+                    pendingSyncQueue: [...st.pendingSyncQueue, ...built.queued],
+                  }));
+                }
+              }
+              if (ownProvId && ownProvId !== mergeTargetId) {
+                const oid = ownProvId;
+                const targetId = mergeTargetId;
+                set((st) => {
+                  const finalCounts = transferOrphanCount(st.finalCounts, oid, targetId, now());
+                  return {
+                    products: st.products.filter((p) => p.id !== oid),
+                    finalCounts,
+                    scanFeed: st.scanFeed.map((e) =>
+                      e.matchedProductId === oid
+                        ? { ...e, matchedProductId: targetId, decodeStatus: e.decodeStatus !== "verified" ? ("suggested" as const) : e.decodeStatus }
+                        : e,
+                    ),
+                    needsReviewQueue: st.needsReviewQueue.map((r) =>
+                      r.id === reviewId
+                        ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                        : r,
+                    ),
+                  };
+                });
+              } else {
+                set((st) => ({
+                  needsReviewQueue: st.needsReviewQueue.map((r) =>
+                    r.id === reviewId
+                      ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                      : r,
+                  ),
+                }));
+              }
+            } else if (ownProvId) {
+              const provId = ownProvId;
+              set((st) => ({
+                products: st.products.map((p) =>
+                  p.id === provId
+                    ? {
+                        ...p,
+                        name: tireFields?.description || cleanName || p.name,
+                        brand: tireFields?.brand ?? best?.brand ?? p.brand,
+                        category: best?.category ?? p.category,
+                        specsShort: tireFields?.size ?? best?.specsShort ?? p.specsShort,
+                        specsFull: best?.specsFull ?? p.specsFull,
+                        primarySku: p.primarySku || (tireFields?.partNumber ?? best?.primarySku ?? ""),
+                        gtin: p.gtin || (best?.gtin ?? ""),
+                        upc: p.upc || (best?.upc ?? ""),
+                        ean: p.ean || (best?.ean ?? ""),
+                        imageUrl: s.allowImageSuggestions ? (best?.imageUrl ?? p.imageUrl) : p.imageUrl,
+                        productUrl: best?.productUrl || p.productUrl,
+                        confidence: decision.confidence ?? p.confidence,
+                        updatedAt: now(),
+                        updatedBy: "ai",
+                      }
+                    : p,
+                ),
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const, syncStatus: "synced" as const }
+                    : r,
+                ),
+                scanFeed: st.scanFeed.map((e) =>
+                  e.cleanCode === review.cleanCode && e.decodeStatus !== "verified" ? { ...e, decodeStatus: "suggested" as const } : e,
+                ),
+              }));
+            }
+          }
+          // else: verified-but-gate-blocked-for-another-reason (e.g. autoAdd off, incomplete specs, or no
+          // usable name/confidence < 0.8 and not app-verified-exact). The fast pass already left an
+          // accurate review row; we leave it for the human (never count a blocked result).
         }
-        // else: verified-but-gate-blocked-for-another-reason (e.g. autoAdd off, incomplete specs). The fast
-        // pass already left an accurate review row; we leave it for the human (never count a blocked result).
       },
 
       resolveUnknown: (reviewId, action, payload) => {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
-        // Idempotency / re-entry guard: only act on an OPEN review. A double-click, or a race where a
-        // background decode resolves the same review while a human approves it, must NOT re-run
-        // applyToCount -> a second count of the same physical item. Matches the open-status guard already
-        // used by liveDecode / backgroundVerifyDeep / cloudCatalogResolve / correctionRecheck.
-        if (!review || review.status !== "open") return;
+        // Idempotency / re-entry guard: only act on a review still AWAITING a decision - OPEN, or a
+        // PENDING inline suggestion ("suggested", Task 9b owner-ratified 2026-07-14: the feed row's
+        // inline approve routes through this exact core, so a parked suggestion must be resolvable
+        // here). A double-click, or a race where a background decode resolves the same review while a
+        // human approves it, must NOT re-run applyToCount -> a second count of the same physical item:
+        // resolved/ignored stays a hard no-op. Matches the open-status guard already used by
+        // liveDecode / backgroundVerifyDeep / cloudCatalogResolve / correctionRecheck.
+        if (!review || (review.status !== "open" && review.status !== "suggested")) return;
 
         if (action === "ignore") {
           set({
@@ -2563,7 +4298,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // never leaves a duplicate product row. `provOrphanId` is that placeholder for THIS review's code;
         // `removeOrphanId` / `orphanTransferTargetId` drive the merge at commit time.
         const countedIdsForOrphan = new Set(state.finalCounts.map((c) => c.productId));
+        // STABLE-ID FIX (kills the prefix-floor placeholder-name collision, task-STABLEID): try the review's
+        // OWN stable `provisionalProductId` FIRST - captured at review-creation/mint time (see the doc
+        // comment on the field in types.ts) and reload-resilient because it is a local product id, never a
+        // barcode/gtin (safe to persist to a customer's disk; survives the customer persist split). This is
+        // bulletproof against name collisions: a prefix-floor placeholder name is BRAND-ONLY
+        // ("<Brand> / product unconfirmed", not code-specific), so two different unresolved codes sharing a
+        // GS1-prefix brand mint the IDENTICAL name - the old name-based fallback below could then attribute
+        // one code's count to the OTHER code's review. A plain id has no such collision.
+        const stableOrphanId =
+          review.provisionalProductId &&
+          state.products.find(
+            (p) => p.id === review.provisionalProductId && countedIdsForOrphan.has(p.id) && p.status !== "archived",
+          )?.id;
         const provOrphanId =
+          stableOrphanId ??
           state.products.find(
             (p) =>
               p.provisional === true &&
@@ -2572,7 +4321,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku]
                 .map((c) => (c ?? "").trim())
                 .includes(review.cleanCode),
-          )?.id ?? null;
+          )?.id ??
+          // BACKWARD-COMPAT NAME FALLBACK: only reached when the review has no usable `provisionalProductId`
+          // (a review persisted/created before this field existed) AND the strict identifier match above
+          // found nothing. A customer's localStorage persist strips a product's `provisional` flag AND its
+          // identifier fields (primaryBarcode/gtin/upc/ean/primarySku - CUSTOMER_SAFE_PRODUCT_FIELDS never
+          // persists them; see scanPersist.ts / sensitiveFields.ts), so for an OLD review minted before the
+          // stable id existed, this reconstructed-name match is the only way left to re-identify the scan's
+          // own placeholder after a reload. Known limitation (accepted, low-likelihood, non-blocking per
+          // task-FINALREVIEW-report.md): a prefix-floor name is brand-only, so this fallback can still
+          // collide for two OLD reviews sharing a prefix-floor brand - closed for every review going forward
+          // by the stable id above.
+          state.products.find(
+            (p) =>
+              countedIdsForOrphan.has(p.id) &&
+              p.status !== "archived" &&
+              p.name === provisionalPlaceholderName(review.cleanCode),
+          )?.id ??
+          null;
         let removeOrphanId: string | null = null;
         let orphanTransferTargetId: string | null = null;
 
@@ -2589,9 +4355,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               .map((c) => (c ?? "").trim())
               .filter(Boolean),
           )];
+          // P5/D5: use the cross-tier-conflict-aware resolver here too so a code that conflicts across
+          // tiers (e.g. an approved alias for one product vs. a verified identifier for another) is
+          // never silently dedup-merged into a single product row. Master slot stays empty on purpose
+          // (GC2/AC6): this dedup guard is a sync helper inside resolveUnknown, not the async
+          // cloudCatalogResolve enrichment path where Phase 5b (Task 4, ~scanStore.ts:2460) wires the
+          // real tenant-vs-master conflict feed via services/catalog/masterCandidates.ts.
           const matchedIds = new Set<string>();
           for (const codeStr of identityCodes) {
-            const res = resolveScanToProduct(cleanScanCode(codeStr), state.products, state.aliases, state.businessId);
+            const res = resolveScanToProductTiered(
+              cleanScanCode(codeStr),
+              { products: state.products, aliases: state.aliases, masterCandidates: [] },
+              state.businessId,
+            );
             if (res.matchType === "conflict") (res.conflictProductIds ?? []).forEach((id) => matchedIds.add(id));
             else if (res.productId) matchedIds.add(res.productId);
           }
@@ -2603,6 +4379,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // which makes resolveScanToProduct miss it and used to mint a duplicate. This is a DETERMINISTIC
           // exact identifier match (never fuzzy name), and it is scoped to products that are ACTIVELY
           // COUNTED, so a markWrong'd product (whose count was removed) is never silently reused.
+          //
+          // B2 FIX (owner-reported, 268-row review, 2026-07-20): raw string equality here missed a
+          // leading-zero GTIN variant of an already-counted identity (848983027580 vs 00848983027580),
+          // minting a duplicate product row instead of aggregating the quantity onto the existing one.
+          // Compare via the SAME canonical-GTIN key universal import already uses (aggKeyFor,
+          // ~scanStore.ts:5282) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
+          // GTIN-shaped code; a non-GTIN-shaped code (e.g. a part number) falls through unchanged, so a
+          // part number's leading zeros still carry meaning and are never canonicalized away.
+          const canon = (c: string): string => c; // TEMP: verify RED
+          const identityCodesCanonical = identityCodes.map(canon);
           const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
           for (const p of state.products) {
             if (!countedProductIds.has(p.id) || p.status === "archived") continue;
@@ -2610,7 +4396,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // exclude it so it never causes a false "multiple products own this identity" conflict.
             if (p.id === provOrphanId) continue;
             const pCodes = [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku].map((c) => (c ?? "").trim()).filter(Boolean);
-            if (pCodes.some((c) => identityCodes.includes(c))) matchedIds.add(p.id);
+            if (pCodes.some((c) => identityCodesCanonical.includes(canon(c)))) matchedIds.add(p.id);
             // BARCODE-IN-NAME DEDUP (P2): a legacy product can carry its barcode ONLY inside the name
             // (e.g. "UPC 029142712886 - Discoverer A/T3"), so the identifier-field check above misses it
             // and re-scanning that barcode mints a duplicate. Reuse it when the scanned code appears as an
@@ -2618,6 +4404,47 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             else if (blobContainsCodeToken(p.name, identityCodes)) matchedIds.add(p.id);
           }
           if (provOrphanId) matchedIds.delete(provOrphanId); // never let the placeholder count as an owner
+
+          // IDENTITY-MERGE (decode ladder Task 9): when the deterministic dedup above finds NO owner, still
+          // check whether this decoded identity is the SAME countable product as one already in the shop, by
+          // canonical GTIN (auto_link) or a fuzzy brand+name match (suggest_link). This links two DIFFERENT
+          // scannable codes that resolve to the same product across encodings, so a second scan increments
+          // the existing row instead of minting a duplicate. Only consider real (active, non-placeholder)
+          // products; the scan's own provisional placeholder is excluded so it is never matched to itself.
+          if (matchedIds.size === 0) {
+            const mergeCandidates = state.products.filter(
+              (p) => p.status !== "archived" && p.id !== provOrphanId && p.provisional !== true,
+            );
+            const merge = findIdentityMerge(mergeCandidates, {
+              gtin: np.gtin ?? null,
+              upc: np.upc ?? null,
+              ean: np.ean ?? null,
+              brand: np.brand ?? null,
+              name: np.name ?? null,
+              specsShort: np.specsShort ?? null,
+              specsFull: np.specsFull ?? null,
+            });
+            if (merge.kind === "auto_link") {
+              // Same product across encodings -> reuse its row (the size===1 path below adds the alias +
+              // counts). Never a duplicate.
+              matchedIds.add(merge.productId);
+              emitAudit({ entityType: "Product", entityId: merge.productId, action: "identity_merge_auto_link", metadata: { code: review.cleanCode } });
+            } else if (merge.kind === "suggest_link") {
+              // Fuzzy match (brand+name, or a plus-generation / tire-size difference) -> NEVER auto-link.
+              // Attach the candidate to the review as a one-tap "link to existing product?" suggestion and
+              // keep it OPEN. The scan already counted provisionally (scan N = count N); this only refuses to
+              // guess the merge. The review keeps its existing provisional placeholder + count untouched.
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, suggestedLinkProductId: merge.productId, decodeStatus: "suggested" as const }
+                    : r,
+                ),
+              }));
+              emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "identity_merge_suggest_link", metadata: { code: review.cleanCode, productId: merge.productId } });
+              return; // stop: do NOT mint a product; wait for the human to confirm the link
+            }
+          }
 
           if (matchedIds.size > 1) {
             // MORE THAN ONE existing product owns this identity -> never guess; keep it in Needs Review
@@ -2679,10 +4506,45 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 products = products.map((p) => {
                   if (p.id !== productId) return p;
                   const updates: Partial<Product> = { verified: true, provisional: false, updatedAt: now(), updatedBy: "human" };
+                  // FALKEN FIX (owner-reported live bug, 2026-07-20): a name-only decode payload (no
+                  // separate brand/category/specsShort/specsFull fields) used to leave every structured
+                  // column blank forever, even though the size/brand/model are cleanly parseable from
+                  // the name itself (e.g. "Falken Azenis RT660 P 245 /40 R18 97W XL BSW"). Route every
+                  // apply through the single shared enrichProductIdentity helper: the payload's own
+                  // structured field always wins; a still-empty field falls back to a deterministic
+                  // parse of the (cleaned) name - never a guess. `enriched.name` is the CLEANED name
+                  // (tireListingNormalizer's cleanListingTitle) - use it wherever np.name would have
+                  // been written raw before.
+                  const enriched = enrichProductIdentity({
+                    payload: { name: np.name ?? p.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
+                    existing: { name: p.name, brand: p.brand, category: p.category, specsShort: p.specsShort, specsFull: p.specsFull },
+                  });
+                  // B1 FIX (owner-reported, 268-row review, 2026-07-20): this re-match/reuse path used to
+                  // drop specsShort/specsFull/primarySku/category entirely - a decode payload's structured
+                  // fields never landed on an existing (already-counted) provisional row, so Brand/Model/
+                  // Category/Specs/Size stayed blank forever once a row was first counted, even when a
+                  // LATER, richer decode re-matched the same physical item. Fill-if-empty ONLY: any field
+                  // this row already carries a non-empty value for (human-entered or from an earlier
+                  // decode) is never clobbered by a weaker/different later suggestion.
                   if (np.name && normName(np.name) !== normName(p.name)) {
-                    updates.name = np.name;
+                    updates.name = enriched.name;
                     if (np.brand !== undefined) updates.brand = np.brand;
                     if (np.category !== undefined) updates.category = np.category;
+                  }
+                  if (!p.category) updates.category = enriched.category;
+                  if (!p.specsShort) updates.specsShort = enriched.specsShort;
+                  if (!p.specsFull) updates.specsFull = enriched.specsFull;
+                  if (!p.primarySku && np.primarySku) updates.primarySku = np.primarySku;
+                  if (!p.brand) updates.brand = enriched.brand;
+                  if (!p.structuredModel && enriched.structuredModel) updates.structuredModel = enriched.structuredModel;
+                  // Task 4: (re)structure only when the name/brand actually changed above; the guard
+                  // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
+                  // the safe wrapper: a structurer throw must never break this scan flow (Task 4 review fix).
+                  Object.assign(updates, safeStructuredFieldsFor(updates.name ?? p.name, updates.brand ?? p.brand, p.structuredBy));
+                  // safeStructuredFieldsFor may return its own structuredModel guess (name-only
+                  // structurer); prefer OUR still-empty fill above when the structurer found nothing.
+                  if (!updates.structuredModel && enriched.structuredModel && !p.structuredModel) {
+                    updates.structuredModel = enriched.structuredModel;
                   }
                   return { ...p, ...updates };
                 });
@@ -2699,18 +4561,33 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             approvingProvisional = true;
             weakGuessProduct = isWeakGuess(review, np) && payload.origin !== "human";
             const orphan = products.find((p) => p.id === provOrphanId)!;
+            // FALKEN FIX (owner-reported live bug, 2026-07-20): this upgrade path used to write
+            // np.brand/np.category/np.specsShort/np.specsFull verbatim with no fallback, so a
+            // name-only decode payload (all structured fields empty) left every structured column
+            // permanently blank even though the size/brand/model are cleanly parseable from the
+            // name. Route through the shared helper: payload field wins when present; a still-empty
+            // field falls back to a deterministic parse of the (cleaned) name - never a guess.
+            const orphanEnriched = enrichProductIdentity({
+              payload: { name: np.name, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
+              existing: { name: orphan.name, brand: orphan.brand, category: orphan.category, specsShort: orphan.specsShort, specsFull: orphan.specsFull },
+            });
             const upgraded: Product = {
               ...orphan,
-              name: np.name ?? orphan.name,
-              brand: np.brand ?? orphan.brand,
-              category: np.category ?? orphan.category,
-              specsShort: np.specsShort ?? orphan.specsShort,
-              specsFull: np.specsFull ?? orphan.specsFull,
+              name: orphanEnriched.name || orphan.name,
+              brand: orphanEnriched.brand,
+              category: orphanEnriched.category,
+              specsShort: orphanEnriched.specsShort,
+              specsFull: orphanEnriched.specsFull,
               primarySku: np.primarySku ?? orphan.primarySku,
               primaryBarcode: orphan.primaryBarcode || review.cleanCode,
-              gtin: np.gtin ?? orphan.gtin,
-              upc: np.upc ?? orphan.upc,
-              ean: np.ean ?? orphan.ean,
+              ...(function () {
+                const gated = gateIdentityBarcodeFields(np);
+                return {
+                  gtin: np.gtin !== undefined ? gated.gtin : orphan.gtin,
+                  upc: np.upc !== undefined ? gated.upc : orphan.upc,
+                  ean: np.ean !== undefined ? gated.ean : orphan.ean,
+                };
+              })(),
               vendorCodes: orphan.vendorCodes ?? [],
               aliases: [review.cleanCode],
               imageUrl: np.imageUrl ?? orphan.imageUrl,
@@ -2722,7 +4599,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               provisional: weakGuessProduct ? true : false,
               updatedAt: now(),
               updatedBy: payload.origin === "human" ? "human" : orphan.updatedBy,
+              // Task 4: structure the upgraded identity (deterministic only, never LLM on the hot
+              // path). Guarded against clobbering a prior "human" stamp.
+              ...safeStructuredFieldsFor(np.name ?? orphan.name, orphanEnriched.brand, orphan.structuredBy),
             };
+            if (!upgraded.structuredModel && orphanEnriched.structuredModel) {
+              upgraded.structuredModel = orphanEnriched.structuredModel;
+            }
             products = products.map((p) => (p.id === provOrphanId ? upgraded : p));
             createdProduct = upgraded;
           } else {
@@ -2736,21 +4619,30 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // NOTE: unlike the two provisional-reuse sites above, this fresh-mint site does NOT gate on
             // origin !== "human" (behavior preserved from before the extraction).
             weakGuessProduct = isWeakGuess(review, np);
+            const mintedName = np.name ?? review.cleanCode;
+            // FALKEN FIX (owner-reported live bug, 2026-07-20): a fresh mint used to take np.brand/
+            // np.category/np.specsShort/np.specsFull verbatim (defaulting to "" when absent) with no
+            // fallback to parse them from the name - exactly the shape of the owner's bug row (a
+            // single fresh scan whose decode payload carried only a name, no separate structured
+            // fields). Route through the shared helper so a still-empty field is deterministically
+            // parsed from the (cleaned) name instead of staying blank forever.
+            const mintEnriched = enrichProductIdentity({
+              payload: { name: mintedName, brand: np.brand, category: np.category, specsShort: np.specsShort, specsFull: np.specsFull },
+            });
+            const mintedBrand = mintEnriched.brand;
             const newProduct: Product = {
               id: productId,
               businessId: state.businessId,
-              name: np.name ?? review.cleanCode,
-              brand: np.brand ?? "",
-              category: np.category ?? "",
-              specsShort: np.specsShort ?? "",
-              specsFull: np.specsFull ?? "",
+              name: mintedName,
+              brand: mintedBrand,
+              category: mintEnriched.category,
+              specsShort: mintEnriched.specsShort,
+              specsFull: mintEnriched.specsFull,
               primarySku: np.primarySku ?? "",
               // Identity = the scanned code, so the product's primaryBarcode and its first approved alias
               // agree (prevents the alias-miss -> identifier-conflict -> re-decode -> duplicate cascade).
               primaryBarcode: review.cleanCode,
-              gtin: np.gtin ?? "",
-              upc: np.upc ?? "",
-              ean: np.ean ?? "",
+              ...gateIdentityBarcodeFields(np),
               vendorCodes: [],
               aliases: [review.cleanCode],
               imageUrl: np.imageUrl ?? "",
@@ -2765,7 +4657,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               updatedAt: now(),
               createdBy: "human",
               updatedBy: "human",
+              // Task 4: fresh mint - always deterministic-structure (no prior stamp to protect).
+              ...safeStructuredFieldsFor(mintedName, mintedBrand),
             };
+            if (!newProduct.structuredModel && mintEnriched.structuredModel) {
+              newProduct.structuredModel = mintEnriched.structuredModel;
+            }
             products = [...products, newProduct];
             createdProduct = newProduct;
           }
@@ -2876,33 +4773,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (removeOrphanId) {
           const oid = removeOrphanId;
           const targetId = orphanTransferTargetId;
-          set((st) => {
-            const orphanRow = st.finalCounts.find((c) => c.productId === oid);
-            const orphanQty = orphanRow?.quantity ?? 0;
-            let finalCounts = st.finalCounts.filter((c) => c.productId !== oid);
-            if (targetId && orphanQty > 0) {
-              const targetRow = finalCounts.find((c) => c.productId === targetId);
-              finalCounts = targetRow
-                ? finalCounts.map((c) =>
-                    c.productId === targetId ? { ...c, quantity: c.quantity + orphanQty, updatedAt: now() } : c,
-                  )
-                : orphanRow
-                  ? [...finalCounts, { ...orphanRow, productId: targetId, updatedAt: now() }]
-                  : finalCounts;
-            }
-            return {
-              finalCounts,
-              scanFeed: st.scanFeed.map((e) =>
-                e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
-              ),
-            };
-          });
+          set((st) => ({
+            finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
+            scanFeed: st.scanFeed.map((e) =>
+              e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
+            ),
+          }));
         }
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
         const queued: PendingSyncItem[] = [];
         if (createdProduct) {
+          // Task 1b fix (same recipe as correctProduct, commit 024c849): in the orphan-merge branch
+          // above, createdProduct.id === provOrphanId - the SAME id ensureProvisionalCount already
+          // enqueued a SAVE_PRODUCT for (scanStore.ts ~3748). A bare
+          // `businessId:sessionId:<id>:SAVE_PRODUCT` key would be identical to that earlier write's key,
+          // so this resolved-identity write would be swallowed as "alreadyApplied" and never reach the
+          // backend - real data loss (the resolved name never syncs, only the placeholder does). Fold a
+          // content fingerprint of the resolved product into the key, minted once here; every retry of
+          // this queue item (drain loop / manual retrySync) replays the same PendingSyncItem object, so
+          // retry dedupe on THIS write is unaffected.
+          const createdFingerprint = `${JSON.stringify(createdProduct)}@${createdProduct.updatedAt}`;
           queued.push(
             makeQueueItem({
               idFactory,
@@ -2913,7 +4805,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               entityId: createdProduct.id,
               operation: "SAVE_PRODUCT",
               payload: createdProduct,
-              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, createdProduct.id, "SAVE_PRODUCT"),
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                state.sessionId,
+                `${createdProduct.id}:${createdFingerprint}`,
+                "SAVE_PRODUCT",
+              ),
               scanEventId: null,
             }),
           );
@@ -3097,10 +4994,209 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // a customer review rehydrated from disk has its rawCode stripped (privacy), but cleanCode is kept
         // and is what the approved alias is keyed on, so the re-scan still matches + counts.
         if (payload.applyToCount && !weakGuessProduct && !approvingProvisional) {
-          get().processScan(review.rawCode || review.cleanCode);
+          // Phase 4: an import-origin review carries importQuantity - the full quantity from the source
+          // row (already aggregated across duplicate codes by applyUniversalImport) must land in one
+          // confirmation, not just 1 unit. A plain scan-born review has no importQuantity, so this stays
+          // the existing single-unit processScan call for every non-import path.
+          const applications = review.importQuantity ?? 1;
+          if (!Number.isSafeInteger(applications) || applications < 0) return;
+          for (let index = 0; index < applications; index += 1) {
+            get().processScan(review.rawCode || review.cleanCode);
+          }
         } else {
           get().syncPending();
         }
+      },
+
+      batchApprove: (reviewIds) => {
+        const approved: string[] = [];
+        const failed: Array<{ id: string; reason: string }> = [];
+        // CHUNK_SIZE is cosmetic bookkeeping only: it slices reviewIds into readable groups for the code
+        // below and gives per-row containment inside a bounded slice (a throw is still caught per-row by
+        // the inner try/catch, chunk or no chunk). It does NOT commit or yield per chunk - there is no
+        // intermediate `set()`/persist between chunks and no `await`/tick boundary, so the whole loop
+        // (all chunks) runs in one synchronous pass and one synchronous state update per row, exactly as
+        // if CHUNK_SIZE were reviewIds.length. It provides no state isolation between chunks and no
+        // resumability if the tab closes mid-loop.
+        const CHUNK_SIZE = 25;
+
+        for (let i = 0; i < reviewIds.length; i += CHUNK_SIZE) {
+          const chunk = reviewIds.slice(i, i + CHUNK_SIZE);
+          for (const reviewId of chunk) {
+            try {
+              const review = get().needsReviewQueue.find((r) => r.id === reviewId);
+              if (!review) {
+                failed.push({ id: reviewId, reason: "Review not found" });
+                continue;
+              }
+              // Idempotent: a review already resolved/ignored (this call or an earlier one) is silently
+              // skipped, exactly like resolveUnknown's own open-status guard - a re-click or a retried
+              // batch never double-counts and is not reported as a failure. Task 9b (owner-ratified
+              // 2026-07-14): a PENDING inline suggestion (status "suggested") is approvable here too -
+              // resolveUnknown accepts it exactly like "open", so the same core path runs unchanged.
+              if (review.status !== "open" && review.status !== "suggested") continue;
+              if (!review.hasSuggestion || !review.suggestedProductName) {
+                failed.push({ id: reviewId, reason: "No suggestion to approve" });
+                continue;
+              }
+              // Task 9b: capture the feed row(s) carrying this suggestion BEFORE resolveUnknown runs
+              // (it may remap the row's matchedProductId), so the inline tag can be settled afterwards.
+              const pendingRowIds = get()
+                .scanFeed.filter(
+                  (e) =>
+                    e.suggestion?.status === "pending" &&
+                    ((e.cleanCode && e.cleanCode === review.cleanCode) ||
+                      (e.matchedProductId && e.matchedProductId === review.provisionalProductId)),
+                )
+                .map((e) => e.id);
+
+              const discovered = buildDiscoveredIdentifiers(review);
+              // TRUST RULE (Build 3 review Finding 1): do NOT pass origin: "human" here. That value disables
+              // the weak-guess poison guard at the two provisional-reuse branches in resolveUnknown
+              // (`isWeakGuess(review, np) && payload.origin !== "human"`), which exists to stop an
+              // evidence-less AI suggestion from becoming a verified product/approved alias. The single-row
+              // "Approve suggestion" button (NeedsReviewTable.tsx) passes NO origin - batch approval must call
+              // resolveUnknown with the IDENTICAL payload shape so the poison guard applies exactly the same
+              // way whether a suggestion is approved one at a time or in bulk.
+              get().resolveUnknown(reviewId, "create_new", {
+                applyToCount: true,
+                newProduct: {
+                  name: review.suggestedProductName,
+                  brand: review.suggestedBrand,
+                  category: review.suggestedCategory,
+                  specsShort: review.suggestedSpecsShort,
+                  primarySku: review.suggestedPrimarySku,
+                  primaryBarcode: review.suggestedPrimaryBarcode || review.cleanCode,
+                  gtin: review.suggestedGtin,
+                  upc: review.suggestedUpc,
+                  ean: review.suggestedEan,
+                  imageUrl: review.suggestedImageUrl,
+                  productUrl: review.suggestedProductUrl,
+                },
+                // Default = every discovered identifier approved, matching the single-approve row's
+                // default UI state (all checked; the human unchecks to exclude) since batch approval
+                // has no per-row checkbox interaction.
+                selectedAliasCodes: discovered.map((d) => d.code),
+              });
+
+              // resolveUnknown silently no-ops on a guard it hit (e.g. a dedup conflict); only count this
+              // row as approved if it actually left the awaiting states (open / suggested).
+              const after = get().needsReviewQueue.find((r) => r.id === reviewId);
+              if (after && after.status !== "open" && after.status !== "suggested") {
+                approved.push(reviewId);
+                // Task 9b: settle the inline tag on the row(s) this suggestion belonged to.
+                if (pendingRowIds.length > 0) {
+                  set((st) => ({
+                    scanFeed: st.scanFeed.map((e) =>
+                      pendingRowIds.includes(e.id) && e.suggestion?.status === "pending"
+                        ? { ...e, suggestion: { ...e.suggestion, status: "approved" as const } }
+                        : e,
+                    ),
+                  }));
+                }
+              } else {
+                // Task 9b: an approve that could NOT auto-resolve (identity-merge suggest_link / dedup
+                // conflict) surfaces honestly in the OPEN queue for the human instead of staying parked,
+                // and the row's dead inline controls are dropped (the review-derived "(suggested)" tag
+                // takes over, exactly the pre-9b display for an open suggestion-bearing review).
+                if (after && after.status === "suggested") {
+                  set((st) => ({
+                    needsReviewQueue: st.needsReviewQueue.map((r) =>
+                      r.id === reviewId && r.status === "suggested" ? { ...r, status: "open" as const } : r,
+                    ),
+                    scanFeed: st.scanFeed.map((e) =>
+                      pendingRowIds.includes(e.id) ? { ...e, suggestion: undefined } : e,
+                    ),
+                  }));
+                }
+                failed.push({ id: reviewId, reason: "Could not resolve automatically - needs manual review" });
+              }
+            } catch (e) {
+              failed.push({ id: reviewId, reason: e instanceof Error ? e.message : String(e) });
+            }
+          }
+        }
+
+        return { approved, failed };
+      },
+
+      // Task 9b (owner-ratified 2026-07-14): inline approve on the feed row. REUSE, never duplicate:
+      // batchApprove -> resolveUnknown "create_new" IS the single-row human-approval path, so the
+      // idempotency-keyed alias write, Phase-2 poison guard, dedup guard, and no-double-count
+      // provisional upgrade are all inherited. The review is located by the row's cleanCode, with the
+      // reload-resilient provisionalProductId fallback (a customer persist strips the event's code).
+      approveSuggestion: (scanEventId) => {
+        const st = get();
+        const ev = st.scanFeed.find((e) => e.id === scanEventId);
+        if (!ev || ev.suggestion?.status !== "pending") return; // idempotent double-tap guard
+        const review = st.needsReviewQueue.find(
+          (r) =>
+            r.status === "suggested" &&
+            ((ev.cleanCode && r.cleanCode === ev.cleanCode) ||
+              (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
+        );
+        if (!review) return;
+        get().batchApprove([review.id]); // settles the row tag itself on success
+      },
+
+      // Task 9b: inline decline ("Not this product"). Order is owner-ratified: rename the counted row
+      // to the prefix floor FIRST (a declined identity never stays on the count; the floor/placeholder
+      // is a naming aid, NEVER a verified identity), and ONLY THEN create/reopen the OPEN Needs Review
+      // item - decline is now the only suggestion path that creates one. reopenNeedsReview is the
+      // existing core: it opens (or creates) the review with the decline reason and clears the
+      // (declined) suggestion fields so the Suggested batch pile can never re-offer it.
+      declineSuggestion: (scanEventId) => {
+        const st = get();
+        const ev = st.scanFeed.find((e) => e.id === scanEventId);
+        if (!ev || ev.suggestion?.status !== "pending") return; // idempotent double-tap guard
+        const review = st.needsReviewQueue.find(
+          (r) =>
+            (r.status === "suggested" || r.status === "open") &&
+            ((ev.cleanCode && r.cleanCode === ev.cleanCode) ||
+              (ev.matchedProductId && r.provisionalProductId === ev.matchedProductId)),
+        );
+        const code = ev.cleanCode || review?.cleanCode || "";
+        const floor = code ? prefixFloorName(code, detectCodeType(code)) : null;
+        const floorName = code ? provisionalPlaceholderName(code) : "Unidentified item";
+        const declineReason = "Suggestion declined by operator - needs a correct name";
+        const prodId = ev.matchedProductId ?? review?.provisionalProductId ?? null;
+        set((s2) => ({
+          products: prodId
+            ? s2.products.map((p) =>
+                p.id === prodId && p.provisional === true && p.verified !== true
+                  ? {
+                      ...p,
+                      name: floorName,
+                      brand: floor?.brand ?? "",
+                      category: "",
+                      specsShort: "",
+                      specsFull: "",
+                      imageUrl: "",
+                      productUrl: "",
+                      confidence: 0,
+                      updatedAt: now(),
+                      updatedBy: "human",
+                    }
+                  : p,
+              )
+            : s2.products,
+          scanFeed: s2.scanFeed.map((e) =>
+            e.id === scanEventId && e.suggestion
+              ? { ...e, suggestion: { ...e.suggestion, status: "declined" as const }, reason: declineReason }
+              : e,
+          ),
+        }));
+        if (code) get().reopenNeedsReview(code, declineReason);
+        get().recordFeedback("product_rejected", { code });
+        emitAudit({
+          entityType: "UnknownCodeReview",
+          entityId: review?.id ?? code,
+          action: "alias_rejected",
+          metadata: { code, kind: "inline_suggestion_declined" },
+        });
+        // F5 bundle-surgery: the declined row was just renamed to the bare/local-floor placeholder above
+        // - if the client-safe lookup found no brand, check for a DERIVED-tier hit asynchronously.
+        if (code && !floor && prodId) get().enrichPrefixFloorLabel(code, prodId);
       },
 
       evaluateLinkMismatch: (reviewId, productId) => {
@@ -3244,11 +5340,33 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!product) return;
         // Whitelist editable, product-facing fields only. Alias trust (approved/verified) is NEVER touched here.
         const safe: Partial<Product> = {};
-        for (const k of ["name", "brand", "category", "specsShort", "specsFull", "primarySku", "imageUrl", "location"] as const) {
-          if (fields[k] !== undefined) safe[k] = fields[k];
+        for (const k of ["name", "brand", "category", "specsShort", "specsFull", "primarySku", "imageUrl", "location", "unitCost"] as const) {
+          if (k === "unitCost") {
+            if (Object.hasOwn(fields, k)) safe.unitCost = fields.unitCost;
+          } else if (fields[k] !== undefined) {
+            safe[k] = fields[k];
+          }
         }
         const updated: Product = { ...product, ...safe, updatedAt: now(), updatedBy: "human" };
-        const key = buildIdempotencyKey(state.businessId, state.sessionId, productId, "SAVE_PRODUCT");
+        // Task 4: a human editing the name or brand is a PERMANENT correction - stamp structuredBy
+        // "human" so no later automatic re-structuring (hot path or the offline backfill) ever
+        // overwrites it. Mirror the corrected brand into structuredBrand so the table's Brand column
+        // (which prefers structuredBrand) reflects the edit immediately rather than a stale value.
+        if (safe.name !== undefined || safe.brand !== undefined) {
+          updated.structuredBy = "human";
+          if (safe.brand !== undefined) updated.structuredBrand = safe.brand;
+        }
+        // Task 1 fix: a SAVE_PRODUCT idempotency key built from businessId:sessionId:productId:SAVE_PRODUCT
+        // alone is identical for every edit to the same product in the same session - MockDb/
+        // FirebaseSyncTarget dedupe on that key, so edit #2 was silently swallowed as "alreadyApplied"
+        // and never persisted. Fold a content fingerprint of THIS edit (the changed field values +
+        // updatedAt, minted once here) into the key so distinct edits mint distinct keys, matching the
+        // existing "${entityId}:<suffix>" pattern used elsewhere in this file (unlink/move/markwrong).
+        // A genuine RETRY never calls this function again - the drain loop replays the exact same
+        // PendingSyncItem object (same key) via db.apply(), so idempotency on repeated network retries
+        // of ONE edit is unaffected.
+        const editFingerprint = `${JSON.stringify(safe)}@${updated.updatedAt}`;
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, `${productId}:${editFingerprint}`, "SAVE_PRODUCT");
         set((s) => ({ products: s.products.map((p) => (p.id === productId ? updated : p)) }));
         enqueueAndSync([
           makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Product", entityId: productId, operation: "SAVE_PRODUCT", payload: updated, idempotencyKey: key, scanEventId: null }),
@@ -3256,7 +5374,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         emitAudit({ entityType: "Product", entityId: productId, action: "product_corrected", metadata: { fields: Object.keys(safe).join(",") } });
       },
 
-      reopenNeedsReview: (cleanCode, reason) => {
+      reopenNeedsReview: (cleanCode, reason, importContext) => {
         const state = get();
         const code = (cleanCode ?? "").trim();
         if (!code) return null;
@@ -3267,13 +5385,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               r.id === existing.id
                 ? {
                     ...r, status: "open", reason, resolvedAt: null, resolvedBy: null, resolutionAction: null,
-                    hasSuggestion: false, suggestedProductName: "", suggestedBrand: "", suggestedCategory: "",
-                    suggestedSpecsShort: "", suggestedSpecsFull: "", suggestedPrimarySku: "", suggestedPrimaryBarcode: "",
+                    hasSuggestion: Boolean(importContext?.suggestion), suggestedProductName: importContext?.suggestion?.name ?? "",
+                    suggestedBrand: importContext?.suggestion?.brand ?? "", suggestedCategory: importContext?.suggestion?.category ?? "",
+                    suggestedSpecsShort: importContext?.suggestion?.specsShort ?? "", suggestedSpecsFull: "",
+                    suggestedPrimarySku: importContext?.suggestion?.primarySku ?? "", suggestedPrimaryBarcode: importContext?.suggestion?.primaryBarcode ?? "",
                     suggestedGtin: "", suggestedUpc: "", suggestedEan: "", suggestedImageUrl: "", suggestedProductUrl: "",
                     suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [], confidence: 0, providerName: "",
                     decodeStatus: "needs_review", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "",
                     correctionRecheckStatus: undefined, correctionRecheckedAt: null, correctionRecheckMissingKeys: undefined,
                     reopenedFromWrong: true,
+                    importQuantity: importContext?.importQuantity,
                   }
                 : r,
             ),
@@ -3284,19 +5405,173 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const review: UnknownCodeReview = {
           id, businessId: state.businessId, sessionId: state.sessionId, rawCode: code, cleanCode: code,
           normalizedCandidates: normalizeCode(code).searchVariants ?? [code],
-          suggestedProductName: "", suggestedBrand: "", suggestedCategory: "", suggestedSpecsShort: "", suggestedSpecsFull: "",
-          suggestedPrimarySku: "", suggestedPrimaryBarcode: "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
+          suggestedProductName: importContext?.suggestion?.name ?? "", suggestedBrand: importContext?.suggestion?.brand ?? "",
+          suggestedCategory: importContext?.suggestion?.category ?? "", suggestedSpecsShort: importContext?.suggestion?.specsShort ?? "",
+          suggestedSpecsFull: "", suggestedPrimarySku: importContext?.suggestion?.primarySku ?? "",
+          suggestedPrimaryBarcode: importContext?.suggestion?.primaryBarcode ?? "", suggestedGtin: "", suggestedUpc: "", suggestedEan: "",
           suggestedImageUrl: "", suggestedProductUrl: "", suggestedAliases: [], sourceUrls: [], verifiedFacts: [], guesses: [],
-          reason, providerName: "", confidence: 0, hasSuggestion: false, decodeStatus: "needs_review",
+          reason, providerName: "", confidence: 0, hasSuggestion: Boolean(importContext?.suggestion), decodeStatus: "needs_review",
           evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheckDecision: "", reopenedFromWrong: true,
           status: "open", createdAt: now(), resolvedAt: null, resolvedBy: null, resolutionAction: null,
           syncStatus: "pending", idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, id, "SAVE_UNKNOWN_SCAN"),
+          importQuantity: importContext?.importQuantity,
         };
         set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
         enqueueAndSync([
           makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "UnknownCodeReview", entityId: id, operation: "SAVE_UNKNOWN_SCAN", payload: review, idempotencyKey: review.idempotencyKey, scanEventId: null }),
         ]);
         return id;
+      },
+
+      applyUniversalImport: (rows) => {
+        get().ensureAutoSession();
+        if (!get().currentSession || get().currentSession?.status !== "active") {
+          throw new Error("Start or unlock an active session before applying this import.");
+        }
+        const summary: UniversalImportApplySummary = { applied: 0, queuedForReview: 0, rejected: 0 };
+
+        // C5 fix (plan-review-mandated): reopenNeedsReview reuses the FIRST review sharing a cleanCode, so
+        // two source rows for the same code would otherwise OVERWRITE importQuantity (last row wins) and
+        // silently drop the earlier row's quantity - or, on the exact path, mint/count the code twice.
+        // Aggregate by resolved code BEFORE any review/count write so each unique code yields exactly one
+        // review/count carrying the TOTAL quantity. Order of first appearance is preserved for the summary.
+        type AggregatedRow = {
+          code: string;
+          /** cleanCode passed to reopenNeedsReview. Equal to `code` except on a divergent-identity
+           *  collision, where it is disambiguated so the two conflicting identities land as TWO separate
+           *  review entries instead of colliding onto one (reopenNeedsReview keys reviews by cleanCode). */
+          reviewCode: string;
+          status: ImportPreviewRow["status"];
+          reason: string;
+          quantity: number;
+          suggestion: { name: string; brand: string; category: string; specsShort: string; primarySku: string; primaryBarcode: string };
+          /** Finding 3 fix (P4 ultra-review HIGH): the resolved identity this aggregate was built from,
+           *  used to detect a DIVERGENT collision (same raw key, different real product) so it is never
+           *  silently merged under the first row's identity. */
+          identitySignature: string;
+        };
+        // Finding 3 fix: two source rows can share the same raw aggregation key (barcode/partNumber/name
+        // fallback) yet resolve to genuinely DIFFERENT products - e.g. two blank-barcode/blank-PN rows
+        // that both fall back to a generic name like "Tire" but carry different candidate identities.
+        // Merging those under the first row's identity silently discards the second row's identity and
+        // misattributes its quantity (resolver-trust law: wrong identity is FAILURE). Compute a resolved
+        // identity signature per row - prefer the matched candidate/catalog identity over raw free text -
+        // and only sum quantities when two rows for the same raw key share that signature. A divergent
+        // collision is routed to its own review entry instead (never merged, never dropped).
+        const identitySignature = (preview: ImportPreviewRow, source: NonNullable<ImportPreviewRow["source"]>): string => {
+          if (preview.candidate?.uid) return `uid:${preview.candidate.uid}`;
+          if (preview.retailCatalogMatch) {
+            return `catalog:${preview.retailCatalogMatch.brand}|${preview.retailCatalogMatch.productName}|${preview.retailCatalogMatch.barcode}`;
+          }
+          // No matched identity at all - fall back to the same brand/name/sku/barcode fields the
+          // suggestion itself is built from, so two rows with materially different suggestions (e.g.
+          // different brand) are treated as different identities even without a corpus match. DEFECT 1
+          // (padded-GTIN equivalence law): a GTIN-shaped barcode is compared by its CANONICAL form so
+          // 086699866707 (UPC-A) and 0086699866707 (zero-padded EAN-13) share one signature; non-GTIN
+          // codes (part numbers) fall through untouched - their leading zeros carry meaning.
+          const sigBarcode = canonicalGtin(source.barcode) ?? source.barcode;
+          return `raw:${source.brand}|${source.partNumber}|${sigBarcode}|${source.name}`;
+        };
+        // DEFECT 1 (padded-GTIN equivalence law): the aggregation MAP key must collapse zero-padded GTIN
+        // encodings of one product onto a single entry. Key on the CANONICAL GTIN when the code is
+        // GTIN-shaped; otherwise fall back to the raw string (a part number is NEVER canonicalized away).
+        // The raw code is still preserved verbatim on the row/alias/product records below.
+        const aggKeyFor = (rawCode: string): string => canonicalGtin(rawCode) ?? rawCode;
+        const aggregated = new Map<string, AggregatedRow>();
+        for (const preview of rows) {
+          if (preview.status === "reject" || !preview.source) {
+            summary.rejected += 1;
+            continue;
+          }
+          const source = preview.source;
+          const rawCode = source.barcode || source.partNumber || source.name;
+          if (!rawCode) {
+            summary.rejected += 1;
+            continue;
+          }
+          const aggKey = aggKeyFor(rawCode);
+          const suggestion = {
+            name: preview.retailCatalogMatch?.productName || preview.candidate?.name || source.expected.name || rawCode,
+            brand: preview.retailCatalogMatch?.brand || preview.candidate?.brand || source.brand,
+            category: preview.retailCatalogMatch?.category || source.category,
+            specsShort: [source.model, source.size].filter(Boolean).join(" "),
+            primarySku: source.partNumber,
+            primaryBarcode: source.barcode,
+          };
+          const signature = identitySignature(preview, source);
+          const existing = aggregated.get(aggKey);
+          if (existing) {
+            if (existing.identitySignature === signature) {
+              // Genuinely the same resolved product - safe to sum (unchanged C5 behavior).
+              existing.quantity += source.quantity;
+              // A later row for the same code never downgrades an already-exact status to fuzzy/review;
+              // an exact match on ANY row for this code is enough to treat the aggregate as exact.
+              if (preview.status === "exact") existing.status = "exact";
+              continue;
+            }
+            // Divergent identity collision: do NOT merge under the first identity and do NOT drop this
+            // row's identity/quantity. Route BOTH the existing aggregate and this row to Needs Review
+            // under distinct keys, each keeping its own quantity, with an honest conflict reason.
+            const conflictReason = "This code maps to more than one product in the file; confirm which.";
+            if (existing.reason !== conflictReason) {
+              existing.status = "review";
+              existing.reason = conflictReason;
+              // Re-key both the map entry and the reviewCode passed to reopenNeedsReview onto a
+              // signature-qualified value, so this aggregate (a) no longer collides in this map with a
+              // future row sharing the same raw key but a third distinct identity, and (b) mints its OWN
+              // review row below instead of colliding with the review keyed on the bare raw code.
+              existing.reviewCode = `${rawCode} (${existing.identitySignature})`;
+              aggregated.delete(aggKey);
+              aggregated.set(`${aggKey} ${existing.identitySignature}`, existing);
+            }
+            aggregated.set(`${aggKey} ${signature}`, {
+              code: rawCode,
+              reviewCode: `${rawCode} (${signature})`,
+              status: "review",
+              reason: conflictReason,
+              quantity: source.quantity,
+              suggestion,
+              identitySignature: signature,
+            });
+            continue;
+          }
+          aggregated.set(aggKey, { code: rawCode, reviewCode: rawCode, status: preview.status, reason: preview.reason, quantity: source.quantity, suggestion, identitySignature: signature });
+        }
+
+        get().snapshotCount("Before universal import");
+        for (const row of aggregated.values()) {
+          const reviewId = get().reopenNeedsReview(row.reviewCode, row.reason, {
+            importQuantity: row.quantity,
+            suggestion: row.suggestion,
+          });
+          if (!reviewId) {
+            summary.rejected += 1;
+            continue;
+          }
+          if (row.status !== "exact") {
+            summary.queuedForReview += 1;
+            continue;
+          }
+          get().resolveUnknown(reviewId, "create_new", {
+            origin: "human",
+            applyToCount: true,
+            newProduct: {
+              name: row.suggestion.name,
+              brand: row.suggestion.brand,
+              category: row.suggestion.category,
+              specsShort: row.suggestion.specsShort,
+              primarySku: row.suggestion.primarySku,
+              primaryBarcode: row.suggestion.primaryBarcode || row.code,
+            },
+          });
+          if (get().needsReviewQueue.find((review) => review.id === reviewId)?.status === "resolved") {
+            summary.applied += 1;
+          } else {
+            summary.queuedForReview += 1;
+          }
+        }
+        get().snapshotCount("After universal import");
+        return summary;
       },
 
       markWrong: async (productId, opts) => {
@@ -3352,13 +5627,122 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               : e,
           ),
         }));
-        // 3. Remove the session count (product + now-deactivated aliases are kept for audit/repair).
+        // 3. Transfer the wrong product's physical quantity to a SAFE "Unidentified item" provisional
+        //    keyed by the representative scanned code, then reopen review. Total physical quantity is
+        //    INVARIANT across any identity correction (North-star #2): the items are still on the
+        //    shelf; only their identity was wrong.
+        const code = seenCodes[0] || product?.primaryBarcode || "";
         if (count) {
+          const wrongQty = count.quantity;
+          // (a) Remove the wrong count row FIRST. ensureProvisionalCount's idempotency guard
+          //     (scanStore.ts:2952) short-circuits when any CURRENTLY-COUNTED product carries this
+          //     code in its identifier fields - the wrong product still does (step 1b un-verifies but
+          //     does not blank primaryBarcode). Its `counted` set is built from finalCounts, so removing
+          //     the row here is what lets the mint below proceed.
           set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.productId !== productId) }));
-          emitAudit({ entityType: "InventoryCount", entityId: count.id, action: "count_removed", metadata: { productId, quantity: count.quantity, reason: "marked_wrong" } });
+          if (code && wrongQty > 0) {
+            // (b) Mint + count the Unidentified provisional off the first reopened feed row (step 2
+            //     already reset the wrong product's rows to matchedProductId: null / needs_review, which
+            //     is exactly the shape ensureProvisionalCount's feed lookup matches). Task 2's D1 repair
+            //     makes this mint enqueue SAVE_PRODUCT + SAVE_SCAN_EVENT + INCREMENT_COUNT too.
+            //     TASK 9 FIX (provisional-wrong inflation): the mint target id comes from
+            //     ensureProvisionalCount's own return, NEVER re-derived via an unordered
+            //     products.find on primaryBarcode. When the marked-wrong product is ITSELF a
+            //     provisional, the old find matched it (its primaryBarcode is never blanked) and the
+            //     repoint loop re-counted the same physical scans on the OLD row while the mint had
+            //     already counted one event on the NEW row - inflating the total. The id-keyed lookup
+            //     below is deterministic; excluding productId is defense in depth so the repoint can
+            //     never target the product being corrected away from.
+            const mintedId = get().ensureProvisionalCount(code, `Marked wrong - re-identify. Previous match "${product?.name ?? ""}" removed.`);
+            const provRow = get().products.find(
+              (p) => p.id === mintedId && p.id !== productId && p.provisional === true && p.status !== "archived",
+            );
+            if (provRow) {
+              // (c) Repoint every REMAINING reopened feed event for this code onto the provisional and
+              //     apply each through the ledger (incrementInventoryCount dedupes by event id), stamping
+              //     the same-fact quantityDelta: 1 on the row. The transferred quantity is carried by
+              //     REAL events - the ledger replay reproduces it exactly (North-star #2).
+              const pending = get().scanFeed.filter(
+                (e) => e.cleanCode === code && e.matchedProductId === null && e.status === "needs_review",
+              );
+              for (const ev2 of pending) {
+                const stNow = get();
+                const cur = stNow.finalCounts.find((c) => c.productId === provRow.id);
+                if (cur?.scanEventIds.includes(ev2.id)) continue;
+                const r = incrementInventoryCount(
+                  stNow.finalCounts,
+                  { ...ev2, matchedProductId: provRow.id, status: "known", quantityDelta: 1 },
+                  idFactory,
+                );
+                set((s2) => ({
+                  finalCounts: r.counts,
+                  scanFeed: s2.scanFeed.map((e) =>
+                    e.id === ev2.id
+                      ? { ...e, matchedProductId: provRow.id, status: "known" as const, quantityDelta: 1, quantityAfterScan: r.count.quantity }
+                      : e,
+                  ),
+                }));
+              }
+              // (d) Feed-trim safety net: if the wrong count carried MORE events than the current feed
+              //     exposes (a persist-trimmed feed), carry the residual on a SYNTHETIC BACKING EVENT
+              //     appended to the feed and applied through the ledger - NEVER a naked quantity bump.
+              //     replayLedgerCounts rebuilds counts from feed events only, so a bare `quantity +=`
+              //     would be quantity no replay can reproduce - the exact invariant this phase exists
+              //     to guarantee. On a complete feed (every unit test + normal sessions) the repoint
+              //     loop above accounts for everything, missing is 0, and this mints nothing.
+              const applied = get().finalCounts.find((c) => c.productId === provRow.id)?.quantity ?? 0;
+              const missing = wrongQty - applied;
+              if (missing > 0) {
+                const residualId = idFactory();
+                const residualEvent: ScanEvent = {
+                  id: residualId,
+                  businessId: state.businessId,
+                  sessionId: state.sessionId,
+                  rawCode: code,
+                  cleanCode: code,
+                  normalizedCandidates: [],
+                  matchedProductId: provRow.id,
+                  matchType: "unknown",
+                  // status "known" (counted) + resolverStatus "needs_review" (identity unresolved) is
+                  // the deliberate pairing for a counted-but-unidentified row: the transferred quantity
+                  // must land on the ledger now, while identity stays open for human resolution.
+                  status: "known",
+                  resolverStatus: "needs_review",
+                  codeType: detectCodeType(code),
+                  reason: "markWrong residual repoint (feed trimmed by persist).",
+                  quantityDelta: missing,
+                  quantityAfterScan: 0,
+                  createdAt: now(),
+                  source: "scan",
+                  notes: "markWrong residual repoint (feed trimmed by persist).",
+                  syncStatus: "pending",
+                  syncError: null,
+                  idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, residualId, "INCREMENT_COUNT"),
+                };
+                const rr = incrementInventoryCount(get().finalCounts, residualEvent, idFactory);
+                residualEvent.quantityAfterScan = rr.count.quantity;
+                set((s2) => ({
+                  scanFeed: [residualEvent, ...s2.scanFeed],
+                  finalCounts: rr.counts,
+                }));
+                // Enqueue the synthetic event like any counted scan (SAVE_SCAN_EVENT + INCREMENT_COUNT).
+                // Without this, the derived syncStatus reconcile (scanStore.ts:907-922) would report an
+                // event absent from pendingSyncQueue as "synced" - re-minting the exact fake-synced
+                // class Task 2 killed. No SAVE_PRODUCT here: ensureProvisionalCount already enqueued it.
+                const residualInc: IncrementPayload = {
+                  businessId: state.businessId, sessionId: state.sessionId, productId: provRow.id,
+                  scanEventId: residualId, quantityDelta: missing, idempotencyKey: residualEvent.idempotencyKey,
+                };
+                enqueueAndSync([
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "ScanEvent", entityId: residualId, operation: "SAVE_SCAN_EVENT", payload: residualEvent, idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, residualId, "SAVE_SCAN_EVENT"), scanEventId: residualId }),
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "InventoryCount", entityId: rr.count.id, operation: "INCREMENT_COUNT", payload: residualInc, idempotencyKey: residualEvent.idempotencyKey, scanEventId: residualId }),
+                ]);
+              }
+            }
+          }
+          emitAudit({ entityType: "InventoryCount", entityId: count.id, action: "count_transferred", metadata: { productId, quantity: wrongQty, toCode: code, reason: "marked_wrong" } });
         }
         // 4. Reopen Needs Review for the representative scanned code.
-        const code = seenCodes[0] || product?.primaryBarcode || "";
         const reviewId = code
           ? get().reopenNeedsReview(code, `Marked wrong by owner. Previous match ${product?.name ? `"${product.name}"` : ""} removed - re-identify the product.`)
           : null;
@@ -3409,8 +5793,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             patch({
               correctionRecheckStatus: status, correctionRecheckedAt: now(),
               suggestedProductName: best.productName, suggestedBrand: best.brand, suggestedCategory: best.category,
-              suggestedSpecsShort: best.specsShort, suggestedPrimarySku: best.primarySku, suggestedPrimaryBarcode: best.primaryBarcode,
-              suggestedGtin: best.gtin, suggestedUpc: best.upc, suggestedEan: best.ean, suggestedAliases: best.aliases ?? [],
+              suggestedSpecsShort: best.specsShort, suggestedPrimarySku: best.primarySku,
+              suggestedPrimaryBarcode: scrubSuggestedBarcode(best.primaryBarcode, best.primarySku),
+              suggestedGtin: scrubSuggestedBarcode(best.gtin, best.primarySku),
+              suggestedUpc: scrubSuggestedBarcode(best.upc, best.primarySku),
+              suggestedEan: scrubSuggestedBarcode(best.ean, best.primarySku),
+              suggestedAliases: best.aliases ?? [],
               sourceUrls: best.sourceUrls ?? [], verifiedFacts: best.verifiedFacts ?? [], guesses: best.guesses ?? [],
               hasSuggestion: true, decodeStatus: "verified", confidence: decision?.confidence ?? best.confidence ?? 0,
               evidenceStrength: decision?.evidenceStrength ?? "none", exactCodeEvidenceVerifiedByApp: Boolean(decision?.exactCodeEvidenceVerifiedByApp),
@@ -3445,6 +5833,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           idFactory,
           now,
         });
+        applyImportedUnitCosts(rows, plan.products);
 
         if (plan.products.length > 0 || plan.aliases.length > 0) {
           set((s) => ({ products: [...s.products, ...plan.products], aliases: [...s.aliases, ...plan.aliases] }));
@@ -3822,18 +6211,23 @@ const appDeps: ScanStoreDeps = {
         const retailRepo = catalogRepository(getDb(), "retailCatalogEntries"); // SEPARATE retail catalog (Open Food Facts)
         const nowIso = new Date().toISOString();
         // toStoreEntry: map the minimal db/types.ts CatalogEntry shape -> the full catalogTypes CatalogEntry
-        // shape that the store/resolver expects, via sanitizeCatalogEntry (fills in all required defaults).
-        const toStoreEntry = (raw: { id: string; normalizedBarcode: string; name?: string; brand?: string; category?: string; verificationStatus?: string }) =>
-          sanitizeCatalogEntry(
-            { barcode: raw.normalizedBarcode, normalizedBarcode: raw.normalizedBarcode, name: raw.name ?? "", brand: raw.brand, category: raw.category },
-            { now: nowIso, verificationStatus: raw.verificationStatus === "verified" ? "verified" : raw.verificationStatus === "conflict" ? "conflict" : "pending", verifiedBy: null, by: "trusted_source" },
-          );
+        // shape that the store/resolver expects (toMasterAwareStoreEntry, services/catalog/sanitizeCatalog.ts).
+        // Phase 5b Task 4 (GC4 boundary): the tire-master hit ALSO passes raw.id / raw.provenanceTier
+        // through onto the store entry's optional masterId/masterProvenanceTier fields, so
+        // cloudCatalogResolve can build master candidates for the cross-tier conflict check below.
+        // Fix (review HIGH, retail provenance): masterId/masterProvenanceTier are tagged ONLY for hits
+        // from the TIRE master catalog (the default `repo`, collection catalogEntries) - see
+        // toMasterAwareStoreEntry's isMaster param. The retail catalog (`retailRepo`, Open Food Facts)
+        // is a SEPARATE, non-master collection; tagging its hits would run them through the tire-master
+        // conflict machinery with a defaulted "corpus_verified" tier they never earned.
+        const toStoreEntry = (raw: { id: string; normalizedBarcode: string; name?: string; brand?: string; category?: string; verificationStatus?: string; provenanceTier?: ProvenanceTier }, isMaster = false) =>
+          toMasterAwareStoreEntry(raw, isMaster, nowIso);
         let firstAny: CatalogEntry | null = null;
         for (const code of codes) {
           try {
             const raw = await repo.getByBarcode(code);
             if (raw) {
-              const entry = toStoreEntry(raw);
+              const entry = toStoreEntry(raw, true);
               if (entry.verificationStatus === "verified") return entry;
               if (!firstAny) firstAny = entry;
             }
@@ -3842,9 +6236,10 @@ const appDeps: ScanStoreDeps = {
           }
           try {
             // RETAIL catalog (Open Food Facts) - a hit IS the product identity, so resolve it as Known
-            // (mirrors the tire catalog behavior). Separate collection; never mixed with tires.
+            // (mirrors the tire catalog behavior). Separate collection; never mixed with tires. NOT the
+            // master catalog - never tagged with masterId/masterProvenanceTier (see toStoreEntry above).
             const rraw = await retailRepo.getByBarcode(code);
-            if (rraw) return toStoreEntry({ ...rraw, verificationStatus: "verified" });
+            if (rraw) return toStoreEntry({ ...rraw, verificationStatus: "verified" }, false);
           } catch {
             // swallow per-code errors; try the next candidate
           }
@@ -3857,36 +6252,141 @@ const appDeps: ScanStoreDeps = {
   persistName: "sis-scan-v1",
 };
 
+// v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
+// We cannot reliably tell poisoned from good learned data, so reset products/aliases to clean
+// verified seed and clear session/queues. User settings are preserved (merged with new
+// defaults). Use the in-app "Clear local cache" button for a full wipe including the mock DB.
+// v4 (Sec-4): the customer-data wipe of any legacy sensitive localStorage keys (aliases/catalog/
+// raw codes) is enforced by the role-aware `partialize` below on the first post-hydration write
+// (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
+// v5: auto-purge the poisoned duplicates (e.g. the ~235 "Manstel rivet kit" rows saved on the
+// non-matching code 745125495781) by resetting products/aliases to clean verified seed on next load.
+// v6 (Task 4 backfill): THIS APP HAS NO SERVER-SIDE PRODUCT JSON/DB IN LOCAL/MOCK MODE - products
+// live ONLY in this persisted browser state, so the "backfill" for real users runs here, at next
+// load, instead of a script touching a file. Unlike v3/v5, a version-5 install is NOT reset (its
+// products are real, not poisoned) - existing rows are kept and simply gain structured fields via
+// the same skip-human-stamped rule as scripts/polish-backfill.mts (see backfillProducts.ts, shared
+// by both). Only installs older than v5 still get the full poison-cleanup reset (unchanged), with
+// structuring applied to the resulting seed as a no-op convenience.
+//
+// v7 (Task 3.5): adds `countSnapshots` (rolling variance/shrinkage-report history, capped at 12 by
+// snapshotCount). No prior version persisted this field, so every install - reset (<5) or additive
+// (>=5) - simply needs it defaulted to []. An install that already has a countSnapshots array (e.g.
+// a fresh v7 write, or a future migrate step run twice) keeps it untouched: never clobber real data.
+//
+// v9 (Phase 4 Task 10): adds `UnknownCodeReview.importQuantity` (optional). No migrate transform is
+// needed - the field is undefined-safe on every existing persisted review, and the v8 rule (never
+// inject an absent needsReviewQueue/products/etc. key into a partial blob) already holds unchanged.
+//
+// Exported (Task 4 polish-review fix) so a unit test can call this directly with a v5 persisted-state
+// fixture and assert every field survives the migration untouched, without spinning up the full
+// zustand persist/localStorage machinery.
+export function scanStoreMigrate(persisted: unknown, version: number) {
+  const p = (persisted ?? {}) as Record<string, unknown>;
+  const existingSnapshots = Array.isArray(p.countSnapshots) ? p.countSnapshots : [];
+  if (version < 5) {
+    const fresh = getSeed();
+    return {
+      ...p,
+      products: backfillProducts(fresh.products).products,
+      aliases: fresh.aliases,
+      scanFeed: [],
+      finalCounts: [],
+      needsReviewQueue: [],
+      pendingSyncQueue: [],
+      syncedScanEventIds: [],
+      countSnapshots: existingSnapshots,
+      settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
+    } as never;
+  }
+  // Non-destructive branch (v5..v9 -> v10): transform ONLY keys the persisted blob actually carries.
+  // A PARTIAL blob (e.g. the e2e fixture's settings-only seed) must not gain products/scanFeed/
+  // countSnapshots/settings/needsReviewQueue keys here - injected empties clobber the seeded initial
+  // state when zustand merges the migrated blob over it. Live-caught P2 regression: the v7->v8 bump made
+  // this branch run on the settings-only e2e blob for the first time, products became [] while aliases
+  // survived, so known scans counted but the count table lost every product row ("No counts yet"). The
+  // v8->v9 bump (Phase 4 Task 10, UnknownCodeReview.importQuantity) does not need its own key transform -
+  // an absent field on old persisted reviews just stays absent (optional, undefined-safe) - so this
+  // branch's existing non-injective shape already satisfies the v9 rule unchanged. The v9->v10 bump
+  // (Task 2, owner-reported live bug, 2026-07-20) reuses this SAME `backfillProducts` call below - it
+  // now also runs the enrichProductIdentity fill-if-empty pass (see backfillProducts.ts), so a legacy
+  // row's blank brand/category/specsShort/specsFull gets filled from its parseable name, exactly once.
+  const out: Record<string, unknown> = { ...p };
+  if (Array.isArray(p.products)) {
+    out.products = backfillProducts(p.products as Product[]).products;
+  }
+  if (Array.isArray(p.scanFeed)) {
+    // P1-handoff fold-in: legacy v7 feed rows may carry a literal quantityDelta:0 (pre-D1).
+    // applyScanEventOnce's `?? 1` does not correct a non-nullish 0, so normalize here where the
+    // persisted blob is rebuilt.
+    out.scanFeed = (p.scanFeed as Array<{ quantityDelta?: number }>).map((row) =>
+      row && row.quantityDelta === 0 ? { ...row, quantityDelta: 1 } : row,
+    );
+  }
+  // countSnapshots stays UNCONDITIONAL by documented contract (varianceSnapshot.store.test.ts: pre-
+  // snapshot blobs migrate to []). Safe to inject: the initial state is empty too, unlike products.
+  out.countSnapshots = existingSnapshots;
+  if (p.settings !== undefined) {
+    out.settings = { ...DEFAULT_SETTINGS, ...(p.settings as Partial<Settings>) };
+  }
+  // v13 self-heal ("if it is resolved, it does not go to review"): an install that hit the old bug
+  // (resolveUnknown silently no-op'd on a genuinely settled decode - the fuzzy identity-merge
+  // suggest_link path or a dedup conflict - leaving the review "open"/"suggested" forever) gets a
+  // one-time stamp here. "Identity already settled" reuses the EXACT two feed-status signals the app
+  // itself already treats as settled elsewhere in this file: a scanFeed row for the same cleanCode with
+  // status "resolved" (the resolveUnknown relink write, ~scanStore.ts:4738-4743 - implies a real
+  // matchedProductId was assigned) or decodeStatus "verified" (markFeedRowVerified, only ever written
+  // after resolveUnknown actually resolved the review - see the "never leave a 'Verified AI Decode +
+  // Unknown' feed row" guard at ~scanStore.ts:3401-3408). Only needsReviewQueue rows are mutated here;
+  // scanFeed and finalCounts are read-only inputs and are never touched by this step. Never injects an
+  // absent needsReviewQueue key into a partial blob (same v8 rule as the rest of this branch).
+  if (Array.isArray(p.needsReviewQueue)) {
+    const feed = Array.isArray(p.scanFeed) ? (p.scanFeed as Array<{ cleanCode?: string; status?: string; decodeStatus?: string }>) : [];
+    const settledCleanCodes = new Set(
+      feed
+        .filter((e) => e && (e.status === "resolved" || e.decodeStatus === "verified"))
+        .map((e) => e.cleanCode)
+        .filter((c): c is string => Boolean(c)),
+    );
+    out.needsReviewQueue = (p.needsReviewQueue as Array<{ cleanCode?: string; status?: string }>).map((r) =>
+      r && (r.status === "open" || r.status === "suggested") && r.cleanCode && settledCleanCodes.has(r.cleanCode)
+        ? { ...r, status: "resolved" as const, resolvedAt: new Date().toISOString(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+        : r,
+    );
+  }
+  return out as never;
+}
+
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: "sis-scan-v1",
-    version: 5,
-    storage: createJSONStorage(() => localStorage),
+    // Task 2 (owner-reported live bug, 2026-07-20): v9 -> v10 bump so every existing install runs
+    // the identity-field backfill (enrichProductIdentity fill-if-empty, see backfillProducts.ts)
+    // exactly once on next load - a legacy row's blank brand/category/specsShort/specsFull gets
+    // filled from its parseable name via the same non-destructive >= 5 migrate branch below.
+    // Group C item 11 (owner mandate 2026-07-21): v10 -> v11 bump so every existing install also
+    // re-cleans a legacy JUNKY product name into the app's own canonical display form exactly once
+    // (see scanStoreMigrate's v11 name re-clean step below).
+    // Bug 4 fix (owner mandate 2026-07-21, 310-row review): v11 -> v12 bump so every existing install
+    // ALSO re-runs backfillProducts once more to dedupe a brand-duplicated name that an earlier
+    // enrichment/backfill pass baked in before canonicalTireDisplayName/enrichProductIdentity learned
+    // to collapse duplicate brand-token runs (e.g. "Greenball Greenball Greenball Tow-Master"). The
+    // >= 5 migrate branch below already calls backfillProducts unconditionally on every hydrate whose
+    // persisted version is below `version`, so this bump alone is sufficient - no separate v12 step
+    // needed (backfillProducts itself now dedupes via the fixed canonicalTireDisplayName).
+    // "Resolved never lingers in review" fix: v12 -> v13 bump so an install stuck with the old bug
+    // (resolveUnknown silently no-op'd on a genuinely settled decode, leaving the review "open"/
+    // "suggested" forever) gets a one-time self-heal on next load - see scanStoreMigrate's v13 step.
+    version: 13,
+    // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
+    // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
+    // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
+    // until localStorage was cleared). This wrapper fails SOFT (never throws out of a scan) and COALESCES
+    // the ~6 writes/scan into one per tick (flushed on pagehide/visibilitychange so nothing is lost).
+    // See scanPersistStorage.ts. IndexedDB migration remains the recommended architectural follow-up.
+    storage: createJSONStorage(() => createCoalescedFailSoftStorage(() => localStorage)),
     skipHydration: true,
-    // v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
-    // We cannot reliably tell poisoned from good learned data, so reset products/aliases to clean
-    // verified seed and clear session/queues. User settings are preserved (merged with new
-    // defaults). Use the in-app "Clear local cache" button for a full wipe including the mock DB.
-    // v4 (Sec-4): the customer-data wipe of any legacy sensitive localStorage keys (aliases/catalog/
-    // raw codes) is enforced by the role-aware `partialize` below on the first post-hydration write
-    // (which defaults to the customer-safe shape until the user is proven to be the platformOwner).
-    // v5: auto-purge the poisoned duplicates (e.g. the ~235 "Manstel rivet kit" rows saved on the
-    // non-matching code 745125495781) by resetting products/aliases to clean verified seed on next load.
-    migrate: (persisted: unknown) => {
-      const p = (persisted ?? {}) as Record<string, unknown>;
-      const fresh = getSeed();
-      return {
-        ...p,
-        products: fresh.products,
-        aliases: fresh.aliases,
-        scanFeed: [],
-        finalCounts: [],
-        needsReviewQueue: [],
-        pendingSyncQueue: [],
-        syncedScanEventIds: [],
-        settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
-      } as never;
-    },
+    migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
     // code database (aliases / global catalog / shop overrides / barcodes / raw+clean+normalized codes /
     // decode traces). The level is computed from the signed-in uid (same source of truth as the UI), and

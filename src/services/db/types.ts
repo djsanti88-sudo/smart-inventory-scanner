@@ -1,6 +1,8 @@
 // Firebase/Firestore domain model for the Launch MVP backend foundation. Every business-scoped document
 // carries businessId + createdAt/updatedAt. These are the shapes the typed repositories read/write.
 
+import type { ProvenanceTier } from "@/types";
+
 export type Role = "owner" | "admin" | "counter" | "viewer";
 
 export interface Business {
@@ -154,6 +156,10 @@ export interface CatalogEntry {
   brand?: string;
   category?: string;
   verificationStatus?: "verified" | "pending" | "conflict";
+  // GC5 (P5b): mirrors Product.provenanceTier (src/types.ts:89-94). Master-truth appends (P5b Task 1)
+  // stamp "ladder_verified_strong" for a strong app-verified ladder decode; no other tier is minted by
+  // this phase. Optional so every pre-existing CatalogEntry (no tier yet) stays valid.
+  provenanceTier?: ProvenanceTier;
   createdAt?: unknown;
   updatedAt?: unknown;
 }

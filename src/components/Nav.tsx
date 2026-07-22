@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
-import { signOut } from "@/lib/auth";
+import { runSignOutFlow } from "@/services/auth/signOutFlow";
+import { isLiveAuth } from "@/services/auth/authMode";
 
 // App navigation. Shows an open-review count badge so unknown codes are obvious but not disruptive.
 export function Nav() {
@@ -13,8 +14,10 @@ export function Nav() {
 
   const links = [
     { href: "/scan", label: "Scan" },
+    { href: "/history", label: "History" },
     { href: "/products", label: "Products" },
     { href: "/review", label: "Review", badge: openReviews },
+    { href: "/reconcile", label: "Reconcile" },
     { href: "/settings", label: "Settings" },
   ];
 
@@ -46,14 +49,12 @@ export function Nav() {
             </Link>
           );
         })}
-        {process.env.NEXT_PUBLIC_REQUIRE_LOGIN === "1" && (
+        {isLiveAuth() && (
           <button
             type="button"
-            onClick={async () => {
-              if (!window.confirm("Log out now? Your counts are saved - you can sign back in any time to keep going.")) return;
-              await signOut();
-              router.replace("/login");
-            }}
+            // F1/C1: the ONE shared sign-out flow (honest unsynced warning + full tenant wipe + signOut +
+            // redirect). Settings' Sign out button calls the same helper so the two can never drift.
+            onClick={() => void runSignOutFlow(() => router.replace("/login"))}
             className="ml-auto inline-flex min-h-[44px] items-center rounded-lg px-4 text-base font-medium text-zinc-700 hover:bg-zinc-50"
           >
             Log out

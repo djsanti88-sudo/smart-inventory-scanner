@@ -55,16 +55,22 @@ export const CUSTOMER_SAFE_REVIEW_FIELDS = [
   "suggestedProductName", "suggestedBrand", "suggestedCategory", "suggestedSpecsShort", "suggestedImageUrl",
   "reason", "blockingReasons", "hasSuggestion", "decodeStatus", "status",
   "createdAt", "resolvedAt", "resolvedBy", "resolutionAction", "syncStatus", "idempotencyKey",
+  // STABLE-ID FIX: a LOCAL product id (not a barcode/gtin/reusable code), safe to persist - lets
+  // resolveUnknown re-link this review's own provisional placeholder by id after a customer reload
+  // instead of by reconstructed name (which collides when two codes share a prefix-floor brand).
+  "provisionalProductId",
+  "importQuantity",
 ] as const;
 
 // A customer's OWN scan-feed event survives reload as an activity log (Product, Qty after, Status, Reason,
-// Saved). It deliberately EXCLUDES cleanCode: a MATCHED feed row maps a known code -> product, and a growing
-// list of those is a slice of the reusable code->product database, which must never persist to a customer
-// browser (Sec-4 leak guard). The product name + qty are what the customer needs after a reload; the raw
-// code is on the physical item and is shown live during the session. Also excludes rawCode,
-// normalizedCandidates, matchType, codeType, decodeNote, notes, syncError (platform-only decode traces).
+// Saved, Barcode). INCLUDES cleanCode: the code on THIS row is the shop's own physical scan of its own
+// label - the shop's own data, not a foreign tenant's - so it must survive reload the same way Needs
+// Review already keeps it (CUSTOMER_SAFE_REVIEW_FIELDS) at this same access level (QA fix #15: without it
+// the audit trail loses what was physically scanned after a reload). This is NOT the reusable code->product
+// alias/catalog database: that stays excluded via rawCode, normalizedCandidates, matchType, codeType,
+// decodeNote, notes, syncError (platform-only decode traces + internal formatting) which remain stripped.
 export const CUSTOMER_SAFE_SCANEVENT_FIELDS = [
-  "id", "businessId", "sessionId", "matchedProductId",
+  "id", "businessId", "sessionId", "matchedProductId", "cleanCode", "location",
   "status", "resolverStatus", "reason", "quantityDelta", "quantityAfterScan",
   "decodeStatus", "syncStatus", "createdAt", "source", "idempotencyKey",
 ] as const;

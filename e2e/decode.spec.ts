@@ -151,7 +151,10 @@ test("live decode: verified vs suggested vs conflict vs vendor label, all mocked
 
   // Human approves the verified decode -> creates a verified product + approved alias.
   await page.getByTestId("review-row-049000111222").getByTestId("approve-suggestion").click();
-  await expect(page.getByTestId("review-row-049000111222")).toContainText("Resolved");
+  // Owner rule (fc2188a, 2026-07-01, predates this test's last update): Needs Review hides items that
+  // are already resolved AND synced, so the row disappears from the queue entirely instead of lingering
+  // with a "Resolved" badge.
+  await expect(page.getByTestId("review-row-049000111222")).toHaveCount(0);
   await page.screenshot({ path: `${PROOF}/decode-02-approved.png`, fullPage: true });
 
   // Re-scan the approved code: deterministic Known, and it triggers ZERO AI calls.

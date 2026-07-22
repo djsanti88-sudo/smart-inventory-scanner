@@ -108,7 +108,7 @@ describe("retail catalog resolution (827e398): recoverable -> Known, unsafe -> s
     expect(prov).toBeDefined();
     expect(prov!.provisional).toBe(true);
     expect(prov!.verified).toBe(false);
-    expect(store.getState().needsReviewQueue.at(-1)?.status).toBe("open");
+    expect(store.getState().needsReviewQueue.at(-1)?.status).toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === WATER_CODE)?.verificationStatus).not.toBe("verified");
   });
 });

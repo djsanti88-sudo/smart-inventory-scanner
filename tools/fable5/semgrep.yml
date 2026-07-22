@@ -1,0 +1,35 @@
+rules:
+  - id: fable5-no-dynamic-code-execution
+    message: Dynamic code execution is unsafe and blocks trustworthy local review.
+    languages: [javascript, typescript]
+    severity: ERROR
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+
+  - id: fable5-review-child-process-exec
+    message: Shell-string execution needs manual review; prefer argument arrays and no shell.
+    languages: [javascript, typescript]
+    severity: WARNING
+    pattern-either:
+      - patterns:
+          - pattern-inside: |
+              import { ..., exec, ... } from "node:child_process";
+              ...
+          - pattern: exec(...)
+      - patterns:
+          - pattern-inside: |
+              import { ..., exec, ... } from "child_process";
+              ...
+          - pattern: exec(...)
+
+  - id: fable5-cap-single-charge
+    message: New checkAndIncrementDaily callers can double-charge the legacy daily cap.
+    languages: [typescript]
+    severity: ERROR
+    pattern: checkAndIncrementDaily(...)
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - /src/services/security/aiSpendGuard.ts

@@ -1,8 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { verifyEvidence } from "@/services/ai/evidenceVerifier";
+import { verifyEvidence, looksRecycledUpc } from "@/services/ai/evidenceVerifier";
 import type { ProviderEvidence } from "@/types";
 
 const empty: ProviderEvidence = { sourceUrls: [], sourceSnippets: [], groundingChunks: [] };
+
+describe("looksRecycledUpc - pages whose code->product mapping cannot be trusted for identity", () => {
+  it("flags a multi-product aggregator page (Product Name Variations)", () => {
+    expect(looksRecycledUpc("UPC 078742051451 has the following Product Name Variations: dress, CK shoe")).toBe(true);
+  });
+
+  it("flags a nutrition-facts DB page (2026-07-04 dry run: single-product pages mapped recycled Frito-Lay UPCs to the WRONG same-brand product)", () => {
+    // 00028400160131 (truth: Munchies Cheese Fix) came back as "Lay's barbecue ... nutrition facts and
+    // analysis."; 00028400028141 (truth: Lay's Barbecue) came back as "Nutrition Facts for Frito Lay -
+    // Munchies ..." - identities swapped between codes. The page class, not the product, is the tell.
+    expect(looksRecycledUpc("Lay's barbecue flavored potato chips 9.5 ounce plastic bag by Frito Lay nutrition facts and analysis. UPC 00028400160131")).toBe(true);
+    expect(looksRecycledUpc("Nutrition Facts for Frito Lay - Munchies Rold Gold Doritos Cheetos Sun Chips Cheese Fix Snack Mix 3.25 Ounce Plastic Bag. Barcode 00028400028141")).toBe(true);
+  });
+
+  it("does NOT flag a clean single-product barcode-DB page", () => {
+    expect(looksRecycledUpc("BIC Classic Pocket Lighter, UPC-A: 070330645936, Brand: BIC. In stock at retailers.")).toBe(false);
+  });
+});
+
+describe("nutrition-facts DB pages never count as verifying evidence", () => {
+  it("REJECTS fetched source text from a nutrition-facts page even though it contains the exact code", () => {
+    const ev: ProviderEvidence = {
+      ...empty,
+      fetchedSourceText:
+        "Nutrition Facts for Lay's - Lay's Kettle Cooked Party Size Original Potato Chips 14 Ounce Plastic Bag. UPC 00028400076388 calories fat sodium.",
+      sourceUrls: ["https://www.nutritionvalue.org/x"],
+    };
+    const r = verifyEvidence("00028400076388", "upc_a", ev);
+    expect(r.verified).toBe(false);
+    expect(r.strength).toBe("none");
+  });
+});
 
 describe("EvidenceVerifier - the app verifies the exact code, not the model's claim", () => {
   it("REJECTS a model self-claim when no evidence actually contains the code", () => {

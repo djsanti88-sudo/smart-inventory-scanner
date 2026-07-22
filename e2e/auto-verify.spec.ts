@@ -5,8 +5,8 @@ import { test, expect, type Page } from "./fixtures";
 //   NO AI call -> a weak/no-evidence scan goes to Needs Review.
 
 const PROOF = "e2e/proof";
-const STRONG_CODE = "111222333444";
-const WEAK_CODE = "999888777666";
+const STRONG_CODE = "111222333446";
+const WEAK_CODE = "999888777664";
 
 const STATUS = {
   liveEnabled: true, autoDecodeOnScan: true, geminiEnabled: true, openaiEnabled: true,

@@ -112,3 +112,29 @@ describe("MockDb idempotent upserts", () => {
     expect(db.getAlias("biz", "7262", "prod-nokian")).toBeDefined();
   });
 });
+
+function ev(id: string, businessId: string, sessionId: string, createdAt: string): ScanEvent {
+  return {
+    id, businessId, sessionId, rawCode: "123", cleanCode: "123", normalizedCandidates: ["123"],
+    matchedProductId: null, matchType: "unknown", status: "unknown", resolverStatus: "needs_review",
+    codeType: "numeric_sku", reason: "test", quantityDelta: 1, quantityAfterScan: 1, createdAt,
+    source: "scan", notes: "", syncStatus: "synced", syncError: null, idempotencyKey: `k-${id}`,
+  };
+}
+
+describe("MockDb.getScanEventsBySession", () => {
+  it("returns only events for the given business + session, sorted oldest first", () => {
+    const db = new MockDb();
+    db.upsertScanEvent(ev("e1", "biz1", "s1", "2026-07-19T16:00:00.000Z"));
+    db.upsertScanEvent(ev("e2", "biz1", "s1", "2026-07-19T16:05:00.000Z"));
+    db.upsertScanEvent(ev("e3", "biz1", "s2", "2026-07-19T16:01:00.000Z")); // different session
+    db.upsertScanEvent(ev("e4", "biz2", "s1", "2026-07-19T16:02:00.000Z")); // different business, same session id
+    const result = db.getScanEventsBySession("biz1", "s1");
+    expect(result.map((e) => e.id)).toEqual(["e1", "e2"]);
+  });
+
+  it("returns an empty array for a session with no events", () => {
+    const db = new MockDb();
+    expect(db.getScanEventsBySession("biz1", "nope")).toEqual([]);
+  });
+});

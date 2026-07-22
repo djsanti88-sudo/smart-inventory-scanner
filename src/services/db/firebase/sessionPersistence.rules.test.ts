@@ -133,6 +133,30 @@ describe.skipIf(!ready)("Loop 3 session/count persistence (emulator)", () => {
     expect(counts[0].scanEventIds.sort()).toEqual(["ev-1", "ev-2"]);
   });
 
+  it("TWO SEPARATE FirebaseSyncTarget instances (simulating two devices) concurrently scanning the SAME product accumulate correctly, no lost update", async () => {
+    const deviceA = new FirebaseSyncTarget(env.authenticatedContext(UID).firestore() as unknown as Firestore, { emulator: true });
+    const deviceB = new FirebaseSyncTarget(env.authenticatedContext(UID).firestore() as unknown as Firestore, { emulator: true });
+    const mkItem = (key: string, scanEventId: string): PendingSyncItem => ({
+      id: scanEventId, businessId: BIZ, sessionId: SID, entityType: "InventoryCount", entityId: `${SID}_${PID}`,
+      operation: "INCREMENT_COUNT",
+      payload: { businessId: BIZ, sessionId: SID, productId: PID, scanEventId, quantityDelta: 1, idempotencyKey: key },
+      status: "pending", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t",
+      idempotencyKey: key, scanEventId,
+    });
+    // 5 scans from device A, 5 from device B, fully interleaved and concurrent (Promise.all), each
+    // with its OWN distinct idempotency key (matching real distinct-scan behavior - see
+    // idempotency.ts's "never regenerate a key inside a retry" law; these are 10 GENUINELY DIFFERENT
+    // scans, not retries of one scan).
+    const opsA = Array.from({ length: 5 }, (_, i) => deviceA.apply(mkItem(`devA-k${i}`, `devA-e${i}`)));
+    const opsB = Array.from({ length: 5 }, (_, i) => deviceB.apply(mkItem(`devB-k${i}`, `devB-e${i}`)));
+    const results = await Promise.all([...opsA, ...opsB]);
+    expect(results.every((r) => r.ok)).toBe(true);
+    const snap = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "inventoryCounts", `${SID}_${PID}`));
+    const data = snap.data() as { countedQuantity: number; scanEventIds: string[] };
+    expect(data.countedQuantity).toBe(10); // qty = 20 scenario from the master plan's AC2, scaled to 10 for test speed
+    expect(new Set(data.scanEventIds).size).toBe(10); // all ten distinct scanEventIds present, no loss
+  });
+
   it("a non-member cannot read the session or counts (RLS)", async () => {
     await target().apply(sessionItem(activeSession, `${SID}-active`));
     const stranger = env.authenticatedContext("stranger").firestore() as unknown as Firestore;

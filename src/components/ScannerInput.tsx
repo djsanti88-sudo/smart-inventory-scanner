@@ -36,6 +36,7 @@ export function ScannerInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lastResult, setLastResult] = useState<ScanEvent | null>(null);
   // Brief green border flash on a successful (counted) scan; red shake on unknown/error.
   const [flash, setFlash] = useState<false | "success" | "error">(false);
@@ -45,14 +46,45 @@ export function ScannerInput({
   // customer-safe UI. Data-access truth is still server/serializer-enforced; this only shapes the message.
   const isPlatform = useIsPlatformOwner();
   const getProduct = useScanStore((s) => s.getProduct);
+  // Live feed entry for the current scan, so we can see decodeStatus transitions (eg "decoding" ->
+  // "verified") that happen AFTER onScan() returns its static snapshot. lastResult itself is never
+  // mutated; this is only used to know when the decode has settled so the status panel can reset.
+  const liveFeedEntry = useScanStore((s) =>
+    lastResult ? s.scanFeed.find((e) => e.id === lastResult.id) : undefined,
+  );
+  const liveDecodeStatus = liveFeedEntry?.decodeStatus ?? lastResult?.decodeStatus;
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (readyTimer.current) clearTimeout(readyTimer.current);
     };
   }, [autoFocus]);
+
+  // 5 seconds after the scan's decode settles into a terminal state, return the status line to
+  // "Ready to scan." Never reset while the decode is still in flight ("decoding").
+  useEffect(() => {
+    if (readyTimer.current) {
+      clearTimeout(readyTimer.current);
+      readyTimer.current = null;
+    }
+    if (lastResult == null) return;
+    if (liveDecodeStatus === "decoding") return;
+
+    readyTimer.current = setTimeout(() => {
+      setLastResult(null);
+      readyTimer.current = null;
+    }, 5000);
+
+    return () => {
+      if (readyTimer.current) {
+        clearTimeout(readyTimer.current);
+        readyTimer.current = null;
+      }
+    };
+  }, [lastResult, liveDecodeStatus]);
 
   function submit() {
     if (debounceTimer.current) {
@@ -119,7 +151,7 @@ export function ScannerInput({
   }
 
   const counted = lastResult?.status === "known";
-  const isDecoding = lastResult?.decodeStatus === "decoding";
+  const isDecoding = liveDecodeStatus === "decoding";
 
   return (
     <div className="w-full">

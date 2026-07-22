@@ -3,25 +3,22 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSession, onAuthChange, isAuthBypassEnabled } from "@/lib/auth";
+import { isOpenAccess } from "@/services/auth/authMode";
 
-// Client-side gate for protected pages. Checks a real Firebase auth session (async) and redirects to /login
-// when there is none. The E2E/test bypass (isAuthBypassEnabled) keeps existing Playwright specs green
-// and is impossible in production.
-//
-// Open access by default until login is re-enabled. Set NEXT_PUBLIC_REQUIRE_LOGIN=1 to restore the
-// login wall. This does NOT remove any login code — it's a reversible flag.
-const OPEN_ACCESS = process.env.NEXT_PUBLIC_REQUIRE_LOGIN !== "1";
+// Client-side gate for protected pages. In mock (open-access) mode children render immediately.
+// In live mode it checks a real Firebase auth session (async) and redirects to /login when there is none.
+// The E2E/test bypass keeps existing Playwright specs green and is impossible in production.
 
 type GateState = "loading" | "authed" | "anon";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  // Lazy initial state: bypass resolves to "authed" at first render (pure env read, SSR-consistent), so
-  // we never call setState synchronously inside the effect (react-hooks/set-state-in-effect).
-  const [state, setState] = useState<GateState>(() => (isAuthBypassEnabled() || OPEN_ACCESS ? "authed" : "loading"));
+  const [state, setState] = useState<GateState>(() =>
+    isAuthBypassEnabled() || isOpenAccess() ? "authed" : "loading",
+  );
 
   useEffect(() => {
-    if (isAuthBypassEnabled() || OPEN_ACCESS) return;
+    if (isAuthBypassEnabled() || isOpenAccess()) return;
     let active = true;
     getSession().then((s) => {
       if (active) setState(s ? "authed" : "anon");

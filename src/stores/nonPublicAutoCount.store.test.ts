@@ -108,7 +108,7 @@ describe("Option 3 - non-public auto-count (owner: 'found it on Amazon = enough'
     // ...but it can NEVER become permanent truth (Velvet Torch poison stays dead):
     expect(prov!.verified, "provisional is NEVER a verified product").toBe(false);
     expect(store.getState().aliases.find((a) => a.cleanCode === FNSKU && a.approved), "NEVER an approved alias from a weak guess").toBeUndefined();
-    expect(store.getState().needsReviewQueue.at(-1)!.status, "review stays OPEN for human confirmation").toBe("open");
+    expect(store.getState().needsReviewQueue.at(-1)!.status, "pending inline suggestion awaiting the human").toBe("suggested"); // owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b)
     expect(store.getState().catalog.find((e) => e.normalizedBarcode === FNSKU)?.verificationStatus, "no global verified catalog from a weak guess").not.toBe("verified");
   });
 
@@ -136,7 +136,7 @@ describe("Option 3 - non-public auto-count (owner: 'found it on Amazon = enough'
 
   it("PHASE 2: human approval CONFIRMS a provisional (verified + approved alias) with NO double-count; next scan is Known", async () => {
     const store = aiOnStore();
-    let restore = stub(WEAK_NONPUBLIC);
+    const restore = stub(WEAK_NONPUBLIC);
     try {
       store.getState().processScan(FNSKU);
       await vi.waitFor(() => expect(store.getState().finalCounts.length).toBe(1));

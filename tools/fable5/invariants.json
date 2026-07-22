@@ -1,0 +1,56 @@
+[
+  {
+    "id": "key-safety",
+    "description": "Client code cannot read server API keys.",
+    "when_tags": ["decode", "tenancy", "ui"],
+    "command": ["npx", "vitest", "run", "src/services/keySafety.test.ts"],
+    "timeout_seconds": 180
+  },
+  {
+    "id": "ledger-law",
+    "description": "Every scan appears and counts exactly once.",
+    "when_tags": ["ledger"],
+    "command": ["npm", "run", "test:ledger"],
+    "timeout_seconds": 600
+  },
+  {
+    "id": "server-import-boundary",
+    "description": "Server-only modules stay outside client bundles.",
+    "when_tags": ["decode", "tenancy", "ui"],
+    "command": [
+      "npx",
+      "vitest",
+      "run",
+      "src/server/upc/importBoundary.test.ts",
+      "src/server/tire-knowledge/importBoundary.test.ts"
+    ],
+    "timeout_seconds": 180
+  },
+  {
+    "id": "no-em-dash",
+    "description": "Agent copy contains no em or en dash characters.",
+    "when_tags": ["docs", "ui"],
+    "command": ["node", "scripts/validate-agents.mjs"],
+    "timeout_seconds": 90
+  },
+  {
+    "id": "cap-single-charge",
+    "description": "Decode paths cannot add a legacy daily-cap charge caller.",
+    "when_tags": ["decode"],
+    "command": [
+      "semgrep",
+      "scan",
+      "--config",
+      "tools/fable5/semgrep.yml",
+      "--metrics=off",
+      "--error",
+      "--no-rewrite-rule-ids",
+      "--exclude-rule",
+      "fable5-no-dynamic-code-execution",
+      "--exclude-rule",
+      "fable5-review-child-process-exec",
+      "src"
+    ],
+    "timeout_seconds": 240
+  }
+]

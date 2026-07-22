@@ -6,8 +6,11 @@ import {
   createUserWithEmailAndPassword,
   signOut as fbSignOut,
   onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  sendPasswordResetEmail,
 } from "firebase/auth";
-import { doc, setDoc, getDocs, query, collection, where, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDocs, query, collection, where, serverTimestamp, runTransaction } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "@/lib/firebaseClient";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { COLLECTIONS, memberDocId, type BusinessMember } from "@/services/db/types";
@@ -46,7 +49,8 @@ function message(e: unknown): string {
 
 export async function signInWithPassword(email: string, password: string): Promise<{ error: string | null }> {
   try {
-    await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+    const cred = await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+    await ensureUserProfile(cred.user);
     return { error: null };
   } catch (e) {
     return { error: message(e) };
@@ -63,19 +67,60 @@ export async function signUp(email: string, password: string): Promise<{ error: 
   }
 }
 
+/** Google sign-in via popup. On success, ensures the user's profile doc exists (same as email sign-up). */
+export async function signInWithGoogle(): Promise<{ error: string | null }> {
+  try {
+    const cred = await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
+    await ensureUserProfile(cred.user);
+    return { error: null };
+  } catch (e) {
+    return { error: message(e) };
+  }
+}
+
+/** Send a Firebase password-reset email. Errors (e.g. unknown address) are returned, not thrown. */
+export async function sendResetEmail(email: string): Promise<{ error: string | null }> {
+  try {
+    await sendPasswordResetEmail(getFirebaseAuth(), email.trim());
+    return { error: null };
+  } catch (e) {
+    return { error: message(e) };
+  }
+}
+
 export async function signOut(): Promise<void> {
   if (isAuthBypassEnabled()) return;
   await fbSignOut(getFirebaseAuth());
 }
 
-/** Create the user's profile doc on first login (doc id = uid; a user may only write their own). */
+/**
+ * Create (or refresh) the user's profile doc on every login (doc id = uid; a user may only write
+ * their own). `lastLoginAt` is stamped on every call; `signedUpAt` is stamped once, only when the
+ * profile doc does not already have it. The read-then-conditional-write runs inside a Firestore
+ * `runTransaction` so the decision and the write are atomic: two concurrent logins for the same new
+ * uid (double-clicked sign-in, a Google popup racing an auth-state listener) can no longer both read
+ * "not exists" and both stamp `signedUpAt` - the transaction re-reads on conflict and preserves the
+ * first writer's timestamp, keeping the "stamped once" contract.
+ */
 export async function ensureUserProfile(user: User): Promise<void> {
   const db = getDb();
-  await setDoc(
-    doc(db, COLLECTIONS.userProfiles, user.uid),
-    { authUserId: user.uid, email: user.email ?? "", name: user.displayName ?? "", updatedAt: serverTimestamp() },
-    { merge: true },
-  );
+  const ref = doc(db, COLLECTIONS.userProfiles, user.uid);
+  await runTransaction(db, async (tx) => {
+    const existing = await tx.get(ref);
+    const hasSignedUpAt = existing.exists() && existing.data()?.signedUpAt != null;
+    tx.set(
+      ref,
+      {
+        authUserId: user.uid,
+        email: user.email ?? "",
+        name: user.displayName ?? "",
+        updatedAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+        ...(hasSignedUpAt ? {} : { signedUpAt: serverTimestamp() }),
+      },
+      { merge: true },
+    );
+  });
 }
 
 /** Create a business and the creator's owner membership (allowed by the bootstrap security rules). */

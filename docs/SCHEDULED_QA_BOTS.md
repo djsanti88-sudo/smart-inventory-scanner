@@ -1,5 +1,8 @@
 # Scheduled QA Bots — Weekly Report-Only Plan
 
+> ⚠ review: written on an earlier branch; the branch line below is historical. The report-only
+> mode, bot roster, and safety rules still apply as designed.
+
 **Branch:** `demo-readiness-vercel-partnumber` (base `7090873`).
 **Mode:** **Report-only.** Bots inspect, test, screenshot, and recommend. They **never** edit code,
 commit, deploy, or modify real Firestore data. **All fixes require human approval.**

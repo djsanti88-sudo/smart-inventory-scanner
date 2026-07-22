@@ -1,6 +1,7 @@
 import type { CatalogCandidate, CatalogEntry, CatalogEntryMeta, CatalogSourceTier } from "./catalogTypes";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
+import type { ProvenanceTier } from "@/types";
 
 const VALID_TIERS: CatalogSourceTier[] = ["authoritative", "strong_commercial", "supporting", "weak", ""];
 function validTier(t: unknown): CatalogSourceTier {
@@ -72,5 +73,36 @@ export function sanitizeCatalogEntry(candidate: CatalogCandidate, meta: CatalogE
     sourceTier: validTier(candidate.sourceTier),
     evidenceSummary: clean(candidate.evidenceSummary),
     blockingReasons: (candidate.blockingReasons ?? []).map((r) => clean(r)).filter(Boolean).slice(0, 8),
+  };
+}
+
+/** The db/types.ts CatalogEntry shape a repo hit (`getByBarcode`) returns, minimal subset used here. */
+export interface RawCatalogHit {
+  id: string;
+  normalizedBarcode: string;
+  name?: string;
+  brand?: string;
+  category?: string;
+  verificationStatus?: string;
+  provenanceTier?: ProvenanceTier;
+}
+
+/**
+ * Map a raw repo CatalogEntry hit -> the full store CatalogEntry shape via sanitizeCatalogEntry,
+ * optionally tagging the MASTER pass-through fields (masterId/masterProvenanceTier, Phase 5b GC4).
+ *
+ * `isMaster` must be true ONLY for hits from the tire master catalog (the default `catalogEntries`
+ * collection). The retail catalog (Open Food Facts, `retailCatalogEntries`) is a separate,
+ * non-master collection - tagging its hits with a master id would route them through the tire-master
+ * cross-tier conflict machinery under a defaulted "corpus_verified" tier they never earned, silently
+ * changing existing retail resolution behavior. Defaults to false so a caller must opt in explicitly.
+ */
+export function toMasterAwareStoreEntry(raw: RawCatalogHit, isMaster: boolean, nowIso: string): CatalogEntry {
+  return {
+    ...sanitizeCatalogEntry(
+      { barcode: raw.normalizedBarcode, normalizedBarcode: raw.normalizedBarcode, name: raw.name ?? "", brand: raw.brand, category: raw.category },
+      { now: nowIso, verificationStatus: raw.verificationStatus === "verified" ? "verified" : raw.verificationStatus === "conflict" ? "conflict" : "pending", verifiedBy: null, by: "trusted_source" },
+    ),
+    ...(isMaster ? { masterId: raw.id, masterProvenanceTier: raw.provenanceTier } : {}),
   };
 }

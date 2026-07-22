@@ -1,0 +1,91 @@
+Task: for each tire below, find the manufacturer UPC / EAN / GTIN barcode (the number printed on the tire's box/label).
+Give the barcode as digits only, plus your confidence (high/med/low) and the source URL/site.
+IMPORTANT: only report a barcode you actually found published on a real retailer/manufacturer page. Do NOT construct or infer one from the SKU/pattern. If you cannot find a published barcode, say UNKNOWN.
+Format: <line#> | <part number> | <barcode or UNKNOWN> | <confidence> | <source URL/site>
+
+Part number  |  Description (brand model size)
+----------------------------------------------
+  1. NX11404  |  Nexen CP672 BSW P215/55R18 94H SL
+  2. BH5546265  |  Blackhawk Street-H HU02 BSW 235/45R17 97W XL
+  3. BH1601005  |  Blackhawk Agility UHP AS BSW 245/40R17 95V XL
+  4. PT151997  |  Pantera Platinum Touring A/S BSW TL 265/35R22 102V XL
+  5. 315-35-20 ARROYO  |  ARROYO GRAND SPORT AS 315/35R20 110W XL
+  6. BH4120187  |  Blackhawk Agility SUV BSW 245/55R19 103V SL
+  7. 9285030241  |  Fortune Tormenta R/T FSR-309 BSW LT285/70R17 121Q E
+  8. 3936030907  |  Fortune Viento FSR-702 BSW 255/35R19 96Y XL
+  9. 3543030703  |  Fortune Perfectus FSR-602 BSW 235/55R17 99V SL
+ 10. NX18737  |  Nexen Roadian ATX BSW 275/50R22 111H SL
+ 11. TH41402  |  Arisun Aresta A/T ZG06 BSW LT245/75R17 121S E
+ 12. BH1600998  |  Blackhawk Agility UHP AS BSW 235/50R19 103W XL
+ 13. 3262030504  |  Fortune Tormenta H/T FSR-305 BSW 255/70R16 111T SL
+ 14. 160180  |  Toyo Eclipse BSW TL 195/70R14 90S SL
+ 15. V88015-2  |  Samson GL283A A/P 225/70R19.5 /G 128/126L
+ 16. F-28105947  |  Falken Azenis FK460 A/S BSW 275/40R20 106Y XL
+ 17. BH4120860  |  Blackhawk Ridgecrawler A/T BSW 245/65R17 107S SL
+ 18. NX17982  |  Nexen Roadian HTX2 245/65R17 107H XL
+ 19. 160170  |  Toyo Eclipse BSW TL 185/70R14 87S SL
+ 20. GY183106436  |  Goodyear Wrangler SR-A OWL P265/70R17 113R SL
+ 21. NX18776  |  Nexen Roadian ATX BSW 245/65R17 111T XL
+ 22. NT431872  |  NOKIAN Outpost AT BSW LT235/85R16 120S E
+ 23. NT432119  |  Nokian Outpost APT BSW 245/55R19 103H SL
+ 24. EVX2624  |  EVOLUXX Capricorn UHP BSW 275/25R28 99W XL
+ 25. BH4120177  |  Blackhawk Agility SUV BSW 225/60R18 100H SL
+ 26. NX11198  |  Nexen CP672 BSW 215/45R17 91H XL
+ 27. F-28814395  |  Falken Sincera ST80 A/S BSW 215/65R16 98T SL
+ 28. BH1600991  |  Blackhawk Agility UHP AS BSW TL 235/40R19 92W SL
+ 29. BH1600990  |  Blackhawk Agility UHP AS BSW TL 235/40R18 95W XL
+ 30. 3844030907  |  Fortune Viento FSR-702 BSW 245/40R20 99Y XL
+ 31. BH1600467  |  Blackhawk Ridgecrawler R/T BSW 35X12.50R17/E 125Q
+ 32. F-28813983  |  Falken Sincera ST80 A/S BSW 225/60R18 100H SL
+ 33. 3573030609  |  Fortune Tormenta H/T FSR-305 BSW 255/55R20 110H XL
+ 34. 3346030703  |  Fortune Perfectus FSR-602 BSW 235/65R17 108V XL
+ 35. BH4120858  |  Blackhawk Ridgecrawler A/T BSW TL LT265/75R16 123S E
+ 36. 9265031141  |  Fortune Tormenta R/T FSR-309 BSW TL LT265/70R17 123Q E
+ 37. BH1601021  |  Blackhawk Agility UHP AS BSW 255/45R20 105Y XL
+ 38. 9295030141  |  Fortune Tormenta R/T FSR-309 BSW LT295/65R20 126Q E
+ 39. 3239030603  |  Fortune Perfectus FSR-602 BSW 205/70R16 97H SL
+ 40. BH4120885  |  Blackhawk Ridgecrawler A/T BSW TL LT275/65R20 126R E
+ 41. NX15506  |  Nexen Roadian GTX BSW 101H 235/55R19 105V SL
+ 42. 3538030703  |  Fortune Perfectus FSR-602 BSW TL 225/55R17 97V SL
+ 43. PT151263  |  Pantera Platinum Touring A/S BSW TL 235/75R15 105T SL
+ 44. BH4120194  |  Blackhawk Agility SUV BSW 245/50R20 102V SL
+ 45. BH4120152  |  Blackhawk Agility SUV BSW 225/55R18 98V SL
+ 46. 20000559  |  RoyalBlack Racing Trac 245/45R18 Z XL
+ 47. PT107185  |  Pantera Supertrac AT BSW TL LT285/70R17 121Q E
+ 48. BH1601024  |  Blackhawk Agility UHP AS BSW 275/40R20 106Y XL
+ 49. TH41167  |  Arisun Aresta A/T ZG06 BSW LT235/85R16 120S E
+ 50. BH4120168  |  Blackhawk Agility SUV BSW 235/60R16 100H SL
+ 51. 9275030041  |  Fortune Tormenta R/T FSR-309 BSW LT275/65R20 126Q E
+ 52. BH1600481  |  Blackhawk Ridgecrawler R/T BSW TL LT275/65R20 126Q E
+ 53. NX18773  |  Nexen Roadian ATX BSW TL LT265/70R17 123S E
+ 54. TH40856  |  Arisun Aresta ZG02 BSW 285/45R22 114H SL
+ 55. 9245030204  |  Fortune Tormenta H/T FSR-305 BSW TL LT245/75R17 121S E
+ 56. BH4120174  |  Blackhawk Agility SUV BSW 255/60R19 109H SL
+ 57. NX17407  |  Nexen Roadian GTX BSW 255/50R19 107H XL
+ 58. 9285030441  |  Fortune Tormenta R/T FSR-309 BSW LT285/65R18 125Q E
+ 59. BH4120193  |  Blackhawk Agility SUV BSW 245/70R16 107T SL
+ 60. NX18735  |  Nexen Roadian ATX BSW 285/45R22 114H XL
+ 61. BH5546799  |  Blackhawk Street-H HH11 BSW 205/70R15 96T SL
+ 62. NT431328  |  NOKIAN ONE BSW 235/65R17 104H SL
+ 63. NX17991  |  Nexen Roadian HTX2 OWL 255/65R17 110T SL
+ 64. BH1600448  |  Blackhawk Ridgecrawler R/T BSW 275/55R20 117T XL
+ 65. NX18764  |  Nexen Roadian ATX BSW 245/70R17 110T SL
+ 66. BH4120890  |  Blackhawk Ridgecrawler A/T BSW 285/45R22 114H XL
+ 67. BH4120181  |  Blackhawk Agility SUV AS BSW 275/40R20 106Y XL
+ 68. 3942030907  |  Fortune Viento FSR-702 BSW 265/35R18 97Y XL
+ 69. BH1600988  |  Blackhawk Agility UHP AS BSW 225/55R19 103W XL
+ 70. BH5548294  |  Blackhawk BAR26SP Regional AP BSW 245/70R19.5/H 135/133M
+ 71. 3221030503  |  Fortune Perfectus FSR-602 BSW 175/70R14 84T SL
+ 72. BH5546801  |  Blackhawk Street-H HH11 BSW 225/65R16 100H SL
+ 73. 9295030041  |  Fortune Tormenta R/T FSR-309 BSW LT295/70R18 126Q E
+ 74. BH1600999  |  Blackhawk Agility UHP AS BSW 235/55R17 103W XL
+ 75. F-28817529  |  Falken Sincera ST80 A/S BSW TL 235/60R17 102T SL
+ 76. 3938030907  |  Fortune Viento FSR-702 BSW 255/35R20 97Y XL
+ 77. 9295030441  |  Fortune Tormenta R/T FSR-309 BSW LT295/55R20 123Q E
+ 78. NX17609  |  Nexen Roadian ATX BSW TL 265/70R17 115T SL
+ 79. NT431190  |  Nokian One HT BSW 265/60R18 110H SL
+ 80. 3314030603  |  Fortune Perfectus FSR-602 BSW 175/65R15 84H SL
+ 81. EVX0295  |  Evolux Capricorn UHP BSW 265/35R22 102W XL
+ 82. PT151355  |  Pantera Platinum Touring A/S BSW 225/50R18 99V XL
+ 83. BH5545911  |  Blackhawk Hiscend-H HT01 BSW 235/70R16 106T SL
+ 84. 160080  |  Toyo Eclipse BSW TL 175/65R14 81T SL

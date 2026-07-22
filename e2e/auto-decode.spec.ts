@@ -35,12 +35,12 @@ const DECODE: Record<string, object> = {
     results: [result({ productName: "Coca-Cola Classic", brand: "Coca-Cola", upc: "878106003504", sourceUrls: ["https://gs1.org/878106003504"] })],
     decision: { status: "verified", confidence: 0.97, reason: "Verified AI Decode: providers agree, code confirmed in a snippet.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: true, crossCheck: { decision: "agree" } },
   },
-  "111111111119": {
+  "111111111117": {
     providerNames: ["gemini", "openai"], premiumUsed: true,
-    results: [result({ productName: "Maybe Energy Bar", brand: "Generic", upc: "111111111119" })],
+    results: [result({ productName: "Maybe Energy Bar", brand: "Generic", upc: "111111111117" })],
     decision: { status: "suggested", confidence: 0.5, reason: "Suggested, not trusted. Evidence is weak.", evidenceStrength: "url_only", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "agree" } },
   },
-  "222222222226": {
+  "222222222224": {
     providerNames: ["gemini", "openai"], premiumUsed: false,
     results: [result({ productName: "Creamer", brand: "Laird" }), result({ productName: "Receptacle", brand: "Leviton" })],
     decision: { status: "conflict", confidence: 0.2, reason: "Providers conflict on brand.", evidenceStrength: "snippet", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "conflict" } },
@@ -63,7 +63,7 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
     }
     postHits++;
     const body = JSON.parse(req.postData() || "{}");
-    await route.fulfill({ json: DECODE[body.cleanCode as string] ?? DECODE["111111111119"] });
+    await route.fulfill({ json: DECODE[body.cleanCode as string] ?? DECODE["111111111117"] });
   });
 
   await page.goto("/login");
@@ -77,27 +77,38 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   await expect(page.getByTestId("auto-decode-status")).toContainText("On");
 
   // Verified: unknown scan auto-decodes AND AUTO-ADDS the product to the count (no clicking).
+  // P5 Decode Trust (2026-07-20): the badge label is the honest-provenance label "Verified
+  // (app-confirmed)" for a genuinely app-verified decode (two providers agree + a fetched source),
+  // not the old generic "Verified match".
   await scan(page, "878106003504");
-  await expect(page.getByTestId("scan-feed-body")).toContainText("Verified match");
+  await expect(page.getByTestId("scan-feed-body")).toContainText("Verified (app-confirmed)");
   await expect(page.getByTestId("final-count-body")).toContainText("Coca-Cola Classic"); // auto-added
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // focus retained across async decode
   expect(postHits).toBeGreaterThan(0); // AI WAS called automatically
 
-  // Suggested (weak url_only evidence) -> EVIDENCE GATE: NOT auto-counted; routed to Needs Review.
-  await scan(page, "111111111119");
-  await expect(page.getByTestId("final-count-body")).not.toContainText("Maybe Energy Bar");
+  // Suggested (weak url_only evidence) -> EVIDENCE GATE blocks a VERIFIED auto-add, but the
+  // "scan N = count N" invariant (Plan A/Plan C, see docs/superpowers/plans/2026-07-01-plan-c-verified-suggested.md
+  // and the DECODE-EVERYTHING provisional-count block in scanStore.ts) still provisionally counts the
+  // scan as an unverified row. owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b) -
+  // the suggestion now sits as a PENDING inline tag on the row / the Suggested tab (checked below).
+  await scan(page, "111111111117");
+  await expect(page.getByTestId("final-count-body")).toContainText("Maybe Energy Bar");
 
   // Conflict: providers disagree -> NOT auto-added, stays in Needs Review. Plan C, Task 1
   // collapses the conflict label into the single "Suggested" state (non-blocking label).
-  await scan(page, "222222222226");
+  await scan(page, "222222222224");
   await expect(page.getByTestId("scan-feed-body")).toContainText("Suggested");
   await expect(page.getByTestId("scanner-input")).toBeFocused();
   await page.screenshot({ path: `${PROOF}/auto-decode-01-feed.png`, fullPage: true });
 
-  // Both the weak-suggested and the conflict are left in Needs Review (evidence gate; neither auto-counted).
+  // The CONFLICT stays an open Needs Review row (unchanged). The weak-suggested no longer sits in
+  // the open queue (owner-ratified 2026-07-14: suggestions bypass Needs Review, Task 9b) - it is a
+  // pending inline suggestion, still surfaced on the Suggested tab for batch cleanup.
   await page.goto("/review");
-  await expect(page.getByTestId("review-row-111111111119")).toBeVisible();
-  await expect(page.getByTestId("review-row-222222222226")).toBeVisible();
+  await expect(page.getByTestId("review-row-222222222224")).toBeVisible();
+  await expect(page.getByTestId("review-row-111111111117")).toHaveCount(0);
+  await page.getByTestId("review-tab-suggested").click();
+  await expect(page.getByTestId("suggested-row-111111111117")).toBeVisible();
   await page.screenshot({ path: `${PROOF}/auto-decode-02-review.png`, fullPage: true });
 
   // Re-scan the auto-added code: deterministic Known, ZERO new AI calls.

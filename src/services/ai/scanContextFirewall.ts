@@ -63,20 +63,43 @@ export function detectScanContextConflict(params: {
   codeType: CodeType;
   result: AiLookupResult | null | undefined;
   brandPrefixHints: BrandPrefixHint[];
+  /** Owner rule 2026-07-14 (decode-anything): strong APP-VERIFIED exact-code evidence clears the
+   *  category hard-block - a tire shop can really stock hot sauce. The poison guard (coconut-oil
+   *  class: weak/unverified single-source identities) keeps the hard block. Callers pass true ONLY
+   *  when decision.status === "verified" AND decision.exactCodeEvidenceVerifiedByApp === true, i.e.
+   *  the app's own EvidenceVerifier confirmed the EXACT scanned code appears in real evidence. */
+  exactCodeVerifiedByApp?: boolean;
 }): ConflictKind | null {
-  const { scanContext, result } = params;
+  const { scanContext, result, exactCodeVerifiedByApp } = params;
   if (!result) return null;
   const domain = classifyProductDomain(result);
 
-  // 1. Category/context conflict (poison guard): a tire business scanning a clearly non-tire product
-  //    (source poisoning). This STAYS a hard block - a wrong product TYPE must never auto-count.
-  if (scanContext === "tire" && domain === "non_tire") return "category_context_conflict";
+  // 1. Category/context conflict (poison guard): a tire business scanning a clearly non-tire product.
+  //    This STAYS a hard block UNLESS the app independently verified the exact code in real evidence
+  //    (decode-anything). Weak/unverified single-source identities (the coconut-oil / go-upc-poison
+  //    class) still hard-block - a wrong product TYPE from weak evidence must never auto-count.
+  if (scanContext === "tire" && domain === "non_tire") {
+    return exactCodeVerifiedByApp === true ? null : "category_context_conflict";
+  }
 
   // 2. Brand-prefix conflict is DEMOTED to ADVISORY (Plan C, owner rule): a decoded-brand mismatch vs a
   //    learned brand-prefix hint no longer BLOCKS. GS1 company prefixes are many-to-one, so hard prefix
   //    blocks cause false rejects; grounding/corpus evidence wins over the prefix. Callers surface the
   //    mismatch via detectBrandPrefixAdvisory() as a soft, non-blocking flag on the row instead.
   return null;
+}
+
+/**
+ * True exactly when the category conflict was CLEARED by app verification - i.e. the SAME inputs that
+ * WOULD have returned "category_context_conflict" but were let through because exactCodeVerifiedByApp is
+ * true. Callers tag the counted row "Off-category item" so the operator still sees the product is not a
+ * tire, even though it counted. Returns false for tires, for unknown domains, and for the un-cleared
+ * (still-blocking) case - so the advisory tag appears on precisely the rows the hard-block used to catch.
+ */
+export function detectOffCategoryAdvisory(params: Parameters<typeof detectScanContextConflict>[0]): boolean {
+  const { scanContext, result, exactCodeVerifiedByApp } = params;
+  if (!result || exactCodeVerifiedByApp !== true) return false;
+  return scanContext === "tire" && classifyProductDomain(result) === "non_tire";
 }
 
 /**

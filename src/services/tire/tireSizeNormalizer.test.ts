@@ -19,6 +19,14 @@ const CASES: Array<[string, string | null]> = [
   ["295/75R22.5", "295/75R22.5"],
   // --- dual load index ---
   ["LT265/70R17 121/118S", "LT265/70R17 121/118S"],
+  // --- flotation with a construction-letter prefix directly attached (Group A item 4) ---
+  ["LT33X12.50R20", "LT33X12.50R20"],
+  ["LT33X12.50R20 114Q", "LT33X12.50R20 114Q"],
+  // --- flotation with no prefix must still work unchanged ---
+  ["33X12.50R20", "33X12.50R20"],
+  ["35X12.50R17", "35X12.50R17"],
+  // --- spaced shorthand WITH an R separator (Group A item 3): "205 50 R17" ---
+  ["205 50 R17", "205/50R17"],
   // --- case / whitespace tolerance ---
   ["p225/60r18", "P225/60R18"],
   ["  225/60R18  ", "225/60R18"],
@@ -34,6 +42,16 @@ const CASES: Array<[string, string | null]> = [
   ["12345", null],
   ["1234567", null], // 7 digits but 123/45/67 -> rim 67 out of range -> not a size
   ["9999999", null], // width 999 out of range
+
+  // --- Bug 2 (owner mandate 2026-07-21, 310-row review): a bicycle "NN X N.NNN" dimension is NOT a
+  // tire flotation size and must never be fabricated into one. Live-observed: Kenda bike tire
+  // "K50 16 X 2.125" was fabricated into "16X2.1R25" - the FLOTATION regex had no plausibility guard
+  // at all (unlike every other shorthand pattern), so the decimal "2.125" got split mid-digit into a
+  // fake "2.1" width + "25" rim. A real flotation size (e.g. "35X12.50R20") has a genuine explicit
+  // ZR/R/- separator before a real 2-digit rim; a bare "16 X 2.125" with nothing after it is not one.
+  ["16 X 2.125", null],
+  ["K50 16 X 2.125", null],
+  ["700 X 23C", null], // road-bike tire dimension, not a flotation size
 ];
 
 describe("normalizeTireSize", () => {

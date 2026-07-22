@@ -12,6 +12,8 @@ function makeState(): PersistableScanState {
     businessId: "biz-1",
     sessionId: "session-1",
     currentSession: { id: "session-1" },
+    location: "Main",
+    recentLocations: [],
     settings: { aiLookupEnabled: true },
     pendingSyncQueue: [],
     syncedScanEventIds: ["e1"],
@@ -52,6 +54,8 @@ function makeState(): PersistableScanState {
     catalog: [{ id: "cat1", primaryBarcode: "0123456789012", gtin: "00123456789012" }],
     shopOverrides: [{ id: "so1", cleanCode: "555" }],
     feedbackEvents: [{ id: "f1", code: "2881-6861" }],
+    countSnapshots: [],
+    firstScanAt: "2026-07-20T10:00:00.000Z",
   };
 }
 
@@ -86,10 +90,18 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     expect(feed).toHaveLength(1);
     // What the customer needs to ACT on the review survives:
     expect(reviews[0]).toMatchObject({ id: "r1", cleanCode: "999", suggestedProductName: "Generic Tire", suggestedBrand: "Acme", reason: "Check this", status: "open" });
-    // Their own scan feed row survives (product/qty/status) but WITHOUT the raw code: a matched feed row's
-    // code->product mapping is a slice of the reusable DB and must not persist to a customer browser (Sec-4).
-    expect(feed[0]).toMatchObject({ id: "s1", status: "needs_review", syncStatus: "pending" });
-    expect(feed[0].cleanCode).toBeUndefined();
+    // Their own scan feed row survives (product/qty/status) INCLUDING the shop's own scanned code: the
+    // shop's own scan of its own barcode is the shop's own data (QA fix #15 - audit trail must not lose
+    // what was physically scanned on the label after a reload). Needs Review already kept cleanCode at
+    // this same access level; this makes scanFeed symmetric with it.
+    expect(feed[0]).toMatchObject({ id: "s1", status: "needs_review", syncStatus: "pending", cleanCode: "999" });
+    // But every OTHER reusable/decode-internal field on that same event stays stripped - the firewall
+    // narrowing is exactly one field wide (cleanCode), nothing else leaked.
+    expect(feed[0].rawCode).toBeUndefined();
+    expect(feed[0].normalizedCandidates).toBeUndefined();
+    expect(feed[0].matchType).toBeUndefined();
+    expect(feed[0].decodeNote).toBeUndefined();
+    expect(feed[0].syncError).toBeUndefined();
   });
 
   it("platform: full local view persisted (legacy unchanged)", () => {
@@ -98,6 +110,39 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     const blob = JSON.stringify(p);
     expect(blob).toContain("28816861"); // platform keeps full internal data locally
     expect(blob).toContain("778899001122"); // platform keeps decode-discovered codes
+  });
+
+  it("caps ONLY the append-only diagnostic arrays (syncedScanEventIds, feedbackEvents), never customer data (#16)", () => {
+    // Finding #16 mitigation (c): the persisted blob grew unbounded because append-only diagnostic
+    // ledgers were serialized in full on every scan. Cap them to a bounded ring (newest kept), the
+    // same way countSnapshots/feedback already cap. CUSTOMER DATA (scanFeed / finalCounts /
+    // needsReviewQueue / pendingSyncQueue) must NEVER be capped - that would lose counts / unfinished
+    // review work / unsynced writes (TOP-LEVEL LAW).
+    const s = makeState();
+    s.syncedScanEventIds = Array.from({ length: 5000 }, (_, i) => `e-${i}`);
+    s.feedbackEvents = Array.from({ length: 5000 }, (_, i) => ({ id: `f-${i}`, code: `${i}` }));
+    // Large customer data that must survive uncapped:
+    s.scanFeed = Array.from({ length: 3000 }, (_, i) => ({ id: `s-${i}`, status: "counted", syncStatus: "synced", cleanCode: `${i}` }));
+    s.finalCounts = Array.from({ length: 3000 }, (_, i) => ({ id: `c-${i}`, productId: `p-${i}`, quantity: 1, aliasesSeen: [] }));
+    s.needsReviewQueue = Array.from({ length: 400 }, (_, i) => ({ id: `r-${i}`, cleanCode: `${i}`, reason: "x", status: "open", createdAt: "t", idempotencyKey: `k-${i}` }));
+    s.pendingSyncQueue = Array.from({ length: 400 }, (_, i) => ({ id: `q-${i}`, status: "pending" }));
+
+    // Platform level exercises the full (unstripped) view - diagnostic arrays present there too.
+    const p = buildPersistedScanState(s, "platform");
+
+    // Diagnostic ledgers are bounded and keep the NEWEST entries.
+    const synced = p.syncedScanEventIds as string[];
+    const feedback = p.feedbackEvents as Array<Record<string, unknown>>;
+    expect(synced.length).toBeLessThanOrEqual(1000);
+    expect(synced[synced.length - 1]).toBe("e-4999"); // newest retained
+    expect(feedback.length).toBeLessThanOrEqual(500);
+    expect((feedback[feedback.length - 1] as { id: string }).id).toBe("f-4999");
+
+    // Customer data is NOT capped - every row survives.
+    expect((p.scanFeed as unknown[]).length).toBe(3000);
+    expect((p.finalCounts as unknown[]).length).toBe(3000);
+    expect((p.needsReviewQueue as unknown[]).length).toBe(400);
+    expect((p.pendingSyncQueue as unknown[]).length).toBe(400);
   });
 
   it("round-trip: 3 open customer reviews persist + rehydrate as 3 open + approvable", () => {
@@ -113,5 +158,23 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     expect(rehydrated.every((r) => r.status === "open")).toBe(true);
     // Each rehydrated review keeps the cleanCode the approved alias is keyed on (approve+count works).
     expect(rehydrated.map((r) => r.cleanCode)).toEqual(["code-a", "code-b", "code-c"]);
+  });
+
+  it("persists location and recentLocations for customer-role reloads", () => {
+    const s = makeState();
+    s.location = "Bay A";
+    s.recentLocations = ["Main", "Bay A"];
+    const persisted = buildPersistedScanState(s, "business");
+    expect(persisted).toMatchObject({ location: "Bay A", recentLocations: ["Main", "Bay A"] });
+  });
+
+  it("customer: persisted feed retains location but not attribution-only deviceId", () => {
+    const s = makeState();
+    const first = s.scanFeed[0] as Record<string, unknown>;
+    s.scanFeed = [{ ...first, location: "Bay A", deviceId: "device-a" }];
+    const persisted = buildPersistedScanState(s, "business");
+    const feed = persisted.scanFeed as Array<Record<string, unknown>>;
+    expect(feed[0].location).toBe("Bay A");
+    expect(feed[0].deviceId).toBeUndefined();
   });
 });

@@ -1,0 +1,1206 @@
+{
+  "_comment": "150-code ground-truthed dry-run fixture (Task 5). 9 groups. expected: verified-ok=should auto-count the truth product; suggest-only=should surface a candidate but never auto-count; must-refuse=should not verify. Truth verified per group via WebSearch/WebFetch + repo sources; see .superpowers/sdd/task-5-report.md. FNSKU note: only ~3 real FNSKU->product pairs are publicly obtainable (repo corpus); rows 5-7 are honestly-labeled representative FBA-label codes (no fabricated product identity) - truth is not grader-critical for suggest-only. Candidate answer-sheet corrections applied: tire 086699294739 Michelin Pilot Sport 4 SUV (not Pilot Alpin); Muenster 0075925304151 brand corrected. 2026-07-08: 4 Frito-Lay truth rows corrected against upcitemdb/SmartLabel/OpenFoodFacts evidence (scripts/tmp-goupc-benchmark-report.md).",
+  "generatedAt": "2026-07-04",
+  "codes": [
+    {
+      "code": "051596320812",
+      "codeType": "upc",
+      "truth": "Home Depot 5 Gal Orange Homer Bucket / 05GLHD2",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "078742051451",
+      "codeType": "upc",
+      "truth": "Member's Mark Purified Water 500ml / 16.9 oz",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "078742028477",
+      "codeType": "upc",
+      "truth": "Member's Mark Purified Water 40 Pack / 16.9 oz",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "10019320009355",
+      "codeType": "gtin14",
+      "truth": "Oreo Cookies Sleeve Pack / case pack",
+      "expected": "suggest-only",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "009800120871",
+      "codeType": "upc",
+      "truth": "Ferrero Rocher Valentine's Fine Hazelnut Chocolate Hearts, 2.6 oz",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "044000072742",
+      "codeType": "upc",
+      "truth": "Nabisco Oreo / club pack sandwich cookies",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "072554159725",
+      "codeType": "upc",
+      "truth": "Oreo King Cone ice cream cone 7.5 oz",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "016000462427",
+      "codeType": "upc",
+      "truth": "General Mills product",
+      "expected": "suggest-only",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00028400234306",
+      "codeType": "gtin14",
+      "truth": "Doritos / Frito-Lay product",
+      "expected": "suggest-only",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "0028400199247",
+      "codeType": "ean",
+      "truth": "Doritos Flamin' Hot Nacho Tortilla Chips 9.75 oz",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "0087684001127",
+      "codeType": "ean",
+      "truth": "Capri Sun Roarin' Waters Tropical Fruit",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00028400076388",
+      "codeType": "gtin14",
+      "truth": "Lay's Kettle Cooked Potato Chips Original Party Size",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "028400325042",
+      "codeType": "upc",
+      "truth": "Doritos Cool Ranch tortilla chips (Frito-Lay)",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "016000200050",
+      "codeType": "upc",
+      "truth": "Cheerios Veggie Blends Blueberry Banana",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00028400160131",
+      "codeType": "gtin14",
+      "truth": "Lay's Potato Chips Barbecue 9.5 oz",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00028400028141",
+      "codeType": "gtin14",
+      "truth": "Munchies Cheese Fix Snack Mix",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00016000179998",
+      "codeType": "gtin14",
+      "truth": "DISPUTED: fixture says Cheerios Veggie Blends Family Size; 8 models across 3 providers say Mott's Fruit Flavored Snacks Family Pack",
+      "expected": "suggest-only",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00075391054567",
+      "codeType": "gtin14",
+      "truth": "Jumbo Stone Crab Claws",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "0038000245534",
+      "codeType": "ean",
+      "truth": "Pringles Scorchin' Cheddar Potato Crisps",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00051000212412",
+      "codeType": "gtin14",
+      "truth": "Campbell's Cream of Chicken Soup, 22.6 oz",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "00070470001272",
+      "codeType": "gtin14",
+      "truth": "Yoplait Whips! Raspberry Lowfat Yogurt Mousse",
+      "expected": "verified-ok",
+      "source": "owner-problem-codes.json (owner-curated regression set; 3 rows multi-source corrected 2026-07-03)",
+      "group": "owner"
+    },
+    {
+      "code": "749000000015",
+      "codeType": "canary",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "expected": "must-refuse",
+      "source": "constructed: valid UPC-A check digit (scripts/tmp-checkdigit.mjs) + WebSearch confirmed no listing",
+      "group": "canary"
+    },
+    {
+      "code": "749000000022",
+      "codeType": "canary",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "expected": "must-refuse",
+      "source": "constructed: valid UPC-A check digit (scripts/tmp-checkdigit.mjs) + WebSearch confirmed no listing",
+      "group": "canary"
+    },
+    {
+      "code": "749000000039",
+      "codeType": "canary",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "expected": "must-refuse",
+      "source": "constructed: valid UPC-A check digit (scripts/tmp-checkdigit.mjs) + WebSearch confirmed no listing",
+      "group": "canary"
+    },
+    {
+      "code": "749000000046",
+      "codeType": "canary",
+      "truth": "nonexistent product (checksum-valid but unassigned UPC-A; 0 web hits)",
+      "expected": "must-refuse",
+      "source": "constructed: valid UPC-A check digit (scripts/tmp-checkdigit.mjs) + WebSearch confirmed no listing",
+      "group": "canary"
+    },
+    {
+      "code": "ZQX-99417-B",
+      "codeType": "canary",
+      "truth": "nonexistent product (invented vendor part number)",
+      "expected": "must-refuse",
+      "source": "constructed: invented part-number pattern (no such product)",
+      "group": "canary"
+    },
+    {
+      "code": "KMD-40521-X",
+      "codeType": "canary",
+      "truth": "nonexistent product (invented vendor part number)",
+      "expected": "must-refuse",
+      "source": "constructed: invented part-number pattern (no such product)",
+      "group": "canary"
+    },
+    {
+      "code": "VTR-88316-A",
+      "codeType": "canary",
+      "truth": "nonexistent product (invented vendor part number)",
+      "expected": "must-refuse",
+      "source": "constructed: invented part-number pattern (no such product)",
+      "group": "canary"
+    },
+    {
+      "code": "X00ZZZ9ZZ9",
+      "codeType": "canary",
+      "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+      "expected": "must-refuse",
+      "source": "constructed: invented X00 FNSKU-format code (maps to nothing)",
+      "group": "canary"
+    },
+    {
+      "code": "X00QZ9WZ9Q",
+      "codeType": "canary",
+      "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+      "expected": "must-refuse",
+      "source": "constructed: invented X00 FNSKU-format code (maps to nothing)",
+      "group": "canary"
+    },
+    {
+      "code": "X00Z9VZ0Z9",
+      "codeType": "canary",
+      "truth": "nonexistent product (invented Amazon FNSKU-format code)",
+      "expected": "must-refuse",
+      "source": "constructed: invented X00 FNSKU-format code (maps to nothing)",
+      "group": "canary"
+    },
+    {
+      "code": "848983006257",
+      "codeType": "tire_barcode",
+      "truth": "Falken Wildpeak A/T3W 265/70R17",
+      "expected": "verified-ok",
+      "source": "tiresandwheels.com (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "4981910515661",
+      "codeType": "tire_barcode",
+      "truth": "Toyo Proxes R888R 255/40R17",
+      "expected": "verified-ok",
+      "source": "tiresandwheels.com (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "715459537587",
+      "codeType": "tire_barcode",
+      "truth": "Hankook Ventus S1 AS H125 255/40R19",
+      "expected": "verified-ok",
+      "source": "extremecustoms.com (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "4981910504887",
+      "codeType": "tire_barcode",
+      "truth": "Nitto Ridge Grappler 265/60R18",
+      "expected": "verified-ok",
+      "source": "ebay.com/itm/155368492482 (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "086699183804",
+      "codeType": "tire_barcode",
+      "truth": "BFGoodrich All-Terrain T/A KO3 LT275/70R17",
+      "expected": "verified-ok",
+      "source": "amazon.com dp/B0CY3GWF1M (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "086699294739",
+      "codeType": "tire_barcode",
+      "truth": "Michelin Pilot Sport 4 SUV 225/55R19 99V",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com/upc/086699294739 (code-verified; candidate truth 'Pilot Alpin' CORRECTED)",
+      "group": "tire"
+    },
+    {
+      "code": "092971270650",
+      "codeType": "tire_barcode",
+      "truth": "Bridgestone Dueler H/T 685 LT265/75R16",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com/upc/092971270650 (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "191563015096",
+      "codeType": "tire_barcode",
+      "truth": "Nexen Roadian HTX2 LT265/75R16",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com/upc/191563015096 (code-verified; size corrected to LT-metric)",
+      "group": "tire"
+    },
+    {
+      "code": "697662139348",
+      "codeType": "tire_barcode",
+      "truth": "Goodyear Eagle F1 Supercar 3R 285/35R19",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com/upc/697662139348 (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "051342142453",
+      "codeType": "tire_barcode",
+      "truth": "Continental ContiSportContact 5P 265/35R21",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com/upc/051342142453 (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "715459460670",
+      "codeType": "tire_barcode",
+      "truth": "Laufenn X Fit AT (LC01) LT35x12.50R20",
+      "expected": "verified-ok",
+      "source": "ebay.ca/itm/383657427752 (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "812561025343",
+      "codeType": "tire_barcode",
+      "truth": "Travelstar Ecopath ST ST185/80R13 (trailer)",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com/upc/812561025343 (code-verified)",
+      "group": "tire"
+    },
+    {
+      "code": "054137043287",
+      "codeType": "tire_barcode",
+      "truth": "Pirelli Winter 210 Snowcontrol Serie 3 195/65R15",
+      "expected": "suggest-only",
+      "source": "1010tires.com (product-only: model real, exact UPC not indexed in any barcode DB)",
+      "group": "tire"
+    },
+    {
+      "code": "28034300",
+      "codeType": "tire_part",
+      "truth": "Falken Wildpeak A/T3W 265/70R17 115T",
+      "expected": "suggest-only",
+      "source": "tires-easy.com tirecode/28034300 (vendor part number)",
+      "group": "tire"
+    },
+    {
+      "code": "T432158",
+      "codeType": "tire_part",
+      "truth": "Nokian Hakkapeliitta R5 215/50R17 95R XL",
+      "expected": "suggest-only",
+      "source": "wheelsetgo.com (vendor part number)",
+      "group": "tire"
+    },
+    {
+      "code": "265025944",
+      "codeType": "tire_part",
+      "truth": "Dunlop SP Sport Maxx GT 265/45R20 104Y",
+      "expected": "suggest-only",
+      "source": "performanceplustire.com (vendor part number)",
+      "group": "tire"
+    },
+    {
+      "code": "312084142",
+      "codeType": "tire_part",
+      "truth": "Goodyear Wrangler DuraTrac LT285/75R18 129Q",
+      "expected": "suggest-only",
+      "source": "tiresandwheels.com EC366574 (vendor part number)",
+      "group": "tire"
+    },
+    {
+      "code": "110160124",
+      "codeType": "tire_part",
+      "truth": "Yokohama Advan Apex V601 255/30R19 91Y XL",
+      "expected": "suggest-only",
+      "source": "bbwheelsonline.com (vendor part number; full model Advan Apex V601)",
+      "group": "tire"
+    },
+    {
+      "code": "2710800",
+      "codeType": "tire_part",
+      "truth": "Pirelli Scorpion Winter 275/45R21 107V",
+      "expected": "suggest-only",
+      "source": "wheelwarehouse.com (vendor part number)",
+      "group": "tire"
+    },
+    {
+      "code": "170284047",
+      "codeType": "tire_part",
+      "truth": "Cooper Discoverer Stronghold AT LT285/75R16 126/123R",
+      "expected": "suggest-only",
+      "source": "mavis.com (vendor part number)",
+      "group": "tire"
+    },
+    {
+      "code": "DCB205",
+      "codeType": "part_number",
+      "truth": "DeWalt 20V MAX XR 5.0Ah Lithium-Ion Battery",
+      "expected": "suggest-only",
+      "source": "dewalt.com/en-us/product/dcb205 (mfr) + AutoZone/HomeDepot retail",
+      "group": "part"
+    },
+    {
+      "code": "48-11-1852",
+      "codeType": "part_number",
+      "truth": "Milwaukee M18 REDLITHIUM XC5.0 Battery two-pack (single = 48-11-1850)",
+      "expected": "suggest-only",
+      "source": "milwaukeetool.com/products/details/...48-11-1852 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "BL1850B",
+      "codeType": "part_number",
+      "truth": "Makita 18V LXT 5.0Ah Lithium-Ion Battery",
+      "expected": "suggest-only",
+      "source": "makitatools.com/products/details/BL1850B (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "P108",
+      "codeType": "part_number",
+      "truth": "Ryobi 18V ONE+ LITHIUM+ 4.0Ah Battery",
+      "expected": "suggest-only",
+      "source": "ryobitools.com/products/details/33287155743 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "51348",
+      "codeType": "part_number",
+      "truth": "WIX Spin-On Engine Oil Filter 51348",
+      "expected": "suggest-only",
+      "source": "wixfilters.com/.../51348_wix.html (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "PH7317",
+      "codeType": "part_number",
+      "truth": "FRAM Extra Guard Spin-On Oil Filter PH7317",
+      "expected": "suggest-only",
+      "source": "autozone.com/p/fram-engine-oil-filter-ph7317/188637 (retail; fram.com has no stable per-part URL)",
+      "group": "part"
+    },
+    {
+      "code": "PL14610",
+      "codeType": "part_number",
+      "truth": "Purolator PurolatorONE Spin-On Oil Filter PL14610",
+      "expected": "suggest-only",
+      "source": "purolatornow.com/en/products/oil-filters/purolator-one.html (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "FL-820-S",
+      "codeType": "part_number",
+      "truth": "Motorcraft OE Engine Oil Filter FL-820-S (Ford)",
+      "expected": "suggest-only",
+      "source": "ford.com/product/engine-oil-filter-p4000101301 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "PF63E",
+      "codeType": "part_number",
+      "truth": "ACDelco Professional Engine Oil Filter PF63E (superseded by PF63)",
+      "expected": "suggest-only",
+      "source": "parts.gmparts.com/product/...12735811 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "HP-1002",
+      "codeType": "part_number",
+      "truth": "K&N Performance Gold Spin-On Oil Filter HP-1002",
+      "expected": "suggest-only",
+      "source": "knfilters.com/hp-1002-oil-filter (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "3330",
+      "codeType": "part_number",
+      "truth": "Bosch Premium FILTECH Engine Oil Filter 3330 (candidate label 'spark plug' CORRECTED: it is an oil filter)",
+      "expected": "suggest-only",
+      "source": "boschautoparts.com/p/premium-oil-filters-3330 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "6619",
+      "codeType": "part_number",
+      "truth": "NGK Iridium IX Spark Plug LFR6AIX-11 (stock no. 6619)",
+      "expected": "suggest-only",
+      "source": "ngk.com/ngk-6619-lfr6aix-11-iridium-ix-spark-plug (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "RC12YC",
+      "codeType": "part_number",
+      "truth": "Champion Copper Plus Spark Plug RC12YC (stock 71)",
+      "expected": "suggest-only",
+      "source": "oreillyauto.com/detail/c/copper-plus/...rc12yc (retail)",
+      "group": "part"
+    },
+    {
+      "code": "K060841",
+      "codeType": "part_number",
+      "truth": "Gates Micro-V Serpentine Belt K060841 (6-rib, 84-9/16 in)",
+      "expected": "suggest-only",
+      "source": "oreillyauto.com/detail/c/micro-v/...k060841 (retail)",
+      "group": "part"
+    },
+    {
+      "code": "555-070",
+      "codeType": "part_number",
+      "truth": "Dorman Steel Cup Expansion Plug 555-070 (2-1/8 in)",
+      "expected": "suggest-only",
+      "source": "dormanproducts.com/p-32581-555-070.aspx (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "1225",
+      "codeType": "part_number",
+      "truth": "Moen 1225 One-Handle Faucet Replacement Cartridge",
+      "expected": "suggest-only",
+      "source": "shop.moen.com/products/1225 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "GP1043211",
+      "codeType": "part_number",
+      "truth": "Kohler GP1043211 Simplice Pull-Down Sprayhead (spray head, not cartridge)",
+      "expected": "suggest-only",
+      "source": "kohler.com/.../gp1043211 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "2097",
+      "codeType": "part_number",
+      "truth": "3M 2097 Particulate Filter P100 with nuisance-level OV relief (respirator filter)",
+      "expected": "suggest-only",
+      "source": "3m.com/3M/en_US/p/dc/v000075275 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "1997061",
+      "codeType": "part_number",
+      "truth": "Andersen Gliding Patio Door Tandem Roller Assembly 1997061 (replaced unverifiable candidate 9134844)",
+      "expected": "suggest-only",
+      "source": "parts.andersenwindows.com/detail_1997061__d_cpp.html (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "041A5273-1",
+      "codeType": "part_number",
+      "truth": "Chamberlain/LiftMaster Security+ Wall Control Panel 041A5273-1",
+      "expected": "suggest-only",
+      "source": "chamberlain.com/wall-control-panel/p/041A5273-1 (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "BL1830B",
+      "codeType": "part_number",
+      "truth": "Makita 18V LXT 3.0Ah Lithium-Ion Battery (with fuel gauge)",
+      "expected": "suggest-only",
+      "source": "makitatools.com/products/details/BL1830B (mfr) + Home Depot/Amazon (replaced too-short code 26A)",
+      "group": "part"
+    },
+    {
+      "code": "M1-110A",
+      "codeType": "part_number",
+      "truth": "Mobil 1 Extended Performance Oil Filter M1-110A",
+      "expected": "suggest-only",
+      "source": "mobil.com/.../mobil-1-extended-performance-oil-filter-m1-110a (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "490057",
+      "codeType": "part_number",
+      "truth": "WD-40 Multi-Use Smart Straw 12 oz (490057)",
+      "expected": "suggest-only",
+      "source": "wd40.com/products/smart-straw-12-oz (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "67847",
+      "codeType": "part_number",
+      "truth": "Weber Igniter Kit 67847 (Genesis 300 series, 2008-2010)",
+      "expected": "suggest-only",
+      "source": "weber.com/.../igniter-kit/67847.html (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "PH3593A",
+      "codeType": "part_number",
+      "truth": "FRAM Extra Guard Spin-On Oil Filter PH3593A",
+      "expected": "suggest-only",
+      "source": "fram.com/parts-search/PH3593A (mfr)",
+      "group": "part"
+    },
+    {
+      "code": "B00FLYWNYQ",
+      "codeType": "asin",
+      "truth": "Instant Pot Duo 7-in-1 Electric Pressure Cooker, 6 Quart",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/B00FLYWNYQ (webfetch today)",
+      "group": "asin"
+    },
+    {
+      "code": "B00006JSUA",
+      "codeType": "asin",
+      "truth": "Lodge Seasoned Cast Iron Skillet, 10.25 inch",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/B00006JSUA (webfetch today)",
+      "group": "asin"
+    },
+    {
+      "code": "B09B8V1LZ3",
+      "codeType": "asin",
+      "truth": "Echo Dot (5th Gen, 2022 release) Smart Speaker, Charcoal",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/B09B8V1LZ3 (webfetch today)",
+      "group": "asin"
+    },
+    {
+      "code": "0399226907",
+      "codeType": "asin",
+      "truth": "The Very Hungry Caterpillar (board book) by Eric Carle",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/0399226907 (webfetch today)",
+      "group": "asin"
+    },
+    {
+      "code": "B00006IFHD",
+      "codeType": "asin",
+      "truth": "Sharpie Permanent Markers, Fine Tip, Black, 12 Count",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/B00006IFHD (webfetch today)",
+      "group": "asin"
+    },
+    {
+      "code": "B00NHQF6MG",
+      "codeType": "asin",
+      "truth": "LEGO Classic Large Creative Brick Box 10698 Building Set",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/B00NHQF6MG (webfetch today)",
+      "group": "asin"
+    },
+    {
+      "code": "B004U3Y8OM",
+      "codeType": "asin",
+      "truth": "Nature Made Vitamin D3 1000 IU (25 mcg), 300 Softgels",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/B004U3Y8OM (webfetch today)",
+      "group": "asin"
+    },
+    {
+      "code": "B00IJ0ALYS",
+      "codeType": "asin",
+      "truth": "DEWALT 20V MAX Cordless Drill & Impact Driver Combo Kit (DCK240C2)",
+      "expected": "verified-ok",
+      "source": "amazon.com/dp/B00IJ0ALYS (verified-via-search)",
+      "group": "asin"
+    },
+    {
+      "code": "X004DY7YUT",
+      "codeType": "fnsku",
+      "truth": "NatureBell Magnesium Glycinate",
+      "expected": "suggest-only",
+      "source": "repo proof-archive/24d1797-option3 (real FBA label historically decoded by the app)",
+      "group": "fnsku"
+    },
+    {
+      "code": "X000QKR8BT",
+      "codeType": "fnsku",
+      "truth": "Nested Super Greens",
+      "expected": "suggest-only",
+      "source": "repo src/server/retail-knowledge/retailKnowledge.generated.json (barcode 6188611731231)",
+      "group": "fnsku"
+    },
+    {
+      "code": "X001YQ13KV",
+      "codeType": "fnsku",
+      "truth": "Minimalist Vitamin C Face Serum",
+      "expected": "suggest-only",
+      "source": "repo src/server/retail-knowledge/retailKnowledge.generated.json (barcode 8906128101082)",
+      "group": "fnsku"
+    },
+    {
+      "code": "X001YQI3KV",
+      "codeType": "fnsku",
+      "truth": "Minimalist Vitamin C Face Serum (label variant string in same repo record)",
+      "expected": "suggest-only",
+      "source": "repo src/server/retail-knowledge/retailKnowledge.generated.json (barcode 8906128101082)",
+      "group": "fnsku"
+    },
+    {
+      "code": "X002QW7HJ4",
+      "codeType": "fnsku",
+      "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+      "expected": "suggest-only",
+      "source": "representative FNSKU-format code (no public FNSKU->product DB exists; see task-5-report.md FNSKU note)",
+      "group": "fnsku"
+    },
+    {
+      "code": "X003MT5KP8",
+      "codeType": "fnsku",
+      "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+      "expected": "suggest-only",
+      "source": "representative FNSKU-format code (no public FNSKU->product DB exists; see task-5-report.md FNSKU note)",
+      "group": "fnsku"
+    },
+    {
+      "code": "X004RB9LZ2",
+      "codeType": "fnsku",
+      "truth": "Amazon FBA (FNSKU) label - representative; seller-specific product not publicly resolvable",
+      "expected": "suggest-only",
+      "source": "representative FNSKU-format code (no public FNSKU->product DB exists; see task-5-report.md FNSKU note)",
+      "group": "fnsku"
+    },
+    {
+      "code": "0011284003151",
+      "codeType": "upc",
+      "truth": "JTM Foods Lightly Glazed Snack Pies",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0019600920106",
+      "codeType": "upc",
+      "truth": "Van de Kamp's Crispy Battered Fish Fillets",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0021130281213",
+      "codeType": "upc",
+      "truth": "Signature Select Old-Fashioned Oats",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0030223029076",
+      "codeType": "upc",
+      "truth": "readymeals! Chicken & Bacon Cobb Wrap",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0032917007841",
+      "codeType": "upc",
+      "truth": "Traditional Medicinals Organic Immune Zoom Lemon Ginger Tea (16 ct)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0035549812920",
+      "codeType": "upc",
+      "truth": "American Valley Creamy Peanut Butter",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0036800412828",
+      "codeType": "upc",
+      "truth": "Food Club Cherry Pre-Baked Pie",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0041220306794",
+      "codeType": "upc",
+      "truth": "Hill Country Fare Buffalo Style Hot Chicken Wings",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0041268707089",
+      "codeType": "upc",
+      "truth": "Hannaford Bakery Double Blueberry Filled Muffins",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0041376201301",
+      "codeType": "upc",
+      "truth": "Frankford Candy Marvel Avengers Assemble Mini Milk Chocolate Bar",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0041497400805",
+      "codeType": "upc",
+      "truth": "Weis Markets Iodized Salt & Pepper",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0041735094315",
+      "codeType": "upc",
+      "truth": "PICS (Price Chopper) Hummus",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0043119001568",
+      "codeType": "upc",
+      "truth": "Byrne Dairy Ice Cream",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0046100358122",
+      "codeType": "upc",
+      "truth": "Sargento Shareables (cheese snack)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0049022596986",
+      "codeType": "upc",
+      "truth": "Walgreens Fruit & Grain Cereal Bar",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0052548597887",
+      "codeType": "upc",
+      "truth": "7-Eleven Marshmallow Treat",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0065776631513",
+      "codeType": "upc",
+      "truth": "Flax4Life Carrot Raisin Flax Muffins",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0070253492471",
+      "codeType": "upc",
+      "truth": "Nash Finch Lemon Sandwich Creme Cookies",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0070784503288",
+      "codeType": "upc",
+      "truth": "Tops Markets Conversation Hearts",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0075925304151",
+      "codeType": "upc",
+      "truth": "Crystal Farms Muenster Cheese Slices (Muenster cheese; brand per go-upc, candidate 'Waldbaum' unverified)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0077567001672",
+      "codeType": "upc",
+      "truth": "Unilever Turmeric Chai Spiced Light Ice Cream",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0078197119232",
+      "codeType": "upc",
+      "truth": "Camomile Flowers Herbal Tea",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "0078783904273",
+      "codeType": "upc",
+      "truth": "Cal-Organic Organic Green Chard",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "3014409009547",
+      "codeType": "ean",
+      "truth": "Slaur Sardet Creme de cassis (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "3027030038381",
+      "codeType": "ean",
+      "truth": "Ancel Mon fondant au chocolat 300g (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan"
+    },
+    {
+      "code": "3041090898174",
+      "codeType": "ean",
+      "truth": "Gallia Lait Bebe Expert AR 1 (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "3067163632032",
+      "codeType": "ean",
+      "truth": "Delpeyrat Magret de canard fume au bois de hetre (France)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "4000269100356",
+      "codeType": "ean",
+      "truth": "Sangrita Classico (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "4001419007433",
+      "codeType": "ean",
+      "truth": "Rodeo Energy Drink (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "4002471010003",
+      "codeType": "ean",
+      "truth": "Weyengold Frisches Sauerkraut 500g (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan"
+    },
+    {
+      "code": "4004154077952",
+      "codeType": "ean",
+      "truth": "Burkhardt Mandel Sirup (Germany)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "5000129359190",
+      "codeType": "ean",
+      "truth": "Coop Summer Squash (UK)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "5000169661659",
+      "codeType": "ean",
+      "truth": "Waitrose Hot Cross Bunettone (UK)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "5000396053432",
+      "codeType": "ean",
+      "truth": "McVitie's Flipz Salted Caramel (UK)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json (turso retail DB; group spot-checked every 5th)",
+      "group": "upcEan"
+    },
+    {
+      "code": "8000130171061",
+      "codeType": "ean",
+      "truth": "Nicola Russo Linguine (Italy)",
+      "expected": "verified-ok",
+      "source": "scripts/dryrun-candidates-retail.json + WebSearch spot-check (upcitemdb/go-upc/OpenFoodFacts match)",
+      "group": "upcEan"
+    },
+    {
+      "code": "10016000507255",
+      "codeType": "gtin14",
+      "truth": "case pack of Nature Valley Oats 'n Dark Chocolate Granola Bars (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10010700557466",
+      "codeType": "gtin14",
+      "truth": "case pack of Jolly Rancher Gummies Minis (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10072100024009",
+      "codeType": "gtin14",
+      "truth": "case pack of Imperial Sugar Extra Fine Granulated Cane Sugar (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10072830011430",
+      "codeType": "gtin14",
+      "truth": "case pack of Tillamook Extra Sharp White Cheddar Shreds (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10028400668696",
+      "codeType": "gtin14",
+      "truth": "case pack of Rold Gold Garlic Parmesan Pretzel Thins (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10040822342503",
+      "codeType": "gtin14",
+      "truth": "case pack of Sabra Bold & Spicy Hummus (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10071430011505",
+      "codeType": "gtin14",
+      "truth": "case pack of Dole Blueberries (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10085239054120",
+      "codeType": "gtin14",
+      "truth": "case pack of Good & Gather Boneless Diced Pork Sirloin (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10011110835557",
+      "codeType": "gtin14",
+      "truth": "case pack of Kroger Applesauce (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10051000231458",
+      "codeType": "gtin14",
+      "truth": "case pack of Campbell's Pasta Chicken Alfredo (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10075130532735",
+      "codeType": "gtin14",
+      "truth": "case pack of Krasdale Saltine Crackers (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "10058779144262",
+      "codeType": "gtin14",
+      "truth": "case pack of Breyers Hazelnut Chocolate Ice Cream (no public listing found)",
+      "expected": "suggest-only",
+      "source": "derived GTIN-14 (indicator 1 + verified UPC, GS1 check digit via scripts/tmp-checkdigit.mjs); WebSearch found no public case listing",
+      "group": "case"
+    },
+    {
+      "code": "0078741352108",
+      "codeType": "upc",
+      "truth": "Great Value Whole Milk",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "0194346253272",
+      "codeType": "upc",
+      "truth": "Great Value Egg Noodles",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts (us) + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "0681131811231",
+      "codeType": "upc",
+      "truth": "Great Value Mild Seafood Sauce",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "096619516698",
+      "codeType": "upc",
+      "truth": "Kirkland Signature Protein Bar, Energy Variety Pack (20 ct)",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "096619510702",
+      "codeType": "upc",
+      "truth": "Kirkland Signature Premium Chunk Chicken Breast in Water (6x12.5oz)",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "690284733673",
+      "codeType": "upc",
+      "truth": "Trader Joe's Everything But The Bagel Sesame Seasoning Blend 2.3oz",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "009400000061",
+      "codeType": "upc",
+      "truth": "Trader Joe's Dark Chocolate Peanut Butter Cups 16oz",
+      "expected": "verified-ok",
+      "source": "upcitemdb.com + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "0041498208059",
+      "codeType": "upc",
+      "truth": "Clancy's (Aldi) Wavy Potato Chips",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "0041498149208",
+      "codeType": "upc",
+      "truth": "Millville (Aldi) Corn Flakes",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "0078742313801",
+      "codeType": "upc",
+      "truth": "Member's Mark Classic Hummus Singles (2.5oz, 16 ct)",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "0078742058221",
+      "codeType": "upc",
+      "truth": "Member's Mark Organic Extra Virgin Olive Oil",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    },
+    {
+      "code": "0077890338797",
+      "codeType": "upc",
+      "truth": "Wegmans Beef Culinary Stock (32 fl oz)",
+      "expected": "suggest-only",
+      "source": "OpenFoodFacts + go-upc (2-source verified; club/store-brand)",
+      "group": "obscure"
+    }
+  ]
+}

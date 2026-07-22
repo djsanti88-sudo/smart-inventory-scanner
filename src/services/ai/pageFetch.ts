@@ -104,6 +104,28 @@ interface FetchOpts {
   signal?: AbortSignal;
 }
 
+// Per-host politeness memory: after a host answers 429/403 twice in one fetch, skip that host
+// for 10 minutes instead of re-hitting it on every scan. In-memory (per server instance) only.
+const HOST_COOLDOWN_MS = 10 * 60_000;
+const hostCooldownUntil = new Map<string, number>();
+
+function hostOf(url: string): string {
+  try { return new URL(url).host; } catch { return url; }
+}
+
+export function hostOnCooldown(url: string, now: number = Date.now()): boolean {
+  const until = hostCooldownUntil.get(hostOf(url));
+  return until !== undefined && now < until;
+}
+
+export function setHostCooldown(url: string, now: number = Date.now()): void {
+  hostCooldownUntil.set(hostOf(url), now + HOST_COOLDOWN_MS);
+}
+
+export function resetHostCooldowns(): void {
+  hostCooldownUntil.clear();
+}
+
 /** Fetch one URL with a per-call timeout; on 429/403 back off once then skip politely. */
 async function fetchOne(url: string, fetchImpl: FetchImpl, opts: FetchOpts): Promise<FetchedPage | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -120,6 +142,7 @@ async function fetchOne(url: string, fetchImpl: FetchImpl, opts: FetchOpts): Pro
           await sleep(opts.backoffMs, opts.signal); // one short backoff, then give up
           continue;
         }
+        setHostCooldown(url); // second 429/403 -> cool this host down for 10 minutes
         return null; // rate-limited -> skip politely
       }
       if (!res.ok) return null;
@@ -147,7 +170,8 @@ export async function fetchPages(
     backoffMs: deps?.backoffMs ?? 400,
     signal: deps?.signal,
   };
-  const settled = await Promise.allSettled(urls.map((u) => fetchOne(u, fetchImpl, opts)));
+  const live = urls.filter((u) => !hostOnCooldown(u));
+  const settled = await Promise.allSettled(live.map((u) => fetchOne(u, fetchImpl, opts)));
   return settled
     .filter((r): r is PromiseFulfilledResult<FetchedPage | null> => r.status === "fulfilled")
     .map((r) => r.value)
@@ -167,6 +191,7 @@ export function looksLikeNotFound(text: string): boolean {
 }
 
 async function fetchUntilCodePage(
+  code: string,
   urls: string[],
   codeVariants: string[],
   fetchImpl: FetchImpl,
@@ -177,16 +202,18 @@ async function fetchUntilCodePage(
   let fallbackPage: FetchedPage | null = null; // has the code but no usable product (used only if nothing better)
   let resolveFound: () => void = () => {};
   const found = new Promise<void>((r) => (resolveFound = r));
-  const tasks = urls.map((u) =>
+  const liveUrls = urls.filter((u) => !hostOnCooldown(u));
+  const tasks = liveUrls.map((u) =>
     fetchOne(u, fetchImpl, opts)
       .then((p) => {
         if (!p) return;
         pages.push(p);
         if (productPage) return;
         if (!codeVariants.some((v) => p.html.includes(v))) return;
-        // Early-win ONLY on a real product page (usable title, not a "not found" page); otherwise keep
-        // looking at the other sites and hold this only as a last-resort fallback.
-        const usable = isUsableProductName(extractTitleProduct(p.html).productName) && !looksLikeNotFound(p.text);
+        // Early-win ONLY on a real product page (usable title that does not ECHO the queried code,
+        // not a "not found" page); otherwise keep looking at the other sites and hold this only as
+        // a last-resort fallback.
+        const usable = isUsableProductName(extractTitleProduct(p.html).productName, code) && !looksLikeNotFound(p.text);
         if (usable) {
           productPage = p;
           resolveFound();
@@ -236,7 +263,7 @@ export async function enrichWithPageFetch(params: {
 
   const fetchImpl = params.fetchImpl ?? (globalThis.fetch as unknown as FetchImpl);
   const fetchOpts: FetchOpts = { timeoutMs: 7000, maxBytes: 400_000, backoffMs: 400, signal: params.signal };
-  const { codePage, pages } = await fetchUntilCodePage(urls, codeVariants, fetchImpl, fetchOpts);
+  const { codePage, pages } = await fetchUntilCodePage(params.code, urls, codeVariants, fetchImpl, fetchOpts);
 
   const fetchedUrls = pages.map((p) => p.url);
   // The code-bearing page is the authoritative source; read just it (faster than joining every page).
@@ -263,7 +290,7 @@ export async function enrichWithPageFetch(params: {
   // call. Only pay for the model read when the page doesn't self-describe with a usable name. The
   // model read was the ~6s tail and, for barcode-DB pages, returned no extra specs anyway.
   const h = extractTitleProduct(codePage.html);
-  let candidateName = isUsableProductName(h.productName) ? h.productName : "";
+  let candidateName = isUsableProductName(h.productName, params.code) ? h.productName : "";
   let candidateBrand = h.brand;
   let extracted: Partial<AiLookupResult> | null = null;
   if (!candidateName && params.extract) {
@@ -272,7 +299,7 @@ export async function enrichWithPageFetch(params: {
     } catch {
       extracted = null;
     }
-    if (isUsableProductName(extracted?.productName ?? "")) {
+    if (isUsableProductName(extracted?.productName ?? "", params.code)) {
       candidateName = String(extracted?.productName).trim();
       candidateBrand = candidateBrand || (extracted?.brand ?? "").trim();
     }

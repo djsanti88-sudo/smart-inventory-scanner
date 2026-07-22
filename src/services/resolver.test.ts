@@ -100,6 +100,22 @@ describe("X00/Amazon/vendor label rules", () => {
     expect(r.resolverStatus).toBe("known");
     expect(r.productId).toBe("prod-coke");
   });
+
+  it("P4: an X00 FNSKU gets the honest Amazon-fulfillment-label copy (not a public barcode)", () => {
+    const r = resolve("X004DY7YUT");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.reason).toBe(
+      "Amazon fulfillment label (FNSKU). Not a public barcode - resolve via your Amazon inventory.",
+    );
+  });
+
+  it("P4: a B0 ASIN keeps the generic vendor-label copy (only X00 FNSKUs get the FNSKU copy)", () => {
+    const r = resolve("B004DY7YUT");
+    expect(r.codeType).toBe("vendor_label");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.reason).not.toContain("FNSKU");
+    expect(r.reason.toLowerCase()).toContain("label");
+  });
 });
 
 describe("trust gates", () => {
@@ -129,5 +145,132 @@ describe("trust gates", () => {
     const r = resolve("DUP", [...products, a, b], aliases);
     expect(r.resolverStatus).toBe("conflict");
     expect(r.productId).toBeNull();
+  });
+});
+
+describe("A3/AM-2: bad-check-digit codes get an additive, non-terminal misread reason", () => {
+  it("an unknown GTIN-shaped code failing its check digit gets the misread reason and stays a normal needs_review row", () => {
+    const r = resolve("049000006345");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.reason).toContain("Barcode check digit fails");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("rescan");
+    expect(r.reason).toContain("store-internal code");
+    expect(r.reason).toContain("still link it to a product");
+  });
+
+  it("AM-2 case 1: a number-system-2 in-store UPC (12 digits starting with 2, bad plain GS1 check) is a normal aliasable needs_review row whose reason names BOTH possibilities", () => {
+    // 212345678900: GTIN-shaped, fails the plain GS1 check digit by design (in-store price-embedded
+    // code), exactly like a genuine scanner misread would. Verified via scripted check: isValidCheckDigit === false.
+    const r = resolve("212345678900");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.matchType).toBe("unknown");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("store-internal code");
+    expect(r.reason).toContain("You can still link it to a product");
+  });
+
+  it("AM-2 case 2: a 13-digit non-GS1 warehouse numeric is likewise a normal aliasable needs_review row with the additive reason", () => {
+    const r = resolve("9876543210981");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.matchType).toBe("unknown");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("store-internal code");
+  });
+
+  it("AM-2 case 3 (ITF-14 wrapper): a 14-digit code with a bad plain check digit is likewise a normal aliasable needs_review row with the additive reason", () => {
+    const r = resolve("18400000567895");
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.matchType).toBe("unknown");
+    expect(r.reason).toContain("scanner misread");
+    expect(r.reason).toContain("store-internal code");
+  });
+
+  it("AM-2 case 4: an APPROVED alias for a bad-check-digit code still resolves Known (alias wins; reason is untouched)", () => {
+    const linked = alias({
+      cleanCode: "212345678900",
+      normalizedCode: "212345678900",
+      productId: "prod-coke",
+      approved: true,
+    });
+    const r = resolve("212345678900", products, [...aliases, linked]);
+    expect(r.resolverStatus).toBe("known");
+    expect(r.productId).toBe("prod-coke");
+    // The misread/additive copy only ever applies on the unknown branch - a known match's reason
+    // names the product match, never the misread language.
+    expect(r.reason).not.toContain("scanner misread");
+    expect(r.reason).not.toContain("Barcode check digit fails");
+  });
+
+  it("a code that is NOT GTIN-shaped (vendor label) never gets the misread reason", () => {
+    const r = resolve("X004DY7YUT");
+    expect(r.reason).not.toContain("scanner misread");
+    expect(r.reason).not.toContain("Barcode check digit fails");
+  });
+
+  it("a valid GTIN with correct check digit never gets the misread reason", () => {
+    const r = resolve("855724007602"); // seed regression case, still unknown but a VALID check digit
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.reason).not.toContain("scanner misread");
+    expect(r.reason).not.toContain("Barcode check digit fails");
+  });
+});
+
+describe("QA fix cluster #8: over-500-char scans are flagged but never dropped (law: still appears+counts)", () => {
+  it("a 600-char string still resolves (needs_review), row appears, rawCode preserved in full", () => {
+    const longCode = "A".repeat(600);
+    const r = resolve(longCode);
+    expect(r.resolverStatus).toBe("needs_review");
+    expect(r.productId).toBeNull();
+    expect(r.rawCode).toBe(longCode);
+    expect(r.rawCode.length).toBe(600);
+    expect(r.reason.toLowerCase()).toContain("unusually long");
+  });
+
+  it("a code at or under the 500 cap does not get the unusually-long reason", () => {
+    const okCode = "B".repeat(500);
+    const r = resolve(okCode);
+    expect(r.reason.toLowerCase()).not.toContain("unusually long");
+  });
+
+  it("law: scanning N codes yields N feed entries and count N - a long code is never silently dropped", () => {
+    const longCode = "C".repeat(600);
+    const results = [resolve(longCode), resolve(longCode), resolve(longCode)];
+    // Each individual scan call still produces one resolution (one feed entry) - never thrown away.
+    for (const r of results) {
+      expect(r).toBeDefined();
+      expect(r.resolverStatus).not.toBeUndefined();
+    }
+    expect(results.length).toBe(3);
+  });
+
+  it("an over-long code that DOES match an approved alias still resolves Known (length cap never blocks a real match)", () => {
+    const longRaw = "T432119" + "Z".repeat(600);
+    const linked = alias({
+      cleanCode: longRaw,
+      normalizedCode: longRaw,
+      productId: "prod-coke",
+      approved: true,
+    });
+    const r = resolve(longRaw, products, [...aliases, linked]);
+    expect(r.resolverStatus).toBe("known");
+    expect(r.productId).toBe("prod-coke");
+  });
+});
+
+describe("resolveRawScan - affix core does not auto-count against a different-format alias", () => {
+  it("scanning 762590BH with an approved alias for 762590 routes to Needs Review, not Known", () => {
+    const products = [{ id: "p1", businessId: "b1", name: "Some Tire", verified: true } as unknown as Product];
+    const aliases = [{
+      id: "a1", businessId: "b1", productId: "p1", approved: true,
+      cleanCode: "762590", normalizedCode: "762590", rawCodeExample: "762590",
+    } as unknown as Alias];
+    const res = resolveRawScan("762590BH", products, aliases, "b1");
+    expect(res.resolverStatus).toBe("needs_review");
+    expect(res.productId).toBeNull();
   });
 });

@@ -6,6 +6,9 @@ import type {
   ScanEvent,
   UnknownCodeReview,
 } from "@/types";
+import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
+import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
+import { customerDisplayName } from "@/services/displayName";
 
 // Deterministic CSV export. Pure functions (no React, no next/*). Works entirely from local
 // session state, so export succeeds even when sync is pending. Never exports secrets/API keys.
@@ -83,6 +86,67 @@ export function exportFinalCounts(
 }
 
 /**
+ * Session counts CSV for the History page's per-session download: same columns as the home counts
+ * table (FinalCountTable.tsx), same order, minus the Sync/Actions columns (not exportable data).
+ * Header for the 8th column mirrors that table's isPlatform switch exactly (SKU vs Part number).
+ * A count row whose product cannot be resolved (e.g. an orphaned/deleted product) shows its scanned
+ * code in Product and Barcode via aliasesSeen, honest emptiness everywhere else - never a fabricated
+ * value.
+ */
+export function exportSessionCounts(
+  counts: InventoryCount[],
+  products: Product[],
+  isPlatform: boolean,
+): string {
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const headers = [
+    "qty",
+    "product",
+    "brand",
+    "model",
+    "category",
+    "specs",
+    "size",
+    isPlatform ? "sku" : "part_number",
+    "barcode",
+    "location",
+    "last_scanned",
+    "status",
+  ];
+  const rows = counts.map((c) => {
+    const p = byId.get(c.productId);
+    if (!p) {
+      // Unresolvable product: the code the shop actually scanned is the only honest identity we
+      // have. Every other cell stays blank rather than guessing.
+      const cleanCode = c.aliasesSeen[0] ?? "";
+      return [c.quantity, cleanCode, "", "", "", "", "", "", cleanCode, c.location ?? "", c.lastScannedAt, ""];
+    }
+    const brand = prettifyBrand(p.structuredBrand || p.brand);
+    const model = p.structuredModel
+      ? (isPlatform ? prettifyProductName(p.structuredModel) : prettifyProductName(customerDisplayName(prettifyProductName(p.structuredModel))))
+      : "";
+    const sizeDisplay = matchTireSize(p.specsShort)?.canonical.split(" ")[0] ?? p.sizeTag ?? plainTireSizeDigits(p.specsShort) ?? "";
+    const productName = isPlatform ? prettifyProductName(p.name) : prettifyProductName(customerDisplayName(p.name));
+    const status = p.verified ? "verified" : p.provisional ? "needs_review" : "";
+    return [
+      c.quantity,
+      productName,
+      brand,
+      model,
+      p.category || "",
+      p.specsShort || "",
+      sizeDisplay,
+      p.primarySku || "",
+      p.primaryBarcode || "",
+      p.location || "",
+      c.lastScannedAt,
+      status,
+    ];
+  });
+  return buildCsv(headers, rows);
+}
+
+/**
  * Quantity-adjustment CSV: one row per counted product with its code(s) + counted quantity, formatted
  * for pushing adjustments into an inventory system. This MVP does not track a prior "system quantity"
  * baseline, so the counted quantity IS the adjustment value (system_quantity is left blank). Built from
@@ -150,6 +214,48 @@ export function exportRawScanLog(scanFeed: ScanEvent[]): string {
     e.quantityAfterScan,
     e.syncStatus,
     e.idempotencyKey,
+  ]);
+  return buildCsv(headers, rows);
+}
+
+/** Session-scoped scan-level CSV for a single session's timeline.
+ *  Kept separate from exportRawScanLog because the whole-account raw log and one session's timeline
+ *  have different audiences. */
+export function exportSessionScanLog(events: ScanEvent[]): string {
+  const headers = [
+    "time",
+    "raw_code",
+    "clean_code",
+    "match_type",
+    "matched_product_id",
+    "status",
+    "quantity_after_scan",
+    "location",
+    "sync_status",
+  ];
+  const rows = events.map((e) => [
+    e.createdAt,
+    e.rawCode,
+    e.cleanCode,
+    e.matchType,
+    e.matchedProductId ?? "",
+    e.status,
+    e.quantityAfterScan,
+    e.location ?? "",
+    e.syncStatus,
+  ]);
+  return buildCsv(headers, rows);
+}
+
+/** Customer-safe session timeline export. Code and attribution fields stay platform-only. */
+export function exportSessionScanLogCustomer(events: ScanEvent[]): string {
+  const headers = ["time", "status", "quantity_after_scan", "location", "sync_status"];
+  const rows = events.map((e) => [
+    e.createdAt,
+    e.status,
+    e.quantityAfterScan,
+    e.location ?? "",
+    e.syncStatus,
   ]);
   return buildCsv(headers, rows);
 }

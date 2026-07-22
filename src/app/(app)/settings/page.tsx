@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { User } from "firebase/auth";
 import { useScanStore } from "@/stores/scanStore";
+import { useReconcileStore } from "@/stores/reconcileStore";
+import { DECODE_BUDGET_MIN_MS, DECODE_BUDGET_MAX_MS, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ExportMenu } from "@/components/ExportMenu";
 import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
+import { GptLadderPanel } from "@/components/GptLadderPanel";
+import { GeminiStatusRow } from "@/components/GeminiStatusRow";
+import { requiresOwnerPin } from "@/services/security/destructiveGuard";
+import { getSession, onAuthChange } from "@/lib/auth";
+import { runSignOutFlow, wipeAndSignOut } from "@/services/auth/signOutFlow";
 
 export default function SettingsPage() {
   const settings = useScanStore((s) => s.settings);
@@ -26,7 +34,42 @@ export default function SettingsPage() {
   const verifiedCatalogCount = catalog.filter((e) => e.verificationStatus === "verified").length;
   const pendingCatalogCount = catalog.filter((e) => e.verificationStatus === "pending").length;
 
+  const [user, setUser] = useState<User | null>(null);
+  useEffect(() => {
+    let active = true;
+    getSession().then((s) => {
+      if (active) setUser(s);
+    });
+    const unsub = onAuthChange((s) => {
+      if (active) setUser(s);
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, []);
+
   const [cacheMsg, setCacheMsg] = useState("");
+  const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
+  const verifyOwnerPin = useScanStore((s) => s.verifyOwnerPin);
+  const [pinPrompt, setPinPrompt] = useState(false);
+  const [pin, setPin] = useState("");
+  const [pinErr, setPinErr] = useState("");
+
+  // The pre-existing clear-cache body, verbatim (AM-R9 preserved). The PIN gate wraps AROUND it.
+  function doClear() {
+    clearLocalCache();
+    // AM-R9: the reconcile session is browser-local session state too - the same wipe clears it.
+    useReconcileStore.getState().clearLocalCache();
+    setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
+    // Reload cleanly so cloud data re-loads fresh (and a poisoned alias that returns proves it is in
+    // cloud data, to be fixed via the alias repair path, not local cache).
+    if (typeof window !== "undefined") setTimeout(() => window.location.reload(), 1400);
+    setPinPrompt(false);
+    setPin("");
+    setPinErr("");
+  }
+
   function handleClearCache() {
     const ok =
       typeof window === "undefined" ||
@@ -35,15 +78,87 @@ export default function SettingsPage() {
           "cached data only. Your cloud data is NOT deleted.",
       );
     if (!ok) return;
-    clearLocalCache();
-    setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
-    // Reload cleanly so cloud data re-loads fresh (and a poisoned alias that returns proves it is in
-    // cloud data, to be fixed via the alias repair path, not local cache).
-    if (typeof window !== "undefined") setTimeout(() => window.location.reload(), 1400);
+    if (requiresOwnerPin("clearCache", hasPin)) {
+      setPinPrompt(true);
+      return;
+    }
+    doClear();
+  }
+
+  async function submitPin() {
+    const ok = await verifyOwnerPin(pin);
+    if (!ok) { setPinErr("Wrong PIN"); return; }
+    doClear();
+  }
+
+  // D2 (Phase 6): hard account deletion. Same owner-PIN gate pattern as clear-cache, plus a typed
+  // confirm phrase the server re-checks (client state is never trusted for a destructive action).
+  const [deletePrompt, setDeletePrompt] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState("");
+  const [deletePin, setDeletePin] = useState("");
+  const [deleteErr, setDeleteErr] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  function handleDeleteAccount() {
+    if (!user) return;
+    setDeleteErr("");
+    setDeletePhrase("");
+    setDeletePin("");
+    setDeletePrompt(true);
+  }
+
+  async function submitDeleteAccount() {
+    if (!user || !businessId) return;
+    setDeleteErr("");
+
+    if (requiresOwnerPin("clearCache", hasPin)) {
+      const ok = await verifyOwnerPin(deletePin);
+      if (!ok) { setDeleteErr("Wrong PIN"); return; }
+    }
+
+    if (deletePhrase !== "DELETE MY ACCOUNT") {
+      setDeleteErr('Type "DELETE MY ACCOUNT" exactly to confirm.');
+      return;
+    }
+
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        "This permanently deletes every product, count, scan, and setting for this business. " +
+          "This cannot be undone. Continue?",
+      );
+    if (!confirmed) return;
+
+    setDeleteBusy(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ businessId, idToken, confirmPhrase: deletePhrase }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDeleteErr(typeof payload?.error === "string" ? payload.error : "Deletion failed.");
+        return;
+      }
+      setDeletePrompt(false);
+      // F2: the business is deleted server-side, so the local tenant blob (scan feed / products /
+      // aliases in sis-scan-v1) is now meaningless AND a data leak - without this wipe it ghosts into
+      // the next session on this browser. No unsynced-work confirm here: there is nothing to preserve,
+      // and the typed-phrase + confirm already gated the destructive act. Same wipe as the sign-out flow.
+      await wipeAndSignOut();
+      if (typeof window !== "undefined") window.location.href = "/login";
+    } catch {
+      setDeleteErr("Deletion failed. Check your connection and try again.");
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
+      <h1 className="sr-only">Settings</h1>
       <OwnerPinSettings />
       {/* P3: the raw Business ID is an internal identifier - platformOwner only. Customers see only
           Export, Clean up, and Danger zone. */}
@@ -105,10 +220,10 @@ export default function SettingsPage() {
         <Row label="Max lookup wait (ms)">
           <input
             type="number"
-            min={5000}
-            max={20000}
+            min={DECODE_BUDGET_MIN_MS}
+            max={DECODE_BUDGET_MAX_MS}
             step={1000}
-            value={settings.decodeBudgetMs ?? 13000}
+            value={settings.decodeBudgetMs ?? DECODE_BUDGET_DEFAULT_MS}
             onChange={(e) => update({ decodeBudgetMs: Number(e.target.value) })}
             className="w-24 rounded border border-zinc-300 px-2 py-1 text-sm"
             data-testid="setting-decode-budget"
@@ -116,7 +231,7 @@ export default function SettingsPage() {
         </Row>
         <p className="text-xs text-zinc-500">
           How long a live decode may run before it gives up and routes the code to Needs Review
-          (never a partial guess). The server clamps this to between 5000 and 20000 ms.
+          (never a partial guess). The server clamps this to between 5000 and 8000 ms.
         </p>
         <p className="text-xs text-zinc-500">
           AI results are SUGGESTIONS a human approves. Even a &quot;Verified AI Decode&quot; (the app
@@ -143,9 +258,10 @@ export default function SettingsPage() {
           <span className="text-sm">{aiStatus.autoDecodeOnScan ? "On" : "Off"}</span>
         </Row>
         <Row label="Fast AI lookup">
-          <span className={`text-sm ${aiStatus.geminiConfigured ? "text-green-700" : "text-red-700"}`} data-testid="gemini-status">
-            {aiStatus.geminiConfigured ? "Connected (key configured)" : "Not connected (key missing)"}
-          </span>
+          <GeminiStatusRow
+            geminiConfigured={aiStatus.geminiConfigured}
+            geminiUsedForDecode={aiStatus.geminiUsedForDecode}
+          />
         </Row>
         <Row label="Backup AI lookup">
           <span className={`text-sm ${aiStatus.openaiConfigured ? "text-green-700" : "text-red-700"}`} data-testid="openai-status">
@@ -155,6 +271,7 @@ export default function SettingsPage() {
         <Row label="Thorough lookup mode">
           <span className="text-sm">{aiStatus.premiumFallback ? "On" : "Off"}</span>
         </Row>
+        <GptLadderPanel gptLadder={aiStatus.gptLadder} />
         <Row label="Daily lookup count">
           <span className="text-sm text-zinc-600">
             {settings.dailyLookupCount}/{settings.dailyLookupLimit}
@@ -233,6 +350,29 @@ export default function SettingsPage() {
         />
       </Section>
       </>)}
+
+      <Section title="Account">
+        {user ? (
+          <>
+            <Row label="Signed in as">
+              <span className="text-sm text-zinc-700" data-testid="account-email">{user.email}</span>
+            </Row>
+            <button
+              type="button"
+              data-testid="sign-out"
+              // C1: route through the ONE shared sign-out flow (honest unsynced warning + full tenant wipe
+              // + signOut + redirect) so this can never drift from Nav's Log out button. A bare signOut()
+              // would leave the prior tenant's data in localStorage for the next user on this browser.
+              onClick={() => void runSignOutFlow(() => { window.location.href = "/login"; })}
+              className="inline-flex min-h-[44px] w-fit items-center rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              Sign out
+            </button>
+          </>
+        ) : (
+          <span className="text-sm text-zinc-600" data-testid="account-local-mode">Local mode (no account)</span>
+        )}
+      </Section>
 
       <Section title="Export">
         <ExportMenu />
@@ -331,6 +471,82 @@ export default function SettingsPage() {
             {cacheMsg}
           </p>
         )}
+        {pinPrompt && (
+          <div className="mt-2 flex items-center gap-2" data-testid="clear-cache-pin-row">
+            <input aria-label="owner PIN" inputMode="numeric" value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} maxLength={6}
+              placeholder="Owner PIN" data-testid="clear-cache-pin"
+              className="min-h-[44px] w-28 rounded-lg border border-zinc-300 px-3 text-base" />
+            <button type="button" data-testid="clear-cache-confirm" onClick={submitPin}
+              className="inline-flex min-h-[44px] items-center rounded-lg bg-red-600 px-4 text-base font-medium text-white hover:bg-red-700">
+              Confirm clear
+            </button>
+            {pinErr && <span className="text-sm text-red-600" data-testid="clear-cache-pin-error">{pinErr}</span>}
+          </div>
+        )}
+
+        <div className="mt-6 border-t border-red-100 pt-4">
+          <h3 className="mb-1 text-sm font-semibold text-red-700">Delete account and all data</h3>
+          <p className="mb-3 text-xs text-zinc-500">
+            Export your data first. Deletion is permanent. This removes every product, count,
+            scan, and setting for this business from our servers and cannot be undone.
+          </p>
+          <button
+            type="button"
+            data-testid="delete-account"
+            onClick={handleDeleteAccount}
+            disabled={!user}
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-red-300 bg-red-50 px-4 text-base font-medium text-red-800 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Delete account and all data
+          </button>
+          {!user && (
+            <p className="mt-2 text-xs text-zinc-500" data-testid="delete-account-signin-required">
+              Sign in as the business owner to delete this account.
+            </p>
+          )}
+          {deletePrompt && (
+            <div className="mt-2 flex flex-col gap-2" data-testid="delete-account-form">
+              <label className="text-sm text-zinc-700">
+                Type <span className="font-mono font-semibold">DELETE MY ACCOUNT</span> to confirm
+              </label>
+              <input
+                aria-label="confirm deletion phrase"
+                value={deletePhrase}
+                onChange={(e) => setDeletePhrase(e.target.value)}
+                placeholder="DELETE MY ACCOUNT"
+                data-testid="delete-account-phrase"
+                className="min-h-[44px] w-full max-w-xs rounded-lg border border-zinc-300 px-3 text-base"
+              />
+              {hasPin && (
+                <input
+                  aria-label="owner PIN"
+                  inputMode="numeric"
+                  value={deletePin}
+                  onChange={(e) => setDeletePin(e.target.value.replace(/\D/g, ""))}
+                  maxLength={6}
+                  placeholder="Owner PIN"
+                  data-testid="delete-account-pin"
+                  className="min-h-[44px] w-28 rounded-lg border border-zinc-300 px-3 text-base"
+                />
+              )}
+              <button
+                type="button"
+                data-testid="delete-account-confirm"
+                onClick={submitDeleteAccount}
+                disabled={deleteBusy}
+                className="inline-flex min-h-[44px] w-fit items-center rounded-lg bg-red-600 px-4 text-base font-medium text-white hover:bg-red-700 disabled:opacity-40"
+              >
+                {deleteBusy ? "Deleting..." : "Permanently delete"}
+              </button>
+              {deleteErr && (
+                <span className="text-sm text-red-600" data-testid="delete-account-error">
+                  {deleteErr}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,12 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   barcodeDbUrls,
   htmlToText,
   extractTitleProduct,
   fetchPages,
   enrichWithPageFetch,
+  resetHostCooldowns,
   type FetchImpl,
 } from "@/services/ai/pageFetch";
+
+// Test-state isolation only: the per-host 429/403 cooldown is module-level by design, and the
+// polite-skip 429 test legitimately trips it for go-upc.com; clear it between tests.
+afterEach(() => resetHostCooldowns());
 
 function page(html: string) {
   return { ok: true, status: 200, text: async () => html };
@@ -248,5 +253,88 @@ describe("enrichWithPageFetch (the read step)", () => {
     expect(r.pageCount).toBe(0);
     expect(r.result).toBeNull();
     expect(r.evidence.strength).toBe("none");
+  });
+});
+
+describe("2026-07-04 dry-run regressions: search pages that ECHO the code must never name a product", () => {
+  // barcode-list.com Search.htm: the results page title is "Search For:<code>" and the code appears
+  // in the page body, so exact-code evidence passes - but the title is a search echo, not a product.
+  it("never adopts a 'Search For:<code>' title even though the page contains the exact code", async () => {
+    const html = `<html><head><title>Search For:3027030038381</title></head>
+      <body>Barcode list search. Search For:3027030038381 . Popular products.</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) =>
+      url.includes("barcode-list.com") ? page(html) : notFound(),
+    ) as unknown as FetchImpl;
+    const r = await enrichWithPageFetch({
+      code: "3027030038381",
+      codeType: "ean_13",
+      extraUrls: ["https://barcode-list.com/barcode/EN/Search.htm?barcode=3027030038381"],
+      fetchImpl,
+    });
+    expect(r.result).toBeNull();
+  });
+
+  it("never adopts an 'UPC Database | <code>' site title", async () => {
+    const html = `<html><head><title>UPC Database | 0049022596986</title></head>
+      <body>UPC 0049022596986 lookup page.</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) =>
+      url.includes("upcdatabase.org") ? page(html) : notFound(),
+    ) as unknown as FetchImpl;
+    const r = await enrichWithPageFetch({
+      code: "0049022596986",
+      codeType: "ean_13",
+      extraUrls: ["https://upcdatabase.org/code/0049022596986"],
+      fetchImpl,
+    });
+    expect(r.result).toBeNull();
+  });
+
+  it("never adopts a 'CodeCheck - Suchergebnisse' search-results title", async () => {
+    const html = `<html><head><title>CodeCheck - Suchergebnisse</title></head>
+      <body>Suche: 4981910515661. Keine passenden Produkte.</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) =>
+      url.includes("codecheck.info") ? page(html) : notFound(),
+    ) as unknown as FetchImpl;
+    const r = await enrichWithPageFetch({
+      code: "4981910515661",
+      codeType: "ean_13",
+      extraUrls: ["https://www.codecheck.info/product.search?q=4981910515661"],
+      fetchImpl,
+    });
+    expect(r.result).toBeNull();
+  });
+
+  it("discards a nutrition-facts DB page entirely (recycled-UPC single-product mismatch): no product, no verified evidence", async () => {
+    // The dry run's 4 wrong Frito-Lay verifies: a nutrition site maps a recycled UPC to a DIFFERENT
+    // product of the same brand. The page carries the exact code, so only the page-class guard saves us.
+    const html = `<html><head><title>Lay's barbecue flavored potato chips 9.5 ounce plastic bag by Frito Lay nutrition facts and analysis.</title></head>
+      <body>Nutrition facts and analysis for UPC 00028400160131. Calories 160. Sodium 170mg.</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) =>
+      url.includes("nutritionvalue.org") ? page(html) : notFound(),
+    ) as unknown as FetchImpl;
+    const r = await enrichWithPageFetch({
+      code: "00028400160131",
+      codeType: "gtin_14",
+      extraUrls: ["https://www.nutritionvalue.org/lays-barbecue.html"],
+      fetchImpl,
+    });
+    expect(r.result).toBeNull();
+    expect(r.evidence.verified).toBe(false);
+  });
+
+  it("a search-echo page does NOT block a sibling site carrying the real product", async () => {
+    const echo = `<html><head><title>Search For:070330645936</title></head>
+      <body>Search For:070330645936</body></html>`;
+    const fetchImpl: FetchImpl = vi.fn(async (url: string) =>
+      url.includes("barcode-list.com") ? page(echo) : url.includes("go-upc") ? page(GO_UPC_HTML) : notFound(),
+    ) as unknown as FetchImpl;
+    const r = await enrichWithPageFetch({
+      code: "070330645936",
+      codeType: "upc_a",
+      extraUrls: ["https://barcode-list.com/barcode/EN/Search.htm?barcode=070330645936"],
+      fetchImpl,
+    });
+    expect(r.result?.productName).toBe("BIC Classic Pocket Lighter (Texas)");
+    expect(r.evidence.verified).toBe(true);
   });
 });
