@@ -91,6 +91,19 @@ vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", async (importOriginal)
   return { ...actual, lookupRetailBarcodeAsync: vi.fn(actual.lookupRetailBarcodeAsync) };
 });
 
+// Sync Truth Task 4: mock the master-catalog rung so EVERY test in this file (not just the dedicated
+// describe block below) gets a safe, instant "miss" by default - the real implementation would call
+// getAdminDb() and attempt live Firebase Admin credential resolution, which must never happen inside a
+// unit test. Individual tests override with mockResolvedValueOnce for a "verified"/"suggestion" hit.
+const realMasterLookup = vi.hoisted(() => ({
+  lookupMasterCatalog: undefined as unknown as typeof import("@/server/catalog/masterLookup").lookupMasterCatalog,
+}));
+vi.mock("@/server/catalog/masterLookup", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/catalog/masterLookup")>();
+  realMasterLookup.lookupMasterCatalog = actual.lookupMasterCatalog;
+  return { ...actual, lookupMasterCatalog: vi.fn(async () => ({ kind: "miss" as const })) };
+});
+
 // Redirect ladderStorage() at a per-process tmp dir so the daily-cap / Go-UPC usage counters never
 // pollute the real repo working tree (identical to the route test's mock).
 vi.mock("@/server/upc/storage", async (importOriginal) => {
@@ -137,6 +150,7 @@ import { getLearnedProduct, upsertLearnedProduct, siblingPrefixConflict, __reset
 import { fetchV2 } from "@/services/fetchV2/index";
 import { makeResult } from "@/services/fetchV2/types";
 import { lookupRetailBarcodeAsync, __resetRetailKnowledgeCacheForTests } from "@/server/retail-knowledge/retailKnowledgeIndex";
+import { lookupMasterCatalog, __resetMasterLookupMemoForTests } from "@/server/catalog/masterLookup";
 
 // Thin unit tests for the extracted decode pipeline (Task 2.4). They run with NO API keys and a fully
 // STUBBED global.fetch, so NO live provider call and NO real network can occur - every rung either
@@ -194,6 +208,9 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
     vi.mocked(lookupRetailBarcodeAsync).mockReset().mockImplementation(realRetail.lookupRetailBarcodeAsync);
     vi.mocked(recordGptLadderSpend).mockReset().mockImplementation(realSpendGuard.recordGptLadderSpend);
     vi.mocked(recordGptLadderCall).mockReset().mockImplementation(realSpendGuard.recordGptLadderCall);
+    // Sync Truth Task 4: default every test to a safe instant miss; the dedicated describe block below
+    // overrides with mockResolvedValueOnce for a verified/suggestion hit.
+    vi.mocked(lookupMasterCatalog).mockReset().mockResolvedValue({ kind: "miss" });
     __resetRetailKnowledgeCacheForTests();
     __resetForTest();
     __resetDecodeCacheStoreForTest();
@@ -1119,6 +1136,87 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(outcome.kind).toBe("computed");
       if (outcome.kind !== "computed") throw new Error("unreachable");
       expect(outcome.payload.providerNames).not.toContain("learned-products");
+    });
+  });
+
+  // Sync Truth Task 4 (owner-approved 2026-07-22): the master-catalog peek runs right after the
+  // learned-products tier peek and still before the L2 persisted-decode cache / daily-cap gate, so a
+  // hit NEVER reaches a paid rung ("first settled rung stops the ladder, never pay when an earlier
+  // rung already answered"). lookupMasterCatalog itself is mocked module-wide (see the vi.mock block
+  // near the top of this file) - these tests drive it directly rather than mocking Firestore, mirroring
+  // how the learned-tier tests above drive getLearnedProduct directly instead of a real store.
+  describe("Sync Truth Task 4: master-catalog free ladder rung", () => {
+    const MASTER_CODE = "086699997654"; // GTIN-shaped, not on any real corpus/learned fixture
+
+    it("human_verified hit settles as VERIFIED and stops the ladder before any paid rung runs", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      vi.mocked(lookupMasterCatalog).mockResolvedValueOnce({
+        kind: "verified",
+        entry: { id: "gtin_00086699997654", normalizedBarcode: MASTER_CODE, name: "Michelin Defender LTX M/S", brand: "Michelin", category: "tire", verificationStatus: "verified", provenanceTier: "human_verified" },
+      });
+
+      const outcome = await runDecodePipeline(makeReq(MASTER_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("verified");
+      expect(outcome.payload.decision.exactCodeEvidenceVerifiedByApp).toBe(true);
+      expect(outcome.payload.providerNames).toContain("master-catalog");
+      expect(outcome.payload.results[0].productName).toBe("Michelin Defender LTX M/S");
+      // Never contacted a paid provider and never charged the daily cap (this rung is FREE, L12).
+      expect(hitAnAiProvider()).toBe(false);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("verified-but-not-human_verified hit settles as a SUGGESTION (never auto-verified), also without reaching a paid rung", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      vi.mocked(lookupMasterCatalog).mockResolvedValueOnce({
+        kind: "suggestion",
+        entry: { id: "gtin_00086699997654", normalizedBarcode: MASTER_CODE, name: "Michelin Defender LTX M/S", brand: "Michelin", category: "tire", verificationStatus: "verified", provenanceTier: "ladder_verified_strong" },
+      });
+
+      const outcome = await runDecodePipeline(makeReq(MASTER_CODE));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.decision.status).toBe("suggested");
+      expect(outcome.payload.decision.status).not.toBe("verified");
+      expect(outcome.payload.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
+      expect(outcome.payload.providerNames).toContain("master-catalog");
+      expect(hitAnAiProvider()).toBe(false);
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("a miss (pending / rejected / not found) falls through to the rest of the ladder", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      vi.mocked(lookupMasterCatalog).mockResolvedValueOnce({ kind: "miss" });
+      stubFreeRungFetch({ upcHit: false });
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      expect(outcome.payload.providerNames).not.toContain("master-catalog");
+      expect(vi.mocked(lookupMasterCatalog)).toHaveBeenCalled();
+    });
+
+    it("e2eMode() bypasses the rung entirely - lookupMasterCatalog is never called", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      process.env.IS_E2E = "1";
+      vi.mocked(lookupMasterCatalog).mockResolvedValueOnce({
+        kind: "verified",
+        entry: { id: "gtin_00086699997654", normalizedBarcode: MASTER_CODE, name: "Should Never Be Used", verificationStatus: "verified", provenanceTier: "human_verified" },
+      });
+
+      await runDecodePipeline(makeReq(MASTER_CODE));
+
+      expect(vi.mocked(lookupMasterCatalog)).not.toHaveBeenCalled();
     });
   });
 

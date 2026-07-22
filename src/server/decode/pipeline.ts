@@ -44,6 +44,7 @@ import { paidWorkPossible } from "@/server/upc/paidWorkPossible";
 import { steerFreeRungs } from "@/server/upc/freeRungSteering";
 import { getLearnedProduct, upsertLearnedProduct, shouldLearnDecode, prefixCheckNote, siblingPrefixConflict, type LearnedProductRow } from "@/server/learnedProducts";
 import { crossCheck } from "@/services/ai/crossCheckEngine";
+import { lookupMasterCatalog } from "@/server/catalog/masterLookup";
 
 // PURE EXTRACTION (Task 2.4): this module is the decode pipeline lifted verbatim out of
 // app/api/ai-lookup/route.ts. Zero behavior change - every domain rule (the daily cap charged only
@@ -267,6 +268,70 @@ function retailPayload(
     reasonText: reason,
     timedOut: false,
     debug: { providersAttempted: ["retail-corpus"], evidenceStrengths: ["none"], sourceCounts: [0], corroborationPath: "retail_corpus_exact_barcode", aiCalled: false, pageFetched: false, cached: false },
+    sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
+  };
+}
+
+// Sync Truth Task 4: PURE payload assembly for a master-catalog hit (src/server/catalog/masterLookup.ts).
+// Two honest shapes, mirroring the corpus/learned/retail payload builders above:
+//   - human_verified -> a SETTLED VERIFIED result (an owner already approved this exact code+identity
+//     via the catalog-review page; this rung stops the ladder before it ever reaches a paid gate).
+//   - verified-but-not-human_verified (a fresh ladder-verified append, still pending owner review) ->
+//     a high-trust SUGGESTION, never auto-verified - mirrors learnedPayload/retailPayload's honest
+//     review-first posture so a still-unreviewed master entry never silently becomes ground truth.
+const MASTER_CATALOG_SUGGESTION_CONFIDENCE = 0.85;
+function masterCatalogPayload(
+  entry: { name?: string; brand?: string; category?: string },
+  outcomeKind: "verified" | "suggestion",
+  code: string,
+  rawCodeSanitized: string,
+  cleanCodeSanitized: string,
+): DecodePayload {
+  const isVerified = outcomeKind === "verified";
+  const reason = isVerified
+    ? "Matched an owner-approved master catalog entry (exact barcode). No AI lookup needed."
+    : "Matched a master catalog entry pending owner review (exact barcode). No AI lookup needed.";
+  const confidence = isVerified ? 1 : MASTER_CATALOG_SUGGESTION_CONFIDENCE;
+  const result: AiLookupResult = {
+    ...emptyResult(),
+    productName: entry.name ?? "",
+    brand: entry.brand ?? "",
+    category: entry.category ?? "",
+    confidence,
+    needsHumanReview: !isVerified,
+    sourceUrls: [],
+    verifiedFacts: [`Master catalog: exact barcode ${code}`],
+  };
+  const evidence: EvidenceResult = {
+    verified: isVerified,
+    strength: isVerified ? "fetched_source" : "none",
+    matchedCode: isVerified ? code : "",
+    matchedSources: [],
+    reason: isVerified
+      ? "Master-catalog replay: human-verified via the owner catalog-review approval flow."
+      : "Master-catalog replay: not yet human-verified, a single structured-DB row this scan.",
+  };
+  const decision: DecodeDecision = {
+    status: isVerified ? "verified" : "suggested",
+    confidence,
+    reason,
+    evidenceStrength: evidence.strength,
+    exactCodeEvidenceVerifiedByApp: isVerified,
+    crossCheck: { decision: "single_provider", confidence, reason: "Master-catalog exact barcode (single source).", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+    // No CorroborationPath variant exists for "master-catalog human-verified" (types.ts is out of
+    // scope for this task); corroborationPath stays unset, which is valid (optional field).
+  };
+  return {
+    mode: "decode" as const,
+    providerNames: ["master-catalog"],
+    results: [result],
+    evidences: [evidence],
+    providerStatuses: [{ provider: "master-catalog", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
+    decision,
+    reasonCode: "ok",
+    reasonText: reason,
+    timedOut: false,
+    debug: { providersAttempted: ["master-catalog"], evidenceStrengths: [evidence.strength], sourceCounts: [0], corroborationPath: "master_catalog_exact_barcode", aiCalled: false, pageFetched: false, cached: false },
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
   };
 }
@@ -664,6 +729,29 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     if (learned) {
       appendDecodeOutcome({ settledBy: "learned-products", status: "suggested", reasons: [], sourceTier: null });
       return { kind: "computed", payload: learnedPayload(learned, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
+    }
+
+    // Sync Truth Task 4 (owner-approved 2026-07-22): MASTER CATALOG PEEK, immediately after the
+    // learned-tier peek and still BEFORE the L2 persisted-decode cache / daily-cap gate below - the
+    // exact slot the plan calls for ("after learned-tier/L2 cache, before goupc gate"; positioned here,
+    // ahead of the L2 read, so a master-catalog hit is the LAST free rung this pipeline tries before the
+    // persisted-cache peek and preserves "first settled rung stops, never pay when an earlier rung
+    // already answered"). A "verified" outcome (owner-approved via the catalog-review page,
+    // provenanceTier human_verified) settles here and stops the ladder before any paid rung ever runs. A
+    // "suggestion" outcome (ladder-verified but not yet owner-reviewed) is honestly review-first, exactly
+    // like the learned-tier/retail-corpus peeks above - it also settles this request without a paid call,
+    // it just never auto-verifies. This rung NEVER calls chargeDailySlot (it is FREE, L12: never charge
+    // two paths of one request) and NEVER throws (masterLookup.ts silently misses on missing credentials,
+    // a Firestore error, or a read exceeding its internal timeout bound).
+    const masterHit = await lookupMasterCatalog(code);
+    if (masterHit.kind !== "miss") {
+      appendDecodeOutcome({ settledBy: "master-catalog", status: masterHit.kind, reasons: [], sourceTier: null });
+      return {
+        kind: "computed",
+        payload: masterCatalogPayload(masterHit.entry, masterHit.kind, code, rawCodeSanitized, cleanCodeSanitized),
+        cached: false,
+        paidComputeCharged: false,
+      };
     }
   }
 
