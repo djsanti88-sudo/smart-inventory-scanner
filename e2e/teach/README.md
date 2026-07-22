@@ -29,6 +29,7 @@ behavior into an approved test on its own.
 |---|---|
 | `node e2e/teach/teach.mjs --self-check` | **Safe** dry check: prints deployment stamp + the run's lesson plan; zero browser, zero network, zero spend, real knowledge files untouched. |
 | `npm run teach` | **OWNER-GATED live run.** Opens 3 headed browsers, creates 3 real accounts, drives the app, may spend on live decode. |
+| `npm run teach -- --loop --one-window [--persona tire]` | **OWNER-GATED loop.** ONE window, ONE reused account, deepens each round, runs until Ctrl-C. One aggregate decode budget caps total spend. Writes a running `testing/artifacts/<loopId>/LOOP_REPORT.md`. |
 | `npm run teach:test` | Unit suite for the harness (`node --test`, 127 tests). |
 | `npm run teach:cleanup -- --run-id <id> --dry-run` | List what a run created (accounts/businesses) from its manifest. |
 | `npm run teach:cleanup -- --run-id <id> --confirm` | Remove that run's data (manifest-scoped only — no blind sweeps). |

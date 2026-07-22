@@ -25,9 +25,15 @@ it produced, and **triage honestly** — never to fix the app.
   Confirms target + the run's lesson plan. **Always offer this first.**
 - **`run`** (owner-gated) → confirm target + explicit go, then `npm run teach` (background so the 3 headed
   windows are watchable). Default target is prod `https://inventory-lovat-six.vercel.app`; `run --target <url>`
-  or `TEACH_TARGET_URL=<url>` to override. To force the FULL 11-lesson curriculum in one pass without faking
-  the real ledger, point `TEACH_KNOWLEDGE_BASE` at a throwaway base whose `RUN_HISTORY.jsonl` has >=10 lines
-  (the run number = history length + 1; run N runs lessons 1..N).
+  or `TEACH_TARGET_URL=<url>` to override. To force the FULL curriculum in one pass without faking the real
+  ledger, point `TEACH_KNOWLEDGE_BASE` at a throwaway base whose `RUN_HISTORY.jsonl` has >=12 lines (run
+  number = history length + 1; run N runs lessons 1..N; >=12 runs everything incl. the smoke-every-control lesson).
+- **`loop`** (owner-gated) → `npm run teach -- --loop --one-window [--persona tire]`. ONE headed window, ONE
+  persona, **reuses a single account** across rounds (creds in-memory, no sprawl), deepens the curriculum each
+  round (gets smarter), and runs **until the owner presses Ctrl-C** (graceful stop). ONE aggregate decode
+  budget caps total paid spend across the whole loop. A cumulative `testing/artifacts/<loopId>/LOOP_REPORT.md`
+  updates every round (rounds, run number, deduped findings, coverage growth, spend, "still learning?"). Tell
+  the owner the LOOP_REPORT path and that they stop it with Ctrl-C.
 - **`triage <runId>`** → read `testing/artifacts/<runId>/report.json` and adjudicate each finding
   **app-bug vs test-bug**. Reproduce before confirming. Remember: lessons can **over-report** (e.g. not
   accounting for a prior lesson's scan, a `countedTotal` helper that only sums `qty-*` cells, or a lesson
