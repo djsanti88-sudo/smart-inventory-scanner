@@ -38,15 +38,13 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
 export function NeedsReviewTable() {
   const allReviews = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
-  // Owner rule: an item that is ALREADY solved AND synced is done - it must not linger in Needs Review.
-  // A resolved item that is NOT yet synced stays visible (so nothing looks lost before it saves).
-  // Task 9b (owner-ratified 2026-07-14): a review PARKED at status "suggested" (pending inline
-  // suggestion) NEVER belongs in this queue regardless of sync state - it lives on the feed row's
-  // inline controls + the SuggestedApprovalPanel. Without this exclusion, a freshly parked review
-  // (syncStatus "pending" until the ASYNC cloud sync drains) leaked in via the second clause.
-  const reviews = allReviews.filter(
-    (r) => r.status !== "suggested" && (r.status === "open" || r.syncStatus !== "synced"),
-  );
+  // Owner rule: an item that is ALREADY solved (resolved or ignored) is done - it must never linger in
+  // Needs Review, regardless of sync state. Review status is identity metadata only; it never affects
+  // the scan feed or session counts (those stay independent, keyed by cleanCode). Task 9b
+  // (owner-ratified 2026-07-14): a review PARKED at status "suggested" (pending inline suggestion) also
+  // never belongs in this queue - it lives on the feed row's inline controls + the
+  // SuggestedApprovalPanel. Only "open" reviews render here.
+  const reviews = allReviews.filter((r) => r.status === "open");
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">

@@ -3087,6 +3087,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // canAutoCount) passed, i.e. the app itself verified the exact-code evidence - honest
               // "app_verified" provenance for the badge.
               get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "", "app_verified");
+            } else {
+              // OWNER RULE ("if it is resolved, it does not go to review"): the evidence gate already
+              // verified this scan's identity above, so it is genuinely settled even when resolveUnknown
+              // itself no-opped (suggest_link / dedup conflict left the review "open" or "suggested" for a
+              // human link decision). A settled identity must never linger in the Needs Review queue -
+              // stamp it resolved directly, same shape as the other direct-stamp sites (e.g. the
+              // auto-suggest-apply branch below). This ONLY changes review-row status metadata; it never
+              // touches scanFeed or finalCounts (those are independent, keyed by cleanCode).
+              const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
+              if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested")) {
+                set((st) => ({
+                  needsReviewQueue: st.needsReviewQueue.map((r) =>
+                    r.id === reviewId
+                      ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+                      : r,
+                  ),
+                }));
+              }
             }
             // Task 9: an app-verified off-category decode counts, but flag the row so the feed shows the
             // "Off-category item" tag (the product is not a tire, even though it cleared the firewall).
@@ -4044,6 +4062,21 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // "verified" in that case would show "Verified match" over the unresolved placeholder name.
           if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
             get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
+          } else {
+            // OWNER RULE ("if it is resolved, it does not go to review"): the evidence gate already
+            // verified this scan's identity above, so it is genuinely settled even when resolveUnknown
+            // itself no-opped (suggest_link / dedup conflict). Stamp it resolved directly so it never
+            // lingers in the Needs Review queue - status metadata only, never scanFeed/finalCounts.
+            const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
+            if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested")) {
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+                    : r,
+                ),
+              }));
+            }
           }
           // Task 9: tag an app-verified off-category decode so the feed shows "Off-category item".
           if (offCategory) {
@@ -6254,6 +6287,31 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   if (p.settings !== undefined) {
     out.settings = { ...DEFAULT_SETTINGS, ...(p.settings as Partial<Settings>) };
   }
+  // v13 self-heal ("if it is resolved, it does not go to review"): an install that hit the old bug
+  // (resolveUnknown silently no-op'd on a genuinely settled decode - the fuzzy identity-merge
+  // suggest_link path or a dedup conflict - leaving the review "open"/"suggested" forever) gets a
+  // one-time stamp here. "Identity already settled" reuses the EXACT two feed-status signals the app
+  // itself already treats as settled elsewhere in this file: a scanFeed row for the same cleanCode with
+  // status "resolved" (the resolveUnknown relink write, ~scanStore.ts:4738-4743 - implies a real
+  // matchedProductId was assigned) or decodeStatus "verified" (markFeedRowVerified, only ever written
+  // after resolveUnknown actually resolved the review - see the "never leave a 'Verified AI Decode +
+  // Unknown' feed row" guard at ~scanStore.ts:3401-3408). Only needsReviewQueue rows are mutated here;
+  // scanFeed and finalCounts are read-only inputs and are never touched by this step. Never injects an
+  // absent needsReviewQueue key into a partial blob (same v8 rule as the rest of this branch).
+  if (Array.isArray(p.needsReviewQueue)) {
+    const feed = Array.isArray(p.scanFeed) ? (p.scanFeed as Array<{ cleanCode?: string; status?: string; decodeStatus?: string }>) : [];
+    const settledCleanCodes = new Set(
+      feed
+        .filter((e) => e && (e.status === "resolved" || e.decodeStatus === "verified"))
+        .map((e) => e.cleanCode)
+        .filter((c): c is string => Boolean(c)),
+    );
+    out.needsReviewQueue = (p.needsReviewQueue as Array<{ cleanCode?: string; status?: string }>).map((r) =>
+      r && (r.status === "open" || r.status === "suggested") && r.cleanCode && settledCleanCodes.has(r.cleanCode)
+        ? { ...r, status: "resolved" as const, resolvedAt: new Date().toISOString(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+        : r,
+    );
+  }
   return out as never;
 }
 
@@ -6274,7 +6332,10 @@ export const useScanStore = create<ScanState>()(
     // >= 5 migrate branch below already calls backfillProducts unconditionally on every hydrate whose
     // persisted version is below `version`, so this bump alone is sufficient - no separate v12 step
     // needed (backfillProducts itself now dedupes via the fixed canonicalTireDisplayName).
-    version: 12,
+    // "Resolved never lingers in review" fix: v12 -> v13 bump so an install stuck with the old bug
+    // (resolveUnknown silently no-op'd on a genuinely settled decode, leaving the review "open"/
+    // "suggested" forever) gets a one-time self-heal on next load - see scanStoreMigrate's v13 step.
+    version: 13,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken

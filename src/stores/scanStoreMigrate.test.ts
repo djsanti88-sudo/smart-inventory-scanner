@@ -176,3 +176,68 @@ describe("scanStoreMigrate - v5 -> v6 persist migration (Task 4 review fix)", ()
     expect(migrated.countSnapshots).toEqual([]);
   });
 });
+
+// v13 self-heal: "if it is resolved, it does not go to review." An install that hit the old bug
+// (resolveUnknown silently no-op'd on a genuinely settled decode) can be stuck with a review row
+// forever "open"/"suggested" even though its identity is settled. The migrate step reuses the exact
+// two feed-status signals the app already treats as settled (scanFeed status "resolved", or
+// decodeStatus "verified") to stamp the matching review row resolved, once, on next load.
+describe("scanStoreMigrate - v12 -> v13 stuck-review self-heal", () => {
+  it("an open review whose cleanCode has a settled feed event (status resolved) migrates to resolved", () => {
+    const persistedV12 = {
+      needsReviewQueue: [
+        {
+          id: "r1", businessId: "b1", sessionId: "s1", rawCode: "111222333446", cleanCode: "111222333446",
+          status: "open", resolvedAt: null, resolvedBy: null, resolutionAction: null,
+        },
+      ],
+      scanFeed: [
+        { id: "se1", cleanCode: "111222333446", status: "resolved", decodeStatus: "suggested", matchedProductId: "prod-1" },
+      ],
+    };
+
+    const migrated = scanStoreMigrate(persistedV12, 12) as unknown as {
+      needsReviewQueue: Array<{ id: string; status: string; resolvedBy: string | null; resolutionAction: string | null; resolvedAt: string | null }>;
+    };
+
+    const r1 = migrated.needsReviewQueue.find((r) => r.id === "r1")!;
+    expect(r1.status).toBe("resolved");
+    expect(r1.resolvedBy).toBe("auto");
+    expect(r1.resolutionAction).toBe("create_new");
+    expect(r1.resolvedAt).toBeTruthy();
+  });
+
+  it("an open review whose cleanCode has a settled feed event (decodeStatus verified) migrates to resolved", () => {
+    const persistedV12 = {
+      needsReviewQueue: [
+        { id: "r2", businessId: "b1", sessionId: "s1", rawCode: "222333444553", cleanCode: "222333444553", status: "suggested" },
+      ],
+      scanFeed: [
+        { id: "se2", cleanCode: "222333444553", status: "known", decodeStatus: "verified", matchedProductId: "prod-2" },
+      ],
+    };
+
+    const migrated = scanStoreMigrate(persistedV12, 12) as unknown as { needsReviewQueue: Array<{ id: string; status: string }> };
+    expect(migrated.needsReviewQueue.find((r) => r.id === "r2")!.status).toBe("resolved");
+  });
+
+  it("an open review whose cleanCode has NO settled feed event stays open", () => {
+    const persistedV12 = {
+      needsReviewQueue: [
+        { id: "r3", businessId: "b1", sessionId: "s1", rawCode: "333444555662", cleanCode: "333444555662", status: "open" },
+      ],
+      scanFeed: [
+        { id: "se3", cleanCode: "333444555662", status: "unknown", decodeStatus: "needs_review", matchedProductId: null },
+      ],
+    };
+
+    const migrated = scanStoreMigrate(persistedV12, 12) as unknown as { needsReviewQueue: Array<{ id: string; status: string }> };
+    expect(migrated.needsReviewQueue.find((r) => r.id === "r3")!.status).toBe("open");
+  });
+
+  it("never injects a needsReviewQueue key into a partial blob without one", () => {
+    const partial = { settings: { aiLookupEnabled: false } };
+    const migrated = scanStoreMigrate(partial, 12) as Record<string, unknown>;
+    expect("needsReviewQueue" in migrated).toBe(false);
+  });
+});

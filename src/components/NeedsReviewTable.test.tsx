@@ -72,7 +72,7 @@ describe("NeedsReviewTable - Task 9 copy fix (no bogus demotion on a verified de
   });
 });
 
-describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
+describe("NeedsReviewTable - hide solved (owner rule: resolved never lingers in review)", () => {
   it("hides an item that is resolved AND synced, keeps open items", () => {
     useScanStore.setState({
       needsReviewQueue: [
@@ -85,14 +85,16 @@ describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
     expect(screen.queryByTestId("review-row-2000000000002")).toBeNull(); // resolved+synced -> hidden
   });
 
-  it("keeps a resolved item that is NOT yet synced (nothing looks lost before it saves)", () => {
+  // Regression: "if it is resolved, it does not go to review." Sync state is irrelevant to whether a
+  // SOLVED item still shows in Needs Review - a resolved row awaiting sync must not linger either.
+  it("hides a resolved item even when its sync is still pending", () => {
     useScanStore.setState({
       needsReviewQueue: [
         review({ id: "pend1", cleanCode: "3000000000003", status: "resolved", syncStatus: "pending" }),
       ],
     });
     render(<NeedsReviewTable />);
-    expect(screen.queryByTestId("review-row-3000000000003")).not.toBeNull(); // resolved but pending sync -> still shown
+    expect(screen.queryByTestId("review-row-3000000000003")).toBeNull(); // resolved -> hidden regardless of sync
   });
 });
 
