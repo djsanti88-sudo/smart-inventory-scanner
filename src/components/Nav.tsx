@@ -14,6 +14,7 @@ export function Nav() {
 
   const links = [
     { href: "/scan", label: "Scan" },
+    { href: "/history", label: "History" },
     { href: "/products", label: "Products" },
     { href: "/review", label: "Review", badge: openReviews },
     { href: "/reconcile", label: "Reconcile" },

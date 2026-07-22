@@ -14,9 +14,42 @@ import {
 import { useAccessLevel } from "@/services/security/useAccessLevel";
 import { getDb } from "@/lib/firebaseClient";
 import { useScanStore } from "@/stores/scanStore";
-import type { ScanEvent } from "@/types";
+import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
+import type { Product, ScanEvent } from "@/types";
 
 const TIMELINE_UNAVAILABLE = "Session timeline is not available for this data source.";
+const COUNTS_UNAVAILABLE = "Product counts are not available for this data source.";
+
+// Derives the session's product-counts spreadsheet from its scan timeline: each product/code's
+// session total is its chronologically LAST "known" event's quantityAfterScan (the ledger's running
+// count at that point - see services/inventory.ts / scanStore processScan), not a sum of deltas.
+// When an event's matchedProductId resolves through the store's getProduct (same selector the
+// current-session path uses), the row carries the full product for the spreadsheet columns; it
+// falls back to the event's cleanCode alone when the product is not in the store. No aliasesSeen:
+// the timeline carries no alias data, so the table omits that column for past sessions.
+// Exported for its unit test (SessionCountsTable.test.tsx).
+export function countsFromTimeline(
+  events: ScanEvent[],
+  getProduct: (id: string | null) => Product | undefined,
+): SessionCountRow[] {
+  const byKey = new Map<string, ScanEvent>();
+  for (const event of events) {
+    if (event.status !== "known") continue;
+    const key = event.matchedProductId ?? event.cleanCode;
+    const prior = byKey.get(key);
+    if (!prior || new Date(event.createdAt).getTime() >= new Date(prior.createdAt).getTime()) {
+      byKey.set(key, event);
+    }
+  }
+  return [...byKey.entries()].map(([key, event]) => ({
+    id: key,
+    code: event.cleanCode,
+    quantity: event.quantityAfterScan,
+    product: getProduct(event.matchedProductId),
+    location: event.location,
+    lastScannedAt: event.createdAt,
+  }));
+}
 
 function normalizeEventCreatedAt(event: ScanEvent): ScanEvent {
   const value = event.createdAt as unknown;
@@ -52,6 +85,8 @@ export default function SessionDetailPage() {
   const currentSession = useScanStore((state) => state.currentSession);
   const cloudSessions = useScanStore((state) => state.sessions);
   const listSessions = useScanStore((state) => state.listSessions);
+  const finalCounts = useScanStore((state) => state.finalCounts);
+  const getProduct = useScanStore((state) => state.getProduct);
   const accessLevel = useAccessLevel();
   const [timeline, setTimeline] = useState<{
     sessionId: string;
@@ -65,6 +100,31 @@ export default function SessionDetailPage() {
   const session = (cloudSessions.length > 0 ? cloudSessions : listSessions())
     .find((candidate) => candidate.id === sessionId)
     ?? (currentSession?.id === sessionId ? currentSession : undefined);
+
+  // Product counts: for the CURRENT session, finalCounts already carries the real product identity
+  // (store's current-session-only ledger - see stores/scanStore.ts ~:1314), so it is the richer,
+  // preferred source. For any other (past) session, finalCounts holds nothing (it is scoped to the
+  // live session), so counts are derived from the same timeline read the page already performs.
+  const isCurrentSession = currentSession?.id === sessionId;
+  const countsUnavailable = !isCurrentSession && error === TIMELINE_UNAVAILABLE;
+  const countRows: SessionCountRow[] | null = isCurrentSession
+    ? finalCounts
+        .filter((c) => c.sessionId === sessionId)
+        .map((c) => {
+          const product = getProduct(c.productId);
+          return {
+            id: c.id,
+            code: product?.primaryBarcode ?? "",
+            quantity: c.quantity,
+            product,
+            location: c.location,
+            lastScannedAt: c.lastScannedAt,
+            aliasesSeen: c.aliasesSeen,
+          };
+        })
+    : events
+      ? countsFromTimeline(events, getProduct)
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +189,14 @@ export default function SessionDetailPage() {
           </button>
         )}
       </div>
+
+      {countsUnavailable ? (
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 text-center text-zinc-600" data-testid="session-counts-unavailable">
+          {COUNTS_UNAVAILABLE}
+        </div>
+      ) : (
+        <SessionCountsTable rows={countRows ?? []} />
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
         <table className="w-full min-w-[36rem] border-collapse text-left text-sm" data-testid="session-timeline-table">
