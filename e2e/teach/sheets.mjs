@@ -256,12 +256,11 @@ function generateLevel2(products, expectedRows, outDir, fileBase) {
 // --- level 3: TSV or semicolon-delimited, renamed headers --------------------------
 
 function generateLevel3(products, expectedRows, outDir, fileBase) {
-  const delimiter = level % 0 === 0 ? ';' : '\t'; // placeholder, replaced below
   const plan = [
     { field: 'partNumber', header: 'Item No' },
     { field: 'brand', header: 'Manufacturer' },
     { field: 'model', header: 'Description' },
-    { field: 'size', header: 'Size' },
+    { field: 'size', header: 'Product Size' },
     { field: 'quantity', header: 'Count' },
     { field: 'barcode', header: 'EAN' },
     { field: 'name', header: 'Product Name' },
