@@ -428,6 +428,10 @@ async function runOneWindow({ target, runId, knowledge, manifest, personas, repo
     context = await newPersonaContext(browser, persona);
     const page = await context.newPage();
 
+    // The round-1 manifest must exist BEFORE signup, because signUpPersona records the created
+    // account/business into it. (Rounds > 1 create their own manifest inside the loop.)
+    await createManifest(runId, { target, personas: [persona.key] });
+
     const probe = await probeDeployment(page, target);
     const mode = probe.mode;
     if (mode === 'live_auth') {
@@ -454,7 +458,10 @@ async function runOneWindow({ target, runId, knowledge, manifest, personas, repo
       const allLessons = await loadLessons();
       const plan = buildPlan(allLessons, runNumber, mastered);
 
-      await createManifest(roundRunId, { target, personas: [persona.key] });
+      if (roundNumber > 1) {
+        // Round 1's manifest was already created before signup (and holds the recorded account).
+        await createManifest(roundRunId, { target, personas: [persona.key] });
+      }
       const runDir = path.join(PATHS.artifactsDir, roundRunId);
 
       const personaResult = await runLessonsForPersona({
