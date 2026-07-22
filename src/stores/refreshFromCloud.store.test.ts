@@ -81,6 +81,36 @@ describe("refreshFromCloud", () => {
     expect(store.getState().finalCounts.find((c) => c.productId === "p-local")?.quantity).toBe(3);
   });
 
+  it("NEVER clobbers a product this device still has a PENDING SAVE_PRODUCT edit for (Task 1 refresh-race guard)", async () => {
+    const remoteProduct = product("p-edited", "Stale Remote Name"); // server has not seen the local edit yet
+    const loadBusinessData = vi.fn().mockResolvedValue({
+      products: [remoteProduct],
+      aliases: [],
+      sessions: [],
+      counts: [],
+    });
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData });
+    store.setState({
+      businessContextReady: true,
+      businessDataLoaded: true,
+      businessId: "biz1",
+      userId: "u1",
+      sessionId: "s1",
+      // This device has a locally corrected name for the SAME product, still unsynced.
+      products: [product("p-edited", "Locally Corrected Name")],
+      pendingSyncQueue: [
+        {
+          id: "pend-prod", businessId: "biz1", sessionId: "s1", entityType: "Product", entityId: "p-edited",
+          operation: "SAVE_PRODUCT", payload: product("p-edited", "Locally Corrected Name"), status: "pending",
+          retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t", idempotencyKey: "k-prod-edit", scanEventId: null,
+        },
+      ],
+    });
+    await store.getState().refreshFromCloud();
+    // The local, not-yet-synced edit MUST survive - refreshing must never regress it to the stale remote name.
+    expect(store.getState().products.find((p) => p.id === "p-edited")?.name).toBe("Locally Corrected Name");
+  });
+
   it("does NOT touch scanFeed (scan events are read via getScanEventsBySession, not this action)", async () => {
     const loadBusinessData = vi.fn().mockResolvedValue({ products: [], aliases: [], sessions: [], counts: [] });
     const store = createTestScanStore({ cloudBackend: true, loadBusinessData });

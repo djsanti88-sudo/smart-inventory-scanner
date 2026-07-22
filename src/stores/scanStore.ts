@@ -1758,9 +1758,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Products/aliases: upsert by id over the existing arrays (additive - a product this
           // device does not know about yet is ADDED; an existing id is refreshed to the remote's
           // version, since products/aliases are not counted-quantity state and always safe to take
-          // the server's word for, matching the trust model everywhere else in this app).
+          // the server's word for, matching the trust model everywhere else in this app) - EXCEPT a
+          // product this device still has a pending (unsynced) SAVE_PRODUCT edit for. Mirrors the
+          // finalCounts pending-queue exclusion below: an unsynced local edit is authoritative until it
+          // syncs, otherwise refreshFromCloud would clobber a human's correctProduct edit with the stale
+          // remote value that has not seen it yet (Task 1 refresh-race guard).
+          const pendingProductIds = new Set(
+            cur.pendingSyncQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
+          );
           const productsById = new Map(cur.products.map((p) => [p.id, p]));
-          for (const p of data.products) productsById.set(p.id, p);
+          for (const p of data.products) {
+            if (pendingProductIds.has(p.id)) continue; // guard: unsynced local edit wins
+            productsById.set(p.id, p);
+          }
           const aliasesById = new Map(cur.aliases.map((a) => [a.id, a]));
           for (const a of data.aliases) aliasesById.set(a.id, a);
           const sessionsById = new Map(cur.sessions.map((s) => [s.id, s]));
@@ -5324,7 +5334,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           updated.structuredBy = "human";
           if (safe.brand !== undefined) updated.structuredBrand = safe.brand;
         }
-        const key = buildIdempotencyKey(state.businessId, state.sessionId, productId, "SAVE_PRODUCT");
+        // Task 1 fix: a SAVE_PRODUCT idempotency key built from businessId:sessionId:productId:SAVE_PRODUCT
+        // alone is identical for every edit to the same product in the same session - MockDb/
+        // FirebaseSyncTarget dedupe on that key, so edit #2 was silently swallowed as "alreadyApplied"
+        // and never persisted. Fold a content fingerprint of THIS edit (the changed field values +
+        // updatedAt, minted once here) into the key so distinct edits mint distinct keys, matching the
+        // existing "${entityId}:<suffix>" pattern used elsewhere in this file (unlink/move/markwrong).
+        // A genuine RETRY never calls this function again - the drain loop replays the exact same
+        // PendingSyncItem object (same key) via db.apply(), so idempotency on repeated network retries
+        // of ONE edit is unaffected.
+        const editFingerprint = `${JSON.stringify(safe)}@${updated.updatedAt}`;
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, `${productId}:${editFingerprint}`, "SAVE_PRODUCT");
         set((s) => ({ products: s.products.map((p) => (p.id === productId ? updated : p)) }));
         enqueueAndSync([
           makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Product", entityId: productId, operation: "SAVE_PRODUCT", payload: updated, idempotencyKey: key, scanEventId: null }),
