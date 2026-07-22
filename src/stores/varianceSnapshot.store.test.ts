@@ -110,6 +110,7 @@ describe("countSnapshots persistence", () => {
         { id: "snap-1", label: "Morning", takenAt: "t", lines: [{ productId: "p1", name: "Widget", qty: 5 }] },
       ],
       firstScanAt: null,
+      sessionHistory: [],
     };
     const persisted = buildPersistedScanState(base, "platform");
     expect(persisted.countSnapshots).toEqual(base.countSnapshots);

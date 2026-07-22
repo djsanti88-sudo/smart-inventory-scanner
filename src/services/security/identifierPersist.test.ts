@@ -45,6 +45,7 @@ describe("identifier fields survive customer ('business') persistence (2026-07-2
       ],
       aliases: [], scanFeed: [], finalCounts: [], needsReviewQueue: [], lastCleanupBackup: null,
       catalog: [], shopOverrides: [], feedbackEvents: [], countSnapshots: [], firstScanAt: null,
+      sessionHistory: [],
     };
   }
 

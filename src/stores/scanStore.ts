@@ -75,6 +75,11 @@ import {
 import type { CatalogSourceTier, CatalogVerifiedBy } from "@/services/catalog/catalogTypes";
 import { appendFeedback, type FeedbackEvent, type FeedbackEventType } from "@/services/feedback/feedback";
 import type { CountSnapshot } from "@/services/reports/varianceReport";
+import {
+  buildSessionHistoryEntry,
+  appendSessionHistory,
+  type SessionHistoryEntry,
+} from "@/services/sessions/sessionHistory";
 import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
@@ -577,6 +582,10 @@ export interface ScanState {
   // Task 3.5: rolling snapshots of finalCounts for the variance/shrinkage report. Capped ring buffer
   // (same append-and-slice-oldest pattern as feedbackEvents/appendFeedback), most-recent-last.
   countSnapshots: CountSnapshot[];
+  /** Owner feature (2026-07-22): automatically saved history of past scan sessions, newest first.
+   *  Written the moment a session ends or rotates away (before scanFeed/finalCounts are wiped) - the
+   *  shop owner never has to do anything. Capped ring buffer (see sessionHistory.ts for the caps). */
+  sessionHistory: SessionHistoryEntry[];
 
   // sync
   pendingSyncQueue: PendingSyncItem[];
@@ -1163,6 +1172,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       }
     };
 
+    // Owner feature (2026-07-22): automatically archive the CURRENT session's live scanFeed into
+    // sessionHistory the instant it ends or rotates away - called BEFORE the caller wipes scanFeed/
+    // finalCounts, so a session with at least one scan is never silently lost. A zero-scan session is
+    // not recorded (buildSessionHistoryEntry returns null in that case). Never throws into the caller.
+    const archiveCurrentSessionIfAny = () => {
+      const s = get();
+      if (!s.currentSession) return;
+      const getProductName = (matchedProductId: string | null) => {
+        const product = matchedProductId ? s.products.find((p) => p.id === matchedProductId) : undefined;
+        return product?.name ?? "Unidentified item";
+      };
+      const entry = buildSessionHistoryEntry(s.currentSession, s.scanFeed, getProductName, now());
+      if (!entry) return;
+      set((cur) => ({ sessionHistory: appendSessionHistory(cur.sessionHistory, entry) }));
+    };
+
     // P6 C2: set-once stamp of this business's first EVER counted scan (any path). Called AFTER the
     // count has already been applied at each call site (never before - TOP-LEVEL LAW: counting is never
     // gated on this). Idempotent: a no-op once firstScanAt is already set, so re-scans/re-entries never
@@ -1261,6 +1286,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       finalCounts: [],
       needsReviewQueue: [],
       countSnapshots: [],
+      sessionHistory: [],
       pendingSyncQueue: [],
       syncedScanEventIds: [],
       online: true,
@@ -1493,6 +1519,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       startSession: (name, location) => {
+        // Owner feature (2026-07-22): archive the session being abandoned/rotated away from BEFORE
+        // its scanFeed is wiped below - a session with at least one scan is never silently lost.
+        archiveCurrentSessionIfAny();
         const id = `session-${idFactory()}`;
         const businessId = get().businessId;
         const session: InventorySession = {
@@ -1733,6 +1762,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             return;
           }
         }
+        // A genuine rotation away from the prior session (fresh session below wipes scanFeed/
+        // finalCounts) - archive it first, same as startSession.
+        archiveCurrentSessionIfAny();
         const id = `session-${idFactory()}`;
         const businessId = get().businessId;
         const session: InventorySession = {
@@ -6330,6 +6362,11 @@ const appDeps: ScanStoreDeps = {
 export function scanStoreMigrate(persisted: unknown, version: number) {
   const p = (persisted ?? {}) as Record<string, unknown>;
   const existingSnapshots = Array.isArray(p.countSnapshots) ? p.countSnapshots : [];
+  // v13 (owner feature, 2026-07-22): adds `sessionHistory` (automatically saved past-session log,
+  // capped ring buffer - see sessionHistory.ts). Same unconditional-inject contract as countSnapshots:
+  // no prior version persisted this field, so every install defaults it to [] and an install that
+  // already has one (e.g. a fresh v13 write) keeps its real data untouched.
+  const existingSessionHistory = Array.isArray(p.sessionHistory) ? p.sessionHistory : [];
   if (version < 5) {
     const fresh = getSeed();
     return {
@@ -6342,6 +6379,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
       pendingSyncQueue: [],
       syncedScanEventIds: [],
       countSnapshots: existingSnapshots,
+      sessionHistory: existingSessionHistory,
       settings: { ...DEFAULT_SETTINGS, ...((p.settings as Partial<Settings>) ?? {}) },
     } as never;
   }
@@ -6372,6 +6410,8 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   // countSnapshots stays UNCONDITIONAL by documented contract (varianceSnapshot.store.test.ts: pre-
   // snapshot blobs migrate to []). Safe to inject: the initial state is empty too, unlike products.
   out.countSnapshots = existingSnapshots;
+  // sessionHistory: same unconditional-inject contract as countSnapshots (see v13 note above).
+  out.sessionHistory = existingSessionHistory;
   if (p.settings !== undefined) {
     out.settings = { ...DEFAULT_SETTINGS, ...(p.settings as Partial<Settings>) };
   }
@@ -6395,7 +6435,9 @@ export const useScanStore = create<ScanState>()(
     // >= 5 migrate branch below already calls backfillProducts unconditionally on every hydrate whose
     // persisted version is below `version`, so this bump alone is sufficient - no separate v12 step
     // needed (backfillProducts itself now dedupes via the fixed canonicalTireDisplayName).
-    version: 12,
+    // Owner feature (2026-07-22): v12 -> v13 bump so every existing install gains `sessionHistory`
+    // defaulted to [] (see scanStoreMigrate's v13 note above).
+    version: 13,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken

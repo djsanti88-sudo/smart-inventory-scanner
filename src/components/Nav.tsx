@@ -16,6 +16,7 @@ export function Nav() {
     { href: "/scan", label: "Scan" },
     { href: "/products", label: "Products" },
     { href: "/review", label: "Review", badge: openReviews },
+    { href: "/history", label: "History" },
     { href: "/reconcile", label: "Reconcile" },
     { href: "/settings", label: "Settings" },
   ];
