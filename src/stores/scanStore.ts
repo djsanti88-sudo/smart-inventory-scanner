@@ -3745,7 +3745,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             quantityDelta: 1, idempotencyKey: countedEvent.idempotencyKey,
           };
           enqueueAndSync([
-            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, provId, "SAVE_PRODUCT"), scanEventId: null }),
+            // Task 1b fix (same recipe as correctProduct, commit 024c849): a bare
+            // `businessId:sessionId:provId:SAVE_PRODUCT` key collides with resolveUnknown's later
+            // orphan-merge SAVE_PRODUCT for this SAME id (it reuses provOrphanId - scanStore.ts ~4791),
+            // which would otherwise be swallowed as "alreadyApplied" and the resolved identity would
+            // never reach the backend. Suffix `:provisional` so the first (placeholder) write and any
+            // later distinct write to this id mint different keys; the key is still minted once here and
+            // reused verbatim on every retry of THIS item, so retry dedupe is unaffected.
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT"), scanEventId: countedEvent.id }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);
@@ -4778,6 +4785,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
         const queued: PendingSyncItem[] = [];
         if (createdProduct) {
+          // Task 1b fix (same recipe as correctProduct, commit 024c849): in the orphan-merge branch
+          // above, createdProduct.id === provOrphanId - the SAME id ensureProvisionalCount already
+          // enqueued a SAVE_PRODUCT for (scanStore.ts ~3748). A bare
+          // `businessId:sessionId:<id>:SAVE_PRODUCT` key would be identical to that earlier write's key,
+          // so this resolved-identity write would be swallowed as "alreadyApplied" and never reach the
+          // backend - real data loss (the resolved name never syncs, only the placeholder does). Fold a
+          // content fingerprint of the resolved product into the key, minted once here; every retry of
+          // this queue item (drain loop / manual retrySync) replays the same PendingSyncItem object, so
+          // retry dedupe on THIS write is unaffected.
+          const createdFingerprint = `${JSON.stringify(createdProduct)}@${createdProduct.updatedAt}`;
           queued.push(
             makeQueueItem({
               idFactory,
@@ -4788,7 +4805,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               entityId: createdProduct.id,
               operation: "SAVE_PRODUCT",
               payload: createdProduct,
-              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, createdProduct.id, "SAVE_PRODUCT"),
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                state.sessionId,
+                `${createdProduct.id}:${createdFingerprint}`,
+                "SAVE_PRODUCT",
+              ),
               scanEventId: null,
             }),
           );
