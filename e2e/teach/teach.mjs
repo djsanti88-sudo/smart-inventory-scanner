@@ -25,6 +25,10 @@ import { chromium } from 'playwright';
 import { computeRunNumber, masteredFrom, selectLessons, pickExploration, loadLessons } from './curriculum.mjs';
 import { RunLimits } from './limits.mjs';
 import * as h from './lessonHelpers.mjs';
+
+// Headed-run pacing: slow each Playwright action so a human can watch (still far faster than a
+// person). ~half speed by default; override with TEACH_SLOWMO_MS (0 = full speed).
+const SLOWMO_MS = Number.isFinite(Number(process.env.TEACH_SLOWMO_MS)) ? Number(process.env.TEACH_SLOWMO_MS) : 600;
 import * as ladder from './ladder.mjs';
 import * as sheets from './sheets.mjs';
 import * as triage from './triage.mjs';
@@ -424,8 +428,9 @@ async function runOneWindow({ target, runId, knowledge, manifest, personas, repo
   let context = null;
 
   try {
-    browser = await chromium.launch({ headless: false, args: ['--window-size=900,900'] });
+    browser = await chromium.launch({ headless: false, slowMo: SLOWMO_MS, args: ['--window-size=900,900'] });
     context = await newPersonaContext(browser, persona);
+    await h.installCursor(context);
     const page = await context.newPage();
 
     // The round-1 manifest must exist BEFORE signup, because signUpPersona records the created
@@ -644,10 +649,12 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
         try {
           const browser = await chromium.launch({
             headless: false,
+            slowMo: SLOWMO_MS,
             args: [`--window-position=${i * 650},0`, '--window-size=640,820'],
           });
           browsers.push(browser);
           const context = await newPersonaContext(browser, persona);
+          await h.installCursor(context);
           contexts.push(context);
           const page = await context.newPage();
           const probe = await probeDeployment(page, target);

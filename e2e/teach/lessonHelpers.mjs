@@ -278,3 +278,35 @@ export async function startTracing(context) {
 export async function stopTracing(context, absPath) {
   return context.tracing.stop({ path: absPath });
 }
+
+// A visible fake cursor + click ripple so a human watching a headed run can SEE where the bot
+// clicks. Injected via context.addInitScript so it survives navigations. Purely cosmetic overlay,
+// pointer-events:none, never interferes with the page.
+export const MOUSE_HELPER_SCRIPT = `(() => {
+  if (window.__teachCursor) return; window.__teachCursor = true;
+  const install = () => {
+    if (!document.body) return;
+    const dot = document.createElement('div');
+    dot.setAttribute('data-teach-cursor','1');
+    dot.style.cssText = 'position:fixed;top:0;left:0;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:rgba(255,45,45,.55);border:2px solid #fff;box-shadow:0 0 8px rgba(0,0,0,.5);z-index:2147483647;pointer-events:none;transition:transform .06s ease;';
+    document.body.appendChild(dot);
+    addEventListener('mousemove', e => { dot.style.left = e.clientX + 'px'; dot.style.top = e.clientY + 'px'; }, true);
+    addEventListener('mousedown', e => {
+      dot.style.transform = 'scale(1.7)';
+      const r = document.createElement('div');
+      r.style.cssText = 'position:fixed;left:'+e.clientX+'px;top:'+e.clientY+'px;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;border:2px solid rgba(255,45,45,.9);z-index:2147483647;pointer-events:none;';
+      document.body.appendChild(r);
+      r.animate([{transform:'scale(1)',opacity:1},{transform:'scale(4)',opacity:0}],{duration:450}).onfinish = () => r.remove();
+    }, true);
+    addEventListener('mouseup', () => { dot.style.transform = 'scale(1)'; }, true);
+  };
+  if (document.body) install(); else addEventListener('DOMContentLoaded', install);
+})();`;
+
+export async function installCursor(context) {
+  try {
+    await context.addInitScript(MOUSE_HELPER_SCRIPT);
+  } catch {
+    // cosmetic only - never fail a run because the cursor overlay could not attach
+  }
+}
