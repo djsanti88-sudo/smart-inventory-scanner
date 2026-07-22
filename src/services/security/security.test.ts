@@ -48,12 +48,15 @@ describe("product serialization by role", () => {
     expect(p.gtin).toBe("848983012906");
     expect(p.primaryBarcode).toBe("848983012906");
   });
-  it("business role strips barcode/gtin/upc/ean/aliases/vendorCodes; keeps name/brand/part number", () => {
+  it("business role strips aliases/vendorCodes (the reusable alias/catalog corpus); keeps name/brand/part number/the shop's own scanned barcode", () => {
     const p = sanitizeProduct(product, "business") as Record<string, unknown>;
     expect(p.name).toBe("Falken");
     expect(p.primarySku).toBe("28816861"); // part number is product-facing (allowed)
-    expect("primaryBarcode" in p).toBe(false);
-    expect("gtin" in p).toBe(false);
+    // Owner rule (2026-07-22): the barcode a shop scanned onto THEIR OWN product row is their data -
+    // already rendered to every role (FinalCountTable.tsx:129-131) - so it survives at business level.
+    expect(p.primaryBarcode).toBe("848983012906");
+    expect(p.gtin).toBe("848983012906");
+    // The reusable alias/catalog corpus (many-code-to-one-product mapping, vendor labels) stays platform-only.
     expect("aliases" in p).toBe(false);
     expect("vendorCodes" in p).toBe(false);
   });
