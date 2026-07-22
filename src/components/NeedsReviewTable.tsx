@@ -43,7 +43,8 @@ export function NeedsReviewTable() {
   // the device already has everything and the cloud backup retries invisibly in the background
   // (pendingSyncQueue + the global sync indicator cover a stuck backup; a shop owner never needs
   // to see sync state here). "suggested" reviews also never belong here - they live on the feed
-  // row's inline controls + the SuggestedApprovalPanel.
+  // row's inline controls + the SuggestedApprovalPanel. "ignored" is likewise a made decision
+  // (the human clicked Ignore), so it leaves the queue with the resolved ones.
   const reviews = allReviews.filter((r) => r.status === "open");
 
   return (

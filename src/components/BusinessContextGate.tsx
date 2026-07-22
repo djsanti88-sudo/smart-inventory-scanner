@@ -67,8 +67,8 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
           <button
             type="button"
             data-testid="adopt-data"
-            onClick={() => {
-              useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
+            onClick={async () => {
+              await useScanStore.getState().adoptLegacyLocalData(pendingCtx.uid);
               setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
               setStatus("ready");
             }}
@@ -79,8 +79,8 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
           <button
             type="button"
             data-testid="skip-adopt"
-            onClick={() => {
-              useScanStore.getState().rehydrateForUid(pendingCtx.uid);
+            onClick={async () => {
+              await useScanStore.getState().rehydrateForUid(pendingCtx.uid);
               setBusinessContext(pendingCtx.businessId, pendingCtx.uid);
               setStatus("ready");
             }}
