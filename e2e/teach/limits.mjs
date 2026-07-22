@@ -3,13 +3,18 @@
 // Teach Bot run limits: HONEST enforcement of run size, not dollar spend.
 //
 // The live decode server does not return an authoritative per-call cost, so
-// this module never claims to cap spend exactly. Instead it enforces hard
-// COUNT and TIME limits (paid lookups, total requests, wall-clock minutes)
-// and reports an ESTIMATED floor/upper bound in USD derived from documented
-// worst-case-per-rung figures. Per the owner's Paid API Cost Truth Rule:
-// true spend must always be reconciled against the provider's billing
-// console before quoting a wallet number - these numbers are a floor/ceiling
-// for run-time decision making only, never a receipt.
+// this module never claims to cap spend exactly. It enforces hard gates on
+// paid-lookup count and wall-clock time (paidLookupsExceeded/timeExceeded,
+// consulted by canPaidLookup and by the orchestrator's lesson loop). Total
+// request count (requestsExceeded) and the estimated USD figure are also
+// checked and surfaced via reason(), but are only as strong as their callers:
+// the orchestrator must call requestsExceeded()/usdAdvisoryExceeded() itself
+// to stop a run on them - this module does not enforce them on its own. The
+// USD figure is an ESTIMATED floor/upper bound derived from documented
+// worst-case-per-rung figures, never a measured cost. Per the owner's Paid
+// API Cost Truth Rule: true spend must always be reconciled against the
+// provider's billing console before quoting a wallet number - these numbers
+// are for run-time decision making only, never a receipt.
 
 /**
  * Worst-case USD per paid decode rung. These are documented estimates, not

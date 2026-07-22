@@ -191,25 +191,45 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
   let model = null;
 
   try {
-    // Phase 1: launch tiled browsers, probe deployment mode, sign up each persona.
+    // Phase 1: launch tiled browsers, probe deployment mode, sign up each
+    // persona. Each persona's setup is isolated in its own try/catch so ONE
+    // persona failing (browser launch, probe, or signup) does not abort the
+    // whole run - it is recorded as a setup failure and excluded from Phase 2,
+    // while personas that DID set up successfully still run their lessons.
     const personaSetups = await Promise.all(
       PERSONAS.map(async (persona, i) => {
-        const browser = await chromium.launch({
-          headless: false,
-          args: [`--window-position=${i * 650},0`, '--window-size=640,820'],
-        });
-        browsers.push(browser);
-        const context = await newPersonaContext(browser, persona);
-        contexts.push(context);
-        const page = await context.newPage();
-        const probe = await probeDeployment(page, target);
-        const mode = probe.mode;
-        let businessId = null;
-        if (mode === 'live_auth') {
-          const signup = await signUpPersona(page, { persona, runId, baseURL: target });
-          businessId = signup.businessId;
+        try {
+          const browser = await chromium.launch({
+            headless: false,
+            args: [`--window-position=${i * 650},0`, '--window-size=640,820'],
+          });
+          browsers.push(browser);
+          const context = await newPersonaContext(browser, persona);
+          contexts.push(context);
+          const page = await context.newPage();
+          const probe = await probeDeployment(page, target);
+          const mode = probe.mode;
+          let businessId = null;
+          if (mode === 'live_auth') {
+            const signup = await signUpPersona(page, { persona, runId, baseURL: target });
+            businessId = signup.businessId;
+          }
+          return { persona, page, mode, businessId, setupFailed: false };
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          const setupFinding = triage.buildFinding({
+            title: `Persona "${persona.key}" failed Phase-1 setup`,
+            category: 'harness',
+            severity: 'high',
+            lesson: 'phase1-setup',
+            persona: persona.key,
+            repro: `Launch browser, probe deployment, and sign up persona "${persona.key}" against ${target}`,
+            expected: 'The persona launches a browser, probes the deployment, and (if live_auth) signs up successfully.',
+            actual: reason,
+            triageClass: 'environment_problem',
+          });
+          return { persona, setupFailed: true, setupFinding };
         }
-        return { persona, page, mode, businessId };
       })
     );
 
@@ -221,23 +241,61 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
       }
     }
 
-    const allBusinessIds = personaSetups.map((s) => s.businessId).filter(Boolean);
-    const modes = new Set(personaSetups.map((s) => s.mode));
-    const deploymentMode = modes.size === 1 ? [...modes][0] : 'mixed';
+    const successfulSetups = personaSetups.filter((s) => !s.setupFailed);
+    const failedSetups = personaSetups.filter((s) => s.setupFailed);
 
-    // Phase 2: run the curriculum plan for each persona concurrently.
-    const personaResults = await Promise.all(
-      personaSetups.map(async ({ persona, page, mode, businessId }) => {
+    const allBusinessIds = successfulSetups.map((s) => s.businessId).filter(Boolean);
+    const modes = new Set(successfulSetups.map((s) => s.mode));
+    const deploymentMode = modes.size === 1 ? [...modes][0] : (modes.size === 0 ? 'unknown' : 'mixed');
+
+    // Setup-failed personas never enter the lessons phase; their failure is
+    // still surfaced as a finding via a synthetic Phase-1 "lesson" entry so it
+    // flows into the report the same way any other finding does.
+    const failedPersonaResults = failedSetups.map(({ persona, setupFinding }) => ({
+      persona: persona.key,
+      lessons: [
+        {
+          id: 'phase1-setup',
+          title: 'Phase 1 persona setup',
+          level: 0,
+          pass: false,
+          notes: 'setup failed: excluded from lessons phase',
+          findings: [setupFinding],
+          learned: null,
+        },
+      ],
+    }));
+
+    // Phase 2: run the curriculum plan for each successfully set-up persona.
+    const livePersonaResults = await Promise.all(
+      successfulSetups.map(async ({ persona, page, mode, businessId }) => {
         const otherTenantIds = allBusinessIds.filter((id) => id !== businessId);
         const lessons = [];
+        const passedLessonIds = new Set();
         for (const lesson of plan) {
-          if (limits.timeExceeded()) {
+          if (limits.timeExceeded() || limits.requestsExceeded()) {
             lessons.push({
               id: lesson.id,
               title: lesson.title,
               level: lesson.level,
               pass: false,
-              notes: 'skipped: run time budget exceeded before this lesson started',
+              notes: `skipped: run budget exceeded before this lesson started (${limits.reason()})`,
+              findings: [],
+              learned: null,
+            });
+            continue;
+          }
+
+          const missingPrereq = Array.isArray(lesson.prereqs)
+            ? lesson.prereqs.find((id) => !passedLessonIds.has(id))
+            : null;
+          if (missingPrereq) {
+            lessons.push({
+              id: lesson.id,
+              title: lesson.title,
+              level: lesson.level,
+              pass: true,
+              notes: `skipped: prereq ${missingPrereq} not satisfied`,
               findings: [],
               learned: null,
             });
@@ -279,11 +337,13 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
           }
 
           const findings = [...collected, ...(Array.isArray(result.findings) ? result.findings : [])];
+          const passed = Boolean(result.pass);
+          if (passed) passedLessonIds.add(lesson.id);
           lessons.push({
             id: lesson.id,
             title: lesson.title,
             level: lesson.level,
-            pass: Boolean(result.pass),
+            pass: passed,
             notes: result.notes ?? null,
             findings,
             learned: result.learned ?? null,
@@ -292,6 +352,8 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
         return { persona: persona.key, lessons };
       })
     );
+
+    const personaResults = [...failedPersonaResults, ...livePersonaResults];
 
     const findings = personaResults.flatMap((pr) => pr.lessons.flatMap((l) => l.findings ?? []));
     const ladderRows = personaResults.flatMap((pr) =>
