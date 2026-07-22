@@ -138,6 +138,14 @@ export default {
     };
 
     // --- Step 1: same known product scanned 3 times -> dedup on the count side ---
+    // Must use a FRESH code never scanned this session. Reusing
+    // persona.codes.known[0] would collide with an earlier lesson's scan of
+    // the same code, so the product row already exists before this step
+    // even starts, and the "row count delta === 1" assertion below would be
+    // trivially true for the wrong reason (or wrongly flagged as a dedup
+    // failure if some other lesson also scanned it more than once).
+    const dedupCode = `TEACHDEDUP${Date.now()}`;
+
     let countRowsBefore = 0;
     try {
       countRowsBefore = await page.locator('[data-testid="final-count-body"] > tr').count();
@@ -147,7 +155,7 @@ export default {
 
     for (let i = 0; i < 3; i += 1) {
       // eslint-disable-next-line no-await-in-loop
-      await scanSafely(known, 'known (repeat)');
+      await scanSafely(dedupCode, 'known (repeat, fresh dedup code)');
     }
     try {
       await h.waitFeedAtLeast(page, baselineFeed + 3, 20000);
@@ -158,6 +166,7 @@ export default {
     let feedAfterTriple = baselineFeed;
     let qtyAfterTriple = baselineQty;
     let countRowsAfter = countRowsBefore;
+    let dedupQty = null;
     try {
       feedAfterTriple = await h.feedCount(page);
       qtyAfterTriple = await h.countedTotal(page);
@@ -183,7 +192,21 @@ export default {
     const qtyDeltaTriple = qtyAfterTriple - baselineQty;
     const countRowDelta = countRowsBefore >= 0 ? countRowsAfter - countRowsBefore : null;
 
+    // Read the qty cell of the specific new row the dedup code landed on (not
+    // the whole-page countedTotal, which would be muddied by every other
+    // product already counted this session).
+    try {
+      const newRow = page.locator('[data-testid^="count-row-"]').filter({ hasText: dedupCode }).first();
+      const qtyCell = newRow.locator('[data-testid^="qty-"]').first();
+      const qtyText = await qtyCell.innerText({ timeout: 5000 });
+      const parsed = parseInt(qtyText, 10);
+      dedupQty = Number.isNaN(parsed) ? null : parsed;
+    } catch {
+      dedupQty = null;
+    }
+
     learned.qtyAfterTriple = qtyDeltaTriple;
+    learned.dedupQty = dedupQty;
 
     if (feedDeltaTriple !== 3) {
       findings.push(triage.buildFinding({
@@ -192,7 +215,7 @@ export default {
         severity: 'critical',
         lesson: 'scan-n-count-n',
         persona: persona?.key ?? null,
-        repro: `Scan known code ${known} three times in a row, then diff feedCount() before/after.`,
+        repro: `Scan fresh dedup code ${dedupCode} three times in a row, then diff feedCount() before/after.`,
         expected: 'feedCount delta === 3 (feed is never deduped - one row per scan event).',
         actual: `feedCount delta was ${feedDeltaTriple} (baseline ${baselineFeed}, after ${feedAfterTriple}).`,
         evidence: {},
@@ -210,7 +233,7 @@ export default {
         severity: 'critical',
         lesson: 'scan-n-count-n',
         persona: persona?.key ?? null,
-        repro: `Scan known code ${known} three times in a row, then diff countedTotal() before/after.`,
+        repro: `Scan fresh dedup code ${dedupCode} three times in a row, then diff countedTotal() before/after.`,
         expected: 'countedTotal delta === 3 (dedup increments qty, it does not drop scans).',
         actual: `countedTotal delta was ${qtyDeltaTriple} (baseline ${baselineQty}, after ${qtyAfterTriple}).`,
         evidence: {},
@@ -221,20 +244,38 @@ export default {
       pass = false;
     }
 
-    learned.sameProductDedup = countRowDelta === null ? null : countRowDelta === 1;
+    learned.sameProductDedup = countRowDelta === null || dedupQty === null ? null : (countRowDelta === 1 && dedupQty === 3);
     if (countRowDelta !== null && countRowDelta !== 1) {
       findings.push(triage.buildFinding({
-        title: 'Same known product scanned 3x created more than one count row (dedup failure)',
+        title: 'Same fresh code scanned 3x created more than one count row (dedup failure)',
         category: 'ledger',
         severity: 'high',
         lesson: 'scan-n-count-n',
         persona: persona?.key ?? null,
-        repro: `Scan known code ${known} three times, then diff final-count-body row count before/after.`,
+        repro: `Scan fresh dedup code ${dedupCode} three times, then diff final-count-body row count before/after.`,
         expected: 'final-count-body row count delta === 1 (repeat scans of the same product increment one row, never create a duplicate).',
         actual: `final-count-body row count delta was ${countRowDelta}.`,
         evidence: {},
         triageClass: 'confirmed_app_bug',
         customerImpact: 'A duplicate product row for the same identity fragments inventory counts and confuses reconciliation.',
+        locked: true,
+      }));
+      pass = false;
+    }
+
+    if (countRowDelta === 1 && dedupQty !== null && dedupQty !== 3) {
+      findings.push(triage.buildFinding({
+        title: 'Rescanning the same fresh code 3x did not raise its own row qty to 3',
+        category: 'ledger',
+        severity: 'high',
+        lesson: 'scan-n-count-n',
+        persona: persona?.key ?? null,
+        repro: `Scan fresh dedup code ${dedupCode} three times, then read the qty-<productId> cell of its count row.`,
+        expected: 'The single count row created for the code reads qty === 3 (rescans increment quantity).',
+        actual: `The row's qty read ${dedupQty}.`,
+        evidence: {},
+        triageClass: 'confirmed_app_bug',
+        customerImpact: 'Repeat scans of the same item are not being tallied into that item\'s quantity.',
         locked: true,
       }));
       pass = false;

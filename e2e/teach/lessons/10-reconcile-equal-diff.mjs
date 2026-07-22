@@ -31,6 +31,28 @@ export default {
     // -------------------------------------------------------------------
     const plan = sheets.buildReconcilePlan(sheets.DEFAULT_PRODUCTS, { equal: true });
 
+    // /reconcile has no scanner input - all scanning must happen on /scan
+    // first, then navigate to /reconcile only to upload the CSV.
+    try {
+      await h.gotoApp(page, baseURL, '/scan');
+      await page.locator('#scanner-input').waitFor({ state: 'visible', timeout: 15000 });
+    } catch (err) {
+      findings.push(triage.buildFinding({
+        title: 'Could not reach the scan screen to build the reconcile baseline',
+        category: 'environment',
+        severity: 'high',
+        lesson: 'reconcile-equal-diff',
+        persona: persona?.key ?? null,
+        repro: 'gotoApp(page, baseURL, "/scan"); wait for #scanner-input.',
+        expected: 'Scan screen loads with a focused/visible scanner input.',
+        actual: String(err && err.message ? err.message : err),
+        evidence: {},
+        triageClass: 'environment_problem',
+        customerImpact: 'Unknown - could not evaluate.',
+      }));
+      return { pass: false, findings, learned, notes: notes.join(' ') };
+    }
+
     let scanFailure = null;
     for (const entry of plan.scanPlan) {
       const code = entry.barcode || entry.partNumber;

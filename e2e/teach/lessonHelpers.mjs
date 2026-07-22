@@ -83,11 +83,13 @@ export async function scan(page, code, { wedge = false, suffix = 'Enter', delayM
   await input.click();
 
   if (wedge) {
-    const keys = buildWedgeKeys(code, suffix);
-    for (const key of keys) {
-      await page.keyboard.press(key);
-      await page.waitForTimeout(delayMs);
-    }
+    // A real hardware wedge scanner bursts every character in well under
+    // 80ms, then sends the terminator key - it is NOT slowed down by
+    // Playwright's slowMo. insertText injects the whole string as one
+    // action (unaffected by per-keystroke slowMo), so it reproduces a
+    // real burst instead of splitting into one submission per character.
+    await page.keyboard.insertText(code);
+    await page.keyboard.press(suffix);
     return;
   }
 
