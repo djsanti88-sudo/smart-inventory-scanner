@@ -18,7 +18,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npm run dev -- --port 3200",
+    // --emulator is REQUIRED: scripts/dev.mjs defaults to MOCK and force-overrides the env below
+    // (backend=0 + auth bypass), which silently ran this whole suite against the mock backend.
+    command: "npm run dev -- --emulator --port 3200",
     url: "http://localhost:3200",
     reuseExistingServer: false,
     timeout: 180_000,
@@ -31,6 +33,10 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_BACKEND: "1",
       NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "1",
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-smart-inventory",
+      // Live auth mode, same as the production env (2026-07-22 go-live). Without this the P2
+      // authMode refactor defaults to "mock", cloud=false, and the business-context gate never
+      // engages - the spec then fails at its first banner assertion while testing nothing real.
+      NEXT_PUBLIC_AUTH_MODE: "live",
       // This spec exercises the FULL platformOwner end-to-end workflow (scan unknown -> Needs Review ->
       // create product -> learn alias -> export code-bearing CSV) and asserts that workflow survives a
       // full-page refresh. That is the platformOwner view, so we force it here exactly as the mock suite

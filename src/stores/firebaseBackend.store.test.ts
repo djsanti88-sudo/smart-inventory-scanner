@@ -42,7 +42,12 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(store.getState().pendingSyncQueue.length).toBeGreaterThan(0);
   });
 
-  it("setBusinessContext drains the queue to the cloud target (async)", async () => {
+  it("setBusinessContext drops pre-context (foreign-tenant) queue items instead of draining them (contract updated 2026-07-22)", async () => {
+    // The original Loop-2 contract drained pre-context items after context arrived. Against the REAL
+    // backend that writes another tenant's businessId into the new tenant's path - Firestore rules
+    // deny it forever and the item clogs "Waiting to save" permanently (proven by the emulator e2e).
+    // The tenant switch wipes that pre-context local state anyway (isolation law), and legacy data
+    // continuity is the adopt-flow's job, so the switch now discards foreign-tenant queue items.
     const target = new FakeAsyncTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true });
     store.getState().processScan("999999999999");
@@ -54,9 +59,9 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(store.getState().businessContextReady).toBe(true);
     expect(store.getState().userId).toBe("user-real");
     expect(store.getState().businessId).toBe("biz-real");
-    expect(target.applied.length).toBeGreaterThan(0); // queued items drained
+    expect(target.applied).toHaveLength(0); // foreign-tenant items are never written to the new tenant
     expect(store.getState().lastSyncError).toBeNull();
-    expect(store.getState().pendingSyncQueue).toHaveLength(0);
+    expect(store.getState().pendingSyncQueue).toHaveLength(0); // dropped, not stuck
   });
 
   it("setBusinessContext loads the business's products/aliases so a scan resolves the approved alias", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createBusiness, listMemberships, signOut, type Membership } from "@/lib/auth";
+import { createBusiness, getBusinessNames, listMemberships, signOut, type Membership } from "@/lib/auth";
 import { setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
@@ -12,21 +12,26 @@ import { useScanStore } from "@/stores/scanStore";
 export default function BusinessPage() {
   const router = useRouter();
   const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [businessNames, setBusinessNames] = useState<Record<string, string>>({});
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    setMemberships(await listMemberships());
+    const m = await listMemberships();
+    setMemberships(m);
+    setBusinessNames(await getBusinessNames(m.map((x) => x.businessId)));
     setLoading(false);
   }, []);
 
   useEffect(() => {
     let active = true;
-    listMemberships().then((m) => {
+    listMemberships().then(async (m) => {
+      const names = await getBusinessNames(m.map((x) => x.businessId));
       if (active) {
         setMemberships(m);
+        setBusinessNames(names);
         setLoading(false);
       }
     });
@@ -84,7 +89,11 @@ export default function BusinessPage() {
         )}
         {memberships.map((m) => (
           <li key={m.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3">
-            <span className="font-mono text-xs text-zinc-600">{m.businessId}</span>
+            {/* The NAME is the label; the raw id lives only in the tooltip (owner report: the UUID
+                rendered here read like "a random name that almost looks like a code string"). */}
+            <span className="font-medium text-zinc-900" title={m.businessId}>
+              {businessNames[m.businessId] ?? "Business (name loading...)"}
+            </span>
             <span className="flex items-center gap-2">
               <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">{m.role}</span>
               <button

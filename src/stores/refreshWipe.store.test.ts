@@ -89,6 +89,44 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store2.getState().finalCounts.length, "counts survive a true refresh").toBe(2);
   });
 
+  it("(f) a tenant SWITCH drops pending sync items queued under another tenant (a pre-sign-in demo-business item can never pass the real backend's rules and would clog 'Waiting to save' forever)", () => {
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    store.setState({
+      pendingSyncQueue: [
+        { id: "q1", businessId: "demo-business", sessionId: "session-1", entityType: "CountSession", entityId: "session-1", operation: "SAVE_SESSION", payload: {}, idempotencyKey: "k1", attempts: 0, status: "pending", createdAt: "t" } as never,
+      ],
+    });
+    store.getState().setBusinessContext("b-real", "u1");
+    expect(store.getState().pendingSyncQueue).toEqual([]);
+    // The foreign tenant's session object must not survive either: ensureAutoSession would ADOPT it
+    // (keeping its old businessId) and re-enqueue undrainable foreign saves on the next scan.
+    expect(store.getState().currentSession).toBeNull();
+  });
+
+  it("(g) upgrading a provisional via create_new enqueues SAVE_PRODUCT under a FRESH idempotency key (the scan-time save already consumed the stable key; reusing it makes the cloud applied-keys ledger silently skip the rename)", async () => {
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    store.getState().setBusinessContext("b1", "u1");
+    store.getState().processScan("9999999999"); // unknown -> provisional + SAVE_PRODUCT(stable key)
+    const review = store.getState().needsReviewQueue.find((r) => r.status === "open")!;
+    const provisionalSaveKeys = store
+      .getState()
+      .pendingSyncQueue.filter((q) => q.operation === "SAVE_PRODUCT")
+      .map((q) => q.idempotencyKey);
+
+    store.getState().resolveUnknown(review.id, "create_new", {
+      applyToCount: false, origin: "human",
+      newProduct: { name: "FB Mystery", primaryBarcode: "9999999999" },
+    });
+
+    const upgradeSaves = store
+      .getState()
+      .pendingSyncQueue.filter((q) => q.operation === "SAVE_PRODUCT" && (q.payload as { name?: string })?.name === "FB Mystery");
+    expect(upgradeSaves.length).toBeGreaterThan(0);
+    for (const item of upgradeSaves) {
+      expect(provisionalSaveKeys).not.toContain(item.idempotencyKey);
+    }
+  });
+
   it("(b) an ACTUAL tenant switch still fully wipes (isolation law unchanged)", () => {
     const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
     store.getState().setBusinessContext("b1", "u1");

@@ -29,14 +29,30 @@ async function scan(page: Page, code: string) {
 
 async function waitDrained(page: Page) {
   // Cloud sync is async; wait until everything queued has reached the emulator before asserting/refresh.
-  await expect(page.getByTestId("pending-count")).toContainText("Waiting to save: 0", { timeout: 15_000 });
+  // 45s: the drain's transient-failure retry backoff can exceed 15s on the emulator; the assertion
+  // still demands a FULL drain, it just gives the backoff room (proven: the counter reaches 0).
+  await expect(page.getByTestId("pending-count")).toContainText("Waiting to save: 0", { timeout: 45_000 });
+}
+
+// The "Sessions and export" secondary controls are a collapsed <details> for real users (P4) and only
+// auto-expand under the auth-bypass flag, which this REAL-login suite rightly does not set. Expand it
+// exactly like a user would before touching session/export/sync controls (idempotent).
+async function openSecondaryControls(page: Page) {
+  const details = page.locator("details").filter({ hasText: "Sessions and export" });
+  if (!(await details.getAttribute("open").then((v) => v !== null))) {
+    await details.locator("summary").click();
+  }
 }
 
 test("Firebase-backed end-to-end (real auth, real business context, survive-refresh)", async ({ page }) => {
-  // Never call live AI in this run.
-  const aiCalls: string[] = [];
-  page.on("request", (r) => {
-    if (r.url().includes("/api/ai-lookup") && r.method() === "POST") aiCalls.push(r.url());
+  // Never call live AI in this run. Auto-decode MAY fire /api/ai-lookup (default settings), but
+  // IS_E2E=1 forces the route mock-only - so the safety net asserts every response came from the
+  // mock provider, not that zero calls happened (the old zero-calls assert predates auto-decode).
+  const aiResponses: Array<Promise<unknown>> = [];
+  page.on("response", (r) => {
+    if (r.url().includes("/api/ai-lookup") && r.request().method() === "POST") {
+      aiResponses.push(r.json().catch(() => null));
+    }
   });
 
   // 1. REAL sign-in through the login UI (Auth emulator).
@@ -59,6 +75,7 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await page.screenshot({ path: `${PROOF}/02-context-ready.png`, fullPage: true });
 
   // 4. Start a real count session (persists a CountSession for survive-refresh).
+  await openSecondaryControls(page);
   await page.getByTestId("start-session").click();
 
   // 5. Scan a known product, then an alias code for the SAME product (two codes -> one product).
@@ -85,6 +102,7 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
 
   // 8. Rescan the now-learned code -> resolves Known (no new review), and appears in final counts.
   await page.goto("/scan");
+  await openSecondaryControls(page);
   await scan(page, UNKNOWN_CODE);
   await expect(page.getByTestId("final-count-body")).toContainText("FB Mystery");
   await waitDrained(page);
@@ -95,6 +113,7 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await expect(page.getByTestId(`qty-${KNOWN_PRODUCT_ID}`)).toHaveText("2"); // counts persisted, not doubled
   await expect(page.getByTestId("final-count-body")).toContainText("FB Mystery"); // learned product persisted
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // scanner focus still works after reload
+  await openSecondaryControls(page); // expand AFTER the focus assert - the summary click takes focus
   await page.screenshot({ path: `${PROOF}/05-after-refresh.png`, fullPage: true });
 
   // 10. Finish the session (persists completed state + audit), then export a CSV.
@@ -109,8 +128,42 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await download.saveAs(`${PROOF}/final-counts.csv`);
   await page.screenshot({ path: `${PROOF}/06-finished-exported.png`, fullPage: true });
 
-  // No live AI was ever called.
-  expect(aiCalls).toHaveLength(0);
+  // No LIVE AI was ever called: every ai-lookup response must come from the mock provider.
+  // A whole-body string match is too broad here: the ladder honestly LABELS every rung it evaluated
+  // (e.g. providerNames/ladderReasons naming "fetchv2" or "gpt") even when that rung was SKIPPED under
+  // e2e mock mode (IS_E2E forces the route to wire only mockProvider - see api/ai-lookup/route.ts
+  // e2eMode() branch), so those labels legitimately appear in a mock-only response. The real signal
+  // that a rung actually EXECUTED and returned data is providerStatuses[].status === "ok" paired with
+  // a non-mock provider name; a "skipped"/other status entry naming a paid provider is honest bookkeeping,
+  // not a live call.
+  const BANNED_LIVE_PROVIDERS = /go-?upc|fetchv2|firecrawl|openai|gemini|brave/i;
+  const aiBodies = (await Promise.all(aiResponses)).filter(Boolean) as Array<Record<string, unknown>>;
+  for (const b of aiBodies) {
+    const statuses = Array.isArray((b as { providerStatuses?: unknown }).providerStatuses)
+      ? ((b as { providerStatuses: Array<Record<string, unknown>> }).providerStatuses)
+      : [];
+    for (const st of statuses) {
+      const provider = String(st.provider ?? "");
+      const status = String(st.status ?? "");
+      if (status === "ok") {
+        expect(provider.toLowerCase(), "a live/paid provider must never report status=ok in e2e mock mode").not.toMatch(BANNED_LIVE_PROVIDERS);
+        expect(provider.toLowerCase(), "any non-mock provider reporting status=ok is a live leak").toMatch(/mock/);
+      }
+    }
+    // Debug/decision fields never claim a live provider VERIFIED evidence in mock mode.
+    const decision = (b as { decision?: { evidenceStrength?: string } }).decision;
+    if (decision?.evidenceStrength && decision.evidenceStrength !== "none") {
+      const evidences = Array.isArray((b as { evidences?: unknown }).evidences)
+        ? ((b as { evidences: Array<Record<string, unknown>> }).evidences)
+        : [];
+      for (const ev of evidences) {
+        const sources = Array.isArray(ev.matchedSources) ? (ev.matchedSources as unknown[]).join(",") : "";
+        if (ev.verified === true) {
+          expect(sources.toLowerCase(), "verified evidence must never cite a live/paid provider in e2e mock mode").not.toMatch(BANNED_LIVE_PROVIDERS);
+        }
+      }
+    }
+  }
 
   // ---- Genuine persistence proof: assert the EMULATOR state directly via the Admin SDK ----
   const db = adminDb();

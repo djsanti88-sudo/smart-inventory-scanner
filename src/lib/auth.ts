@@ -10,7 +10,7 @@ import {
   signInWithPopup,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { doc, setDoc, getDocs, query, collection, where, serverTimestamp, runTransaction } from "firebase/firestore";
+import { doc, setDoc, getDoc, getDocs, query, collection, where, serverTimestamp, runTransaction } from "firebase/firestore";
 import { getFirebaseAuth, getDb } from "@/lib/firebaseClient";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { COLLECTIONS, memberDocId, type BusinessMember } from "@/services/db/types";
@@ -148,6 +148,28 @@ export async function createBusiness(name: string): Promise<{ businessId: string
   } catch (e) {
     return { businessId: null, error: message(e) };
   }
+}
+
+/** Names for the given business ids (rules let members read their own business doc). Ids whose doc
+ *  is missing/unreadable are omitted - the caller falls back to something sensible. Without this
+ *  join the membership list showed the raw businessId UUID as if it were the name (owner report
+ *  2026-07-22: "creates a random name that almost looks like a code string"). */
+export async function getBusinessNames(businessIds: string[]): Promise<Record<string, string>> {
+  if (isAuthBypassEnabled()) return {};
+  const db = getDb();
+  const out: Record<string, string> = {};
+  await Promise.all(
+    [...new Set(businessIds)].map(async (bid) => {
+      try {
+        const snap = await getDoc(doc(db, COLLECTIONS.businesses, bid));
+        const n = snap.exists() ? (snap.data().name as string | undefined) : undefined;
+        if (n) out[bid] = n;
+      } catch {
+        // unreadable (e.g. revoked membership mid-flight): UI falls back to the id
+      }
+    }),
+  );
+  return out;
 }
 
 /** The signed-in user's memberships (rules scope reads to their own). */

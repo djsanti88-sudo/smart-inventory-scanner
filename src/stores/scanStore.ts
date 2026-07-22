@@ -1333,25 +1333,43 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // finalCounts linger when no session restores, so a context switch must REPLACE all four or
           // the previous tenant's rows bleed through (two users OR one user with two businesses).
           const cleared = emptyTenantState();
-          set({
+          set((s) => ({
             businessId,
             userId,
             businessContextReady: true,
             businessDataLoaded: !needsLoad,
             lastSyncError: null,
+            // Drop sync items queued under ANOTHER tenant (e.g. a pre-sign-in demo-business
+            // SAVE_SESSION): the real backend's rules deny them forever, so they would clog
+            // "Waiting to save" permanently - and their underlying data is wiped right here anyway.
+            pendingSyncQueue: s.pendingSyncQueue.filter((q) => q.businessId === businessId),
+            // The old tenant's session must not survive either: ensureAutoSession would ADOPT it
+            // (spreading its old businessId) and enqueue foreign SAVE_SESSIONs the new tenant's
+            // rules deny forever. Null lets the next scan mint a fresh session under THIS tenant.
+            currentSession: null,
             scanFeed: cleared.scanFeed,
             finalCounts: cleared.finalCounts,
             needsReviewQueue: cleared.needsReviewQueue,
             settings: cleared.settings,
             firstScanAt: cleared.firstScanAt,
             recentLocations: cleared.recentLocations,
-          });
+          }));
         }
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
-          // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
-          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI.
+          // PUSH THEN PULL (2026-07-22, caught by the real-backend e2e): drain the queue BEFORE
+          // reading Firestore. The old pull-first order replaced local products/aliases/counts with
+          // a cloud copy that had not yet received just-made local changes (e.g. a review resolution
+          // on the previous page), silently reverting them. After a full drain the cloud is a
+          // superset and the replace is safe; while items remain unsynced (offline/failing), keep
+          // the local rows and skip the replace - the next successful drain re-runs the pull.
           void (async () => {
+            try {
+              await syncPendingCloud(true);
+            } catch {
+              // drain failures surface via lastSyncError inside the drain itself
+            }
+            const undrained = get().pendingSyncQueue.length > 0;
             try {
               const data = await loader(businessId, userId);
               // Reconstruct the active count session + its finalCounts (survive-refresh). Prefer the most
@@ -1361,8 +1379,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (b.startedAt ?? "").localeCompare(a.startedAt ?? "");
               const sessions = [...data.sessions].sort(byStartedAtDesc);
               const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
-              const next: Partial<ScanState> = { products: data.products, aliases: data.aliases };
-              if (restored) {
+              const next: Partial<ScanState> = undrained ? {} : { products: data.products, aliases: data.aliases };
+              if (restored && !undrained) {
                 next.currentSession = restored;
                 next.sessionId = restored.id;
                 next.finalCounts = data.counts.filter((c) => c.sessionId === restored.id);
@@ -4846,7 +4864,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               entityId: createdProduct.id,
               operation: "SAVE_PRODUCT",
               payload: createdProduct,
-              idempotencyKey: buildIdempotencyKey(state.businessId, state.sessionId, createdProduct.id, "SAVE_PRODUCT"),
+              // A provisional UPGRADE re-saves a product whose scan-time SAVE_PRODUCT already
+              // consumed the stable (businessId, sessionId, id) key - the cloud applied-keys ledger
+              // would silently skip this save and the rename would never reach Firestore (caught by
+              // the real-backend e2e 2026-07-22). Mint a per-enqueue revision key instead; minted
+              // ONCE here and reused verbatim on every retry (Idempotent Sync Rules), and
+              // SAVE_PRODUCT is an upsert-by-id so re-application is safe.
+              idempotencyKey: approvingProvisional
+                ? buildIdempotencyKey(state.businessId, state.sessionId, `${createdProduct.id}:upgrade:${idFactory()}`, "SAVE_PRODUCT")
+                : buildIdempotencyKey(state.businessId, state.sessionId, createdProduct.id, "SAVE_PRODUCT"),
               scanEventId: null,
             }),
           );
