@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "updatedAt": null,
+  "note": "feature x persona x state x viewport coverage. Orchestrator is the only writer (atomic).",
+  "lessons": {
+    "1-signup-first-scan": { "status": "not_run", "lastRunId": null },
+    "2-scan-n-equals-count-n": { "status": "not_run", "lastRunId": null },
+    "3-teach-alias": { "status": "not_run", "lastRunId": null },
+    "4-offline-reconnect": { "status": "not_run", "lastRunId": null },
+    "5-wedge-scanner": { "status": "not_run", "lastRunId": null },
+    "6-resilience-refresh-dupes": { "status": "not_run", "lastRunId": null },
+    "7-live-decode-ladder-trace": { "status": "not_run", "lastRunId": null },
+    "8-import-clean": { "status": "not_run", "lastRunId": null },
+    "9-import-messy": { "status": "not_run", "lastRunId": null },
+    "10-reconcile-equal-and-different": { "status": "not_run", "lastRunId": null },
+    "11-tenant-isolation-deep": { "status": "not_run", "lastRunId": null }
+  },
+  "personas": ["tire", "cstore", "supp"],
+  "viewports": ["desktop", "mobile"],
+  "explored": [],
+  "notYetExplored": ["history-page", "settings-deep", "products-edit", "export-raw-log"]
+}
