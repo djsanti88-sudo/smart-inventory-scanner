@@ -32,38 +32,19 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
   );
 }
 
-// A resolved row stays visible until its resolution syncs (owner rule: nothing looks lost before it
-// saves), so its Actions cell must read as a DONE state in plain words - never the internal enum
-// ("create_new"), which reads like a broken button.
-function resolvedActionLabel(review: UnknownCodeReview): string {
-  const saving = review.syncStatus !== "synced" ? " (saving...)" : "";
-  switch (review.resolutionAction) {
-    case "create_new":
-      return `Done: new product created${saving}`;
-    case "link_existing":
-      return `Done: linked to existing product${saving}`;
-    case "ignore":
-      return `Ignored${saving}`;
-    default:
-      return `Done${saving}`;
-  }
-}
-
 // Needs Review queue. Unknown / conflicting codes land here and are never silently counted.
 // Human resolution permanently learns an alias (handled by the store), so the AI is never asked
 // about that code again.
 export function NeedsReviewTable() {
   const allReviews = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
-  // Owner rule: an item that is ALREADY solved AND synced is done - it must not linger in Needs Review.
-  // A resolved item that is NOT yet synced stays visible (so nothing looks lost before it saves).
-  // Task 9b (owner-ratified 2026-07-14): a review PARKED at status "suggested" (pending inline
-  // suggestion) NEVER belongs in this queue regardless of sync state - it lives on the feed row's
-  // inline controls + the SuggestedApprovalPanel. Without this exclusion, a freshly parked review
-  // (syncStatus "pending" until the ASYNC cloud sync drains) leaked in via the second clause.
-  const reviews = allReviews.filter(
-    (r) => r.status !== "suggested" && (r.status === "open" || r.syncStatus !== "synced"),
-  );
+  // Owner rule (2026-07-22, supersedes the resolved-but-unsynced carve-out of 2026-07-14): the
+  // queue shows ONLY items still awaiting a human decision. A resolved item vanishes immediately -
+  // the device already has everything and the cloud backup retries invisibly in the background
+  // (pendingSyncQueue + the global sync indicator cover a stuck backup; a shop owner never needs
+  // to see sync state here). "suggested" reviews also never belong here - they live on the feed
+  // row's inline controls + the SuggestedApprovalPanel.
+  const reviews = allReviews.filter((r) => r.status === "open");
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -300,11 +281,8 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             </div>
           </div>
         )}
-        {resolved ? (
-          <span className="text-sm text-zinc-600" data-testid="resolved-label">
-            {resolvedActionLabel(review)}
-          </span>
-        ) : mode === "create" ? (
+        {resolved ? null : mode === "create" ? ( // resolved rows are filtered out above; branch kept as defense in depth
+
           <div className="flex w-64 flex-col gap-1.5" data-testid="create-form">
             <input
               aria-label="product name"

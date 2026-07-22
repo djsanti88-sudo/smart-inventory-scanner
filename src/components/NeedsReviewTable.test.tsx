@@ -85,41 +85,15 @@ describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
     expect(screen.queryByTestId("review-row-2000000000002")).toBeNull(); // resolved+synced -> hidden
   });
 
-  it("keeps a resolved item that is NOT yet synced (nothing looks lost before it saves)", () => {
+  it("hides a resolved item even when its cloud backup has not synced yet (owner rule 2026-07-22: resolved = gone; sync retries invisibly in the background)", () => {
     useScanStore.setState({
       needsReviewQueue: [
-        review({ id: "pend1", cleanCode: "3000000000003", status: "resolved", syncStatus: "pending" }),
+        review({ id: "pend1", cleanCode: "3000000000003", status: "resolved", syncStatus: "pending", resolutionAction: "create_new" }),
       ],
     });
     render(<NeedsReviewTable />);
-    expect(screen.queryByTestId("review-row-3000000000003")).not.toBeNull(); // resolved but pending sync -> still shown
-  });
-});
-
-describe("NeedsReviewTable - resolved rows show human copy, never the raw enum", () => {
-  it("a resolved create_new row says the product was created, not 'create_new'", () => {
-    useScanStore.setState({
-      needsReviewQueue: [
-        review({ id: "done-cn", cleanCode: "4000000000004", status: "resolved", syncStatus: "pending", resolutionAction: "create_new" }),
-      ],
-    });
-    render(<NeedsReviewTable />);
-    expect(screen.queryByText("create_new")).toBeNull();
-    expect(screen.getByTestId("resolved-label").textContent).toMatch(/new product created/i);
-  });
-
-  it("link_existing and ignore also render human copy", () => {
-    useScanStore.setState({
-      needsReviewQueue: [
-        review({ id: "done-le", cleanCode: "5000000000005", status: "resolved", syncStatus: "pending", resolutionAction: "link_existing" }),
-        review({ id: "done-ig", cleanCode: "6000000000006", status: "resolved", syncStatus: "pending", resolutionAction: "ignore" }),
-      ],
-    });
-    render(<NeedsReviewTable />);
-    expect(screen.queryByText("link_existing")).toBeNull();
-    const labels = screen.getAllByTestId("resolved-label").map((el) => el.textContent ?? "");
-    expect(labels.some((t) => /linked to existing product/i.test(t))).toBe(true);
-    expect(labels.some((t) => /ignored/i.test(t))).toBe(true);
+    expect(screen.queryByTestId("review-row-3000000000003")).toBeNull(); // resolved -> gone, regardless of sync
+    expect(screen.queryByText("create_new")).toBeNull(); // raw enum never reaches the UI
   });
 });
 
