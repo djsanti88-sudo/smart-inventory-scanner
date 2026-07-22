@@ -65,6 +65,11 @@ export function buildPersistedScanState(
 ): Record<string, unknown> {
   const base = {
     businessId: s.businessId,
+    // REFRESH GUARD (2026-07-22): setBusinessContext's same-tenant check compares BOTH businessId and
+    // userId against the rehydrated store. The persist key is already per-uid (scanPersistNamespace),
+    // so storing the uid leaks nothing new - but without it a fresh page load rehydrates userId as
+    // null, the guard misses, and every refresh wipes scanFeed/finalCounts/needsReviewQueue.
+    userId: s.userId,
     sessionId: s.sessionId,
     currentSession: s.currentSession,
     location: s.location,
