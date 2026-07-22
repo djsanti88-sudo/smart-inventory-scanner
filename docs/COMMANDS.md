@@ -110,6 +110,7 @@ First time on a machine: `npx playwright install chromium`.
 | `npm run test:firebase:cloud-smoke` | **LIVE** cloud Firebase writes (self-cleaning throwaway business). |
 | `node scripts/create-god-account.mjs` / `repair-god-alias.mjs --repair` | **LIVE** real-account provisioning / repair (repair is read-only without `--repair`). |
 | `node scripts/gpt-ladder-live-proof.mts`, `scripts/fetchv2-*.mts` | **PAID** provider/discovery probes (credit-capped). |
+| `npm run deploy:rules:prod` | **LIVE** deploys `firestore.rules` + `firestore.indexes.json` to the REAL production project (`smart-inventory-scanner-app`, alias `prod` in `.firebaserc`). Not billed, but production-affecting: a wrong rules push changes who can read/write real customer data. Owner approval required before every run. |
 
 Cost truths that always apply: a client-aborted call is still billed server-side; unmeterable fees
 reserve documented worst case; reconcile against the provider console before quoting spend.

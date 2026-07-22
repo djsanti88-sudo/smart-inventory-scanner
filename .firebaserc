@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "demo-smart-inventory"
+    "default": "demo-smart-inventory",
+    "prod": "smart-inventory-scanner-app"
   }
 }
