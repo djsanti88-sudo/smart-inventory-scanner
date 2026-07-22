@@ -130,6 +130,29 @@ IRREVERSIBLE, never in a smoke test.
 7. **Never in a smoke pass on a real account**: `delete-account-confirm` (irreversible); `sign-out` (ends the
    reused session — last, if at all).
 
+## Verified behavior semantics (ground truth - do NOT mis-assert these)
+- **Feed vs count:** `scan-feed-body` gets ONE row per scan EVENT (no dedup). `final-count-body` DEDUPES by
+  product: same code scanned N times => N feed rows but ONE count row with `qty-<id>` = N. N distinct codes =>
+  N feed rows AND N count rows.
+- **Unidentified/vendor scans STILL COUNT:** every scan (known/unknown/vendor) gets a feed row AND a
+  `final-count-body` row with its own `qty-<id>` cell (an "Unidentified item" placeholder). So
+  `sum of all [data-testid^="qty-"]` INCLUDES unidentified/vendor items. There is NO session-total testid.
+- **TRUE "Scan N = count N":** `delta(feed rows) === delta(sum of qty-* cells) === codes scanned`. Assert
+  DELTAS from a baseline, never hardcoded absolutes (prior lessons already added scans). Rescanning the same
+  code does NOT add a count row - it increments that row's qty (dedup, L5).
+- **Vendor codes (X00/FNSKU/B0 ASIN):** the deterministic resolver NEVER matches them as a public UPC/GTIN,
+  but AI decode MAY confidently identify + auto-count one (shop-local approved alias, review auto-resolved)
+  when it app-verifies the exact code in a trusted source. So a vendor code is NOT required to sit in Needs
+  Review - it may be identified/counted OR reviewed; both are correct. The only vendor BUG is a vendor code
+  shown as a VERIFIED public-UPC product with a wrong identity.
+- **Universal import panel** is unconditionally on `/products` (`universal-import-panel`; heading "Universal
+  inventory import"; button "Choose file") - no gating/delay. Detect with Playwright auto-waiting
+  `expect(getByTestId('universal-import-panel')).toBeVisible()` after the route settles; do NOT assert absence
+  from an immediate/early check. (`account-email` on /settings is likewise present for all roles.)
+
 ## Learned log (append newly-observed reality here, dated)
 - 2026-07-22: prod is `live_auth`; signup + business-create + first scan work end-to-end. `/api/products` with a
   foreign businessId → 404; `/api/reconcile/match` with a foreign businessId → 200 (verify if tenant-scoped).
+- 2026-07-22: corrected false-positive lesson assertions (see Verified behavior semantics above): the earlier
+  "scan-n-count-n mismatch", "vendor must be in review", and "import-panel absent" findings were TEST bugs, not
+  app bugs. Console/page errors observed on /products and /reconcile remain worth verifying.

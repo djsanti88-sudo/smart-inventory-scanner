@@ -149,6 +149,96 @@ function updateCoverageForPlan(coverage, plan, runId) {
 }
 
 /**
+ * Robustly resets the reused page to a clean, usable /scan state at the
+ * start of every loop round. The reused page can drift off /scan between
+ * rounds (a lesson leaves it on a different route, a client-side redirect
+ * fires, etc.); without this reset, later rounds intermittently fail with
+ * "scan input not visible" / "could not navigate to /scan" because the
+ * round's lessons assume they're starting from /scan and they aren't.
+ *
+ * Returns { ready: true } once '#scanner-input' is confirmed visible, or
+ * { ready: false, reason } if /scan genuinely cannot be reached (e.g. the
+ * session was lost and the app bounced to /login) - the caller must stop
+ * the loop gracefully in that case rather than spinning through doomed
+ * rounds.
+ */
+async function ensureScanReady(page, target) {
+  const scanUrl = `${target}/scan`;
+  const gotoScan = async () => {
+    try {
+      await page.goto(scanUrl, { waitUntil: 'domcontentloaded' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  let navigated = await gotoScan();
+  if (!navigated) navigated = await gotoScan(); // retry once
+  if (!navigated) {
+    return { ready: false, reason: `could not navigate to ${scanUrl} after 2 attempts` };
+  }
+
+  const scannerVisible = async (timeout) =>
+    page.locator('#scanner-input').isVisible({ timeout }).catch(() => false);
+
+  if (await scannerVisible(15000)) {
+    return { ready: true };
+  }
+
+  // Not on a usable /scan yet. Figure out why: session lost (bounced to
+  // /login), or a business-context gate/banner needs re-selecting.
+  let currentUrl = '';
+  try {
+    currentUrl = page.url();
+  } catch {
+    currentUrl = '';
+  }
+  if (/\/login(\?|$)/.test(currentUrl)) {
+    return { ready: false, reason: `session lost: bounced to ${currentUrl} instead of /scan` };
+  }
+
+  const bannerVisible = await page
+    .getByTestId('business-context-banner')
+    .isVisible({ timeout: 2000 })
+    .catch(() => false);
+  const goToBusinessLink = page.getByTestId('go-to-business');
+  const goToBusinessVisible = await goToBusinessLink.isVisible({ timeout: 2000 }).catch(() => false);
+
+  if (bannerVisible || goToBusinessVisible) {
+    try {
+      if (goToBusinessVisible) {
+        await goToBusinessLink.click();
+      } else {
+        await page.goto(`${target}/business`, { waitUntil: 'domcontentloaded' });
+      }
+      const selectButton = page.locator('[data-testid^="select-business-"]').first();
+      await selectButton.waitFor({ state: 'visible', timeout: 15000 });
+      await selectButton.click();
+      await page.waitForURL('**/scan', { timeout: 30000 });
+      if (await scannerVisible(15000)) {
+        return { ready: true };
+      }
+      return { ready: false, reason: 're-selected business but #scanner-input never became visible on /scan' };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { ready: false, reason: `business re-selection failed: ${reason}` };
+    }
+  }
+
+  try {
+    currentUrl = page.url();
+  } catch {
+    currentUrl = '';
+  }
+  if (/\/login(\?|$)/.test(currentUrl)) {
+    return { ready: false, reason: `session lost: bounced to ${currentUrl} instead of /scan` };
+  }
+
+  return { ready: false, reason: `#scanner-input not visible on ${scanUrl} and no known gate (business banner/go-to-business) or login redirect detected (currentUrl=${currentUrl || 'unknown'})` };
+}
+
+/**
  * Runs one persona's curriculum plan against an already-signed-in page.
  * Extracted so both the default 3-browser runLive() and the one-window /
  * loop path (runOneWindow()) share the exact same lesson-execution
@@ -250,6 +340,26 @@ async function runLessonsForPersona({
     }
 
     const findings = [...collected, ...(Array.isArray(result.findings) ? result.findings : [])];
+
+    if (findings.length > 0) {
+      // Capture the page as it looked right after the lesson finished, so the
+      // PDF report can show each bug's real state, not just its text. A
+      // screenshot failure here must never break the run - it's proof, not
+      // a requirement.
+      try {
+        const shotPath = path.join(runDir, `${lesson.id}-finding.png`);
+        await h.screenshot(page, shotPath);
+        for (const finding of findings) {
+          if (finding && typeof finding === 'object') {
+            finding.evidence = finding.evidence && typeof finding.evidence === 'object' ? finding.evidence : {};
+            if (!finding.evidence.screenshot) finding.evidence.screenshot = shotPath;
+          }
+        }
+      } catch {
+        // best-effort; findings still get reported without a screenshot.
+      }
+    }
+
     const passed = Boolean(result.pass);
     if (passed) passedLessonIds.add(lesson.id);
     lessons.push({
@@ -468,6 +578,60 @@ async function runOneWindow({ target, runId, knowledge, manifest, personas, repo
         await createManifest(roundRunId, { target, personas: [persona.key] });
       }
       const runDir = path.join(PATHS.artifactsDir, roundRunId);
+
+      // Round 1 lands on /scan via signUpPersona already, so skip the reset there
+      // and only guard against between-rounds drift from round 2 onward.
+      if (roundNumber > 1) {
+        const resetResult = await ensureScanReady(page, target);
+        if (!resetResult.ready) {
+          console.log(`Round ${roundNumber}: could not reach a usable /scan (${resetResult.reason}). Stopping loop gracefully.`);
+          const envFinding = triage.buildFinding({
+            title: 'Loop round could not reach a usable /scan state',
+            category: 'harness',
+            severity: 'high',
+            lesson: 'round-reset',
+            persona: persona.key,
+            repro: `Loop round ${roundNumber}: navigate the reused page to ${target}/scan and confirm #scanner-input is visible (re-selecting the business on a context-gate banner if shown).`,
+            expected: '#scanner-input becomes visible on /scan, either directly or after re-selecting the reused business.',
+            actual: resetResult.reason,
+            triageClass: 'environment_problem',
+          });
+          const abortedPersonaResults = [
+            {
+              persona: persona.key,
+              lessons: [
+                {
+                  id: 'round-reset',
+                  title: 'Between-rounds /scan reset',
+                  level: 0,
+                  pass: false,
+                  notes: 'loop stopped: could not reach a usable /scan state',
+                  findings: [envFinding],
+                  learned: null,
+                },
+              ],
+            },
+          ];
+          const abortedModel = await buildRunModel({
+            runId: roundRunId,
+            startedAt,
+            target,
+            browserVersion,
+            deploymentMode: mode,
+            runNumber,
+            personaResults: abortedPersonaResults,
+            limits,
+            manifest,
+            k,
+            plan,
+          });
+          await persistRunArtifacts({ knowledge, report, runId: roundRunId, model: abortedModel, plan, k });
+          await setStatus(roundRunId, 'aborted');
+          lastRoundRunId = roundRunId;
+          finalStatus = 'aborted';
+          break;
+        }
+      }
 
       const personaResult = await runLessonsForPersona({
         page,

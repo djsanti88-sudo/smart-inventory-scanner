@@ -1,5 +1,7 @@
 // e2e/teach/lessons/12-smoke-controls.mjs
 //
+import { expect } from '@playwright/test';
+//
 // Level 12 (exploration): a broad "does every visible control work" smoke
 // walk across the whole app, for whatever role the current persona actually
 // has. This lesson does NOT assert product-identity correctness or ledger
@@ -90,7 +92,15 @@ export default {
     // Step 1: Nav sweep
     // =======================================================================
     try {
-      await h.gotoApp(page, ctx.baseURL, '/scan');
+      try {
+        await h.gotoApp(page, ctx.baseURL, '/scan');
+      } catch {
+        // A single slow/flaky load must not be reported as a broken nav -
+        // retry once before treating this as a real failure.
+        await page.waitForTimeout(500);
+        await h.gotoApp(page, ctx.baseURL, '/scan');
+      }
+      await expect(page.getByTestId('scanner-input')).toBeVisible({ timeout: 15000 });
       currentRoute = '/scan';
       routesVisited.push('/scan');
     } catch (err) {
@@ -510,8 +520,19 @@ export default {
     try {
       await h.gotoApp(page, ctx.baseURL, '/products');
       currentRoute = '/products';
+      await page.waitForURL('**/products', { timeout: 8000 }).catch(() => {});
 
-      const panelVisible = await page.getByTestId('universal-import-panel').isVisible({ timeout: 5000 }).catch(() => false);
+      // universal-import-panel is present on /products unconditionally (no
+      // gating, no lazy/Suspense delay). Use Playwright's auto-waiting
+      // toBeVisible with a generous timeout so a slow render is never
+      // mistaken for absence - only raise a finding if it is STILL not
+      // visible after the wait.
+      let panelVisible = true;
+      try {
+        await expect(page.getByTestId('universal-import-panel')).toBeVisible({ timeout: 15000 });
+      } catch {
+        panelVisible = false;
+      }
       if (!panelVisible) {
         findings.push(triage.buildFinding({
           title: 'universal-import-panel is not present on /products',
@@ -686,8 +707,17 @@ export default {
     try {
       await h.gotoApp(page, ctx.baseURL, '/settings');
       currentRoute = '/settings';
+      await page.waitForURL('**/settings', { timeout: 8000 }).catch(() => {});
 
-      const accountEmailVisible = await page.getByTestId('account-email').isVisible({ timeout: 5000 }).catch(() => false);
+      // account-email is present on /settings for every signed-in role (not
+      // gated). Use auto-waiting toBeVisible with a generous timeout - only
+      // raise a finding if it is STILL not visible after the wait.
+      let accountEmailVisible = true;
+      try {
+        await expect(page.getByTestId('account-email')).toBeVisible({ timeout: 15000 });
+      } catch {
+        accountEmailVisible = false;
+      }
       if (!accountEmailVisible) {
         findings.push(triage.buildFinding({
           title: 'account-email is not present on /settings',
