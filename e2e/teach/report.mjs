@@ -198,3 +198,63 @@ export async function writeReport(runId, model) {
   await atomicWriteFile(jsonPath, `${buildReportJson(model)}\n`);
   return { mdPath, jsonPath };
 }
+
+// ---------------------------------------------------------------------------
+// LOOP report - the cumulative report for --loop mode, updated after EVERY
+// round at testing/artifacts/<loopId>/LOOP_REPORT.md(+.json). Distinct from
+// the per-round report.md/.json above (which each round still writes
+// unchanged): this one tracks growth ACROSS rounds - cumulative deduped
+// findings, coverage growth, the aggregate whole-loop spend line, the reused
+// account/business ids, and a "still learning?" signal for the latest round.
+function loopFindingLine(f) {
+  return `- [${f?.severity ?? '?'}] ${f?.title ?? '(untitled)'} - lesson: ${f?.lesson ?? '?'}, ` +
+    `triage: ${f?.triageClass ?? '(unclassified)'}, locked: ${f?.locked ? 'YES' : 'no'}`;
+}
+
+export function buildLoopReportMarkdown(model) {
+  const findings = Array.isArray(model.cumulativeFindings) ? model.cumulativeFindings : [];
+  const sortedFindings = findings.slice().sort((a, b) => severityRank(a?.severity) - severityRank(b?.severity));
+  const coveredLessons = Array.isArray(model.coveredLessons) ? model.coveredLessons : [];
+  const reused = model.reused ?? {};
+
+  return [
+    `# Teach Bot LOOP report - ${model.loopId ?? '(unknown loop)'}`,
+    '',
+    '## Loop status',
+    '',
+    `- Target: ${model.target ?? '(unknown)'}`,
+    `- Rounds completed: ${model.roundsCompleted ?? 0}`,
+    `- Current run number: ${model.currentRunNumber ?? '?'}`,
+    `- Reused persona: ${reused.personaKey ?? '(none)'} (${reused.email ?? '(no account yet)'})`,
+    `- Reused business id: ${reused.businessId ?? '(none yet)'}`,
+    `- Last round id: ${model.lastRoundId ?? '(none)'}`,
+    `- Still learning (this round added something new): ${model.stillLearning ? 'YES' : 'no'}`,
+    '',
+    '## Cumulative findings (deduped by lesson+title, severity-sorted)',
+    '',
+    sortedFindings.length > 0 ? sortedFindings.map(loopFindingLine).join('\n') : '(no findings yet)',
+    '',
+    '## Coverage growth (lessons newly covered so far across the loop)',
+    '',
+    coveredLessons.length > 0 ? fmtList(coveredLessons) : '(none covered yet)',
+    '',
+    '## Aggregate spend (whole loop, ONE shared budget across all rounds)',
+    '',
+    model.spendLine ?? '(no spend data)',
+    '',
+    'True spend = provider console.',
+  ].join('\n');
+}
+
+export function buildLoopReportJson(model) {
+  return JSON.stringify(model, null, 2);
+}
+
+export async function writeLoopReport(loopId, model) {
+  const loopDir = path.join(PATHS.artifactsDir, loopId);
+  const mdPath = path.join(loopDir, 'LOOP_REPORT.md');
+  const jsonPath = path.join(loopDir, 'LOOP_REPORT.json');
+  await atomicWriteFile(mdPath, buildLoopReportMarkdown(model));
+  await atomicWriteFile(jsonPath, `${buildLoopReportJson(model)}\n`);
+  return { mdPath, jsonPath };
+}

@@ -35,8 +35,17 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 const DEFAULT_TARGET = 'https://inventory-lovat-six.vercel.app';
 
+const DEFAULT_LOOP_PERSONA = 'tire';
+
 function parseArgs(argv) {
-  const args = { selfCheck: false, target: null, runId: null };
+  const args = {
+    selfCheck: false,
+    target: null,
+    runId: null,
+    oneWindow: false,
+    loop: false,
+    persona: null,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--self-check') {
@@ -47,8 +56,19 @@ function parseArgs(argv) {
     } else if (arg === '--run-id') {
       args.runId = argv[i + 1] ?? null;
       i += 1;
+    } else if (arg === '--one-window') {
+      args.oneWindow = true;
+    } else if (arg === '--loop') {
+      args.loop = true;
+    } else if (arg === '--persona') {
+      args.persona = argv[i + 1] ?? null;
+      i += 1;
     }
   }
+  // --loop always drives a single headed browser/persona (session persists across
+  // rounds); there is no 3-up loop mode in this harness, so --loop implies
+  // --one-window regardless of whether --one-window was also passed explicitly.
+  if (args.loop) args.oneWindow = true;
   return args;
 }
 
@@ -124,6 +144,421 @@ function updateCoverageForPlan(coverage, plan, runId) {
   return next;
 }
 
+/**
+ * Runs one persona's curriculum plan against an already-signed-in page.
+ * Extracted so both the default 3-browser runLive() and the one-window /
+ * loop path (runOneWindow()) share the exact same lesson-execution
+ * semantics (budget gates, prereq gates, crash handling) instead of two
+ * copies drifting apart. `stopSignal`, when provided, is an object whose
+ * `.requested` flag - set by a SIGINT handler - stops the round from
+ * starting any further lesson (the lesson already in flight always finishes
+ * first, since this is only checked between lessons, never mid-lesson).
+ */
+async function runLessonsForPersona({
+  page,
+  persona,
+  runId,
+  target,
+  mode,
+  plan,
+  limits,
+  runDir,
+  otherTenantIds = [],
+  stopSignal = null,
+}) {
+  const lessons = [];
+  const passedLessonIds = new Set();
+  for (const lesson of plan) {
+    if (limits.timeExceeded() || limits.requestsExceeded()) {
+      lessons.push({
+        id: lesson.id,
+        title: lesson.title,
+        level: lesson.level,
+        pass: false,
+        notes: `skipped: run budget exceeded before this lesson started (${limits.reason()})`,
+        findings: [],
+        learned: null,
+      });
+      continue;
+    }
+
+    if (stopSignal?.requested) {
+      lessons.push({
+        id: lesson.id,
+        title: lesson.title,
+        level: lesson.level,
+        pass: false,
+        notes: 'skipped: stop requested (SIGINT) - finishing after the previously running lesson',
+        findings: [],
+        learned: null,
+      });
+      continue;
+    }
+
+    const missingPrereq = Array.isArray(lesson.prereqs)
+      ? lesson.prereqs.find((id) => !passedLessonIds.has(id))
+      : null;
+    if (missingPrereq) {
+      lessons.push({
+        id: lesson.id,
+        title: lesson.title,
+        level: lesson.level,
+        pass: true,
+        notes: `skipped: prereq ${missingPrereq} not satisfied`,
+        findings: [],
+        learned: null,
+      });
+      continue;
+    }
+
+    const collected = [];
+    let result;
+    try {
+      result = await lesson.run({
+        page,
+        persona,
+        runId,
+        baseURL: target,
+        deploymentMode: mode,
+        limits,
+        h,
+        ladder,
+        sheets,
+        triage,
+        artifactsDir: runDir,
+        recordFinding: (f) => collected.push(f),
+        otherTenantIds,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const crashFinding = triage.buildFinding({
+        title: `Lesson "${lesson.id}" threw an uncaught error`,
+        category: 'crash',
+        severity: 'high',
+        lesson: lesson.id,
+        persona: persona.key,
+        repro: `Run lesson "${lesson.id}" for persona "${persona.key}" against ${target}`,
+        expected: 'The lesson completes and returns a result without throwing.',
+        actual: reason,
+        triageClass: 'probable_app_bug',
+      });
+      result = { pass: false, findings: [crashFinding], learned: null, notes: `threw: ${reason}` };
+    }
+
+    const findings = [...collected, ...(Array.isArray(result.findings) ? result.findings : [])];
+    const passed = Boolean(result.pass);
+    if (passed) passedLessonIds.add(lesson.id);
+    lessons.push({
+      id: lesson.id,
+      title: lesson.title,
+      level: lesson.level,
+      pass: passed,
+      notes: result.notes ?? null,
+      findings,
+      learned: result.learned ?? null,
+    });
+  }
+  return { persona: persona.key, lessons };
+}
+
+/** Builds the same run-model shape runLive() writes into report.md/.json, for one round. */
+async function buildRunModel({
+  runId,
+  startedAt,
+  target,
+  browserVersion,
+  deploymentMode,
+  runNumber,
+  personaResults,
+  limits,
+  manifest,
+  k,
+  plan,
+}) {
+  const manifestNow = await manifest.readManifest(runId);
+  const finishedAt = new Date().toISOString();
+  const planLevels = new Set(plan.map((l) => l.level));
+  const coverageDelta = computeCoverageDelta(k.coverage, planLevels);
+  const findings = personaResults.flatMap((pr) => pr.lessons.flatMap((l) => l.findings ?? []));
+  const ladderRows = personaResults.flatMap((pr) =>
+    pr.lessons.flatMap((l) => (Array.isArray(l.learned?.ladderRows) ? l.learned.ladderRows : []))
+  );
+  return {
+    runId,
+    startedAt,
+    finishedAt,
+    deployment: {
+      url: target,
+      gitSha: gitShaShort(),
+      teachBotVersion: await packageVersion(),
+      browserVersion,
+      timestamp: finishedAt,
+    },
+    runNumber,
+    deploymentMode,
+    personaResults,
+    findings,
+    ladderRows,
+    limits: {
+      snapshot: limits.snapshot(),
+      spendLine: limits.spendLine(),
+      estimate: limits.estimateSpend(),
+    },
+    createdData: manifestNow.created ?? { accounts: [], businesses: [], docs: [] },
+    coverageDelta,
+  };
+}
+
+/**
+ * The same end-of-round atomic knowledge write runLive() does (run history,
+ * coverage, bugs, discoveries, candidate promotion, report). Reused by the
+ * one-window / loop path so every round's write is byte-for-byte the same
+ * shape as a normal run's.
+ */
+async function persistRunArtifacts({ knowledge, report, runId, model, plan, k }) {
+  const { writeCoverage, appendRunHistory, appendDiscoveries, appendBugs, atomicWriteFile } = knowledge;
+  const { writeReport } = report;
+  const { finishedAt, findings } = model;
+
+  await appendRunHistory({
+    runId,
+    at: finishedAt,
+    runNumber: model.runNumber,
+    deploymentMode: model.deploymentMode,
+    results: model.personaResults.flatMap((pr) => pr.lessons.map((l) => ({ id: l.id, pass: l.pass }))),
+    spend: model.limits.estimate,
+    findingsCount: findings.length,
+  });
+
+  const nextCoverage = updateCoverageForPlan(k.coverage, plan, runId);
+  await writeCoverage(nextCoverage);
+
+  const confirmedBugs = findings.filter((f) => f?.triageClass === 'confirmed_app_bug');
+  if (confirmedBugs.length > 0) {
+    const md = confirmedBugs
+      .map(
+        (f) =>
+          `## ${f.title}\n- run: ${runId}\n- severity: ${f.severity}\n- persona: ${f.persona}\n- lesson: ${f.lesson}\n- expected: ${f.expected}\n- actual: ${f.actual}`
+      )
+      .join('\n\n');
+    await appendBugs(`\n<!-- run ${runId} -->\n${md}`);
+  }
+
+  const learnedNotes = model.personaResults
+    .flatMap((pr) => pr.lessons.map((l) => ({ persona: pr.persona, id: l.id, learned: l.learned })))
+    .filter((entry) => entry.learned && Object.keys(entry.learned).length > 0);
+  if (learnedNotes.length > 0) {
+    const md = learnedNotes
+      .map((e) => `- [${runId}] ${e.persona}/${e.id}: ${JSON.stringify(e.learned)}`)
+      .join('\n');
+    await appendDiscoveries(`\n<!-- run ${runId} -->\n${md}`);
+  }
+
+  const stableCandidates = plan.filter((lesson) =>
+    model.personaResults.every((pr) => pr.lessons.find((l) => l.id === lesson.id)?.pass === true)
+  );
+  const candidatesMd = [
+    `# Suggested permanent-test candidates - run ${runId}`,
+    '',
+    'These lessons passed for every persona this run. They are candidates for',
+    'promotion to a permanent Playwright test under testing/permanent - NOT',
+    'auto-promoted. Owner review required before promotion.',
+    '',
+    stableCandidates.length > 0
+      ? stableCandidates.map((l) => `- [level ${l.level}] ${l.id} (${l.title})`).join('\n')
+      : '(no candidates this run)',
+  ].join('\n');
+  await atomicWriteFile(
+    path.join(REPO_ROOT, 'testing', 'tests', 'candidates', `${runId}-suggested.md`),
+    `${candidatesMd}\n`
+  );
+
+  return writeReport(runId, model);
+}
+
+/**
+ * One-window mode: a single headed browser, single persona, instead of the
+ * default 3 tiled browsers. With `loop: true`, rounds run continuously
+ * (Ctrl-C / SIGINT to stop) reusing the SAME signed-in browser context/page
+ * across every round - the persona account is created once (round 1) and
+ * reused thereafter, never re-created. Each round recomputes runNumber from
+ * the (growing) RUN_HISTORY so the curriculum deepens round over round, then
+ * does the same atomic end-of-round knowledge write a normal run does. A
+ * single RunLimits instance (created by the caller, started once here) caps
+ * PAID decode spend across the WHOLE loop, not per round - an unattended
+ * loop must never run unbounded paid spend. Free/UI lessons are unaffected:
+ * `limits.canPaidLookup()` (checked inside individual lessons) is the only
+ * gate on paid rungs; it never blocks free lessons.
+ */
+async function runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop }) {
+  const { readKnowledge, PATHS } = knowledge;
+  const { createManifest, setStatus } = manifest;
+  const { PERSONAS, probeDeployment, signUpPersona, newPersonaContext } = personas;
+  const { writeLoopReport } = report;
+
+  const persona = PERSONAS.find((p) => p.key === personaKey);
+  if (!persona) {
+    throw new Error(
+      `--persona "${personaKey}" is not a known persona (available: ${PERSONAS.map((p) => p.key).join(', ')})`
+    );
+  }
+
+  const loopId = `loop-${runId}`;
+  limits.start();
+
+  const stopSignal = { requested: false };
+  const onSigint = () => {
+    if (stopSignal.requested) return;
+    stopSignal.requested = true;
+    console.log('\nSIGINT received: finishing the current lesson, then stopping gracefully...');
+  };
+  process.on('SIGINT', onSigint);
+
+  const cumulativeFindingsByKey = new Map();
+  const coveredLessons = new Set();
+  let roundsCompleted = 0;
+  let reused = { email: null, businessId: null, personaKey: persona.key };
+  let finalStatus = 'aborted';
+  let lastRoundRunId = null;
+  let browser = null;
+  let context = null;
+
+  try {
+    browser = await chromium.launch({ headless: false, args: ['--window-size=900,900'] });
+    context = await newPersonaContext(browser, persona);
+    const page = await context.newPage();
+
+    const probe = await probeDeployment(page, target);
+    const mode = probe.mode;
+    if (mode === 'live_auth') {
+      const signup = await signUpPersona(page, { persona, runId, baseURL: target });
+      reused = { email: signup.email, businessId: signup.businessId, personaKey: persona.key };
+    }
+
+    let browserVersion = 'chromium';
+    try {
+      browserVersion = browser.version();
+    } catch {
+      browserVersion = 'chromium';
+    }
+
+    for (;;) {
+      const roundNumber = roundsCompleted + 1;
+      const roundRunId = roundNumber === 1 ? runId : generateRunId();
+      lastRoundRunId = roundRunId;
+      const startedAt = new Date().toISOString();
+
+      const k = await readKnowledge();
+      const runNumber = computeRunNumber(k.runHistory);
+      const mastered = masteredFrom(k.runHistory);
+      const allLessons = await loadLessons();
+      const plan = buildPlan(allLessons, runNumber, mastered);
+
+      await createManifest(roundRunId, { target, personas: [persona.key] });
+      const runDir = path.join(PATHS.artifactsDir, roundRunId);
+
+      const personaResult = await runLessonsForPersona({
+        page,
+        persona,
+        runId: roundRunId,
+        target,
+        mode,
+        plan,
+        limits,
+        runDir,
+        otherTenantIds: [],
+        stopSignal,
+      });
+      const personaResults = [personaResult];
+
+      const model = await buildRunModel({
+        runId: roundRunId,
+        startedAt,
+        target,
+        browserVersion,
+        deploymentMode: mode,
+        runNumber,
+        personaResults,
+        limits,
+        manifest,
+        k,
+        plan,
+      });
+
+      const { mdPath: reportPath } = await persistRunArtifacts({ knowledge, report, runId: roundRunId, model, plan, k });
+      await setStatus(roundRunId, 'completed');
+      roundsCompleted = roundNumber;
+      finalStatus = 'completed';
+      console.log(`Round ${roundNumber} done (${roundRunId}). Report: ${reportPath}`);
+      console.log(limits.spendLine());
+
+      const newFindings = [];
+      for (const f of model.findings) {
+        const key = `${f?.lesson ?? '?'}::${f?.title ?? '?'}`;
+        if (!cumulativeFindingsByKey.has(key)) {
+          cumulativeFindingsByKey.set(key, f);
+          newFindings.push(f);
+        }
+      }
+      const newlyCoveredThisRound = [];
+      for (const id of model.coverageDelta.newlyCovered) {
+        if (!coveredLessons.has(id)) {
+          coveredLessons.add(id);
+          newlyCoveredThisRound.push(id);
+        }
+      }
+      const stillLearning = newFindings.length > 0 || newlyCoveredThisRound.length > 0;
+
+      const loopModel = {
+        loopId,
+        target,
+        roundsCompleted,
+        currentRunNumber: runNumber,
+        reused,
+        lastRoundId: roundRunId,
+        stillLearning,
+        cumulativeFindings: [...cumulativeFindingsByKey.values()],
+        coveredLessons: [...coveredLessons].sort(),
+        spendLine: limits.spendLine(),
+      };
+      const { mdPath: loopReportPath } = await writeLoopReport(loopId, loopModel);
+      console.log(`LOOP report: ${loopReportPath}`);
+
+      if (!loop || stopSignal.requested) break;
+
+      try {
+        await page.goto(`${target}/scan`, { waitUntil: 'domcontentloaded' });
+      } catch {
+        // best-effort; the next round's lessons still navigate as needed.
+      }
+    }
+  } catch (err) {
+    finalStatus = 'aborted';
+    if (lastRoundRunId) {
+      try {
+        await setStatus(lastRoundRunId, 'aborted');
+      } catch {
+        // best-effort
+      }
+    }
+    throw err;
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+  }
+
+  if (stopSignal.requested) {
+    // A SIGINT was handled gracefully above (reports written, status
+    // completed, browser closed) - exit cleanly rather than relying on
+    // Node's default post-SIGINT behavior, which we overrode by registering
+    // a listener.
+    process.exit(0);
+  }
+
+  return finalStatus;
+}
+
 async function runSelfCheck({ target, runId, knowledge, manifest, curriculumModules }) {
   const { readKnowledge } = knowledge;
   const { createManifest, setStatus } = manifest;
@@ -133,8 +568,9 @@ async function runSelfCheck({ target, runId, knowledge, manifest, curriculumModu
   const mastered = masteredFrom(k.runHistory);
   const allLessons = await loadLessons();
 
-  if (allLessons.length !== 11) {
-    throw new Error(`SELF-CHECK FAILED: expected 11 lessons, found ${allLessons.length}`);
+  const MIN_LESSONS = 11;
+  if (allLessons.length < MIN_LESSONS) {
+    throw new Error(`SELF-CHECK FAILED: expected at least ${MIN_LESSONS} lessons, found ${allLessons.length}`);
   }
 
   const plan = buildPlan(allLessons, runNumber, mastered);
@@ -153,7 +589,7 @@ async function runSelfCheck({ target, runId, knowledge, manifest, curriculumModu
   console.log('=== Teach Bot self-check ===');
   console.log('Deployment stamp:', JSON.stringify(deployment, null, 2));
   console.log(`Run number: ${runNumber}`);
-  console.log(`Total lessons discovered: ${allLessons.length} (expected 11)`);
+  console.log(`Total lessons discovered: ${allLessons.length} (>= ${MIN_LESSONS} expected)`);
   console.log('Ordered plan:');
   for (const lesson of plan) {
     console.log(`  - [level ${lesson.level}] ${lesson.id} (${lesson.title})`);
@@ -506,6 +942,12 @@ export async function main(argv) {
   const personas = await import('./personas.mjs');
   const report = await import('./report.mjs');
   const limits = new RunLimits({});
+
+  if (args.oneWindow) {
+    const personaKey = args.persona ?? DEFAULT_LOOP_PERSONA;
+    await runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop: args.loop });
+    return;
+  }
 
   await runLive({ target, runId, knowledge, manifest, personas, report, limits });
 }
