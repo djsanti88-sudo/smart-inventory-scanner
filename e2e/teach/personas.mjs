@@ -11,6 +11,7 @@
 // Hard rule: passwords are generated in memory only and NEVER passed to
 // manifest.recordCreated, logged, or included in thrown errors.
 
+import { randomInt } from 'node:crypto';
 import { recordCreated } from './manifest.mjs';
 
 export const PERSONAS = [
@@ -68,7 +69,7 @@ const PASSWORD_CHARS =
 export function makePassword() {
   let out = '';
   for (let i = 0; i < 20; i += 1) {
-    out += PASSWORD_CHARS[Math.floor(Math.random() * PASSWORD_CHARS.length)];
+    out += PASSWORD_CHARS[randomInt(0, PASSWORD_CHARS.length)];
   }
   return `Tb${out}!9`;
 }
