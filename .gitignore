@@ -155,3 +155,11 @@ scripts/polish-eval-results.json
 # attachment; owner review happens against the freshly generated file each run).
 docs/pilot/point-s-backfill-worklist.csv
 .ladder-kv.json
+
+# Teach Bot (2026-07-22): live-app learning test harness.
+# Run artifacts (screenshots/traces/video/reports/manifests) are large + may reference
+# per-run synthetic accounts; regenerated every run, never source. Keep the dir via .gitkeep.
+testing/artifacts/*
+!testing/artifacts/.gitkeep
+# Subagent-driven-development progress ledger (git-ignored scratch).
+.superpowers/

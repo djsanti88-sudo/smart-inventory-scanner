@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-jwks-rsa.cjs",
+    "teach": "node e2e/teach/teach.mjs",
+    "teach:cleanup": "node e2e/teach/cleanup.mjs",
+    "teach:regression": "playwright test --config=playwright.teach.config.ts",
+    "teach:test": "node --test \"e2e/teach/**/*.test.mjs\"",
     "dev": "node scripts/dev.mjs",
     "dev:emulator": "node scripts/dev.mjs --emulator",
     "dev:prod": "node scripts/dev.mjs --prod",
@@ -69,6 +73,7 @@
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.1",
+    "@playwright/cli": "^0.1.17",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
