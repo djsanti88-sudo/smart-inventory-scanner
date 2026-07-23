@@ -737,14 +737,20 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     // ahead of the L2 read, so a master-catalog hit is the LAST free rung this pipeline tries before the
     // persisted-cache peek and preserves "first settled rung stops, never pay when an earlier rung
     // already answered"). A "verified" outcome (owner-approved via the catalog-review page,
-    // provenanceTier human_verified) settles here and stops the ladder before any paid rung ever runs. A
-    // "suggestion" outcome (ladder-verified but not yet owner-reviewed) is honestly review-first, exactly
-    // like the learned-tier/retail-corpus peeks above - it also settles this request without a paid call,
-    // it just never auto-verifies. This rung NEVER calls chargeDailySlot (it is FREE, L12: never charge
-    // two paths of one request) and NEVER throws (masterLookup.ts silently misses on missing credentials,
-    // a Firestore error, or a read exceeding its internal timeout bound).
+    // provenanceTier human_verified, OR a prior ladder_verified_strong append - masterLookup.ts's
+    // classifyEntry now trusts that tier too) settles here and stops the ladder before any paid rung
+    // ever runs. This rung NEVER calls chargeDailySlot (it is FREE, L12: never charge two paths of one
+    // request) and NEVER throws (masterLookup.ts silently misses on missing credentials, a Firestore
+    // error, or a read exceeding its internal timeout bound).
+    //
+    // FIX (rung self-poisoning, owner-approved): a "suggestion" outcome must NOT settle/stop the ladder.
+    // Before this fix, ANY non-miss master hit unconditionally returned here - since classifyEntry only
+    // ever returns "suggestion" for a verified-but-not-yet-trusted entry, that entry would replay
+    // forever as a demoted suggestion and the rest of the ladder (L2 cache, paid rungs) would never run
+    // to genuinely re-resolve it. Record the honest peek (settledBy: null mirrors the cap_blocked
+    // non-settling pattern elsewhere in this function) and fall through - only "verified" settles.
     const masterHit = await lookupMasterCatalog(code);
-    if (masterHit.kind !== "miss") {
+    if (masterHit.kind === "verified") {
       appendDecodeOutcome({ settledBy: "master-catalog", status: masterHit.kind, reasons: [], sourceTier: null });
       return {
         kind: "computed",
@@ -752,6 +758,9 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
         cached: false,
         paidComputeCharged: false,
       };
+    }
+    if (masterHit.kind === "suggestion") {
+      appendDecodeOutcome({ settledBy: null, status: "master_catalog_suggestion_fallthrough", reasons: [], sourceTier: null });
     }
   }
 

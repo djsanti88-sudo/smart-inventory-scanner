@@ -61,8 +61,15 @@ describe("lookupMasterCatalog (Sync Truth Task 4 free ladder rung)", () => {
     expect(outcome).toEqual({ kind: "verified", entry });
   });
 
-  it("verified but NOT human_verified (e.g. ladder_verified_strong) -> SUGGESTION, never auto-verified", async () => {
+  it("ladder_verified_strong entry -> settled VERIFIED (fix: rung self-poisoning) - the append gate already required app-verified exact-code evidence at >= 0.8 on a public barcode, so replaying it as verified mirrors the decode-cache replay semantics", async () => {
     const entry = { id: "gtin_00086699997654", normalizedBarcode: GTIN, name: "Michelin Defender", verificationStatus: "verified", provenanceTier: "ladder_verified_strong" };
+    const { db } = makeDb(async () => ({ exists: true, data: () => entry }));
+    const outcome = await lookupMasterCatalog(GTIN, { db });
+    expect(outcome).toEqual({ kind: "verified", entry });
+  });
+
+  it("verified but neither human_verified nor ladder_verified_strong (e.g. an unrecognized/legacy provenanceTier) -> SUGGESTION, never auto-verified", async () => {
+    const entry = { id: "gtin_00086699997654", normalizedBarcode: GTIN, name: "Michelin Defender", verificationStatus: "verified", provenanceTier: "some_other_tier" };
     const { db } = makeDb(async () => ({ exists: true, data: () => entry }));
     const outcome = await lookupMasterCatalog(GTIN, { db });
     expect(outcome).toEqual({ kind: "suggestion", entry });

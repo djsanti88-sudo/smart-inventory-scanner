@@ -68,9 +68,16 @@ export function __resetMasterLookupMemoForTests(): void {
 
 function classifyEntry(entry: DbCatalogEntry): MasterLookupOutcome {
   if (entry.verificationStatus !== "verified") return { kind: "miss" };
-  // Plan rule 2/3: human_verified -> settled verified; verified-but-not-human_verified -> suggestion.
-  // pending/rejected/any other verificationStatus already returned "miss" above.
-  if (entry.provenanceTier === "human_verified") return { kind: "verified", entry };
+  // Fix (owner-approved, rung self-poisoning): human_verified (owner-approved via catalog-review) AND
+  // ladder_verified_strong (masterAppend.ts's write gate already required app-verified exact-code
+  // evidence at >= 0.8 confidence on a public barcode shape before ever writing this tier) both settle
+  // verified. Without this, a code the ladder itself verified yesterday via paid rungs would replay
+  // forever as a demoted 0.85 "suggestion" and the paid rungs would never run again to re-confirm it -
+  // a previously-Verified code downgrading permanently. Any other/unrecognized provenanceTier on a
+  // verified entry (legacy data, future tiers not yet trusted here) stays a review-first suggestion.
+  if (entry.provenanceTier === "human_verified" || entry.provenanceTier === "ladder_verified_strong") {
+    return { kind: "verified", entry };
+  }
   return { kind: "suggestion", entry };
 }
 

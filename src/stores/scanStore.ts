@@ -3098,15 +3098,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // "app_verified" provenance for the badge.
               get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "", "app_verified");
             } else {
-              // OWNER RULE ("if it is resolved, it does not go to review"): the evidence gate already
-              // verified this scan's identity above, so it is genuinely settled even when resolveUnknown
-              // itself no-opped (suggest_link / dedup conflict left the review "open" or "suggested" for a
-              // human link decision). A settled identity must never linger in the Needs Review queue -
-              // stamp it resolved directly, same shape as the other direct-stamp sites (e.g. the
-              // auto-suggest-apply branch below). This ONLY changes review-row status metadata; it never
-              // touches scanFeed or finalCounts (those are independent, keyed by cleanCode).
+              // FIX (rung self-poisoning audit, owner-approved): resolveUnknown's create_new branch
+              // already stamps "resolved" on every ACTUAL resolution. The only ways a review is still
+              // open/suggested here are the two DELIBERATE human-required early-returns: the fuzzy
+              // identity-merge suggest_link path (stamps suggestedLinkProductId + returns, keeping the
+              // review open on purpose) and the multi-match dedup-conflict path (pushes this reviewId onto
+              // lastAliasConflicts + returns, keeping it open on purpose). Force-stamping "resolved" here
+              // used to fire in BOTH of those cases - the only cases where the row is still open - hiding
+              // a row that MUST stay visible behind a fabricated "auto create_new" audit trail even though
+              // nothing was actually created. Only stamp when NEITHER deliberate-hold signal fired for
+              // this exact review.
               const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
-              if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested")) {
+              const heldForSuggestLink = Boolean(stillOpen?.suggestedLinkProductId);
+              const heldForConflict = (get().lastAliasConflicts ?? []).some((c) => c.reviewId === reviewId);
+              if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested") && !heldForSuggestLink && !heldForConflict) {
                 set((st) => ({
                   needsReviewQueue: st.needsReviewQueue.map((r) =>
                     r.id === reviewId
@@ -4080,12 +4085,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
             get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
           } else {
-            // OWNER RULE ("if it is resolved, it does not go to review"): the evidence gate already
-            // verified this scan's identity above, so it is genuinely settled even when resolveUnknown
-            // itself no-opped (suggest_link / dedup conflict). Stamp it resolved directly so it never
-            // lingers in the Needs Review queue - status metadata only, never scanFeed/finalCounts.
+            // FIX (rung self-poisoning audit, owner-approved): resolveUnknown's create_new branch
+            // already stamps "resolved" on every ACTUAL resolution. The only ways a review is still
+            // open/suggested here are the two DELIBERATE human-required early-returns: the fuzzy
+            // identity-merge suggest_link path (stamps suggestedLinkProductId + returns, keeping the
+            // review open on purpose) and the multi-match dedup-conflict path (pushes this reviewId onto
+            // lastAliasConflicts + returns, keeping it open on purpose). Only stamp when NEITHER
+            // deliberate-hold signal fired for this exact review - status metadata only, never
+            // scanFeed/finalCounts.
             const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
-            if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested")) {
+            const heldForSuggestLink = Boolean(stillOpen?.suggestedLinkProductId);
+            const heldForConflict = (get().lastAliasConflicts ?? []).some((c) => c.reviewId === reviewId);
+            if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested") && !heldForSuggestLink && !heldForConflict) {
               set((st) => ({
                 needsReviewQueue: st.needsReviewQueue.map((r) =>
                   r.id === reviewId

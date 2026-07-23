@@ -1170,12 +1170,38 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
       expect(await readDailyUsed(await ladderStorage())).toBe(0);
     });
 
-    it("verified-but-not-human_verified hit settles as a SUGGESTION (never auto-verified), also without reaching a paid rung", async () => {
+    // FIX (rung self-poisoning, owner-approved 2026-07-22): a "suggestion"-class master hit must NOT
+    // settle/stop the ladder anymore - classifyEntry only returns "suggestion" for a verified entry
+    // whose provenanceTier this pipeline does not (yet) trust as verified, so it must fall through and
+    // let a later rung genuinely try to resolve the code, exactly like every other honest-miss rung.
+    it("a 'suggestion'-class master hit does NOT settle the ladder - it falls through and a later free rung runs and can settle the request", async () => {
       process.env.AI_LOOKUP_DAILY_LIMIT = "100";
       vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
       vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
       vi.mocked(lookupMasterCatalog).mockResolvedValueOnce({
         kind: "suggestion",
+        entry: { id: "gtin_00086699997654", normalizedBarcode: VALID_GTIN, name: "Some Unreviewed Entry", brand: "Acme", category: "tire", verificationStatus: "verified", provenanceTier: "corpus_verified" },
+      });
+      stubFreeRungFetch({ upcHit: true });
+
+      const outcome = await runDecodePipeline(makeReq(VALID_GTIN));
+
+      expect(vi.mocked(lookupMasterCatalog)).toHaveBeenCalled();
+      expect(outcome.kind).toBe("computed");
+      if (outcome.kind !== "computed") throw new Error("unreachable");
+      // The ladder did NOT settle on the master-catalog suggestion - it fell through and a later free
+      // rung (UPCitemdb, stubbed to hit) actually resolved the request instead.
+      expect(outcome.payload.providerNames).not.toContain("master-catalog");
+      expect(outcome.payload.providerNames).toContain("upcitemdb");
+      expect(await readDailyUsed(await ladderStorage())).toBe(0);
+    });
+
+    it("a ladder_verified_strong hit settles as VERIFIED (classifyEntry now trusts this tier) and stops the ladder before any paid rung runs", async () => {
+      process.env.AI_LOOKUP_DAILY_LIMIT = "100";
+      vi.mocked(resolveExactBarcode).mockResolvedValueOnce(null);
+      vi.mocked(getLearnedProduct).mockResolvedValueOnce(null);
+      vi.mocked(lookupMasterCatalog).mockResolvedValueOnce({
+        kind: "verified",
         entry: { id: "gtin_00086699997654", normalizedBarcode: MASTER_CODE, name: "Michelin Defender LTX M/S", brand: "Michelin", category: "tire", verificationStatus: "verified", provenanceTier: "ladder_verified_strong" },
       });
 
@@ -1183,9 +1209,8 @@ describe("runDecodePipeline (extracted decode pipeline; no live AI)", () => {
 
       expect(outcome.kind).toBe("computed");
       if (outcome.kind !== "computed") throw new Error("unreachable");
-      expect(outcome.payload.decision.status).toBe("suggested");
-      expect(outcome.payload.decision.status).not.toBe("verified");
-      expect(outcome.payload.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
+      expect(outcome.payload.decision.status).toBe("verified");
+      expect(outcome.payload.decision.exactCodeEvidenceVerifiedByApp).toBe(true);
       expect(outcome.payload.providerNames).toContain("master-catalog");
       expect(hitAnAiProvider()).toBe(false);
       expect(await readDailyUsed(await ladderStorage())).toBe(0);
