@@ -60,19 +60,37 @@ describe("aiSpendGuard", () => {
       expect((await checkRateLimit("b", { limit: 1, windowMs: 1000, now: 0 })).allowed).toBe(true);
     });
 
-    it("treats an empty AI_LOOKUP_RATE_LIMIT env as the default (30), not 0", async () => {
+    it("treats an empty AI_LOOKUP_RATE_LIMIT env as the default (600), not 0", async () => {
       const prev = process.env.AI_LOOKUP_RATE_LIMIT;
       process.env.AI_LOOKUP_RATE_LIMIT = ""; // present-but-blank, the env-pull failure mode
       try {
         const ip = "9.9.9.9";
         const now = 2_000_000;
-        // With the bug (blank -> Number("") = 0) the 2nd call is blocked; with the default 30 all pass.
-        for (let i = 0; i < 5; i++) {
+        // With the bug (blank -> Number("") = 0) the 2nd call is blocked; with the default 600 all
+        // 600 pass and the 601st is blocked (proves the default is exactly 600, not merely nonzero).
+        for (let i = 0; i < 600; i++) {
           expect((await checkRateLimit(ip, { windowMs: 60_000, now })).allowed).toBe(true);
         }
+        expect((await checkRateLimit(ip, { windowMs: 60_000, now })).allowed).toBe(false);
       } finally {
         if (prev === undefined) delete process.env.AI_LOOKUP_RATE_LIMIT;
         else process.env.AI_LOOKUP_RATE_LIMIT = prev;
+      }
+    });
+
+    // Bulk-scan contract (owner report 2026-07-22): a fast 300-code scan session must never mass-429
+    // under the DEFAULT limit (no env override, no opts.limit) - the old 120 default failed this.
+    it("300 sequential checks within one window all pass under the default limit", async () => {
+      const prev = process.env.AI_LOOKUP_RATE_LIMIT;
+      delete process.env.AI_LOOKUP_RATE_LIMIT; // exercise the true built-in default
+      try {
+        const ip = "7.7.7.7";
+        const now = 3_000_000;
+        for (let i = 0; i < 300; i++) {
+          expect((await checkRateLimit(ip, { windowMs: 60_000, now })).allowed).toBe(true);
+        }
+      } finally {
+        if (prev !== undefined) process.env.AI_LOOKUP_RATE_LIMIT = prev;
       }
     });
   });
