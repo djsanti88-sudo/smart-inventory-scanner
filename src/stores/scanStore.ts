@@ -646,7 +646,7 @@ export interface ScanState {
    *  that resolves once rehydrate has applied, so callers can await it before reading state. */
   rehydrateForUid: (uid: string) => Promise<void>;
   /** Owner-initiated: migrate the legacy pre-account blob into this uid's key, then rehydrate. */
-  adoptLegacyLocalData: (uid: string) => void;
+  adoptLegacyLocalData: (uid: string) => Promise<void>;
   startSession: (name: string, location: string) => void;
   /** Mark the current session completed (status=completed, completedAt set) and persist it. */
   finishSession: () => void;
@@ -1450,11 +1450,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       adoptLegacyLocalData: (uid: string) => {
-        if (typeof window === "undefined" || !window.localStorage) return;
+        if (typeof window === "undefined" || !window.localStorage) return Promise.resolve();
         // OWNER-INITIATED adopt: copy sis-scan-v1 into this uid's key (normalizing quantityDelta:0),
-        // DELETE the legacy blob, then hydrate from the adopted key.
+        // DELETE the legacy blob, then hydrate from the adopted key. Returns the rehydrate promise so
+        // callers can await it before setBusinessContext (same ordering rule as the main gate path).
         migrateLegacyBlobOnce(uid, window.localStorage);
-        get().rehydrateForUid(uid);
+        return get().rehydrateForUid(uid);
       },
 
       recordFeedback: (type, payload) =>
@@ -6122,10 +6123,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const feedById = new Map(backup.feed.map((e) => [e.id, e]));
         set((s) => {
           // The repointed count rows share ids with the backed-up originals, so upsertById below
-          // restores them onto the original product. The delete-minted provisionals are then empty:
-          // remove any that no remaining count row references (a provisional that gained NEW scans
-          // after the delete keeps its own fresh count row and therefore stays).
-          const restoredCounts = upsertById(s.finalCounts, backup.counts);
+          // restores them onto the original product. LAW GUARD: a scan made AFTER the delete
+          // incremented the SAME repointed row (Phase-2 re-scan bridge), so a plain restore would
+          // absorb that unit - carve the surplus (quantity + event ids beyond the backup's) onto a
+          // residual row that stays on the provisional. Total quantity is invariant across undo.
+          const backupCountById = new Map(backup.counts.map((c) => [c.id, c]));
+          const residuals: InventoryCount[] = [];
+          for (const live of s.finalCounts) {
+            const orig = backupCountById.get(live.id);
+            if (!orig || live.quantity <= orig.quantity) continue;
+            residuals.push({
+              ...live,
+              id: idFactory(),
+              quantity: live.quantity - orig.quantity,
+              scanEventIds: live.scanEventIds.filter((id) => !orig.scanEventIds.includes(id)),
+              appliedIdempotencyKeys: live.appliedIdempotencyKeys.filter((k) => !orig.appliedIdempotencyKeys.includes(k)),
+            });
+          }
+          const restoredCounts = [...upsertById(s.finalCounts, backup.counts), ...residuals];
           const stillCounted = new Set(restoredCounts.map((c) => c.productId));
           const minted = new Set(backup.mintedProvisionalIds ?? []);
           return {

@@ -66,6 +66,11 @@ export const CUSTOMER_SAFE_REVIEW_FIELDS = [
   // resolveUnknown re-link this review's own provisional placeholder by id after a customer reload
   // instead of by reconstructed name (which collides when two codes share a prefix-floor brand).
   "provisionalProductId",
+  // HOLD-STAMP FIX (2026-07-22): also a LOCAL product id (never a barcode/reusable code). The
+  // post-resolve stamp sites spare rows a human deliberately held open via suggestedLinkProductId
+  // (identity-merge suggest_link path); dropping it here made the hold vanish on a customer
+  // reload, letting auto-resolve stamp a row that was kept open on purpose.
+  "suggestedLinkProductId",
   "importQuantity",
 ] as const;
 

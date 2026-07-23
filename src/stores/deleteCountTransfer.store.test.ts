@@ -65,6 +65,26 @@ describe("scanStore - deleteProduct preserves total counted quantity (law: scan 
     expect(leftoverProv).toBeUndefined();
   });
 
+  it("scan the provisional AFTER delete, then undo: new scan's count survives on the provisional, transferred qty returns to the original, total exact", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const p = addCountedProduct(store, "888888888881", "Junk Auto-Add");
+    store.getState().processScan("888888888881"); // qty 2
+    store.getState().deleteProduct(p.id);
+    const prov = store.getState().products.find(
+      (x) => x.provisional === true && x.status !== "archived" && x.primaryBarcode === "888888888881",
+    )!;
+    store.getState().processScan("888888888881"); // NEW physical unit lands on the provisional -> 3
+    expect(totalUnits(store)).toBe(3);
+
+    expect(store.getState().undoDeleteProduct()).toBe(true);
+
+    // Transferred 2 back on the original; the genuinely new post-delete scan stays on the provisional.
+    expect(store.getState().finalCounts.find((c) => c.productId === p.id)?.quantity).toBe(2);
+    expect(store.getState().finalCounts.find((c) => c.productId === prov.id)?.quantity).toBe(1);
+    expect(store.getState().products.some((x) => x.id === prov.id && x.status === "active")).toBe(true); // still counted -> kept
+    expect(totalUnits(store)).toBe(3);
+  });
+
   it("a deleted product with ZERO counted quantity mints nothing (no ghost provisionals)", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const p = addCountedProduct(store, "777777777775", "Zero Qty");

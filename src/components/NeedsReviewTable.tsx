@@ -38,12 +38,13 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
 export function NeedsReviewTable() {
   const allReviews = useScanStore((s) => s.needsReviewQueue);
   const isPlatform = useIsPlatformOwner();
-  // Owner rule: an item that is ALREADY solved (resolved or ignored) is done - it must never linger in
-  // Needs Review, regardless of sync state. Review status is identity metadata only; it never affects
-  // the scan feed or session counts (those stay independent, keyed by cleanCode). Task 9b
-  // (owner-ratified 2026-07-14): a review PARKED at status "suggested" (pending inline suggestion) also
-  // never belongs in this queue - it lives on the feed row's inline controls + the
-  // SuggestedApprovalPanel. Only "open" reviews render here.
+  // Owner rule (2026-07-22, supersedes the resolved-but-unsynced carve-out of 2026-07-14): the
+  // queue shows ONLY items still awaiting a human decision. A resolved item vanishes immediately -
+  // the device already has everything and the cloud backup retries invisibly in the background
+  // (pendingSyncQueue + the global sync indicator cover a stuck backup; a shop owner never needs
+  // to see sync state here). "suggested" reviews also never belong here - they live on the feed
+  // row's inline controls + the SuggestedApprovalPanel. "ignored" is likewise a made decision
+  // (the human clicked Ignore), so it leaves the queue with the resolved ones.
   const reviews = allReviews.filter((r) => r.status === "open");
 
   return (

@@ -89,6 +89,34 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store2.getState().finalCounts.length, "counts survive a true refresh").toBe(2);
   });
 
+  it("(e2) a deliberate suggest_link HOLD survives a rehydrate cycle (stamp guard input persists)", () => {
+    // The post-resolve stamp sites spare rows deliberately held open via suggestedLinkProductId
+    // (identity-merge suggest_link path). That guard reads the stamp off the persisted review row,
+    // so the hold must round-trip persist -> fresh store -> rehydrate -> setBusinessContext intact.
+    const mk = () =>
+      createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    const store1 = mk();
+    store1.getState().setBusinessContext("b1", "u1");
+    const heldReview = {
+      id: "rev-hold", businessId: "b1", rawCode: "444", cleanCode: "444", codeType: "unknown",
+      status: "open", decodeStatus: "suggested", reason: "possible match", suggestedProductName: "Existing Tire",
+      suggestedLinkProductId: "p-existing", createdAt: "t", scanCount: 1, lastScannedAt: "t",
+    } as unknown as UnknownCodeReview;
+    store1.setState({ needsReviewQueue: [heldReview] });
+    const blob = JSON.parse(JSON.stringify(buildPersistedScanState(store1.getState() as never, "business")));
+
+    const store2 = mk(); // fresh page load
+    store2.setState(blob as never); // zustand persist rehydrate = shallow merge
+    store2.getState().setBusinessContext("b1", "u1");
+
+    const after = store2.getState().needsReviewQueue.find((r) => r.id === "rev-hold");
+    expect(after?.status, "held review stays open across a refresh").toBe("open");
+    expect(
+      (after as unknown as { suggestedLinkProductId?: string })?.suggestedLinkProductId,
+      "the suggest_link hold stamp survives the rehydrate cycle",
+    ).toBe("p-existing");
+  });
+
   it("(b) an ACTUAL tenant switch still fully wipes (isolation law unchanged)", () => {
     const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
     store.getState().setBusinessContext("b1", "u1");
