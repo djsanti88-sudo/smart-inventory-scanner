@@ -294,6 +294,27 @@ describe("GET /api/catalog-review pagination cursor", () => {
     expect(body2.nextCursor).toBeNull();
   });
 
+  it("never skips an upgraded legacy doc that carries BOTH firstSeenAt and updatedAt", async () => {
+    // masterAppend.ts upserts with merge:true, so a legacy "pending" doc a strong ladder decode
+    // upgrades keeps its old firstSeenAt while gaining a fresh updatedAt. The ladder query orders
+    // by updatedAt, so the merged sort must key that doc by updatedAt too - keying it by its stale
+    // firstSeenAt pushes it below its cursor position and page 2's startAfter skips it forever.
+    mocks.entries = [
+      { id: "lx", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "7", name: "Upgraded", firstSeenAt: "2026-06-01T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z" } },
+      { id: "ly", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "8", name: "Fresh", updatedAt: "2026-07-21T00:00:00.000Z" } },
+    ];
+    const page1 = await GET(listRequest("?pageSize=1"));
+    expect(page1.status).toBe(200);
+    const body1 = await page1.json();
+    // Query order (updatedAt desc) puts lx first; the merged sort must agree.
+    expect(body1.entries.map((e: { id: string }) => e.id)).toEqual(["lx"]);
+    const page2 = await GET(listRequest(`?pageSize=1&cursor=${encodeURIComponent(body1.nextCursor)}`));
+    expect(page2.status).toBe(200);
+    const body2 = await page2.json();
+    expect(body2.entries.map((e: { id: string }) => e.id)).toEqual(["ly"]);
+    expect(body2.nextCursor).toBeNull();
+  });
+
   it("treats a malformed cursor as the first page instead of erroring", async () => {
     const response = await GET(listRequest("?pageSize=2&cursor=not-a-real-cursor"));
     expect(response.status).toBe(200);

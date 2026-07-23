@@ -132,8 +132,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Legacy pending docs carry firstSeenAt; ladder-written docs are stamped updatedAt by
-    // masterAppend.ts (never firstSeenAt), so each query orders by the field its docs actually have
-    // and the merge sorts on whichever is present, newest first.
+    // masterAppend.ts, so each query orders by the field its own docs are keyed on and the merge
+    // sorts each entry by ITS stream's field, newest first.
     let pendingQuery = db
       .collection(COLLECTIONS.catalogEntries)
       .where("verificationStatus", "==", "pending")
@@ -176,8 +176,13 @@ export async function GET(request: NextRequest) {
     }
     const pendingDocs = pendingResult.status === "fulfilled" ? pendingResult.value.docs : [];
     const ladderDocs = ladderResult.status === "fulfilled" ? ladderResult.value.docs : [];
-    const timestampOf = (e: Record<string, unknown>): string => {
-      const t = e.firstSeenAt ?? e.updatedAt;
+    // Kind-aware sort key: each entry sorts by the SAME field its stream's query ordered by
+    // (pending -> firstSeenAt, ladder -> updatedAt). masterAppend.ts upserts with merge:true, so a
+    // legacy pending doc a strong ladder decode upgrades keeps its old firstSeenAt while gaining a
+    // fresh updatedAt - keying such a doc by firstSeenAt would push it below its cursor position
+    // and page 2's startAfter would skip it forever.
+    const timestampOf = (e: { pendingKind: "pending" | "ladder_verified" } & Record<string, unknown>): string => {
+      const t = e.pendingKind === "pending" ? e.firstSeenAt : e.updatedAt;
       return typeof t === "string" ? t : "";
     };
     const merged = [...tag(pendingDocs, "pending"), ...tag(ladderDocs, "ladder_verified")]
