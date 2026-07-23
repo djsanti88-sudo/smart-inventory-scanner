@@ -12,17 +12,23 @@ const mocks = vi.hoisted(() => ({
   queriedPaths: [] as string[],
 }));
 
-function makeQuery(pageSize: number) {
-  return {
-    orderBy: () => makeQuery(pageSize),
-    where: () => makeQuery(pageSize),
+// The mock honestly applies == where clauses so the route's two review-queue shapes (legacy
+// "pending" vs ladder-written "verified"/ladder_verified_strong) return DIFFERENT slices of
+// mocks.entries, the way real Firestore would.
+function makeQuery(filters: Array<[string, unknown]> = []) {
+  const matches = (e: { data: Record<string, unknown> }) =>
+    filters.every(([field, value]) => e.data[field] === value);
+  const query = {
+    orderBy: () => makeQuery(filters),
+    where: (field: string, _op: string, value: unknown) => makeQuery([...filters, [field, value]]),
     limit: (n: number) => ({
       get: async () => ({
-        docs: mocks.entries.slice(0, n).map((e) => ({ id: e.id, data: () => e.data })),
+        docs: mocks.entries.filter(matches).slice(0, n).map((e) => ({ id: e.id, data: () => e.data })),
       }),
     }),
-    startAfter: () => makeQuery(pageSize),
+    startAfter: () => makeQuery(filters),
   };
+  return query;
 }
 
 vi.mock("@/lib/firebaseAdmin", () => ({
@@ -30,7 +36,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminDb: () => ({
     collection: (path: string) => {
       mocks.queriedPaths.push(path);
-      return makeQuery(0);
+      return makeQuery();
     },
   }),
 }));
@@ -108,5 +114,48 @@ describe("GET /api/catalog-review success path", () => {
     const payload = await response.json();
     expect(payload.entries).toEqual([]);
     expect(payload.nextCursor).toBeNull();
+  });
+});
+
+// Empty-queue seam fix: masterAppend.ts writes verificationStatus "verified" + provenanceTier
+// "ladder_verified_strong" (never "pending"), so a pending-only GET left the owner approval queue
+// permanently empty. The route must ALSO list ladder-written entries, tagged pendingKind
+// "ladder_verified" so the client can tell them from legacy "pending" docs.
+describe("GET /api/catalog-review ladder-verified queue", () => {
+  it("lists ladder-written verified entries alongside pending ones, each tagged with pendingKind", async () => {
+    mocks.entries = [
+      { id: "gtin_1", data: { verificationStatus: "pending", normalizedBarcode: "111", name: "Widget", firstSeenAt: "2026-07-20T00:00:00.000Z" } },
+      { id: "gtin_ladder", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "333", name: "Tire", updatedAt: "2026-07-21T00:00:00.000Z" } },
+    ];
+    const response = await GET(listRequest());
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.entries).toHaveLength(2);
+    const byId = Object.fromEntries(payload.entries.map((e: { id: string; pendingKind: string }) => [e.id, e.pendingKind]));
+    expect(byId["gtin_1"]).toBe("pending");
+    expect(byId["gtin_ladder"]).toBe("ladder_verified");
+  });
+
+  it("does NOT list human_verified or rejected entries in the queue", async () => {
+    mocks.entries = [
+      { id: "gtin_human", data: { verificationStatus: "verified", provenanceTier: "human_verified", normalizedBarcode: "444", name: "Approved" } },
+      { id: "gtin_rejected", data: { verificationStatus: "rejected", provenanceTier: "ladder_verified_strong", normalizedBarcode: "555", name: "Rejected" } },
+    ];
+    const response = await GET(listRequest());
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.entries).toEqual([]);
+  });
+
+  it("finds a ladder-written entry via barcode search, tagged ladder_verified", async () => {
+    mocks.entries = [
+      { id: "gtin_ladder", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "333", name: "Tire", updatedAt: "2026-07-21T00:00:00.000Z" } },
+    ];
+    const response = await GET(listRequest("?barcode=333"));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.entries).toHaveLength(1);
+    expect(payload.entries[0].id).toBe("gtin_ladder");
+    expect(payload.entries[0].pendingKind).toBe("ladder_verified");
   });
 });

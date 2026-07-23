@@ -155,7 +155,9 @@ export interface CatalogEntry {
   name?: string;
   brand?: string;
   category?: string;
-  verificationStatus?: "verified" | "pending" | "conflict";
+  // "rejected" is written by the catalog-review reject action (api/catalog-review/[id]) and consulted
+  // by masterAppend.ts's re-append trap (an owner-rejected entry is never silently re-verified).
+  verificationStatus?: "verified" | "pending" | "conflict" | "rejected";
   // GC5 (P5b): mirrors Product.provenanceTier (src/types.ts:89-94). Master-truth appends (P5b Task 1)
   // stamp "ladder_verified_strong" for a strong app-verified ladder decode; no other tier is minted by
   // this phase. Optional so every pre-existing CatalogEntry (no tier yet) stays valid.

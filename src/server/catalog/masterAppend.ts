@@ -88,16 +88,17 @@ export interface MasterAppendDeps {
   storage?: LadderStorage;
 }
 
-export type MasterAppendResult = "written" | "skipped_human" | "error";
+export type MasterAppendResult = "written" | "skipped_human" | "skipped_rejected" | "error";
 
 // Task 2 (owner steps 1+2, outcome visibility): appendMasterCatalogEntry used to swallow every
 // failure into a bare "error" with no durable signal anywhere - zero catalogEntries had been
 // created since June 26 despite hundreds of July decodes, and nothing surfaced that silently.
 // This counter reuses the existing ladderStorage()/ladder_kv KV pattern (same seam the daily AI
-// spend cap and Go-UPC usage counters already use) so the written/skipped_human/error tally, the
+// spend cap and Go-UPC usage counters already use) so the written/skipped_human/skipped_rejected/error tally, the
 // last error reason, and its timestamp are all durable and inspectable without adding a new store.
 const KV_KEY_WRITTEN = "master_catalog_append:written";
 const KV_KEY_SKIPPED_HUMAN = "master_catalog_append:skipped_human";
+const KV_KEY_SKIPPED_REJECTED = "master_catalog_append:skipped_rejected";
 const KV_KEY_ERROR = "master_catalog_append:error";
 const KV_KEY_LAST_ERROR_REASON = "master_catalog_append:last_error_reason";
 const KV_KEY_LAST_ERROR_AT = "master_catalog_append:last_error_at";
@@ -112,7 +113,11 @@ async function recordOutcome(
 ): Promise<void> {
   try {
     const store = storage ?? (await ladderStorage());
-    const key = outcome === "written" ? KV_KEY_WRITTEN : outcome === "skipped_human" ? KV_KEY_SKIPPED_HUMAN : KV_KEY_ERROR;
+    const key =
+      outcome === "written" ? KV_KEY_WRITTEN
+      : outcome === "skipped_human" ? KV_KEY_SKIPPED_HUMAN
+      : outcome === "skipped_rejected" ? KV_KEY_SKIPPED_REJECTED
+      : KV_KEY_ERROR;
     await store.increment(key);
     if (outcome === "error" && errorReason) {
       await store.set(KV_KEY_LAST_ERROR_REASON, errorReason);
@@ -148,6 +153,12 @@ export async function appendMasterCatalogEntry(
         const existing = snap.data() as DbCatalogEntry | undefined;
         if (existing?.provenanceTier === "human_verified") {
           return "skipped_human" as const;
+        }
+        // Re-append trap: an owner-REJECTED entry is a human decision too (catalog-review reject
+        // writes verificationStatus "rejected"). A later strong ladder decode of the same code must
+        // never silently flip it back to verified - skip with its own honest outcome.
+        if (existing?.verificationStatus === "rejected") {
+          return "skipped_rejected" as const;
         }
       }
       const { id: _id, ...rest } = entry;

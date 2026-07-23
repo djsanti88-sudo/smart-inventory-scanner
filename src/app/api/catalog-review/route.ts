@@ -8,9 +8,13 @@ import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
 
-// Task 3 (owner step 3): platform-owner-only listing of pending catalogEntries for human approval.
-// GET only - lists verificationStatus "pending" docs from the top-level (shared, cross-tenant)
-// `catalogEntries` collection, paginated. Approve/reject live in ./[id]/route.ts (POST). Auth pattern
+// Task 3 (owner step 3): platform-owner-only listing of reviewable catalogEntries for human approval.
+// GET only - lists TWO reviewable shapes from the top-level (shared, cross-tenant) `catalogEntries`
+// collection, paginated: legacy verificationStatus "pending" docs AND ladder-written docs
+// (verificationStatus "verified" + provenanceTier "ladder_verified_strong" - masterAppend.ts never
+// writes "pending", so a pending-only query left this queue permanently empty). Each entry carries
+// pendingKind ("pending" | "ladder_verified") so the client can tell them apart. human_verified and
+// rejected docs never appear. Approve/reject live in ./[id]/route.ts (POST). Auth pattern
 // mirrors src/app/api/resolve-scan/route.ts: verify the Firebase ID token, then require platformOwner
 // (accessLevelServer === "platform") - a customer/business caller is refused with 403, never a partial
 // or sanitized view (this collection is never tenant data, so there is no lesser view to fall back to).
@@ -73,37 +77,64 @@ export async function GET(request: NextRequest) {
   try {
     const db = getAdminDb();
 
+    // Firestore has no OR across the two reviewable shapes' different field pairs, so each branch
+    // runs one query per shape (pending / ladder-written) and merges, tagging pendingKind.
+    const tag = (
+      docs: FirebaseFirestore.QueryDocumentSnapshot[],
+      pendingKind: "pending" | "ladder_verified",
+    ) => docs.map((d) => ({ id: d.id, ...d.data(), pendingKind }));
+
     // A barcode search is a targeted point lookup: normalizedBarcode is the primary key convention
     // (masterAppend.ts), so match on it directly rather than trying to paginate a filtered query.
     if (barcodeSearch) {
-      const snap = await db
+      const base = db
         .collection(COLLECTIONS.catalogEntries)
-        .where("normalizedBarcode", "==", barcodeSearch)
-        .where("verificationStatus", "==", "pending")
-        .limit(pageSize)
-        .get();
-      const entries = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        .where("normalizedBarcode", "==", barcodeSearch);
+      const [pendingSnap, ladderSnap] = await Promise.all([
+        base.where("verificationStatus", "==", "pending").limit(pageSize).get(),
+        base
+          .where("verificationStatus", "==", "verified")
+          .where("provenanceTier", "==", "ladder_verified_strong")
+          .limit(pageSize)
+          .get(),
+      ]);
+      const entries = [...tag(pendingSnap.docs, "pending"), ...tag(ladderSnap.docs, "ladder_verified")].slice(0, pageSize);
       return json({ entries, nextCursor: null });
     }
 
-    let query = db
+    // Legacy pending docs carry firstSeenAt; ladder-written docs are stamped updatedAt by
+    // masterAppend.ts (never firstSeenAt), so each query orders by the field its docs actually have
+    // and the merge sorts on whichever is present, newest first.
+    let pendingQuery = db
       .collection(COLLECTIONS.catalogEntries)
       .where("verificationStatus", "==", "pending")
       .orderBy("firstSeenAt", "desc")
+      .limit(pageSize + 1);
+    let ladderQuery = db
+      .collection(COLLECTIONS.catalogEntries)
+      .where("verificationStatus", "==", "verified")
+      .where("provenanceTier", "==", "ladder_verified_strong")
+      .orderBy("updatedAt", "desc")
       .limit(pageSize + 1);
 
     if (cursor) {
       const cursorSnap = await db.collection(COLLECTIONS.catalogEntries).doc(cursor).get();
       if (cursorSnap.exists) {
-        query = query.startAfter(cursorSnap);
+        pendingQuery = pendingQuery.startAfter(cursorSnap);
+        ladderQuery = ladderQuery.startAfter(cursorSnap);
       }
     }
 
-    const snap = await query.get();
-    const docs = snap.docs.slice(0, pageSize);
-    const entries = docs.map((d) => ({ id: d.id, ...d.data() }));
-    const hasMore = snap.docs.length > pageSize;
-    const nextCursor = hasMore ? docs[docs.length - 1]?.id ?? null : null;
+    const [pendingSnap, ladderSnap] = await Promise.all([pendingQuery.get(), ladderQuery.get()]);
+    const timestampOf = (e: Record<string, unknown>): string => {
+      const t = e.firstSeenAt ?? e.updatedAt;
+      return typeof t === "string" ? t : "";
+    };
+    const merged = [...tag(pendingSnap.docs, "pending"), ...tag(ladderSnap.docs, "ladder_verified")]
+      .sort((a, b) => timestampOf(b).localeCompare(timestampOf(a)));
+    const entries = merged.slice(0, pageSize);
+    const hasMore = merged.length > pageSize;
+    const nextCursor = hasMore ? entries[entries.length - 1]?.id ?? null : null;
 
     return json({ entries, nextCursor });
   } catch (error) {

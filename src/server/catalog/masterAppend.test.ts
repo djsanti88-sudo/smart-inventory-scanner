@@ -155,6 +155,20 @@ describe("appendMasterCatalogEntry (Admin-SDK upsert, mocked)", () => {
     expect(setCalls).toHaveLength(0);
   });
 
+  // Re-append trap: an owner-REJECTED entry is a human decision too. A later strong ladder decode
+  // of the same code must never silently flip it back to verified - skip with its own honest outcome.
+  it("skips (never re-verifies) when the existing doc is owner-rejected", async () => {
+    const { tx, setCalls } = makeMockTx({ verificationStatus: "rejected", provenanceTier: "ladder_verified_strong" }, true);
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db });
+    expect(result).toBe("skipped_rejected");
+    expect(setCalls).toHaveLength(0);
+  });
+
   it("allows overwrite (retry idempotency) when the existing doc is NOT human_verified", async () => {
     const { tx, setCalls } = makeMockTx({ provenanceTier: "ladder_verified_strong" }, true);
     const db = {
@@ -252,6 +266,15 @@ describe("appendMasterCatalogEntry outcome counter (Task 2, KV pattern)", () => 
     expect(result).toBe("skipped_human");
     await new Promise((r) => setTimeout(r, 0));
     expect(storage.kv.get("master_catalog_append:skipped_human")).toBe("1");
+  });
+
+  it("increments the skipped_rejected counter when an existing doc is owner-rejected", async () => {
+    const storage = makeMockStorage();
+    const db = makeTxDb({ verificationStatus: "rejected" }, true);
+    const result = await appendMasterCatalogEntry(entry, { db, storage });
+    expect(result).toBe("skipped_rejected");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:skipped_rejected")).toBe("1");
   });
 
   it("increments the error counter AND records the real error reason + timestamp when the transaction rejects", async () => {
