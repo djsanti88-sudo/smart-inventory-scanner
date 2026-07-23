@@ -18,27 +18,62 @@ const mocks = vi.hoisted(() => ({
 
 // The mock honestly applies == where clauses so the route's two review-queue shapes (legacy
 // "pending" vs ladder-written "verified"/ladder_verified_strong) return DIFFERENT slices of
-// mocks.entries, the way real Firestore would.
-function makeQuery(filters: Array<[string, unknown]> = []) {
+// mocks.entries, the way real Firestore would. orderBy/startAfter are honest too: startAfter
+// rejects a cursor snapshot missing the orderBy field (the real Admin SDK throws "Field ... is
+// missing in the provided DocumentSnapshot") and pagination resumes after the cursor doc in
+// field order, so cross-applying one stream's cursor to the other stream fails here exactly
+// like production.
+type MockCursorSnap = { id: string; data: () => Record<string, unknown> | undefined };
+
+function makeQuery(
+  filters: Array<[string, unknown]> = [],
+  orderField: string | null = null,
+  after: MockCursorSnap | null = null,
+) {
   const matches = (e: { data: Record<string, unknown> }) =>
     filters.every(([field, value]) => e.data[field] === value);
   const query = {
-    orderBy: () => makeQuery(filters),
-    where: (field: string, _op: string, value: unknown) => makeQuery([...filters, [field, value]]),
+    orderBy: (field: string) => makeQuery(filters, field, after),
+    where: (field: string, _op: string, value: unknown) => makeQuery([...filters, [field, value]], orderField, after),
     limit: (n: number) => ({
       get: async () => {
         const isLadder = filters.some(([field, value]) => field === "provenanceTier" && value === "ladder_verified_strong");
         const isPending = filters.some(([field, value]) => field === "verificationStatus" && value === "pending");
         if (isLadder && mocks.queryErrors.ladder) throw mocks.queryErrors.ladder;
         if (isPending && mocks.queryErrors.pending) throw mocks.queryErrors.pending;
+        let list = mocks.entries.filter(matches);
+        if (orderField) {
+          const field = orderField;
+          list = [...list].sort((a, b) => String(b.data[field] ?? "").localeCompare(String(a.data[field] ?? "")));
+        }
+        if (after) {
+          const idx = list.findIndex((e) => e.id === after.id);
+          if (idx >= 0) list = list.slice(idx + 1);
+        }
         return {
-          docs: mocks.entries.filter(matches).slice(0, n).map((e) => ({ id: e.id, data: () => e.data })),
+          docs: list.slice(0, n).map((e) => ({ id: e.id, data: () => e.data })),
         };
       },
     }),
-    startAfter: () => makeQuery(filters),
+    startAfter: (snap: MockCursorSnap) => {
+      if (orderField && (snap.data() ?? {})[orderField] === undefined) {
+        throw new Error(`Field "${orderField}" is missing in the provided DocumentSnapshot.`);
+      }
+      return makeQuery(filters, orderField, snap);
+    },
   };
   return query;
+}
+
+function makeDocRef(id: string) {
+  return {
+    get: async () => {
+      const found = mocks.entries.find((e) => e.id === id);
+      return found
+        ? { exists: true, id: found.id, data: () => found.data }
+        : { exists: false, id, data: () => undefined };
+    },
+  };
 }
 
 vi.mock("@/lib/firebaseAdmin", () => ({
@@ -46,7 +81,7 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminDb: () => ({
     collection: (path: string) => {
       mocks.queriedPaths.push(path);
-      return makeQuery();
+      return { ...makeQuery(), doc: makeDocRef };
     },
   }),
 }));
@@ -205,5 +240,64 @@ describe("GET /api/catalog-review query-failure isolation", () => {
     mocks.queryErrors.ladder = indexError;
     const response = await GET(listRequest());
     expect(response.status).toBe(500);
+  });
+});
+
+// Cursor fix: the two queue queries order by DIFFERENT fields (pending -> firstSeenAt,
+// ladder -> updatedAt) and any given doc carries only one of them, so one shared cursor doc
+// snapshot cross-applied to both queries makes the real Admin SDK throw ("Field ... is missing
+// in the provided DocumentSnapshot") as soon as the client follows nextCursor. The route must
+// keep a per-stream cursor packed inside one opaque nextCursor token, applying each stream's
+// cursor only to its own query, with no skipped or duplicated entries across pages.
+describe("GET /api/catalog-review pagination cursor", () => {
+  beforeEach(() => {
+    mocks.entries = [
+      { id: "p1", data: { verificationStatus: "pending", normalizedBarcode: "1", name: "P1", firstSeenAt: "2026-07-21T06:00:00.000Z" } },
+      { id: "l1", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "2", name: "L1", updatedAt: "2026-07-21T05:00:00.000Z" } },
+      { id: "p2", data: { verificationStatus: "pending", normalizedBarcode: "3", name: "P2", firstSeenAt: "2026-07-21T04:00:00.000Z" } },
+      { id: "l2", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "4", name: "L2", updatedAt: "2026-07-21T03:00:00.000Z" } },
+      { id: "p3", data: { verificationStatus: "pending", normalizedBarcode: "5", name: "P3", firstSeenAt: "2026-07-21T02:00:00.000Z" } },
+      { id: "l3", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "6", name: "L3", updatedAt: "2026-07-21T01:00:00.000Z" } },
+    ];
+  });
+
+  it("pages through a mixed pending + ladder queue newest-first with no throw, skip, or duplicate", async () => {
+    const page1 = await GET(listRequest("?pageSize=2"));
+    expect(page1.status).toBe(200);
+    const body1 = await page1.json();
+    expect(body1.entries.map((e: { id: string }) => e.id)).toEqual(["p1", "l1"]);
+    expect(body1.nextCursor).not.toBeNull();
+
+    const page2 = await GET(listRequest(`?pageSize=2&cursor=${encodeURIComponent(body1.nextCursor)}`));
+    expect(page2.status).toBe(200);
+    const body2 = await page2.json();
+    expect(body2.entries.map((e: { id: string }) => e.id)).toEqual(["p2", "l2"]);
+    expect(body2.nextCursor).not.toBeNull();
+
+    const page3 = await GET(listRequest(`?pageSize=2&cursor=${encodeURIComponent(body2.nextCursor)}`));
+    expect(page3.status).toBe(200);
+    const body3 = await page3.json();
+    expect(body3.entries.map((e: { id: string }) => e.id)).toEqual(["p3", "l3"]);
+    expect(body3.nextCursor).toBeNull();
+  });
+
+  it("keeps advancing a stream that emitted nothing on the current page (cursor carries forward)", async () => {
+    // Page 1 of size 3 emits p1, l1, p2 - the ladder stream's l2/l3 are sliced off; page 2 must
+    // still resume the ladder stream from l1, not restart it from the top.
+    const page1 = await GET(listRequest("?pageSize=3"));
+    const body1 = await page1.json();
+    expect(body1.entries.map((e: { id: string }) => e.id)).toEqual(["p1", "l1", "p2"]);
+    const page2 = await GET(listRequest(`?pageSize=3&cursor=${encodeURIComponent(body1.nextCursor)}`));
+    expect(page2.status).toBe(200);
+    const body2 = await page2.json();
+    expect(body2.entries.map((e: { id: string }) => e.id)).toEqual(["l2", "p3", "l3"]);
+    expect(body2.nextCursor).toBeNull();
+  });
+
+  it("treats a malformed cursor as the first page instead of erroring", async () => {
+    const response = await GET(listRequest("?pageSize=2&cursor=not-a-real-cursor"));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.entries.map((e: { id: string }) => e.id)).toEqual(["p1", "l1"]);
   });
 });

@@ -31,6 +31,35 @@ function authConfigurationError(error: unknown): boolean {
   return /credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(message);
 }
 
+// Pagination cursor: the two queue queries order by DIFFERENT fields (pending -> firstSeenAt,
+// ladder -> updatedAt) and any given doc carries only one of them, so a single shared cursor doc
+// snapshot cross-applied to both queries would make the Admin SDK throw ("Field ... is missing in
+// the provided DocumentSnapshot"). Each stream therefore keeps its OWN cursor doc id, packed into
+// one opaque base64url token; each is applied only to its own query. A malformed token is treated
+// as the first page (never an error).
+type MergedCursor = { p?: string; l?: string };
+
+function encodeCursor(cursor: MergedCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeCursor(raw: string): MergedCursor | null {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    if (parsed && typeof parsed === "object") {
+      const { p, l } = parsed as Record<string, unknown>;
+      const cursor: MergedCursor = {
+        ...(typeof p === "string" && p ? { p } : {}),
+        ...(typeof l === "string" && l ? { l } : {}),
+      };
+      if (cursor.p || cursor.l) return cursor;
+    }
+  } catch {
+    // Malformed cursor - fall through to first page.
+  }
+  return null;
+}
+
 function bearerToken(request: NextRequest): string {
   const header = request.headers.get("authorization") ?? request.headers.get("Authorization");
   if (!header) return "";
@@ -108,28 +137,34 @@ export async function GET(request: NextRequest) {
     let pendingQuery = db
       .collection(COLLECTIONS.catalogEntries)
       .where("verificationStatus", "==", "pending")
-      .orderBy("firstSeenAt", "desc")
-      .limit(pageSize + 1);
+      .orderBy("firstSeenAt", "desc");
     let ladderQuery = db
       .collection(COLLECTIONS.catalogEntries)
       .where("verificationStatus", "==", "verified")
       .where("provenanceTier", "==", "ladder_verified_strong")
-      .orderBy("updatedAt", "desc")
-      .limit(pageSize + 1);
+      .orderBy("updatedAt", "desc");
 
-    if (cursor) {
-      const cursorSnap = await db.collection(COLLECTIONS.catalogEntries).doc(cursor).get();
-      if (cursorSnap.exists) {
-        pendingQuery = pendingQuery.startAfter(cursorSnap);
-        ladderQuery = ladderQuery.startAfter(cursorSnap);
-      }
+    // Per-stream cursors (see MergedCursor above): each stream resumes after its OWN last-emitted
+    // doc - never the other stream's, whose snapshot would be missing this query's orderBy field.
+    const decodedCursor = cursor ? decodeCursor(cursor) : null;
+    if (decodedCursor) {
+      const collection = db.collection(COLLECTIONS.catalogEntries);
+      const [pendingCursorSnap, ladderCursorSnap] = await Promise.all([
+        decodedCursor.p ? collection.doc(decodedCursor.p).get() : Promise.resolve(null),
+        decodedCursor.l ? collection.doc(decodedCursor.l).get() : Promise.resolve(null),
+      ]);
+      if (pendingCursorSnap?.exists) pendingQuery = pendingQuery.startAfter(pendingCursorSnap);
+      if (ladderCursorSnap?.exists) ladderQuery = ladderQuery.startAfter(ladderCursorSnap);
     }
 
     // The two shapes' queries need different composite indexes (declared in firestore.indexes.json);
     // a missing index rejects with FAILED_PRECONDITION on real Firestore. Settle each independently
     // so one shape failing degrades to an empty page for that shape (logged) instead of 500ing the
     // whole listing - only both failing leaves nothing to serve and falls through to the catch.
-    const [pendingResult, ladderResult] = await Promise.allSettled([pendingQuery.get(), ladderQuery.get()]);
+    const [pendingResult, ladderResult] = await Promise.allSettled([
+      pendingQuery.limit(pageSize + 1).get(),
+      ladderQuery.limit(pageSize + 1).get(),
+    ]);
     if (pendingResult.status === "rejected" && ladderResult.status === "rejected") {
       throw pendingResult.reason;
     }
@@ -149,7 +184,17 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => timestampOf(b).localeCompare(timestampOf(a)));
     const entries = merged.slice(0, pageSize);
     const hasMore = merged.length > pageSize;
-    const nextCursor = hasMore ? entries[entries.length - 1]?.id ?? null : null;
+    // A stream that emitted nothing on this page carries its incoming cursor forward, so entries
+    // sliced off the merged page are never skipped and never re-emitted.
+    let nextCursor: string | null = null;
+    if (hasMore) {
+      const lastEmittedOf = (kind: "pending" | "ladder_verified"): string | undefined =>
+        [...entries].reverse().find((e) => e.pendingKind === kind)?.id;
+      nextCursor = encodeCursor({
+        p: lastEmittedOf("pending") ?? decodedCursor?.p,
+        l: lastEmittedOf("ladder_verified") ?? decodedCursor?.l,
+      });
+    }
 
     return json({ entries, nextCursor });
   } catch (error) {
