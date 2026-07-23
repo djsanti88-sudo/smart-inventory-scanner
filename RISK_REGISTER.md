@@ -139,3 +139,12 @@ No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migr
 | 3 | T9 paid backfill (16 missing tire codes) hits paid rungs | Low | Gated | Script is review-first with strict upsert criteria (`83d3d62`); runs only on explicit owner approval | Owner | Gated |
 | 4 | Preview is open access (no login); anyone with the URL can scan/see data | Med | Low | Owner decision "no login, no shop selection for now"; role/data-protection foundation deferred (docs/HOTFIX_FOLLOWUPS.md); revisit before real customer data | Owner accepted | Accepted |
 | 5 | Working tree carries ~60 uncommitted tmp scripts/screenshots that could get accidentally committed | Low | Med | This docs pass leaves them untracked; sweep `scripts/tmp-*` + root PNGs into ignore/cleanup before the next commit batch | — | Open |
+
+## Deploy-chaos + ultracode round (2026-07-22/23)
+
+| # | Risk | Sev | Likelihood | Mitigation | Approval | Status |
+|---|------|-----|-----------|------------|----------|--------|
+| 1 | Multi-device concurrent delete/undo races (two devices deleting/undoing the same product near-simultaneously) | High | Med | New regression tests added for the undo/delete/transfer paths; residual risk remains until proven under an actual live cross-device drill (agy flagged this caveat) | — | Mitigated (tests); residual until live drill |
+| 2 | Master-catalog global trust has no revocation path (dispute/tombstone) - one bad strong write replays globally to every tenant until a revocation mechanism exists | High | Low-Med | Revocation/dispute/tombstone path is DESIGNED but NOT implemented; current mitigation is upstream write-quality gates only | Needs owner decision + build approval | Open |
+| 3 | Old Vercel deployments remain publicly reachable indefinitely at their unique preview URLs (including deployments with bugs/old data shapes) | Med | Certain (by design of the platform) | None active; purge/expire policy for stale deployment URLs not yet decided | Owner decision pending | Open |
+| 4 | Prevention/never-again hardening project (env-parity gate, deploy build-fingerprint check, fix-lineage guard per L19-L21) is queued but not executed, so the same class of deploy-chaos defect can recur | Med | Med until built | Documented as the concrete next project (env-parity gate + deploy fingerprint + fix-lineage manifest/guard); not started | — | Queued/Open |
