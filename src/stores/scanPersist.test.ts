@@ -56,6 +56,7 @@ function makeState(): PersistableScanState {
     feedbackEvents: [{ id: "f1", code: "2881-6861" }],
     countSnapshots: [],
     firstScanAt: "2026-07-20T10:00:00.000Z",
+    sessionHistory: [],
   };
 }
 

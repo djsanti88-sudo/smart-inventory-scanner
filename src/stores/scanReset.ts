@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS } from "@/stores/scanStore";
+import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import type { ScanEvent, InventoryCount, UnknownCodeReview, Settings } from "@/types";
 
 // Tenant-scoped state that must be fully REPLACED (never merged) when the active business/user
@@ -12,6 +13,7 @@ export function emptyTenantState(): {
   settings: Settings;
   firstScanAt: string | null;
   recentLocations: string[];
+  sessionHistory: SessionHistoryEntry[];
 } {
   // C2: firstScanAt is per-tenant first-run state (drives the /scan empty-state banner), so a business
   // switch or sign-out must reset it to null exactly like scanFeed/finalCounts - otherwise a brand new
@@ -19,6 +21,9 @@ export function emptyTenantState(): {
   // recentLocations is documented per-business (scanStore.ts:611) - a business switch/sign-out must
   // reset it too, or the previous tenant's location strings leak into the new workspace's location
   // picker.
+  // sessionHistory is the tenant's own archived scan log (codes + product names) - a business switch
+  // or sign-out must reset it exactly like scanFeed, or the previous tenant's scanned codes leak into
+  // the next tenant's History page.
   return {
     scanFeed: [],
     finalCounts: [],
@@ -26,5 +31,6 @@ export function emptyTenantState(): {
     settings: { ...DEFAULT_SETTINGS },
     firstScanAt: null,
     recentLocations: [],
+    sessionHistory: [],
   };
 }

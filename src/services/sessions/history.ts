@@ -31,3 +31,27 @@ export function aggregateSessionCounts(rows: SessionCountRow[]): SessionAggregat
   for (const qty of byProduct.values()) units += qty;
   return { units, distinctProducts: byProduct.size };
 }
+
+/** Minimal shape this module needs from a SessionHistoryEntry's archived scan rows
+ *  (services/sessions/sessionHistory.ts) - the auto-saved trace of a past session. */
+export interface HistoryScanRow {
+  code: string;
+  productName: string;
+  quantityDelta: number;
+}
+
+/**
+ * Aggregate an archived session's scan rows into the same {units, distinctProducts} shape the
+ * History table shows. Archived rows carry no productId, so distinctness keys on the resolved
+ * product name, falling back to the scanned code for unidentified rows ("Unidentified item") so two
+ * different unknown codes still count as two distinct items rather than collapsing into one.
+ */
+export function aggregateHistoryRows(rows: HistoryScanRow[]): SessionAggregate {
+  const distinct = new Set<string>();
+  let units = 0;
+  for (const row of rows) {
+    distinct.add(row.productName === "Unidentified item" ? `code:${row.code}` : `name:${row.productName}`);
+    units += row.quantityDelta;
+  }
+  return { units, distinctProducts: distinct.size };
+}

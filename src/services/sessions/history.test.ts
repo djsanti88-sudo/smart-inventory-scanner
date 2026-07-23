@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aggregateSessionCounts } from "@/services/sessions/history";
+import { aggregateSessionCounts, aggregateHistoryRows } from "@/services/sessions/history";
 
 describe("aggregateSessionCounts", () => {
   it("returns zeros for an empty session", () => {
@@ -35,5 +35,28 @@ describe("aggregateSessionCounts", () => {
       { productId: "p2", quantity: 4 },
     ];
     expect(aggregateSessionCounts(rows)).toEqual({ units: 4, distinctProducts: 2 });
+  });
+});
+
+describe("aggregateHistoryRows (archived past-session rows)", () => {
+  it("returns zeros for an empty archive", () => {
+    expect(aggregateHistoryRows([])).toEqual({ units: 0, distinctProducts: 0 });
+  });
+
+  it("sums quantityDelta and keys distinctness on product name", () => {
+    const rows = [
+      { code: "111", productName: "Michelin Defender", quantityDelta: 2 },
+      { code: "111", productName: "Michelin Defender", quantityDelta: 1 },
+      { code: "222", productName: "Falken Wildpeak", quantityDelta: 4 },
+    ];
+    expect(aggregateHistoryRows(rows)).toEqual({ units: 7, distinctProducts: 2 });
+  });
+
+  it("two different unidentified codes stay two distinct items (fallback key is the code)", () => {
+    const rows = [
+      { code: "AAA", productName: "Unidentified item", quantityDelta: 1 },
+      { code: "BBB", productName: "Unidentified item", quantityDelta: 1 },
+    ];
+    expect(aggregateHistoryRows(rows)).toEqual({ units: 2, distinctProducts: 2 });
   });
 });

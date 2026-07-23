@@ -7,11 +7,13 @@ import { getMockDb } from "@/services/mockDb";
 import { exportSessionCounts } from "@/services/csvExport";
 import { downloadCsv } from "@/services/exportFormats";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
-import { aggregateSessionCounts, type SessionCountRow } from "@/services/sessions/history";
+import { aggregateSessionCounts, aggregateHistoryRows, type SessionCountRow, type SessionAggregate } from "@/services/sessions/history";
+import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import { useScanStore } from "@/stores/scanStore";
 import type { InventoryCount, InventorySession } from "@/types";
 
 const COUNTS_UNAVAILABLE = "n/a";
+const EMPTY_HISTORY: SessionHistoryEntry[] = [];
 
 // History page: every saved session (active, completed, locked), newest first, with unit/product
 // totals and a per-session counts CSV download. The active session's numbers come straight from the
@@ -20,16 +22,26 @@ const COUNTS_UNAVAILABLE = "n/a";
 // directly (the real backing store there); cloud has no equivalent read capability on SyncTarget, so
 // past-session counts on cloud are honestly "n/a" rather than a fake 0 (mirrors that page's
 // TIMELINE_UNAVAILABLE pattern for a capability that data source does not support).
+//
+// Owner feature (2026-07-22): sessions also AUTO-SAVE. The store archives every session with at
+// least one scan into `sessionHistory` the moment it ends or rotates away (scanStore
+// archiveCurrentSessionIfAny), persisted across reloads on both backends. That archive is the
+// PREFERRED source for a past session's numbers here (it survives a mock-DB reset and needs no
+// cloud read), with the data-source reads above kept as the fallback; archived sessions the data
+// source no longer knows about still get a row, so a past session always leaves a trace.
 export default function HistoryPage() {
   const router = useRouter();
   const currentSession = useScanStore((s) => s.currentSession);
   const listSessions = useScanStore((s) => s.listSessions);
   const finalCounts = useScanStore((s) => s.finalCounts);
   const products = useScanStore((s) => s.products);
+  // Guard: mocked/legacy states may lack the field; the real store always defines it.
+  const sessionHistory = useScanStore((s) => s.sessionHistory) ?? EMPTY_HISTORY;
   const accessLevel = useAccessLevel();
   const cloudBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
 
   const sessions = listSessions();
+  const historyBySessionId = new Map(sessionHistory.map((e) => [e.sessionId, e]));
 
   // Past-session mock counts, fetched once per session id (not reactive - matches the detail page's
   // non-reactive timeline fetch). Keyed by sessionId -> rows, or null while unavailable/unfetched.
@@ -37,7 +49,10 @@ export default function HistoryPage() {
 
   useEffect(() => {
     if (cloudBackend) return; // cloud has no getSessionCounts; nothing to fetch here
-    const missing = sessions.filter((s) => s.id !== currentSession?.id && !(s.id in pastCounts));
+    // Sessions with an auto-saved archive never need the mock read - the archive is authoritative.
+    const missing = sessions.filter(
+      (s) => s.id !== currentSession?.id && !historyBySessionId.has(s.id) && !(s.id in pastCounts),
+    );
     if (missing.length === 0) return;
     let cancelled = false;
     void Promise.resolve().then(() => {
@@ -83,12 +98,42 @@ export default function HistoryPage() {
     return pastCounts[session.id] ?? null; // null = not fetched yet (still loading)
   }
 
+  // Preferred numbers for a PAST session: its auto-saved archive (survives reloads and mock-DB
+  // resets on every backend). Falls back to the data-source counts read when no archive exists
+  // (pre-feature sessions), and to the honest "n/a" while that fallback is still loading.
+  function aggregateFor(session: InventorySession, counts: InventoryCount[] | null): SessionAggregate | null {
+    if (session.id !== currentSession?.id) {
+      const archived = historyBySessionId.get(session.id);
+      if (archived) return aggregateHistoryRows(archived.scanRows);
+    }
+    if (counts === null) return null;
+    return aggregateSessionCounts(counts as SessionCountRow[]);
+  }
+
   function exportSession(session: InventorySession, counts: InventoryCount[]) {
     const csv = exportSessionCounts(counts, products, accessLevel === "platform");
     downloadCsv(csv, `session-${session.id}-counts`);
   }
 
-  const rows = [...sessions].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  // Auto-saved sessions the data source no longer returns (e.g. the mock DB reset by a reload) still
+  // deserve a row - synthesize a completed session from the archive so its trace stays visible.
+  const knownIds = new Set(sessions.map((s) => s.id));
+  const archivedOnly: InventorySession[] = sessionHistory
+    .filter((e) => !knownIds.has(e.sessionId))
+    .map((e) => ({
+      id: e.sessionId,
+      businessId: "",
+      name: "Saved session",
+      location: "",
+      status: "completed",
+      startedAt: e.startedAt,
+      completedAt: e.endedAt,
+      createdBy: "",
+      notes: "",
+      syncStatus: "synced",
+    } as InventorySession));
+
+  const rows = [...sessions, ...archivedOnly].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
@@ -116,8 +161,7 @@ export default function HistoryPage() {
             ) : (
               rows.map((session) => {
                 const counts = countsFor(session);
-                const rowsForAggregate: SessionCountRow[] = counts ?? [];
-                const { units, distinctProducts } = aggregateSessionCounts(rowsForAggregate);
+                const aggregate = aggregateFor(session, counts);
                 const started = new Date(session.startedAt);
                 const dateLabel = Number.isNaN(started.getTime()) ? "Unknown" : started.toLocaleDateString();
                 const hourLabel = Number.isNaN(started.getTime()) ? "" : started.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -139,10 +183,10 @@ export default function HistoryPage() {
                     <td className="px-4 py-2">{dateLabel}</td>
                     <td className="whitespace-nowrap px-4 py-2">{hourLabel}</td>
                     <td className="px-4 py-2" data-testid={`history-units-${session.id}`}>
-                      {counts === null ? COUNTS_UNAVAILABLE : units}
+                      {aggregate === null ? COUNTS_UNAVAILABLE : aggregate.units}
                     </td>
                     <td className="px-4 py-2" data-testid={`history-products-${session.id}`}>
-                      {counts === null ? COUNTS_UNAVAILABLE : distinctProducts}
+                      {aggregate === null ? COUNTS_UNAVAILABLE : aggregate.distinctProducts}
                     </td>
                     <td className="px-4 py-2">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${badge.className}`}>

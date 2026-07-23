@@ -87,6 +87,7 @@ describe("firstScanAt set-once", () => {
       feedbackEvents: s.feedbackEvents,
       countSnapshots: s.countSnapshots,
       firstScanAt: s.firstScanAt,
+      sessionHistory: s.sessionHistory,
     };
     const platformBlob = buildPersistedScanState(persistable, "platform");
     const businessBlob = buildPersistedScanState(persistable, "business");

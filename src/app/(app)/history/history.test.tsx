@@ -232,4 +232,64 @@ describe("HistoryPage", () => {
     render(<HistoryPage />);
     expect(screen.getByTestId("history-units-s2")).toHaveTextContent("4");
   });
+
+  // Owner feature (2026-07-22): sessions auto-save. A past session's numbers come from its archived
+  // sessionHistory entry - synchronously, no data-source fetch, surviving a mock-DB reset.
+  it("a past session with an auto-saved archive shows the archive's units/products immediately (no n/a, no mock fetch)", () => {
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    const s2 = session({ id: "s2", status: "completed", startedAt: "2026-07-19T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1, s2],
+      finalCounts: [],
+      products: [],
+      sessionHistory: [
+        {
+          sessionId: "s2",
+          startedAt: "2026-07-19T10:00:00.000Z",
+          endedAt: "2026-07-19T11:00:00.000Z",
+          scanRows: [
+            { time: "2026-07-19T10:01:00.000Z", code: "111", productName: "Michelin Defender", quantityDelta: 2 },
+            { time: "2026-07-19T10:02:00.000Z", code: "222", productName: "Falken Wildpeak", quantityDelta: 1 },
+          ],
+          totalScans: 2,
+          totalUnits: 3,
+        },
+      ],
+    };
+    render(<HistoryPage />);
+    // Synchronous, from the archive - never "n/a" and never dependent on the mock DB read.
+    expect(screen.getByTestId("history-units-s2")).toHaveTextContent("3");
+    expect(screen.getByTestId("history-products-s2")).toHaveTextContent("2");
+    expect(mocks.getSessionCounts).not.toHaveBeenCalledWith("s2");
+  });
+
+  it("an archived session the data source no longer knows about still gets a row (auto-saved trace) and navigates on click", () => {
+    const s1 = session({ id: "s1", status: "active", startedAt: "2026-07-20T10:00:00.000Z" });
+    mocks.storeState = {
+      businessId: "b1",
+      currentSession: s1,
+      sessions: [],
+      listSessions: () => [s1], // the archived session is NOT returned by the data source
+      finalCounts: [],
+      products: [],
+      sessionHistory: [
+        {
+          sessionId: "gone-1",
+          startedAt: "2026-07-18T09:00:00.000Z",
+          endedAt: "2026-07-18T09:30:00.000Z",
+          scanRows: [{ time: "2026-07-18T09:05:00.000Z", code: "333", productName: "Unidentified item", quantityDelta: 1 }],
+          totalScans: 1,
+          totalUnits: 1,
+        },
+      ],
+    };
+    render(<HistoryPage />);
+    expect(screen.getByTestId("history-row-gone-1")).toBeInTheDocument();
+    expect(screen.getByTestId("history-units-gone-1")).toHaveTextContent("1");
+    fireEvent.click(screen.getByTestId("history-row-gone-1"));
+    expect(mocks.push).toHaveBeenCalledWith("/sessions/gone-1");
+  });
 });

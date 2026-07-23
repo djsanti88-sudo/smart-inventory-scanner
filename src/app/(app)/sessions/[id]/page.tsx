@@ -14,7 +14,9 @@ import {
 import { useAccessLevel } from "@/services/security/useAccessLevel";
 import { getDb } from "@/lib/firebaseClient";
 import { useScanStore } from "@/stores/scanStore";
+import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
 import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
+import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
 import type { Product, ScanEvent } from "@/types";
 
 const TIMELINE_UNAVAILABLE = "Session timeline is not available for this data source.";
@@ -87,6 +89,7 @@ export default function SessionDetailPage() {
   const listSessions = useScanStore((state) => state.listSessions);
   const finalCounts = useScanStore((state) => state.finalCounts);
   const getProduct = useScanStore((state) => state.getProduct);
+  const sessionHistory: SessionHistoryEntry[] | undefined = useScanStore((state) => state.sessionHistory);
   const accessLevel = useAccessLevel();
   const [timeline, setTimeline] = useState<{
     sessionId: string;
@@ -106,6 +109,14 @@ export default function SessionDetailPage() {
   // preferred source. For any other (past) session, finalCounts holds nothing (it is scoped to the
   // live session), so counts are derived from the same timeline read the page already performs.
   const isCurrentSession = currentSession?.id === sessionId;
+  // Owner feature (2026-07-22): a PAST session's auto-saved archive (scanStore sessionHistory) is the
+  // durable trace of what was scanned. When the live data source has no timeline for it (mock DB
+  // reset by a reload; a source without the read capability), the archived scan spreadsheet renders
+  // in the timeline's place instead of an empty/error state.
+  const historyEntry = !isCurrentSession
+    ? (sessionHistory ?? []).find((e) => e.sessionId === sessionId)
+    : undefined;
+  const showArchivedScans = !!historyEntry && (error !== null || (events !== null && events.length === 0));
   const countsUnavailable = !isCurrentSession && error === TIMELINE_UNAVAILABLE;
   const countRows: SessionCountRow[] | null = isCurrentSession
     ? finalCounts
@@ -198,6 +209,9 @@ export default function SessionDetailPage() {
         <SessionCountsTable rows={countRows ?? []} />
       )}
 
+      {showArchivedScans && historyEntry ? (
+        <ArchivedSessionScans entry={historyEntry} />
+      ) : (
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
         <table className="w-full min-w-[36rem] border-collapse text-left text-sm" data-testid="session-timeline-table">
           <thead className="border-b border-zinc-200 bg-zinc-50 font-semibold text-zinc-700">
@@ -242,6 +256,7 @@ export default function SessionDetailPage() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
