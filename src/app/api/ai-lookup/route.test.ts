@@ -18,6 +18,16 @@ vi.mock("@/server/catalog/masterAppend", () => ({
   appendMasterCatalogEntry: async () => "skipped_human" as const,
 }));
 
+// Same hazard as masterAppend above, one rung earlier in the ladder (pipeline.ts's free
+// master-catalog peek, c0be3b8): without this mock, `lookupMasterCatalog` calls the real Admin
+// SDK (getAdminDb) on every decode compute in this suite, producing the identical unhandled
+// "Could not load the default credentials" rejections - TEST SAFETY: no automated test may reach
+// live Firestore. Stubbed to an honest "miss" (its documented fail-open shape); the rung's own
+// wiring/gating is proven separately in masterLookup.test.ts and pipeline.test.ts.
+vi.mock("@/server/catalog/masterLookup", () => ({
+  lookupMasterCatalog: async () => ({ kind: "miss" as const }),
+}));
+
 // TASK T8b: route.ts calls `ladderStorage()` (no dir arg) which defaults to `process.cwd()` - the REAL
 // repo root. A Go-UPC rung that genuinely hits writes a usage counter via that storage, which would
 // pollute the actual repo working tree on every test run. Redirect ladderStorage() at a per-process tmp
