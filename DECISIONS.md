@@ -321,3 +321,25 @@ Why each choice was made. Newest decisions at the bottom of each section.
   rule); SKU is a human-assigned identity in their catalog. Guardrails unchanged: barcode conflicts
   never re-point (error list), idempotent re-import, preview + explicit confirm. Revisit if
   multi-tenant catalogs ever share SKUs across businesses.
+
+## Master-catalog trust: suggestions fall through, only strong verifieds replay (owner, 2026-07-22)
+- `ladder_verified_strong` master-catalog entries still replay as VERIFIED - the append gate already
+  demanded app-verified exact-code evidence >= 0.8 on a public barcode before writing one, so replaying
+  it is safe. A suggestion-class master-catalog hit NEVER settles the ladder by itself anymore: it
+  records `master_catalog_suggestion_fallthrough` and the scan falls through to the remaining rungs.
+- Rationale: the rung was self-poisoning. Its own 0.85-confidence suggestion writes were being replayed
+  forever as settled answers, permanently blocking the paid rungs from ever re-attempting a real
+  decode for that code.
+
+## Deployment model: GitHub disconnected, manual/CLI deploys only (owner, 2026-07-22)
+- GitHub is disconnected from Vercel; deploys are manual/CLI only going forward (owner order, in
+  response to tonight's deploy-chaos incident). Previews intentionally stay mock/no-login -
+  `NEXT_PUBLIC_FIREBASE_*` is deliberately absent from the Preview environment. Production promote is
+  always an explicit owner action, never automatic on push/merge.
+
+## Auto-resolve stamping must never override a deliberate human hold (owner, 2026-07-22)
+- Post-decode resolved-stamping must never fire on rows a store safety gate deliberately holds open -
+  `suggest_link` fuzzy-match candidates and dedup/alias conflicts stay visible in Needs Review even
+  after a decode result lands, until a human actually resolves them. Fixed on
+  `fix/rung-trust-and-resolve-stamp` by skipping the stamp for rows carrying `suggestedLinkProductId`
+  or `lastAliasConflicts`.
