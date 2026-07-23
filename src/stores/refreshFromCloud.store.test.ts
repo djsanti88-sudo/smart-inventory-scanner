@@ -111,6 +111,36 @@ describe("refreshFromCloud", () => {
     expect(store.getState().products.find((p) => p.id === "p-edited")?.name).toBe("Locally Corrected Name");
   });
 
+  it("NEVER double-counts a DELETED product: the backend's stale count row is not re-added alongside the repointed provisional (reviewed defect 2026-07-22)", async () => {
+    // The backend still holds the pre-delete snapshot: the product active, its count row at qty 2.
+    const remoteProduct = { ...product("p-del", "Junk Widget"), primaryBarcode: "888888888881" };
+    const loadBusinessData = vi.fn().mockResolvedValue({
+      products: [remoteProduct],
+      aliases: [],
+      sessions: [],
+      counts: [count("s1", "p-del", 2)],
+    });
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData });
+    store.setState({
+      businessContextReady: true, businessDataLoaded: true, businessId: "biz1", userId: "u1", sessionId: "s1",
+      products: [{ ...remoteProduct }],
+      finalCounts: [count("s1", "p-del", 2)],
+    });
+    const total = () => store.getState().finalCounts.reduce((sum, c) => sum + c.quantity, 0);
+
+    // Delete repoints the 2 units onto a minted "Unidentified item" provisional (quantity invariant).
+    store.getState().deleteProduct("p-del");
+    expect(total()).toBe(2);
+
+    await store.getState().refreshFromCloud();
+
+    // The remote row keyed (s1, p-del) must NOT come back next to the repointed provisional row
+    // (2 must never become 4), and the archived product must stay archived, not resurrect as active.
+    expect(total()).toBe(2);
+    expect(store.getState().finalCounts.some((c) => c.productId === "p-del")).toBe(false);
+    expect(store.getState().products.find((p) => p.id === "p-del")?.status).toBe("archived");
+  });
+
   it("does NOT touch scanFeed (scan events are read via getScanEventsBySession, not this action)", async () => {
     const loadBusinessData = vi.fn().mockResolvedValue({ products: [], aliases: [], sessions: [], counts: [] });
     const store = createTestScanStore({ cloudBackend: true, loadBusinessData });

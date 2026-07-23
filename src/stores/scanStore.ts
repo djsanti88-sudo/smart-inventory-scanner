@@ -1878,6 +1878,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const productsById = new Map(cur.products.map((p) => [p.id, p]));
           for (const p of data.products) {
             if (pendingProductIds.has(p.id)) continue; // guard: unsynced local edit wins
+            // Delete guard (reviewed defect 2026-07-22): a locally-ARCHIVED product is a delete this
+            // device performed; a remote snapshot loaded before the archive op drained still says
+            // "active". Taking the server's word here would silently resurrect the deleted product
+            // (and defeat the archived-count exclusion below). Deletes are local-authoritative; the
+            // only un-archive path is this device's own undoDeleteProduct.
+            if (productsById.get(p.id)?.status === "archived" && p.status !== "archived") continue;
             productsById.set(p.id, p);
           }
           const aliasesById = new Map(cur.aliases.map((a) => [a.id, a]));
@@ -1905,12 +1911,24 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const countsByKey = new Map(cur.finalCounts.map((c) => [`${c.sessionId}|${c.productId}`, c]));
           for (const remote of data.counts) {
             const key = `${remote.sessionId}|${remote.productId}`;
+            // Delete-transfer guard (reviewed defect 2026-07-22): a remote count row keyed to a
+            // locally-archived product is the backend's not-yet-transferred (or stale-snapshot)
+            // copy of a DELETED product's quantity. deleteProductsInternal already repointed those
+            // units onto a minted provisional, so re-adding the remote row here would double-count
+            // them (2 became 4). productsById is the post-merge map, and the archived-product
+            // merge guard above keeps a local archive authoritative, so this holds even after the
+            // transfer ops have drained.
+            if (productsById.get(remote.productId)?.status === "archived") continue;
             const local = countsByKey.get(key);
+            // pendingCountKeys deliberately does NOT require a local row: the delete-transfer's
+            // zero-out increment targets a (sessionId, productId) row that no longer exists locally
+            // (it was repointed onto the provisional), yet the remote copy must still not be
+            // re-added while that op is pending.
             const localIsPending =
-              !!local &&
-              (pendingCountKeys.has(key) ||
-                pendingCountEntityIds.has(local.id) ||
-                pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`));
+              pendingCountKeys.has(key) ||
+              (!!local &&
+                (pendingCountEntityIds.has(local.id) ||
+                  pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`)));
             if (localIsPending) continue; // guard: unsynced local wins
             countsByKey.set(key, remote);
           }
@@ -6359,6 +6377,43 @@ function deleteProductsInternal(
     mintedProvisionalIds,
   };
 
+  // SYNC THE REPOINT (reviewed defect 2026-07-22): the transfer above is local-only; without these
+  // ops the backend still holds the count row keyed (sessionId, deletedProductId), and the next
+  // refreshFromCloud would re-add it ALONGSIDE the repointed provisional row - doubling the
+  // quantity (2 became 4). Ship the archived product, the minted provisional, and a zero-out /
+  // re-add increment PAIR per transferred count row (net zero per session: quantity is
+  // transferred, never created). The synthetic scanEventId only marks the transfer in the remote
+  // row's trace; the appliedKeys dedupe makes a re-drained op a safe no-op.
+  const bid = state.businessId;
+  const syncOps: PendingSyncItem[] = [];
+  for (const p of targetProducts) {
+    const archived: Product = { ...p, status: "archived", verified: false, updatedBy: "human" };
+    syncOps.push(
+      makeQueueItem({ idFactory, now, businessId: bid, sessionId: state.sessionId, entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: archived, idempotencyKey: buildIdempotencyKey(bid, state.sessionId, `${p.id}:delete:archive`, "SAVE_PRODUCT"), scanEventId: null }),
+    );
+  }
+  for (const prov of provisionalByProduct.values()) {
+    syncOps.push(
+      makeQueueItem({ idFactory, now, businessId: bid, sessionId: state.sessionId, entityType: "Product", entityId: prov.id, operation: "SAVE_PRODUCT", payload: prov, idempotencyKey: buildIdempotencyKey(bid, state.sessionId, `${prov.id}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
+    );
+  }
+  for (const c of targetCounts) {
+    if (c.quantity <= 0) continue; // zero rows are dropped locally and carry nothing to transfer
+    const prov = provisionalByProduct.get(c.productId);
+    const outKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-out`, "INCREMENT_COUNT");
+    const outPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: c.productId, scanEventId: `${c.id}:delete-transfer`, quantityDelta: -c.quantity, idempotencyKey: outKey };
+    syncOps.push(
+      makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: outPayload, idempotencyKey: outKey, scanEventId: null }),
+    );
+    if (prov) {
+      const inKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-in`, "INCREMENT_COUNT");
+      const inPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: prov.id, scanEventId: `${c.id}:delete-transfer`, quantityDelta: c.quantity, idempotencyKey: inKey };
+      syncOps.push(
+        makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: inPayload, idempotencyKey: inKey, scanEventId: null }),
+      );
+    }
+  }
+
   set((s) => ({
     // Archive + un-verify so the deterministic resolver/matcher (verified === true only) stops matching it.
     products: [
@@ -6388,8 +6443,10 @@ function deleteProductsInternal(
           }
         : e,
     ),
+    pendingSyncQueue: [...s.pendingSyncQueue, ...syncOps],
     lastProductDeleteBackup: backup,
   }));
+  get().syncPending(); // drain the transfer ops now (same pattern as enqueueAndSync)
 
   for (const p of targetProducts) {
     emitAudit({ entityType: "Product", entityId: p.id, action: auditAction, metadata: { name: p.name, codes: [...codes].join(" | "), aliasesDeactivated: targetAliases.filter((a) => a.productId === p.id).length } });

@@ -85,6 +85,28 @@ describe("scanStore - deleteProduct preserves total counted quantity (law: scan 
     expect(totalUnits(store)).toBe(3);
   });
 
+  it("SYNCS the delete-transfer to the backend: old count row zeroed, provisional row counted, product archived (reviewed defect 2026-07-22: unsynced repoint let refreshFromCloud double the quantity)", () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db });
+    const p = addCountedProduct(store, "888888888881", "Junk Auto-Add");
+    store.getState().processScan("888888888881"); // qty 2
+    const sessionId = store.getState().sessionId;
+    expect(db.getServerCount(sessionId, p.id)?.quantity).toBe(2); // backend saw the counts
+
+    store.getState().deleteProduct(p.id);
+
+    const prov = store.getState().products.find(
+      (x) => x.provisional === true && x.status !== "archived" && x.primaryBarcode === "888888888881",
+    )!;
+    // The backend row keyed to the deleted product is zeroed, the provisional carries the 2 units,
+    // and the product itself is archived server-side - so a later refreshFromCloud can never
+    // resurrect the deleted product's quantity alongside the repointed provisional row.
+    expect(db.getServerCount(sessionId, p.id)?.quantity).toBe(0);
+    expect(db.getServerCount(sessionId, prov.id)?.quantity).toBe(2);
+    expect(db.snapshot().products[p.id]?.status).toBe("archived");
+    expect(db.snapshot().products[prov.id]).toBeDefined();
+  });
+
   it("a deleted product with ZERO counted quantity mints nothing (no ghost provisionals)", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const p = addCountedProduct(store, "777777777775", "Zero Qty");
