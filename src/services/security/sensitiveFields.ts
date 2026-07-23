@@ -46,10 +46,17 @@ export function stripSensitive<T>(value: T): T {
  * primaryBarcode/gtin/upc/ean are included here. Stripping a shop's own scanned identifier from that
  * same device's own localStorage persistence protected nothing and instead destroyed the shop's own
  * data (the Products/Counts "Barcode" column showed "-" after every reload). The reusable alias/catalog
- * corpus (aliases, vendorCodes, the master catalog) stays platform-only and is unaffected by this. */
+ * corpus (aliases, vendorCodes, the master catalog) stays platform-only and is unaffected by this.
+ * TOP-LEVEL LAW FIX (2026-07-22): `provisional` is a LOCAL boolean flag (never a barcode/alias/catalog
+ * datum), and it MUST survive the customer persist split: with primaryBarcode persisted but provisional
+ * stripped, a reload left the row findable by ensureProvisionalCount's idempotent guard (which returned
+ * early, counting nothing) yet invisible to processScan's re-scan bridge (which requires
+ * p.provisional === true) - so re-scanning the same code after a reload appeared on the feed but never
+ * counted (scan 2 = count 1). Proof: src/stores/rescanAfterReload.store.test.ts. */
 export const CUSTOMER_SAFE_PRODUCT_FIELDS = [
   "id", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
   "primaryBarcode", "gtin", "upc", "ean",
+  "provisional",
 ] as const;
 
 // A customer's OWN pending Needs-Review item — only the fields they need to SEE + ACT on it, plus their
