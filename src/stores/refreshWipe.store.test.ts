@@ -111,6 +111,58 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store.getState().scanFeed.length).toBe(3);
   });
 
+  it("(a4) unsynced local counts from a DIFFERENT session than the restored one must not silently vanish (pendingSyncQueue-referenced + unsynced currentSession rows)", async () => {
+    // The loader's pending-aware seed only ever looked at rows with sessionId === restored.id, so
+    // local finalCounts rows belonging to any OTHER session were dropped outright by the restore
+    // (not merged, not preserved - just gone), even when those rows carried unsynced work: either a
+    // pendingSyncQueue item still references them, or they belong to the current (unsynced) session
+    // which the remote does not yet know about. Widen the seed so unsynced local work never
+    // silently vanishes on a business-context refresh.
+    const restoredSession: InventorySession = {
+      id: "s-restored", businessId: "b1", name: "Restored Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const loader = vi.fn()
+      .mockResolvedValueOnce({ products: [], aliases: [], sessions: [], counts: [] }) // first sign-in: empty tenant
+      .mockResolvedValue({ products: [], aliases: [], sessions: [restoredSession], counts: [] }); // remote knows nothing about the other session
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: loader });
+
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 0)); // let the first (empty) load settle
+
+    // Row A: belongs to a DIFFERENT session ("s-other"), still referenced by an unsynced pendingSyncQueue item.
+    const otherSessionCount: InventoryCount = { ...count("p-other", 2, ["ev-other"]), sessionId: "s-other", syncStatus: "pending" };
+    const pendingForOther: PendingSyncItem = {
+      id: "pend-other", businessId: "b1", sessionId: "s-other", entityType: "InventoryCount",
+      entityId: "count-p-other", operation: "INCREMENT_COUNT",
+      payload: { businessId: "b1", sessionId: "s-other", productId: "p-other", quantityDelta: 2, scanEventId: "ev-other", aliasUsed: "555" },
+      status: "pending", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t",
+      idempotencyKey: "k-other", scanEventId: "ev-other",
+    };
+    // Row B: belongs to cur.currentSession, which is itself unsynced and different from the restored session.
+    const unsyncedCurrentSession: InventorySession = {
+      id: "s-current", businessId: "b1", name: "Unsynced Session", location: "Bay B", status: "active",
+      startedAt: "2026-01-02T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "pending",
+    };
+    const currentSessionCount: InventoryCount = { ...count("p-current", 1, ["ev-current"]), sessionId: "s-current", syncStatus: "pending" };
+
+    store.setState({
+      currentSession: unsyncedCurrentSession,
+      sessionId: "s-current",
+      finalCounts: [otherSessionCount, currentSessionCount],
+      pendingSyncQueue: [pendingForOther],
+    });
+
+    // REFRESH: remote answers with a DIFFERENT active session (restoredSession), which is what would
+    // normally happen if this device's own unsynced session had not yet reached the backend.
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 10)); // let the loader resolve and apply
+
+    const keys = store.getState().finalCounts.map((c) => `${c.sessionId}|${c.productId}`);
+    expect(keys, "pendingSyncQueue-referenced row from another session survives").toContain("s-other|p-other");
+    expect(keys, "unsynced currentSession's row survives").toContain("s-current|p-current");
+  });
+
   it("(e) TRUE refresh: a persisted blob rehydrated into a FRESH store must still pass the same-tenant guard (userId round-trips)", () => {
     // The in-lifetime test (a) cannot catch a guard keyed on state the persist layer drops: on a real
     // page load the store starts EMPTY and only holds what rehydrate restores. Simulate the full

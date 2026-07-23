@@ -1390,9 +1390,26 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                       .filter((key): key is string => !!key),
                   );
                   const pendingCountEntityIds = new Set(pendingCountItems.map((it) => it.entityId));
+                  // Seed from the restored session's rows PLUS any row this device still has unsynced
+                  // work for: one a pendingSyncQueue item references (any sessionId), or one belonging
+                  // to cur.currentSession when that session itself has not synced yet. Otherwise a local
+                  // row from a different/unsynced session (e.g. this device's own active session, when
+                  // the remote answers with a different restored session) was silently dropped instead
+                  // of merged - unsynced local work would vanish on a business-context refresh.
+                  const pendingSessionIds = new Set(cur.pendingSyncQueue.map((it) => it.sessionId));
+                  const unsyncedCurrentSessionId =
+                    cur.currentSession && cur.currentSession.syncStatus !== "synced" ? cur.currentSession.id : null;
                   const countsByKey = new Map(
                     cur.finalCounts
-                      .filter((c) => c.sessionId === restored.id)
+                      .filter(
+                        (c) =>
+                          c.sessionId === restored.id ||
+                          pendingSessionIds.has(c.sessionId) ||
+                          pendingCountKeys.has(`${c.sessionId}|${c.productId}`) ||
+                          pendingCountEntityIds.has(c.id) ||
+                          pendingCountEntityIds.has(`${c.sessionId}_${c.productId}`) ||
+                          (unsyncedCurrentSessionId !== null && c.sessionId === unsyncedCurrentSessionId),
+                      )
                       .map((c) => [`${c.sessionId}|${c.productId}`, c]),
                   );
                   for (const remote of data.counts) {
