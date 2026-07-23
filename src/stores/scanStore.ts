@@ -642,8 +642,9 @@ export interface ScanState {
   /** Sign-out: wipes tenant state to the anon baseline, clears the selected-business key, removes the
    *  signed-out user's per-uid localStorage key, and re-points persist at the anon key. */
   resetForSignOut: () => void;
-  /** Re-point persist at this uid's key and rehydrate (no legacy-blob migration). */
-  rehydrateForUid: (uid: string) => void;
+  /** Re-point persist at this uid's key and rehydrate (no legacy-blob migration). Returns a promise
+   *  that resolves once rehydrate has applied, so callers can await it before reading state. */
+  rehydrateForUid: (uid: string) => Promise<void>;
   /** Owner-initiated: migrate the legacy pre-account blob into this uid's key, then rehydrate. */
   adoptLegacyLocalData: (uid: string) => void;
   startSession: (name: string, location: string) => void;
@@ -1287,23 +1288,39 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       setBusinessContext: (businessId, userId) => {
         const needsLoad = cloudBackend && !!deps.loadBusinessData;
-        // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
-        // finalCounts linger when no session restores, so a context switch must REPLACE all four or
-        // the previous tenant's rows bleed through (two users OR one user with two businesses).
-        const cleared = emptyTenantState();
-        set({
-          businessId,
-          userId,
-          businessContextReady: true,
-          businessDataLoaded: !needsLoad,
-          lastSyncError: null,
-          scanFeed: cleared.scanFeed,
-          finalCounts: cleared.finalCounts,
-          needsReviewQueue: cleared.needsReviewQueue,
-          settings: cleared.settings,
-          firstScanAt: cleared.firstScanAt,
-          recentLocations: cleared.recentLocations,
-        });
+        // REFRESH GUARD (data-loss fix): a page refresh re-resolves the SAME (businessId, userId)
+        // this store already holds and calls setBusinessContext again (BusinessContextGate runs on
+        // every mount). That is NOT a tenant switch, so it must never wipe scanFeed/finalCounts/
+        // needsReviewQueue/settings/firstScanAt/recentLocations - loadBusinessData can never restore
+        // scanFeed/needsReviewQueue (Firestore has no collections for them), so wiping here loses
+        // unsynced scans and open reviews on every reload. Only an ACTUAL tenant/user change (the
+        // isolation law below) replaces tenant state.
+        const sameTenant = get().businessId === businessId && get().userId === userId;
+        if (sameTenant) {
+          set({
+            businessContextReady: true,
+            businessDataLoaded: !needsLoad,
+            lastSyncError: null,
+          });
+        } else {
+          // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
+          // finalCounts linger when no session restores, so a context switch must REPLACE all four or
+          // the previous tenant's rows bleed through (two users OR one user with two businesses).
+          const cleared = emptyTenantState();
+          set({
+            businessId,
+            userId,
+            businessContextReady: true,
+            businessDataLoaded: !needsLoad,
+            lastSyncError: null,
+            scanFeed: cleared.scanFeed,
+            finalCounts: cleared.finalCounts,
+            needsReviewQueue: cleared.needsReviewQueue,
+            settings: cleared.settings,
+            firstScanAt: cleared.firstScanAt,
+            recentLocations: cleared.recentLocations,
+          });
+        }
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
           // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
@@ -1414,18 +1431,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       rehydrateForUid: (uid: string) => {
-        if (typeof window === "undefined" || !window.localStorage) return;
+        if (typeof window === "undefined" || !window.localStorage) return Promise.resolve();
         // Re-point storage at this uid's key and rehydrate from it. NO legacy migration here:
         // adopting the pre-account blob is an explicit owner action (adoptLegacyLocalData), never an
         // automatic side effect of signing in (shared-browser inheritance hazard).
-        if (!deps.persistName) return; // non-persisted test store: nothing to re-point
+        if (!deps.persistName) return Promise.resolve(); // non-persisted test store: nothing to re-point
         const persistApi = (useScanStore as unknown as {
           persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
         }).persist;
         if (persistApi) {
           persistApi.setOptions({ name: persistKeyForUid(uid) });
-          void persistApi.rehydrate();
+          // Returned so callers (BusinessContextGate) can AWAIT rehydrate before calling
+          // setBusinessContext - only then does the store's businessId/userId reflect the persisted
+          // state, letting the same-tenant refresh guard above actually match on a real refresh.
+          return Promise.resolve(persistApi.rehydrate());
         }
+        return Promise.resolve();
       },
 
       adoptLegacyLocalData: (uid: string) => {
@@ -3691,9 +3712,39 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         let counts = st0.finalCounts;
         let qty = 0;
         let countId: string | null = null;
+        // LAW FIX: no matching scanFeed row exists for this code (e.g. a persist-trimmed feed, or a
+        // review whose backing event was otherwise lost) is NOT a reason to silently count nothing -
+        // this function still mints the provisional product below, and a scan that already went to
+        // Needs Review must still count once it is resolved. Mint a SYNTHETIC BACKING EVENT (same
+        // precedent as markWrong's feed-trim safety net, scanStore.ts ~5622) so replayLedgerCounts can
+        // reproduce the quantity from feed events alone - never a naked quantity bump.
         const countedEvent = ev
           ? { ...ev, matchedProductId: provId, status: "known" as const, quantityDelta: 1 }
-          : null;
+          : ({
+              id: idFactory(),
+              businessId: st0.businessId,
+              sessionId: st0.sessionId,
+              rawCode: code,
+              cleanCode: code,
+              normalizedCandidates: [],
+              matchedProductId: provId,
+              matchType: "unknown",
+              status: "known" as const,
+              resolverStatus: "needs_review",
+              codeType: ct,
+              reason: reason || "Recovered count (scan record was missing)",
+              quantityDelta: 1,
+              quantityAfterScan: 0,
+              createdAt: now(),
+              source: "scan",
+              notes: reason || "Recovered count (scan record was missing)",
+              syncStatus: "pending",
+              syncError: null,
+              idempotencyKey: "",
+            } as ScanEvent);
+        if (!ev) {
+          countedEvent.idempotencyKey = buildIdempotencyKey(st0.businessId, st0.sessionId, countedEvent.id, "INCREMENT_COUNT");
+        }
         if (countedEvent) {
           const r = incrementInventoryCount(counts, countedEvent, idFactory);
           counts = r.counts.map((c) =>
@@ -3703,6 +3754,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           );
           qty = r.count.quantity;
           countId = r.count.id;
+          countedEvent.quantityAfterScan = qty;
         }
         set((st) => ({
           products: [...st.products, provProduct],
@@ -3722,27 +3774,32 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 }
               : r,
           ),
-          scanFeed: st.scanFeed.map((e) =>
-            ev && e.id === ev.id
-              ? {
-                  ...e,
-                  matchedProductId: provId,
-                  status: "known",
-                  quantityAfterScan: qty,
-                  // Preserve an IN-FLIGHT "Decoding..." badge (a live decode is actually running) so the
-                  // documented "Decoding -> Verified / Suggested / Conflict / Needs review" UI stays visible;
-                  // only stamp "suggested" when there is no decode in flight.
-                  decodeStatus: e.decodeStatus === "decoding" ? "decoding" : "suggested",
-                  // D1 FIX: the stored feed event and the counted delta are the SAME FACT - the row a
-                  // provisional count was applied from must carry the delta it contributed (North-star #2:
-                  // sum(feed deltas) === quantity). And the fake optimistic "synced" stamp is GONE: the
-                  // row's syncStatus is derived from pendingSyncQueue membership (see the reconcile at
-                  // scanStore.ts:907-922) and only reads "synced" after a real sync ack.
-                  quantityDelta: 1,
-                  reason: e.reason || reason,
-                }
-              : e,
-          ),
+          scanFeed: ev
+            ? st.scanFeed.map((e) =>
+                e.id === ev.id
+                  ? {
+                      ...e,
+                      matchedProductId: provId,
+                      status: "known",
+                      quantityAfterScan: qty,
+                      // Preserve an IN-FLIGHT "Decoding..." badge (a live decode is actually running) so the
+                      // documented "Decoding -> Verified / Suggested / Conflict / Needs review" UI stays visible;
+                      // only stamp "suggested" when there is no decode in flight.
+                      decodeStatus: e.decodeStatus === "decoding" ? "decoding" : "suggested",
+                      // D1 FIX: the stored feed event and the counted delta are the SAME FACT - the row a
+                      // provisional count was applied from must carry the delta it contributed (North-star #2:
+                      // sum(feed deltas) === quantity). And the fake optimistic "synced" stamp is GONE: the
+                      // row's syncStatus is derived from pendingSyncQueue membership (see the reconcile at
+                      // scanStore.ts:907-922) and only reads "synced" after a real sync ack.
+                      quantityDelta: 1,
+                      reason: e.reason || reason,
+                    }
+                  : e,
+              )
+            // No matching feed row: prepend the synthetic backing event so the feed still carries the
+            // exact fact that was counted (North-star #2: sum(feed deltas) === quantity), same
+            // precedent as markWrong's residual-repoint synthetic event.
+            : [countedEvent, ...st.scanFeed],
         }));
         // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW) - and only
         // when this call actually counted something (countedEvent), never on a no-op/idempotent re-entry.

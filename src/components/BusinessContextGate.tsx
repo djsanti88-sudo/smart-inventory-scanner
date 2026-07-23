@@ -46,7 +46,11 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         return;
       }
 
-      useScanStore.getState().rehydrateForUid(user.uid);
+      // Await rehydrate BEFORE setBusinessContext: only once the persisted per-uid state has loaded
+      // does the store's businessId/userId reflect it, letting setBusinessContext's same-tenant guard
+      // recognize a refresh (vs a real switch) and preserve scanFeed/finalCounts/needsReviewQueue.
+      await useScanStore.getState().rehydrateForUid(user.uid);
+      if (!active) return;
       setBusinessContext(membership.businessId, user.uid);
       setStatus("ready");
     })();
