@@ -6224,6 +6224,45 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         };
         const restoredProductIds = new Set(backup.products.map((p) => p.id));
         const feedById = new Map(backup.feed.map((e) => [e.id, e]));
+        // SYNC THE UNDO (reviewed defect 2026-07-22): the delete shipped archive + transfer ops to the
+        // backend, so a local-only restore is silently re-reverted by the next refreshFromCloud - the
+        // remote still says "archived + quantity on the provisional", the products merge re-deletes the
+        // undone product, and the remote provisional row re-adds the transferred quantity ALONGSIDE the
+        // restored local row (2 became 4). Mirror every delete op with a compensator: a restore
+        // SAVE_PRODUCT per product, a reverse transfer PAIR per backed-up count row (net zero per
+        // session), and an archive SAVE_PRODUCT for a minted provisional the undo removes. Compensators
+        // APPEND after any still-pending delete ops, so undoing before the queue drains nets out to the
+        // same restored remote state. Keys are distinct from the delete's, so the backend dedupe never
+        // swallows the reversal.
+        const s0 = get();
+        const bid = s0.businessId;
+        const liveCountById = new Map(s0.finalCounts.map((c) => [c.id, c]));
+        const mintedProducts = s0.products.filter((p) => (backup.mintedProvisionalIds ?? []).includes(p.id));
+        const syncOps: PendingSyncItem[] = [];
+        for (const p of backup.products) {
+          syncOps.push(
+            makeQueueItem({ idFactory, now, businessId: bid, sessionId: s0.sessionId, entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: { ...p }, idempotencyKey: buildIdempotencyKey(bid, s0.sessionId, `${p.id}:delete:undo-restore`, "SAVE_PRODUCT"), scanEventId: null }),
+          );
+        }
+        for (const c of backup.counts) {
+          if (c.quantity <= 0) continue; // the delete transferred nothing for zero rows -> nothing to reverse
+          const live = liveCountById.get(c.id);
+          if (live && live.productId !== c.productId) {
+            // The row is still repointed at the provisional: pull the transferred units back off it.
+            // Post-delete scans incremented the SAME remote row, so subtracting exactly the backup's
+            // quantity leaves any residual units on the provisional (matches the local carve below).
+            const outKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-undo-out`, "INCREMENT_COUNT");
+            const outPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: live.productId, scanEventId: `${c.id}:delete-transfer-undo`, quantityDelta: -c.quantity, idempotencyKey: outKey };
+            syncOps.push(
+              makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: outPayload, idempotencyKey: outKey, scanEventId: null }),
+            );
+          }
+          const inKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-undo-in`, "INCREMENT_COUNT");
+          const inPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: c.productId, scanEventId: `${c.id}:delete-transfer-undo`, quantityDelta: c.quantity, idempotencyKey: inKey };
+          syncOps.push(
+            makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: inPayload, idempotencyKey: inKey, scanEventId: null }),
+          );
+        }
         set((s) => {
           // The repointed count rows share ids with the backed-up originals, so upsertById below
           // restores them onto the original product. LAW GUARD: a scan made AFTER the delete
@@ -6256,6 +6295,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           lastProductDeleteBackup: null,
           };
         });
+        // A minted provisional the undo just removed locally (no residual count kept it) must be
+        // archived remotely too, or refreshFromCloud re-adds it as an active ghost product.
+        for (const prov of mintedProducts) {
+          if (get().products.some((p) => p.id === prov.id)) continue; // residual kept it -> keep remotely
+          const archivedProv: Product = { ...prov, status: "archived", verified: false, updatedBy: "human" };
+          syncOps.push(
+            makeQueueItem({ idFactory, now, businessId: bid, sessionId: s0.sessionId, entityType: "Product", entityId: prov.id, operation: "SAVE_PRODUCT", payload: archivedProv, idempotencyKey: buildIdempotencyKey(bid, s0.sessionId, `${prov.id}:provisional:undo-archive`, "SAVE_PRODUCT"), scanEventId: null }),
+          );
+        }
+        set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...syncOps] }));
+        get().syncPending(); // drain the compensating ops now (same pattern as the delete)
         for (const p of backup.products) emitAudit({ entityType: "Product", entityId: p.id, action: "product_delete_undone", metadata: { name: p.name } });
         get().recordFeedback("restored_cleanup", { code: "", meta: { restored: restoredProductIds.size } });
         return true;
