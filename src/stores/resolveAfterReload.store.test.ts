@@ -10,15 +10,20 @@ import { buildPersistedScanState, type PersistableScanState } from "@/stores/sca
 // product". Before the fix, the Counts table kept ALL 3 "Unidentified item" rows instead of merging the
 // resolved code's provisional count into the newly named product - net effect: wrong counts.
 //
-// Root cause: resolveUnknown's provOrphanId lookup (scanStore.ts) finds the scan's own provisional
-// placeholder product by matching `review.cleanCode` against the product's
-// [primaryBarcode, gtin, upc, ean, primarySku] identifier fields. buildPersistedScanState's customer
-// ("business") shape (CUSTOMER_SAFE_PRODUCT_FIELDS in sensitiveFields.ts) does NOT include
-// primaryBarcode/gtin/upc/ean (only primarySku, which is normally blank for an auto-minted provisional
-// placeholder), and does not preserve `provisional` either. After a real reload, the rehydrated
-// provisional product's identifier fields are gone, so provOrphanId can never find it again -
-// resolveUnknown falls into the "mint a brand new product" branch, leaving the original provisional
-// product + its finalCounts row permanently orphaned (never merged, never removed).
+// Original root cause (now fixed two ways): resolveUnknown's provOrphanId lookup (scanStore.ts) used to
+// find the scan's own provisional placeholder product only by matching `review.cleanCode` against the
+// product's [primaryBarcode, gtin, upc, ean, primarySku] identifier fields, but buildPersistedScanState's
+// customer ("business") shape stripped all of those (only primarySku survived, normally blank for an
+// auto-minted provisional placeholder) and did not preserve `provisional` either - so after a real
+// reload, provOrphanId could never find the placeholder again and resolveUnknown fell into the "mint a
+// brand new product" branch, orphaning the original provisional product + its finalCounts row.
+// Fixed by: (1) a stable `provisionalProductId` captured at review-creation time, which survives reload
+// independent of any identifier field and is provOrphanId's primary lookup (see the doc comment at its
+// definition in scanStore.ts); and (2) as of 2026-07-22, primaryBarcode/gtin/upc/ean are ALSO no longer
+// stripped from a product at business level (CUSTOMER_SAFE_PRODUCT_FIELDS in sensitiveFields.ts) because
+// a shop's own scanned barcode on its own product row is the shop's own data (owner rule, see
+// FinalCountTable.tsx:129-131) - so the identifier-based fallback lookup now also works after reload.
+// This test still proves the reload-resilient merge end to end and must keep passing.
 
 function totalQty(store: ReturnType<typeof createTestScanStore>) {
   return store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0);

@@ -59,9 +59,14 @@ function makeState(): PersistableScanState {
   };
 }
 
+// primaryBarcode/gtin/upc/ean are NOT in this list: owner rule (2026-07-22) a product's OWN scanned
+// identifier is the shop's own data (FinalCountTable.tsx:129-131) and now survives business persistence
+// (see the positive assertion below). The reusable alias/catalog corpus (vendorCodes, aliases, the
+// catalog array, suggested-alias/gtin/upc/barcode fields on a REVIEW - i.e. codes OTHER than the
+// review's own cleanCode) stays platform-only and remains forbidden.
 const FORBIDDEN_KEYS = [
   "aliases", "catalog", "shopOverrides", "lastCleanupBackup", "feedbackEvents",
-  "normalizedCode", "normalizedCandidates", "primaryBarcode", "gtin", "upc", "ean", "vendorCodes",
+  "normalizedCode", "normalizedCandidates", "vendorCodes",
   "rawCodeExample", "rawCode", "suggestedAliases", "suggestedGtin", "suggestedUpc",
   "suggestedPrimaryBarcode", "suggestedPrimarySku", "sourceUrls", "verifiedFacts", "providerName",
   "decodeProviderSummaries", "decodeNote", "evidenceStrength", "crossCheckDecision", "matchType", "syncError",
@@ -73,13 +78,25 @@ describe("buildPersistedScanState (Sec-4 customer localStorage split)", () => {
     for (const k of FORBIDDEN_KEYS) {
       expect(blob, `forbidden key "${k}" leaked into customer persist`).not.toContain(`"${k}"`);
     }
-    // OTHER reusable code VALUES (alias/catalog/decode-discovered) are gone too.
+    // OTHER reusable code VALUES (alias/catalog/decode-discovered - codes NOT this product's own scanned
+    // identifier) are gone too. "28816861" only ever appears here as an ALIAS value (products[0].aliases),
+    // never as this product's own primaryBarcode/gtin/upc/ean, so it stays a valid negative check.
     expect(blob).not.toContain("28816861");
-    expect(blob).not.toContain("0123456789012");
     expect(blob).not.toContain("778899001122"); // decode-discovered other code
     expect(blob).not.toContain("PN-SECRET");
     expect(blob).not.toContain("ECONNRESET"); // raw sync error
     expect(blob).not.toContain("internal trace");
+    // Owner rule (2026-07-22): the product's OWN scanned identifier ("0123456789012") is the shop's own
+    // data (FinalCountTable.tsx:129-131) and now DOES survive - it must NOT be stripped from its product row.
+    const persisted = buildPersistedScanState(makeState(), "business");
+    const persistedProduct = (persisted.products as Array<Record<string, unknown>>)[0];
+    expect(persistedProduct.primaryBarcode).toBe("0123456789012");
+    expect(persistedProduct.gtin).toBe("00123456789012");
+    expect(persistedProduct.upc).toBe("123456789012");
+    expect(persistedProduct.ean).toBe("0123456789012");
+    // But the reusable alias/catalog corpus fields on that same product row stay stripped.
+    expect(persistedProduct.aliases).toBeUndefined();
+    expect(persistedProduct.vendorCodes).toBeUndefined();
   });
 
   it("customer: pending reviews + scan feed ARE persisted (sanitized) so work survives reload (P1)", () => {

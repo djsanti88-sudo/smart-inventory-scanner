@@ -40,9 +40,16 @@ export function stripSensitive<T>(value: T): T {
   return value;
 }
 
-/** Customer-safe product-facing fields (allowlist). Used to BUILD sanitized shapes, not just strip. */
+/** Customer-safe product-facing fields (allowlist). Used to BUILD sanitized shapes, not just strip.
+ * Owner rule (2026-07-22, encoded in src/components/FinalCountTable.tsx:129-131): the barcode a shop
+ * scanned onto THEIR OWN product row is THEIR data - already rendered to every role in the UI - so
+ * primaryBarcode/gtin/upc/ean are included here. Stripping a shop's own scanned identifier from that
+ * same device's own localStorage persistence protected nothing and instead destroyed the shop's own
+ * data (the Products/Counts "Barcode" column showed "-" after every reload). The reusable alias/catalog
+ * corpus (aliases, vendorCodes, the master catalog) stays platform-only and is unaffected by this. */
 export const CUSTOMER_SAFE_PRODUCT_FIELDS = [
   "id", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
+  "primaryBarcode", "gtin", "upc", "ean",
 ] as const;
 
 // A customer's OWN pending Needs-Review item — only the fields they need to SEE + ACT on it, plus their
