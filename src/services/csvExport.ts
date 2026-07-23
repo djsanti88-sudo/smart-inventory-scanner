@@ -349,25 +349,30 @@ export function exportAliases(aliases: Alias[]): string {
 }
 
 // ---- Customer-safe (sanitized) exports ----
-// For non-platformOwner roles. Product-facing columns ONLY: no barcode/gtin/upc/ean/aliases/raw codes/
-// scan-event ids. These are what ExportButtons offers when the access level is "business".
+// For non-platformOwner roles. Owner rule (2026-07-22, same reasoning as commit 13adbdd and the
+// CUSTOMER_SAFE_PRODUCT_FIELDS comment in security/sensitiveFields.ts): a barcode a shop scanned onto
+// THEIR OWN product row is THEIR data - already rendered to every role in the UI - so
+// exportFinalCountsCustomer/exportQuantityAdjustmentsCustomer include a "barcode" column sourced from
+// primaryBarcode. gtin/upc/ean (the platform's reusable catalog identifiers, distinct from what the
+// shop itself scanned) stay excluded, as do aliases/raw codes/scan-event ids. These are what
+// ExportButtons offers when the access level is "business".
 
 export function exportFinalCountsCustomer(counts: InventoryCount[], products: Product[], sessionId: string): string {
   const byId = new Map(products.map((p) => [p.id, p]));
-  const headers = ["quantity", "product_name", "brand", "category", "specs", "part_number", "location", "counted_at", "session_id"];
+  const headers = ["quantity", "product_name", "brand", "category", "specs", "part_number", "barcode", "location", "counted_at", "session_id"];
   const rows = counts.map((c) => {
     const p = byId.get(c.productId);
-    return [c.quantity, p?.name ?? "", p?.brand ?? "", p?.category ?? "", p?.specsShort ?? "", p?.primarySku ?? "", p?.location ?? "", c.lastScannedAt, sessionId];
+    return [c.quantity, p?.name ?? "", p?.brand ?? "", p?.category ?? "", p?.specsShort ?? "", p?.primarySku ?? "", p?.primaryBarcode ?? "", p?.location ?? "", c.lastScannedAt, sessionId];
   });
   return buildCsv(headers, rows);
 }
 
 export function exportQuantityAdjustmentsCustomer(counts: InventoryCount[], products: Product[], sessionId: string): string {
   const byId = new Map(products.map((p) => [p.id, p]));
-  const headers = ["product_name", "brand", "category", "part_number", "counted_quantity", "system_quantity", "adjustment", "location", "session_id"];
+  const headers = ["product_name", "brand", "category", "part_number", "barcode", "counted_quantity", "system_quantity", "adjustment", "location", "session_id"];
   const rows = counts.map((c) => {
     const p = byId.get(c.productId);
-    return [p?.name ?? "", p?.brand ?? "", p?.category ?? "", p?.primarySku ?? "", c.quantity, "", c.quantity, p?.location ?? "", sessionId];
+    return [p?.name ?? "", p?.brand ?? "", p?.category ?? "", p?.primarySku ?? "", p?.primaryBarcode ?? "", c.quantity, "", c.quantity, p?.location ?? "", sessionId];
   });
   return buildCsv(headers, rows);
 }

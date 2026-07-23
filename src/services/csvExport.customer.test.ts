@@ -7,7 +7,11 @@ const product = { id: "p1", businessId: "b", name: "Falken Sincera", brand: "Fal
 const count = { id: "c1", businessId: "b", sessionId: "s1", productId: "p1", quantity: 3, lastScannedAt: "t", aliasesSeen: ["28816861"], scanEventIds: ["e1"], createdAt: "", updatedAt: "", syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [] } as InventoryCount;
 const review = { rawCode: "999", cleanCode: "999", normalizedCandidates: ["999"], suggestedProductName: "Mystery", suggestedBrand: "X", suggestedCategory: "Tire", status: "open", providerName: "gemini", syncStatus: "synced" } as unknown as UnknownCodeReview;
 
-const SENSITIVE_HEADERS = ["barcode", "gtin", "upc", "ean", "aliases", "raw_code", "clean_code", "normalized", "scan_event_ids", "provider"];
+// "barcode" is intentionally EXCLUDED here: a shop's own scanned barcode on its own product row is
+// their data (same rule as commit 13adbdd / sensitiveFields.ts CUSTOMER_SAFE_PRODUCT_FIELDS comment).
+// gtin/upc/ean (the platform's reusable catalog identifiers, distinct from what the shop itself
+// scanned) stay excluded, as do aliases/raw codes/scan-event ids/provider names.
+const SENSITIVE_HEADERS = ["gtin", "upc", "ean", "aliases", "raw_code", "clean_code", "normalized", "scan_event_ids", "provider"];
 
 function headerCols(csv: string): string[] {
   return csv.replace(/^﻿/, "").split(/\r?\n/)[0].split(",");
@@ -19,25 +23,40 @@ describe("customer-safe exports", () => {
     expect(h).toContain("primary_barcode");
     expect(h).toContain("aliases");
   });
-  it("customer final-counts has NO code columns", () => {
+  it("customer final-counts has NO reusable-catalog code columns, but DOES include the shop's own barcode", () => {
     const h = headerCols(exportFinalCountsCustomer([count], [product], "s1"));
     for (const bad of SENSITIVE_HEADERS) expect(h.some((c) => c.toLowerCase().includes(bad))).toBe(false);
     expect(h).toContain("product_name");
     expect(h).toContain("part_number");
+    expect(h).toContain("barcode");
+    expect(h.indexOf("barcode")).toBe(h.indexOf("part_number") + 1);
+    const rows = exportFinalCountsCustomer([count], [product], "s1").split(/\r?\n/);
+    const barcodeCol = h.indexOf("barcode");
+    expect(rows[1].split(",")[barcodeCol]).toBe(product.primaryBarcode);
   });
-  it("customer qty-adjustments has NO code columns", () => {
+  it("customer qty-adjustments has NO reusable-catalog code columns, but DOES include the shop's own barcode", () => {
     const h = headerCols(exportQuantityAdjustmentsCustomer([count], [product], "s1"));
     for (const bad of SENSITIVE_HEADERS) expect(h.some((c) => c.toLowerCase().includes(bad))).toBe(false);
+    expect(h).toContain("barcode");
+    expect(h.indexOf("barcode")).toBe(h.indexOf("part_number") + 1);
+    const rows = exportQuantityAdjustmentsCustomer([count], [product], "s1").split(/\r?\n/);
+    const barcodeCol = h.indexOf("barcode");
+    expect(rows[1].split(",")[barcodeCol]).toBe(product.primaryBarcode);
   });
-  it("customer unknowns export has NO raw/clean/normalized codes and no provider", () => {
+  it("customer unknowns export has NO raw/clean/normalized codes, no barcode, and no provider", () => {
     const csv = exportUnknownsCustomer([review]);
     const h = headerCols(csv);
-    for (const bad of SENSITIVE_HEADERS) expect(h.some((c) => c.toLowerCase().includes(bad))).toBe(false);
+    const unknownsSensitive = [...SENSITIVE_HEADERS, "barcode"];
+    for (const bad of unknownsSensitive) expect(h.some((c) => c.toLowerCase().includes(bad))).toBe(false);
     expect(csv).not.toContain("gemini"); // provider name never in a customer export
   });
-  it("no customer export header is a sensitive key", () => {
-    for (const fn of [exportFinalCountsCustomer([count], [product], "s1"), exportQuantityAdjustmentsCustomer([count], [product], "s1"), exportUnknownsCustomer([review])]) {
-      for (const col of headerCols(fn)) expect(isSensitiveKey(col)).toBe(false);
+  it("no customer export header is a sensitive key (barcode excepted for the shop's-own-data exports)", () => {
+    for (const fn of [exportFinalCountsCustomer([count], [product], "s1"), exportQuantityAdjustmentsCustomer([count], [product], "s1")]) {
+      for (const col of headerCols(fn)) {
+        if (col === "barcode") continue; // intentional: shop's own scanned barcode, not reusable catalog data
+        expect(isSensitiveKey(col)).toBe(false);
+      }
     }
+    for (const col of headerCols(exportUnknownsCustomer([review]))) expect(isSensitiveKey(col)).toBe(false);
   });
 });
