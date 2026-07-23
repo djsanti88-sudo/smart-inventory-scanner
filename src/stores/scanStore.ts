@@ -1908,17 +1908,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               .filter((key): key is string => !!key),
           );
           const pendingCountEntityIds = new Set(pendingCountItems.map((it) => it.entityId));
+          // Products THIS device archived before the merge (its own deletes) - distinguishes a
+          // local delete from one performed on another device (see the archived branch below).
+          const locallyArchivedIds = new Set(cur.products.filter((p) => p.status === "archived").map((p) => p.id));
           const countsByKey = new Map(cur.finalCounts.map((c) => [`${c.sessionId}|${c.productId}`, c]));
           for (const remote of data.counts) {
             const key = `${remote.sessionId}|${remote.productId}`;
-            // Delete-transfer guard (reviewed defect 2026-07-22): a remote count row keyed to a
-            // locally-archived product is the backend's not-yet-transferred (or stale-snapshot)
-            // copy of a DELETED product's quantity. deleteProductsInternal already repointed those
-            // units onto a minted provisional, so re-adding the remote row here would double-count
-            // them (2 became 4). productsById is the post-merge map, and the archived-product
-            // merge guard above keeps a local archive authoritative, so this holds even after the
-            // transfer ops have drained.
-            if (productsById.get(remote.productId)?.status === "archived") continue;
             const local = countsByKey.get(key);
             // pendingCountKeys deliberately does NOT require a local row: the delete-transfer's
             // zero-out increment targets a (sessionId, productId) row that no longer exists locally
@@ -1930,6 +1925,20 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (pendingCountEntityIds.has(local.id) ||
                   pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`)));
             if (localIsPending) continue; // guard: unsynced local wins
+            if (productsById.get(remote.productId)?.status === "archived") {
+              // Delete-transfer guard (reviewed defect 2026-07-22): a remote count row keyed to a
+              // LOCALLY-archived product is the backend's not-yet-transferred (or stale-snapshot)
+              // copy of a product THIS device deleted. deleteProductsInternal already repointed
+              // those units onto a minted provisional, so re-adding the remote row here would
+              // double-count them (2 became 4). The archived-product merge guard above keeps a
+              // local archive authoritative, so this holds even after the transfer ops drained.
+              if (locallyArchivedIds.has(remote.productId)) continue;
+              // Cross-device delete (reviewed defect 2026-07-22): the archive came from the REMOTE
+              // (this device's copy was still active - ANOTHER device deleted it). The remote row
+              // is the post-transfer zeroed truth; skipping it would keep the stale local row
+              // alive NEXT TO the remote provisional row (2 became 4 on every other device), so
+              // fall through and let the remote (zeroed) row replace the stale local one.
+            }
             countsByKey.set(key, remote);
           }
 

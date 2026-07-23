@@ -141,6 +141,37 @@ describe("refreshFromCloud", () => {
     expect(store.getState().products.find((p) => p.id === "p-del")?.status).toBe("archived");
   });
 
+  it("takes the remote ZEROED row when the delete happened on ANOTHER device: the stale local row must not survive next to the remote provisional (cross-device inflation, reviewed defect 2026-07-22)", async () => {
+    // Devices A and B share the business. Both held (s1, p-del) qty 2, fully synced. Device B then
+    // deleted p-del: the backend now says p-del archived, its count row zeroed, and the 2 units
+    // repointed onto a minted provisional p-prov. Device A (this store) still holds the pre-delete
+    // local state with NOTHING pending - the remote is the post-transfer truth and must win.
+    const archivedRemote = { ...product("p-del", "Junk Widget"), status: "archived" as const };
+    const remoteProvisional = { ...product("p-prov", "Unidentified item"), verified: false, provisional: true };
+    const loadBusinessData = vi.fn().mockResolvedValue({
+      products: [archivedRemote, remoteProvisional],
+      aliases: [],
+      sessions: [],
+      counts: [count("s1", "p-del", 0), count("s1", "p-prov", 2)],
+    });
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData });
+    store.setState({
+      businessContextReady: true, businessDataLoaded: true, businessId: "biz1", userId: "u1", sessionId: "s1",
+      products: [product("p-del", "Junk Widget")], // still active locally - A has not seen the delete yet
+      finalCounts: [count("s1", "p-del", 2)], // synced pre-delete row, no pending queue items
+    });
+
+    await store.getState().refreshFromCloud();
+
+    // 2 physical items must total 2, never 4: the stale local (s1, p-del)=2 row is replaced by the
+    // remote zeroed row, and only the remote provisional carries the quantity.
+    const total = store.getState().finalCounts.reduce((sum, c) => sum + c.quantity, 0);
+    expect(total).toBe(2);
+    expect(store.getState().finalCounts.find((c) => c.productId === "p-del")?.quantity ?? 0).toBe(0);
+    expect(store.getState().finalCounts.find((c) => c.productId === "p-prov")?.quantity).toBe(2);
+    expect(store.getState().products.find((p) => p.id === "p-del")?.status).toBe("archived");
+  });
+
   it("does NOT touch scanFeed (scan events are read via getScanEventsBySession, not this action)", async () => {
     const loadBusinessData = vi.fn().mockResolvedValue({ products: [], aliases: [], sessions: [], counts: [] });
     const store = createTestScanStore({ cloudBackend: true, loadBusinessData });
