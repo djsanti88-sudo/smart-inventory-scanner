@@ -125,12 +125,27 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const [pendingSnap, ladderSnap] = await Promise.all([pendingQuery.get(), ladderQuery.get()]);
+    // The two shapes' queries need different composite indexes (declared in firestore.indexes.json);
+    // a missing index rejects with FAILED_PRECONDITION on real Firestore. Settle each independently
+    // so one shape failing degrades to an empty page for that shape (logged) instead of 500ing the
+    // whole listing - only both failing leaves nothing to serve and falls through to the catch.
+    const [pendingResult, ladderResult] = await Promise.allSettled([pendingQuery.get(), ladderQuery.get()]);
+    if (pendingResult.status === "rejected" && ladderResult.status === "rejected") {
+      throw pendingResult.reason;
+    }
+    if (pendingResult.status === "rejected") {
+      logServerEvent({ route: "/api/catalog-review", event: "read_degraded", reasonCode: "pending_query_failed", status: 200 });
+    }
+    if (ladderResult.status === "rejected") {
+      logServerEvent({ route: "/api/catalog-review", event: "read_degraded", reasonCode: "ladder_query_failed", status: 200 });
+    }
+    const pendingDocs = pendingResult.status === "fulfilled" ? pendingResult.value.docs : [];
+    const ladderDocs = ladderResult.status === "fulfilled" ? ladderResult.value.docs : [];
     const timestampOf = (e: Record<string, unknown>): string => {
       const t = e.firstSeenAt ?? e.updatedAt;
       return typeof t === "string" ? t : "";
     };
-    const merged = [...tag(pendingSnap.docs, "pending"), ...tag(ladderSnap.docs, "ladder_verified")]
+    const merged = [...tag(pendingDocs, "pending"), ...tag(ladderDocs, "ladder_verified")]
       .sort((a, b) => timestampOf(b).localeCompare(timestampOf(a)));
     const entries = merged.slice(0, pageSize);
     const hasMore = merged.length > pageSize;

@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   entries: [] as Array<{ id: string; data: Record<string, unknown> }>,
   cursorDocs: {} as Record<string, { exists: boolean; data?: Record<string, unknown> }>,
   queriedPaths: [] as string[],
+  // Per-shape query failure injection (e.g. a missing composite index rejecting with
+  // FAILED_PRECONDITION on real Firestore): "ladder" hits the provenanceTier query,
+  // "pending" hits the legacy pending query.
+  queryErrors: {} as { pending?: Error; ladder?: Error },
 }));
 
 // The mock honestly applies == where clauses so the route's two review-queue shapes (legacy
@@ -22,9 +26,15 @@ function makeQuery(filters: Array<[string, unknown]> = []) {
     orderBy: () => makeQuery(filters),
     where: (field: string, _op: string, value: unknown) => makeQuery([...filters, [field, value]]),
     limit: (n: number) => ({
-      get: async () => ({
-        docs: mocks.entries.filter(matches).slice(0, n).map((e) => ({ id: e.id, data: () => e.data })),
-      }),
+      get: async () => {
+        const isLadder = filters.some(([field, value]) => field === "provenanceTier" && value === "ladder_verified_strong");
+        const isPending = filters.some(([field, value]) => field === "verificationStatus" && value === "pending");
+        if (isLadder && mocks.queryErrors.ladder) throw mocks.queryErrors.ladder;
+        if (isPending && mocks.queryErrors.pending) throw mocks.queryErrors.pending;
+        return {
+          docs: mocks.entries.filter(matches).slice(0, n).map((e) => ({ id: e.id, data: () => e.data })),
+        };
+      },
     }),
     startAfter: () => makeQuery(filters),
   };
@@ -57,6 +67,7 @@ beforeEach(() => {
     { id: "gtin_2", data: { verificationStatus: "pending", normalizedBarcode: "222", name: "Gadget", firstSeenAt: "2026-07-19T00:00:00.000Z" } },
   ];
   mocks.queriedPaths = [];
+  mocks.queryErrors = {};
   vi.stubEnv("PLATFORM_OWNER_UIDS", "owner-uid");
   vi.stubEnv("PLATFORM_OWNER_EMAILS", "");
 });
@@ -157,5 +168,42 @@ describe("GET /api/catalog-review ladder-verified queue", () => {
     expect(payload.entries).toHaveLength(1);
     expect(payload.entries[0].id).toBe("gtin_ladder");
     expect(payload.entries[0].pendingKind).toBe("ladder_verified");
+  });
+});
+
+// Index-failure isolation: the ladder query (verificationStatus == "verified" + provenanceTier ==
+// "ladder_verified_strong" + orderBy updatedAt) needs a Firestore composite index (declared in
+// firestore.indexes.json); if it is missing, real Firestore rejects with FAILED_PRECONDITION. One
+// shape's query failing must degrade that shape to an empty page, never 500 the whole listing -
+// otherwise a missing index would also kill the previously working pending queue.
+describe("GET /api/catalog-review query-failure isolation", () => {
+  const indexError = new Error("9 FAILED_PRECONDITION: The query requires an index.");
+
+  it("still returns pending entries when the ladder query fails (missing composite index)", async () => {
+    mocks.queryErrors.ladder = indexError;
+    const response = await GET(listRequest());
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.entries).toHaveLength(2);
+    expect(payload.entries.every((e: { pendingKind: string }) => e.pendingKind === "pending")).toBe(true);
+  });
+
+  it("still returns ladder entries when the pending query fails", async () => {
+    mocks.entries = [
+      { id: "gtin_ladder", data: { verificationStatus: "verified", provenanceTier: "ladder_verified_strong", normalizedBarcode: "333", name: "Tire", updatedAt: "2026-07-21T00:00:00.000Z" } },
+    ];
+    mocks.queryErrors.pending = indexError;
+    const response = await GET(listRequest());
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.entries).toHaveLength(1);
+    expect(payload.entries[0].pendingKind).toBe("ladder_verified");
+  });
+
+  it("returns 500 when BOTH queries fail (no shape left to serve)", async () => {
+    mocks.queryErrors.pending = indexError;
+    mocks.queryErrors.ladder = indexError;
+    const response = await GET(listRequest());
+    expect(response.status).toBe(500);
   });
 });
