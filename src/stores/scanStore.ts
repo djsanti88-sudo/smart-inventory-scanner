@@ -1364,14 +1364,53 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (b.startedAt ?? "").localeCompare(a.startedAt ?? "");
               const sessions = [...data.sessions].sort(byStartedAtDesc);
               const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
-              const next: Partial<ScanState> = { products: data.products, aliases: data.aliases };
-              if (restored) {
-                next.currentSession = restored;
-                next.sessionId = restored.id;
-                next.finalCounts = data.counts.filter((c) => c.sessionId === restored.id);
-              }
-              next.businessDataLoaded = true;
-              set(next);
+              set((cur) => {
+                const next: Partial<ScanState> = { products: data.products, aliases: data.aliases, businessDataLoaded: true };
+                if (restored) {
+                  // Same-tenant refresh guard (part 2): the synchronous guard above preserves the local
+                  // feed/counts, so this restore must not quietly re-introduce the wipe by REPLACING
+                  // finalCounts with the remote snapshot - that snapshot has not seen this device's
+                  // unsynced increments, so a refresh with pending work would show a feed of N against
+                  // counts of N-k (the exact feed-vs-counts divergence class the guard exists to stop).
+                  // Mirror refreshFromCloud's pending-aware merge: a local row still referenced by an
+                  // unsynced INCREMENT_COUNT queue item is authoritative until it syncs; otherwise the
+                  // remote row wins. A tenant switch starts from a wiped store (empty local counts, empty
+                  // queue), so that path degrades to the plain remote restore this used to be.
+                  next.currentSession = cur.currentSession?.id === restored.id ? cur.currentSession : restored;
+                  next.sessionId = restored.id;
+                  const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+                  const pendingCountKeys = new Set(
+                    pendingCountItems
+                      .map((it) => {
+                        const payload = it.payload as Partial<IncrementPayload> | undefined;
+                        const productId = payload?.productId;
+                        if (!productId) return null;
+                        return `${payload.sessionId ?? it.sessionId}|${productId}`;
+                      })
+                      .filter((key): key is string => !!key),
+                  );
+                  const pendingCountEntityIds = new Set(pendingCountItems.map((it) => it.entityId));
+                  const countsByKey = new Map(
+                    cur.finalCounts
+                      .filter((c) => c.sessionId === restored.id)
+                      .map((c) => [`${c.sessionId}|${c.productId}`, c]),
+                  );
+                  for (const remote of data.counts) {
+                    if (remote.sessionId !== restored.id) continue;
+                    const key = `${remote.sessionId}|${remote.productId}`;
+                    const local = countsByKey.get(key);
+                    const localIsPending =
+                      !!local &&
+                      (pendingCountKeys.has(key) ||
+                        pendingCountEntityIds.has(local.id) ||
+                        pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`));
+                    if (localIsPending) continue; // guard: unsynced local wins
+                    countsByKey.set(key, remote);
+                  }
+                  next.finalCounts = [...countsByKey.values()];
+                }
+                return next;
+              });
             } catch (e) {
               // Surface the error but mark loaded so the UI does not hang forever (sync still paused on error).
               set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data", businessDataLoaded: true });

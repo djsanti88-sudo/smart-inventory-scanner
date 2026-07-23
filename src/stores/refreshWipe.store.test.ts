@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { buildPersistedScanState } from "@/stores/scanPersist";
 import { replayLedgerCounts } from "@/services/inventory.replay";
-import type { InventoryCount, ScanEvent, UnknownCodeReview } from "@/types";
+import type { InventoryCount, InventorySession, PendingSyncItem, ScanEvent, UnknownCodeReview } from "@/types";
 
 // Data-loss fix (critical): on a real page REFRESH with the cloud backend, BusinessContextGate
 // re-resolves the SAME (businessId, userId) the store already holds and calls setBusinessContext
@@ -64,6 +64,51 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store.getState().scanFeed).toEqual([ev1, ev2]);
     expect(store.getState().finalCounts.map((c) => c.productId).sort()).toEqual(["p1", "p2"]);
     expect(store.getState().needsReviewQueue).toEqual([review]);
+  });
+
+  it("(a3) the loader's session restore must NOT replace UNSYNCED local counts with the stale remote snapshot", async () => {
+    // Same-tenant refresh in cloud mode where the remote DOES return the active session: the sync wipe
+    // is (correctly) skipped by the guard above, but the async loadBusinessData block used to do
+    // `next.finalCounts = data.counts.filter(...)` unconditionally - replacing a local qty-3 row (2
+    // unsynced) with the remote's stale qty-1 snapshot while the preserved feed kept showing 3. The
+    // restore must apply the refreshFromCloud-style pending-aware merge: unsynced local rows win.
+    const session: InventorySession = {
+      id: "s1", businessId: "b1", name: "Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const staleRemoteCount: InventoryCount = { ...count("p1", 1, ["ev1"]), syncStatus: "synced" };
+    const loader = vi.fn()
+      .mockResolvedValueOnce({ products: [], aliases: [], sessions: [], counts: [] }) // first sign-in: empty tenant
+      .mockResolvedValue({ products: [], aliases: [], sessions: [session], counts: [staleRemoteCount] });
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: loader });
+
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 0)); // let the first (empty) load settle
+
+    // Local truth: qty 3 for p1 in s1, of which 2 increments are still UNSYNCED in the pending queue.
+    const pendingIncrement = (id: string): PendingSyncItem => ({
+      id: `pend-${id}`, businessId: "b1", sessionId: "s1", entityType: "InventoryCount",
+      entityId: "count-p1", operation: "INCREMENT_COUNT",
+      payload: { businessId: "b1", sessionId: "s1", productId: "p1", quantityDelta: 1, scanEventId: id, aliasUsed: "111" },
+      status: "pending", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t",
+      idempotencyKey: `k-${id}`, scanEventId: id,
+    });
+    store.setState({
+      currentSession: session,
+      sessionId: "s1",
+      scanFeed: [scanEvent("ev1", "p1", "111"), scanEvent("ev2", "p1", "111"), scanEvent("ev3", "p1", "111")],
+      finalCounts: [{ ...count("p1", 3, ["ev1", "ev2", "ev3"]), syncStatus: "pending" }],
+      pendingSyncQueue: [pendingIncrement("ev2"), pendingIncrement("ev3")],
+    });
+
+    // REFRESH: same tenant, remote now answers with the active session + its STALE qty-1 count row.
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 10)); // let the loader resolve and apply
+
+    const p1 = store.getState().finalCounts.find((c) => c.productId === "p1");
+    expect(p1?.quantity, "unsynced local count wins over the stale remote snapshot").toBe(3);
+    // Feed and counts must agree (the divergence class this guards against).
+    expect(store.getState().scanFeed.length).toBe(3);
   });
 
   it("(e) TRUE refresh: a persisted blob rehydrated into a FRESH store must still pass the same-tenant guard (userId round-trips)", () => {
