@@ -282,3 +282,6 @@ Failing-first evidence recorded for both TDD fixes.
 Next: agy diff review adjudication -> commit -> CLI preview deploy -> owner 128-code verification ->
 owner-gated production promote. Open follow-up: master-catalog revocation on mark-wrong (design in
 progress, not started).
+
+### Ultracode round close (2026-07-23 00:40)
+All fixes landed (21 commits), gates green (unit 2652/0, dom 697/0, ledger 45/45, golden, build), agy + sentinel clean. Preview inventory-5ha3w7se8 proof: 338/338 scans; re-paste = 0 API calls, qty exactly 2x; post-reload re-scan = 0 API calls (persist keeps identifiers + verified + businessId). Awaiting owner: promotion, deployment cleanup, never-again project.
