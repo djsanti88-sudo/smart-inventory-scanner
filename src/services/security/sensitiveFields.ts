@@ -52,11 +52,25 @@ export function stripSensitive<T>(value: T): T {
  * stripped, a reload left the row findable by ensureProvisionalCount's idempotent guard (which returned
  * early, counting nothing) yet invisible to processScan's re-scan bridge (which requires
  * p.provisional === true) - so re-scanning the same code after a reload appeared on the feed but never
- * counted (scan 2 = count 1). Proof: src/stores/rescanAfterReload.store.test.ts. */
+ * counted (scan 2 = count 1). Proof: src/stores/rescanAfterReload.store.test.ts.
+ * POST-RELOAD RE-DECODE FIX (2026-07-22, live-proof caught): `verified` is likewise a LOCAL trust-state
+ * boolean (never a barcode/alias/catalog datum), and matchProductByIdentifiers
+ * (src/services/aliasMatcher.ts) is the deterministic KNOWN-match trust gate - it only matches products
+ * with `verified === true`. Without `verified` here, a customer reload rehydrated every product with its
+ * identifiers intact but `verified` defaulted to falsy/undefined, so EVERY already-known code failed the
+ * deterministic match after reload and fell through to the live AI decode path (a real fleet run saw 27
+ * needless /api/ai-lookup calls re-scanning 30 previously-known codes post-reload).
+ * `businessId` is likewise required: matchProductByIdentifiers ALSO scopes its candidate set to
+ * `p.businessId === businessId` (tenant isolation), and CUSTOMER_SAFE_REVIEW_FIELDS /
+ * CUSTOMER_SAFE_SCANEVENT_FIELDS already persist it for the exact same reason. Without it here every
+ * rehydrated product had `businessId: undefined`, which never equals the live store's businessId, so the
+ * scope filter dropped every product regardless of `verified`. `businessId` is the shop's own tenant id
+ * (not a barcode/alias/catalog datum) - identical safety class to the id already in this allowlist.
+ * Proof: src/stores/rescanKnownAfterReload.store.test.ts. */
 export const CUSTOMER_SAFE_PRODUCT_FIELDS = [
-  "id", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
+  "id", "businessId", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
   "primaryBarcode", "gtin", "upc", "ean",
-  "provisional",
+  "provisional", "verified",
 ] as const;
 
 // A customer's OWN pending Needs-Review item — only the fields they need to SEE + ACT on it, plus their
