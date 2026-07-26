@@ -79,3 +79,54 @@ test('USAGE: mentions all real flags and the TEACH_ env budget vars', () => {
   assert.match(USAGE, /--persona/);
   assert.match(USAGE, /TEACH_/);
 });
+
+test('USAGE: documents --lesson <id|level>[,<id|level>...]', () => {
+  assert.match(USAGE, /--lesson/);
+  assert.match(USAGE, /<id\|level>/);
+});
+
+test('parseArgs: no --lesson -> lessons is an empty array (unchanged default behavior)', () => {
+  const args = parseArgs([]);
+  assert.deepEqual(args.lessons, []);
+  assert.equal(args.unknownFlag, null);
+});
+
+test('parseArgs: --lesson 7 parses to ["7"]', () => {
+  const args = parseArgs(['--lesson', '7']);
+  assert.deepEqual(args.lessons, ['7']);
+  assert.equal(args.unknownFlag, null);
+});
+
+test('parseArgs: --lesson 2,7 parses a comma list to ["2", "7"]', () => {
+  const args = parseArgs(['--lesson', '2,7']);
+  assert.deepEqual(args.lessons, ['2', '7']);
+});
+
+test('parseArgs: --lesson live-decode-ladder-trace parses the slug form', () => {
+  const args = parseArgs(['--lesson', 'live-decode-ladder-trace']);
+  assert.deepEqual(args.lessons, ['live-decode-ladder-trace']);
+});
+
+test('parseArgs: repeated --lesson flags accumulate', () => {
+  const args = parseArgs(['--lesson', '2', '--lesson', '7']);
+  assert.deepEqual(args.lessons, ['2', '7']);
+});
+
+test('parseArgs: repeated --lesson combined with comma lists accumulate all values', () => {
+  const args = parseArgs(['--lesson', '1,2', '--lesson', '7']);
+  assert.deepEqual(args.lessons, ['1', '2', '7']);
+});
+
+test('parseArgs: --lesson works alongside --one-window and --persona (does not disturb other flags)', () => {
+  const args = parseArgs(['--one-window', '--persona', 'tire', '--lesson', '7']);
+  assert.equal(args.oneWindow, true);
+  assert.equal(args.persona, 'tire');
+  assert.deepEqual(args.lessons, ['7']);
+  assert.equal(args.unknownFlag, null);
+});
+
+test('parseArgs: --lesson with a trailing unknown flag still reports the unknown flag', () => {
+  const args = parseArgs(['--lesson', '7', '--typo']);
+  assert.deepEqual(args.lessons, ['7']);
+  assert.equal(args.unknownFlag, '--typo');
+});

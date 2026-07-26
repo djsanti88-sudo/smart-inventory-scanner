@@ -22,7 +22,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import { chromium } from 'playwright';
 
-import { computeRunNumber, masteredFrom, selectLessons, pickExploration, loadLessons } from './curriculum.mjs';
+import { computeRunNumber, masteredFrom, selectLessons, pickExploration, loadLessons, planForLessons } from './curriculum.mjs';
 import { RunLimits } from './limits.mjs';
 import * as h from './lessonHelpers.mjs';
 
@@ -78,6 +78,16 @@ Flags:
   --target <url>         Override the deployment URL (default: $TEACH_TARGET_URL
                           or ${DEFAULT_TARGET}).
   --run-id <id>          Override the generated run id.
+  --lesson <id|level>[,<id|level>...]
+                          Target specific lesson(s) instead of the normal
+                          cumulative curriculum. Accepts a numeric level
+                          (e.g. 7) or a lesson id/slug (e.g.
+                          live-decode-ladder-trace), a comma list, and/or the
+                          flag repeated. The run plan becomes exactly the
+                          requested lesson(s), ordered by level - the normal
+                          runNumber selection and exploration pick are
+                          skipped. An unknown id/level errors out (naming the
+                          bad value) before any browser or account is created.
   --help, -h             Print this usage and exit. Never launches a browser or
                           creates accounts.
 
@@ -96,7 +106,7 @@ Running with no flags launches the DEFAULT FULL LIVE RUN: 3 headed browsers,
 one real account per persona, against the deployment above. Use --self-check
 or --help first if you are unsure.`;
 
-const KNOWN_VALUE_FLAGS = new Set(['--target', '--run-id', '--persona']);
+const KNOWN_VALUE_FLAGS = new Set(['--target', '--run-id', '--persona', '--lesson']);
 const KNOWN_BOOLEAN_FLAGS = new Set(['--self-check', '--one-window', '--loop', '--help', '-h']);
 
 export function parseArgs(argv) {
@@ -107,6 +117,7 @@ export function parseArgs(argv) {
     oneWindow: false,
     loop: false,
     persona: null,
+    lessons: [],
     help: false,
     unknownFlag: null,
   };
@@ -127,6 +138,13 @@ export function parseArgs(argv) {
     } else if (arg === '--persona') {
       args.persona = argv[i + 1] ?? null;
       i += 1;
+    } else if (arg === '--lesson') {
+      const value = argv[i + 1] ?? '';
+      i += 1;
+      for (const piece of String(value).split(',')) {
+        const trimmed = piece.trim();
+        if (trimmed.length > 0) args.lessons.push(trimmed);
+      }
     } else if (arg === '--help' || arg === '-h') {
       args.help = true;
     } else if (typeof arg === 'string' && arg.startsWith('-') && !KNOWN_VALUE_FLAGS.has(arg) && !KNOWN_BOOLEAN_FLAGS.has(arg)) {
@@ -163,7 +181,16 @@ async function packageVersion() {
   }
 }
 
-function buildPlan(allLessons, runNumber, mastered) {
+function buildPlan(allLessons, runNumber, mastered, lessonOverride = null) {
+  if (Array.isArray(lessonOverride) && lessonOverride.length > 0) {
+    // --lesson targeting: the plan is exactly the requested lesson(s),
+    // ordered by level. main() already validated the request against
+    // loadLessons() before any browser/account setup ran, so this always
+    // resolves ok:true here - but planForLessons is re-checked defensively
+    // rather than trusted blindly, since allLessons is re-loaded per call site.
+    const result = planForLessons(allLessons, lessonOverride);
+    if (result.ok) return result.plan;
+  }
   const selected = selectLessons(allLessons, { runNumber });
   const explore = pickExploration(allLessons, { runNumber, mastered });
   const merged = [...selected];
@@ -569,7 +596,7 @@ async function persistRunArtifacts({ knowledge, report, runId, model, plan, k })
  * `limits.canPaidLookup()` (checked inside individual lessons) is the only
  * gate on paid rungs; it never blocks free lessons.
  */
-async function runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop }) {
+async function runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop, lessonOverride = null }) {
   const { readKnowledge, PATHS } = knowledge;
   const { createManifest, setStatus } = manifest;
   const { PERSONAS, probeDeployment, signUpPersona, newPersonaContext } = personas;
@@ -636,7 +663,7 @@ async function runOneWindow({ target, runId, knowledge, manifest, personas, repo
       const runNumber = computeRunNumber(k.runHistory);
       const mastered = masteredFrom(k.runHistory);
       const allLessons = await loadLessons();
-      const plan = buildPlan(allLessons, runNumber, mastered);
+      const plan = buildPlan(allLessons, runNumber, mastered, lessonOverride);
 
       if (roundNumber > 1) {
         // Round 1's manifest was already created before signup (and holds the recorded account).
@@ -975,7 +1002,7 @@ async function runPlanForPersona({ persona, page, mode, businessId, otherTenantI
   return { persona: persona.key, lessons };
 }
 
-async function runLive({ target, runId, knowledge, manifest, personas, report, limits }) {
+async function runLive({ target, runId, knowledge, manifest, personas, report, limits, lessonOverride = null }) {
   const { readKnowledge, writeCoverage, appendRunHistory, appendDiscoveries, appendBugs, atomicWriteFile, PATHS } = knowledge;
   const { createManifest, setStatus, readManifest } = manifest;
   const { PERSONAS } = personas;
@@ -985,7 +1012,7 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
   const runNumber = computeRunNumber(k.runHistory);
   const mastered = masteredFrom(k.runHistory);
   const allLessons = await loadLessons();
-  const plan = buildPlan(allLessons, runNumber, mastered);
+  const plan = buildPlan(allLessons, runNumber, mastered, lessonOverride);
 
   await createManifest(runId, { target, personas: PERSONAS.map((p) => p.key) });
   const runDir = path.join(PATHS.artifactsDir, runId);
@@ -1229,6 +1256,21 @@ export async function main(argv) {
   const target = args.target ?? process.env.TEACH_TARGET_URL ?? DEFAULT_TARGET;
   const runId = args.runId ?? generateRunId();
 
+  // --lesson validation runs before ANY browser launch or account creation
+  // (including --self-check's manifest write), matching the fail-fast style
+  // of the unknown-flag check above: a typo'd lesson id/level must never
+  // silently fall through to a full live run.
+  if (args.lessons.length > 0) {
+    const allLessonsForValidation = await loadLessons();
+    const requestedCheck = planForLessons(allLessonsForValidation, args.lessons);
+    if (!requestedCheck.ok) {
+      console.error(`Unknown lesson id/level: ${requestedCheck.unknown.join(', ')}`);
+      console.error(`Available lessons: ${allLessonsForValidation.map((l) => `[${l.level}] ${l.id}`).join(', ')}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   if (args.selfCheck) {
     let tempBase = null;
     const hadEnv = Boolean(process.env.TEACH_KNOWLEDGE_BASE);
@@ -1256,13 +1298,15 @@ export async function main(argv) {
   const report = await import('./report.mjs');
   const limits = new RunLimits({});
 
+  const lessonOverride = args.lessons.length > 0 ? args.lessons : null;
+
   if (args.oneWindow) {
     const personaKey = args.persona ?? DEFAULT_LOOP_PERSONA;
-    await runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop: args.loop });
+    await runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop: args.loop, lessonOverride });
     return;
   }
 
-  await runLive({ target, runId, knowledge, manifest, personas, report, limits });
+  await runLive({ target, runId, knowledge, manifest, personas, report, limits, lessonOverride });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

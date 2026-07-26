@@ -111,6 +111,73 @@ export function pickExploration(allLessons, { runNumber, mastered }) {
   return pool[index];
 }
 
+/**
+ * Resolves an explicit `--lesson` request list (each entry either a numeric
+ * level string like "7" or a lesson id/slug like "live-decode-ladder-trace")
+ * against the full lesson set. Pure function, no side effects.
+ *
+ * - A numeric-level request selects every lesson at that level.
+ * - An id/slug request selects the single matching lesson.
+ * - Results are deduped (a lesson matched by both a level and its own id
+ *   only appears once) and returned sorted by level then id, matching the
+ *   ordering used by selectLessons/buildPlan.
+ * - Any request that resolves to zero lessons makes the whole result
+ *   ok:false; `unknown` lists every such bad request (in the order first
+ *   seen), and `plan` is [] so callers fail fast before doing anything else.
+ *
+ * @param {Array<{ id: string, level: number }>} allLessons
+ * @param {string[]} requested - raw --lesson values, already split on commas
+ * @returns {{ ok: boolean, plan: Array, unknown: string[] }}
+ */
+export function planForLessons(allLessons, requested) {
+  const lessons = Array.isArray(allLessons) ? allLessons : [];
+  const requestList = Array.isArray(requested) ? requested : [];
+
+  if (requestList.length === 0) {
+    return { ok: true, plan: [], unknown: [] };
+  }
+
+  const byLevel = new Map();
+  const byId = new Map();
+  for (const lesson of lessons) {
+    if (!lesson) continue;
+    if (typeof lesson.level === 'number') {
+      const key = String(lesson.level);
+      if (!byLevel.has(key)) byLevel.set(key, []);
+      byLevel.get(key).push(lesson);
+    }
+    if (typeof lesson.id === 'string') {
+      byId.set(lesson.id, lesson);
+    }
+  }
+
+  const unknown = [];
+  const matched = new Map();
+  for (const raw of requestList) {
+    const key = String(raw).trim();
+    if (key.length === 0) continue;
+    const isNumeric = /^\d+$/.test(key);
+    const levelMatches = isNumeric ? byLevel.get(key) : null;
+    const idMatch = byId.get(key);
+    if (levelMatches && levelMatches.length > 0) {
+      for (const lesson of levelMatches) matched.set(lesson.id, lesson);
+    } else if (idMatch) {
+      matched.set(idMatch.id, idMatch);
+    } else {
+      unknown.push(key);
+    }
+  }
+
+  if (unknown.length > 0) {
+    return { ok: false, plan: [], unknown };
+  }
+
+  const plan = [...matched.values()].sort(
+    (a, b) => (a.level - b.level) || String(a.id).localeCompare(String(b.id))
+  );
+  return { ok: true, plan, unknown: [] };
+}
+
 function isValidLesson(candidate) {
   return Boolean(
     candidate &&

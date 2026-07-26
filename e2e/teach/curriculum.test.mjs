@@ -10,6 +10,7 @@ import {
   selectLessons,
   pickExploration,
   loadLessons,
+  planForLessons,
 } from './curriculum.mjs';
 
 describe('computeRunNumber', () => {
@@ -103,6 +104,79 @@ describe('pickExploration', () => {
   test('returns null when everything explorable is mastered', () => {
     const mastered = new Set(['e1', 'e2']);
     assert.equal(pickExploration(allLessons, { runNumber: 0, mastered }), null);
+  });
+});
+
+describe('planForLessons', () => {
+  const allLessons = [
+    { id: 'signup-flow', level: 1 },
+    { id: 'add-known-product', level: 2 },
+    { id: 'resolve-unknown', level: 4 },
+    { id: 'export-csv', level: 4 },
+    { id: 'live-decode-ladder-trace', level: 7 },
+  ];
+
+  test('a single numeric level string resolves to that lesson', () => {
+    const result = planForLessons(allLessons, ['7']);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-ladder-trace']);
+    assert.deepEqual(result.unknown, []);
+  });
+
+  test('a single lesson id/slug resolves to that lesson', () => {
+    const result = planForLessons(allLessons, ['live-decode-ladder-trace']);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-ladder-trace']);
+  });
+
+  test('multiple requests are ordered by level ascending, not request order', () => {
+    const result = planForLessons(allLessons, ['7', '2']);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.plan.map((l) => l.id), ['add-known-product', 'live-decode-ladder-trace']);
+  });
+
+  test('a level with multiple lessons at that level resolves all of them, sorted by id', () => {
+    const result = planForLessons(allLessons, ['4']);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.plan.map((l) => l.id), ['export-csv', 'resolve-unknown']);
+  });
+
+  test('duplicate requests (level + id resolving to the same lesson) are deduped', () => {
+    const result = planForLessons(allLessons, ['7', 'live-decode-ladder-trace']);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.plan.map((l) => l.id), ['live-decode-ladder-trace']);
+  });
+
+  test('an unknown id/level yields ok:false with the bad id named', () => {
+    const result = planForLessons(allLessons, ['99']);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.unknown, ['99']);
+    assert.deepEqual(result.plan, []);
+  });
+
+  test('an unknown slug yields ok:false with the bad slug named', () => {
+    const result = planForLessons(allLessons, ['not-a-real-lesson']);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.unknown, ['not-a-real-lesson']);
+  });
+
+  test('mixed known and unknown requests report ok:false and list only the unknown ones', () => {
+    const result = planForLessons(allLessons, ['2', 'bogus', '99']);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.unknown, ['bogus', '99']);
+  });
+
+  test('empty requested list yields ok:true with an empty plan', () => {
+    const result = planForLessons(allLessons, []);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.plan, []);
+    assert.deepEqual(result.unknown, []);
+  });
+
+  test('non-array allLessons is tolerated (returns ok:false, unknown lists the request)', () => {
+    const result = planForLessons(undefined, ['7']);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.unknown, ['7']);
   });
 });
 
