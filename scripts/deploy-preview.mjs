@@ -165,11 +165,14 @@ function runVercelDeploy() {
     return { ok: true, url: "https://dry-run-fake-preview.vercel.app" };
   }
   log("running `vercel deploy` (preview)...");
-  const result = spawnSync("vercel", ["deploy"], {
+  // Windows: `vercel` is a .cmd shim, spawnSync needs a shell there (same fix as
+  // check-env-parity.mjs). --yes skips the interactive scope/link confirmation.
+  const result = spawnSync("vercel", ["deploy", "--yes"], {
     stdio: ["inherit", "pipe", "inherit"],
     cwd: REPO_ROOT,
     encoding: "utf8",
     env: { ...process.env, DEPLOY_WRAPPER: "1" },
+    shell: process.platform === "win32",
   });
   const stdout = result.stdout || "";
   process.stdout.write(stdout);
