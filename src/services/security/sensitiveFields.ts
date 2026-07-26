@@ -47,9 +47,17 @@ export function stripSensitive<T>(value: T): T {
  * same device's own localStorage persistence protected nothing and instead destroyed the shop's own
  * data (the Products/Counts "Barcode" column showed "-" after every reload). The reusable alias/catalog
  * corpus (aliases, vendorCodes, the master catalog) stays platform-only and is unaffected by this. */
+// Owner rule (2026-07-22, same reasoning as the barcode fields above): `verified` and `businessId` are
+// trust/scoping flags on the shop's OWN product row, not sensitive reusable-corpus data - they were
+// missing here, so after a customer persist/reload round-trip a verified product lost `verified` and
+// `businessId`, and the resolver trust gate (matchProductByIdentifiers, src/services/aliasMatcher.ts:111,
+// `p.businessId === businessId && p.verified === true`) could never match it again: the shop's own
+// already-verified products silently stopped resolving as "known" after every reload. Including them here
+// is consistent with CUSTOMER_SAFE_REVIEW_FIELDS/CUSTOMER_SAFE_SCANEVENT_FIELDS, which already carry
+// businessId for the same customer-scoping reason.
 export const CUSTOMER_SAFE_PRODUCT_FIELDS = [
   "id", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
-  "primaryBarcode", "gtin", "upc", "ean",
+  "primaryBarcode", "gtin", "upc", "ean", "verified", "businessId",
 ] as const;
 
 // A customer's OWN pending Needs-Review item — only the fields they need to SEE + ACT on it, plus their

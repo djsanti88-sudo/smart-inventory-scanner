@@ -14,6 +14,7 @@ import { doc, setDoc, getDoc, getDocs, query, collection, where, serverTimestamp
 import { getFirebaseAuth, getDb } from "@/lib/firebaseClient";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { COLLECTIONS, memberDocId, type BusinessMember } from "@/services/db/types";
+import { setSelectedBusinessId } from "@/lib/selectedBusiness";
 
 // Firebase Auth for the launch MVP (email/password; structured so Google can be added later). The
 // Admin SDK / service account is NEVER imported here. The guarded E2E/test bypass keeps Playwright specs
@@ -61,6 +62,7 @@ export async function signUp(email: string, password: string): Promise<{ error: 
   try {
     const cred = await createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
     await ensureUserProfile(cred.user);
+    await ensureDefaultBusinessProvisioned();
     return { error: null };
   } catch (e) {
     return { error: message(e) };
@@ -72,9 +74,35 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
   try {
     const cred = await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
     await ensureUserProfile(cred.user);
+    await ensureDefaultBusinessProvisioned();
     return { error: null };
   } catch (e) {
     return { error: message(e) };
+  }
+}
+
+/**
+ * Root cause fix (owner report 2026-07-22): a fresh signup previously had NO business + membership
+ * doc until the user manually visited /business -> Create -> Select, so every guarded API 403'd with
+ * "Not a member of this business" from the very first load. Auto-provision a default business (reusing
+ * createBusiness's exact transactional doc + owner-membership write) whenever the signed-in user has
+ * zero memberships, and select it, so a fresh account lands ready to scan immediately.
+ *
+ * Never runs under the E2E/test auth bypass (isAuthBypassEnabled) - that path has no real Firebase user
+ * and mock mode's DEMO_BUSINESS_ID substrate must stay untouched. Errors are swallowed (not fatal to
+ * signup itself): a failed provision degrades to the existing manual /business flow, it does not break
+ * account creation.
+ */
+export async function ensureDefaultBusinessProvisioned(): Promise<void> {
+  if (isAuthBypassEnabled()) return;
+  try {
+    const existing = await listMemberships();
+    if (existing.length > 0) return;
+    const { businessId, error } = await createBusiness("My Business");
+    if (error || !businessId) return;
+    setSelectedBusinessId(businessId);
+  } catch {
+    // Best-effort: the user still lands signed in; the manual /business flow remains available.
   }
 }
 
