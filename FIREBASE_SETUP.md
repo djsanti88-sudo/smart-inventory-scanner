@@ -7,6 +7,10 @@ config / production credentials are needed. The live scan/count sync path IS wir
 (`FirebaseSyncTarget` + the scanStore cloud drain) behind the opt-in `dev:emulator`/`dev:prod`
 modes; mock remains the default backend, and master plan Phase 2 completes accounts/tenancy on top.
 
+Preview deployments intentionally carry NO Firebase env vars at all - every preview always runs mock
+backend, no login, regardless of branch or code, so a preview link is always safe to share (see
+`docs/DEPLOY_TRUTH.md`); only Production carries the live Firebase config.
+
 ## Prerequisites
 - Firebase CLI (`firebase --version`; already installed: 15.x) and a Firebase login (`firebase login`).
 - Java (the Firestore emulator needs it; Java 21 present).

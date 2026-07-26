@@ -182,6 +182,12 @@ publishing; importing into a live inventory platform; sending emails/messages.
 **Approved without approval:** local code edits, local tests, local seed data, mock AI provider,
 screenshots, CSV export proof, local mock auth/DB, docs, local sync/retry/idempotency proof.
 
+Deploy mechanics (GitHub-Vercel disconnect, preview vs. production, what env vars live where) are
+canonically documented in `docs/DEPLOY_TRUTH.md` - read it before reasoning about deploy at all.
+Production promote/rollback/alias commands are hard-blocked at the tool layer by
+`.claude/hookify.vercel-prod-gate.local.md`, not just this written rule - do not assume a blocked
+command can be argued around; it needs the owner's explicit in-conversation approval.
+
 ## Human Bot Proof Gate
 Human-bot proof + safe security-leak checks are REQUIRED before handoff for scanner, inventory, role,
 export, catalog, alias, product-resolution, and customer-facing changes. Unit tests are NOT

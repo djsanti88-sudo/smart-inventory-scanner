@@ -87,6 +87,17 @@ First time on a machine: `npx playwright install chromium`.
 | `npm run deploy:card` | Same sentinel, deploy-card output mode. |
 | `node scripts/release-hygiene.mjs` | Git-only uncommitted/unpushed check (repo lives on OneDrive; pushing is the real backup). `--json` for machine output. |
 
+## Deploy (Vercel CLI)
+
+Full mechanics and current truth: `docs/DEPLOY_TRUTH.md` - read it before running any of this.
+Short version: GitHub auto-deploy is disconnected (`vercel.json`), so `git push` never deploys
+anything. Preview deploys are a plain `vercel deploy` (no committed wrapper script exists yet).
+Production promote/rollback (`vercel --prod`, `vercel promote`, `vercel rollback`, `vercel alias set`)
+is **owner-only** and hard-blocked at the tool layer by `.claude/hookify.vercel-prod-gate.local.md` -
+it will not run from an agent session without explicit in-conversation owner approval, even if a
+prior session already approved something similar. Run `npm run release:check` / `npm run deploy:card`
+(`scripts/release-sentinel.mjs`, see above) as the preflight gate before proposing any deploy action.
+
 ## Data / corpus pipelines (local, no paid calls)
 
 | Script | What it does |
