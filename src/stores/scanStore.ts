@@ -49,6 +49,7 @@ import {
   type BreakerState,
 } from "@/services/circuitBreaker";
 import { sanitizeForAiLookup } from "@/services/sanitizer";
+import { authFieldsForDecode } from "@/lib/decodeAuth";
 import { sanitizeCustomerReason } from "@/services/ai/decodeFallback";
 import { isUsableProductName, cleanProductName } from "@/services/ai/decode";
 import { buildCleanupRecommendations } from "@/services/cleanup/recommendations";
@@ -2604,6 +2605,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const cleanCodeSanitized = sanitizeForAiLookup(review.cleanCode).clean;
 
         try {
+          // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
+          // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
+          const authFields = await authFieldsForDecode();
           const res = await fetch("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2612,6 +2616,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               cleanCode: cleanCodeSanitized,
               provider: s.primaryProvider,
               allowImageSuggestions: s.allowImageSuggestions,
+              ...authFields,
             }),
           });
           if (!res.ok) throw new Error(`lookup failed ${res.status}`);
@@ -2889,6 +2894,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const clampedBudgetMs = clampDecodeBudgetMs(s.decodeBudgetMs);
           const abortController = new AbortController();
           const abortTimer = setTimeout(() => abortController.abort(), clampedBudgetMs + 7000);
+          // D4-follow-up: resolved once and reused on the 429 retry leg below - live-auth mode
+          // requires idToken + businessId on every POST (route.ts:294-324) or this 401s
+          // "unauthenticated"; mock mode resolves {} and both call legs are unaffected.
+          const authFields = await authFieldsForDecode();
           const decodeOnce = async () => {
             let res: Response;
             try {
@@ -2908,6 +2917,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   scanContext,
                   brandPrefixHint,
                   autoCountNonPublicWithEvidence: s.autoCountNonPublicWithEvidence ?? true,
+                  ...authFields,
                 }),
               });
             } catch (fetchErr) {
@@ -2947,6 +2957,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
                   confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
                   budgetMs: clampedBudgetMs, scanContext, brandPrefixHint,
+                  ...authFields,
                 }),
               });
               if (!retry.ok) throw new Error(`decode failed ${retry.status} after 429 retry`);
@@ -4049,6 +4060,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           results?: AiLookupResult[];
         };
         try {
+          // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
+          // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
+          const authFields = await authFieldsForDecode();
           const res = await fetch("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -4063,6 +4077,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               codeType,
               confidenceThreshold: 0.85,
               allowImageSuggestions: s.allowImageSuggestions,
+              ...authFields,
             }),
           });
           if (!res.ok) return; // never throw into the scan flow; leave the review open for the human
@@ -6003,12 +6018,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         patch({ correctionRecheckStatus: "requested", correctionRecheckedAt: now() });
         try {
+          // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
+          // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
+          const authFields = await authFieldsForDecode();
           const res = await fetch("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             // proRecheck selects the strongest configured Gemini model server-side. Correction-only:
             // it does NOT change normal scan provider order or premium fallback.
-            body: JSON.stringify({ mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85 }),
+            body: JSON.stringify({ mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85, ...authFields }),
           });
           const data = await res.json();
           const decision = data.decision;
