@@ -41,7 +41,46 @@ const DEFAULT_TARGET = 'https://inventory-lovat-six.vercel.app';
 
 const DEFAULT_LOOP_PERSONA = 'tire';
 
-function parseArgs(argv) {
+export const USAGE = `Teach Bot - live-app learning Playwright harness
+
+Usage: node e2e/teach/teach.mjs [flags]
+
+Flags:
+  --self-check           Zero-network, zero-browser dry run: loads the lesson
+                          curriculum and prints the plan without touching the
+                          real deployment, knowledge base, or creating accounts.
+  --loop                 Run continuously (Ctrl-C to stop), reusing one signed-in
+                          browser/account across rounds. Implies --one-window.
+  --one-window           Single headed browser / single persona instead of the
+                          default multi-window tiled run.
+  --persona <key>        Persona to use with --one-window / --loop
+                          (default: "${DEFAULT_LOOP_PERSONA}"; available keys are
+                          defined in personas.mjs, e.g. tire, cstore, supp).
+  --target <url>         Override the deployment URL (default: $TEACH_TARGET_URL
+                          or ${DEFAULT_TARGET}).
+  --run-id <id>          Override the generated run id.
+  --help, -h             Print this usage and exit. Never launches a browser or
+                          creates accounts.
+
+Environment variables (run budget / behavior):
+  TEACH_TARGET_URL         Default deployment URL (overridden by --target).
+  TEACH_KNOWLEDGE_BASE     Redirects the knowledge-base file paths (used by
+                            --self-check internally; do not point this at the
+                            real testing/app-knowledge directory in normal runs).
+  TEACH_SLOWMO_MS           Playwright slowMo in ms for headed runs (default 600).
+  TEACH_MAX_PAID_LOOKUPS    Cap on paid decode lookups per run/loop.
+  TEACH_MAX_REQUESTS        Cap on total lesson requests per run/loop.
+  TEACH_MAX_MINUTES         Cap on wall-clock minutes per run/loop.
+  TEACH_ESTIMATED_MAX_USD   Cap on estimated spend (USD) per run/loop.
+
+Running with no flags launches the DEFAULT FULL LIVE RUN: 3 headed browsers,
+one real account per persona, against the deployment above. Use --self-check
+or --help first if you are unsure.`;
+
+const KNOWN_VALUE_FLAGS = new Set(['--target', '--run-id', '--persona']);
+const KNOWN_BOOLEAN_FLAGS = new Set(['--self-check', '--one-window', '--loop', '--help', '-h']);
+
+export function parseArgs(argv) {
   const args = {
     selfCheck: false,
     target: null,
@@ -49,6 +88,8 @@ function parseArgs(argv) {
     oneWindow: false,
     loop: false,
     persona: null,
+    help: false,
+    unknownFlag: null,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -67,6 +108,11 @@ function parseArgs(argv) {
     } else if (arg === '--persona') {
       args.persona = argv[i + 1] ?? null;
       i += 1;
+    } else if (arg === '--help' || arg === '-h') {
+      args.help = true;
+    } else if (typeof arg === 'string' && arg.startsWith('-') && !KNOWN_VALUE_FLAGS.has(arg) && !KNOWN_BOOLEAN_FLAGS.has(arg)) {
+      args.unknownFlag = arg;
+      break;
     }
   }
   // --loop always drives a single headed browser/persona (session persists across
@@ -1091,6 +1137,19 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
 
 export async function main(argv) {
   const args = parseArgs(argv);
+
+  if (args.unknownFlag) {
+    console.error(`Unrecognized flag: ${args.unknownFlag}`);
+    console.error('Run with --help to see the available flags.');
+    process.exitCode = 1;
+    return;
+  }
+
+  if (args.help) {
+    console.log(USAGE);
+    return;
+  }
+
   const target = args.target ?? process.env.TEACH_TARGET_URL ?? DEFAULT_TARGET;
   const runId = args.runId ?? generateRunId();
 
