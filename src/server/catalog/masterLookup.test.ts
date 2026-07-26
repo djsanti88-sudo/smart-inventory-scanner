@@ -89,6 +89,26 @@ describe("lookupMasterCatalog (Sync Truth Task 4 free ladder rung)", () => {
     expect(outcome).toEqual({ kind: "miss" });
   });
 
+  // Catalog revocation round (design §2.1 step 3 / §3.2): a disputed entry must MISS, regardless of
+  // provenanceTier, so the ladder honestly re-decodes instead of replaying a disputed identity. This
+  // is the read-side regression test for the new "disputed" verificationStatus - it fails today
+  // because classifyEntry has no "disputed" branch at all (any non-"verified" status falls to the
+  // generic { kind: "miss" } already, so this test also guards against a FUTURE regression where
+  // "disputed" is accidentally treated as verified for a trusted provenanceTier).
+  it("disputed entry -> miss (falls through to the ladder), even for ladder_verified_strong", async () => {
+    const entry = { id: "gtin_00086699997654", normalizedBarcode: GTIN, name: "Michelin Defender", verificationStatus: "disputed", provenanceTier: "ladder_verified_strong" };
+    const { db } = makeDb(async () => ({ exists: true, data: () => entry }));
+    const outcome = await lookupMasterCatalog(GTIN, { db });
+    expect(outcome).toEqual({ kind: "miss" });
+  });
+
+  it("disputed entry -> miss even for human_verified provenanceTier", async () => {
+    const entry = { id: "gtin_00086699997654", normalizedBarcode: GTIN, name: "Michelin Defender", verificationStatus: "disputed", provenanceTier: "human_verified" };
+    const { db } = makeDb(async () => ({ exists: true, data: () => entry }));
+    const outcome = await lookupMasterCatalog(GTIN, { db });
+    expect(outcome).toEqual({ kind: "miss" });
+  });
+
   it("no entry found -> miss", async () => {
     const { db } = makeDb(async () => ({ exists: false, data: () => undefined }));
     const outcome = await lookupMasterCatalog(GTIN, { db });

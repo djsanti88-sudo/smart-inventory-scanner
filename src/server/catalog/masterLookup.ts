@@ -3,6 +3,7 @@ import "server-only";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/types";
+import { resolveCatalogDocId } from "@/server/catalog/catalogDocId";
 
 // Sync Truth Task 4 (owner-approved 2026-07-22, docs/superpowers/plans/2026-07-22-sync-truth-five-steps.md):
 // a FREE ladder rung that consults the top-level Firestore `catalogEntries` master catalog (the same
@@ -83,17 +84,14 @@ function classifyEntry(entry: DbCatalogEntry): MasterLookupOutcome {
 
 async function readEntry(canonical: string, deps: MasterLookupDeps): Promise<DbCatalogEntry | null> {
   const db = deps.db ?? getAdminDb();
-  const col = db.collection(COLLECTIONS.catalogEntries);
-  // Primary: masterAppend.ts's GC6 doc-id scheme ("gtin_" + canonical) - always finds what an append wrote.
-  const primary = await col.doc(`gtin_${canonical}`).get();
-  if (primary.exists) return (primary.data() as DbCatalogEntry | undefined) ?? null;
-  // Fallback (integration fix 2026-07-22): the REAL catalogEntries collection holds 76,208 rows imported
-  // June 25 whose doc ids are the BARE normalized barcode (e.g. catalogEntries/00848983020611). Without
-  // this fallback the rung would miss every imported entry, including ones the owner approves via the
-  // /catalog-review page. Both reads share the same READ_TIMEOUT_MS envelope (the race wraps readEntry).
-  const bare = await col.doc(canonical).get();
-  if (!bare.exists) return null;
-  return (bare.data() as DbCatalogEntry | undefined) ?? null;
+  // Doc-id resolution (gtin_<canonical> primary, bare-canonical fallback for the 76,208-row legacy
+  // June-25 import) lives in the shared catalogDocId.ts helper (catalog revocation round, design
+  // §2.2 step 2) so this rung and the /api/catalog-dispute endpoint can never drift on which doc a
+  // given canonical GTIN resolves to. Both reads share the same READ_TIMEOUT_MS envelope (the race
+  // wraps readEntry).
+  const resolved = await resolveCatalogDocId(db, COLLECTIONS.catalogEntries, canonical);
+  if (!resolved) return null;
+  return (resolved.snap.data() as DbCatalogEntry | undefined) ?? null;
 }
 
 /**
