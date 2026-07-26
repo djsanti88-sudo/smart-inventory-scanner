@@ -288,7 +288,6 @@ async function setupPersonaAuth({ page, persona, runId, target, personas, accoun
   }
 }
 
-/** Extract the leading integer from a COVERAGE_MATRIX lesson key like "10-reconcile-equal-and-different". */
 function leadingLevel(key) {
   const match = /^(\d+)-/.exec(key);
   return match ? Number(match[1]) : null;
@@ -306,21 +305,6 @@ function computeCoverageDelta(coverage, planLevels) {
     if (!ran && !wasCovered) stillUncovered.push(key);
   }
   return { newlyCovered, stillUncovered };
-}
-
-function updateCoverageForPlan(coverage, plan, runId) {
-  const base = coverage && typeof coverage === 'object' ? coverage : { lessons: {} };
-  const next = JSON.parse(JSON.stringify(base));
-  next.lessons = next.lessons && typeof next.lessons === 'object' ? next.lessons : {};
-  next.updatedAt = new Date().toISOString();
-  const planLevels = new Map(plan.map((l) => [l.level, l]));
-  for (const key of Object.keys(next.lessons)) {
-    const level = leadingLevel(key);
-    if (level !== null && planLevels.has(level)) {
-      next.lessons[key] = { status: 'covered', lastRunId: runId };
-    }
-  }
-  return next;
 }
 
 /**
@@ -605,21 +589,27 @@ async function buildRunModel({
  * shape as a normal run's.
  */
 async function persistRunArtifacts({ knowledge, report, runId, model, plan, k }) {
-  const { writeCoverage, appendRunHistory, appendDiscoveries, appendBugs, atomicWriteFile } = knowledge;
+  const { writeCoverage, updateCoverageForRun, appendRunHistory, appendDiscoveries, appendBugs, atomicWriteFile } = knowledge;
   const { writeReport } = report;
   const { finishedAt, findings } = model;
+  const results = model.personaResults.flatMap((pr) => pr.lessons.map((l) => ({
+    id: l.id,
+    pass: l.pass,
+    skipped: l.skipped,
+    learned: l.learned,
+  })));
 
   await appendRunHistory({
     runId,
     at: finishedAt,
     runNumber: model.runNumber,
     deploymentMode: model.deploymentMode,
-    results: model.personaResults.flatMap((pr) => pr.lessons.map((l) => ({ id: l.id, pass: l.pass }))),
+    results: results.map((result) => ({ id: result.id, pass: result.pass })),
     spend: model.limits.estimate,
     findingsCount: findings.length,
   });
 
-  const nextCoverage = updateCoverageForPlan(k.coverage, plan, runId);
+  const nextCoverage = updateCoverageForRun(k.coverage, plan, runId, results);
   await writeCoverage(nextCoverage);
 
   const confirmedBugs = findings.filter((f) => f?.triageClass === 'confirmed_app_bug');
@@ -1086,7 +1076,16 @@ async function runPlanForPersona({ persona, page, mode, businessId, otherTenantI
 }
 
 async function runLive({ target, runId, knowledge, manifest, personas, report, limits, lessonOverride = null, accountReuse = null }) {
-  const { readKnowledge, writeCoverage, appendRunHistory, appendDiscoveries, appendBugs, atomicWriteFile, PATHS } = knowledge;
+  const {
+    readKnowledge,
+    writeCoverage,
+    updateCoverageForRun,
+    appendRunHistory,
+    appendDiscoveries,
+    appendBugs,
+    atomicWriteFile,
+    PATHS,
+  } = knowledge;
   const { createManifest, setStatus, readManifest } = manifest;
   const { PERSONAS } = personas;
   const { writeReport } = report;
@@ -1237,17 +1236,23 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
 
     // Single atomic knowledge write at the end - the orchestrator is the only writer.
     const findingsCount = findings.length;
+    const results = personaResults.flatMap((pr) => pr.lessons.map((l) => ({
+      id: l.id,
+      pass: l.pass,
+      skipped: l.skipped,
+      learned: l.learned,
+    })));
     await appendRunHistory({
       runId,
       at: finishedAt,
       runNumber,
       deploymentMode,
-      results: personaResults.flatMap((pr) => pr.lessons.map((l) => ({ id: l.id, pass: l.pass }))),
+      results: results.map((result) => ({ id: result.id, pass: result.pass })),
       spend: limits.estimateSpend(),
       findingsCount,
     });
 
-    const nextCoverage = updateCoverageForPlan(k.coverage, plan, runId);
+    const nextCoverage = updateCoverageForRun(k.coverage, plan, runId, results);
     await writeCoverage(nextCoverage);
 
     const confirmedBugs = findings.filter((f) => f?.triageClass === 'confirmed_app_bug');

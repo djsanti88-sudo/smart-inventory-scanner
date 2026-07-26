@@ -150,6 +150,63 @@ export async function writeCoverage(obj) {
   await atomicWriteFile(PATHS.coverage, `${JSON.stringify(obj, null, 2)}\n`);
 }
 
+/** Extract the leading integer from a COVERAGE_MATRIX lesson key like "10-reconcile-equal-and-different". */
+export function leadingCoverageLevel(key) {
+  const match = /^(\d+)-/.exec(key);
+  return match ? Number(match[1]) : null;
+}
+
+function resultWasSkipped(result) {
+  return Boolean(
+    result?.skipped === true ||
+    result?.learned?.skipped === true ||
+    result?.isolationVectorsTested === 0 ||
+    result?.learned?.isolationVectorsTested === 0
+  );
+}
+
+function statusForResults(results) {
+  if (!Array.isArray(results) || results.length === 0) return 'not_run';
+  if (results.some((result) => !resultWasSkipped(result) && result?.pass === false)) return 'failed';
+  if (results.some((result) => resultWasSkipped(result))) return 'skipped';
+  return results.every((result) => result?.pass === true) ? 'covered' : 'failed';
+}
+
+/**
+ * Merge a run's actual lesson results into COVERAGE_MATRIX.
+ * A lesson is covered only when it executed and passed. Non-executed lessons
+ * keep their prior status/run evidence instead of adopting this run id.
+ */
+export function updateCoverageForRun(coverage, plan, runId, results) {
+  const base = coverage && typeof coverage === 'object' ? coverage : { lessons: {} };
+  const next = JSON.parse(JSON.stringify(base));
+  next.lessons = next.lessons && typeof next.lessons === 'object' ? next.lessons : {};
+  next.updatedAt = new Date().toISOString();
+
+  const plannedByLevel = new Map(
+    (Array.isArray(plan) ? plan : [])
+      .filter((lesson) => lesson && typeof lesson.level === 'number' && typeof lesson.id === 'string')
+      .map((lesson) => [lesson.level, lesson])
+  );
+  const resultsById = new Map();
+  for (const result of Array.isArray(results) ? results : []) {
+    if (!result || typeof result.id !== 'string') continue;
+    if (!resultsById.has(result.id)) resultsById.set(result.id, []);
+    resultsById.get(result.id).push(result);
+  }
+
+  for (const key of Object.keys(next.lessons)) {
+    const level = leadingCoverageLevel(key);
+    const lesson = level === null ? null : plannedByLevel.get(level);
+    const lessonResults = lesson ? resultsById.get(lesson.id) ?? [] : [];
+    const status = statusForResults(lessonResults);
+    if (status !== 'not_run') {
+      next.lessons[key] = { status, lastRunId: runId };
+    }
+  }
+  return next;
+}
+
 /**
  * Append one JSON object as a single line to RUN_HISTORY.jsonl.
  * Reads the existing content, appends the new line, and rewrites the whole

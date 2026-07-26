@@ -22,6 +22,7 @@ const {
   readLocked,
   writeAppExpert,
   writeCoverage,
+  updateCoverageForRun,
   appendRunHistory,
   appendDiscoveries,
   appendBugs,
@@ -90,6 +91,70 @@ test('readLocked / writeAppExpert / writeCoverage round-trip', async () => {
   await writeCoverage({ flows: ['login', 'scan'], count: 2 });
   const knowledge2 = await readKnowledge();
   assert.deepEqual(knowledge2.coverage, { flows: ['login', 'scan'], count: 2 });
+});
+
+test('updateCoverageForRun marks skipped lesson results as skipped, not covered', () => {
+  const coverage = {
+    lessons: {
+      '11-tenant-isolation-deep': { status: 'not_run', lastRunId: null },
+    },
+  };
+  const plan = [{ id: 'tenant-isolation-deep', level: 11 }];
+  const next = updateCoverageForRun(coverage, plan, 'run-skipped', [
+    {
+      id: 'tenant-isolation-deep',
+      pass: true,
+      skipped: true,
+      learned: { isolationVectorsTested: 0 },
+    },
+  ]);
+
+  assert.deepEqual(next.lessons['11-tenant-isolation-deep'], {
+    status: 'skipped',
+    lastRunId: 'run-skipped',
+  });
+});
+
+test('updateCoverageForRun marks failed lesson results as failed', () => {
+  const coverage = {
+    lessons: {
+      '2-scan-n-equals-count-n': { status: 'not_run', lastRunId: null },
+    },
+  };
+  const plan = [{ id: 'scan-n-count-n', level: 2 }];
+  const next = updateCoverageForRun(coverage, plan, 'run-failed', [
+    { id: 'scan-n-count-n', pass: false },
+  ]);
+
+  assert.deepEqual(next.lessons['2-scan-n-equals-count-n'], {
+    status: 'failed',
+    lastRunId: 'run-failed',
+  });
+});
+
+test('updateCoverageForRun preserves a lesson not executed in the run', () => {
+  const coverage = {
+    lessons: {
+      '1-signup-first-scan': { status: 'covered', lastRunId: 'run-prior' },
+      '4-offline-reconnect': { status: 'not_run', lastRunId: null },
+    },
+  };
+  const plan = [
+    { id: 'signup-first-scan', level: 1 },
+    { id: 'offline-reconnect', level: 4 },
+  ];
+  const next = updateCoverageForRun(coverage, plan, 'run-current', [
+    { id: 'round-reset', pass: false },
+  ]);
+
+  assert.deepEqual(next.lessons['1-signup-first-scan'], {
+    status: 'covered',
+    lastRunId: 'run-prior',
+  });
+  assert.deepEqual(next.lessons['4-offline-reconnect'], {
+    status: 'not_run',
+    lastRunId: null,
+  });
 });
 
 test('appendRunHistory produces valid JSONL, one object per line', async () => {
