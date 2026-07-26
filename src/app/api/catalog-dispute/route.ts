@@ -1,8 +1,9 @@
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth } from "@/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { accessLevelServer } from "@/services/security/roleAccess";
+import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { disputeCatalogEntry } from "@/server/catalog/catalogDispute";
 import { logServerEvent } from "@/server/log";
@@ -12,9 +13,17 @@ export const runtime = "nodejs";
 // Catalog revocation round (owner-approved design, section 2.2). A shop reports that a scanned
 // identity from the shared `catalogEntries` master catalog was wrong. Auth is DELIBERATELY looser
 // than /api/catalog-review (platformOwner-only): catalogEntries carries no businessId, so
-// membership-in-a-specific-business isn't a meaningful check here - any authenticated caller
-// (accessLevelServer "business" OR "platform") may dispute. The abuse ceiling is the
-// threshold/dedup logic inside disputeCatalogEntry (catalogDispute.ts), not tighter auth.
+// membership-in-a-specific-business isn't a meaningful check on the DOC being disputed - any
+// authenticated caller (accessLevelServer "business" OR "platform") may dispute a catalog entry.
+// The abuse ceiling is the threshold/dedup logic inside disputeCatalogEntry (catalogDispute.ts),
+// not tighter auth on the doc.
+//
+// BUT the businessId in the request body IS meaningful: it is the attribution key
+// disputeCatalogEntry dedupes on and the identity behind the "3 distinct businesses" demotion
+// threshold for human_verified entries. Without verifying the caller's uid is actually a member of
+// that businessId, one authenticated account could submit unlimited fabricated businessId strings
+// and fake "3 distinct businesses" alone - mirrors resolve-scan's membership check (403
+// "not_member"). platformOwner is exempt (may act on behalf of any business), same as resolve-scan.
 //
 // Unlike masterAppend's fire-and-forget append, a dispute is a deliberate user action: a genuine
 // Firestore failure surfaces to the caller as a real error response (500), never silently
@@ -86,10 +95,32 @@ export async function POST(request: NextRequest) {
     return json({ error: "Invalid or expired sign-in." }, 401);
   }
 
-  // Any authenticated user may dispute (accessLevelServer is "business" or "platform" - both
-  // allowed). This intentionally never gates on accessLevelServer at all, unlike catalog-review's
-  // platform-only check - see the module comment above for why.
-  void accessLevelServer({ uid, email });
+  // Any authenticated user may dispute the catalog DOC (accessLevelServer is "business" or
+  // "platform" - both allowed). This intentionally never gates on accessLevelServer for the doc
+  // itself, unlike catalog-review's platform-only check - see the module comment above for why.
+  const level = accessLevelServer({ uid, email });
+
+  // Membership check on the CLAIMED businessId (not on the doc): platformOwner may attribute a
+  // dispute to any business; a business-level caller must actually be a member of the businessId
+  // they claim, or the "3 distinct businesses" abuse ceiling in disputeCatalogEntry is spoofable
+  // from a single account. Mirrors resolve-scan's identical check.
+  if (level !== "platform") {
+    try {
+      const db = getAdminDb();
+      const member = await db.doc(`${COLLECTIONS.businessMembers}/${memberDocId(businessId, uid)}`).get();
+      if (!member.exists) {
+        logServerEvent({ route: "/api/catalog-dispute", event: "auth_reject", reasonCode: "not_member", businessId, status: 403 });
+        return json({ error: "Not a member of this business" }, 403);
+      }
+    } catch (error) {
+      if (authConfigurationError(error)) {
+        logServerEvent({ route: "/api/catalog-dispute", event: "auth_unavailable", reasonCode: "server_auth_unavailable", status: 503 });
+        return json({ error: "Server auth is not configured." }, 503);
+      }
+      logServerEvent({ route: "/api/catalog-dispute", event: "write_failed", reasonCode: "member_read_error", businessId, status: 500 });
+      return json({ error: "Failed to verify business membership." }, 500);
+    }
+  }
 
   const canonical = canonicalGtin(normalizedBarcode);
   if (!canonical) {

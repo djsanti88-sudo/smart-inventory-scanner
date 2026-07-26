@@ -11,11 +11,14 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   verifyIdToken: vi.fn(),
   disputeCatalogEntry: vi.fn(),
+  memberGet: vi.fn(),
 }));
 
 vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
-  getAdminDb: () => ({}),
+  getAdminDb: () => ({
+    doc: () => ({ get: mocks.memberGet }),
+  }),
 }));
 
 vi.mock("@/server/catalog/catalogDispute", () => ({
@@ -38,6 +41,9 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   mocks.verifyIdToken.mockReset().mockResolvedValue({ uid: "customer-uid", email: "customer@example.com" });
   mocks.disputeCatalogEntry.mockReset().mockResolvedValue({ ok: true, disputeCount: 1, changed: true, verificationStatus: "disputed" });
+  // Default: caller IS a member of "biz-a" (the businessId VALID_BODY claims), matching resolve-scan's
+  // membership-check harness default so existing happy-path tests stay green.
+  mocks.memberGet.mockReset().mockResolvedValue({ exists: true });
   vi.stubEnv("PLATFORM_OWNER_UIDS", "owner-uid");
   vi.stubEnv("PLATFORM_OWNER_EMAILS", "");
 });
@@ -88,6 +94,27 @@ describe("POST /api/catalog-dispute auth", () => {
   // KEY behavioral difference from catalog-review: a plain business-level (non-platform-owner)
   // caller is accepted (200), never 403'd, because any shop may report a wrong shared identity.
   it("accepts a plain business-level caller (does NOT 403 a non-platform-owner)", async () => {
+    const response = await POST(req(VALID_BODY));
+    expect(response.status).toBe(200);
+    expect(mocks.disputeCatalogEntry).toHaveBeenCalledOnce();
+  });
+
+  // SECURITY: catalogEntries has no businessId of its own, but the dispute's abuse ceiling (design
+  // §2.1's "3 distinct businesses" threshold and disputedBy attribution) is only meaningful if the
+  // caller's token uid is actually a member of the businessId it claims. Without this check, one
+  // authenticated account could spam fabricated businessId strings to fake "3 distinct businesses"
+  // alone, defeating the human_verified demotion threshold entirely - mirrors resolve-scan's
+  // membership check (403 "not_member").
+  it("rejects a caller who is NOT a member of the claimed businessId with 403", async () => {
+    mocks.memberGet.mockResolvedValue({ exists: false });
+    const response = await POST(req(VALID_BODY));
+    expect(response.status).toBe(403);
+    expect(mocks.disputeCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  it("allows a platformOwner caller to dispute on behalf of any businessId without a membership doc", async () => {
+    mocks.verifyIdToken.mockResolvedValue({ uid: "owner-uid", email: null });
+    mocks.memberGet.mockResolvedValue({ exists: false });
     const response = await POST(req(VALID_BODY));
     expect(response.status).toBe(200);
     expect(mocks.disputeCatalogEntry).toHaveBeenCalledOnce();
