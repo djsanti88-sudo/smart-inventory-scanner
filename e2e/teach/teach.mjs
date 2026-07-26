@@ -88,6 +88,14 @@ Flags:
                           runNumber selection and exploration pick are
                           skipped. An unknown id/level errors out (naming the
                           bad value) before any browser or account is created.
+  --reuse-account         Force account-reuse mode ON: the persona set up by
+                          --one-window/--loop logs into ONE stable account
+                          (TEACH_BOT_ACCOUNT_EMAIL/PASSWORD) instead of
+                          signing up a fresh one. Reuse mode is ALSO
+                          auto-enabled whenever TEACH_BOT_ACCOUNT_PASSWORD is
+                          set, so this flag is normally only needed to make
+                          the intent explicit. Without a password configured,
+                          this flag has no effect (falls back to fresh signup).
   --help, -h             Print this usage and exit. Never launches a browser or
                           creates accounts.
 
@@ -101,13 +109,21 @@ Environment variables (run budget / behavior):
   TEACH_MAX_REQUESTS        Cap on total lesson requests per run/loop.
   TEACH_MAX_MINUTES         Cap on wall-clock minutes per run/loop.
   TEACH_ESTIMATED_MAX_USD   Cap on estimated spend (USD) per run/loop.
+  TEACH_BOT_ACCOUNT_EMAIL     Stable account email for --reuse-account mode
+                              (default: teachbot-owner@scanbin-teachbot.test).
+  TEACH_BOT_ACCOUNT_PASSWORD  Stable account password for --reuse-account
+                              mode. Unset = reuse mode OFF (unchanged
+                              signup-per-run behavior) regardless of the
+                              --reuse-account flag. Kept in memory only -
+                              never logged, never written to the manifest,
+                              report, or knowledge files.
 
 Running with no flags launches the DEFAULT FULL LIVE RUN: 3 headed browsers,
 one real account per persona, against the deployment above. Use --self-check
 or --help first if you are unsure.`;
 
 const KNOWN_VALUE_FLAGS = new Set(['--target', '--run-id', '--persona', '--lesson']);
-const KNOWN_BOOLEAN_FLAGS = new Set(['--self-check', '--one-window', '--loop', '--help', '-h']);
+const KNOWN_BOOLEAN_FLAGS = new Set(['--self-check', '--one-window', '--loop', '--help', '-h', '--reuse-account']);
 
 export function parseArgs(argv) {
   const args = {
@@ -120,6 +136,7 @@ export function parseArgs(argv) {
     lessons: [],
     help: false,
     unknownFlag: null,
+    reuseAccount: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -147,6 +164,8 @@ export function parseArgs(argv) {
       }
     } else if (arg === '--help' || arg === '-h') {
       args.help = true;
+    } else if (arg === '--reuse-account') {
+      args.reuseAccount = true;
     } else if (typeof arg === 'string' && arg.startsWith('-') && !KNOWN_VALUE_FLAGS.has(arg) && !KNOWN_BOOLEAN_FLAGS.has(arg)) {
       args.unknownFlag = arg;
       break;
@@ -203,6 +222,70 @@ function buildPlan(allLessons, runNumber, mastered, lessonOverride = null) {
     deduped.push(lesson);
   }
   return deduped.sort((a, b) => (a.level - b.level) || String(a.id).localeCompare(String(b.id)));
+}
+
+/**
+ * Setup dispatcher: decides (via personas.chooseAuthFlow, a pure function)
+ * whether to log into the stable reused account or sign up a fresh one, and
+ * runs it. Reuse only ever applies to the persona actually being run when
+ * accountReuse.reuse is on (e.g. --one-window --persona tire uses the
+ * stable account for "tire"; runLive's multi-persona batch would apply it
+ * per-persona the same way if accountReuse.reuse is on for that run).
+ *
+ * login-first: try personas.loginPersona with the stable creds; if that
+ * throws (most commonly because the account does not exist yet on its very
+ * first-ever use), fall back ONCE to personas.signUpPersona using the SAME
+ * stable creds, so the first run creates the account and every run after
+ * that logs into it. The stable password never leaves memory - it is read
+ * from accountReuse.stablePassword (itself sourced from
+ * TEACH_BOT_ACCOUNT_PASSWORD in main()) and passed only as a function
+ * argument, never logged or persisted.
+ */
+async function setupPersonaAuth({ page, persona, runId, target, personas, accountReuse }) {
+  const { signUpPersona, loginPersona, chooseAuthFlow, resolveIdentity } = personas;
+  const reuse = Boolean(accountReuse?.reuse);
+  const hasPassword = Boolean(accountReuse?.stablePassword);
+  const flow = chooseAuthFlow({ reuse, hasPassword });
+
+  if (flow !== 'login-first') {
+    return signUpPersona(page, { persona, runId, baseURL: target });
+  }
+
+  const identity = resolveIdentity({
+    reuse,
+    runId,
+    personaKey: persona.key,
+    stableEmail: accountReuse.stableEmail,
+    hasStablePassword: hasPassword,
+  });
+
+  try {
+    return await loginPersona(page, {
+      persona,
+      baseURL: target,
+      creds: { email: identity.email, password: accountReuse.stablePassword },
+    });
+  } catch (loginErr) {
+    // Most likely cause: this is the very first run and the stable account
+    // does not exist yet. Fall back ONCE to signup using the SAME stable
+    // creds so this run creates the account for every future run to log
+    // into. If signup also fails, surface both failures.
+    try {
+      return await signUpPersona(
+        page,
+        { persona, runId, baseURL: target },
+        {},
+        { email: identity.email, password: accountReuse.stablePassword }
+      );
+    } catch (signupErr) {
+      const loginReason = loginErr instanceof Error ? loginErr.message : String(loginErr);
+      const signupReason = signupErr instanceof Error ? signupErr.message : String(signupErr);
+      throw new Error(
+        `setupPersonaAuth: login-first failed and signup fallback also failed for persona "${persona.key}". ` +
+          `login error: ${loginReason} | signup fallback error: ${signupReason}`
+      );
+    }
+  }
 }
 
 /** Extract the leading integer from a COVERAGE_MATRIX lesson key like "10-reconcile-equal-and-different". */
@@ -596,10 +679,10 @@ async function persistRunArtifacts({ knowledge, report, runId, model, plan, k })
  * `limits.canPaidLookup()` (checked inside individual lessons) is the only
  * gate on paid rungs; it never blocks free lessons.
  */
-async function runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop, lessonOverride = null }) {
+async function runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop, lessonOverride = null, accountReuse = null }) {
   const { readKnowledge, PATHS } = knowledge;
   const { createManifest, setStatus } = manifest;
-  const { PERSONAS, probeDeployment, signUpPersona, newPersonaContext } = personas;
+  const { PERSONAS, probeDeployment, newPersonaContext } = personas;
   const { writeLoopReport } = report;
 
   const persona = PERSONAS.find((p) => p.key === personaKey);
@@ -642,7 +725,7 @@ async function runOneWindow({ target, runId, knowledge, manifest, personas, repo
     const probe = await probeDeployment(page, target);
     const mode = probe.mode;
     if (mode === 'live_auth') {
-      const signup = await signUpPersona(page, { persona, runId, baseURL: target });
+      const signup = await setupPersonaAuth({ page, persona, runId, target, personas, accountReuse });
       reused = { email: signup.email, businessId: signup.businessId, personaKey: persona.key };
     }
 
@@ -881,8 +964,8 @@ const SCREEN_HEIGHT = Number.isFinite(Number(process.env.TEACH_SCREEN_HEIGHT)) ?
  * own try/catch so one persona failing does not abort its batch - it is
  * recorded as a setup failure and excluded from Phase 2.
  */
-async function setupPersonaWindow({ persona, slotIndex, target, runId, personasModule }) {
-  const { probeDeployment, signUpPersona, newPersonaContext } = personasModule;
+async function setupPersonaWindow({ persona, slotIndex, target, runId, personasModule, accountReuse = null }) {
+  const { probeDeployment, newPersonaContext } = personasModule;
   const layout = personasModule.computeSplitLayout(SCREEN_WIDTH, SCREEN_HEIGHT, slotIndex);
   try {
     const browser = await chromium.launch({
@@ -897,7 +980,7 @@ async function setupPersonaWindow({ persona, slotIndex, target, runId, personasM
     const mode = probe.mode;
     let businessId = null;
     if (mode === 'live_auth') {
-      const signup = await signUpPersona(page, { persona, runId, baseURL: target });
+      const signup = await setupPersonaAuth({ page, persona, runId, target, personas: personasModule, accountReuse });
       businessId = signup.businessId;
     }
     return { persona, browser, context, page, mode, businessId, setupFailed: false };
@@ -1002,7 +1085,7 @@ async function runPlanForPersona({ persona, page, mode, businessId, otherTenantI
   return { persona: persona.key, lessons };
 }
 
-async function runLive({ target, runId, knowledge, manifest, personas, report, limits, lessonOverride = null }) {
+async function runLive({ target, runId, knowledge, manifest, personas, report, limits, lessonOverride = null, accountReuse = null }) {
   const { readKnowledge, writeCoverage, appendRunHistory, appendDiscoveries, appendBugs, atomicWriteFile, PATHS } = knowledge;
   const { createManifest, setStatus, readManifest } = manifest;
   const { PERSONAS } = personas;
@@ -1042,7 +1125,7 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
       // Phase 1 (this batch only): launch split-screen browsers, probe, sign up.
       const personaSetups = await Promise.all(
         batch.map((persona, slotIndex) =>
-          setupPersonaWindow({ persona, slotIndex, target, runId, personasModule: personas })
+          setupPersonaWindow({ persona, slotIndex, target, runId, personasModule: personas, accountReuse })
         )
       );
 
@@ -1300,13 +1383,26 @@ export async function main(argv) {
 
   const lessonOverride = args.lessons.length > 0 ? args.lessons : null;
 
+  // Account-reuse config: reuse mode engages when TEACH_BOT_ACCOUNT_PASSWORD
+  // is set (--reuse-account just makes the intent explicit; it has no effect
+  // without a password - see personas.chooseAuthFlow). The password is read
+  // once here into a local const and threaded through in memory only - never
+  // logged, never passed to manifest/report/knowledge writers.
+  const stablePassword = process.env.TEACH_BOT_ACCOUNT_PASSWORD || null;
+  const reuseAccount = args.reuseAccount || Boolean(stablePassword);
+  const accountReuse = {
+    reuse: reuseAccount,
+    stableEmail: process.env.TEACH_BOT_ACCOUNT_EMAIL || 'teachbot-owner@scanbin-teachbot.test',
+    stablePassword,
+  };
+
   if (args.oneWindow) {
     const personaKey = args.persona ?? DEFAULT_LOOP_PERSONA;
-    await runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop: args.loop, lessonOverride });
+    await runOneWindow({ target, runId, knowledge, manifest, personas, report, limits, personaKey, loop: args.loop, lessonOverride, accountReuse });
     return;
   }
 
-  await runLive({ target, runId, knowledge, manifest, personas, report, limits, lessonOverride });
+  await runLive({ target, runId, knowledge, manifest, personas, report, limits, lessonOverride, accountReuse });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

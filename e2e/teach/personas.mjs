@@ -170,10 +170,15 @@ export async function probeDeployment(page, baseURL) {
  * Returns { email, businessName, businessId, personaKey } plus a
  * non-enumerable-in-manifest `_password` field the caller may read but must
  * never log or persist.
+ *
+ * Optional `creds` ({ email, password }) overrides the default per-run
+ * generated identity - used by the account-reuse fallback path (first-ever
+ * run of a stable reused account: nothing to log into yet, so it signs up
+ * ONCE using the SAME stable creds every later run will log in with).
  */
-export async function signUpPersona(page, { persona, runId, baseURL }, deps = {}) {
-  const email = makeEmail(runId, persona.key);
-  const password = makePassword();
+export async function signUpPersona(page, { persona, runId, baseURL }, deps = {}, creds = null) {
+  const email = creds?.email ?? makeEmail(runId, persona.key);
+  const password = creds?.password ?? makePassword();
   let step = 'goto /login';
 
   try {
@@ -242,6 +247,129 @@ export async function signUpPersona(page, { persona, runId, baseURL }, deps = {}
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(`signUpPersona failed at step "${step}" for persona "${persona.key}": ${reason}`);
   }
+}
+
+/**
+ * Runs the real sign-IN UI flow for one persona against the live deployed
+ * app, using STABLE pre-existing credentials (not a freshly generated
+ * password): fill email+password on /login (default "signin" mode, no
+ * toggle needed) -> submit -> land on /scan directly, or on /business first
+ * if the account has no business yet (mirrors signUpPersona's post-auth
+ * landing so both flows return the same shape).
+ *
+ * Returns the same shape as signUpPersona: { email, businessName,
+ * businessId, personaKey, _password }. `_password` echoes back the caller's
+ * own already-in-memory `creds.password` (never logged, never read from the
+ * DOM) so callers can treat the two functions interchangeably.
+ */
+export async function loginPersona(page, { persona, baseURL, creds }, deps = {}) {
+  const email = creds?.email;
+  const password = creds?.password;
+  if (!email || !password) {
+    throw new Error('loginPersona: creds.email and creds.password are required');
+  }
+  let step = 'goto /login';
+
+  try {
+    await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' });
+
+    step = 'fill sign-in form';
+    await page.getByTestId('login-email').fill(email);
+    await page.getByTestId('login-password').fill(password);
+
+    step = 'submit sign-in form';
+    await page.getByTestId('login-button').click();
+
+    step = 'wait for /business or /scan';
+    await Promise.race([
+      page.waitForURL('**/scan', { timeout: 30000 }),
+      page.waitForURL('**/business', { timeout: 30000 }),
+    ]);
+
+    let businessId = null;
+    if (/\/business(?:$|[/?#])/.test(page.url())) {
+      step = 'fill business name (first-ever login, no business yet)';
+      await page.getByTestId('business-name').fill(persona.businessName);
+
+      step = 'create business';
+      await page.getByTestId('create-business').click();
+
+      step = 'locate created business select button';
+      const selectButton = page.locator('[data-testid^="select-business-"]').first();
+      await selectButton.waitFor({ state: 'visible', timeout: 15000 });
+      const testId = await selectButton.getAttribute('data-testid');
+      businessId = testId ? testId.replace(/^select-business-/, '') : null;
+      if (!businessId) {
+        throw new Error('loginPersona: could not read businessId from select-business testid');
+      }
+
+      step = 'click select business';
+      await selectButton.click();
+
+      step = 'wait for /scan and scanner-input';
+      await page.waitForURL('**/scan', { timeout: 30000 });
+    }
+
+    step = 'wait for scanner-input';
+    await page.getByTestId('scanner-input').waitFor({ state: 'visible', timeout: 15000 });
+
+    if (!businessId) {
+      // Returning account with an existing business: try to read it off a
+      // business-context banner testid if present; otherwise leave null
+      // (callers only need it to match signUpPersona's shape, not to gate
+      // any behavior when reuse is on).
+      try {
+        const banner = page.getByTestId('business-context-banner');
+        const attr = await banner.getAttribute('data-business-id', { timeout: 1000 });
+        businessId = attr ?? null;
+      } catch {
+        businessId = null;
+      }
+    }
+
+    // Deliberately does NOT call recordCreated: this account was NOT created
+    // by this run (it's the stable reused account), so it must never be
+    // marked as something cleanup.mjs would delete. Only signUpPersona
+    // records an account as "created".
+
+    return {
+      email,
+      businessName: persona.businessName,
+      businessId,
+      personaKey: persona.key,
+      _password: password,
+    };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`loginPersona failed at step "${step}" for persona "${persona.key}": ${reason}`);
+  }
+}
+
+/**
+ * Pure decision of which auth flow a persona setup should attempt.
+ * Account-reuse (login-first, falling back to signup only if the account
+ * doesn't exist yet) requires BOTH reuse mode to be explicitly on AND a
+ * stable password to actually be configured - a half-configured environment
+ * (reuse requested but no password set) must never attempt a login with no
+ * credential, so it safely falls back to the original per-run signup flow.
+ */
+export function chooseAuthFlow({ reuse, hasPassword } = {}) {
+  if (reuse && hasPassword) return 'login-first';
+  return 'signup';
+}
+
+/**
+ * Pure selection of which (email, useStableCreds) a persona setup should
+ * use. Mirrors chooseAuthFlow's gating: reuse only actually applies the
+ * stable email when both reuse is on AND a stable password is configured;
+ * otherwise this returns the original per-run makeEmail address unchanged.
+ */
+export function resolveIdentity({ reuse, runId, personaKey, stableEmail, hasStablePassword } = {}) {
+  const useStableCreds = Boolean(reuse) && Boolean(hasStablePassword);
+  return {
+    email: useStableCreds ? stableEmail : makeEmail(runId, personaKey),
+    useStableCreds,
+  };
 }
 
 /**

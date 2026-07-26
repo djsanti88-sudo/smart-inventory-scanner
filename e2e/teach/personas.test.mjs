@@ -15,6 +15,8 @@ import {
   makePassword,
   classifyDeploymentMode,
   computeSplitLayout,
+  chooseAuthFlow,
+  resolveIdentity,
 } from './personas.mjs';
 
 test('makeEmail: format is teachbot+<runId>-<personaKey>@scanbin-teachbot.test', () => {
@@ -200,4 +202,87 @@ test('computeSplitLayout: returns integer pixel values', () => {
   for (const v of [left.x, left.y, left.width, left.height, right.x, right.y, right.width, right.height]) {
     assert.ok(Number.isInteger(v), `expected integer, got ${v}`);
   }
+});
+
+// chooseAuthFlow: pure decision of which auth flow the setup dispatcher takes.
+// Account-reuse (login-first, signup-fallback) only ever engages when reuse
+// mode is explicitly on AND a stable password is actually present - a
+// half-configured environment (reuse on, no password) must never silently
+// attempt a login with no credential.
+
+test('chooseAuthFlow: reuse off -> always signup, regardless of password presence', () => {
+  assert.equal(chooseAuthFlow({ reuse: false, hasPassword: true }), 'signup');
+  assert.equal(chooseAuthFlow({ reuse: false, hasPassword: false }), 'signup');
+});
+
+test('chooseAuthFlow: reuse on + password present -> login-first (fallback to signup handled by caller)', () => {
+  assert.equal(chooseAuthFlow({ reuse: true, hasPassword: true }), 'login-first');
+});
+
+test('chooseAuthFlow: reuse on but no password -> signup (reuse cannot engage without a credential)', () => {
+  assert.equal(chooseAuthFlow({ reuse: true, hasPassword: false }), 'signup');
+});
+
+test('chooseAuthFlow: missing/undefined inputs default to signup (safe default)', () => {
+  assert.equal(chooseAuthFlow({}), 'signup');
+  assert.equal(chooseAuthFlow(undefined), 'signup');
+});
+
+// resolveIdentity: pure selection of which (email, password-presence) a
+// persona setup should use. In reuse mode the STABLE configured email is
+// used instead of the per-run teachbot+<runId>-<key>@ address; outside reuse
+// mode nothing changes from today's per-run email.
+
+test('resolveIdentity: reuse off -> per-run email, no stable password threaded through', () => {
+  const identity = resolveIdentity({
+    reuse: false,
+    runId: 'run123',
+    personaKey: 'tire',
+    stableEmail: 'teachbot-owner@scanbin-teachbot.test',
+    hasStablePassword: true,
+  });
+  assert.equal(identity.email, makeEmail('run123', 'tire'));
+  assert.equal(identity.useStableCreds, false);
+});
+
+test('resolveIdentity: reuse on + password present -> stable email, useStableCreds true', () => {
+  const identity = resolveIdentity({
+    reuse: true,
+    runId: 'run123',
+    personaKey: 'tire',
+    stableEmail: 'teachbot-owner@scanbin-teachbot.test',
+    hasStablePassword: true,
+  });
+  assert.equal(identity.email, 'teachbot-owner@scanbin-teachbot.test');
+  assert.equal(identity.useStableCreds, true);
+});
+
+test('resolveIdentity: reuse on but no password -> falls back to per-run email (reuse cannot engage)', () => {
+  const identity = resolveIdentity({
+    reuse: true,
+    runId: 'run123',
+    personaKey: 'tire',
+    stableEmail: 'teachbot-owner@scanbin-teachbot.test',
+    hasStablePassword: false,
+  });
+  assert.equal(identity.email, makeEmail('run123', 'tire'));
+  assert.equal(identity.useStableCreds, false);
+});
+
+test('resolveIdentity: stable email is the same across different runIds when reuse is on (no pile-up)', () => {
+  const a = resolveIdentity({
+    reuse: true,
+    runId: 'run-A',
+    personaKey: 'tire',
+    stableEmail: 'teachbot-owner@scanbin-teachbot.test',
+    hasStablePassword: true,
+  });
+  const b = resolveIdentity({
+    reuse: true,
+    runId: 'run-B',
+    personaKey: 'tire',
+    stableEmail: 'teachbot-owner@scanbin-teachbot.test',
+    hasStablePassword: true,
+  });
+  assert.equal(a.email, b.email);
 });

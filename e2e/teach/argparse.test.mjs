@@ -130,3 +130,35 @@ test('parseArgs: --lesson with a trailing unknown flag still reports the unknown
   assert.deepEqual(args.lessons, ['7']);
   assert.equal(args.unknownFlag, '--typo');
 });
+
+// --reuse-account: explicit flag to force account-reuse (login instead of
+// fresh signup) ON. parseArgs itself stays pure/env-free - it only records
+// whether the flag was passed; main() combines this with
+// TEACH_BOT_ACCOUNT_PASSWORD presence to decide the actual reuse mode (see
+// personas.mjs chooseAuthFlow / resolveIdentity, unit-tested there).
+
+test('parseArgs: --reuse-account sets reuseAccount=true', () => {
+  const args = parseArgs(['--reuse-account']);
+  assert.equal(args.reuseAccount, true);
+  assert.equal(args.unknownFlag, null);
+});
+
+test('parseArgs: default (no flag) -> reuseAccount=false', () => {
+  const args = parseArgs([]);
+  assert.equal(args.reuseAccount, false);
+});
+
+test('parseArgs: --reuse-account works alongside --one-window --persona --lesson', () => {
+  const args = parseArgs(['--one-window', '--persona', 'tire', '--lesson', '7', '--reuse-account']);
+  assert.equal(args.reuseAccount, true);
+  assert.equal(args.oneWindow, true);
+  assert.equal(args.persona, 'tire');
+  assert.deepEqual(args.lessons, ['7']);
+  assert.equal(args.unknownFlag, null);
+});
+
+test('USAGE: documents --reuse-account and the TEACH_BOT_ACCOUNT_* env vars', () => {
+  assert.match(USAGE, /--reuse-account/);
+  assert.match(USAGE, /TEACH_BOT_ACCOUNT_EMAIL/);
+  assert.match(USAGE, /TEACH_BOT_ACCOUNT_PASSWORD/);
+});
