@@ -25,8 +25,8 @@ function buildPaths(repoRoot) {
   const appKnowledgeDir = path.join(repoRoot, 'testing', 'app-knowledge');
   const artifactsDir = path.join(repoRoot, 'testing', 'artifacts');
   const specsDir = path.join(repoRoot, 'testing', 'specs');
-  const candidatesDir = path.join(repoRoot, 'testing', 'candidates');
-  const permanentDir = path.join(repoRoot, 'testing', 'permanent');
+  const candidatesDir = path.join(repoRoot, 'testing', 'tests', 'candidates');
+  const permanentDir = path.join(repoRoot, 'testing', 'tests', 'permanent');
   return {
     repoRoot,
     appKnowledgeDir,

@@ -15,6 +15,19 @@ export const MANIFEST_STATUSES = ['started', 'completed', 'failed', 'aborted'];
 
 const SECRET_KEY_PATTERN = /pass|password|token|secret|cookie|credential|apikey|api_key|authorization/i;
 
+// Concurrent callers (e.g. Promise.all across personas in teach.mjs) can each
+// read-modify-write RUN_MANIFEST.json for the SAME runId at the same time,
+// which loses updates (last writer wins, earlier writes vanish). A promise-
+// chain mutex serializes every mutation onto a single queue so read-modify-
+// write bodies never interleave, while keeping each function's return value
+// and async signature identical.
+let _chain = Promise.resolve();
+function withManifestLock(fn) {
+  const run = _chain.then(fn, fn);
+  _chain = run.catch(() => {});
+  return run;
+}
+
 function runDir(runId) {
   return path.join(PATHS.artifactsDir, runId);
 }
@@ -84,28 +97,34 @@ export async function recordCreated(runId, kind, entry) {
     throw new Error(`recordCreated: unknown kind "${kind}"`);
   }
   assertNoSecrets(entry);
-  const manifest = await readManifestRaw(runId);
-  manifest.created[kind] = [...(manifest.created[kind] ?? []), entry];
-  await writeManifestRaw(runId, manifest);
-  return manifest;
+  return withManifestLock(async () => {
+    const manifest = await readManifestRaw(runId);
+    manifest.created[kind] = [...(manifest.created[kind] ?? []), entry];
+    await writeManifestRaw(runId, manifest);
+    return manifest;
+  });
 }
 
 export async function setStatus(runId, status) {
   if (!MANIFEST_STATUSES.includes(status)) {
     throw new Error(`setStatus: invalid status "${status}"`);
   }
-  const manifest = await readManifestRaw(runId);
-  manifest.status = status;
-  if (status === 'completed' || status === 'failed' || status === 'aborted') {
-    manifest.completedAt = new Date().toISOString();
-  }
-  await writeManifestRaw(runId, manifest);
-  return manifest;
+  return withManifestLock(async () => {
+    const manifest = await readManifestRaw(runId);
+    manifest.status = status;
+    if (status === 'completed' || status === 'failed' || status === 'aborted') {
+      manifest.completedAt = new Date().toISOString();
+    }
+    await writeManifestRaw(runId, manifest);
+    return manifest;
+  });
 }
 
 export async function addNote(runId, note) {
-  const manifest = await readManifestRaw(runId);
-  manifest.notes = [...(manifest.notes ?? []), note];
-  await writeManifestRaw(runId, manifest);
-  return manifest;
+  return withManifestLock(async () => {
+    const manifest = await readManifestRaw(runId);
+    manifest.notes = [...(manifest.notes ?? []), note];
+    await writeManifestRaw(runId, manifest);
+    return manifest;
+  });
 }

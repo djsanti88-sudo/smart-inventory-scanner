@@ -8,6 +8,8 @@
     "teach:cleanup": "node e2e/teach/cleanup.mjs",
     "teach:regression": "playwright test --config=playwright.teach.config.ts",
     "teach:test": "node --test \"e2e/teach/**/*.test.mjs\"",
+    "teach:bugreport": "node e2e/teach/bugReport.mjs",
+    "teach:bugreport:pdf": "node e2e/teach/pdfReport.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:emulator": "node scripts/dev.mjs --emulator",
     "dev:prod": "node scripts/dev.mjs --prod",
