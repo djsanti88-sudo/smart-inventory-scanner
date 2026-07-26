@@ -145,6 +145,26 @@ test("ladderTableRow flattens a parsed trace", () => {
   assert.equal(row.reasonsSummary, "fetchv2:miss; gpt:settled");
 });
 
+test("ladderTableRow includes latencyMs when provided", () => {
+  const parsed = parseLadderTrace({
+    debug: { ladderPath: "gpt", ladderReasons: [{ rung: "gpt", reason: "settled" }] },
+  });
+  const row = ladderTableRow("012345678905", parsed, { latencyMs: 842 });
+  assert.equal(row.latencyMs, 842);
+});
+
+test("ladderTableRow defaults latencyMs to null when not provided", () => {
+  const parsed = parseLadderTrace({ debug: { ladderPath: "gpt" } });
+  const row = ladderTableRow("012345678905", parsed);
+  assert.equal(row.latencyMs, null);
+});
+
+test("ladderTableRow defaults latencyMs to null when options object has no latencyMs", () => {
+  const parsed = parseLadderTrace({ debug: { ladderPath: "gpt" } });
+  const row = ladderTableRow("012345678905", parsed, {});
+  assert.equal(row.latencyMs, null);
+});
+
 test("summarizeLadder aggregates rows", () => {
   const rows = [
     ladderTableRow("a", parseLadderTrace({ debug: { ladderPath: "gpt", ladderReasons: [{ rung: "gpt", reason: "settled" }] } })),

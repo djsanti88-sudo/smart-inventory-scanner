@@ -196,21 +196,72 @@ export async function timeToUsable(page, actionFn, readySelector, { samples = 3 
 }
 
 /**
+ * Extract a response's latency in milliseconds from Playwright's
+ * ResourceTiming (`request.timing()`), which is relative to request start.
+ * Prefers `responseEnd`; falls back to `responseStart` when `responseEnd` is
+ * unavailable (-1 or non-numeric, e.g. the response was aborted or the
+ * browser never reported it). Returns null when no usable timing exists.
+ * @param {{ responseStart?: number, responseEnd?: number } | null | undefined} timing
+ */
+function extractLatencyMs(timing) {
+  if (!timing || typeof timing !== 'object') return null;
+  const { responseEnd, responseStart } = timing;
+  if (typeof responseEnd === 'number' && responseEnd >= 0) return responseEnd;
+  if (typeof responseStart === 'number' && responseStart >= 0) return responseStart;
+  return null;
+}
+
+/**
+ * True when a URL's path (query string ignored) starts with '/api/'.
+ * @param {string} url
+ */
+function isApiPath(url) {
+  try {
+    const { pathname } = new URL(url);
+    return pathname.startsWith('/api/');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Register a response listener that captures every POST /api/ai-lookup
- * response, parses it into a ladder trace, and feeds paid-rung usage into
- * `limits` for run-size enforcement. Fully defensive: response bodies may be
- * non-JSON, HTML error pages, or otherwise malformed.
+ * response, parses it into a ladder trace (with latency), and feeds paid-rung
+ * usage into `limits` for run-size enforcement. Also tallies EVERY /api/*
+ * response (any method) into a lightweight call-coverage list, independent of
+ * the ai-lookup-specific parsing, so a lesson can assert on which backend
+ * calls fired at all. Fully defensive: response bodies may be non-JSON, HTML
+ * error pages, or otherwise malformed; timing may be unavailable.
  * @param {import('playwright').Page} page
  * @param {import('./limits.mjs').RunLimits} limits
  */
 export function attachLadderCapture(page, limits) {
   const traces = [];
+  const apiCallList = [];
 
   const handler = async (response) => {
     try {
+      const url = response.url();
       const request = response.request();
+      const timing = extractLatencyMs(request.timing?.());
+
+      if (isApiPath(url)) {
+        let pathOnly = url;
+        try {
+          pathOnly = new URL(url).pathname;
+        } catch {
+          // keep raw url if it fails to parse
+        }
+        apiCallList.push({
+          urlPath: pathOnly,
+          method: request.method(),
+          status: typeof response.status === 'function' ? response.status() : null,
+          latencyMs: timing,
+        });
+      }
+
       if (request.method() !== 'POST') return;
-      if (!response.url().includes('/api/ai-lookup')) return;
+      if (!url.includes('/api/ai-lookup')) return;
 
       let code = null;
       try {
@@ -231,7 +282,7 @@ export function attachLadderCapture(page, limits) {
       }
 
       const parsed = parseLadderTrace(body);
-      traces.push({ code, parsed });
+      traces.push({ code, parsed, latencyMs: timing });
 
       if (parsed.settledRung === 'goupc' || parsed.settledRung === 'fetchv2' || parsed.settledRung === 'gpt') {
         limits.recordPaidLookup(parsed.settledRung);
@@ -247,7 +298,10 @@ export function attachLadderCapture(page, limits) {
   return {
     traces,
     rows() {
-      return traces.map((t) => ladderTableRow(t.code, t.parsed));
+      return traces.map((t) => ladderTableRow(t.code, t.parsed, { latencyMs: t.latencyMs }));
+    },
+    apiCalls() {
+      return apiCallList;
     },
     stop() {
       page.off('response', handler);

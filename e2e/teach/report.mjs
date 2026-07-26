@@ -120,6 +120,36 @@ function ladderSection(ladderRows) {
   return `## Ladder diagnosis\n\n${header}\n${body}`;
 }
 
+/**
+ * Render every observed backend API call (from attachLadderCapture's
+ * apiCalls()) as a markdown table, sorted slowest-first, so a human reading
+ * the report can immediately see the load-timing tail. Rows with an unknown
+ * (null/non-numeric) latencyMs sort after every timed row and render '-'.
+ * @param {{ urlPath?: string, method?: string, status?: number, latencyMs?: number|null }[]} apiCalls
+ */
+export function timingSection(apiCalls) {
+  const list = Array.isArray(apiCalls) ? apiCalls : [];
+  if (list.length === 0) return '## Timing\n\n(no api calls captured this run)';
+
+  const sorted = list.slice().sort((a, b) => {
+    const aMs = typeof a?.latencyMs === 'number' ? a.latencyMs : null;
+    const bMs = typeof b?.latencyMs === 'number' ? b.latencyMs : null;
+    if (aMs === null && bMs === null) return 0;
+    if (aMs === null) return 1;
+    if (bMs === null) return -1;
+    return bMs - aMs;
+  });
+
+  const header = '| urlPath | method | status | latencyMs |\n|---|---|---|---|';
+  const body = sorted
+    .map((c) => {
+      const latency = typeof c?.latencyMs === 'number' ? c.latencyMs : '-';
+      return `| ${c?.urlPath ?? '?'} | ${c?.method ?? '?'} | ${c?.status ?? '?'} | ${latency} |`;
+    })
+    .join('\n');
+  return `## Timing\n\n${header}\n${body}`;
+}
+
 function createdDataSection(createdData) {
   const accounts = createdData?.accounts ?? [];
   const businesses = createdData?.businesses ?? [];
@@ -176,6 +206,8 @@ export function buildReportMarkdown(model) {
     categorySection('Nice-to-haves', findings, 'nice_to_have'),
     '',
     ladderSection(model.ladderRows),
+    '',
+    timingSection(model.apiCalls),
     '',
     createdDataSection(model.createdData),
     '',

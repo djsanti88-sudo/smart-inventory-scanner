@@ -94,11 +94,17 @@ export function parseLadderTrace(body) {
  * Flatten a parsed trace into a table row for reporting.
  * @param {string} code
  * @param {ReturnType<typeof parseLadderTrace>} parsed
+ * @param {{ latencyMs?: number|null }} [options] Optional timing metadata
+ *   (e.g. from attachLadderCapture). Absent/undefined -> latencyMs is null.
  */
-export function ladderTableRow(code, parsed) {
+export function ladderTableRow(code, parsed, options) {
   const reasonsSummary = (parsed?.reasons ?? [])
     .map((r) => `${r?.rung ?? "?"}:${r?.reason ?? "?"}`)
     .join("; ");
+
+  const latencyMs = options && typeof options === "object" && typeof options.latencyMs === "number"
+    ? options.latencyMs
+    : null;
 
   return {
     code,
@@ -109,6 +115,7 @@ export function ladderTableRow(code, parsed) {
     partialIdentity: Boolean(parsed?.partialIdentity),
     confidence: parsed?.confidence ?? null,
     reasonsSummary,
+    latencyMs,
   };
 }
 
