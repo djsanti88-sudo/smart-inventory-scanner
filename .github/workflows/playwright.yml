@@ -1,0 +1,48 @@
+name: Playwright E2E
+
+# Runs the mock-backend Playwright proof suite (the same one `npm run test:e2e` runs locally)
+# on every push and PR. TEST SAFETY: the webServer sets IS_E2E=1, which forces /api/ai-lookup
+# mock-only, so CI never calls a live AI provider (see CLAUDE.md + playwright.config.ts).
+# Firebase, human-bot, and live suites are intentionally NOT run here - they need emulators /
+# real backends / owner-gated live keys and stay local. This job is the fast correctness gate.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# One run per ref; a new push cancels the previous in-flight run.
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Mock E2E (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium + OS deps
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E (mock backend)
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14

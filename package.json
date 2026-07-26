@@ -21,6 +21,8 @@
     "test:corpus-drift": "vitest run src/server/tire-knowledge/corpusDrift.test.ts",
     "test:ledger": "vitest run src/stores/ledgerInvariants.store.test.ts src/stores/unknownEnqueue.store.test.ts src/stores/mergeUnion.store.test.ts src/stores/markWrongTransfer.store.test.ts src/stores/provenanceTier.store.test.ts src/stores/goldenClasses.store.test.ts src/services/inventory.replay.test.ts src/server/upc/ladderTimeout.test.ts",
     "test:e2e": "playwright test",
+    "test:a11y": "playwright test e2e/a11y.spec.ts",
+    "test:ct": "playwright test --config=playwright-ct.config.ts",
     "release:check": "node scripts/release-sentinel.mjs",
     "proof:local": "tsc --noEmit && vitest run",
     "proof:full": "npm run proof:local && next build",
@@ -72,9 +74,11 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@firebase/rules-unit-testing": "^5.0.1",
     "@playwright/cli": "^0.1.17",
-    "@playwright/test": "^1.60.0",
+    "@playwright/experimental-ct-react": "^1.61.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
