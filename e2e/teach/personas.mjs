@@ -51,6 +51,26 @@ export const PERSONAS = [
 ];
 
 /**
+ * Pure 2-up split-screen window layout. Given a screen size and a window
+ * slot index, returns the {x, y, width, height} for that slot: index 0 (or
+ * any even index) gets the LEFT half of the screen, index 1 (or any odd
+ * index) gets the RIGHT half - both full height. The index is taken modulo
+ * 2 so this always describes at most 2 slots, matching the owner's "never
+ * more than 2 windows visible at once" requirement; batching which persona
+ * goes in which slot/round is handled separately (see teach.mjs
+ * batchPersonas).
+ */
+export function computeSplitLayout(screenWidth, screenHeight, index) {
+  const slot = ((index % 2) + 2) % 2; // 0 or 1, defensive against negatives
+  const leftWidth = Math.floor(screenWidth / 2);
+  const rightWidth = screenWidth - leftWidth;
+  if (slot === 0) {
+    return { x: 0, y: 0, width: leftWidth, height: Math.round(screenHeight) };
+  }
+  return { x: leftWidth, y: 0, width: rightWidth, height: Math.round(screenHeight) };
+}
+
+/**
  * Deterministic per-(runId, personaKey) synthetic email. No email
  * verification is enforced on the deployed app, so any well-formed address
  * on this reserved test domain works.

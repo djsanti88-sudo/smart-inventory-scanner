@@ -28,7 +28,7 @@ behavior into an approved test on its own.
 | Command | What it does |
 |---|---|
 | `node e2e/teach/teach.mjs --self-check` | **Safe** dry check: prints deployment stamp + the run's lesson plan; zero browser, zero network, zero spend, real knowledge files untouched. |
-| `npm run teach` | **OWNER-GATED live run.** Opens 3 headed browsers, creates 3 real accounts, drives the app, may spend on live decode. |
+| `npm run teach` | **OWNER-GATED live run.** Creates 3 real accounts, drives the app, may spend on live decode. Opens at most 2 headed windows at once (split-screen left/right); with 3 personas, runs in batches of 2 then 1. |
 | `npm run teach -- --loop --one-window [--persona tire]` | **OWNER-GATED loop.** ONE window, ONE reused account, deepens each round, runs until Ctrl-C. One aggregate decode budget caps total spend. Writes a running `testing/artifacts/<loopId>/LOOP_REPORT.md`. |
 | `npm run teach:test` | Unit suite for the harness (`node --test`, 127 tests). |
 | `npm run teach:cleanup -- --run-id <id> --dry-run` | List what a run created (accounts/businesses) from its manifest. |
@@ -44,11 +44,15 @@ accounts + data and can spend real money** — trigger it deliberately.
 `TEACH_ESTIMATED_MAX_USD` (3, advisory). Hard gates: paid-lookup count + time.
 
 ## Architecture (`e2e/teach/`)
-- `teach.mjs` — orchestrator. Reads knowledge → run number, loads lessons, launches 3 tiled headed browsers
-  (isolated context per persona, shared aggregate budget), probes deployment, signs up, runs the plan
-  (fault-isolated per persona), does ONE atomic knowledge write at the end, writes a candidates *note*
-  (never auto-promotes), stamps the report with URL/git-sha/version/browser/timestamp, prints the spend line.
-  `--self-check` runs against a temp knowledge base so it is side-effect-free.
+- `teach.mjs` — orchestrator. Reads knowledge → run number, loads lessons, launches headed browsers in
+  batches of at most `MAX_CONCURRENT_WINDOWS` (default 2, split-screen left/right via
+  `personas.computeSplitLayout`; batching via `batchPersonas`) so no more than 2 windows are ever visible
+  at once - each batch's windows fully close before the next batch launches (isolated context per persona,
+  shared aggregate budget), probes deployment, signs up, runs the plan (fault-isolated per persona), does
+  ONE atomic knowledge write at the end, writes a candidates *note* (never auto-promotes), stamps the
+  report with URL/git-sha/version/browser/timestamp, prints the spend line. `--self-check` runs against a
+  temp knowledge base so it is side-effect-free. `--help`/`-h` prints usage and exits without any side
+  effects; an unrecognized flag errors out (exit 1) instead of falling through to a live run.
 - `report.mjs` — builds `report.md` + `report.json` (bugs, empty fields, performance, nice-to-haves, ladder
   diagnosis table, created-data list, coverage delta, spend).
 - `personas.mjs` — 3 TEACH-BOT personas (tire/cstore/supp, one mobile), synthetic non-deliverable emails

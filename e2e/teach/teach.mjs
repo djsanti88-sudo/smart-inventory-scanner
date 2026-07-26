@@ -41,6 +41,25 @@ const DEFAULT_TARGET = 'https://inventory-lovat-six.vercel.app';
 
 const DEFAULT_LOOP_PERSONA = 'tire';
 
+// Owner requirement: never show more than 2 headed windows at once. If more
+// personas are queued than this, runLive() runs them in sequential batches
+// of at most this many, split-screen left/right (see personas.mjs
+// computeSplitLayout), rather than tiling all of them concurrently.
+export const MAX_CONCURRENT_WINDOWS = 2;
+
+/**
+ * Pure batching helper: splits an ordered list into chunks of at most
+ * `maxConcurrent` items each, preserving order. Used to cap how many headed
+ * Playwright windows are open at the same time.
+ */
+export function batchPersonas(list, maxConcurrent = MAX_CONCURRENT_WINDOWS) {
+  const batches = [];
+  for (let i = 0; i < list.length; i += maxConcurrent) {
+    batches.push(list.slice(i, i + maxConcurrent));
+  }
+  return batches;
+}
+
 export const USAGE = `Teach Bot - live-app learning Playwright harness
 
 Usage: node e2e/teach/teach.mjs [flags]
@@ -823,10 +842,143 @@ async function runSelfCheck({ target, runId, knowledge, manifest, curriculumModu
   console.log('SELF-CHECK OK');
 }
 
+// Assumed screen size for the split-screen window layout, overridable for
+// unusual monitor setups. Only affects where headed windows are placed -
+// never affects headless/self-check paths.
+const SCREEN_WIDTH = Number.isFinite(Number(process.env.TEACH_SCREEN_WIDTH)) ? Number(process.env.TEACH_SCREEN_WIDTH) : 1920;
+const SCREEN_HEIGHT = Number.isFinite(Number(process.env.TEACH_SCREEN_HEIGHT)) ? Number(process.env.TEACH_SCREEN_HEIGHT) : 1080;
+
+/**
+ * Runs Phase 1 (launch + probe + signup) for one persona at the given
+ * split-screen slot index (0 = left half, 1 = right half). Isolated in its
+ * own try/catch so one persona failing does not abort its batch - it is
+ * recorded as a setup failure and excluded from Phase 2.
+ */
+async function setupPersonaWindow({ persona, slotIndex, target, runId, personasModule }) {
+  const { probeDeployment, signUpPersona, newPersonaContext } = personasModule;
+  const layout = personasModule.computeSplitLayout(SCREEN_WIDTH, SCREEN_HEIGHT, slotIndex);
+  try {
+    const browser = await chromium.launch({
+      headless: false,
+      slowMo: SLOWMO_MS,
+      args: [`--window-position=${layout.x},${layout.y}`, `--window-size=${layout.width},${layout.height}`],
+    });
+    const context = await newPersonaContext(browser, persona);
+    await h.installCursor(context);
+    const page = await context.newPage();
+    const probe = await probeDeployment(page, target);
+    const mode = probe.mode;
+    let businessId = null;
+    if (mode === 'live_auth') {
+      const signup = await signUpPersona(page, { persona, runId, baseURL: target });
+      businessId = signup.businessId;
+    }
+    return { persona, browser, context, page, mode, businessId, setupFailed: false };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const setupFinding = triage.buildFinding({
+      title: `Persona "${persona.key}" failed Phase-1 setup`,
+      category: 'harness',
+      severity: 'high',
+      lesson: 'phase1-setup',
+      persona: persona.key,
+      repro: `Launch browser, probe deployment, and sign up persona "${persona.key}" against ${target}`,
+      expected: 'The persona launches a browser, probes the deployment, and (if live_auth) signs up successfully.',
+      actual: reason,
+      triageClass: 'environment_problem',
+    });
+    return { persona, setupFailed: true, setupFinding };
+  }
+}
+
+/** Runs the curriculum plan for one already-set-up persona (Phase 2). */
+async function runPlanForPersona({ persona, page, mode, businessId, otherTenantIds, runId, target, plan, limits, runDir }) {
+  const lessons = [];
+  const passedLessonIds = new Set();
+  for (const lesson of plan) {
+    if (limits.timeExceeded() || limits.requestsExceeded()) {
+      lessons.push({
+        id: lesson.id,
+        title: lesson.title,
+        level: lesson.level,
+        pass: false,
+        notes: `skipped: run budget exceeded before this lesson started (${limits.reason()})`,
+        findings: [],
+        learned: null,
+      });
+      continue;
+    }
+
+    const missingPrereq = Array.isArray(lesson.prereqs)
+      ? lesson.prereqs.find((id) => !passedLessonIds.has(id))
+      : null;
+    if (missingPrereq) {
+      lessons.push({
+        id: lesson.id,
+        title: lesson.title,
+        level: lesson.level,
+        pass: true,
+        notes: `skipped: prereq ${missingPrereq} not satisfied`,
+        findings: [],
+        learned: null,
+      });
+      continue;
+    }
+
+    const collected = [];
+    let result;
+    try {
+      result = await lesson.run({
+        page,
+        persona,
+        runId,
+        baseURL: target,
+        deploymentMode: mode,
+        limits,
+        h,
+        ladder,
+        sheets,
+        triage,
+        artifactsDir: runDir,
+        recordFinding: (f) => collected.push(f),
+        otherTenantIds,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const crashFinding = triage.buildFinding({
+        title: `Lesson "${lesson.id}" threw an uncaught error`,
+        category: 'crash',
+        severity: 'high',
+        lesson: lesson.id,
+        persona: persona.key,
+        repro: `Run lesson "${lesson.id}" for persona "${persona.key}" against ${target}`,
+        expected: 'The lesson completes and returns a result without throwing.',
+        actual: reason,
+        triageClass: 'probable_app_bug',
+      });
+      result = { pass: false, findings: [crashFinding], learned: null, notes: `threw: ${reason}` };
+    }
+
+    const findings = [...collected, ...(Array.isArray(result.findings) ? result.findings : [])];
+    const passed = Boolean(result.pass);
+    if (passed) passedLessonIds.add(lesson.id);
+    lessons.push({
+      id: lesson.id,
+      title: lesson.title,
+      level: lesson.level,
+      pass: passed,
+      notes: result.notes ?? null,
+      findings,
+      learned: result.learned ?? null,
+    });
+  }
+  return { persona: persona.key, lessons };
+}
+
 async function runLive({ target, runId, knowledge, manifest, personas, report, limits }) {
   const { readKnowledge, writeCoverage, appendRunHistory, appendDiscoveries, appendBugs, atomicWriteFile, PATHS } = knowledge;
   const { createManifest, setStatus, readManifest } = manifest;
-  const { PERSONAS, probeDeployment, signUpPersona, newPersonaContext } = personas;
+  const { PERSONAS } = personas;
   const { writeReport } = report;
 
   const k = await readKnowledge();
@@ -840,8 +992,6 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
 
   limits.start();
 
-  const browsers = [];
-  const contexts = [];
   let browserVersion = 'chromium';
   let finalStatus = 'aborted';
 
@@ -849,171 +999,96 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
   let model = null;
 
   try {
-    // Phase 1: launch tiled browsers, probe deployment mode, sign up each
-    // persona. Each persona's setup is isolated in its own try/catch so ONE
-    // persona failing (browser launch, probe, or signup) does not abort the
-    // whole run - it is recorded as a setup failure and excluded from Phase 2,
-    // while personas that DID set up successfully still run their lessons.
-    const personaSetups = await Promise.all(
-      PERSONAS.map(async (persona, i) => {
-        try {
-          const browser = await chromium.launch({
-            headless: false,
-            slowMo: SLOWMO_MS,
-            args: [`--window-position=${i * 650},0`, '--window-size=640,820'],
-          });
-          browsers.push(browser);
-          const context = await newPersonaContext(browser, persona);
-          await h.installCursor(context);
-          contexts.push(context);
-          const page = await context.newPage();
-          const probe = await probeDeployment(page, target);
-          const mode = probe.mode;
-          let businessId = null;
-          if (mode === 'live_auth') {
-            const signup = await signUpPersona(page, { persona, runId, baseURL: target });
-            businessId = signup.businessId;
-          }
-          return { persona, page, mode, businessId, setupFailed: false };
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          const setupFinding = triage.buildFinding({
-            title: `Persona "${persona.key}" failed Phase-1 setup`,
-            category: 'harness',
-            severity: 'high',
-            lesson: 'phase1-setup',
-            persona: persona.key,
-            repro: `Launch browser, probe deployment, and sign up persona "${persona.key}" against ${target}`,
-            expected: 'The persona launches a browser, probes the deployment, and (if live_auth) signs up successfully.',
-            actual: reason,
-            triageClass: 'environment_problem',
-          });
-          return { persona, setupFailed: true, setupFinding };
-        }
-      })
-    );
+    // Owner requirement: never show more than MAX_CONCURRENT_WINDOWS headed
+    // windows at once. Personas run in sequential batches (default: pairs),
+    // each batch split-screen left/right; every batch's browsers are fully
+    // closed before the next batch launches, so at most MAX_CONCURRENT_WINDOWS
+    // windows are ever visible concurrently, regardless of how many personas
+    // are queued.
+    const personaBatches = batchPersonas(PERSONAS, MAX_CONCURRENT_WINDOWS);
+    const personaResults = [];
+    const failedPersonaResults = [];
+    const allBusinessIdsSoFar = [];
+    const modesSeen = new Set();
 
-    if (browsers[0]) {
+    for (const batch of personaBatches) {
+      // Phase 1 (this batch only): launch split-screen browsers, probe, sign up.
+      const personaSetups = await Promise.all(
+        batch.map((persona, slotIndex) =>
+          setupPersonaWindow({ persona, slotIndex, target, runId, personasModule: personas })
+        )
+      );
+
+      const browsers = personaSetups.map((s) => s.browser).filter(Boolean);
+      const contexts = personaSetups.map((s) => s.context).filter(Boolean);
+
+      if (browserVersion === 'chromium' && browsers[0]) {
+        try {
+          browserVersion = browsers[0].version();
+        } catch {
+          browserVersion = 'chromium';
+        }
+      }
+
+      const successfulSetups = personaSetups.filter((s) => !s.setupFailed);
+      const failedSetups = personaSetups.filter((s) => s.setupFailed);
+
+      for (const s of successfulSetups) {
+        if (s.businessId) allBusinessIdsSoFar.push(s.businessId);
+        if (s.mode) modesSeen.add(s.mode);
+      }
+
+      // Setup-failed personas never enter the lessons phase; their failure is
+      // still surfaced as a finding via a synthetic Phase-1 "lesson" entry so
+      // it flows into the report the same way any other finding does.
+      for (const { persona, setupFinding } of failedSetups) {
+        failedPersonaResults.push({
+          persona: persona.key,
+          lessons: [
+            {
+              id: 'phase1-setup',
+              title: 'Phase 1 persona setup',
+              level: 0,
+              pass: false,
+              notes: 'setup failed: excluded from lessons phase',
+              findings: [setupFinding],
+              learned: null,
+            },
+          ],
+        });
+      }
+
       try {
-        browserVersion = browsers[0].version();
-      } catch {
-        browserVersion = 'chromium';
+        // Phase 2 (this batch only): run the curriculum plan for each
+        // successfully set-up persona in the batch.
+        const batchResults = await Promise.all(
+          successfulSetups.map(({ persona, page, mode, businessId }) =>
+            runPlanForPersona({
+              persona,
+              page,
+              mode,
+              businessId,
+              otherTenantIds: allBusinessIdsSoFar.filter((id) => id !== businessId),
+              runId,
+              target,
+              plan,
+              limits,
+              runDir,
+            })
+          )
+        );
+        personaResults.push(...batchResults);
+      } finally {
+        // Close this batch's windows before the next batch opens, so no more
+        // than MAX_CONCURRENT_WINDOWS are ever visible at once.
+        await Promise.all(contexts.map((c) => c.close().catch(() => {})));
+        await Promise.all(browsers.map((b) => b.close().catch(() => {})));
       }
     }
 
-    const successfulSetups = personaSetups.filter((s) => !s.setupFailed);
-    const failedSetups = personaSetups.filter((s) => s.setupFailed);
+    personaResults.unshift(...failedPersonaResults);
 
-    const allBusinessIds = successfulSetups.map((s) => s.businessId).filter(Boolean);
-    const modes = new Set(successfulSetups.map((s) => s.mode));
-    const deploymentMode = modes.size === 1 ? [...modes][0] : (modes.size === 0 ? 'unknown' : 'mixed');
-
-    // Setup-failed personas never enter the lessons phase; their failure is
-    // still surfaced as a finding via a synthetic Phase-1 "lesson" entry so it
-    // flows into the report the same way any other finding does.
-    const failedPersonaResults = failedSetups.map(({ persona, setupFinding }) => ({
-      persona: persona.key,
-      lessons: [
-        {
-          id: 'phase1-setup',
-          title: 'Phase 1 persona setup',
-          level: 0,
-          pass: false,
-          notes: 'setup failed: excluded from lessons phase',
-          findings: [setupFinding],
-          learned: null,
-        },
-      ],
-    }));
-
-    // Phase 2: run the curriculum plan for each successfully set-up persona.
-    const livePersonaResults = await Promise.all(
-      successfulSetups.map(async ({ persona, page, mode, businessId }) => {
-        const otherTenantIds = allBusinessIds.filter((id) => id !== businessId);
-        const lessons = [];
-        const passedLessonIds = new Set();
-        for (const lesson of plan) {
-          if (limits.timeExceeded() || limits.requestsExceeded()) {
-            lessons.push({
-              id: lesson.id,
-              title: lesson.title,
-              level: lesson.level,
-              pass: false,
-              notes: `skipped: run budget exceeded before this lesson started (${limits.reason()})`,
-              findings: [],
-              learned: null,
-            });
-            continue;
-          }
-
-          const missingPrereq = Array.isArray(lesson.prereqs)
-            ? lesson.prereqs.find((id) => !passedLessonIds.has(id))
-            : null;
-          if (missingPrereq) {
-            lessons.push({
-              id: lesson.id,
-              title: lesson.title,
-              level: lesson.level,
-              pass: true,
-              notes: `skipped: prereq ${missingPrereq} not satisfied`,
-              findings: [],
-              learned: null,
-            });
-            continue;
-          }
-
-          const collected = [];
-          let result;
-          try {
-            result = await lesson.run({
-              page,
-              persona,
-              runId,
-              baseURL: target,
-              deploymentMode: mode,
-              limits,
-              h,
-              ladder,
-              sheets,
-              triage,
-              artifactsDir: runDir,
-              recordFinding: (f) => collected.push(f),
-              otherTenantIds,
-            });
-          } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            const crashFinding = triage.buildFinding({
-              title: `Lesson "${lesson.id}" threw an uncaught error`,
-              category: 'crash',
-              severity: 'high',
-              lesson: lesson.id,
-              persona: persona.key,
-              repro: `Run lesson "${lesson.id}" for persona "${persona.key}" against ${target}`,
-              expected: 'The lesson completes and returns a result without throwing.',
-              actual: reason,
-              triageClass: 'probable_app_bug',
-            });
-            result = { pass: false, findings: [crashFinding], learned: null, notes: `threw: ${reason}` };
-          }
-
-          const findings = [...collected, ...(Array.isArray(result.findings) ? result.findings : [])];
-          const passed = Boolean(result.pass);
-          if (passed) passedLessonIds.add(lesson.id);
-          lessons.push({
-            id: lesson.id,
-            title: lesson.title,
-            level: lesson.level,
-            pass: passed,
-            notes: result.notes ?? null,
-            findings,
-            learned: result.learned ?? null,
-          });
-        }
-        return { persona: persona.key, lessons };
-      })
-    );
-
-    const personaResults = [...failedPersonaResults, ...livePersonaResults];
+    const deploymentMode = modesSeen.size === 1 ? [...modesSeen][0] : (modesSeen.size === 0 ? 'unknown' : 'mixed');
 
     const findings = personaResults.flatMap((pr) => pr.lessons.flatMap((l) => l.findings ?? []));
     const ladderRows = personaResults.flatMap((pr) =>
@@ -1127,10 +1202,11 @@ async function runLive({ target, runId, knowledge, manifest, personas, report, l
       }
     }
     throw err;
-  } finally {
-    await Promise.all(contexts.map((c) => c.close().catch(() => {})));
-    await Promise.all(browsers.map((b) => b.close().catch(() => {})));
   }
+  // No outer finally browser/context cleanup needed here: each batch's
+  // windows are already closed inline (see the per-batch try/finally above)
+  // before the next batch launches, keeping at most MAX_CONCURRENT_WINDOWS
+  // windows open at any moment.
 
   return finalStatus;
 }
