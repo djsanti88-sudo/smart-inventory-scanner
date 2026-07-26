@@ -150,6 +150,38 @@ export function timingSection(apiCalls) {
   return `## Timing\n\n${header}\n${body}`;
 }
 
+/**
+ * Correctness-oracle results: for each checked corpus code, the expected
+ * identity (ground truth from the app's own product corpus), the identity the
+ * running app actually returned, and whether they matched. A run of misses here
+ * flags a real bug class (e.g. a corpus code re-scanning as suggested/
+ * unidentified). Pure array-to-markdown, mirroring timingSection/ladderSection.
+ *
+ * Each result row is shaped { code, expected, observed, match, reason? } where
+ * expected/observed are display strings (or {name,brand} objects).
+ */
+export function oracleSection(oracleResults) {
+  const rows = Array.isArray(oracleResults) ? oracleResults : [];
+  if (rows.length === 0) return '## Correctness oracle\n\n(no oracle checks run this run)';
+
+  const fmtIdentity = (v) => {
+    if (v == null) return '-';
+    if (typeof v === 'string') return v || '-';
+    if (typeof v === 'object') {
+      const parts = [v.brand, v.name].filter((p) => p != null && String(p).trim() !== '');
+      return parts.length ? parts.join(' - ') : '-';
+    }
+    return String(v);
+  };
+
+  const passed = rows.filter((r) => r?.match).length;
+  const header = '| code | expected | observed | match |\n|---|---|---|---|';
+  const body = rows
+    .map((r) => `| ${r?.code ?? '?'} | ${fmtIdentity(r?.expected)} | ${fmtIdentity(r?.observed)} | ${r?.match ? 'yes' : 'no'} |`)
+    .join('\n');
+  return `## Correctness oracle\n\n${passed}/${rows.length} corpus codes resolved to the expected identity.\n\n${header}\n${body}`;
+}
+
 function createdDataSection(createdData) {
   const accounts = createdData?.accounts ?? [];
   const businesses = createdData?.businesses ?? [];
@@ -208,6 +240,8 @@ export function buildReportMarkdown(model) {
     ladderSection(model.ladderRows),
     '',
     timingSection(model.apiCalls),
+    '',
+    oracleSection(model.oracleResults),
     '',
     createdDataSection(model.createdData),
     '',

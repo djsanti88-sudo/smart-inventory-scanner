@@ -167,6 +167,72 @@ export function reviewRow(page, cleanCode) {
 }
 
 /**
+ * Best-effort read of the product identity (name/brand) the running app
+ * attached to a scanned code, for the correctness oracle. Looks first at the
+ * counted feed rows ([data-testid^="feed-product-"] / [data-testid^="count-row-"]),
+ * mirroring the existing locators in lessons/2-scan-n-count-n.mjs, then falls
+ * back to the Needs Review row. Never throws: on any locator failure it returns
+ * empty strings so the caller can record an honest "no identity observed".
+ *
+ * The returned shape feeds compareIdentity() in ./oracle.mjs. `name` is the
+ * primary product label, `brand` is a best-effort brand slice, and `raw` is the
+ * full text of the matched row for debugging.
+ *
+ * @param {import('playwright').Page} page
+ * @param {string} code raw or clean scanned code (matched as row text)
+ * @returns {Promise<{ name: string, brand: string, raw: string }>}
+ */
+export async function productIdentityForCode(page, code) {
+  const empty = { name: '', brand: '', raw: '' };
+  if (!page || !code) return empty;
+
+  // Preferred: the identified feed/count row for this code.
+  const rowSelectors = ['[data-testid^="feed-product-"]', '[data-testid^="count-row-"]'];
+  for (const selector of rowSelectors) {
+    try {
+      const row = page.locator(selector).filter({ hasText: code }).first();
+      const count = await row.count().catch(() => 0);
+      if (!count) continue;
+      const raw = (await row.innerText({ timeout: 5000 }).catch(() => '')) || '';
+      if (!raw.trim()) continue;
+
+      // Prefer explicit name/brand sub-cells when present, else use the row text.
+      const nameCell = row.locator('[data-testid^="product-name-"]').first();
+      const brandCell = row.locator('[data-testid^="product-brand-"]').first();
+      const name =
+        (await nameCell.innerText({ timeout: 1000 }).catch(() => '')) || firstLine(raw);
+      const brand = (await brandCell.innerText({ timeout: 1000 }).catch(() => '')) || '';
+      return { name: name.trim(), brand: brand.trim(), raw: raw.trim() };
+    } catch {
+      // fall through to next selector / fallback
+    }
+  }
+
+  // Fallback: a Needs Review row still carries whatever partial identity exists.
+  try {
+    const review = page.locator('[data-testid^="review-row-"]').filter({ hasText: code }).first();
+    const count = await review.count().catch(() => 0);
+    if (count) {
+      const raw = (await review.innerText({ timeout: 5000 }).catch(() => '')) || '';
+      if (raw.trim()) return { name: firstLine(raw).trim(), brand: '', raw: raw.trim() };
+    }
+  } catch {
+    // ignore
+  }
+
+  return empty;
+}
+
+/** First non-empty line of a multi-line innerText blob. */
+function firstLine(text) {
+  if (!text) return '';
+  for (const line of String(text).split('\n')) {
+    if (line.trim()) return line.trim();
+  }
+  return '';
+}
+
+/**
  * Toggle the browser context's offline simulation.
  * @param {import('playwright').Page} page
  * @param {boolean} offline
