@@ -14,10 +14,15 @@ this project - never assume one implies the other.
 
 ## Deploys are manual/CLI or owner-only dashboard, never automatic
 
-- **Preview deploys**: manual `vercel` CLI invocation. There is no committed wrapper script yet
-  (`scripts/deploy-preview.mjs` does not exist in this repo as of this writing) - a preview deploy is
-  a plain `vercel deploy` run by hand. If a wrapper script is added later, it belongs here and this
-  paragraph should be updated to name it.
+- **Preview deploys**: `node scripts/deploy-preview.mjs` is the sanctioned wrapper (added
+  2026-07-22, the day of the incident this doc describes). It acquires an exclusive `.deploy-lock`
+  (stale locks over 30 min are reclaimed), runs the fix-lineage and env-parity preflight gates below
+  (tolerating their absence only if they are ever removed), runs a plain `vercel deploy` (never
+  `--prod`), then runs the post-deploy smoke fingerprint against the resulting URL, releasing the
+  lock in all cases. `node scripts/deploy-preview.mjs --dry-run` exercises the lock + preflight
+  logic without shelling out to `vercel` or making any network call - use this to sanity-check the
+  wrapper itself. A raw `vercel deploy` run by hand still works and is not blocked, but skips the
+  lock and both gates, so prefer the wrapper.
 - **Production promote/rollback**: **OWNER-ONLY**, via the Vercel dashboard or an explicit
   `vercel --prod` / `vercel promote` / `vercel rollback` / `vercel alias set` CLI call that the owner
   has approved in the moment. No agent session may run these without that explicit approval, even if
@@ -56,11 +61,30 @@ expects it.
   plus cross-system facts passed in via `SENTINEL_*` env vars (Vercel project/alias, Firebase prod
   project, branch protection) into a blocker/warning list and a deploy card with the mandatory owner
   approval phrase (`DEPLOY THIS SHA`). Never mutates anything and never deploys by itself.
-- **Not yet built** (proposed in the post-incident "never again" decision package, not implemented):
-  a fix-lineage ancestry check (would refuse a deploy candidate that doesn't descend from commits the
-  owner marked "must ship"), a full env-parity diff across environments, and a post-deploy smoke
-  fingerprint that hits a live URL and checks decode-ladder rung availability against a canary
-  manifest. If/when these are built, this section is where they get named and linked.
+- `node scripts/check-fix-lineage.mjs [ref]` (prevention item 1) - git-ancestry based, not a
+  hand-maintained file manifest: fails unless local `master` is an ancestor of the candidate ref
+  (`ref` defaults to `HEAD`) AND every commit in `scripts/fix-lineage-pins.json` (if present) is also
+  an ancestor. Exit 0 = lineage OK, exit 1 = missing mainline/pinned commits (named in the message),
+  exit 2 = usage/environment error. This is the direct fix for the 2026-07-22 incident (a deploy
+  candidate built from a lineage missing already-shipped fixes).
+- `node scripts/check-env-parity.mjs [--env=production|preview]` (prevention item 2) - shells out to
+  `vercel env ls <environment>` and diffs variable NAMES ONLY (never values - Vercel only ever shows
+  Encrypted/Plain, and this script deliberately never runs `vercel env pull`) against
+  `scripts/env-manifest.json`'s required/forbidden/optional sets per environment. Catches a required
+  var silently missing (e.g. `GO_UPC_API_KEY` absent from Preview) and a forbidden var silently
+  present (e.g. `NEXT_PUBLIC_FIREBASE_*` leaking into Preview, which would break the mock/no-login
+  guarantee above). Exit 0 = no gaps, exit 1 = gaps printed per environment.
+- `node scripts/smoke-fingerprint.mjs <deployed-url> [--expect-lineage-mismatch]` (prevention item 3)
+  - post-deploy, read-only GET checks against a URL that has already been deployed: the
+  `/api/ai-lookup` capability JSON matches `scripts/smoke-expected.json` (empty `missingKeys`, Go-UPC
+  configured, daily limit, ladder order, Gemini never used for decode), a route fingerprint
+  (`/scan`, `/history`, `/catalog-review`, `/reconcile` 200/307 as expected; `/sessions` 404 is
+  correct, not a bug - there is no index route under `sessions/`, only `sessions/[id]`), and a check
+  for Vercel's "Deployment has failed" masquerade page (a failed build can still answer 200 while
+  serving Vercel's own error HTML). Exit 0 = all checks passed, exit 1 = a mismatch, exit 2 =
+  usage/network error. `--expect-lineage-mismatch` is for the script's own self-test only.
+- All three gates above are wired into `scripts/deploy-preview.mjs` (see above) and also runnable
+  standalone for manual verification before a raw `vercel deploy`.
 
 ## What this replaces
 
