@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseLadderTrace, ladderTableRow, summarizeLadder, LADDER_ORDER } from "./ladder.mjs";
+import { parseLadderTrace, ladderTableRow, summarizeLadder, LADDER_ORDER, evaluateDecodeTriggerOutcome } from "./ladder.mjs";
 
 test("LADDER_ORDER is the expected cost-ordered sequence", () => {
   assert.deepEqual(LADDER_ORDER, ["upcitemdb", "openfoodfacts", "goupc", "fetchv2", "gpt"]);
@@ -177,4 +177,71 @@ test("summarizeLadder aggregates rows", () => {
   assert.equal(summary.byRung.corpus_exact_barcode, 1);
   assert.equal(summary.reachedGptCount, 1);
   assert.equal(summary.partialIdentityCount, 1);
+});
+
+test("evaluateDecodeTriggerOutcome: no codes attempted -> unavailable/no_codes_attempted", () => {
+  const result = evaluateDecodeTriggerOutcome({
+    attemptedCount: 0,
+    triggerAvailableCount: 0,
+    traceCount: 0,
+    apiCallCount: 0,
+  });
+  assert.deepEqual(result, { outcome: "unavailable", reason: "no_codes_attempted" });
+});
+
+test("evaluateDecodeTriggerOutcome: trigger missing for at least one code -> unavailable with supplied reason", () => {
+  const result = evaluateDecodeTriggerOutcome({
+    attemptedCount: 2,
+    triggerAvailableCount: 1,
+    traceCount: 0,
+    apiCallCount: 0,
+    unavailableReason: "ai-status=Off",
+  });
+  assert.deepEqual(result, { outcome: "unavailable", reason: "ai-status=Off" });
+});
+
+test("evaluateDecodeTriggerOutcome: trigger missing with no explicit reason -> default reason", () => {
+  const result = evaluateDecodeTriggerOutcome({
+    attemptedCount: 1,
+    triggerAvailableCount: 0,
+    traceCount: 0,
+    apiCallCount: 0,
+  });
+  assert.equal(result.outcome, "unavailable");
+  assert.equal(result.reason, "trigger_not_available");
+});
+
+test("evaluateDecodeTriggerOutcome: trigger available on every code but zero traces/api calls -> silent_miss", () => {
+  const result = evaluateDecodeTriggerOutcome({
+    attemptedCount: 2,
+    triggerAvailableCount: 2,
+    traceCount: 0,
+    apiCallCount: 0,
+  });
+  assert.deepEqual(result, { outcome: "silent_miss", reason: null });
+});
+
+test("evaluateDecodeTriggerOutcome: trigger available and at least one trace captured -> triggered", () => {
+  const result = evaluateDecodeTriggerOutcome({
+    attemptedCount: 2,
+    triggerAvailableCount: 2,
+    traceCount: 1,
+    apiCallCount: 1,
+  });
+  assert.deepEqual(result, { outcome: "triggered", reason: null });
+});
+
+test("evaluateDecodeTriggerOutcome: trigger available and apiCalls alone (no parsed trace) still counts as triggered", () => {
+  const result = evaluateDecodeTriggerOutcome({
+    attemptedCount: 1,
+    triggerAvailableCount: 1,
+    traceCount: 0,
+    apiCallCount: 1,
+  });
+  assert.equal(result.outcome, "triggered");
+});
+
+test("evaluateDecodeTriggerOutcome: non-finite counters default to 0 without throwing", () => {
+  const result = evaluateDecodeTriggerOutcome({});
+  assert.deepEqual(result, { outcome: "unavailable", reason: "no_codes_attempted" });
 });

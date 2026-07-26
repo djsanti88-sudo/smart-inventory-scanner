@@ -120,6 +120,60 @@ export function ladderTableRow(code, parsed, options) {
 }
 
 /**
+ * Pure decision helper for lesson 7 (live decode ladder trace): given whether
+ * the manual "Look up with AI" trigger was actually available/clickable for
+ * a code, and how many ladder-capture traces + /api/ai-lookup calls were
+ * observed for the codes we attempted to trigger, decide what happened.
+ *
+ * Three outcomes:
+ *  - 'unavailable': the trigger button was absent/disabled for at least one
+ *    attempted code, so decode could not be exercised through this path.
+ *    Not automatically a bug - the caller supplies `reason` (e.g. AI lookup
+ *    off, no platform-owner access, no server keys) so the lesson can record
+ *    an honest, non-locked finding rather than silently passing.
+ *  - 'silent_miss': the trigger WAS available and was clicked on every
+ *    attempted code, but zero ladder traces / zero api calls were captured.
+ *    This is a real app-bug candidate (the button did nothing) and MUST
+ *    surface a finding, never a silent pass.
+ *  - 'triggered': the trigger was available and at least one trace/api call
+ *    was captured for the attempted codes - decode was genuinely exercised.
+ *
+ * @param {{
+ *   attemptedCount: number,
+ *   triggerAvailableCount: number,
+ *   traceCount: number,
+ *   apiCallCount: number,
+ *   unavailableReason?: string|null,
+ * }} input
+ */
+export function evaluateDecodeTriggerOutcome({
+  attemptedCount,
+  triggerAvailableCount,
+  traceCount,
+  apiCallCount,
+  unavailableReason = null,
+} = {}) {
+  const attempted = Number.isFinite(attemptedCount) ? attemptedCount : 0;
+  const available = Number.isFinite(triggerAvailableCount) ? triggerAvailableCount : 0;
+  const traces = Number.isFinite(traceCount) ? traceCount : 0;
+  const apiCalls = Number.isFinite(apiCallCount) ? apiCallCount : 0;
+
+  if (attempted === 0) {
+    return { outcome: 'unavailable', reason: unavailableReason ?? 'no_codes_attempted' };
+  }
+
+  if (available < attempted) {
+    return { outcome: 'unavailable', reason: unavailableReason ?? 'trigger_not_available' };
+  }
+
+  if (traces === 0 && apiCalls === 0) {
+    return { outcome: 'silent_miss', reason: null };
+  }
+
+  return { outcome: 'triggered', reason: null };
+}
+
+/**
  * Summarize an array of ladder table rows.
  * @param {ReturnType<typeof ladderTableRow>[]} rows
  */

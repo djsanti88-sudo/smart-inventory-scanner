@@ -8,6 +8,25 @@
 // (escaping GPT without an honest skip reason, settling on partial/brand-only
 // identity) - it never asserts these are bugs, and it never proposes
 // changing ladder logic itself; ladder changes need owner approval.
+//
+// IMPORTANT: unlike known scans, an unknown scan does NOT auto-decode just by
+// landing on the feed - the app never calls AI mid-typing/mid-scan on its
+// own initiative for a manual trigger; auto-decode-on-scan is a separate
+// server+settings gated path (see evaluateAutoDecode in scanStore.ts) that
+// may or may not fire. To DETERMINISTICALLY exercise the ladder, this lesson
+// scans the unknown code, opens its Needs Review row, and clicks the row's
+// "Look up with AI" button (data-testid="live-decode", scoped inside
+// data-testid="review-row-<cleanCode>"). That button only renders for a
+// platform-owner identity AND only for a non-import-origin review AND is
+// disabled when settings.aiLookupEnabled is false - see
+// src/components/NeedsReviewTable.tsx:404-429. Teach Bot personas are
+// regular fresh signups (never platform-owner), so on most deployments this
+// button will be ABSENT and decode cannot be triggered through this UI path;
+// that is expected, not a bug, and the lesson records an honest non-locked
+// finding instead of silently passing hollow (the original defect this
+// lesson was rewritten to fix).
+
+import { evaluateDecodeTriggerOutcome } from '../ladder.mjs';
 
 export default {
   id: 'live-decode-ladder-trace',
@@ -85,6 +104,8 @@ export default {
       return { pass: false, findings, learned, notes: notes.join(' ') };
     }
 
+    let triggerAvailableCount = 0;
+    const scannedCodes = [];
     try {
       for (const code of candidates) {
         if (!limits.canPaidLookup()) {
@@ -93,6 +114,29 @@ export default {
         }
         await h.scan(page, code);
         scannedCount += 1;
+        scannedCodes.push(code);
+
+        // A scan alone does NOT guarantee decode fires - auto-decode-on-scan
+        // is a separate gated path (see file header). Deterministically
+        // trigger the ladder by clicking this row's manual "Look up with AI"
+        // button, scoped to its own review row so we never click the wrong
+        // code's button.
+        try {
+          const row = h.reviewRow(page, code);
+          await row.waitFor({ state: 'visible', timeout: 10000 });
+          const liveDecodeButton = row.getByTestId('live-decode');
+          const visible = await liveDecodeButton.isVisible({ timeout: 3000 }).catch(() => false);
+          const enabled = visible ? await liveDecodeButton.isEnabled().catch(() => false) : false;
+          if (visible && enabled) {
+            triggerAvailableCount += 1;
+            await liveDecodeButton.click();
+          }
+        } catch {
+          // Row never appeared or button probe failed - trigger stays
+          // unavailable for this code; handled by the outcome evaluation
+          // below rather than thrown here.
+        }
+
         // Wait briefly for the /api/ai-lookup response to land before the
         // next scan, so the ladder-capture attributes traces correctly.
         await page.waitForTimeout(2500);
@@ -116,7 +160,9 @@ export default {
 
     cap.stop();
     const rows = cap.rows();
+    const apiCalls = typeof cap.apiCalls === 'function' ? cap.apiCalls() : [];
     learned.ladderRows = rows;
+    learned.apiCalls = apiCalls;
 
     // CRITICAL (L1): every scanned code must still appear on the feed and
     // count, regardless of decode outcome.
@@ -152,6 +198,69 @@ export default {
         evidence: {},
         triageClass: 'probable_app_bug',
         customerImpact: 'A decode-ladder outcome must never suppress a scanned row - top-level law violation with real customer scans.',
+        locked: true,
+      }));
+      pass = false;
+    }
+
+    // Honest decode-trigger assessment: did we actually manage to exercise
+    // the ladder for the codes we attempted? Never silently pass when we
+    // intended to decode but captured nothing - see the pure
+    // evaluateDecodeTriggerOutcome() helper in ladder.mjs.
+    let aiStatusText = null;
+    let autoDecodeStatusText = null;
+    try {
+      aiStatusText = await page.getByTestId('ai-status').innerText({ timeout: 2000 }).catch(() => null);
+      autoDecodeStatusText = await page.getByTestId('auto-decode-status').innerText({ timeout: 2000 }).catch(() => null);
+    } catch {
+      // Best-effort only - absence of these testids never blocks the outcome check.
+    }
+
+    const triggerOutcome = evaluateDecodeTriggerOutcome({
+      attemptedCount: scannedCount,
+      triggerAvailableCount,
+      traceCount: rows.length,
+      apiCallCount: apiCalls.filter((c) => c.urlPath && c.urlPath.includes('/api/ai-lookup')).length,
+      unavailableReason:
+        `ai-status='${aiStatusText ?? 'unknown'}', auto-decode-status='${autoDecodeStatusText ?? 'unknown'}', ` +
+        `live-decode button available on ${triggerAvailableCount}/${scannedCount} scanned code(s).`,
+    });
+
+    learned.triggerOutcome = triggerOutcome;
+    learned.triggerAvailableCount = triggerAvailableCount;
+
+    if (triggerOutcome.outcome === 'unavailable') {
+      findings.push(triage.buildFinding({
+        title: `Live decode not triggerable via the Needs Review UI for ${scannedCount} unknown code(s)`,
+        category: 'decode-diagnosis',
+        severity: 'medium',
+        lesson: 'live-decode-ladder-trace',
+        persona: persona?.key ?? null,
+        repro: `Scan unknown code(s) ${scannedCodes.join(', ')}, open the Needs Review row, attempt to click data-testid="live-decode".`,
+        expected: 'The "Look up with AI" button is available and clickable so the ladder can be exercised deterministically, OR the reason it is unavailable is an intentional, known gate (e.g. non-platform-owner identity, AI lookup off, import origin).',
+        actual: triggerOutcome.reason,
+        evidence: {},
+        triageClass: aiStatusText === 'Product lookup: Off' || autoDecodeStatusText === 'Off' ? 'environment_problem' : 'probable_app_bug',
+        customerImpact: 'Diagnostic only - this run could not exercise the decode ladder through the manual trigger; the ladder itself is unverified for this run.',
+        options: [
+          'If this persona is intentionally never platform-owner, this is expected - no action needed.',
+          'If AI lookup is intentionally off on this deployment, this is expected - no action needed.',
+          'If none of the above apply, investigate why the manual decode trigger was unavailable.',
+        ],
+      }));
+    } else if (triggerOutcome.outcome === 'silent_miss') {
+      findings.push(triage.buildFinding({
+        title: `Clicked "Look up with AI" on ${triggerAvailableCount} code(s) but no /api/ai-lookup fired and no ladder trace was captured`,
+        category: 'decode-diagnosis',
+        severity: 'high',
+        lesson: 'live-decode-ladder-trace',
+        persona: persona?.key ?? null,
+        repro: `Scan unknown code(s) ${scannedCodes.join(', ')}, click data-testid="live-decode" on each row, observe network traffic.`,
+        expected: 'Clicking "Look up with AI" issues a POST /api/ai-lookup request and the ladder capture records a trace.',
+        actual: `apiCalls=${apiCalls.length}, ladderTraces=${rows.length} after clicking the trigger on ${triggerAvailableCount} available button(s).`,
+        evidence: {},
+        triageClass: 'probable_app_bug',
+        customerImpact: 'The manual "Look up with AI" button appears clickable but does nothing - a platform-owner user relying on it would see no result and no feedback.',
         locked: true,
       }));
       pass = false;
@@ -227,6 +336,12 @@ export default {
 
     notes.push(limits.spendLine());
     notes.push(`Scanned ${scannedCount}/${candidates.length} candidate unknown code(s) before budget/time considerations.`);
+    notes.push(
+      `Decode trigger outcome: ${triggerOutcome.outcome}` +
+      (triggerOutcome.reason ? ` (${triggerOutcome.reason})` : '') +
+      ` - live-decode button available on ${triggerAvailableCount}/${scannedCount} scan(s), ` +
+      `${rows.length} ladder trace(s), ${apiCalls.length} /api/* call(s) captured.`
+    );
 
     return { pass, findings, learned, notes: notes.join(' ') };
   },
