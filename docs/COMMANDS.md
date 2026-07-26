@@ -30,6 +30,20 @@ The Windows wrapper `.\fable5.cmd` and `python -m tools.fable5` are equivalent.
 | `python -m tools.fable5 selftest` | Runs the five isolated detector canaries without worktrees or npm. | Free, offline. |
 | `python -m tools.fable5 stress --target <url>` | Runs the fail-closed scan stress battery. Localhost must use port 3400; cloud needs `--allow-cloud`. | Local is free. Every preview run is owner-gated; the monitor aborts on any AI lookup. |
 
+## Teach Bot (live-app learning harness)
+
+Built on `feat/teach-bot` / `feat/teach-bot-clean` (not yet on master; unverified as of 2026-07-22
+whether merged). Batch A modules shipped: `e2e/teach/{knowledge,ladder,manifest,sheets,triage}.mjs`
++ matching `node:test` suites, driving `testing/app-knowledge`, `testing/specs`, and
+`testing/tests/{candidates,permanent}`.
+
+| Script | What it does | Status |
+|---|---|---|
+| `npm run teach` | Runs `e2e/teach/teach.mjs` (the harness entry point) | `e2e/teach/teach.mjs` does not exist yet on this branch as of 2026-07-22 - package.json script currently points at a file not yet built |
+| `npm run teach:cleanup` | Runs `e2e/teach/cleanup.mjs` | Same gap - file not yet present |
+| `npm run teach:test` | `node --test "e2e/teach/**/*.test.mjs"` - the Batch A node:test suite (knowledge/ladder/manifest/sheets/triage) | Exists, runs today |
+| `npm run teach:regression` | `playwright test --config=playwright.teach.config.ts` - runs `testing/tests/permanent` against `TEACH_TARGET_URL` (defaults to the real production deployment, no local webServer) | Config exists; this is a LIVE-app-driving config, not mock E2E - treat as owner-gated like other live/production-facing runs |
+
 ## Dev servers
 
 | Script | What it does |
