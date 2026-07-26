@@ -184,6 +184,37 @@ export async function persistDecode(entry: PersistedDecode): Promise<void> {
   }
 }
 
+/**
+ * Delete a persisted decode entry by code (catalog revocation round, design §4 "independent replay
+ * layers below the master rung"): when a shop disputes a catalog entry, this L2 cache is a second
+ * place the SAME pre-dispute (possibly wrong) decode result could keep replaying from even after
+ * the master catalogEntries doc has been demoted - so the dispute handler purges it here too.
+ * Best-effort like every other export in this module: never throws, a missing/absent entry or a
+ * storage failure is silently treated as "nothing to delete" so a cache-purge hiccup can never fail
+ * the dispute itself.
+ */
+export async function deletePersistedDecode(code: string): Promise<void> {
+  const key = (code ?? "").trim();
+  if (!key) return;
+  try {
+    const client = await getTursoClient();
+    if (client) {
+      const ready = await ensureTursoTable(client);
+      if (!ready) return;
+      await client.execute({ sql: "DELETE FROM decode_cache WHERE code = ?", args: [key] });
+      return;
+    }
+    const store = readFileStore();
+    if (key in store) {
+      delete store[key];
+      writeFileStore(store);
+    }
+  } catch (e) {
+    console.warn("[decode-cache-store] deletePersistedDecode failed:", (e as Error).message);
+    // best-effort; never throw - a failed purge must never break the dispute call that triggered it
+  }
+}
+
 /** Test-only: reset in-memory Turso client/table-ready state between test cases. */
 export function __resetForTest(): void {
   _tursoClient = null;
