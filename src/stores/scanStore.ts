@@ -37,6 +37,7 @@ import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
 import { auditRepository, catalogRepository } from "@/services/db/firebase/repositories";
 import { getDb } from "@/lib/firebaseClient";
+import { getSession } from "@/lib/auth";
 import {
   evaluateAiGate,
   initBreaker,
@@ -5950,6 +5951,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "needs_review_reopened", metadata: { code, fromProduct: productId } });
           // 5. Stronger Gemini Pro correction recheck (cost-guarded; never auto-saves or counts).
           await get().correctionRecheck(reviewId, { reason: opts?.reason });
+        }
+        // 6. Catalog revocation round (design §2.3): report the wrong identity to the shared master
+        // catalog so other shops stop replaying it. Best-effort and NON-BLOCKING - mirrors how
+        // correctionRecheck above is a trailing side-effect, not a dependency: markWrong's local
+        // correction (count transfer, alias deactivation) already succeeded regardless of whether
+        // this call lands, times out, the user has no session, or the server is unreachable. Never
+        // awaited into the return path; every failure mode is swallowed here on purpose (matches the
+        // project's "never block scanning/correction on the backend" rule for the sync queue).
+        if (code) {
+          void (async () => {
+            try {
+              const user = await getSession();
+              if (!user) return;
+              const idToken = await user.getIdToken();
+              await fetch("/api/catalog-dispute", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  idToken,
+                  normalizedBarcode: code,
+                  businessId: state.businessId,
+                  reason: opts?.reason ?? "marked_wrong",
+                }),
+              });
+            } catch {
+              // best-effort; local correction already succeeded regardless of this call
+            }
+          })();
         }
         return reviewId;
       },
