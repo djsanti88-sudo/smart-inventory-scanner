@@ -169,6 +169,39 @@ describe("appendMasterCatalogEntry (Admin-SDK upsert, mocked)", () => {
     expect(setCalls).toHaveLength(0);
   });
 
+  // Catalog revocation round (design §2.4b CRITICAL): a disputed entry must NEVER be silently
+  // re-verified by the very next strong ladder decode of the same code - that would undo a live
+  // dispute with no human in the loop. The re-decode instead lands as a "pending" re-candidate,
+  // preserving the dispute history (disputeCount/disputedBy/auditLog) so the reviewing human sees
+  // both the fresh evidence AND the dispute trail together.
+  it("re-append over a disputed doc lands as pending (never silently re-verifies), preserving dispute history", async () => {
+    const existing = {
+      verificationStatus: "disputed",
+      provenanceTier: "ladder_verified_strong",
+      disputeCount: 1,
+      disputedBy: [{ businessId: "biz-a", at: "2026-07-20T00:00:00.000Z" }],
+      auditLog: [{ at: "2026-07-20T00:00:00.000Z", action: "disputed", by: "biz-a" }],
+    };
+    const { tx, setCalls } = makeMockTx(existing, true);
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db });
+    expect(result).toBe("written");
+    expect(setCalls).toHaveLength(1);
+    const [, data] = setCalls[0];
+    const payload = data as Record<string, unknown>;
+    // Fresh identity fields land, but verificationStatus is demoted to "pending" - never "verified".
+    expect(payload.verificationStatus).toBe("pending");
+    expect(payload.name).toBe(entry.name);
+    // Dispute history is preserved untouched, not clobbered by the merge write.
+    expect(payload.disputeCount).toBe(1);
+    expect(payload.disputedBy).toEqual(existing.disputedBy);
+    expect(payload.auditLog).toEqual(existing.auditLog);
+  });
+
   it("allows overwrite (retry idempotency) when the existing doc is NOT human_verified", async () => {
     const { tx, setCalls } = makeMockTx({ provenanceTier: "ladder_verified_strong" }, true);
     const db = {

@@ -160,6 +160,31 @@ export async function appendMasterCatalogEntry(
         if (existing?.verificationStatus === "rejected") {
           return "skipped_rejected" as const;
         }
+        // Re-append trap (catalog revocation round, design §2.4b): a "disputed" doc (a shop reported
+        // the identity was wrong - see catalogDispute.ts) must never be silently re-verified by the
+        // very next strong ladder decode of the same code either. Unlike "rejected" (fully skipped),
+        // the fresh decode result IS useful evidence, so it lands as a "pending" re-candidate for the
+        // reviewing human instead of being discarded - but verificationStatus is demoted from the
+        // entry's own "verified" to "pending" and the dispute history (disputeCount/disputedBy/
+        // auditLog) is preserved untouched so the reviewer sees both the fresh evidence and the
+        // dispute trail together.
+        if (existing?.verificationStatus === "disputed") {
+          const { id: _id, ...rest } = entry;
+          void _id;
+          tx.set(
+            ref,
+            {
+              ...rest,
+              verificationStatus: "pending",
+              updatedAt: new Date().toISOString(),
+              ...(existing.disputeCount !== undefined ? { disputeCount: existing.disputeCount } : {}),
+              ...(existing.disputedBy !== undefined ? { disputedBy: existing.disputedBy } : {}),
+              ...(existing.auditLog !== undefined ? { auditLog: existing.auditLog } : {}),
+            },
+            { merge: true },
+          );
+          return "written" as const;
+        }
       }
       const { id: _id, ...rest } = entry;
       void _id;

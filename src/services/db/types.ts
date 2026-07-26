@@ -157,11 +157,26 @@ export interface CatalogEntry {
   category?: string;
   // "rejected" is written by the catalog-review reject action (api/catalog-review/[id]) and consulted
   // by masterAppend.ts's re-append trap (an owner-rejected entry is never silently re-verified).
-  verificationStatus?: "verified" | "pending" | "conflict" | "rejected";
+  // "disputed" (catalog revocation round, design §2.1) is written by /api/catalog-dispute: a soft
+  // demotion masterLookup.ts's classifyEntry treats as a miss (falls through to re-decode) - never a
+  // human tombstone, and masterAppend.ts's re-append trap turns a fresh strong decode over a disputed
+  // doc into a "pending" re-candidate rather than silently re-verifying it.
+  verificationStatus?: "verified" | "pending" | "conflict" | "rejected" | "disputed";
   // GC5 (P5b): mirrors Product.provenanceTier (src/types.ts:89-94). Master-truth appends (P5b Task 1)
   // stamp "ladder_verified_strong" for a strong app-verified ladder decode; no other tier is minted by
   // this phase. Optional so every pre-existing CatalogEntry (no tier yet) stays valid.
   provenanceTier?: ProvenanceTier;
+  // Written by /api/catalog-review/[id] (approve/reject) - declared here to close a pre-existing type
+  // gap (these fields were already written ad hoc, undeclared). Untouched by this round except for
+  // reuse in the new dispute audit trail below.
+  verifiedBy?: string;
+  timesRejected?: number;
+  auditLog?: Array<{ at: string; action: string; by: string; reason?: string }>;
+  // Catalog revocation round (design §2.1/§2.2): dispute tally + per-business dedup. disputedBy is
+  // capped (FIFO, last 50) so the array itself never grows unbounded; disputeCount is the immutable
+  // running total (kept even as disputedBy evicts old entries).
+  disputeCount?: number;
+  disputedBy?: Array<{ businessId: string; at: string }>;
   createdAt?: unknown;
   updatedAt?: unknown;
 }
