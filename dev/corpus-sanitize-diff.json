@@ -1,0 +1,343 @@
+{
+  "summary": {
+    "generated_at_of_source": "2026-06-30T00:36:06.527Z",
+    "total_rows": 4047273,
+    "rows_dropped": 13611,
+    "rows_dropped_dummy_barcode": 2,
+    "rows_dropped_garbled_text": 13609,
+    "rows_kept": 4033662,
+    "brand_truncated_to_first_tag": 213499,
+    "brand_cleared_still_garbled": 134,
+    "pct_dropped": "0.3363%",
+    "pct_brand_changed": "5.2784%"
+  },
+  "dropped_samples": [
+    {
+      "code": "10827987",
+      "before": [
+        "Kale & chicken chopped kale blend, white meat chicken, feta cheese, dried cranberries with a raspberry vinaigrette salad",
+        "SIGNATURE CAFE",
+        "Salted-snacks"
+      ]
+    },
+    {
+      "code": "10846384",
+      "before": [
+        "00020126920014br.gov.bcb.pix2570qrcodes.sulcredi.coop.br/v2/v3/at/6a858260-1e93-4df2-9c35-0f952de314cf5204000053039865802BR5911BYTECH LTDA6009SAO PAULO62070503***6304E0CC",
+        null,
+        null
+      ]
+    },
+    {
+      "code": "11145066",
+      "before": [
+        "Trail Mix Crackers with mung beans, seeds, cashews, raisins & cheese",
+        "Trader Joe's",
+        null
+      ]
+    },
+    {
+      "code": "12118878",
+      "before": [
+        "Rosemary, mint, sage, green tea clear mind kombucha",
+        "BREW DR. KOMBUCHA",
+        "Beverages"
+      ]
+    },
+    {
+      "code": "14321184",
+      "before": [
+        "Reviews Clean Nutraceuticals Primary Supplement TypeL-Theanine, Magnesium Glycinate, Magnesium, Magnesium Citrate, Magnesium Taurate",
+        null,
+        null
+      ]
+    },
+    {
+      "code": "14745393",
+      "before": [
+        "Grape, lemon, strawberry, green apple, orange original bite size candies",
+        "SKITTLES",
+        "Confectioneries"
+      ]
+    },
+    {
+      "code": "14926280",
+      "before": [
+        "Vanilla and chocolate with heath toffee pieces and fudge covered waffle cone pieces frozen dairy dessert, vanilla and chocolate",
+        "UNILEVER",
+        "Frozen desserts"
+      ]
+    },
+    {
+      "code": "14983108",
+      "before": [
+        "Protein Meal Bar, Chocolate Peanut Butter - Elevation by Millville - Elevation by Millville - Elevation by Millville",
+        null,
+        null
+      ]
+    },
+    {
+      "code": "15983220",
+      "before": [
+        "TURKEY SAUSAGE Bites with Sharp Cheddar Cheese & Sea Salted Almonds & Peanut Butter Filled Pretzels",
+        "H-E-B",
+        null
+      ]
+    },
+    {
+      "code": "16465565",
+      "before": [
+        "16 mini nems - poulet, menthe, légumes, coriandre",
+        "Cuisine Evasion",
+        "Chicken nems"
+      ]
+    },
+    {
+      "code": "17853699",
+      "before": [
+        "Katsu Curry Noodles, Chicken Breast Noodles, Kale, Edamame & Katsu Sauce",
+        "Fuelhub",
+        null
+      ]
+    },
+    {
+      "code": "18115628",
+      "before": [
+        "Pâte à tartiner, chocolat, noir, noisettes, orange",
+        null,
+        null
+      ]
+    },
+    {
+      "code": "19501048",
+      "before": [
+        "Blonvilliers pur,, canne, blond",
+        "Beghin Say",
+        null
+      ]
+    },
+    {
+      "code": "20058937",
+      "before": [
+        "GBC Couverture Pour Réliure Hiclear, Format A4, PVC, 0, 20 mm",
+        null,
+        null
+      ]
+    },
+    {
+      "code": "20145804",
+      "before": [
+        "Pfirsiche, Halbe Frucht, Gezuckert, Geschält",
+        "River Valley",
+        "Peaches"
+      ]
+    },
+    {
+      "code": "20156848",
+      "before": [
+        "Milchmischerzeugnis mit 1% Fett im Milchanteil mit Erdbeermark und Bananensaft aus Bananensaftkonzentrat mit Vitamin B12 und Calcium.",
+        "Landfein, Norma",
+        "Yogurts"
+      ]
+    },
+    {
+      "code": "20183981",
+      "before": [
+        "Broccoli, butternut & baby marrow in a creamy béchamel sauce made with full cream milk & butter, topped with cheese",
+        null,
+        null
+      ]
+    },
+    {
+      "code": "20201364",
+      "before": [
+        "Muesli bio, croustillant, sucré, au citron et au gingembre",
+        "Bio Sonne",
+        "Mueslis"
+      ]
+    },
+    {
+      "code": "20207380",
+      "before": [
+        "Rolada z kakaowego ciasta biszkoptowego z 50% kremowym nadzieniem o smaku waniliowym, udekorowana polewą kakaową",
+        "Confiserie Firenze",
+        "Gateaux-au-chocolat"
+      ]
+    },
+    {
+      "code": "20220143",
+      "before": [
+        "Jumbo Vers Sap Chia, Spinazie, Kiwi, Mango & Appel 3 x 250ML",
+        "Jumbo",
+        null
+      ]
+    },
+    {
+      "code": "20220297",
+      "before": [
+        "Jumbo Vers Sap Chia, Mango, Passievrucht, Banaan & Appel 3 x 250ML",
+        "Jumbo",
+        null
+      ]
+    },
+    {
+      "code": "20236731",
+      "before": [
+        "Jus 4 fruit pomme, cassis, framboise, raisin",
+        null,
+        null
+      ]
+    },
+    {
+      "code": "20244361",
+      "before": [
+        "Vollmilch 3,5%, 3,5%",
+        "Milbona",
+        "Whole milks"
+      ]
+    },
+    {
+      "code": "20346621",
+      "before": [
+        "Penny Markt, Paradiso, Obst & Gemüsedrink, Apfel Cassis",
+        "L'etal Du Volailler",
+        null
+      ]
+    },
+    {
+      "code": "20363079",
+      "before": [
+        "Mixxed Up Energy Drink  cranberry   Fire / With A Spicy Kick / Made For: De / At, FR / Be, NL / Be, GR / Cy",
+        null,
+        null
+      ]
+    }
+  ],
+  "brand_change_samples": [
+    {
+      "code": "10000052",
+      "before": "E.Leclerc, Leclerc",
+      "after": "E.Leclerc"
+    },
+    {
+      "code": "10004265",
+      "before": "Nestlé, Quality Street",
+      "after": "Nestlé"
+    },
+    {
+      "code": "10007822",
+      "before": "Tesco, Yew tree dairy",
+      "after": "Tesco"
+    },
+    {
+      "code": "10012567",
+      "before": "Tesco, Garden",
+      "after": "Tesco"
+    },
+    {
+      "code": "10023280",
+      "before": "Lidl, Solevita",
+      "after": "Lidl"
+    },
+    {
+      "code": "10024041",
+      "before": "Splenda, SMUCKERS",
+      "after": "Splenda"
+    },
+    {
+      "code": "10035399",
+      "before": "Tesco, method",
+      "after": "Tesco"
+    },
+    {
+      "code": "10048597",
+      "before": "Mars, Snickers",
+      "after": "Mars"
+    },
+    {
+      "code": "10055144",
+      "before": "Allos, Tartex",
+      "after": "Allos"
+    },
+    {
+      "code": "10055564",
+      "before": "Iberia, NOEL",
+      "after": "Iberia"
+    },
+    {
+      "code": "10066157",
+      "before": "Tesco, Woodcote",
+      "after": "Tesco"
+    },
+    {
+      "code": "10070390",
+      "before": "Evian, Kusmi Tea",
+      "after": "Evian"
+    },
+    {
+      "code": "10088791",
+      "before": "Tesco, Tesco Finest",
+      "after": "Tesco"
+    },
+    {
+      "code": "10098103",
+      "before": "Tesco finest, Tesco",
+      "after": "Tesco finest"
+    },
+    {
+      "code": "10113981",
+      "before": "Tesco, Healthy Choice",
+      "after": "Tesco"
+    },
+    {
+      "code": "10152706",
+      "before": "Sam's West, Inc.",
+      "after": "Sam's West"
+    },
+    {
+      "code": "10165171",
+      "before": "Carrefour, Original",
+      "after": "Carrefour"
+    },
+    {
+      "code": "10187753",
+      "before": "Coop, Vipiteno",
+      "after": "Coop"
+    },
+    {
+      "code": "10223673",
+      "before": "Fleury Michon, Halal",
+      "after": "Fleury Michon"
+    },
+    {
+      "code": "10274767",
+      "before": "Hacendado, Mercadona",
+      "after": "Hacendado"
+    },
+    {
+      "code": "10288009",
+      "before": "Brauerei Zipf Austria, Heineken",
+      "after": "Brauerei Zipf Austria"
+    },
+    {
+      "code": "10301890",
+      "before": "Crownfield, Lidl",
+      "after": "Crownfield"
+    },
+    {
+      "code": "10311110",
+      "before": "Tesco stores ltd, Tesco",
+      "after": "Tesco stores ltd"
+    },
+    {
+      "code": "10343364",
+      "before": "Bio Organic, Sondey",
+      "after": "Bio Organic"
+    },
+    {
+      "code": "10345641",
+      "before": "Crownfield, Lidl",
+      "after": "Crownfield"
+    }
+  ]
+}
