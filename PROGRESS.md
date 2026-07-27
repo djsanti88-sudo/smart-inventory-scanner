@@ -285,3 +285,29 @@ progress, not started).
 
 ### Ultracode round close (2026-07-23 00:40)
 All fixes landed (21 commits), gates green (unit 2652/0, dom 697/0, ledger 45/45, golden, build), agy + sentinel clean. Preview inventory-5ha3w7se8 proof: 338/338 scans; re-paste = 0 API calls, qty exactly 2x; post-reload re-scan = 0 API calls (persist keeps identifiers + verified + businessId). Awaiting owner: promotion, deployment cleanup, never-again project.
+
+## Checkpoint 2026-07-27: GitHub-truth repo health effort
+Plan: `docs/superpowers/plans/2026-07-27-github-truth-repo-health.md` (Opus-authored, Codex+Argus
+reviewed). Goal: certify `master` as source of truth, rescue valuable unmerged work into PRs, clean up
+stale branches, and cut deploys over from local Vercel CLI to GitHub-driven (PR previews + gated
+production).
+
+- **Master certification**: gate battery (tsc, unit+dom, ledger, build, e2e) run clean on
+  `origin/master`; the 2026-07-22 tree-swap (`2ddc081`) reviewed and confirmed lossless (no commit
+  content dropped versus master-before).
+- **Branch rescue**: 6 PRs opened (#12-#17) carrying the VALUABLE-UNMERGED work identified by scout
+  (feat/teach-bot, fix/release-stabilization, fix/phase3-followups, fix/argus-cp1252,
+  feat/reverse-upc-heads-up, hotfix/decode-auth folded where duplicate).
+- **Branch cleanup**: kill list prepared (archive-tag-then-delete per branch, tags pushed and
+  verified via `git ls-remote --tags` before any delete) - execution is owner-gated at Gate 3, not yet
+  run.
+- **CI**: new `.github/workflows/ci.yml` authored (tsc + lint + unit/dom + build), alongside the
+  existing mock Playwright workflow; branch protection payload prepared, not yet applied.
+- **Cutover status**: pending owner gates in strict order per the plan - Preview-env live-AI-key
+  lockdown, then CI required-check merge, then branch protection applied, then Vercel Git connection
+  verified, then the `vercel.json` `deploymentEnabled.master` flag removed last. Docs
+  (`CLAUDE.md`, `docs/COMMANDS.md`, `docs/DEPLOY_TRUTH.md`) updated ahead of the cutover to describe
+  the target GitHub-driven state; `docs/GO_LIVE_CHECKLIST.md` still describes the old disconnected
+  state and needs a follow-up pass once cutover actually lands.
+- Next: owner reviews Gate 1-5 batches per the plan; nothing in this effort pushed master, merged a
+  PR, deleted a branch, or touched Vercel/GitHub config without that approval.
