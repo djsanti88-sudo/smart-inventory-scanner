@@ -147,7 +147,8 @@ clone - this section is the durable name list. Client-exposed vars are
   `NEXT_PUBLIC_FIREBASE_ALLOW_PROD`, `NEXT_PUBLIC_FIREBASE_*` (app config), `NEXT_PUBLIC_REQUIRE_LOGIN`
 - Firebase server: `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON` / `_PATH`,
   `GOOGLE_APPLICATION_CREDENTIALS`, emulator hosts
-- AI providers (server-only secrets): `OPENAI_API_KEY` (+ `OPENAI_MODEL`, `GPT_LADDER_MODEL`,
+- AI providers (server-only secrets): `OPENAI_API_KEY` (+ `OPENAI_MODEL`, `GPT_LADDER_MODEL` - decode
+  ladder's paid GPT rung, defaults to `gpt-5.4-mini` as of 2026-07-27,
   `GPT_LADDER_DAILY_USD`), `GEMINI_API_KEY` (+ model vars; decode-disabled), `GO_UPC_API_KEY`
   (+ `GO_UPC_MONTHLY_LIMIT`), `FIRECRAWL_API_KEY` (+ `_1..4` rotation), `BRAVE_SEARCH_API_KEY`,
   `UPCITEMDB_DAILY_LIMIT`, `OPENFOODFACTS_PER_MINUTE_LIMIT`

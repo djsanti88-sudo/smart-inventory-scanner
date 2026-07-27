@@ -7,6 +7,12 @@
 //   none      = empty productName (honest-empty) / error / abort
 // This module is pure aside from one env read: fetch is injected, the API key is passed by the
 // caller, and GPT_LADDER_MODEL (G2, 2026-07-15) selects the model name only - never a secret.
+// Default model switched to "gpt-5.4-mini" (owner order 2026-07-27, Lane 2 / app decode ladder only -
+// unrelated to the separate Lane 1 Codex/ChatGPT subscription model policy). GPT_LADDER_MODEL still
+// overrides this default when set. Pricing constants below are the OLD gpt-5.5 rates, kept
+// intentionally as the conservative/safe cost ceiling: verified gpt-5.4-mini per-token/per-search
+// pricing has not yet been confirmed against the OpenAI pricing page, so per the cost-truth doctrine
+// we do NOT guess-lower the budget guard. Update these only after verified pricing is sourced.
 const IN_USD_PER_M = 5.0;
 const OUT_USD_PER_M = 30.0;
 const USD_PER_SEARCH = 0.01;
@@ -98,7 +104,7 @@ export async function gptFromScratch(
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${deps.apiKey}` },
       body: JSON.stringify({
-        model: process.env.GPT_LADDER_MODEL?.trim() || "gpt-5.5",
+        model: process.env.GPT_LADDER_MODEL?.trim() || "gpt-5.4-mini",
         input: promptFor(code),
         // wave-3 (2026-07-20 owner-ratified): raised default "low" -> "medium" - "low" was starving the
         // model of search context on codes that genuinely need broader web coverage to find. Overridable
