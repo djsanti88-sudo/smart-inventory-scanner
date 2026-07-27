@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   // FAILED_PRECONDITION on real Firestore): "ladder" hits the provenanceTier query,
   // "pending" hits the legacy pending query.
   queryErrors: {} as { pending?: Error; ladder?: Error },
+  checkRateLimit: vi.fn(),
 }));
 
 // The mock honestly applies == where clauses so the route's two review-queue shapes (legacy
@@ -86,6 +87,19 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
 }));
 
+vi.mock("@/server/upc/storage", () => ({
+  ladderStorage: async () => ({} as never),
+}));
+
+vi.mock("@/services/security/aiSpendGuard", () => ({
+  checkRateLimit: () => mocks.checkRateLimit(),
+  intEnv: (value: string | undefined, fallback: number) => {
+    if (value === undefined) return fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  },
+}));
+
 import { GET } from "@/app/api/catalog-review/route";
 
 function listRequest(query = ""): NextRequest {
@@ -97,6 +111,7 @@ function listRequest(query = ""): NextRequest {
 beforeEach(() => {
   vi.unstubAllEnvs();
   mocks.verifyIdToken.mockReset().mockResolvedValue({ uid: "owner-uid", email: "owner@example.com" });
+  mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   mocks.entries = [
     { id: "gtin_1", data: { verificationStatus: "pending", normalizedBarcode: "111", name: "Widget", firstSeenAt: "2026-07-20T00:00:00.000Z" } },
     { id: "gtin_2", data: { verificationStatus: "pending", normalizedBarcode: "222", name: "Gadget", firstSeenAt: "2026-07-19T00:00:00.000Z" } },
@@ -160,6 +175,25 @@ describe("GET /api/catalog-review success path", () => {
     const payload = await response.json();
     expect(payload.entries).toEqual([]);
     expect(payload.nextCursor).toBeNull();
+  });
+});
+
+describe("GET /api/catalog-review rate limit and query length guards", () => {
+  it("returns 429 when request-rate limit is exhausted", async () => {
+    mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: false, retryAfterMs: 1200 });
+    const response = await GET(listRequest());
+    expect(response.status).toBe(429);
+    expect(mocks.verifyIdToken).not.toHaveBeenCalled();
+    const payload = await response.json();
+    expect(payload.reasonCode).toBe("rate_limited");
+    expect(payload.error).toMatch(/Too many requests/i);
+  });
+
+  it("rejects a barcode query that exceeds the max length", async () => {
+    const response = await GET(listRequest(`?barcode=${"b".repeat(65)}`));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/barcode query is too long/i);
   });
 });
 
