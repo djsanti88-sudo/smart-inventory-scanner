@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
-import { POST } from "@/app/api/businesses/provision/route";
+import { POST as provisionPOST } from "@/app/api/businesses/provision/route";
+import { POST as membersPOST } from "@/app/api/businesses/members/route";
 import { defaultBusinessIdFor } from "@/server/business/provisioning";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 
@@ -43,6 +44,33 @@ function provisionRequest(idToken: string): Request {
   });
 }
 
+function memberCreateRequest(idToken: string, body: unknown): Request {
+  return new Request("http://localhost/api/businesses/members", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${idToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function signInEmulatorUser(email: string, password: string) {
+  const response = await fetch(
+    `http://${authHost}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=demo-api-key`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    },
+  );
+  const body = await response.json() as { localId?: string; idToken?: string };
+  if (!response.ok || !body.localId || !body.idToken) {
+    throw new Error(`Auth emulator password sign-in failed with status ${response.status}`);
+  }
+  return { uid: body.localId, idToken: body.idToken };
+}
+
 afterEach(async () => {
   if (!ready) return;
   const db = getAdminDb();
@@ -67,7 +95,7 @@ describe.skipIf(!ready)("provisioning route against Auth + Firestore emulators",
   it("verifies a real emulator token and atomically creates all workspace documents", async () => {
     const { uid, idToken } = await createEmulatorUser();
 
-    const response = await POST(provisionRequest(idToken));
+    const response = await provisionPOST(provisionRequest(idToken));
 
     expect(response.status).toBe(200);
     const body = await response.json() as { status: string; businessId: string };
@@ -89,8 +117,8 @@ describe.skipIf(!ready)("provisioning route against Auth + Firestore emulators",
     const { uid, idToken } = await createEmulatorUser();
 
     const responses = await Promise.all([
-      POST(provisionRequest(idToken)),
-      POST(provisionRequest(idToken)),
+      provisionPOST(provisionRequest(idToken)),
+      provisionPOST(provisionRequest(idToken)),
     ]);
     const bodies = await Promise.all(
       responses.map((response) => response.json() as Promise<{ businessId: string }>),
@@ -118,10 +146,10 @@ describe.skipIf(!ready)("provisioning route against Auth + Firestore emulators",
     });
     createdBusinessIds.add(preclaimedId);
 
-    const firstResponse = await POST(provisionRequest(idToken));
+    const firstResponse = await provisionPOST(provisionRequest(idToken));
     const first = await firstResponse.json() as { status: string; businessId: string };
     createdBusinessIds.add(first.businessId);
-    const secondResponse = await POST(provisionRequest(idToken));
+    const secondResponse = await provisionPOST(provisionRequest(idToken));
     const second = await secondResponse.json() as { status: string; businessId: string };
 
     expect(firstResponse.status).toBe(200);
@@ -141,6 +169,46 @@ describe.skipIf(!ready)("provisioning route against Auth + Firestore emulators",
     ).toBe(false);
     expect((await db.doc(`${COLLECTIONS.businesses}/${first.businessId}`).get()).data()).toMatchObject({
       createdBy: uid,
+    });
+  });
+
+  it("owner-created users are real Firebase Auth users that can sign in and keep their membership", async () => {
+    const { uid: ownerUid, idToken } = await createEmulatorUser();
+    const provisionResponse = await provisionPOST(provisionRequest(idToken));
+    const provisioned = await provisionResponse.json() as { businessId: string };
+    createdBusinessIds.add(provisioned.businessId);
+
+    const staffEmail = `staff-${crypto.randomUUID()}@example.test`;
+    const staffPassword = "TempPass123!";
+    const memberResponse = await membersPOST(memberCreateRequest(idToken, {
+      businessId: provisioned.businessId,
+      email: staffEmail,
+      name: "Counter User",
+      password: staffPassword,
+      role: "counter",
+    }));
+
+    expect(memberResponse.status).toBe(200);
+    const memberBody = await memberResponse.json() as {
+      uid: string;
+      createdAuthUser: boolean;
+      passwordSet: boolean;
+    };
+    createdUsers.push(memberBody.uid);
+    expect(memberBody).toMatchObject({ createdAuthUser: true, passwordSet: true });
+    expect(memberBody.uid).not.toBe(ownerUid);
+
+    const signedInStaff = await signInEmulatorUser(staffEmail, staffPassword);
+    expect(signedInStaff.uid).toBe(memberBody.uid);
+
+    const membership = await getAdminDb()
+      .doc(`${COLLECTIONS.businessMembers}/${memberDocId(provisioned.businessId, memberBody.uid)}`)
+      .get();
+    expect(membership.data()).toMatchObject({
+      businessId: provisioned.businessId,
+      userId: memberBody.uid,
+      role: "counter",
+      invitedBy: ownerUid,
     });
   });
 });

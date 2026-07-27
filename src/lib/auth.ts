@@ -29,6 +29,7 @@ import { COLLECTIONS, type BusinessMember } from "@/services/db/types";
 export { isAuthBypassEnabled };
 export type AppRole = "owner" | "admin" | "counter" | "viewer";
 export type Membership = BusinessMember & { businessName: string };
+export type CreatableMemberRole = Exclude<AppRole, "owner">;
 
 const E2E_USER = { uid: "e2e-user", email: "e2e@test.local" } as unknown as User;
 const BUSINESS_REQUEST_PREFIX = "sis-business-create-request-v2:";
@@ -357,6 +358,51 @@ export async function createBusiness(name: string): Promise<{ businessId: string
     }
   }
   return { businessId: null, error: "We could not create the business. Please try again." };
+}
+
+/** Create or link a Firebase Auth user, then add that uid to the selected business. */
+export async function createBusinessMember(input: {
+  businessId: string;
+  email: string;
+  name: string;
+  role: CreatableMemberRole;
+  password?: string;
+}): Promise<{ uid: string | null; createdAuthUser: boolean; passwordSet: boolean; error: string | null }> {
+  const auth = getFirebaseAuth();
+  const user = auth.currentUser;
+  if (!user) return { uid: null, createdAuthUser: false, passwordSet: false, error: "Not signed in." };
+  const idToken = await user.getIdToken();
+  const response = await fetch("/api/businesses/members", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => null) as {
+    ok?: unknown;
+    uid?: unknown;
+    createdAuthUser?: unknown;
+    passwordSet?: unknown;
+    reason?: unknown;
+  } | null;
+  if (response.ok && body?.ok === true && typeof body.uid === "string") {
+    return {
+      uid: body.uid,
+      createdAuthUser: body.createdAuthUser === true,
+      passwordSet: body.passwordSet === true,
+      error: null,
+    };
+  }
+  const reason = typeof body?.reason === "string" ? body.reason : "";
+  if (reason === "owner_required") {
+    return { uid: null, createdAuthUser: false, passwordSet: false, error: "Only the business owner can add users." };
+  }
+  if (reason === "auth_user_unavailable") {
+    return { uid: null, createdAuthUser: false, passwordSet: false, error: "We could not create that Firebase login. Please try again." };
+  }
+  return { uid: null, createdAuthUser: false, passwordSet: false, error: "We could not add that user. Please try again." };
 }
 
 /** The signed-in user's memberships (rules scope reads to their own). */

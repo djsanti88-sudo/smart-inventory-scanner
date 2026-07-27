@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 const mocks = vi.hoisted(() => ({
   createBusiness: vi.fn(),
+  createBusinessMember: vi.fn(),
   ensureWorkspace: vi.fn(),
   listMemberships: vi.fn(),
   replace: vi.fn(),
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/auth", () => ({
   createBusiness: (...args: unknown[]) => mocks.createBusiness(...args),
+  createBusinessMember: (...args: unknown[]) => mocks.createBusinessMember(...args),
   ensureWorkspace: (...args: unknown[]) => mocks.ensureWorkspace(...args),
   listMemberships: (...args: unknown[]) => mocks.listMemberships(...args),
   signOut: vi.fn(),
@@ -32,6 +34,7 @@ import BusinessPage from "./page";
 
 beforeEach(() => {
   mocks.createBusiness.mockReset();
+  mocks.createBusinessMember.mockReset();
   mocks.ensureWorkspace.mockReset();
   mocks.listMemberships.mockReset();
 });
@@ -103,5 +106,44 @@ describe("business page recovery", () => {
 
     expect(await screen.findByText("Main Street Auto")).toBeInTheDocument();
     expect(screen.queryByText("opaque-business")).not.toBeInTheDocument();
+  });
+
+  it("adds a user through the Firebase Auth-backed member route", async () => {
+    mocks.listMemberships.mockResolvedValue([{
+      id: "biz-1_user-1",
+      businessId: "biz-1",
+      businessName: "Main Street Auto",
+      userId: "user-1",
+      role: "owner",
+    }]);
+    mocks.createBusinessMember.mockResolvedValue({
+      uid: "staff-1",
+      createdAuthUser: true,
+      passwordSet: true,
+      error: null,
+    });
+    render(<BusinessPage />);
+
+    fireEvent.change(await screen.findByTestId("member-email"), {
+      target: { value: "tech@example.com" },
+    });
+    fireEvent.change(screen.getByTestId("member-name"), {
+      target: { value: "Tech One" },
+    });
+    fireEvent.change(screen.getByTestId("member-password"), {
+      target: { value: "TempPass123!" },
+    });
+    fireEvent.click(screen.getByTestId("add-member"));
+
+    await waitFor(() => expect(mocks.createBusinessMember).toHaveBeenCalledWith({
+      businessId: "biz-1",
+      email: "tech@example.com",
+      name: "Tech One",
+      password: "TempPass123!",
+      role: "counter",
+    }));
+    expect(await screen.findByTestId("member-notice")).toHaveTextContent(
+      "sign in with the temporary password",
+    );
   });
 });
