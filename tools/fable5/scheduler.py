@@ -234,24 +234,50 @@ async def run_checks(
                 cached=True,
             )
 
+        async def _attempt(attempt_log: Path) -> tuple[str, int | None, float, str, str]:
+            try:
+                exit_code, duration, output_tail, reason = await _execute(
+                    spec, command, root, attempt_log
+                )
+            except OSError as error:
+                exit_code, duration, output_tail, reason = None, 0.0, "", str(error)
+            if reason:
+                status = "failed" if spec.blocking else "warning"
+            elif exit_code == 0:
+                status = "passed"
+            else:
+                status = "failed" if spec.blocking else "warning"
+                reason = f"Exited with code {exit_code}"
+            return status, exit_code, duration, reason, output_tail
+
         log_path = logs_dir / f"{spec.check_id}.log"
         callback(f"START {spec.check_id} [{spec.resource}]")
         async with semaphores[spec.resource]:
             started_at = _now()
-            try:
-                exit_code, duration, output_tail, reason = await _execute(
-                    spec, command, root, log_path
-                )
-            except OSError as error:
-                exit_code, duration, output_tail, reason = None, 0.0, "", str(error)
+            status, exit_code, duration, reason, output_tail = await _attempt(log_path)
+            # Reconfirm a failed BLOCKING check once before it is allowed to BLOCK the
+            # verdict: a transient failure (e.g. tsc reading a tree another process is
+            # mid-edit, or a flaky external call) must not sink the run. Timeouts are
+            # excluded - a hang is likely real and a retry only doubles the wait. A check
+            # that recovers is reported transparently as "passed on reconfirm", never
+            # a silent pass.
+            if status == "failed" and spec.blocking and not reason.startswith("Timed out"):
+                first_reason = reason
+                callback(f"RECONF {spec.check_id}: first attempt failed; re-running once")
+                reconfirm_log = logs_dir / f"{spec.check_id}.reconfirm.log"
+                r_status, r_exit, r_duration, r_reason, r_tail = await _attempt(reconfirm_log)
+                duration += r_duration
+                exit_code, output_tail = r_exit, r_tail
+                if r_status == "passed":
+                    status = "passed"
+                    reason = (
+                        "passed on reconfirm (first attempt failed, likely transient: "
+                        f"{first_reason})"
+                    )
+                else:
+                    status = r_status
+                    reason = f"failed on reconfirm ({r_reason}); first attempt: {first_reason}"
 
-        if reason:
-            status = "failed" if spec.blocking else "warning"
-        elif exit_code == 0:
-            status = "passed"
-        else:
-            status = "failed" if spec.blocking else "warning"
-            reason = f"Exited with code {exit_code}"
         result = CheckResult(
             check_id=spec.check_id,
             description=spec.description,
