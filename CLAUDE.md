@@ -175,16 +175,26 @@ PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `inte
   default to mock. Never commit secrets.
 
 ## No-Deploy Rule & Forbidden Actions (require explicit approval, even mid-plan)
-Deploy; git push; paid/live API calls; production DB or credentials; deleting/overwriting real data;
-sending business data to third-party APIs; connecting to real business systems; live payments;
+Deploys happen ONLY through GitHub: opening a PR gets an automatic Vercel preview, and production
+deploys only when a PR is merged into protected `master` (owner-gated by the merge itself, plus
+production promote/rollback if the owner has left promotion in manual mode). Local `vercel deploy`
+and `vercel deploy --prod` are forbidden except the documented emergency fallback below.
+Also gated: git push; paid/live API calls; production DB or credentials; deleting/overwriting real
+data; sending business data to third-party APIs; connecting to real business systems; live payments;
 publishing; importing into a live inventory platform; sending emails/messages.
 
 **Approved without approval:** local code edits, local tests, local seed data, mock AI provider,
 screenshots, CSV export proof, local mock auth/DB, docs, local sync/retry/idempotency proof.
 
-Deploy mechanics (GitHub-Vercel disconnect, preview vs. production, what env vars live where) are
-canonically documented in `docs/DEPLOY_TRUTH.md` - read it before reasoning about deploy at all.
-Production promote/rollback/alias commands are hard-blocked at the tool layer by
+**Emergency fallback only:** `node scripts/deploy-preview.mjs` (preview-only, never `--prod`) is
+demoted to a documented emergency path for when GitHub-driven previews are unavailable (e.g. Vercel
+Git integration itself is down) - it requires explicit owner authorization in the moment, the same
+as any other deploy action, and is not a routine substitute for opening a PR.
+
+Deploy mechanics (GitHub-Vercel Git integration, PR previews, protected-master production deploys,
+what env vars live where, rollback) are canonically documented in `docs/DEPLOY_TRUTH.md` - read it
+before reasoning about deploy at all. Production promote/rollback/alias commands and raw
+`vercel deploy --prod` are hard-blocked at the tool layer by
 `.claude/hookify.vercel-prod-gate.local.md`, not just this written rule - do not assume a blocked
 command can be argued around; it needs the owner's explicit in-conversation approval.
 
