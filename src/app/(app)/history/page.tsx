@@ -9,6 +9,7 @@ import { downloadCsv } from "@/services/exportFormats";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
 import { aggregateSessionCounts, aggregateHistoryRows, type SessionCountRow, type SessionAggregate } from "@/services/sessions/history";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
+import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { useScanStore } from "@/stores/scanStore";
 import type { InventoryCount, InventorySession } from "@/types";
 
@@ -136,6 +137,7 @@ export default function HistoryPage() {
   const rows = [...sessions, ...archivedOnly].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
 
   return (
+    <BusinessContextGate>
     <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
       <h1 className="text-xl font-semibold text-zinc-900">History</h1>
 
@@ -223,5 +225,6 @@ export default function HistoryPage() {
         &larr; Back to scan
       </Link>
     </div>
+    </BusinessContextGate>
   );
 }

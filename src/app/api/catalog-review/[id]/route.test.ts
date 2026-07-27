@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   docExists: true,
   updateCalls: [] as Array<{ path: string; payload: Record<string, unknown> }>,
   queriedPaths: [] as string[],
+  checkRateLimit: vi.fn(),
 }));
 
 vi.mock("@/lib/firebaseAdmin", () => ({
@@ -27,6 +28,19 @@ vi.mock("@/lib/firebaseAdmin", () => ({
       },
     }),
   }),
+}));
+
+vi.mock("@/server/upc/storage", () => ({
+  ladderStorage: async () => ({} as never),
+}));
+
+vi.mock("@/services/security/aiSpendGuard", () => ({
+  checkRateLimit: () => mocks.checkRateLimit(),
+  intEnv: (value: string | undefined, fallback: number) => {
+    if (value === undefined) return fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  },
 }));
 
 vi.mock("firebase-admin/firestore", () => ({
@@ -55,6 +69,7 @@ const VALID_BODY = { idToken: "firebase-token", action: "approve" as const };
 beforeEach(() => {
   vi.unstubAllEnvs();
   mocks.verifyIdToken.mockReset().mockResolvedValue({ uid: "owner-uid", email: "owner@example.com" });
+  mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   mocks.docExists = true;
   mocks.updateCalls = [];
   mocks.queriedPaths = [];
@@ -83,6 +98,25 @@ describe("POST /api/catalog-review/[id] request validation", () => {
     const response = await POST(actionRequest({ idToken: "t", action: "delete" }), ctx("gtin_1"));
     expect(response.status).toBe(400);
     expect(mocks.updateCalls).toHaveLength(0);
+  });
+
+  it("rejects an oversized catalog entry id with 400", async () => {
+    const response = await POST(actionRequest({ idToken: "t", action: "approve" }), ctx("x".repeat(257)));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/Catalog entry id is too long/i);
+  });
+});
+
+describe("POST /api/catalog-review/[id] rate limit", () => {
+  it("returns 429 when rate limit is exceeded", async () => {
+    mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: false, retryAfterMs: 900 });
+    const response = await POST(actionRequest({ idToken: "t", action: "approve" }), ctx("gtin_1"));
+    expect(response.status).toBe(429);
+    expect(mocks.verifyIdToken).not.toHaveBeenCalled();
+    const payload = await response.json();
+    expect(payload.reasonCode).toBe("rate_limited");
+    expect(payload.error).toMatch(/Too many requests/i);
   });
 });
 

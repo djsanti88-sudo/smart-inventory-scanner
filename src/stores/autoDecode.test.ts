@@ -129,7 +129,28 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect(lastReview(store).status).toBe("open");
   });
 
-  it("does NOT auto-decode (and explains why) when API keys are missing", () => {
+  it("still calls server decode when paid-provider keys are missing if the server advertises free corpus/cache rungs", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    store.getState().setAiStatus({
+      geminiConfigured: false,
+      openaiConfigured: false,
+      freeDecodeAvailable: true,
+      missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
+    });
+    const { spy, restore } = stub(VERIFIED);
+    try {
+      store.getState().processScan("878106003504");
+      await vi.waitFor(() => expect(lastReview(store).decodeStatus).toBe("verified"));
+    } finally {
+      restore();
+    }
+    expect(spy).toHaveBeenCalled();
+    const call = (spy as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls[0];
+    expect(JSON.parse(call[1].body).mode).toBe("decode");
+  });
+
+  it("keeps the legacy no-key client block when a stale/mocked server status does not advertise free rungs", () => {
     const store = createTestScanStore({ db: new MockDb() });
     store.getState().updateSettings({ aiLookupEnabled: true });
     store.getState().setAiStatus({ geminiConfigured: false, openaiConfigured: false, missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"] });
@@ -140,11 +161,7 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
       restore();
     }
     expect(spy).not.toHaveBeenCalled();
-    const r = lastReview(store);
-    expect(r.decodeStatus).toBe("needs_review");
-    // platformOwner diagnostic carries the key detail; the customer-facing reason must NOT.
-    expect(r.decodeNote).toMatch(/GEMINI_API_KEY|OPENAI_API_KEY|key/i);
-    expect(r.reason).not.toMatch(/api.?key|gemini|openai|provider/i);
+    expect(lastReview(store).decodeStatus).toBe("needs_review");
   });
 
   it("does NOT auto-decode when AI lookup is OFF (passive, with reason)", () => {

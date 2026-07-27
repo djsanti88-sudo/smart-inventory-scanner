@@ -5,6 +5,8 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS } from "@/services/db/types";
 import { accessLevelServer } from "@/services/security/roleAccess";
+import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
@@ -17,13 +19,30 @@ export const runtime = "nodejs";
 
 type ReviewAction = "approve" | "reject";
 
+const MAX_ENTRY_ID_LENGTH = 256;
+const CATALOG_REVIEW_ID_RATE_LIMIT = 120;
+
 interface ActionBody {
   idToken?: unknown;
   action?: unknown;
 }
 
-function json(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
+function ipFromRequest(request: NextRequest): string {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    "local"
+  );
+}
+
+function json(body: unknown, statusOrInit: number | ResponseInit = 200): NextResponse {
+  const options = typeof statusOrInit === "number"
+    ? { status: statusOrInit, headers: { "Cache-Control": "no-store" } }
+    : {
+        ...statusOrInit,
+        headers: { ...(statusOrInit.headers as Record<string, string> | undefined), "Cache-Control": "no-store" },
+      };
+  return NextResponse.json(body, options);
 }
 
 function authConfigurationError(error: unknown): boolean {
@@ -39,8 +58,28 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
+  const ip = ipFromRequest(request);
+  try {
+    const rl = await checkRateLimit(ip, {
+      limit: intEnv(process.env.CATALOG_REVIEW_RATE_LIMIT, CATALOG_REVIEW_ID_RATE_LIMIT),
+      storage: await ladderStorage(),
+    });
+    if (!rl.allowed) {
+      logServerEvent({ route: "/api/catalog-review/[id]", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+      return json(
+        { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
+    }
+  } catch {
+    logServerEvent({ route: "/api/catalog-review/[id]", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
+  }
+
   const { id } = await context.params;
   const entryId = stringField(id);
+  if (entryId.length > MAX_ENTRY_ID_LENGTH) {
+    return json({ error: "Catalog entry id is too long." }, 400);
+  }
   if (!entryId) {
     return json({ error: "Missing catalog entry id." }, 400);
   }

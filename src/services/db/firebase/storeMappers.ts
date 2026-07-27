@@ -1,4 +1,4 @@
-import type { Product, Alias, InventorySession, InventoryCount } from "@/types";
+import type { Product, Alias, InventorySession, InventoryCount, ScanEvent } from "@/types";
 
 // PURE Firestore-doc -> store-shape mappers. Deliberately dependency-free: NO `firebase/firestore` (or any
 // client Firebase SDK) runtime import, so these can be safely pulled into a server/serverless API route
@@ -11,6 +11,26 @@ function str(v: unknown, d = ""): string {
 
 function num(v: unknown, d = 0): number {
   return typeof v === "number" && Number.isFinite(v) ? v : d;
+}
+
+function strings(v: unknown): string[] {
+  if (typeof v === "string") return v ? [v] : [];
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+function time(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (!v || typeof v !== "object") return "";
+  const ts = v as { toDate?: () => Date; seconds?: number; nanoseconds?: number };
+  if (typeof ts.toDate === "function") {
+    const d = ts.toDate();
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+  }
+  if (typeof ts.seconds === "number") {
+    const d = new Date(ts.seconds * 1000 + Math.floor((ts.nanoseconds ?? 0) / 1_000_000));
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+  }
+  return "";
 }
 
 export function toStoreProduct(id: string, data: Record<string, unknown>, businessId: string): Product {
@@ -100,5 +120,37 @@ export function toStoreCount(id: string, data: Record<string, unknown>, business
     appliedIdempotencyKeys: Array.isArray(data.appliedIdempotencyKeys)
       ? (data.appliedIdempotencyKeys as string[])
       : [],
+  };
+}
+
+export function toStoreScanEvent(id: string, data: Record<string, unknown>, businessId: string): ScanEvent {
+  return {
+    id,
+    businessId,
+    sessionId: str(data.sessionId, str(data.countSessionId)),
+    rawCode: str(data.rawCode),
+    cleanCode: str(data.cleanCode, str(data.rawCode)),
+    normalizedCandidates: strings(data.normalizedCandidates ?? data.normalizedCode),
+    matchedProductId: typeof data.matchedProductId === "string" ? data.matchedProductId : null,
+    matchType: (data.matchType as ScanEvent["matchType"]) ?? "unknown",
+    status: (data.status as ScanEvent["status"]) ?? "unknown",
+    resolverStatus: (data.resolverStatus as ScanEvent["resolverStatus"]) ?? "needs_review",
+    codeType: (data.codeType as ScanEvent["codeType"]) ?? "messy",
+    reason: str(data.reason),
+    decodeNote: typeof data.decodeNote === "string" ? data.decodeNote : undefined,
+    decodeStatus: (data.decodeStatus as ScanEvent["decodeStatus"]) ?? undefined,
+    provenance: (data.provenance as ScanEvent["provenance"]) ?? undefined,
+    offCategory: data.offCategory === true ? true : undefined,
+    suggestion: data.suggestion as ScanEvent["suggestion"],
+    quantityDelta: num(data.quantityDelta, 1),
+    quantityAfterScan: num(data.quantityAfterScan, 1),
+    createdAt: time(data.scannedAt) || time(data.createdAt),
+    source: (data.source as ScanEvent["source"]) ?? "scan",
+    notes: str(data.notes),
+    syncStatus: "synced",
+    syncError: null,
+    idempotencyKey: str(data.idempotencyKey),
+    deviceId: typeof data.deviceId === "string" ? data.deviceId : undefined,
+    location: typeof data.location === "string" ? data.location : undefined,
   };
 }

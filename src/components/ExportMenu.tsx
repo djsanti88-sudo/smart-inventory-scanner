@@ -29,8 +29,18 @@ interface Dataset { testid: string; title: string; filenameBase: string; rows: n
 
 export function ExportMenu() {
   const s = useScanStore();
+  const currentSession = useScanStore((store) => store.currentSession);
   const level = useAccessLevel();
   const isPlatform = level === "platform";
+  const activePendingQueue = s.pendingSyncQueue.filter((item) => item.businessId === s.businessId);
+
+  // M2 fix (same leak class as F2/FinalCountTable): refreshFromCloud intentionally does an ADDITIVE
+  // cross-session merge into finalCounts (a tested cross-device sync path - see
+  // refreshFromCloud.store.test.ts). This menu must export only the CURRENT session's counts, not
+  // every session's counts merged into the store.
+  const sessionFinalCounts = currentSession
+    ? s.finalCounts.filter((c) => c.sessionId === currentSession.id)
+    : s.finalCounts;
 
   const fileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -53,13 +63,13 @@ export function ExportMenu() {
   const groups: { group: string; datasets: Dataset[] }[] = isPlatform
     ? [
         { group: "Inventory", datasets: [
-          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: s.finalCounts.length, csv: () => exportFinalCounts(s.finalCounts, s.products, s.sessionId) },
-          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: s.finalCounts.length, csv: () => exportQuantityAdjustments(s.finalCounts, s.products, s.sessionId) },
+          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: sessionFinalCounts.length, csv: () => exportFinalCounts(sessionFinalCounts, s.products, s.sessionId) },
+          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: sessionFinalCounts.length, csv: () => exportQuantityAdjustments(sessionFinalCounts, s.products, s.sessionId) },
         ] },
         { group: "Activity", datasets: [
           { testid: "export-raw-log", title: "Raw scan log", filenameBase: "raw-scan-log", rows: s.scanFeed.length, csv: () => exportRawScanLog(s.scanFeed) },
           { testid: "export-unknowns", title: "Unrecognised codes", filenameBase: "unknown-codes", rows: s.needsReviewQueue.length, csv: () => exportUnknowns(s.needsReviewQueue) },
-          { testid: "export-pending", title: "Items waiting to sync", filenameBase: "pending-sync", rows: s.pendingSyncQueue.length, csv: () => exportPendingQueue(s.pendingSyncQueue) },
+          { testid: "export-pending", title: "Items waiting to sync", filenameBase: "pending-sync", rows: activePendingQueue.length, csv: () => exportPendingQueue(activePendingQueue) },
         ] },
         { group: "Catalog", datasets: [
           { testid: "export-products", title: "Products", filenameBase: "products", rows: s.products.length, csv: () => exportProducts(s.products) },
@@ -68,8 +78,8 @@ export function ExportMenu() {
       ]
     : [
         { group: "Inventory", datasets: [
-          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: s.finalCounts.length, csv: () => exportFinalCountsCustomer(s.finalCounts, s.products, s.sessionId) },
-          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: s.finalCounts.length, csv: () => exportQuantityAdjustmentsCustomer(s.finalCounts, s.products, s.sessionId) },
+          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: sessionFinalCounts.length, csv: () => exportFinalCountsCustomer(sessionFinalCounts, s.products, s.sessionId) },
+          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: sessionFinalCounts.length, csv: () => exportQuantityAdjustmentsCustomer(sessionFinalCounts, s.products, s.sessionId) },
         ] },
         { group: "Activity", datasets: [
           { testid: "export-unknowns", title: "Items to check", filenameBase: "items-to-check", rows: s.needsReviewQueue.length, csv: () => exportUnknownsCustomer(s.needsReviewQueue) },

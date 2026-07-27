@@ -64,7 +64,7 @@ import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/ba
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
 import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
-import { isCatalogWritable, sanitizeCatalogEntry, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
+import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
 import { enrichProductIdentity } from "@/services/catalog/enrichProductIdentity";
 import { toMasterCandidates } from "@/services/catalog/masterCandidates";
@@ -227,6 +227,7 @@ const DEFAULT_AI_STATUS: AiStatus = {
   openaiEnabled: true,
   geminiConfigured: false,
   openaiConfigured: false,
+  freeDecodeAvailable: false,
   premiumFallback: false,
   mode: "aggressive",
   dailyLimit: 100,
@@ -256,11 +257,16 @@ function evaluateAutoDecode(p: {
   if (!p.status.autoDecodeOnScan) return { allowed: false, reason: "Auto decode on scan is disabled." };
   if (p.status.emergencyStop) return { allowed: false, reason: "Emergency stop is active. AI calls are paused." };
   if (!p.online) return { allowed: false, reason: "Offline. Saved locally; AI was not called." };
-  if (!p.status.geminiConfigured && !p.status.openaiConfigured) {
+  const freeDecodeAvailable = p.status.freeDecodeAvailable === true;
+  // When the server advertises free/local decode rungs (tire corpus, retail corpus, caches), do not
+  // client-block solely on paid-provider keys or a spent cap: the server will answer $0 hits before
+  // applying paid-rung gates. Older/mocked status payloads omit this flag, so they keep the legacy
+  // key/cap client gate and existing tests do not accidentally start real/network decode attempts.
+  if (!freeDecodeAvailable && !p.status.geminiConfigured && !p.status.openaiConfigured) {
     const missing = p.status.missingKeys.join(", ") || "GEMINI_API_KEY, OPENAI_API_KEY";
     return { allowed: false, reason: `No API keys configured (missing: ${missing}). Set them server-side, then retry live decode.` };
   }
-  if (isDailyCapReached(p.dailyCount, p.dailyLimit))
+  if (!freeDecodeAvailable && isDailyCapReached(p.dailyCount, p.dailyLimit))
     return { allowed: false, reason: "Daily AI lookup cap reached. Routed to Needs Review." };
   if (!canRequest(p.breaker, p.now).allowed)
     return { allowed: false, reason: "AI circuit breaker is open after repeated failures. Routed to Needs Review." };
@@ -505,6 +511,7 @@ export interface ScanStoreDeps {
     aliases: Alias[];
     sessions: InventorySession[];
     counts: InventoryCount[];
+    scanEvents?: ScanEvent[];
   }>;
   // Fire-and-forget audit sink (cloud -> auditRepository.append). Optional: when absent (mock/default)
   // audit is a no-op. It must never throw into the scanner path; the store also guards every call.
@@ -1102,22 +1109,24 @@ function buildAliasesForCodes(params: {
 
 /** Recompute syncStatus on feed/counts/reviews from what remains in the pending queue. */
 function recomputeSyncStatus(state: {
+  businessId: string;
   scanFeed: ScanEvent[];
   finalCounts: InventoryCount[];
   needsReviewQueue: UnknownCodeReview[];
   pendingSyncQueue: PendingSyncItem[];
 }) {
+  const tenantQueue = state.pendingSyncQueue.filter((item) => item.businessId === state.businessId);
   const pendingEventIds = new Set(
-    state.pendingSyncQueue.map((p) => p.scanEventId).filter((x): x is string => !!x),
+    tenantQueue.map((p) => p.scanEventId).filter((x): x is string => !!x),
   );
   const erroredEventIds = new Set(
-    state.pendingSyncQueue
-      .filter((p) => p.status === "error")
+    tenantQueue
+      .filter((p) => p.status === "error" || p.status === "quarantined")
       .map((p) => p.scanEventId)
       .filter((x): x is string => !!x),
   );
   const pendingProductIds = new Set(
-    state.pendingSyncQueue
+    tenantQueue
       .filter((p) => p.operation === "INCREMENT_COUNT")
       .map((p) => (p.payload as IncrementPayload).productId),
   );
@@ -1141,7 +1150,7 @@ function recomputeSyncStatus(state: {
 // reviews are keyed to their originating scan event via idempotencyKey's event segment;
 // we stash the scanEventId on the review's idempotencyKey, so derive it back here.
 function idForReview(r: UnknownCodeReview): string {
-  const parts = r.idempotencyKey.split(":");
+  const parts = (r.idempotencyKey ?? "").split(":");
   return parts[2] ?? r.id;
 }
 
@@ -1159,6 +1168,42 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...items] }));
       // Optimistic UI is already updated by the caller; attempt sync afterward.
       get().syncPending();
+    };
+
+    // Live decode is tenant-scoped. Mock/E2E mode remains token-free.
+    const aiRequestAuth = async (businessId: string): Promise<{ idToken?: string; businessId?: string }> => {
+      if (!cloudBackend) return {};
+      const user = await getSession();
+      if (!user || typeof user.getIdToken !== "function") return {};
+      return { idToken: await user.getIdToken(), businessId };
+    };
+
+    // The provisional product and scan event are written immediately so counting survives a slow decode.
+    // Once a decode enriches either record, persist that newer state too or a refresh would restore the
+    // placeholder rather than the identity the scanner just displayed.
+    const syncDecodedState = (reviewId: string) => {
+      if (!cloudBackend) return;
+      const state = get();
+      const review = state.needsReviewQueue.find((item) => item.id === reviewId);
+      if (!review || !state.businessContextReady || !state.sessionId) return;
+      const event = state.scanFeed.find(
+        (item) => item.sessionId === review.sessionId && item.cleanCode === review.cleanCode,
+      );
+      const product = event ? state.products.find((item) => item.id === event.matchedProductId) : undefined;
+      if (!event || !product) return;
+      const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
+      enqueueAndSync([
+        makeQueueItem({
+          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+          entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
+          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${version}`, "SAVE_PRODUCT"), scanEventId: null,
+        }),
+        makeQueueItem({
+          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+          entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
+          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
+        }),
+      ]);
     };
 
     // Fire-and-forget audit. NEVER blocks or throws into the scanner/UI. Only emits with a REAL business
@@ -1204,6 +1249,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     // each drain after the previous completes; every enqueue still triggers a drain that picks up the
     // latest queue. Per-item idempotency (transaction + ledger) remains the guarantee against true retries.
     let drainChain: Promise<void> = Promise.resolve();
+    let businessLoadGeneration = 0;
+    const queueItemIdentity = (item: PendingSyncItem) =>
+      `${item.businessId}\u0000${item.id}\u0000${item.idempotencyKey}`;
     const syncPendingCloud = (force: boolean): Promise<void> => {
       drainChain = drainChain.then(() => drainCloudOnce(force)).catch(() => {});
       return drainChain;
@@ -1222,23 +1270,48 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // Snapshot the batch to process. We must NOT overwrite the whole queue at the end (items enqueued
       // by rapid scans DURING this async loop would be clobbered + silently lost). Instead, track this
       // batch's outcome by item id and reconcile against the LATEST queue, preserving anything new.
-      const batch = state.pendingSyncQueue;
+      const activeBusinessId = state.businessId;
+      const activeUserId = state.userId;
+      const batch = state.pendingSyncQueue.filter(
+        (item) => item.businessId === activeBusinessId && item.status !== "quarantined",
+      );
+      if (batch.length === 0) return;
       const syncedIds = new Set(get().syncedScanEventIds);
-      const appliedIds = new Set<string>();
-      const erroredById = new Map<string, PendingSyncItem>();
+      const appliedItems = new Set<string>();
+      const erroredItems = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
       for (const item of batch) {
+        const live = get();
+        if (
+          !live.businessContextReady ||
+          live.businessId !== activeBusinessId ||
+          live.userId !== activeUserId
+        ) {
+          break;
+        }
+        const itemIdentity = queueItemIdentity(item);
         let res;
         try {
           res = await db.apply(item);
         } catch (e) {
-          res = { ok: false, alreadyApplied: false, error: e instanceof Error ? e.message : String(e) };
+          res = {
+            ok: false,
+            alreadyApplied: false,
+            error: e instanceof Error ? e.message : String(e),
+            retryable: true,
+          };
         }
         if (res.ok) {
-          appliedIds.add(item.id);
+          appliedItems.add(itemIdentity);
           if (item.scanEventId) syncedIds.add(item.scanEventId);
         } else {
-          erroredById.set(item.id, { ...item, status: "error", retryCount: item.retryCount + 1, lastError: res.error ?? "sync failed", updatedAt: now() });
+          erroredItems.set(itemIdentity, {
+            ...item,
+            status: res.retryable === false ? "quarantined" : "error",
+            retryCount: item.retryCount + 1,
+            lastError: res.error ?? "sync failed",
+            updatedAt: now(),
+          });
           lastErr = res.error ?? "sync failed";
         }
       }
@@ -1247,15 +1320,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // version, and KEEP any items enqueued while this pass was awaiting (the mutex's next pass drains
         // them). This avoids the read-modify-write race that previously dropped concurrent scans.
         const nextQueue = cur.pendingSyncQueue
-          .filter((it) => !appliedIds.has(it.id))
-          .map((it) => erroredById.get(it.id) ?? it);
+          .filter((it) => !appliedItems.has(queueItemIdentity(it)))
+          .map((it) => erroredItems.get(queueItemIdentity(it)) ?? it);
         const recomputed = recomputeSyncStatus({
+          businessId: cur.businessId,
           scanFeed: cur.scanFeed,
           finalCounts: cur.finalCounts,
           needsReviewQueue: cur.needsReviewQueue,
           pendingSyncQueue: nextQueue,
         });
-        return { pendingSyncQueue: nextQueue, syncedScanEventIds: [...syncedIds], lastSyncError: lastErr, ...recomputed };
+        const contextStillMatches =
+          cur.businessContextReady &&
+          cur.businessId === activeBusinessId &&
+          cur.userId === activeUserId;
+        return {
+          pendingSyncQueue: nextQueue,
+          syncedScanEventIds: [...syncedIds],
+          lastSyncError: contextStillMatches ? lastErr : cur.lastSyncError,
+          ...recomputed,
+        };
       });
     };
 
@@ -1314,6 +1397,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
       setBusinessContext: (businessId, userId) => {
+        const loadGeneration = ++businessLoadGeneration;
         const needsLoad = cloudBackend && !!deps.loadBusinessData;
         // REFRESH GUARD (data-loss fix): a page refresh re-resolves the SAME (businessId, userId)
         // this store already holds and calls setBusinessContext again (BusinessContextGate runs on
@@ -1322,7 +1406,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // scanFeed/needsReviewQueue (Firestore has no collections for them), so wiping here loses
         // unsynced scans and open reviews on every reload. Only an ACTUAL tenant/user change (the
         // isolation law below) replaces tenant state.
-        const sameTenant = get().businessId === businessId && get().userId === userId;
+        const contextState = get();
+        const sameTenant = contextState.businessId === businessId && contextState.userId === userId;
         if (sameTenant) {
           set({
             businessContextReady: true,
@@ -1340,12 +1425,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             businessContextReady: true,
             businessDataLoaded: !needsLoad,
             lastSyncError: null,
+            products: cleared.products,
+            aliases: cleared.aliases,
+            sessions: cleared.sessions,
+            currentSession: cleared.currentSession,
+            sessionId: cleared.sessionId,
             scanFeed: cleared.scanFeed,
             finalCounts: cleared.finalCounts,
             needsReviewQueue: cleared.needsReviewQueue,
+            countSnapshots: cleared.countSnapshots,
             settings: cleared.settings,
             firstScanAt: cleared.firstScanAt,
             recentLocations: cleared.recentLocations,
+            location: "Main",
+            syncedScanEventIds: [],
+            lastMismatchWarning: null,
+            lastAliasConflicts: null,
+            lastCategoryWarning: null,
+            aiLookupLogs: [],
+            shopOverrides: [],
+            feedbackEvents: [],
+            lastCleanupBackup: null,
+            lastProductDeleteBackup: null,
+            lastIdentifierBackfill: null,
             // Tenant isolation: the previous tenant's archived scan log (codes + product names) must
             // never bleed into the next tenant's History page.
             sessionHistory: cleared.sessionHistory,
@@ -1358,6 +1460,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           void (async () => {
             try {
               const data = await loader(businessId, userId);
+              if (
+                loadGeneration !== businessLoadGeneration ||
+                get().businessId !== businessId ||
+                get().userId !== userId
+              ) {
+                return;
+              }
               // Reconstruct the active count session + its finalCounts (survive-refresh). Prefer the most
               // recent ACTIVE session; else the most recent overall. finalCounts are the persisted count
               // lines for that session, mapped back to store shape. No session -> keep current defaults.
@@ -1379,7 +1488,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // queue), so that path degrades to the plain remote restore this used to be.
                   next.currentSession = cur.currentSession?.id === restored.id ? cur.currentSession : restored;
                   next.sessionId = restored.id;
-                  const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+                  const tenantPendingQueue = cur.pendingSyncQueue.filter((it) => it.businessId === businessId);
+                  const pendingCountItems = tenantPendingQueue.filter((it) => it.operation === "INCREMENT_COUNT");
                   const pendingCountKeys = new Set(
                     pendingCountItems
                       .map((it) => {
@@ -1397,7 +1507,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // row from a different/unsynced session (e.g. this device's own active session, when
                   // the remote answers with a different restored session) was silently dropped instead
                   // of merged - unsynced local work would vanish on a business-context refresh.
-                  const pendingSessionIds = new Set(cur.pendingSyncQueue.map((it) => it.sessionId));
+                  const pendingSessionIds = new Set(tenantPendingQueue.map((it) => it.sessionId));
                   const unsyncedCurrentSessionId =
                     cur.currentSession && cur.currentSession.syncStatus !== "synced" ? cur.currentSession.id : null;
                   const countsByKey = new Map(
@@ -1426,12 +1536,43 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     countsByKey.set(key, remote);
                   }
                   next.finalCounts = [...countsByKey.values()];
+                  const pendingScanEventIds = new Set(
+                    tenantPendingQueue
+                      .map((it) => it.scanEventId ?? it.entityId)
+                      .filter((id): id is string => !!id),
+                  );
+                  if (Array.isArray(data.scanEvents)) {
+                    const remoteFeed = data.scanEvents
+                      .filter((e) => e.sessionId === restored.id)
+                      .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+                    const feedById = new Map(remoteFeed.map((e) => [e.id, e]));
+                    for (const local of cur.scanFeed) {
+                      if (local.sessionId !== restored.id) continue;
+                      if (local.syncStatus === "synced" && !pendingScanEventIds.has(local.id)) continue;
+                      feedById.set(local.id, local);
+                    }
+                    next.scanFeed = [...feedById.values()].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+                  }
                 }
                 return next;
               });
             } catch (e) {
+              if (
+                loadGeneration !== businessLoadGeneration ||
+                get().businessId !== businessId ||
+                get().userId !== userId
+              ) {
+                return;
+              }
               // Surface the error but mark loaded so the UI does not hang forever (sync still paused on error).
               set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data", businessDataLoaded: true });
+            }
+            if (
+              loadGeneration !== businessLoadGeneration ||
+              get().businessId !== businessId ||
+              get().userId !== userId
+            ) {
+              return;
             }
             get().syncPending();
           })();
@@ -1488,6 +1629,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           userId: null,
           businessContextReady: !cloudBackend,
           businessDataLoaded: !cloudBackend,
+          products: cleared.products,
+          aliases: cleared.aliases,
+          sessions: cleared.sessions,
           scanFeed: cleared.scanFeed,
           finalCounts: cleared.finalCounts,
           needsReviewQueue: cleared.needsReviewQueue,
@@ -1503,10 +1647,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // is the variance ring buffer; currentSession/sessionId are the active-session identity.
           // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
           // sessionHistory carries the tenant's scanned codes - same residue rule.
-          countSnapshots: [],
+          countSnapshots: cleared.countSnapshots,
           sessionHistory: [],
-          currentSession: null,
-          sessionId: "",
+          currentSession: cleared.currentSession,
+          sessionId: cleared.sessionId,
         });
         if (typeof window !== "undefined" && window.localStorage) {
           try {
@@ -1874,11 +2018,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!cloudBackend || !deps.loadBusinessData) return; // mock/local path: already the source of truth
         const state = get();
         if (!state.businessContextReady || !state.userId || !state.businessId) return;
+        const businessId = state.businessId;
+        const userId = state.userId;
+        const loadGeneration = ++businessLoadGeneration;
         let data;
         try {
-          data = await deps.loadBusinessData(state.businessId, state.userId);
+          data = await deps.loadBusinessData(businessId, userId);
         } catch (e) {
+          if (
+            loadGeneration !== businessLoadGeneration ||
+            get().businessId !== businessId ||
+            get().userId !== userId
+          ) {
+            return;
+          }
           set({ lastSyncError: e instanceof Error ? e.message : "Failed to refresh from the cloud" });
+          return;
+        }
+        if (
+          loadGeneration !== businessLoadGeneration ||
+          get().businessId !== businessId ||
+          get().userId !== userId
+        ) {
           return;
         }
         set((cur) => {
@@ -1890,8 +2051,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // finalCounts pending-queue exclusion below: an unsynced local edit is authoritative until it
           // syncs, otherwise refreshFromCloud would clobber a human's correctProduct edit with the stale
           // remote value that has not seen it yet (Task 1 refresh-race guard).
+          const tenantPendingQueue = cur.pendingSyncQueue.filter((it) => it.businessId === businessId);
           const pendingProductIds = new Set(
-            cur.pendingSyncQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
+            tenantPendingQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
           );
           const productsById = new Map(cur.products.map((p) => [p.id, p]));
           for (const p of data.products) {
@@ -1914,7 +2076,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           // finalCounts: additive upsert by (sessionId,productId), EXCEPT any row still referenced by
           // a pending (unsynced) queue item - that row's local value is authoritative until it syncs.
-          const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+          const pendingCountItems = tenantPendingQueue.filter((it) => it.operation === "INCREMENT_COUNT");
           const pendingCountKeys = new Set(
             pendingCountItems
               .map((it) => {
@@ -1993,7 +2155,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Callers (the scan page) also call ensureAutoSession before every scan batch; this is the
         // hard backstop for any path (including the internal resolveUnknown -> processScan re-apply
         // call) that does not.
-        if (get().currentSession?.locked || get().currentSession?.status === "completed") {
+        if (!get().sessionId || !get().currentSession || get().currentSession?.locked || get().currentSession?.status === "completed") {
           get().ensureAutoSession();
         }
         const scanLocation = get().location;
@@ -2459,6 +2621,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
 
         const recomputed = recomputeSyncStatus({
+          businessId: state.businessId,
           scanFeed: state.scanFeed,
           finalCounts: state.finalCounts,
           needsReviewQueue: state.needsReviewQueue,
@@ -2608,6 +2771,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              ...(await aiRequestAuth(state.businessId)),
               rawCode: rawCodeSanitized,
               cleanCode: cleanCodeSanitized,
               provider: s.primaryProvider,
@@ -2897,6 +3061,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 headers: { "Content-Type": "application/json" },
                 signal: abortController.signal,
                 body: JSON.stringify({
+                  ...(await aiRequestAuth(state.businessId)),
                   mode: "decode",
                   proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
                   rawCode: rawCodeSanitized,
@@ -2943,6 +3108,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // initial call so a hung retry can never block the scanner past the abort window.
                 signal: abortController.signal,
                 body: JSON.stringify({
+                  ...(await aiRequestAuth(state.businessId)),
                   mode: "decode", proRecheck: review.reopenedFromWrong === true,
                   rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
                   confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
@@ -3688,6 +3854,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 ),
               }));
             }
+            syncDecodedState(reviewId);
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
@@ -4053,6 +4220,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              ...(await aiRequestAuth(state.businessId)),
               mode: "decode-deep",
               // MANDATORY: without scanContext "tire" the route's page-fetch verify gate cannot fire,
               // so the exact UPC is never app-verified and decideDecode can never return "verified"
@@ -4953,12 +5121,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         // Mark any earlier "unknown" feed rows for this code as resolved, so the feed reflects the
         // learned mapping instead of staying red.
-        const scanFeed = get().scanFeed.map((e) =>
-          e.cleanCode === review.cleanCode &&
-          (e.status === "unknown" || e.status === "needs_review" || e.status === "conflict")
-            ? { ...e, status: "resolved" as const, resolverStatus: "resolved" as const, matchedProductId: productId }
-            : e,
-        );
+        const resolvedScanEvents: ScanEvent[] = [];
+        const scanFeed = get().scanFeed.map((e) => {
+          if (
+            e.cleanCode === review.cleanCode &&
+            (e.status === "unknown" || e.status === "needs_review" || e.status === "conflict" || e.matchedProductId !== productId)
+          ) {
+            const resolved = {
+              ...e,
+              status: "resolved" as const,
+              resolverStatus: "resolved" as const,
+              matchedProductId: productId,
+            };
+            resolvedScanEvents.push(resolved);
+            return resolved;
+          }
+          return e;
+        });
 
         // TASK 3: drop the merged provisional placeholder from the product list before committing so the
         // resolved identity never coexists with its own duplicate row.
@@ -5029,6 +5208,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               payload: newAlias,
               idempotencyKey: aliasKeyOp,
               scanEventId: null,
+            }),
+          );
+        }
+        for (const event of resolvedScanEvents) {
+          const resolutionFingerprint = `${event.id}:${event.matchedProductId}:${event.status}:${event.resolverStatus}`;
+          queued.push(
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: state.businessId,
+              sessionId: event.sessionId,
+              entityType: "ScanEvent",
+              entityId: event.id,
+              operation: "SAVE_SCAN_EVENT",
+              payload: event,
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                event.sessionId,
+                `${resolutionFingerprint}:human-resolution`,
+                "SAVE_SCAN_EVENT",
+              ),
+              scanEventId: event.id,
             }),
           );
         }
@@ -6008,7 +6209,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             headers: { "Content-Type": "application/json" },
             // proRecheck selects the strongest configured Gemini model server-side. Correction-only:
             // it does NOT change normal scan provider order or premium fallback.
-            body: JSON.stringify({ mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85 }),
+            body: JSON.stringify({
+              ...(await aiRequestAuth(get().businessId)),
+              mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85,
+            }),
           });
           const data = await res.json();
           const decision = data.decision;
