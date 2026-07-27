@@ -1,0 +1,130 @@
+name: CI
+
+# Required-check gate for branch protection on master: typecheck, unit tests, build, lint.
+# Mirrors the setup conventions of .github/workflows/playwright.yml (Node 20, npm ci, actions/setup-node
+# npm cache). This workflow intentionally does NOT run Playwright E2E, Firebase emulator tests, or QA
+# bots - those stay in their own dedicated workflows/local runs (they need emulators / real backends /
+# owner-gated live keys). This is the fast, always-green-or-honestly-red correctness gate.
+#
+# CORPUS DB NOTE (unit-tests job): src/server/knowledge.generated.db (the SQLite corpus DB, built by
+# `npm run build:knowledge-db` from tireKnowledge.generated.json + the Git-LFS retail JSON) is NOT
+# built in this workflow. The codebase is deliberately designed so JSON is the CI/Vercel source of
+# truth: src/server/knowledgeDb.ts's getKnowledgeDb() returns null gracefully when no DB file is
+# present, and every corpus-touching test either mocks getKnowledgeDb() to null and asserts the JSON
+# fallback path (tireKnowledgeIndex.jsonfallback.test.ts, decode-corpus.test.ts, retailKnowledgeIndex.test.ts),
+# or reads the committed JSON directly (corpusDrift.test.ts). The one exception is
+# dtHarvestIntegration.test.ts, which asserts against a locally-built DB with harvest-added rows not
+# guaranteed to exist in the committed JSON seed - it is excluded below rather than silently allowed to
+# flake red in a clean-checkout CI environment. Building the full DB in CI (LFS pull of the 247MB retail
+# JSON + a multi-minute better-sqlite3 batch insert) was evaluated and rejected as unnecessary recurring
+# CI cost for a local-dev-only performance optimization; rebuild it locally via
+# `npm run build:knowledge-db` (or `node scripts/provision-worktree.mjs` to copy from a known-good
+# checkout) if you need to exercise the DB path.
+#
+# STRESS FIXTURES NOTE (unit-tests job): src/components/UniversalImportPanel.fixtures.test.tsx reads
+# real CSV fixtures from .superpowers/stress/fixtures/, which is entirely gitignored (see .gitignore:
+# "Agent/session scratch") and has no build-time generator in this repo - scripts/provision-worktree.mjs
+# only copies it from a known-good LOCAL checkout path (C:/Users/djsan/inventory), which does not exist
+# in a clean CI runner. Verified locally: on a fresh worktree checkout this file fails all 6 tests with
+# ENOENT (ADR verified 2026-07-27 at commit e5f0157). Excluded below rather than left to flake red on
+# every CI run; the same coverage intent (CSV parsing edge cases, mapping inference, error surfacing) is
+# still exercised by non-fixture-dependent tests elsewhere in the import test suite.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# One run per ref; a new push cancels the previous in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit)
+        run: npx tsc --noEmit
+
+  unit-tests:
+    name: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # See the corpus-DB and stress-fixtures notes at the top of this file: the real
+      # knowledge.generated.db is not built in CI, and .superpowers/stress/fixtures/ is gitignored
+      # local-only scratch data with no CI-reachable generator.
+      - name: Run unit + dom tests (excluding local-only DB/fixture-dependent suites)
+        run: >
+          npx vitest run
+          --exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"
+          --exclude "src/components/UniversalImportPanel.fixtures.test.tsx"
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # No knowledge.generated.db(.gz) is present at build time either - see the corpus-DB note above.
+      # next.config.ts's serverExternalPackages (better-sqlite3, @libsql/client, firebase-admin) keep
+      # those native/server-only modules out of the client bundle; getKnowledgeDb() falling back to
+      # null at runtime is expected and does not fail the build.
+      - name: Build (next build)
+        run: npm run build
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Scoped to production source only (2026-07-27): `eslint src scripts e2e` currently carries
+      # 46 pre-existing errors, ALL confined to scripts/*.ts and *.test.* files (no-explicit-any
+      # etc.); production src is clean. A required check must be green on master, so this job
+      # starts at the honest green scope. Widening lint to tests/scripts = owner decision:
+      # either fix the 46 errors or accept the narrower gate permanently.
+      - name: Lint (eslint src, excluding test files)
+        run: npx eslint src --ignore-pattern "**/*.test.ts" --ignore-pattern "**/*.test.tsx" --ignore-pattern "**/*.test.mjs"
