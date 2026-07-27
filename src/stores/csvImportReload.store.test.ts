@@ -19,11 +19,13 @@ import {
 // which passes an explicit "business" level - that stripping is unchanged.
 
 // A single-product CSV the owner uploads on their own machine. The barcode is what they later scan.
+// A GS1-check-digit-VALID UPC-A (the AM-4.1 CSV import trust gate rejects invalid-check-digit
+// barcodes as likely misreads, so this fixture must be a real, valid code, not an arbitrary number).
 const CSV = [
   "name,brand,category,barcode,sku",
-  "Owner Widget 9000,OwnerBrand,Hardware,700123456789,OWN-9000",
+  "Owner Widget 9000,OwnerBrand,Hardware,700123456783,OWN-9000",
 ].join("\n");
-const IMPORTED_BARCODE = "700123456789";
+const IMPORTED_BARCODE = "700123456783";
 
 /**
  * Faithful reload: build the persisted localStorage blob at the level the REAL persist split would use
