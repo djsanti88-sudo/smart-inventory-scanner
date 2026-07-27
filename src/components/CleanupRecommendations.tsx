@@ -32,13 +32,22 @@ export function CleanupRecommendations() {
   const products = useScanStore((s) => s.products);
   const aliases = useScanStore((s) => s.aliases);
   const catalog = useScanStore((s) => s.catalog);
+  const currentSession = useScanStore((s) => s.currentSession);
   const applyCleanupSelections = useScanStore((s) => s.applyCleanupSelections);
   const undoCleanup = useScanStore((s) => s.undoCleanup);
   const lastCleanupBackup = useScanStore((s) => s.lastCleanupBackup);
 
+  // M2 fix (same leak class as F2/FinalCountTable): refreshFromCloud intentionally does an ADDITIVE
+  // cross-session merge into finalCounts (a tested cross-device sync path - see
+  // refreshFromCloud.store.test.ts). Cleanup recommendations must only consider the CURRENT
+  // session's counts, not every session's counts merged into the store.
+  const sessionFinalCounts = currentSession
+    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
+    : finalCounts;
+
   const { groups, recommendations } = useMemo(
-    () => buildCleanupRecommendations({ finalCounts, products, aliases, catalog }),
-    [finalCounts, products, aliases, catalog],
+    () => buildCleanupRecommendations({ finalCounts: sessionFinalCounts, products, aliases, catalog }),
+    [sessionFinalCounts, products, aliases, catalog],
   );
 
   const isPlatform = useIsPlatformOwner();

@@ -290,6 +290,13 @@ export async function mintShareToken(payload: SharePayload, ttlMs: number): Prom
         "[shareTokenStore] Turso insert failed, using local fallback:",
         error instanceof Error ? error.message : String(error),
       );
+      // M1 (resilience nit): a durable WRITE failure means this client instance is bad (or the
+      // connection has gone stale) - invalidate the memoization so the NEXT call re-attempts
+      // construction from scratch instead of hammering the same known-bad client on every request.
+      // This does not change F6's fail-loud outcome: the throw below (production) or the fallback
+      // return (dev/test) still happens on THIS call exactly as before.
+      tursoClient = null;
+      tableReady = false;
     }
   }
 
