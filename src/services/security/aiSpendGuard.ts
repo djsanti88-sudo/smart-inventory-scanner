@@ -80,7 +80,11 @@ export async function checkRateLimit(
   ip: string,
   opts: { limit?: number; windowMs?: number; now?: number; storage?: RateLimitStorage } = {}
 ): Promise<{ allowed: boolean; retryAfterMs: number; remaining: number }> {
-  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_RATE_LIMIT, 120);
+  // Default 600/window (window default 60s): a real bulk-scan session (owner report: a fast
+  // 300-code run) mass-429'd under the old 120 default. 600 = ~10 scans/second sustained - well
+  // above any human scanner, still abuse-protective against a runaway client. Override via
+  // AI_LOOKUP_RATE_LIMIT (blank/invalid falls back to this default - see intEnv).
+  const limit = opts.limit ?? intEnv(process.env.AI_LOOKUP_RATE_LIMIT, 600);
   const windowMs = opts.windowMs ?? intEnv(process.env.AI_LOOKUP_RATE_WINDOW_MS, 60_000);
   const now = opts.now ?? Date.now();
   const key = ip || "unknown";

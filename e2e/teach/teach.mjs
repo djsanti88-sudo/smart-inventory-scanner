@@ -29,6 +29,9 @@ import * as h from './lessonHelpers.mjs';
 // Headed-run pacing: slow each Playwright action so a human can watch (still far faster than a
 // person). ~half speed by default; override with TEACH_SLOWMO_MS (0 = full speed).
 const SLOWMO_MS = Number.isFinite(Number(process.env.TEACH_SLOWMO_MS)) ? Number(process.env.TEACH_SLOWMO_MS) : 600;
+// TEACH_HEADLESS=1 runs every persona browser headless (CI / orchestrated runs); default stays
+// headed so a human can watch. Headless runs should usually also set TEACH_SLOWMO_MS=0.
+const TEACH_HEADLESS = process.env.TEACH_HEADLESS === '1';
 import * as ladder from './ladder.mjs';
 import * as sheets from './sheets.mjs';
 import * as triage from './triage.mjs';
@@ -703,7 +706,7 @@ async function runOneWindow({ target, runId, knowledge, manifest, personas, repo
   let context = null;
 
   try {
-    browser = await chromium.launch({ headless: false, slowMo: SLOWMO_MS, args: ['--window-size=900,900'] });
+    browser = await chromium.launch({ headless: TEACH_HEADLESS, slowMo: SLOWMO_MS, args: ['--window-size=900,900'] });
     context = await newPersonaContext(browser, persona);
     await h.installCursor(context);
     const page = await context.newPage();
@@ -959,7 +962,7 @@ async function setupPersonaWindow({ persona, slotIndex, target, runId, personasM
   const layout = personasModule.computeSplitLayout(SCREEN_WIDTH, SCREEN_HEIGHT, slotIndex);
   try {
     const browser = await chromium.launch({
-      headless: false,
+      headless: TEACH_HEADLESS,
       slowMo: SLOWMO_MS,
       args: [`--window-position=${layout.x},${layout.y}`, `--window-size=${layout.width},${layout.height}`],
     });

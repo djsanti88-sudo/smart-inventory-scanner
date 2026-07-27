@@ -86,8 +86,8 @@ export function buildPersistedScanState(
     // P6 C2: a single ISO timestamp, no codes/identities - safe for every role (drives the /scan
     // first-run banner across reloads).
     firstScanAt: s.firstScanAt,
-    // Owner feature (2026-07-22): session history is the shop's own scan history (same owner rule as
-    // the barcode fix above - their scans are their data). Rows carry only { time, code, productName,
+    // Owner feature (2026-07-22): session history is the shop's own scan history (a shop's scans are
+    // their data, so it persists at BOTH access levels). Rows carry only { time, code, productName,
     // quantityDelta } - no cost/price/margin fields exist on this shape, so it is safe at every level.
     sessionHistory: s.sessionHistory,
   };

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
-import { getPersistedDecode, persistDecode, __resetForTest, type PersistedDecode } from "@/server/decodeCacheStore";
+import { getPersistedDecode, persistDecode, deletePersistedDecode, __resetForTest, type PersistedDecode } from "@/server/decodeCacheStore";
 
 describe("decodeCacheStore (file-fallback mode; no Turso configured)", () => {
   const keys = ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DECODE_CACHE_FILE"];
@@ -102,6 +102,31 @@ describe("decodeCacheStore (file-fallback mode; no Turso configured)", () => {
     await expect(
       persistDecode({ code: "555555555555", kind: "result", payload: "x", tier: "verified", createdAt: 1 }),
     ).resolves.toBeUndefined();
+  });
+
+  // Catalog revocation round (design §4, "Independent replay layers below the master rung"): the
+  // dispute endpoint purges the L2 persisted decode cache entry for a disputed code so the ladder's
+  // own cache layer never keeps replaying the pre-dispute (possibly wrong) decode after the master
+  // catalog entry itself has already been demoted to "disputed".
+  it("deletePersistedDecode removes a persisted entry so a later read is a genuine miss", async () => {
+    await persistDecode({ code: "888888888888", kind: "result", payload: "x", tier: "verified", createdAt: 1 });
+    expect(await getPersistedDecode("888888888888")).not.toBeNull();
+    await deletePersistedDecode("888888888888");
+    expect(await getPersistedDecode("888888888888")).toBeNull();
+  });
+
+  it("deletePersistedDecode is a no-op (never throws) for a code that was never persisted", async () => {
+    await expect(deletePersistedDecode("999999999999")).resolves.toBeUndefined();
+  });
+
+  it("deletePersistedDecode never throws even when the file target is impossible (best-effort)", async () => {
+    process.env.DECODE_CACHE_FILE = path.join(tmpFile, "nested", "impossible.json");
+    await expect(deletePersistedDecode("101010101010")).resolves.toBeUndefined();
+  });
+
+  it("deletePersistedDecode is a no-op for an empty/blank code", async () => {
+    await expect(deletePersistedDecode("")).resolves.toBeUndefined();
+    await expect(deletePersistedDecode("   ")).resolves.toBeUndefined();
   });
 
   it("empty/blank code is a no-op for both read and write", async () => {

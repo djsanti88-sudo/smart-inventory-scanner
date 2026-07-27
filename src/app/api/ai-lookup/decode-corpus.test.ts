@@ -24,6 +24,21 @@ vi.mock("@/server/knowledgeDb", () => ({
 // The route imports server-only modules (groundedSpecFinder). Stub the marker so it can load in vitest.
 vi.mock("server-only", () => ({}));
 
+// Same hazard route.test.ts guards against: without these mocks, a public-barcode decode that falls
+// through the corpus reaches pipeline.ts's free master-catalog peek (lookupMasterCatalog) and/or the
+// route's fire-and-forget master-append hook (maybeAppendMasterCatalogEntry), both of which construct
+// the real Admin SDK (getAdminDb) absent a mock, producing unhandled "Could not load the default
+// credentials" rejections - TEST SAFETY: no automated test may reach live Firestore. Stubbed to their
+// documented fail-open shapes; the rungs' own wiring/gating is proven separately in
+// masterLookup.test.ts, masterAppend.test.ts, and route.masterAppend.test.ts.
+vi.mock("@/server/catalog/masterLookup", () => ({
+  lookupMasterCatalog: async () => ({ kind: "miss" as const }),
+}));
+vi.mock("@/server/catalog/masterAppend", () => ({
+  buildMasterCatalogEntry: () => null,
+  appendMasterCatalogEntry: async () => "skipped_human" as const,
+}));
+
 // v2 daily cap (Task 1): route.ts now reads/writes the cap counter through ladderStorage(). This file
 // does NOT set TURSO_DATABASE_URL, so an unmocked ladderStorage() would default to the file adapter
 // rooted at process.cwd() - the REAL repo root - and pollute the working tree on every test run (same

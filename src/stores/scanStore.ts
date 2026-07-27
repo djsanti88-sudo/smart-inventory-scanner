@@ -37,6 +37,7 @@ import { FirebaseSyncTarget } from "@/services/db/firebase/firebaseSyncTarget";
 import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
 import { auditRepository, catalogRepository } from "@/services/db/firebase/repositories";
 import { getDb } from "@/lib/firebaseClient";
+import { getSession } from "@/lib/auth";
 import {
   evaluateAiGate,
   initBreaker,
@@ -1354,23 +1355,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             settings: cleared.settings,
             firstScanAt: cleared.firstScanAt,
             recentLocations: cleared.recentLocations,
+            // Tenant isolation: the previous tenant's archived scan log (codes + product names) must
+            // never bleed into the next tenant's History page.
+            sessionHistory: cleared.sessionHistory,
           }));
         }
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
-          // PUSH THEN PULL (2026-07-22, caught by the real-backend e2e): drain the queue BEFORE
-          // reading Firestore. The old pull-first order replaced local products/aliases/counts with
-          // a cloud copy that had not yet received just-made local changes (e.g. a review resolution
-          // on the previous page), silently reverting them. After a full drain the cloud is a
-          // superset and the replace is safe; while items remain unsynced (offline/failing), keep
-          // the local rows and skip the replace - the next successful drain re-runs the pull.
+          // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
+          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI. The
+          // pending-aware finalCounts merge below keeps this device's unsynced increments authoritative,
+          // so no pre-drain is needed: a local row still referenced by an unsynced INCREMENT_COUNT queue
+          // item wins over the remote snapshot until it syncs (proven by refreshWipe tests a3/a4).
           void (async () => {
-            try {
-              await syncPendingCloud(true);
-            } catch {
-              // drain failures surface via lastSyncError inside the drain itself
-            }
-            const undrained = get().pendingSyncQueue.length > 0;
             try {
               const data = await loader(businessId, userId);
               // Reconstruct the active count session + its finalCounts (survive-refresh). Prefer the most
@@ -1380,14 +1377,70 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 (b.startedAt ?? "").localeCompare(a.startedAt ?? "");
               const sessions = [...data.sessions].sort(byStartedAtDesc);
               const restored = sessions.find((s) => s.status === "active") ?? sessions[0] ?? null;
-              const next: Partial<ScanState> = undrained ? {} : { products: data.products, aliases: data.aliases };
-              if (restored && !undrained) {
-                next.currentSession = restored;
-                next.sessionId = restored.id;
-                next.finalCounts = data.counts.filter((c) => c.sessionId === restored.id);
-              }
-              next.businessDataLoaded = true;
-              set(next);
+              set((cur) => {
+                const next: Partial<ScanState> = { products: data.products, aliases: data.aliases, businessDataLoaded: true };
+                if (restored) {
+                  // Same-tenant refresh guard (part 2): the synchronous guard above preserves the local
+                  // feed/counts, so this restore must not quietly re-introduce the wipe by REPLACING
+                  // finalCounts with the remote snapshot - that snapshot has not seen this device's
+                  // unsynced increments, so a refresh with pending work would show a feed of N against
+                  // counts of N-k (the exact feed-vs-counts divergence class the guard exists to stop).
+                  // Mirror refreshFromCloud's pending-aware merge: a local row still referenced by an
+                  // unsynced INCREMENT_COUNT queue item is authoritative until it syncs; otherwise the
+                  // remote row wins. A tenant switch starts from a wiped store (empty local counts, empty
+                  // queue), so that path degrades to the plain remote restore this used to be.
+                  next.currentSession = cur.currentSession?.id === restored.id ? cur.currentSession : restored;
+                  next.sessionId = restored.id;
+                  const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+                  const pendingCountKeys = new Set(
+                    pendingCountItems
+                      .map((it) => {
+                        const payload = it.payload as Partial<IncrementPayload> | undefined;
+                        const productId = payload?.productId;
+                        if (!productId) return null;
+                        return `${payload.sessionId ?? it.sessionId}|${productId}`;
+                      })
+                      .filter((key): key is string => !!key),
+                  );
+                  const pendingCountEntityIds = new Set(pendingCountItems.map((it) => it.entityId));
+                  // Seed from the restored session's rows PLUS any row this device still has unsynced
+                  // work for: one a pendingSyncQueue item references (any sessionId), or one belonging
+                  // to cur.currentSession when that session itself has not synced yet. Otherwise a local
+                  // row from a different/unsynced session (e.g. this device's own active session, when
+                  // the remote answers with a different restored session) was silently dropped instead
+                  // of merged - unsynced local work would vanish on a business-context refresh.
+                  const pendingSessionIds = new Set(cur.pendingSyncQueue.map((it) => it.sessionId));
+                  const unsyncedCurrentSessionId =
+                    cur.currentSession && cur.currentSession.syncStatus !== "synced" ? cur.currentSession.id : null;
+                  const countsByKey = new Map(
+                    cur.finalCounts
+                      .filter(
+                        (c) =>
+                          c.sessionId === restored.id ||
+                          pendingSessionIds.has(c.sessionId) ||
+                          pendingCountKeys.has(`${c.sessionId}|${c.productId}`) ||
+                          pendingCountEntityIds.has(c.id) ||
+                          pendingCountEntityIds.has(`${c.sessionId}_${c.productId}`) ||
+                          (unsyncedCurrentSessionId !== null && c.sessionId === unsyncedCurrentSessionId),
+                      )
+                      .map((c) => [`${c.sessionId}|${c.productId}`, c]),
+                  );
+                  for (const remote of data.counts) {
+                    if (remote.sessionId !== restored.id) continue;
+                    const key = `${remote.sessionId}|${remote.productId}`;
+                    const local = countsByKey.get(key);
+                    const localIsPending =
+                      !!local &&
+                      (pendingCountKeys.has(key) ||
+                        pendingCountEntityIds.has(local.id) ||
+                        pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`));
+                    if (localIsPending) continue; // guard: unsynced local wins
+                    countsByKey.set(key, remote);
+                  }
+                  next.finalCounts = [...countsByKey.values()];
+                }
+                return next;
+              });
             } catch (e) {
               // Surface the error but mark loaded so the UI does not hang forever (sync still paused on error).
               set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data", businessDataLoaded: true });
@@ -1461,7 +1514,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // session/report data (and does not spuriously look "non-empty" to hasLegacyBlob). countSnapshots
           // is the variance ring buffer; currentSession/sessionId are the active-session identity.
           // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
+          // sessionHistory carries the tenant's scanned codes - same residue rule.
           countSnapshots: [],
+          sessionHistory: [],
           currentSession: null,
           sessionId: "",
         });
@@ -1842,9 +1897,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // Products/aliases: upsert by id over the existing arrays (additive - a product this
           // device does not know about yet is ADDED; an existing id is refreshed to the remote's
           // version, since products/aliases are not counted-quantity state and always safe to take
-          // the server's word for, matching the trust model everywhere else in this app).
+          // the server's word for, matching the trust model everywhere else in this app) - EXCEPT a
+          // product this device still has a pending (unsynced) SAVE_PRODUCT edit for. Mirrors the
+          // finalCounts pending-queue exclusion below: an unsynced local edit is authoritative until it
+          // syncs, otherwise refreshFromCloud would clobber a human's correctProduct edit with the stale
+          // remote value that has not seen it yet (Task 1 refresh-race guard).
+          const pendingProductIds = new Set(
+            cur.pendingSyncQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
+          );
           const productsById = new Map(cur.products.map((p) => [p.id, p]));
-          for (const p of data.products) productsById.set(p.id, p);
+          for (const p of data.products) {
+            if (pendingProductIds.has(p.id)) continue; // guard: unsynced local edit wins
+            // Delete guard (reviewed defect 2026-07-22): a locally-ARCHIVED product is a delete this
+            // device performed; a remote snapshot loaded before the archive op drained still says
+            // "active". Taking the server's word here would silently resurrect the deleted product
+            // (and defeat the archived-count exclusion below). Deletes are local-authoritative; the
+            // only un-archive path is this device's own undoDeleteProduct.
+            if (productsById.get(p.id)?.status === "archived" && p.status !== "archived") continue;
+            productsById.set(p.id, p);
+          }
           const aliasesById = new Map(cur.aliases.map((a) => [a.id, a]));
           for (const a of data.aliases) aliasesById.set(a.id, a);
           const sessionsById = new Map(cur.sessions.map((s) => [s.id, s]));
@@ -1867,16 +1938,37 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               .filter((key): key is string => !!key),
           );
           const pendingCountEntityIds = new Set(pendingCountItems.map((it) => it.entityId));
+          // Products THIS device archived before the merge (its own deletes) - distinguishes a
+          // local delete from one performed on another device (see the archived branch below).
+          const locallyArchivedIds = new Set(cur.products.filter((p) => p.status === "archived").map((p) => p.id));
           const countsByKey = new Map(cur.finalCounts.map((c) => [`${c.sessionId}|${c.productId}`, c]));
           for (const remote of data.counts) {
             const key = `${remote.sessionId}|${remote.productId}`;
             const local = countsByKey.get(key);
+            // pendingCountKeys deliberately does NOT require a local row: the delete-transfer's
+            // zero-out increment targets a (sessionId, productId) row that no longer exists locally
+            // (it was repointed onto the provisional), yet the remote copy must still not be
+            // re-added while that op is pending.
             const localIsPending =
-              !!local &&
-              (pendingCountKeys.has(key) ||
-                pendingCountEntityIds.has(local.id) ||
-                pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`));
+              pendingCountKeys.has(key) ||
+              (!!local &&
+                (pendingCountEntityIds.has(local.id) ||
+                  pendingCountEntityIds.has(`${local.sessionId}_${local.productId}`)));
             if (localIsPending) continue; // guard: unsynced local wins
+            if (productsById.get(remote.productId)?.status === "archived") {
+              // Delete-transfer guard (reviewed defect 2026-07-22): a remote count row keyed to a
+              // LOCALLY-archived product is the backend's not-yet-transferred (or stale-snapshot)
+              // copy of a product THIS device deleted. deleteProductsInternal already repointed
+              // those units onto a minted provisional, so re-adding the remote row here would
+              // double-count them (2 became 4). The archived-product merge guard above keeps a
+              // local archive authoritative, so this holds even after the transfer ops drained.
+              if (locallyArchivedIds.has(remote.productId)) continue;
+              // Cross-device delete (reviewed defect 2026-07-22): the archive came from the REMOTE
+              // (this device's copy was still active - ANOTHER device deleted it). The remote row
+              // is the post-transfer zeroed truth; skipping it would keep the stale local row
+              // alive NEXT TO the remote provisional row (2 became 4 on every other device), so
+              // fall through and let the remote (zeroed) row replace the stale local one.
+            }
             countsByKey.set(key, remote);
           }
 
@@ -3181,6 +3273,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // canAutoCount) passed, i.e. the app itself verified the exact-code evidence - honest
               // "app_verified" provenance for the badge.
               get().markFeedRowVerified(review.cleanCode, decision?.reason ?? "", "app_verified");
+            } else {
+              // FIX (rung self-poisoning audit, owner-approved): resolveUnknown's create_new branch
+              // already stamps "resolved" on every ACTUAL resolution. The only ways a review is still
+              // open/suggested here are the two DELIBERATE human-required early-returns: the fuzzy
+              // identity-merge suggest_link path (stamps suggestedLinkProductId + returns, keeping the
+              // review open on purpose) and the multi-match dedup-conflict path (pushes this reviewId onto
+              // lastAliasConflicts + returns, keeping it open on purpose). Force-stamping "resolved" here
+              // used to fire in BOTH of those cases - the only cases where the row is still open - hiding
+              // a row that MUST stay visible behind a fabricated "auto create_new" audit trail even though
+              // nothing was actually created. Only stamp when NEITHER deliberate-hold signal fired for
+              // this exact review.
+              const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
+              const heldForSuggestLink = Boolean(stillOpen?.suggestedLinkProductId);
+              const heldForConflict = (get().lastAliasConflicts ?? []).some((c) => c.reviewId === reviewId);
+              if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested") && !heldForSuggestLink && !heldForConflict) {
+                set((st) => ({
+                  needsReviewQueue: st.needsReviewQueue.map((r) =>
+                    r.id === reviewId
+                      ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+                      : r,
+                  ),
+                }));
+              }
             }
             // Task 9: an app-verified off-category decode counts, but flag the row so the feed shows the
             // "Off-category item" tag (the product is not a tire, even though it cleared the firewall).
@@ -3847,7 +3962,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             quantityDelta: 1, idempotencyKey: countedEvent.idempotencyKey,
           };
           enqueueAndSync([
-            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, provId, "SAVE_PRODUCT"), scanEventId: null }),
+            // Task 1b fix (same recipe as correctProduct, commit 024c849): a bare
+            // `businessId:sessionId:provId:SAVE_PRODUCT` key collides with resolveUnknown's later
+            // orphan-merge SAVE_PRODUCT for this SAME id (it reuses provOrphanId - scanStore.ts ~4791),
+            // which would otherwise be swallowed as "alreadyApplied" and the resolved identity would
+            // never reach the backend. Suffix `:provisional` so the first (placeholder) write and any
+            // later distinct write to this id mint different keys; the key is still minted once here and
+            // reused verbatim on every retry of THIS item, so retry dedupe is unaffected.
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT"), scanEventId: countedEvent.id }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);
@@ -4178,6 +4300,27 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // "verified" in that case would show "Verified match" over the unresolved placeholder name.
           if (get().needsReviewQueue.find((r) => r.id === reviewId)?.status === "resolved") {
             get().markFeedRowVerified(review.cleanCode, decision.reason ?? "");
+          } else {
+            // FIX (rung self-poisoning audit, owner-approved): resolveUnknown's create_new branch
+            // already stamps "resolved" on every ACTUAL resolution. The only ways a review is still
+            // open/suggested here are the two DELIBERATE human-required early-returns: the fuzzy
+            // identity-merge suggest_link path (stamps suggestedLinkProductId + returns, keeping the
+            // review open on purpose) and the multi-match dedup-conflict path (pushes this reviewId onto
+            // lastAliasConflicts + returns, keeping it open on purpose). Only stamp when NEITHER
+            // deliberate-hold signal fired for this exact review - status metadata only, never
+            // scanFeed/finalCounts.
+            const stillOpen = get().needsReviewQueue.find((r) => r.id === reviewId);
+            const heldForSuggestLink = Boolean(stillOpen?.suggestedLinkProductId);
+            const heldForConflict = (get().lastAliasConflicts ?? []).some((c) => c.reviewId === reviewId);
+            if (stillOpen && (stillOpen.status === "open" || stillOpen.status === "suggested") && !heldForSuggestLink && !heldForConflict) {
+              set((st) => ({
+                needsReviewQueue: st.needsReviewQueue.map((r) =>
+                  r.id === reviewId
+                    ? { ...r, status: "resolved" as const, resolvedAt: now(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+                    : r,
+                ),
+              }));
+            }
           }
           // Task 9: tag an app-verified off-category decode so the feed shows "Off-category item".
           if (offCategory) {
@@ -4869,6 +5012,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // references a persisted product. Then queue idempotent RESOLVE_ALIAS.
         const queued: PendingSyncItem[] = [];
         if (createdProduct) {
+          // Task 1b fix (same recipe as correctProduct, commit 024c849): in the orphan-merge branch
+          // above, createdProduct.id === provOrphanId - the SAME id ensureProvisionalCount already
+          // enqueued a SAVE_PRODUCT for (scanStore.ts ~3748). A bare
+          // `businessId:sessionId:<id>:SAVE_PRODUCT` key would be identical to that earlier write's key,
+          // so this resolved-identity write would be swallowed as "alreadyApplied" and never reach the
+          // backend - real data loss (the resolved name never syncs, only the placeholder does). Fold a
+          // content fingerprint of the resolved product into the key, minted once here; every retry of
+          // this queue item (drain loop / manual retrySync) replays the same PendingSyncItem object, so
+          // retry dedupe on THIS write is unaffected.
+          const createdFingerprint = `${JSON.stringify(createdProduct)}@${createdProduct.updatedAt}`;
           queued.push(
             makeQueueItem({
               idFactory,
@@ -4879,15 +5032,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               entityId: createdProduct.id,
               operation: "SAVE_PRODUCT",
               payload: createdProduct,
-              // A provisional UPGRADE re-saves a product whose scan-time SAVE_PRODUCT already
-              // consumed the stable (businessId, sessionId, id) key - the cloud applied-keys ledger
-              // would silently skip this save and the rename would never reach Firestore (caught by
-              // the real-backend e2e 2026-07-22). Mint a per-enqueue revision key instead; minted
-              // ONCE here and reused verbatim on every retry (Idempotent Sync Rules), and
-              // SAVE_PRODUCT is an upsert-by-id so re-application is safe.
-              idempotencyKey: approvingProvisional
-                ? buildIdempotencyKey(state.businessId, state.sessionId, `${createdProduct.id}:upgrade:${idFactory()}`, "SAVE_PRODUCT")
-                : buildIdempotencyKey(state.businessId, state.sessionId, createdProduct.id, "SAVE_PRODUCT"),
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                state.sessionId,
+                `${createdProduct.id}:${createdFingerprint}`,
+                "SAVE_PRODUCT",
+              ),
               scanEventId: null,
             }),
           );
@@ -5433,7 +5583,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           updated.structuredBy = "human";
           if (safe.brand !== undefined) updated.structuredBrand = safe.brand;
         }
-        const key = buildIdempotencyKey(state.businessId, state.sessionId, productId, "SAVE_PRODUCT");
+        // Task 1 fix: a SAVE_PRODUCT idempotency key built from businessId:sessionId:productId:SAVE_PRODUCT
+        // alone is identical for every edit to the same product in the same session - MockDb/
+        // FirebaseSyncTarget dedupe on that key, so edit #2 was silently swallowed as "alreadyApplied"
+        // and never persisted. Fold a content fingerprint of THIS edit (the changed field values +
+        // updatedAt, minted once here) into the key so distinct edits mint distinct keys, matching the
+        // existing "${entityId}:<suffix>" pattern used elsewhere in this file (unlink/move/markwrong).
+        // A genuine RETRY never calls this function again - the drain loop replays the exact same
+        // PendingSyncItem object (same key) via db.apply(), so idempotency on repeated network retries
+        // of ONE edit is unaffected.
+        const editFingerprint = `${JSON.stringify(safe)}@${updated.updatedAt}`;
+        const key = buildIdempotencyKey(state.businessId, state.sessionId, `${productId}:${editFingerprint}`, "SAVE_PRODUCT");
         set((s) => ({ products: s.products.map((p) => (p.id === productId ? updated : p)) }));
         enqueueAndSync([
           makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "Product", entityId: productId, operation: "SAVE_PRODUCT", payload: updated, idempotencyKey: key, scanEventId: null }),
@@ -5818,6 +5978,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // 5. Stronger Gemini Pro correction recheck (cost-guarded; never auto-saves or counts).
           await get().correctionRecheck(reviewId, { reason: opts?.reason });
         }
+        // 6. Catalog revocation round (design §2.3): report the wrong identity to the shared master
+        // catalog so other shops stop replaying it. Best-effort and NON-BLOCKING - mirrors how
+        // correctionRecheck above is a trailing side-effect, not a dependency: markWrong's local
+        // correction (count transfer, alias deactivation) already succeeded regardless of whether
+        // this call lands, times out, the user has no session, or the server is unreachable. Never
+        // awaited into the return path; every failure mode is swallowed here on purpose (matches the
+        // project's "never block scanning/correction on the backend" rule for the sync queue).
+        if (code) {
+          void (async () => {
+            try {
+              const user = await getSession();
+              if (!user) return;
+              const idToken = await user.getIdToken();
+              await fetch("/api/catalog-dispute", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  idToken,
+                  normalizedBarcode: code,
+                  businessId: state.businessId,
+                  reason: opts?.reason ?? "marked_wrong",
+                }),
+              });
+            } catch {
+              // best-effort; local correction already succeeded regardless of this call
+            }
+          })();
+        }
         return reviewId;
       },
 
@@ -6111,6 +6299,45 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         };
         const restoredProductIds = new Set(backup.products.map((p) => p.id));
         const feedById = new Map(backup.feed.map((e) => [e.id, e]));
+        // SYNC THE UNDO (reviewed defect 2026-07-22): the delete shipped archive + transfer ops to the
+        // backend, so a local-only restore is silently re-reverted by the next refreshFromCloud - the
+        // remote still says "archived + quantity on the provisional", the products merge re-deletes the
+        // undone product, and the remote provisional row re-adds the transferred quantity ALONGSIDE the
+        // restored local row (2 became 4). Mirror every delete op with a compensator: a restore
+        // SAVE_PRODUCT per product, a reverse transfer PAIR per backed-up count row (net zero per
+        // session), and an archive SAVE_PRODUCT for a minted provisional the undo removes. Compensators
+        // APPEND after any still-pending delete ops, so undoing before the queue drains nets out to the
+        // same restored remote state. Keys are distinct from the delete's, so the backend dedupe never
+        // swallows the reversal.
+        const s0 = get();
+        const bid = s0.businessId;
+        const liveCountById = new Map(s0.finalCounts.map((c) => [c.id, c]));
+        const mintedProducts = s0.products.filter((p) => (backup.mintedProvisionalIds ?? []).includes(p.id));
+        const syncOps: PendingSyncItem[] = [];
+        for (const p of backup.products) {
+          syncOps.push(
+            makeQueueItem({ idFactory, now, businessId: bid, sessionId: s0.sessionId, entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: { ...p }, idempotencyKey: buildIdempotencyKey(bid, s0.sessionId, `${p.id}:delete:undo-restore`, "SAVE_PRODUCT"), scanEventId: null }),
+          );
+        }
+        for (const c of backup.counts) {
+          if (c.quantity <= 0) continue; // the delete transferred nothing for zero rows -> nothing to reverse
+          const live = liveCountById.get(c.id);
+          if (live && live.productId !== c.productId) {
+            // The row is still repointed at the provisional: pull the transferred units back off it.
+            // Post-delete scans incremented the SAME remote row, so subtracting exactly the backup's
+            // quantity leaves any residual units on the provisional (matches the local carve below).
+            const outKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-undo-out`, "INCREMENT_COUNT");
+            const outPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: live.productId, scanEventId: `${c.id}:delete-transfer-undo`, quantityDelta: -c.quantity, idempotencyKey: outKey };
+            syncOps.push(
+              makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: outPayload, idempotencyKey: outKey, scanEventId: null }),
+            );
+          }
+          const inKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-undo-in`, "INCREMENT_COUNT");
+          const inPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: c.productId, scanEventId: `${c.id}:delete-transfer-undo`, quantityDelta: c.quantity, idempotencyKey: inKey };
+          syncOps.push(
+            makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: inPayload, idempotencyKey: inKey, scanEventId: null }),
+          );
+        }
         set((s) => {
           // The repointed count rows share ids with the backed-up originals, so upsertById below
           // restores them onto the original product. LAW GUARD: a scan made AFTER the delete
@@ -6143,6 +6370,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           lastProductDeleteBackup: null,
           };
         });
+        // A minted provisional the undo just removed locally (no residual count kept it) must be
+        // archived remotely too, or refreshFromCloud re-adds it as an active ghost product.
+        for (const prov of mintedProducts) {
+          if (get().products.some((p) => p.id === prov.id)) continue; // residual kept it -> keep remotely
+          const archivedProv: Product = { ...prov, status: "archived", verified: false, updatedBy: "human" };
+          syncOps.push(
+            makeQueueItem({ idFactory, now, businessId: bid, sessionId: s0.sessionId, entityType: "Product", entityId: prov.id, operation: "SAVE_PRODUCT", payload: archivedProv, idempotencyKey: buildIdempotencyKey(bid, s0.sessionId, `${prov.id}:provisional:undo-archive`, "SAVE_PRODUCT"), scanEventId: null }),
+          );
+        }
+        set((s) => ({ pendingSyncQueue: [...s.pendingSyncQueue, ...syncOps] }));
+        get().syncPending(); // drain the compensating ops now (same pattern as the delete)
         for (const p of backup.products) emitAudit({ entityType: "Product", entityId: p.id, action: "product_delete_undone", metadata: { name: p.name } });
         get().recordFeedback("restored_cleanup", { code: "", meta: { restored: restoredProductIds.size } });
         return true;
@@ -6273,6 +6511,43 @@ function deleteProductsInternal(
     mintedProvisionalIds,
   };
 
+  // SYNC THE REPOINT (reviewed defect 2026-07-22): the transfer above is local-only; without these
+  // ops the backend still holds the count row keyed (sessionId, deletedProductId), and the next
+  // refreshFromCloud would re-add it ALONGSIDE the repointed provisional row - doubling the
+  // quantity (2 became 4). Ship the archived product, the minted provisional, and a zero-out /
+  // re-add increment PAIR per transferred count row (net zero per session: quantity is
+  // transferred, never created). The synthetic scanEventId only marks the transfer in the remote
+  // row's trace; the appliedKeys dedupe makes a re-drained op a safe no-op.
+  const bid = state.businessId;
+  const syncOps: PendingSyncItem[] = [];
+  for (const p of targetProducts) {
+    const archived: Product = { ...p, status: "archived", verified: false, updatedBy: "human" };
+    syncOps.push(
+      makeQueueItem({ idFactory, now, businessId: bid, sessionId: state.sessionId, entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: archived, idempotencyKey: buildIdempotencyKey(bid, state.sessionId, `${p.id}:delete:archive`, "SAVE_PRODUCT"), scanEventId: null }),
+    );
+  }
+  for (const prov of provisionalByProduct.values()) {
+    syncOps.push(
+      makeQueueItem({ idFactory, now, businessId: bid, sessionId: state.sessionId, entityType: "Product", entityId: prov.id, operation: "SAVE_PRODUCT", payload: prov, idempotencyKey: buildIdempotencyKey(bid, state.sessionId, `${prov.id}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
+    );
+  }
+  for (const c of targetCounts) {
+    if (c.quantity <= 0) continue; // zero rows are dropped locally and carry nothing to transfer
+    const prov = provisionalByProduct.get(c.productId);
+    const outKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-out`, "INCREMENT_COUNT");
+    const outPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: c.productId, scanEventId: `${c.id}:delete-transfer`, quantityDelta: -c.quantity, idempotencyKey: outKey };
+    syncOps.push(
+      makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: outPayload, idempotencyKey: outKey, scanEventId: null }),
+    );
+    if (prov) {
+      const inKey = buildIdempotencyKey(bid, c.sessionId, `${c.id}:delete-transfer-in`, "INCREMENT_COUNT");
+      const inPayload: IncrementPayload = { businessId: bid, sessionId: c.sessionId, productId: prov.id, scanEventId: `${c.id}:delete-transfer`, quantityDelta: c.quantity, idempotencyKey: inKey };
+      syncOps.push(
+        makeQueueItem({ idFactory, now, businessId: bid, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: inPayload, idempotencyKey: inKey, scanEventId: null }),
+      );
+    }
+  }
+
   set((s) => ({
     // Archive + un-verify so the deterministic resolver/matcher (verified === true only) stops matching it.
     products: [
@@ -6302,8 +6577,10 @@ function deleteProductsInternal(
           }
         : e,
     ),
+    pendingSyncQueue: [...s.pendingSyncQueue, ...syncOps],
     lastProductDeleteBackup: backup,
   }));
+  get().syncPending(); // drain the transfer ops now (same pattern as enqueueAndSync)
 
   for (const p of targetProducts) {
     emitAudit({ entityType: "Product", entityId: p.id, action: auditAction, metadata: { name: p.name, codes: [...codes].join(" | "), aliasesDeactivated: targetAliases.filter((a) => a.productId === p.id).length } });
@@ -6421,10 +6698,10 @@ const appDeps: ScanStoreDeps = {
 export function scanStoreMigrate(persisted: unknown, version: number) {
   const p = (persisted ?? {}) as Record<string, unknown>;
   const existingSnapshots = Array.isArray(p.countSnapshots) ? p.countSnapshots : [];
-  // v13 (owner feature, 2026-07-22): adds `sessionHistory` (automatically saved past-session log,
+  // v14 (owner feature, 2026-07-22): adds `sessionHistory` (automatically saved past-session log,
   // capped ring buffer - see sessionHistory.ts). Same unconditional-inject contract as countSnapshots:
   // no prior version persisted this field, so every install defaults it to [] and an install that
-  // already has one (e.g. a fresh v13 write) keeps its real data untouched.
+  // already has one (e.g. a fresh v14 write) keeps its real data untouched.
   const existingSessionHistory = Array.isArray(p.sessionHistory) ? p.sessionHistory : [];
   if (version < 5) {
     const fresh = getSeed();
@@ -6469,10 +6746,35 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   // countSnapshots stays UNCONDITIONAL by documented contract (varianceSnapshot.store.test.ts: pre-
   // snapshot blobs migrate to []). Safe to inject: the initial state is empty too, unlike products.
   out.countSnapshots = existingSnapshots;
-  // sessionHistory: same unconditional-inject contract as countSnapshots (see v13 note above).
+  // sessionHistory: same unconditional-inject contract as countSnapshots (see v14 note above).
   out.sessionHistory = existingSessionHistory;
   if (p.settings !== undefined) {
     out.settings = { ...DEFAULT_SETTINGS, ...(p.settings as Partial<Settings>) };
+  }
+  // v13 self-heal ("if it is resolved, it does not go to review"): an install that hit the old bug
+  // (resolveUnknown silently no-op'd on a genuinely settled decode - the fuzzy identity-merge
+  // suggest_link path or a dedup conflict - leaving the review "open"/"suggested" forever) gets a
+  // one-time stamp here. "Identity already settled" reuses the EXACT two feed-status signals the app
+  // itself already treats as settled elsewhere in this file: a scanFeed row for the same cleanCode with
+  // status "resolved" (the resolveUnknown relink write, ~scanStore.ts:4738-4743 - implies a real
+  // matchedProductId was assigned) or decodeStatus "verified" (markFeedRowVerified, only ever written
+  // after resolveUnknown actually resolved the review - see the "never leave a 'Verified AI Decode +
+  // Unknown' feed row" guard at ~scanStore.ts:3401-3408). Only needsReviewQueue rows are mutated here;
+  // scanFeed and finalCounts are read-only inputs and are never touched by this step. Never injects an
+  // absent needsReviewQueue key into a partial blob (same v8 rule as the rest of this branch).
+  if (Array.isArray(p.needsReviewQueue)) {
+    const feed = Array.isArray(p.scanFeed) ? (p.scanFeed as Array<{ cleanCode?: string; status?: string; decodeStatus?: string }>) : [];
+    const settledCleanCodes = new Set(
+      feed
+        .filter((e) => e && (e.status === "resolved" || e.decodeStatus === "verified"))
+        .map((e) => e.cleanCode)
+        .filter((c): c is string => Boolean(c)),
+    );
+    out.needsReviewQueue = (p.needsReviewQueue as Array<{ cleanCode?: string; status?: string }>).map((r) =>
+      r && (r.status === "open" || r.status === "suggested") && r.cleanCode && settledCleanCodes.has(r.cleanCode)
+        ? { ...r, status: "resolved" as const, resolvedAt: new Date().toISOString(), resolvedBy: "auto", resolutionAction: "create_new" as const }
+        : r,
+    );
   }
   return out as never;
 }
@@ -6494,9 +6796,12 @@ export const useScanStore = create<ScanState>()(
     // >= 5 migrate branch below already calls backfillProducts unconditionally on every hydrate whose
     // persisted version is below `version`, so this bump alone is sufficient - no separate v12 step
     // needed (backfillProducts itself now dedupes via the fixed canonicalTireDisplayName).
-    // Owner feature (2026-07-22): v12 -> v13 bump so every existing install gains `sessionHistory`
-    // defaulted to [] (see scanStoreMigrate's v13 note above).
-    version: 13,
+    // "Resolved never lingers in review" fix: v12 -> v13 bump so an install stuck with the old bug
+    // (resolveUnknown silently no-op'd on a genuinely settled decode, leaving the review "open"/
+    // "suggested" forever) gets a one-time self-heal on next load - see scanStoreMigrate's v13 step.
+    // Owner feature (2026-07-22): v13 -> v14 bump so every existing install gains `sessionHistory`
+    // defaulted to [] (see scanStoreMigrate's v14 note above).
+    version: 14,
     // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
     // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
     // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken

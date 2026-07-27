@@ -3,6 +3,7 @@ import "server-only";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/types";
+import { ladderStorage, type LadderStorage } from "@/server/upc/storage";
 
 // P5b Task 1 (master-truth write path, GC3/GC5/GC6/GC7/GC8): a strong app-verified ladder decode on a
 // PUBLIC barcode shape appends (idempotently) to the top-level Firestore `catalogEntries` master
@@ -84,9 +85,54 @@ export function buildMasterCatalogEntry(input: MasterAppendInput): DbCatalogEntr
 
 export interface MasterAppendDeps {
   db?: FirebaseFirestore.Firestore;
+  storage?: LadderStorage;
 }
 
-export type MasterAppendResult = "written" | "skipped_human" | "error";
+export type MasterAppendResult = "written" | "skipped_human" | "skipped_rejected" | "error";
+
+// Task 2 (owner steps 1+2, outcome visibility): appendMasterCatalogEntry used to swallow every
+// failure into a bare "error" with no durable signal anywhere - zero catalogEntries had been
+// created since June 26 despite hundreds of July decodes, and nothing surfaced that silently.
+// This counter reuses the existing ladderStorage()/ladder_kv KV pattern (same seam the daily AI
+// spend cap and Go-UPC usage counters already use) so the written/skipped_human/skipped_rejected/error tally, the
+// last error reason, and its timestamp are all durable and inspectable without adding a new store.
+const KV_KEY_WRITTEN = "master_catalog_append:written";
+const KV_KEY_SKIPPED_HUMAN = "master_catalog_append:skipped_human";
+const KV_KEY_SKIPPED_REJECTED = "master_catalog_append:skipped_rejected";
+const KV_KEY_ERROR = "master_catalog_append:error";
+const KV_KEY_LAST_ERROR_REASON = "master_catalog_append:last_error_reason";
+const KV_KEY_LAST_ERROR_AT = "master_catalog_append:last_error_at";
+
+/** true once this process has console.error'd its first append failure (never re-logged after). */
+let firstErrorLoggedThisProcess = false;
+
+async function recordOutcome(
+  outcome: MasterAppendResult,
+  storage: LadderStorage | undefined,
+  errorReason?: string,
+): Promise<void> {
+  try {
+    const store = storage ?? (await ladderStorage());
+    const key =
+      outcome === "written" ? KV_KEY_WRITTEN
+      : outcome === "skipped_human" ? KV_KEY_SKIPPED_HUMAN
+      : outcome === "skipped_rejected" ? KV_KEY_SKIPPED_REJECTED
+      : KV_KEY_ERROR;
+    await store.increment(key);
+    if (outcome === "error" && errorReason) {
+      await store.set(KV_KEY_LAST_ERROR_REASON, errorReason);
+      await store.set(KV_KEY_LAST_ERROR_AT, new Date().toISOString());
+    }
+  } catch {
+    // The counter is observability-only (GC7 sibling rule): a storage failure recording the
+    // outcome must never surface as an append failure, and never throws back to the caller.
+  }
+}
+
+/** Test-only: reset the first-error-per-process console.error latch between test files/cases. */
+export function __resetMasterAppendErrorLatchForTests(): void {
+  firstErrorLoggedThisProcess = false;
+}
 
 /**
  * Admin-SDK idempotent upsert (GC6). Retries land on the SAME doc id (merge semantics). The
@@ -108,6 +154,37 @@ export async function appendMasterCatalogEntry(
         if (existing?.provenanceTier === "human_verified") {
           return "skipped_human" as const;
         }
+        // Re-append trap: an owner-REJECTED entry is a human decision too (catalog-review reject
+        // writes verificationStatus "rejected"). A later strong ladder decode of the same code must
+        // never silently flip it back to verified - skip with its own honest outcome.
+        if (existing?.verificationStatus === "rejected") {
+          return "skipped_rejected" as const;
+        }
+        // Re-append trap (catalog revocation round, design §2.4b): a "disputed" doc (a shop reported
+        // the identity was wrong - see catalogDispute.ts) must never be silently re-verified by the
+        // very next strong ladder decode of the same code either. Unlike "rejected" (fully skipped),
+        // the fresh decode result IS useful evidence, so it lands as a "pending" re-candidate for the
+        // reviewing human instead of being discarded - but verificationStatus is demoted from the
+        // entry's own "verified" to "pending" and the dispute history (disputeCount/disputedBy/
+        // auditLog) is preserved untouched so the reviewer sees both the fresh evidence and the
+        // dispute trail together.
+        if (existing?.verificationStatus === "disputed") {
+          const { id: _id, ...rest } = entry;
+          void _id;
+          tx.set(
+            ref,
+            {
+              ...rest,
+              verificationStatus: "pending",
+              updatedAt: new Date().toISOString(),
+              ...(existing.disputeCount !== undefined ? { disputeCount: existing.disputeCount } : {}),
+              ...(existing.disputedBy !== undefined ? { disputedBy: existing.disputedBy } : {}),
+              ...(existing.auditLog !== undefined ? { auditLog: existing.auditLog } : {}),
+            },
+            { merge: true },
+          );
+          return "written" as const;
+        }
       }
       const { id: _id, ...rest } = entry;
       void _id;
@@ -118,10 +195,19 @@ export async function appendMasterCatalogEntry(
       );
       return "written" as const;
     });
+    void recordOutcome(result, deps.storage);
     return result;
-  } catch {
+  } catch (err) {
     // GC7: an append failure must never break the decode response - the caller fires this
-    // fire-and-forget and swallows rejections; this catch is a last-resort safety net.
+    // fire-and-forget and swallows rejections; this catch is a last-resort safety net. It still
+    // must never THROW itself, so the real reason is captured here (not discarded) instead of
+    // inside a nested try that could itself explode the caller's fire-and-forget chain.
+    const reason = err instanceof Error ? err.message : String(err);
+    if (!firstErrorLoggedThisProcess) {
+      firstErrorLoggedThisProcess = true;
+      console.error("[masterAppend] appendMasterCatalogEntry failed (first occurrence this process):", reason);
+    }
+    void recordOutcome("error", deps.storage, reason);
     return "error";
   }
 }

@@ -1,0 +1,103 @@
+{
+  "$schema": "env-manifest v1 - see docs/deploy/ (never-again decision package item 2)",
+  "_purpose": "Declares which env var NAMES must exist, must NOT exist, or are optional per Vercel environment. Values are never inspected here (Vercel CLI 'env ls' only reports names + environments, never values) - this catches a var being MISSING entirely, not a var holding a garbage/placeholder value. Seeded 2026-07-25 from a live `vercel env ls production` / `vercel env ls preview` read against the real sharpenly/inventory Vercel project.",
+  "environments": {
+    "production": {
+      "required": [
+        "GO_UPC_API_KEY",
+        "OPENAI_API_KEY",
+        "TURSO_AUTH_TOKEN",
+        "TURSO_DATABASE_URL",
+        "FIREBASE_SERVICE_ACCOUNT_JSON_BASE64",
+        "NEXT_PUBLIC_FIREBASE_API_KEY",
+        "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+        "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+        "NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET",
+        "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
+        "NEXT_PUBLIC_FIREBASE_APP_ID",
+        "NEXT_PUBLIC_AUTH_MODE",
+        "PLATFORM_OWNER_EMAILS",
+        "PLATFORM_OWNER_UIDS"
+      ],
+      "forbidden": [],
+      "optional": [
+        "GEMINI_API_KEY",
+        "GEMINI_MODEL",
+        "OPENAI_MODEL",
+        "OPENAI_FAST_MODEL",
+        "AI_PROVIDER",
+        "AI_LOOKUP_DAILY_LIMIT",
+        "GPT_LADDER_DAILY_USD",
+        "ENABLE_LIVE_AI_LOOKUP",
+        "BRAVE_SEARCH_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "FIRECRAWL_API_KEY_1",
+        "FIRECRAWL_API_KEY_2",
+        "FIRECRAWL_API_KEY_3",
+        "FIRECRAWL_API_KEY_4",
+        "FIRECRAWL_API_KEY_5",
+        "FIRECRAWL_API_KEY_6",
+        "FIRECRAWL_API_KEY_7",
+        "NEXT_PUBLIC_FIREBASE_BACKEND",
+        "NEXT_PUBLIC_FIREBASE_USE_EMULATOR",
+        "NEXT_PUBLIC_PLATFORM_OWNER_UIDS",
+        "NEXT_PUBLIC_PLATFORM_OWNER_EMAILS",
+        "TIRELIBRARY_API_KEY",
+        "GMAIL_USER",
+        "GMAIL_APP_PASSWORD",
+        "SUPABASE_DB_URL",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "AUTONOMA_CLIENT_ID",
+        "AUTONOMA_SECRET_ID"
+      ]
+    },
+    "preview": {
+      "required": [
+        "GO_UPC_API_KEY",
+        "OPENAI_API_KEY",
+        "TURSO_AUTH_TOKEN",
+        "TURSO_DATABASE_URL"
+      ],
+      "forbidden": [
+        "NEXT_PUBLIC_FIREBASE_API_KEY",
+        "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+        "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+        "NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET",
+        "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
+        "NEXT_PUBLIC_FIREBASE_APP_ID",
+        "NEXT_PUBLIC_FIREBASE_BACKEND",
+        "NEXT_PUBLIC_FIREBASE_USE_EMULATOR",
+        "NEXT_PUBLIC_AUTH_MODE",
+        "PLATFORM_OWNER_EMAILS",
+        "PLATFORM_OWNER_UIDS",
+        "NEXT_PUBLIC_PLATFORM_OWNER_UIDS",
+        "NEXT_PUBLIC_PLATFORM_OWNER_EMAILS"
+      ],
+      "_forbidden_reason": "Preview is mock-by-design (CLAUDE.md: 'Mock is the default backend everywhere ... production stays mock until the go-live gate'). NEXT_PUBLIC_FIREBASE_*/NEXT_PUBLIC_AUTH_MODE/PLATFORM_OWNER_* existing in Preview would mean a preview build could authenticate against real cloud/production tenancy - exactly the class of preview-reaches-production-behavior confusion the incident produced. FIREBASE_SERVICE_ACCOUNT_JSON_BASE64 is deliberately NOT in this forbidden list even though it is present in Preview today (used by server-side smoke/admin scripts against a non-prod project) - only the browser-facing NEXT_PUBLIC_FIREBASE_*/AUTH_MODE/PLATFORM_OWNER_* surface is the actual regression vector.",
+      "optional": [
+        "GEMINI_API_KEY",
+        "GEMINI_MODEL",
+        "OPENAI_MODEL",
+        "OPENAI_FAST_MODEL",
+        "AI_PROVIDER",
+        "AI_LOOKUP_DAILY_LIMIT",
+        "GPT_LADDER_DAILY_USD",
+        "ENABLE_LIVE_AI_LOOKUP",
+        "BRAVE_SEARCH_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "FIRECRAWL_API_KEY_1",
+        "FIRECRAWL_API_KEY_2",
+        "FIRECRAWL_API_KEY_3",
+        "FIRECRAWL_API_KEY_4",
+        "FIRECRAWL_API_KEY_5",
+        "FIRECRAWL_API_KEY_6",
+        "FIRECRAWL_API_KEY_7",
+        "FIREBASE_SERVICE_ACCOUNT_JSON_BASE64",
+        "AUTONOMA_CLIENT_ID",
+        "AUTONOMA_SECRET_ID"
+      ]
+    }
+  }
+}

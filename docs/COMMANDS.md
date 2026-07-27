@@ -101,6 +101,27 @@ First time on a machine: `npx playwright install chromium`.
 | `npm run deploy:card` | Same sentinel, deploy-card output mode. |
 | `node scripts/release-hygiene.mjs` | Git-only uncommitted/unpushed check (repo lives on OneDrive; pushing is the real backup). `--json` for machine output. |
 
+## Deploy (Vercel CLI)
+
+Full mechanics and current truth: `docs/DEPLOY_TRUTH.md` - read it before running any of this.
+Short version: GitHub auto-deploy is disconnected (`vercel.json`), so `git push` never deploys
+anything. Preview deploys go through `node scripts/deploy-preview.mjs` (the sanctioned wrapper: an
+exclusive `.deploy-lock`, then the fix-lineage and env-parity gates below, then a plain
+`vercel deploy`, then the post-deploy smoke fingerprint; `--dry-run` exercises the lock/gates with no
+`vercel`/network call). A raw `vercel deploy` still works but skips the lock and both gates.
+Production promote/rollback (`vercel --prod`, `vercel promote`, `vercel rollback`, `vercel alias set`)
+is **owner-only** and hard-blocked at the tool layer by `.claude/hookify.vercel-prod-gate.local.md` -
+it will not run from an agent session without explicit in-conversation owner approval, even if a
+prior session already approved something similar. Run `npm run release:check` / `npm run deploy:card`
+(`scripts/release-sentinel.mjs`, see above) as the preflight gate before proposing any deploy action.
+
+| Script | What it does |
+|---|---|
+| `node scripts/deploy-preview.mjs [--dry-run]` | Sanctioned preview-deploy wrapper: lock + fix-lineage gate + env-parity gate + `vercel deploy` (preview only) + smoke fingerprint. |
+| `node scripts/check-fix-lineage.mjs [ref]` | Fails if `master` (or a pinned commit in `scripts/fix-lineage-pins.json`) is not an ancestor of `ref` (default `HEAD`). |
+| `node scripts/check-env-parity.mjs [--env=production\|preview]` | Diffs Vercel env var NAMES (never values) against `scripts/env-manifest.json`'s required/forbidden sets. |
+| `node scripts/smoke-fingerprint.mjs <url> [--expect-lineage-mismatch]` | Post-deploy GET-only checks: `/api/ai-lookup` capability JSON, route fingerprint, failed-deploy masquerade page detection. |
+
 ## Data / corpus pipelines (local, no paid calls)
 
 | Script | What it does |

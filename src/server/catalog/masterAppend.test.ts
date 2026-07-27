@@ -1,5 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
-import { buildMasterCatalogEntry, appendMasterCatalogEntry, type MasterAppendInput } from "./masterAppend";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  buildMasterCatalogEntry,
+  appendMasterCatalogEntry,
+  __resetMasterAppendErrorLatchForTests,
+  type MasterAppendInput,
+} from "./masterAppend";
+import type { LadderStorage } from "@/server/upc/storage";
 
 function baseInput(overrides: Partial<MasterAppendInput> = {}): MasterAppendInput {
   return {
@@ -149,6 +155,53 @@ describe("appendMasterCatalogEntry (Admin-SDK upsert, mocked)", () => {
     expect(setCalls).toHaveLength(0);
   });
 
+  // Re-append trap: an owner-REJECTED entry is a human decision too. A later strong ladder decode
+  // of the same code must never silently flip it back to verified - skip with its own honest outcome.
+  it("skips (never re-verifies) when the existing doc is owner-rejected", async () => {
+    const { tx, setCalls } = makeMockTx({ verificationStatus: "rejected", provenanceTier: "ladder_verified_strong" }, true);
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db });
+    expect(result).toBe("skipped_rejected");
+    expect(setCalls).toHaveLength(0);
+  });
+
+  // Catalog revocation round (design §2.4b CRITICAL): a disputed entry must NEVER be silently
+  // re-verified by the very next strong ladder decode of the same code - that would undo a live
+  // dispute with no human in the loop. The re-decode instead lands as a "pending" re-candidate,
+  // preserving the dispute history (disputeCount/disputedBy/auditLog) so the reviewing human sees
+  // both the fresh evidence AND the dispute trail together.
+  it("re-append over a disputed doc lands as pending (never silently re-verifies), preserving dispute history", async () => {
+    const existing = {
+      verificationStatus: "disputed",
+      provenanceTier: "ladder_verified_strong",
+      disputeCount: 1,
+      disputedBy: [{ businessId: "biz-a", at: "2026-07-20T00:00:00.000Z" }],
+      auditLog: [{ at: "2026-07-20T00:00:00.000Z", action: "disputed", by: "biz-a" }],
+    };
+    const { tx, setCalls } = makeMockTx(existing, true);
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db });
+    expect(result).toBe("written");
+    expect(setCalls).toHaveLength(1);
+    const [, data] = setCalls[0];
+    const payload = data as Record<string, unknown>;
+    // Fresh identity fields land, but verificationStatus is demoted to "pending" - never "verified".
+    expect(payload.verificationStatus).toBe("pending");
+    expect(payload.name).toBe(entry.name);
+    // Dispute history is preserved untouched, not clobbered by the merge write.
+    expect(payload.disputeCount).toBe(1);
+    expect(payload.disputedBy).toEqual(existing.disputedBy);
+    expect(payload.auditLog).toEqual(existing.auditLog);
+  });
+
   it("allows overwrite (retry idempotency) when the existing doc is NOT human_verified", async () => {
     const { tx, setCalls } = makeMockTx({ provenanceTier: "ladder_verified_strong" }, true);
     const db = {
@@ -171,5 +224,189 @@ describe("appendMasterCatalogEntry (Admin-SDK upsert, mocked)", () => {
 
     const result = await appendMasterCatalogEntry(entry, { db });
     expect(result).toBe("error");
+  });
+});
+
+// ---- Task 2 (outcome visibility): KV counter + first-error-per-process console.error ----
+
+/** A minimal in-memory LadderStorage double so these tests never touch the file adapter or Turso. */
+function makeMockStorage(): LadderStorage & { kv: Map<string, string> } {
+  const kv = new Map<string, string>();
+  return {
+    kv,
+    async readUsage() {
+      return { month: "2026-07", used: 0 };
+    },
+    async writeUsage() {},
+    async incrementUsage() {
+      return 0;
+    },
+    async readMissCache() {
+      return null;
+    },
+    async writeMissCache() {},
+    async appendArchive() {},
+    async appendOutcome() {},
+    async get(key: string) {
+      return kv.has(key) ? kv.get(key)! : null;
+    },
+    async set(key: string, value: string) {
+      kv.set(key, value);
+    },
+    async increment(key: string) {
+      const n = Number(kv.get(key) ?? "0") + 1;
+      kv.set(key, String(n));
+      return n;
+    },
+    async incrementBy(key: string, delta: number) {
+      const n = Number(kv.get(key) ?? "0") + delta;
+      kv.set(key, String(n));
+      return n;
+    },
+  };
+}
+
+function makeTxDb(existingData: Record<string, unknown> | undefined, exists: boolean) {
+  const { tx } = makeMockTx(existingData, exists);
+  return {
+    collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: "gtin_012345678905" })) })),
+    runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+  } as unknown as FirebaseFirestore.Firestore;
+}
+
+describe("appendMasterCatalogEntry outcome counter (Task 2, KV pattern)", () => {
+  const entry = buildMasterCatalogEntry(baseInput())!;
+
+  beforeEach(() => {
+    __resetMasterAppendErrorLatchForTests();
+  });
+
+  it("increments the written counter on a successful write", async () => {
+    const storage = makeMockStorage();
+    const db = makeTxDb(undefined, false);
+    const result = await appendMasterCatalogEntry(entry, { db, storage });
+    expect(result).toBe("written");
+    // recordOutcome is fire-and-forget (void, not awaited) - flush microtasks before asserting.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:written")).toBe("1");
+    expect(storage.kv.get("master_catalog_append:error")).toBeUndefined();
+  });
+
+  it("increments the skipped_human counter when an existing doc is already human_verified", async () => {
+    const storage = makeMockStorage();
+    const db = makeTxDb({ provenanceTier: "human_verified" }, true);
+    const result = await appendMasterCatalogEntry(entry, { db, storage });
+    expect(result).toBe("skipped_human");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:skipped_human")).toBe("1");
+  });
+
+  it("increments the skipped_rejected counter when an existing doc is owner-rejected", async () => {
+    const storage = makeMockStorage();
+    const db = makeTxDb({ verificationStatus: "rejected" }, true);
+    const result = await appendMasterCatalogEntry(entry, { db, storage });
+    expect(result).toBe("skipped_rejected");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:skipped_rejected")).toBe("1");
+  });
+
+  it("increments the error counter AND records the real error reason + timestamp when the transaction rejects", async () => {
+    const storage = makeMockStorage();
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async () => {
+        throw new Error("firestore down: DEADLINE_EXCEEDED");
+      }),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db, storage });
+    expect(result).toBe("error");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:error")).toBe("1");
+    expect(storage.kv.get("master_catalog_append:last_error_reason")).toBe("firestore down: DEADLINE_EXCEEDED");
+    expect(storage.kv.get("master_catalog_append:last_error_at")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("accumulates counts across multiple calls instead of overwriting", async () => {
+    const storage = makeMockStorage();
+    const db1 = makeTxDb(undefined, false);
+    const db2 = makeTxDb(undefined, false);
+    await appendMasterCatalogEntry(entry, { db: db1, storage });
+    await appendMasterCatalogEntry(entry, { db: db2, storage });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:written")).toBe("2");
+  });
+
+  it("console.error's the underlying reason on the FIRST error this process, not a generic message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const storage = makeMockStorage();
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async () => {
+        throw new Error("permission-denied: missing IAM role");
+      }),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    await appendMasterCatalogEntry(entry, { db, storage });
+    expect(spy).toHaveBeenCalledOnce();
+    const loggedArgs = spy.mock.calls[0].join(" ");
+    expect(loggedArgs).toContain("permission-denied: missing IAM role");
+    spy.mockRestore();
+  });
+
+  it("does NOT re-log a second error in the same process (first-error-per-process latch)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const storage = makeMockStorage();
+    const failingDb = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async () => {
+        throw new Error("error one");
+      }),
+    } as unknown as FirebaseFirestore.Firestore;
+    const failingDb2 = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      runTransaction: vi.fn(async () => {
+        throw new Error("error two");
+      }),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    await appendMasterCatalogEntry(entry, { db: failingDb, storage });
+    await appendMasterCatalogEntry(entry, { db: failingDb2, storage });
+    // Both failures are still counted...
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:error")).toBe("2");
+    // ...but console.error only fired once (the first occurrence this process).
+    expect(spy).toHaveBeenCalledOnce();
+    spy.mockRestore();
+  });
+
+});
+
+// ---- admin-db-unavailable (no creds): getAdminDb() itself throws before any transaction runs ----
+// Isolated in its own describe block with vi.mock so it never depends on the REAL firebaseAdmin
+// module's async credential-resolution behavior (which rejects on a later tick outside any
+// synchronous try/catch in a real no-creds environment, rather than throwing synchronously - see
+// LESSONS_LEARNED: never assume an SDK failure mode without observing it). Mocking getAdminDb to
+// throw synchronously proves the exact contract this module promises: "creds/entry absent -> never
+// throws, always resolves 'error', and it must still be counted."
+vi.mock("@/lib/firebaseAdmin", () => ({
+  getAdminDb: () => {
+    throw new Error("admin db unavailable: no credentials configured");
+  },
+}));
+
+describe("appendMasterCatalogEntry admin-db-unavailable (Task 2, no-creds path)", () => {
+  it("returns 'error' (never throws) and counts it when getAdminDb() itself throws", async () => {
+    __resetMasterAppendErrorLatchForTests();
+    const storage = makeMockStorage();
+    const entry = buildMasterCatalogEntry(baseInput())!;
+    // No `db` in deps - forces the appendMasterCatalogEntry call path through the mocked getAdminDb().
+    const result = await appendMasterCatalogEntry(entry, { storage });
+    expect(result).toBe("error");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(storage.kv.get("master_catalog_append:error")).toBe("1");
+    expect(storage.kv.get("master_catalog_append:last_error_reason")).toBe(
+      "admin db unavailable: no credentials configured",
+    );
   });
 });

@@ -299,3 +299,37 @@ Decode Trust (P5), Master Truth (P5b), and Sell-Ready (P6) are complete on feat/
 (NOT pushed). Full battery green: unit 2883/0, ledger 44/44, golden 2/2, firebase 52/52, build,
 e2e 56/56, qa:bots 12/12, Argus PASS. Durable ledger: .superpowers/sdd/progress.md (authoritative).
 Remaining owner decisions: push/PR, production promote, /code-review ultra, corpus CSV reconciliation.
+
+## Checkpoint 2026-07-22 late evening: Deploy-chaos incident diagnosed + fix round
+Branch `fix/rung-trust-and-resolve-stamp` (worktree `inventory-wt-diag`, NOT pushed).
+
+Incident: owner saw the app "go backwards" tonight. Four proven causes:
+1. Vercel env split mid-migration - Preview lacked `NEXT_PUBLIC_FIREBASE_*`/`AUTH_MODE` (previews run
+   mock by design); Production lacked `GO_UPC_API_KEY` (weaker decode than expected).
+2. Master-catalog rung self-poisoning (see DECISIONS entry) activated once
+   `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64` reached Preview ~5pm; the first credential-bearing builds
+   went out 6:02pm+.
+3. Commit `092600e`'s auto-resolve stamp hid deliberate-hold review rows.
+4. "Old settings" sighting = a stale early-July master fossil served from the `inventory-git-master`
+   alias (now deleted), predating the `ebe43e3` hide-AI-internals fix.
+
+Remediation shipped tonight:
+- `GO_UPC_API_KEY` added to Production + pinned `a8b0d32` build redeployed (`goUpc.configured:true`
+  verified live).
+- GitHub integration disconnected from Vercel (manual/CLI deploys only, owner order).
+- Three stale git aliases deleted.
+- Two TDD fixes on this branch: masterLookup `ladder_verified_strong` entries replay as verified, but
+  a suggestion-class master hit falls through the remaining ladder rungs instead of settling it;
+  scanStore's auto-resolve stamp now skips rows carrying `suggestedLinkProductId` /
+  `lastAliasConflicts` so deliberate-hold reviews stay visible.
+
+Gates: catalog+pipeline 142/142, review-lingering suite 4/4, unit 2618 pass (11 pre-existing
+corpus-data failures, identical on clean `dc98c49`), tsc clean, ledger 44/44, build clean.
+Failing-first evidence recorded for both TDD fixes.
+
+Next: agy diff review adjudication -> commit -> CLI preview deploy -> owner 128-code verification ->
+owner-gated production promote. Open follow-up: master-catalog revocation on mark-wrong (design in
+progress, not started).
+
+### Ultracode round close (2026-07-23 00:40)
+All fixes landed (21 commits), gates green (unit 2652/0, dom 697/0, ledger 45/45, golden, build), agy + sentinel clean. Preview inventory-5ha3w7se8 proof: 338/338 scans; re-paste = 0 API calls, qty exactly 2x; post-reload re-scan = 0 API calls (persist keeps identifiers + verified + businessId). Awaiting owner: promotion, deployment cleanup, never-again project.

@@ -85,6 +85,72 @@ describe("scanStore - deleteProduct preserves total counted quantity (law: scan 
     expect(totalUnits(store)).toBe(3);
   });
 
+  it("SYNCS the delete-transfer to the backend: old count row zeroed, provisional row counted, product archived (reviewed defect 2026-07-22: unsynced repoint let refreshFromCloud double the quantity)", () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db });
+    const p = addCountedProduct(store, "888888888881", "Junk Auto-Add");
+    store.getState().processScan("888888888881"); // qty 2
+    const sessionId = store.getState().sessionId;
+    expect(db.getServerCount(sessionId, p.id)?.quantity).toBe(2); // backend saw the counts
+
+    store.getState().deleteProduct(p.id);
+
+    const prov = store.getState().products.find(
+      (x) => x.provisional === true && x.status !== "archived" && x.primaryBarcode === "888888888881",
+    )!;
+    // The backend row keyed to the deleted product is zeroed, the provisional carries the 2 units,
+    // and the product itself is archived server-side - so a later refreshFromCloud can never
+    // resurrect the deleted product's quantity alongside the repointed provisional row.
+    expect(db.getServerCount(sessionId, p.id)?.quantity).toBe(0);
+    expect(db.getServerCount(sessionId, prov.id)?.quantity).toBe(2);
+    expect(db.snapshot().products[p.id]?.status).toBe("archived");
+    expect(db.snapshot().products[prov.id]).toBeDefined();
+  });
+
+  it("SYNCS the undo: backend restores the product active, moves the quantity back off the provisional (reviewed defect 2026-07-22: local-only undo was re-reverted + doubled by the next refreshFromCloud)", () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db });
+    const p = addCountedProduct(store, "888888888881", "Junk Auto-Add");
+    store.getState().processScan("888888888881"); // qty 2
+    const sessionId = store.getState().sessionId;
+    store.getState().deleteProduct(p.id);
+    const prov = store.getState().products.find(
+      (x) => x.provisional === true && x.status !== "archived" && x.primaryBarcode === "888888888881",
+    )!;
+    expect(db.getServerCount(sessionId, prov.id)?.quantity).toBe(2); // delete ops drained
+
+    expect(store.getState().undoDeleteProduct()).toBe(true);
+
+    // Backend mirrors the undo exactly: product active again with its 2 units back, the minted
+    // provisional zeroed and archived - so a later refreshFromCloud can neither re-delete the
+    // undone product nor re-add the transferred quantity alongside the restored row (2 -> 4 class).
+    expect(db.snapshot().products[p.id]?.status).toBe("active");
+    expect(db.getServerCount(sessionId, p.id)?.quantity).toBe(2);
+    expect(db.getServerCount(sessionId, prov.id)?.quantity).toBe(0);
+    expect(db.snapshot().products[prov.id]?.status).toBe("archived");
+  });
+
+  it("SYNCS the undo after a post-delete scan: server splits residual exactly - original back to 2, provisional keeps the 1 new unit and stays active", () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db });
+    const p = addCountedProduct(store, "888888888881", "Junk Auto-Add");
+    store.getState().processScan("888888888881"); // qty 2
+    const sessionId = store.getState().sessionId;
+    store.getState().deleteProduct(p.id);
+    const prov = store.getState().products.find(
+      (x) => x.provisional === true && x.status !== "archived" && x.primaryBarcode === "888888888881",
+    )!;
+    store.getState().processScan("888888888881"); // NEW physical unit lands on the provisional
+    expect(db.getServerCount(sessionId, prov.id)?.quantity).toBe(3);
+
+    expect(store.getState().undoDeleteProduct()).toBe(true);
+
+    // Only the transferred 2 move back; the genuinely new unit stays on the provisional server-side too.
+    expect(db.getServerCount(sessionId, p.id)?.quantity).toBe(2);
+    expect(db.getServerCount(sessionId, prov.id)?.quantity).toBe(1);
+    expect(db.snapshot().products[prov.id]?.status).toBe("active"); // still counted -> kept remotely
+  });
+
   it("a deleted product with ZERO counted quantity mints nothing (no ghost provisionals)", () => {
     const store = createTestScanStore({ db: new MockDb() });
     const p = addCountedProduct(store, "777777777775", "Zero Qty");

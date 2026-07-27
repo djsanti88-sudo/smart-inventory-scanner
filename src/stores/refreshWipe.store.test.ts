@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import { buildPersistedScanState } from "@/stores/scanPersist";
 import { replayLedgerCounts } from "@/services/inventory.replay";
-import type { InventoryCount, ScanEvent, UnknownCodeReview } from "@/types";
+import type { InventoryCount, InventorySession, PendingSyncItem, ScanEvent, UnknownCodeReview } from "@/types";
 
 // Data-loss fix (critical): on a real page REFRESH with the cloud backend, BusinessContextGate
 // re-resolves the SAME (businessId, userId) the store already holds and calls setBusinessContext
@@ -66,6 +66,103 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store.getState().needsReviewQueue).toEqual([review]);
   });
 
+  it("(a3) the loader's session restore must NOT replace UNSYNCED local counts with the stale remote snapshot", async () => {
+    // Same-tenant refresh in cloud mode where the remote DOES return the active session: the sync wipe
+    // is (correctly) skipped by the guard above, but the async loadBusinessData block used to do
+    // `next.finalCounts = data.counts.filter(...)` unconditionally - replacing a local qty-3 row (2
+    // unsynced) with the remote's stale qty-1 snapshot while the preserved feed kept showing 3. The
+    // restore must apply the refreshFromCloud-style pending-aware merge: unsynced local rows win.
+    const session: InventorySession = {
+      id: "s1", businessId: "b1", name: "Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const staleRemoteCount: InventoryCount = { ...count("p1", 1, ["ev1"]), syncStatus: "synced" };
+    const loader = vi.fn()
+      .mockResolvedValueOnce({ products: [], aliases: [], sessions: [], counts: [] }) // first sign-in: empty tenant
+      .mockResolvedValue({ products: [], aliases: [], sessions: [session], counts: [staleRemoteCount] });
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: loader });
+
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 0)); // let the first (empty) load settle
+
+    // Local truth: qty 3 for p1 in s1, of which 2 increments are still UNSYNCED in the pending queue.
+    const pendingIncrement = (id: string): PendingSyncItem => ({
+      id: `pend-${id}`, businessId: "b1", sessionId: "s1", entityType: "InventoryCount",
+      entityId: "count-p1", operation: "INCREMENT_COUNT",
+      payload: { businessId: "b1", sessionId: "s1", productId: "p1", quantityDelta: 1, scanEventId: id, aliasUsed: "111" },
+      status: "pending", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t",
+      idempotencyKey: `k-${id}`, scanEventId: id,
+    });
+    store.setState({
+      currentSession: session,
+      sessionId: "s1",
+      scanFeed: [scanEvent("ev1", "p1", "111"), scanEvent("ev2", "p1", "111"), scanEvent("ev3", "p1", "111")],
+      finalCounts: [{ ...count("p1", 3, ["ev1", "ev2", "ev3"]), syncStatus: "pending" }],
+      pendingSyncQueue: [pendingIncrement("ev2"), pendingIncrement("ev3")],
+    });
+
+    // REFRESH: same tenant, remote now answers with the active session + its STALE qty-1 count row.
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 10)); // let the loader resolve and apply
+
+    const p1 = store.getState().finalCounts.find((c) => c.productId === "p1");
+    expect(p1?.quantity, "unsynced local count wins over the stale remote snapshot").toBe(3);
+    // Feed and counts must agree (the divergence class this guards against).
+    expect(store.getState().scanFeed.length).toBe(3);
+  });
+
+  it("(a4) unsynced local counts from a DIFFERENT session than the restored one must not silently vanish (pendingSyncQueue-referenced + unsynced currentSession rows)", async () => {
+    // The loader's pending-aware seed only ever looked at rows with sessionId === restored.id, so
+    // local finalCounts rows belonging to any OTHER session were dropped outright by the restore
+    // (not merged, not preserved - just gone), even when those rows carried unsynced work: either a
+    // pendingSyncQueue item still references them, or they belong to the current (unsynced) session
+    // which the remote does not yet know about. Widen the seed so unsynced local work never
+    // silently vanishes on a business-context refresh.
+    const restoredSession: InventorySession = {
+      id: "s-restored", businessId: "b1", name: "Restored Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const loader = vi.fn()
+      .mockResolvedValueOnce({ products: [], aliases: [], sessions: [], counts: [] }) // first sign-in: empty tenant
+      .mockResolvedValue({ products: [], aliases: [], sessions: [restoredSession], counts: [] }); // remote knows nothing about the other session
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: loader });
+
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 0)); // let the first (empty) load settle
+
+    // Row A: belongs to a DIFFERENT session ("s-other"), still referenced by an unsynced pendingSyncQueue item.
+    const otherSessionCount: InventoryCount = { ...count("p-other", 2, ["ev-other"]), sessionId: "s-other", syncStatus: "pending" };
+    const pendingForOther: PendingSyncItem = {
+      id: "pend-other", businessId: "b1", sessionId: "s-other", entityType: "InventoryCount",
+      entityId: "count-p-other", operation: "INCREMENT_COUNT",
+      payload: { businessId: "b1", sessionId: "s-other", productId: "p-other", quantityDelta: 2, scanEventId: "ev-other", aliasUsed: "555" },
+      status: "pending", retryCount: 0, lastError: null, createdAt: "t", updatedAt: "t",
+      idempotencyKey: "k-other", scanEventId: "ev-other",
+    };
+    // Row B: belongs to cur.currentSession, which is itself unsynced and different from the restored session.
+    const unsyncedCurrentSession: InventorySession = {
+      id: "s-current", businessId: "b1", name: "Unsynced Session", location: "Bay B", status: "active",
+      startedAt: "2026-01-02T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "pending",
+    };
+    const currentSessionCount: InventoryCount = { ...count("p-current", 1, ["ev-current"]), sessionId: "s-current", syncStatus: "pending" };
+
+    store.setState({
+      currentSession: unsyncedCurrentSession,
+      sessionId: "s-current",
+      finalCounts: [otherSessionCount, currentSessionCount],
+      pendingSyncQueue: [pendingForOther],
+    });
+
+    // REFRESH: remote answers with a DIFFERENT active session (restoredSession), which is what would
+    // normally happen if this device's own unsynced session had not yet reached the backend.
+    store.getState().setBusinessContext("b1", "u1");
+    await new Promise((r) => setTimeout(r, 10)); // let the loader resolve and apply
+
+    const keys = store.getState().finalCounts.map((c) => `${c.sessionId}|${c.productId}`);
+    expect(keys, "pendingSyncQueue-referenced row from another session survives").toContain("s-other|p-other");
+    expect(keys, "unsynced currentSession's row survives").toContain("s-current|p-current");
+  });
+
   it("(e) TRUE refresh: a persisted blob rehydrated into a FRESH store must still pass the same-tenant guard (userId round-trips)", () => {
     // The in-lifetime test (a) cannot catch a guard keyed on state the persist layer drops: on a real
     // page load the store starts EMPTY and only holds what rehydrate restores. Simulate the full
@@ -125,6 +222,34 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     for (const item of upgradeSaves) {
       expect(provisionalSaveKeys).not.toContain(item.idempotencyKey);
     }
+  });
+
+  it("(e2) a deliberate suggest_link HOLD survives a rehydrate cycle (stamp guard input persists)", () => {
+    // The post-resolve stamp sites spare rows deliberately held open via suggestedLinkProductId
+    // (identity-merge suggest_link path). That guard reads the stamp off the persisted review row,
+    // so the hold must round-trip persist -> fresh store -> rehydrate -> setBusinessContext intact.
+    const mk = () =>
+      createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    const store1 = mk();
+    store1.getState().setBusinessContext("b1", "u1");
+    const heldReview = {
+      id: "rev-hold", businessId: "b1", rawCode: "444", cleanCode: "444", codeType: "unknown",
+      status: "open", decodeStatus: "suggested", reason: "possible match", suggestedProductName: "Existing Tire",
+      suggestedLinkProductId: "p-existing", createdAt: "t", scanCount: 1, lastScannedAt: "t",
+    } as unknown as UnknownCodeReview;
+    store1.setState({ needsReviewQueue: [heldReview] });
+    const blob = JSON.parse(JSON.stringify(buildPersistedScanState(store1.getState() as never, "business")));
+
+    const store2 = mk(); // fresh page load
+    store2.setState(blob as never); // zustand persist rehydrate = shallow merge
+    store2.getState().setBusinessContext("b1", "u1");
+
+    const after = store2.getState().needsReviewQueue.find((r) => r.id === "rev-hold");
+    expect(after?.status, "held review stays open across a refresh").toBe("open");
+    expect(
+      (after as unknown as { suggestedLinkProductId?: string })?.suggestedLinkProductId,
+      "the suggest_link hold stamp survives the rehydrate cycle",
+    ).toBe("p-existing");
   });
 
   it("(b) an ACTUAL tenant switch still fully wipes (isolation law unchanged)", () => {

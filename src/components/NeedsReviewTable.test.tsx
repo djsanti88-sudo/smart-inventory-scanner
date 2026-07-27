@@ -72,7 +72,7 @@ describe("NeedsReviewTable - Task 9 copy fix (no bogus demotion on a verified de
   });
 });
 
-describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
+describe("NeedsReviewTable - hide solved (owner rule: resolved never lingers in review)", () => {
   it("hides an item that is resolved AND synced, keeps open items", () => {
     useScanStore.setState({
       needsReviewQueue: [
@@ -85,6 +85,8 @@ describe("NeedsReviewTable - hide solved+synced (owner rule)", () => {
     expect(screen.queryByTestId("review-row-2000000000002")).toBeNull(); // resolved+synced -> hidden
   });
 
+  // Regression: "if it is resolved, it does not go to review." Sync state is irrelevant to whether a
+  // SOLVED item still shows in Needs Review - a resolved row awaiting sync must not linger either.
   it("hides a resolved item even when its cloud backup has not synced yet (owner rule 2026-07-22: resolved = gone; sync retries invisibly in the background)", () => {
     useScanStore.setState({
       needsReviewQueue: [

@@ -5,6 +5,12 @@
 > (`inventory-lovat-six.vercel.app`). Steps marked **OWNER-GATED** must never be run by an agent
 > without explicit, in-the-moment owner approval - no exceptions, even mid-checklist.
 >
+> Deploy mechanics referenced below (GitHub disconnected from Vercel, preview vs. production, the
+> hookify prod gate) are canonical in `docs/DEPLOY_TRUTH.md` - read it first. Production deploys are
+> never automatic: they are explicit, owner-only CLI (`vercel --prod`) or Vercel dashboard promote
+> events, each requiring fresh in-conversation approval - do not assume a deploy already happened or
+> will happen as a side effect of anything else in this checklist.
+>
 > Run the steps in order. Do not skip ahead: later steps assume earlier ones are verified, not just
 > attempted.
 
@@ -18,8 +24,9 @@ Already present on Vercel prod (verified by name; values are sensitive and not r
 
 Since values cannot be verified from this machine, add a runtime verification step instead of trusting
 the list:
-1. **[OWNER-GATED]** After the next production deploy, open the deployed site and confirm in the
-   browser dev tools (or a temporary debug log) that `NEXT_PUBLIC_FIREBASE_PROJECT_ID` reads
+1. **[OWNER-GATED]** After the owner runs the next explicit production deploy/promote (CLI or
+   dashboard - see `docs/DEPLOY_TRUTH.md`), open the deployed site and confirm in the browser dev
+   tools (or a temporary debug log) that `NEXT_PUBLIC_FIREBASE_PROJECT_ID` reads
    `smart-inventory-scanner-app`, not `demo-smart-inventory` and not empty.
 2. Confirm `NEXT_PUBLIC_FIREBASE_USE_EMULATOR` is unset or `0` in production (an emulator flag left on
    in prod would silently try to talk to a local emulator that does not exist there).
@@ -63,7 +70,12 @@ Missing, must be added before go-live:
 
 ## E. Deploy and verify
 
-7. **[OWNER-GATED]** Deploy this branch to production.
+7. **[OWNER-GATED]** Explicit production deploy/promote event: the owner runs `vercel --prod` (or
+   promotes via the Vercel dashboard) for this branch. This is never automatic and never triggered by
+   `git push` (see `docs/DEPLOY_TRUTH.md` - GitHub auto-deploy is disconnected). An agent session may
+   propose this step and run `npm run release:check` / `npm run deploy:card` as preflight, but the
+   deploy command itself is hard-blocked by `.claude/hookify.vercel-prod-gate.local.md` without the
+   owner's explicit approval in that exact conversation.
 8. Verify end to end, in this order:
    - Sign up a fresh test account through the real production UI.
    - Confirm the Auth user appears in Firebase Authentication for `smart-inventory-scanner-app`
