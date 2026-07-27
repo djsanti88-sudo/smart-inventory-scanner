@@ -1,0 +1,85 @@
+name: Rules Guard
+
+# ---------------------------------------------------------------------------------------------
+# WHY THIS WORKFLOW EXISTS
+# ---------------------------------------------------------------------------------------------
+# firestore.rules / firestore.indexes.json are a SEPARATE production surface from the app code
+# gated by ci.yml. They deploy independently via `npm run deploy:rules:prod` (owner-gated, never
+# run by CI) and a bad rule change can silently open cross-tenant data access or break the sync
+# path with no build/typecheck/lint signal at all - none of those gates touch rules content.
+# This workflow closes that gap for PULL REQUESTS that touch the rules files, by running the
+# REAL Firestore emulator against the REAL rules file via the project's existing test suite
+# (src/services/db/firebase/*.rules.test.ts, e.g. firebaseSyncTarget.rules.test.ts covering
+# tenant isolation + idempotent-apply behavior), the same suite a human runs locally as
+# `npm run test:firebase`.
+#
+# LOUD WARNING - READ BEFORE RELYING ON THIS AS A MERGE GATE:
+# This workflow's job (`rules-guard`) is NOT added to master's required status checks by default.
+# Until an owner explicitly adds "Rules Guard / rules-guard" to branch protection required
+# checks, a PR can merge with a red or entirely-skipped run of this workflow. Wiring it into
+# branch protection is an explicit owner decision (see docs/REVISION_GATE.md conventions for how
+# ci.yml's checks were wired) - this file only makes the signal EXIST, it does not GATE anything
+# by itself.
+#
+# DESIGN CHOSEN (v1) AND WHY:
+# Full behavioral gate, not a syntax-only dry-run. `firebase emulators:exec` spins up the REAL
+# Firestore + Auth emulators (Node-hosted Firestore emulator's Java-backed rules engine; GitHub's
+# ubuntu-latest runner ships a JDK, verified present at authoring time - openjdk 21) against the
+# actual firestore.rules file, then runs `vitest run src/services/db/firebase` inside that
+# environment - the exact command `npm run test:firebase` already runs locally and in
+# docs/COMMANDS.md. This is preferred over a rules-only "does it compile" dry run
+# (`firebase deploy --only firestore:rules --dry-run`, which requires an authenticated real
+# Firebase project and Application Default Credentials CI does not have, and which only proves
+# the rules PARSE, not that tenant isolation / idempotent-apply behavior still holds) because:
+#   1. The emulator path needs no live credentials at all - .firebaserc's "default" project
+#      (demo-smart-inventory) is a fake/demo project id, which is exactly what the Firestore
+#      emulator expects; no service account, no `firebase login`, no network call to Google.
+#   2. The project's own rules tests already assert the behavior that actually matters (can a
+#      role read another business's data, is _appliedKeys idempotency enforced, etc.) - reusing
+#      them means this workflow never drifts from what a human considers "the rules are correct."
+#   3. It is the same command already documented and used locally (npm run test:firebase /
+#      docs/COMMANDS.md), so there is exactly one source of truth for "did the rules suite pass."
+# storage.rules does not exist in this repo (firebase.json only configures firestore); the path
+# trigger below still includes it so this workflow auto-activates the day one is added, with no
+# separate follow-up needed.
+#
+# firebase-tools is NOT a project devDependency (only the firebase-admin SDK is, for server code).
+# It is invoked here via `npx firebase-tools@<pinned>` with an explicit version pin so a firebase-
+# tools release cannot silently change CI behavior; bump the pin deliberately when needed.
+# ---------------------------------------------------------------------------------------------
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "firestore.rules"
+      - "firestore.indexes.json"
+      - "storage.rules"
+      - ".github/workflows/rules-guard.yml"
+
+concurrency:
+  group: rules-guard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rules-guard:
+    name: rules-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ubuntu-latest ships a JDK (verified openjdk 21 at authoring time), which the Firestore/Auth
+      # emulator JARs require. No explicit setup-java step is added here to avoid pinning a second
+      # runtime version unnecessarily; if a future runner image drops the bundled JDK, add
+      # actions/setup-java (temurin, 21) as a step before this one.
+      - name: Run Firestore emulator rules suite (npm run test:firebase)
+        run: npx --yes firebase-tools@15.24.0 emulators:exec --project demo-smart-inventory --only auth,firestore "npx vitest run src/services/db/firebase"
