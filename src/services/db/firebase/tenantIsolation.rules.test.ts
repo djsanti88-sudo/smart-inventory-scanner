@@ -57,10 +57,21 @@ describe.skipIf(!ready)("Firestore rules - tenant isolation (authenticated users
   const aDb = () => env.authenticatedContext(A).firestore();
   const bDb = () => env.authenticatedContext(B).firestore();
 
-  it("bootstrap: a signed-in user can create their own business + owner membership", async () => {
+  it("business and initial owner provisioning are server-only", async () => {
     const db = env.authenticatedContext("newUser").firestore();
-    await assertSucceeds(setDoc(doc(db, "businesses", "bizNew"), { name: "New", createdBy: "newUser" }));
-    await assertSucceeds(setDoc(doc(db, "businessMembers", "bizNew_newUser"), { businessId: "bizNew", userId: "newUser", role: "owner" }));
+    await assertFails(
+      setDoc(doc(db, "businesses", "bizNew"), {
+        name: "New",
+        createdBy: "newUser",
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, "businessMembers", "bizNew_newUser"), {
+        businessId: "bizNew",
+        userId: "newUser",
+        role: "owner",
+      }),
+    );
   });
 
   it("(a) User A reads (get + list) and writes Business A data", async () => {
@@ -131,6 +142,13 @@ describe.skipIf(!ready)("Firestore rules - tenant isolation (authenticated users
 
   it("userProfiles: a user reads/writes only their own", async () => {
     await assertSucceeds(setDoc(doc(aDb(), "userProfiles", A), { authUserId: A, email: "a@test.local" }));
+    await assertFails(
+      setDoc(
+        doc(aDb(), "userProfiles", A),
+        { defaultBusinessId: "attacker-controlled" },
+        { merge: true },
+      ),
+    );
     await assertFails(getDoc(doc(bDb(), "userProfiles", A)));
     await assertFails(setDoc(doc(bDb(), "userProfiles", A), { authUserId: A, email: "hacked" }));
   });

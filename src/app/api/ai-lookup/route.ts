@@ -182,6 +182,7 @@ export async function GET(request: Request) {
     geminiConfigured,
     openaiConfigured,
     firecrawlConfigured,
+    freeDecodeAvailable: true,
     openWebFallback: firecrawlConfigured,
     geminiSearchGrounding: process.env.ENABLE_GEMINI_SEARCH_GROUNDING !== "false",
     openaiWebSearch: process.env.ENABLE_OPENAI_WEB_SEARCH !== "false",

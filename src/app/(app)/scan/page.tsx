@@ -38,6 +38,8 @@ export default function ScanPage() {
   const setLocation = useScanStore((s) => s.setLocation);
   const recentLocations = useScanStore((s) => s.recentLocations);
   const ensureAutoSession = useScanStore((s) => s.ensureAutoSession);
+  const businessContextReady = useScanStore((s) => s.businessContextReady);
+  const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const scanFeed = useScanStore((s) => s.scanFeed);
   const firstScanAt = useScanStore((s) => s.firstScanAt);
 
@@ -67,8 +69,9 @@ export default function ScanPage() {
   }, [refreshAiStatus]);
 
   useEffect(() => {
+    if (!businessContextReady || !businessDataLoaded) return;
     ensureAutoSession();
-  }, [ensureAutoSession]);
+  }, [businessContextReady, businessDataLoaded, ensureAutoSession]);
 
   const hasKey = aiStatus.geminiConfigured || aiStatus.openaiConfigured;
   const isPlatform = useIsPlatformOwner(); // AI/provider status is platformOwner-only on the scan page
