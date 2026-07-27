@@ -132,6 +132,14 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   // resolved). Defense in depth - the table filter above already excludes suggested reviews.
   const resolved = review.status !== "open" && review.status !== "suggested";
 
+  // Identity-merge suggest_link (QA 2026-07-15 issue 3): when the decode fuzzily matches a product
+  // ALREADY in the shop, resolveUnknown parks the candidate on suggestedLinkProductId and refuses to
+  // mint a duplicate. Rendering that candidate as a one-tap "Link to <product>" is the only way the
+  // operator can act on it - without it, "Approve suggestion" was a silent no-op on these rows.
+  const suggestedLinkProduct = review.suggestedLinkProductId
+    ? products.find((p) => p.id === review.suggestedLinkProductId && p.status !== "archived")
+    : undefined;
+
   // P4: elderly-readable controls. One PRIMARY action per row (blue filled, >=44px, text-base); everything
   // else is a same-size outline so nothing scary competes with the primary. Approve is primary when there is
   // a suggestion to approve; otherwise Link (to an existing product) is the primary.
@@ -335,7 +343,30 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
-            {review.hasSuggestion && review.suggestedProductName && (
+            {suggestedLinkProduct && (
+              <span className="w-full text-sm text-zinc-600" data-testid="suggest-link-note">
+                This looks like a product already in your list: {prettifyProductName(suggestedLinkProduct.name)}.
+                Link it so it is not duplicated.
+              </span>
+            )}
+            {suggestedLinkProduct && (
+              <button
+                type="button"
+                data-testid="link-suggested"
+                onClick={() =>
+                  resolveUnknown(review.id, "link_existing", {
+                    productId: suggestedLinkProduct.id,
+                    applyToCount,
+                    selectedAliasCodes: selectedCodes,
+                  })
+                }
+                title="Connect this code to the matching product already in your list"
+                className={btnPrimary}
+              >
+                Link to {prettifyProductName(suggestedLinkProduct.name)}
+              </button>
+            )}
+            {!suggestedLinkProduct && review.hasSuggestion && review.suggestedProductName && (
               <button
                 type="button"
                 data-testid="approve-suggestion"

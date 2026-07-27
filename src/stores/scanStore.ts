@@ -104,6 +104,12 @@ export interface CsvImportSummary {
   aliasesCreated: number;
   duplicates: number;
   conflicts: ImportConflict[];
+  /**
+   * QA Task 7 (owner decision, catalog semantics): count of existing-barcode rows whose product had
+   * its descriptive fields (name/brand/category/specsShort/location) refreshed from the row. Never
+   * implies a quantity change - InventoryCount is untouched by a catalog re-import.
+   */
+  refreshed: number;
 }
 
 const UNIT_COST_HEADERS = ["unit_cost", "unit cost", "cost", "unitcost"];
@@ -2496,6 +2502,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             syncStatus: "pending",
             idempotencyKey: keyFor("SAVE_UNKNOWN_SCAN"),
             provisionalProductId: mintedPlaceholder?.id ?? null,
+            // QA Task 8 (owner-approved 2026-07-15): review-only "Did you mean <X>?" near-match SKU
+            // suggestion from the deterministic resolver (distance<=1, single candidate only - see
+            // resolver.ts findNearMatchSuggestion). Reuses the EXACT same one-tap "Link to <product>"
+            // UI/path as the identity-merge suggest_link (NeedsReviewTable's suggestedLinkProductId),
+            // which already routes exclusively through the human-approved link_existing action. This
+            // NEVER auto-counts and NEVER auto-aliases - resolverStatus/decodeStatus above are
+            // untouched (still a normal needs_review row awaiting a human).
+            suggestedLinkProductId: resolution.nearMatchSuggestion?.productId,
           };
           set((s) => ({ needsReviewQueue: [...s.needsReviewQueue, review] }));
           enqueueAndSync([
@@ -6287,13 +6301,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         });
         applyImportedUnitCosts(rows, plan.products);
 
-        if (plan.products.length > 0 || plan.aliases.length > 0) {
-          set((s) => ({ products: [...s.products, ...plan.products], aliases: [...s.aliases, ...plan.aliases] }));
+        if (plan.products.length > 0 || plan.aliases.length > 0 || plan.refreshedProducts.length > 0) {
+          set((s) => {
+            const refreshedById = new Map(plan.refreshedProducts.map((p) => [p.id, p]));
+            return {
+              products: [
+                ...s.products.map((p) => refreshedById.get(p.id) ?? p),
+                ...plan.products,
+              ],
+              aliases: [...s.aliases, ...plan.aliases],
+            };
+          });
 
           // Queue idempotent SAVE_PRODUCT (each new product) BEFORE its aliases, then RESOLVE_ALIAS, so a
           // reloaded alias always references a persisted product. Same durable path Loop 4 proved.
+          // QA Task 7: a refreshed (existing-barcode) product is ALSO queued as SAVE_PRODUCT with the
+          // SAME id (idempotency key is id-based, so it upserts) - never a quantity change, only the
+          // descriptive fields buildProductImport already refreshed on plan.refreshedProducts.
           const items: PendingSyncItem[] = [];
-          for (const p of plan.products) {
+          for (const p of [...plan.products, ...plan.refreshedProducts]) {
             items.push(makeQueueItem({
               idFactory, now, businessId: state.businessId, sessionId: state.sessionId,
               entityType: "Product", entityId: p.id, operation: "SAVE_PRODUCT", payload: p,
@@ -6321,6 +6347,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             aliasesCreated: plan.aliases.length,
             duplicates: plan.duplicates.length,
             conflicts: plan.conflicts.length,
+            refreshed: plan.refreshed.length,
           },
         });
 
@@ -6330,6 +6357,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           aliasesCreated: plan.aliases.length,
           duplicates: plan.duplicates.length,
           conflicts: plan.conflicts,
+          refreshed: plan.refreshed.length,
         };
       },
 

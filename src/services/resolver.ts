@@ -3,6 +3,60 @@ import { cleanScanCode } from "@/services/scanCleaner";
 import { detectCodeType } from "@/services/codeTypeDetector";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
+import { levenshteinWithin } from "@/services/textDistance";
+
+// QA Task 8 (owner-approved 2026-07-15): review-only near-match SKU suggestion. A typo like
+// T432118 scanned when the shop's real SKU is T432119 should not sit as a bare "unknown" - but it
+// must NEVER be guessed into a match. This surfaces a "Did you mean <X>?" hint ONLY when exactly
+// one verified product/approved-alias code is within Levenshtein distance 1, and only ever as an
+// optional field the Needs Review UI can act on through the EXISTING human-approved link_existing
+// path (see NeedsReviewTable's suggestedLinkProductId "Link to <product>" pattern). It never
+// changes resolverStatus, never auto-counts, never auto-creates an alias.
+const NEAR_MATCH_MAX_DISTANCE = 1;
+const NEAR_MATCH_MIN_CODE_LENGTH = 5;
+
+function findNearMatchSuggestion(
+  cleanCode: string,
+  products: Product[],
+  aliases: Alias[],
+  businessId: string,
+): ResolverResult["nearMatchSuggestion"] {
+  type Candidate = { productId: string; matchedOn: string; distance: number };
+  const candidates: Candidate[] = [];
+
+  const consider = (productId: string, code: string) => {
+    if (!code) return;
+    const distance = levenshteinWithin(cleanCode, code, NEAR_MATCH_MAX_DISTANCE);
+    if (distance !== null && distance > 0) {
+      candidates.push({ productId, matchedOn: code, distance });
+    }
+  };
+
+  // Only VERIFIED products and APPROVED aliases participate - same trust gate as a real Known
+  // match. An AI-guessed or unverified product must never seed a suggestion either.
+  for (const p of products) {
+    if (p.businessId !== businessId || p.status === "archived" || !p.verified) continue;
+    consider(p.id, p.primarySku);
+    for (const vc of p.vendorCodes ?? []) consider(p.id, vc);
+  }
+  for (const a of aliases) {
+    if (a.businessId !== businessId || !a.approved) continue;
+    consider(a.productId, a.cleanCode);
+  }
+
+  // Reduce to distinct products (a product may have several near-miss codes; count it once at its
+  // best distance) before requiring EXACTLY one candidate overall.
+  const byProduct = new Map<string, Candidate>();
+  for (const c of candidates) {
+    const existing = byProduct.get(c.productId);
+    if (!existing || c.distance < existing.distance) byProduct.set(c.productId, c);
+  }
+
+  if (byProduct.size !== 1) return undefined; // 0 or >=2 distinct products -> never guess.
+
+  const only = [...byProduct.values()][0];
+  return { productId: only.productId, matchedOn: only.matchedOn, distance: only.distance };
+}
 
 // The ProductResolver. DETERMINISTIC ONLY. It never calls AI and never returns a "suggested" or
 // "mock" identity. It returns "known" exclusively when the deterministic matcher hits an APPROVED
@@ -99,6 +153,15 @@ export function resolveScan(
           ? "Vendor/Amazon label. Link it to a product once and it will count automatically after that."
           : "No approved alias or verified product matches this code yet.") + lengthFlag;
 
+  // QA Task 8: only alpha_sku codes of length >= 5 are eligible for a near-match suggestion. Purely
+  // numeric codes (UPC/EAN/GTIN/numeric_sku) are unaffected - that class is handled by Task 4's
+  // GTIN canonicalization, not here (a numeric typo class has different failure modes and no such
+  // guessing rule was approved for it).
+  const nearMatchSuggestion =
+    codeType === "alpha_sku" && cleaned.cleanCode.length >= NEAR_MATCH_MIN_CODE_LENGTH
+      ? findNearMatchSuggestion(cleaned.cleanCode, products, aliases, businessId)
+      : undefined;
+
   return {
     ...base,
     resolverStatus: "needs_review",
@@ -106,6 +169,7 @@ export function resolveScan(
     productId: null,
     confidence: 0,
     reason,
+    ...(nearMatchSuggestion ? { nearMatchSuggestion } : {}),
   };
 }
 
