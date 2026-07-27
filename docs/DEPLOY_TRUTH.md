@@ -101,3 +101,5 @@ expects it.
 Treat this file as authoritative over any older, vaguer description of "how deploy works" elsewhere in
 the docs. If another doc's deploy description conflicts with this one, this file wins; fix the other
 doc rather than trusting it.
+
+Proof: this line was deployed via the GitHub pipeline (2026-07-27).
