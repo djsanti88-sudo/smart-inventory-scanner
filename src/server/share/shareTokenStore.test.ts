@@ -129,3 +129,57 @@ describe("shareTokenStore durable-write requirement in production", () => {
     expect(resolved).toEqual(payload);
   });
 });
+
+// M1 (resilience nit, not a fail-loud behavior change): the Turso client is module-memoized and was
+// only marked "unavailable" when CONSTRUCTION fails, not when a subsequent durable WRITE (execute)
+// fails - so once Turso goes bad mid-session, the same dead client instance kept being reused and
+// re-failing on every request instead of being retried fresh. This suite proves the memoized client
+// is invalidated after a write failure (next call re-attempts construction), while confirming F6's
+// prod-throw / dev-fallback outcomes are unchanged (covered by the two suites above, which must stay
+// green after this fix).
+describe("shareTokenStore client resilience after a write failure (M1)", () => {
+  const execute = vi.fn();
+
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("TURSO_DATABASE_URL", "libsql://example.turso.io");
+    vi.stubEnv("TURSO_AUTH_TOKEN", "test-token");
+    vi.stubEnv("SHARE_TOKEN_FILE", ":memory:");
+    vi.stubEnv("NODE_ENV", "test"); // dev/test fallback path so the write failure doesn't throw
+    execute.mockReset();
+    createClient.mockReset();
+    __resetShareTokenStoreForTests();
+  });
+
+  it("re-attempts client construction on the next call after a durable write failure, instead of reusing the dead client", async () => {
+    // First call: construction succeeds, DDL (ensureTable) succeeds, but the INSERT write fails.
+    execute.mockImplementationOnce(async () => ({ rows: [] })); // DDL
+    execute.mockImplementationOnce(async () => { throw new Error("turso unreachable"); }); // INSERT
+    createClient.mockReturnValueOnce({ execute });
+
+    const now = Date.now();
+    const payload = {
+      businessId: "b1",
+      sessionId: "s1",
+      reportSnapshot: reportSnapshot(),
+      createdAt: now,
+      expiresAt: now + 60_000,
+    };
+
+    await mintShareToken(payload, 60_000);
+    expect(createClient).toHaveBeenCalledTimes(1);
+    // Falls back to file/memory since NODE_ENV is not production - proves the call still succeeded.
+    expect(__getShareTokenStoreBackendForTests()).toBe("memory");
+
+    // Second call: construction succeeds again and this time DDL + write both succeed. If the
+    // memoized client from the first call were reused instead of reset, createClient would NOT be
+    // called again here (it would stay at 1), and this call would still hit the failing execute mock.
+    execute.mockImplementationOnce(async () => ({ rows: [] })); // DDL (tableReady was reset too)
+    execute.mockImplementationOnce(async () => ({ rows: [] })); // INSERT
+    createClient.mockReturnValueOnce({ execute });
+
+    await mintShareToken(payload, 60_000);
+    expect(createClient).toHaveBeenCalledTimes(2);
+    expect(__getShareTokenStoreBackendForTests()).toBe("turso");
+  });
+});

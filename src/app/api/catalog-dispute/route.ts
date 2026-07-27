@@ -5,6 +5,8 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { accessLevelServer } from "@/services/security/roleAccess";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { canonicalGtin } from "@/services/upc/gtin";
+import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
 import { disputeCatalogEntry } from "@/server/catalog/catalogDispute";
 import { logServerEvent } from "@/server/log";
 
@@ -36,8 +38,27 @@ interface DisputeBody {
   reason?: unknown;
 }
 
-function json(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
+const MAX_BUSINESS_ID_LENGTH = 128;
+const MAX_NORMALIZED_BARCODE_LENGTH = 64;
+const MAX_REASON_LENGTH = 2000;
+const CATALOG_DISPUTE_RATE_LIMIT = 120;
+
+function ipFromRequest(request: NextRequest): string {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    "local"
+  );
+}
+
+function json(body: unknown, statusOrInit: number | ResponseInit = 200): NextResponse {
+  const options = typeof statusOrInit === "number"
+    ? { status: statusOrInit, headers: { "Cache-Control": "no-store" } }
+    : {
+        ...statusOrInit,
+        headers: { ...statusOrInit.headers, "Cache-Control": "no-store" },
+      };
+  return NextResponse.json(body, options);
 }
 
 function authConfigurationError(error: unknown): boolean {
@@ -50,6 +71,23 @@ function stringField(value: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
+  const ip = ipFromRequest(request);
+  try {
+    const rl = await checkRateLimit(ip, {
+      limit: intEnv(process.env.CATALOG_DISPUTE_RATE_LIMIT, CATALOG_DISPUTE_RATE_LIMIT),
+      storage: await ladderStorage(),
+    });
+    if (!rl.allowed) {
+      logServerEvent({ route: "/api/catalog-dispute", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+      return json(
+        { error: "Too many requests. Slow down and try again.", reasonCode: "rate_limited" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
+    }
+  } catch {
+    logServerEvent({ route: "/api/catalog-dispute", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
+  }
+
   let body: DisputeBody;
   try {
     const parsed = (await request.json()) as unknown;
@@ -67,6 +105,15 @@ export async function POST(request: NextRequest) {
   // Reason is untrusted user text (semantic firewall) - passed through as a plain string;
   // disputeCatalogEntry itself caps its length before it ever reaches Firestore.
   const reason = typeof body.reason === "string" ? body.reason : undefined;
+  if (businessId.length > MAX_BUSINESS_ID_LENGTH) {
+    return json({ error: "businessId is too long." }, 400);
+  }
+  if (normalizedBarcode.length > MAX_NORMALIZED_BARCODE_LENGTH) {
+    return json({ error: "normalizedBarcode is too long." }, 400);
+  }
+  if (typeof reason === "string" && reason.length > MAX_REASON_LENGTH) {
+    return json({ error: "reason is too long." }, 400);
+  }
 
   if (!normalizedBarcode) {
     return json({ error: "Missing normalizedBarcode." }, 400);

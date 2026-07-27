@@ -22,9 +22,11 @@ describe("unsyncedSignOutMessage", () => {
     expect(unsyncedSignOutMessage(0)).toContain("counts are saved");
   });
   it("honest discard warning, singular vs plural", () => {
-    expect(unsyncedSignOutMessage(1)).toContain("1 scan could not sync");
+    expect(unsyncedSignOutMessage(1)).toContain("1 queued change could not sync");
+    expect(unsyncedSignOutMessage(1)).toContain("across your businesses");
     expect(unsyncedSignOutMessage(1)).toContain("discard it permanently");
-    expect(unsyncedSignOutMessage(3)).toContain("3 scans could not sync");
+    expect(unsyncedSignOutMessage(3)).toContain("3 queued changes could not sync");
+    expect(unsyncedSignOutMessage(3)).toContain("across your businesses");
     expect(unsyncedSignOutMessage(3)).toContain("discard them permanently");
   });
 });
@@ -44,11 +46,11 @@ describe("runSignOutFlow", () => {
     expect(order).toEqual(["reset", "signOut", "redirect"]);
   });
 
-  it("warns HONESTLY when scans could not sync (confirm receives the discard message)", async () => {
+  it("warns HONESTLY when queued changes across businesses could not sync", async () => {
     prepareSignOut.mockResolvedValue(2);
     const confirmFn = vi.fn(() => true);
     await runSignOutFlow(vi.fn(), confirmFn);
-    expect(confirmFn).toHaveBeenCalledWith(expect.stringContaining("2 scans could not sync"));
+    expect(confirmFn).toHaveBeenCalledWith(expect.stringContaining("2 queued changes could not sync"));
   });
 
   it("cancel aborts entirely: no reset, no signOut, no redirect", async () => {
