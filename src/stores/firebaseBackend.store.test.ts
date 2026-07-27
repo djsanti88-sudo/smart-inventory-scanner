@@ -42,18 +42,18 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(store.getState().pendingSyncQueue.length).toBeGreaterThan(0);
   });
 
-  it("setBusinessContext drains the queue to the cloud target (async)", async () => {
+  it("scans drain to the cloud target after setBusinessContext establishes the tenant", async () => {
     const target = new FakeAsyncTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true });
-    store.getState().processScan("999999999999");
-    await flush();
-    expect(target.applied).toHaveLength(0);
 
     store.getState().setBusinessContext("biz-real", "user-real");
     await flush();
     expect(store.getState().businessContextReady).toBe(true);
     expect(store.getState().userId).toBe("user-real");
     expect(store.getState().businessId).toBe("biz-real");
+
+    store.getState().processScan("999999999999");
+    await flush();
     expect(target.applied.length).toBeGreaterThan(0); // queued items drained
     expect(store.getState().lastSyncError).toBeNull();
     expect(store.getState().pendingSyncQueue).toHaveLength(0);

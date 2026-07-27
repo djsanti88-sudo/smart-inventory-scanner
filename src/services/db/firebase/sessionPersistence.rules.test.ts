@@ -95,6 +95,24 @@ describe.skipIf(!ready)("Loop 3 session/count persistence (emulator)", () => {
     const got = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "countSessions", SID));
     expect(got.exists()).toBe(true);
     expect((got.data() as { status: string }).status).toBe("active");
+    const marker = await getDoc(
+      doc(
+        env.authenticatedContext(UID).firestore() as unknown as Firestore,
+        "businesses",
+        BIZ,
+        "_appliedKeys",
+        `${SID}-active`,
+      ),
+    );
+    expect(marker.data()).toMatchObject({
+      businessId: BIZ,
+      entityType: "CountSession",
+      entityId: SID,
+      sessionId: SID,
+      targetId: SID,
+      operation: "SAVE_SESSION",
+      scanEventId: null,
+    });
   });
 
   it("finishSession (distinct key) updates the SAME session to completed without losing start metadata", async () => {

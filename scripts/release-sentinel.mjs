@@ -31,6 +31,11 @@ export function evaluateSentinel(input = {}) {
   if (!input.approvedSha) B("missing_sha_approval", "No approved SHA. Owner must confirm exactly: DEPLOY THIS SHA.");
   else if (input.head && input.approvedSha !== input.head) B("sha_mismatch", `Approved SHA ${input.approvedSha} != current HEAD ${input.head}.`);
   if (!input.rollbackTarget) B("missing_rollback", "No rollback target set (e.g. baseline-v1).");
+  if (Array.isArray(input.gitReadFailures) && input.gitReadFailures.length) {
+    for (const f of input.gitReadFailures) {
+      B("git_read_failed", `${f.command}: ${f.error}`);
+    }
+  }
 
   // --- Vercel (facts passed in by the agent) ---
   if ((input.vercelProjectCount ?? 0) > 1) B("multiple_vercel_projects", `${input.vercelProjectCount} Vercel projects deploy this repo - exactly ONE is allowed.`);
@@ -89,35 +94,59 @@ export function buildDeployCard(input = {}) {
 }
 
 // --- CLI (read-only): gathers LOCAL facts via `git` reads + .firebaserc/.vercel; network facts come
-// from SENTINEL_* env so the script never reaches out itself. Never exits non-zero unless --strict. ---
+// from SENTINEL_* env so the script never reaches out itself.
 function runningAsScript() {
   const a = process.argv[1] || "";
   return a.endsWith("release-sentinel.mjs");
 }
 if (runningAsScript()) {
-  const git = (args) => { try { return execFileSync("git", args, { encoding: "utf8" }).trim(); } catch { return ""; } };
+  const git = (args, command) => {
+    try {
+      return { ok: true, value: execFileSync("git", args, { encoding: "utf8" }).trim() };
+    } catch (error) {
+      return {
+        ok: false,
+        value: "",
+        error: error instanceof Error ? `${command}: ${error.message}` : `${command}: Git command failed`,
+      };
+    }
+  };
+
   const lines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
-  const dirty = lines(git(["status", "--porcelain"]));
-  const staged = lines(git(["diff", "--cached", "--name-only"]));
+  const failures = [];
+  const status = git(["status", "--porcelain"], "git status --porcelain");
+  if (!status.ok) failures.push({ command: "git status --porcelain", error: status.error });
+  const stagedFiles = git(["diff", "--cached", "--name-only"], "git diff --cached --name-only");
+  if (!stagedFiles.ok) failures.push({ command: "git diff --cached --name-only", error: stagedFiles.error });
+  const branch = git(["branch", "--show-current"], "git branch --show-current");
+  if (!branch.ok) failures.push({ command: "git branch --show-current", error: branch.error });
+  const head = git(["rev-parse", "HEAD"], "git rev-parse HEAD");
+  if (!head.ok) failures.push({ command: "git rev-parse HEAD", error: head.error });
+
+  const dirty = lines(status.value);
+  const staged = lines(stagedFiles.value);
   let firebaseDefaultProject = null;
   try { firebaseDefaultProject = JSON.parse(fs.readFileSync(".firebaserc", "utf8")).projects?.default ?? null; } catch {}
   let linkedVercelProject = null;
   try { linkedVercelProject = JSON.parse(fs.readFileSync(".vercel/project.json", "utf8")).projectName ?? null; } catch {}
+
+  const reportOnly = process.argv.includes("--report-only");
   const input = {
     dirtyCount: dirty.length,
     stagedFiles: staged,
-    branch: git(["branch", "--show-current"]),
-    head: git(["rev-parse", "HEAD"]),
+    branch: branch.value,
+    head: head.value,
     firebaseDefaultProject,
     linkedVercelProject,
     liveAiKeysPresent: !!(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY),
     isE2E: process.env.IS_E2E === "1",
     localProof: process.env.SENTINEL_LOCAL_PROOF !== "0",
     approvedSha: process.env.SENTINEL_APPROVED_SHA || null,
-    rollbackTarget: process.env.SENTINEL_ROLLBACK || "baseline-v1",
+    rollbackTarget: process.env.SENTINEL_ROLLBACK ?? null,
+    gitReadFailures: failures,
     vercelProjectCount: process.env.SENTINEL_VERCEL_PROJECT_COUNT ? Number(process.env.SENTINEL_VERCEL_PROJECT_COUNT) : undefined,
   };
   const out = process.argv.includes("--deploy-card") ? buildDeployCard({ ...input, env: process.env }) : evaluateSentinel(input);
   console.log(JSON.stringify(out, null, 2));
-  if (process.argv.includes("--strict") && out.verdict === "BLOCKED") process.exit(1);
+  if (out.verdict === "BLOCKED" && !process.argv.includes("--deploy-card") && !reportOnly) process.exit(1);
 }

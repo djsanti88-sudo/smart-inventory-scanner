@@ -75,7 +75,7 @@ export type SyncOperation =
   | "SAVE_PRODUCT"
   | "SAVE_SESSION";
 
-export type PendingItemStatus = "pending" | "syncing" | "synced" | "error";
+export type PendingItemStatus = "pending" | "syncing" | "synced" | "error" | "quarantined";
 
 export type AiCircuitState = "closed" | "open" | "half_open";
 
@@ -561,6 +561,8 @@ export interface AiStatus {
   openaiEnabled: boolean; // ENABLE_OPENAI_LOOKUP
   geminiConfigured: boolean; // GEMINI_API_KEY present (server-side)
   openaiConfigured: boolean; // OPENAI_API_KEY present (server-side)
+  /** Server says decode has a free/local rung (corpus/cache/prefix) before paid provider gates. */
+  freeDecodeAvailable?: boolean;
   premiumFallback: boolean; // ENABLE_PREMIUM_MODEL_FALLBACK
   mode: string; // AI_LOOKUP_MODE
   dailyLimit: number; // AI_LOOKUP_DAILY_LIMIT

@@ -32,6 +32,7 @@ export function ExportMenu() {
   const currentSession = useScanStore((store) => store.currentSession);
   const level = useAccessLevel();
   const isPlatform = level === "platform";
+  const activePendingQueue = s.pendingSyncQueue.filter((item) => item.businessId === s.businessId);
 
   // M2 fix (same leak class as F2/FinalCountTable): refreshFromCloud intentionally does an ADDITIVE
   // cross-session merge into finalCounts (a tested cross-device sync path - see
@@ -68,7 +69,7 @@ export function ExportMenu() {
         { group: "Activity", datasets: [
           { testid: "export-raw-log", title: "Raw scan log", filenameBase: "raw-scan-log", rows: s.scanFeed.length, csv: () => exportRawScanLog(s.scanFeed) },
           { testid: "export-unknowns", title: "Unrecognised codes", filenameBase: "unknown-codes", rows: s.needsReviewQueue.length, csv: () => exportUnknowns(s.needsReviewQueue) },
-          { testid: "export-pending", title: "Items waiting to sync", filenameBase: "pending-sync", rows: s.pendingSyncQueue.length, csv: () => exportPendingQueue(s.pendingSyncQueue) },
+          { testid: "export-pending", title: "Items waiting to sync", filenameBase: "pending-sync", rows: activePendingQueue.length, csv: () => exportPendingQueue(activePendingQueue) },
         ] },
         { group: "Catalog", datasets: [
           { testid: "export-products", title: "Products", filenameBase: "products", rows: s.products.length, csv: () => exportProducts(s.products) },
