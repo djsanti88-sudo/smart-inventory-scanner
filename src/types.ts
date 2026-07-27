@@ -561,6 +561,8 @@ export interface AiStatus {
   openaiEnabled: boolean; // ENABLE_OPENAI_LOOKUP
   geminiConfigured: boolean; // GEMINI_API_KEY present (server-side)
   openaiConfigured: boolean; // OPENAI_API_KEY present (server-side)
+  /** Server says decode has a free/local rung (corpus/cache/prefix) before paid provider gates. */
+  freeDecodeAvailable?: boolean;
   premiumFallback: boolean; // ENABLE_PREMIUM_MODEL_FALLBACK
   mode: string; // AI_LOOKUP_MODE
   dailyLimit: number; // AI_LOOKUP_DAILY_LIMIT

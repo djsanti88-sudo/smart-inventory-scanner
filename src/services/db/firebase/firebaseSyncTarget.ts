@@ -1,6 +1,6 @@
 import { type Firestore, collection, doc, getDocs, orderBy, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview, Product, InventorySession } from "@/types";
-import type { SyncResult, FailureMode, IncrementPayload } from "@/services/mockDb";
+import type { SyncResult, IncrementPayload } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { COLLECTIONS } from "@/services/db/types";
 import {
@@ -50,6 +50,10 @@ function markerMatches(
   return MARKER_ENVELOPE_FIELDS.every((field) => stored[field] === expected[field]);
 }
 
+function withoutUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
+
 export class FirebaseSyncTarget implements SyncTarget {
   constructor(
     private readonly db: Firestore,
@@ -57,7 +61,7 @@ export class FirebaseSyncTarget implements SyncTarget {
   ) {}
 
   // Failure simulation is a mock/test concept; the real target has none.
-  setFailure(_mode: FailureMode): void {}
+  setFailure(): void {}
 
   // Guarded: never destructively wipe real cloud data. Allowed only in emulator/test mode (no-op there;
   // tests clear Firestore via the emulator's clear endpoint / rules-unit-testing).
@@ -158,22 +162,22 @@ export class FirebaseSyncTarget implements SyncTarget {
         switch (item.operation) {
           case "SAVE_SCAN_EVENT": {
             const ev = item.payload as ScanEvent;
-            tx.set(sub(COLLECTIONS.scanEvents, ev.id), { ...ev, businessId: bid, createdAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.scanEvents, ev.id), withoutUndefined({ ...ev, businessId: bid, syncedAt: serverTimestamp() }));
             break;
           }
           case "SAVE_UNKNOWN_SCAN": {
             const r = item.payload as UnknownCodeReview;
-            tx.set(sub(COLLECTIONS.unknownCodeReviews, r.id), { ...r, businessId: bid, createdAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.unknownCodeReviews, r.id), withoutUndefined({ ...r, businessId: bid, createdAt: serverTimestamp() }));
             break;
           }
           case "RESOLVE_ALIAS": {
             const a = item.payload as Alias;
-            tx.set(sub(COLLECTIONS.aliases, a.id), { ...a, businessId: bid, updatedAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.aliases, a.id), withoutUndefined({ ...a, businessId: bid, updatedAt: serverTimestamp() }));
             break;
           }
           case "SAVE_PRODUCT": {
             const pr = item.payload as Product;
-            tx.set(sub(COLLECTIONS.products, pr.id), { ...pr, businessId: bid, updatedAt: serverTimestamp() }, { merge: true });
+            tx.set(sub(COLLECTIONS.products, pr.id), withoutUndefined({ ...pr, businessId: bid, updatedAt: serverTimestamp() }), { merge: true });
             break;
           }
           case "SAVE_SESSION": {
@@ -183,7 +187,7 @@ export class FirebaseSyncTarget implements SyncTarget {
             const sess = item.payload as InventorySession;
             tx.set(
               sub(COLLECTIONS.countSessions, sess.id),
-              { ...sess, businessId: bid, updatedAt: serverTimestamp() },
+              withoutUndefined({ ...sess, businessId: bid, updatedAt: serverTimestamp() }),
               { merge: true },
             );
             break;

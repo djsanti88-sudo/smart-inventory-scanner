@@ -33,10 +33,12 @@ async function waitDrained(page: Page) {
 }
 
 test("Firebase-backed end-to-end (real auth, real business context, survive-refresh)", async ({ page }) => {
-  // Never call live AI in this run.
-  const aiCalls: string[] = [];
+  // The dev server is launched with IS_E2E=1, so /api/ai-lookup is mock-only and cannot call live
+  // providers. The client is allowed to POST there so free/local corpus/cache rungs can run even when
+  // paid provider keys are missing.
+  const decodeCalls: string[] = [];
   page.on("request", (r) => {
-    if (r.url().includes("/api/ai-lookup") && r.method() === "POST") aiCalls.push(r.url());
+    if (r.url().includes("/api/ai-lookup")) decodeCalls.push(r.url());
   });
 
   // 1. REAL sign-in through the login UI (Auth emulator).
@@ -73,7 +75,7 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await row.getByTestId("open-create").click();
   await row.getByLabel("product name").fill("FB Mystery");
   await row.getByTestId("create-save").click();
-  await expect(row).toContainText(/resolved|create_new/i);
+  await expect(page.getByTestId(`review-row-${UNKNOWN_CODE}`)).toHaveCount(0);
   await waitDrained(page); // ensure SAVE_PRODUCT + RESOLVE_ALIAS reached the emulator before reloading /scan
   await page.screenshot({ path: `${PROOF}/04-approved.png`, fullPage: true });
 
@@ -88,10 +90,27 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await expect(page.getByTestId("business-context-banner")).toHaveCount(0);
   await expect(page.getByTestId(`qty-${KNOWN_PRODUCT_ID}`)).toHaveText("2"); // counts persisted, not doubled
   await expect(page.getByTestId("final-count-body")).toContainText("FB Mystery"); // learned product persisted
+  await expect(page.getByText("4 scans", { exact: true })).toBeVisible(); // scan feed also rebuilt from Firestore
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // scanner focus still works after reload
   await page.screenshot({ path: `${PROOF}/05-after-refresh.png`, fullPage: true });
 
-  // 10. Finish the session (persists completed state + audit), then export a CSV.
+  // 10. Open History/session detail before finishing: the active session's scan timeline must be
+  // readable from Firestore after reload, not just the product-count summary.
+  await page.goto("/history");
+  await expect(page.getByTestId("history-table")).toBeVisible();
+  const activeHistoryRow = page.locator('[data-testid^="history-row-"]').first();
+  await expect(activeHistoryRow).toContainText("4");
+  await Promise.all([
+    page.waitForURL("**/sessions/**"),
+    activeHistoryRow.click({ position: { x: 20, y: 20 } }),
+  ]);
+  await expect(page.getByTestId("session-timeline-table").locator("tbody tr")).toHaveCount(4);
+  await expect(page.getByTestId("session-timeline-table")).toContainText(UNKNOWN_CODE);
+  await page.screenshot({ path: `${PROOF}/05b-history-detail-timeline.png`, fullPage: true });
+  await page.goto("/scan");
+
+  // 11. Finish the session (persists completed state + audit), then export a CSV.
+  await page.getByText("Sessions and export", { exact: true }).click();
   await page.getByTestId("finish-session").click();
   await waitDrained(page);
   await page.getByTestId("export-menu-trigger").click(); // exports now live in the unified Export dropdown
@@ -103,8 +122,8 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await download.saveAs(`${PROOF}/final-counts.csv`);
   await page.screenshot({ path: `${PROOF}/06-finished-exported.png`, fullPage: true });
 
-  // No live AI was ever called.
-  expect(aiCalls).toHaveLength(0);
+  // Server decode was attempted, but in this Firebase proof it is mock-only (IS_E2E=1), not live AI.
+  expect(decodeCalls.length).toBeGreaterThanOrEqual(1);
 
   // ---- Genuine persistence proof: assert the EMULATOR state directly via the Admin SDK ----
   const db = adminDb();

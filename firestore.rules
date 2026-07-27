@@ -176,7 +176,8 @@ service cloud.firestore {
         && target.id == marker.entityId
         && target.businessId == bid
         && target.sessionId == marker.sessionId
-        && target.createdAt == request.time
+        && target.createdAt is string
+        && target.syncedAt == request.time
         && counterOwnActiveSession(bid, marker.sessionId);
     }
     function counterUnknownMarkerOk(bid) {

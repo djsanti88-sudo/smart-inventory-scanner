@@ -232,11 +232,13 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
 
   it("SAVE_SCAN_EVENT / SAVE_UNKNOWN_SCAN / RESOLVE_ALIAS persist and are idempotent", async () => {
     const t = target();
-    const ev: PendingSyncItem = { ...incItem("se1", "ev1", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", entityId: "ev1", payload: { id: "ev1", businessId: BIZ, sessionId: SID, cleanCode: "111" } };
+    const scannedAt = "2026-07-26T20:00:00.000Z";
+    const ev: PendingSyncItem = { ...incItem("se1", "ev1", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", entityId: "ev1", payload: { id: "ev1", businessId: BIZ, sessionId: SID, cleanCode: "111", createdAt: scannedAt, decodeStatus: undefined } };
     expect((await t.apply(ev)).alreadyApplied).toBe(false);
     expect((await t.apply(ev)).alreadyApplied).toBe(true); // idempotent
     const got = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "scanEvents", "ev1"));
     expect(got.exists()).toBe(true);
+    expect((got.data() as { createdAt?: string }).createdAt).toBe(scannedAt);
 
     const rv: PendingSyncItem = { ...incItem("rv1", "r1", 0), operation: "SAVE_UNKNOWN_SCAN", entityType: "UnknownCodeReview", entityId: "r1", scanEventId: null, payload: { id: "r1", businessId: BIZ, sessionId: SID, cleanCode: "999" } };
     expect((await t.apply(rv)).ok).toBe(true);
@@ -248,7 +250,7 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
 
   it("SAVE_PRODUCT persists the product and retry does not duplicate", async () => {
     const t = target();
-    const pItem: PendingSyncItem = { ...incItem("sp1", "pp1", 0), operation: "SAVE_PRODUCT", entityType: "Product", entityId: "prod1", scanEventId: null, payload: { id: "prod1", businessId: BIZ, name: "Widget", primaryBarcode: "012345678905", verified: true } };
+    const pItem: PendingSyncItem = { ...incItem("sp1", "pp1", 0), operation: "SAVE_PRODUCT", entityType: "Product", entityId: "prod1", scanEventId: null, payload: { id: "prod1", businessId: BIZ, name: "Widget", primaryBarcode: "012345678905", verified: true, structuredBrand: undefined } };
     expect((await t.apply(pItem)).alreadyApplied).toBe(false);
     expect((await t.apply(pItem)).alreadyApplied).toBe(true); // idempotent retry -> no duplicate
     const got = await getDoc(doc(env.authenticatedContext(UID).firestore() as unknown as Firestore, "businesses", BIZ, "products", "prod1"));

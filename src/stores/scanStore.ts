@@ -64,7 +64,7 @@ import { deriveBrandPrefixHints, decodeBarcodeStructure } from "@/services/ai/ba
 import { prefixFloorName, type PrefixFloorResult } from "@/services/catalog/prefixFloor";
 import { fetchPrefixFloorEnrichment, isBareUnidentifiedLabel } from "@/services/catalog/prefixFloorEnrich";
 import { detectScanContextConflict, detectOffCategoryAdvisory, detectIdentityContextConflict, conflictReason } from "@/services/ai/scanContextFirewall";
-import { isCatalogWritable, sanitizeCatalogEntry, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
+import { isCatalogWritable, toMasterAwareStoreEntry } from "@/services/catalog/sanitizeCatalog";
 import { findIdentityMerge } from "@/services/catalog/identityMerge";
 import { enrichProductIdentity } from "@/services/catalog/enrichProductIdentity";
 import { toMasterCandidates } from "@/services/catalog/masterCandidates";
@@ -227,6 +227,7 @@ const DEFAULT_AI_STATUS: AiStatus = {
   openaiEnabled: true,
   geminiConfigured: false,
   openaiConfigured: false,
+  freeDecodeAvailable: false,
   premiumFallback: false,
   mode: "aggressive",
   dailyLimit: 100,
@@ -256,11 +257,16 @@ function evaluateAutoDecode(p: {
   if (!p.status.autoDecodeOnScan) return { allowed: false, reason: "Auto decode on scan is disabled." };
   if (p.status.emergencyStop) return { allowed: false, reason: "Emergency stop is active. AI calls are paused." };
   if (!p.online) return { allowed: false, reason: "Offline. Saved locally; AI was not called." };
-  if (!p.status.geminiConfigured && !p.status.openaiConfigured) {
+  const freeDecodeAvailable = p.status.freeDecodeAvailable === true;
+  // When the server advertises free/local decode rungs (tire corpus, retail corpus, caches), do not
+  // client-block solely on paid-provider keys or a spent cap: the server will answer $0 hits before
+  // applying paid-rung gates. Older/mocked status payloads omit this flag, so they keep the legacy
+  // key/cap client gate and existing tests do not accidentally start real/network decode attempts.
+  if (!freeDecodeAvailable && !p.status.geminiConfigured && !p.status.openaiConfigured) {
     const missing = p.status.missingKeys.join(", ") || "GEMINI_API_KEY, OPENAI_API_KEY";
     return { allowed: false, reason: `No API keys configured (missing: ${missing}). Set them server-side, then retry live decode.` };
   }
-  if (isDailyCapReached(p.dailyCount, p.dailyLimit))
+  if (!freeDecodeAvailable && isDailyCapReached(p.dailyCount, p.dailyLimit))
     return { allowed: false, reason: "Daily AI lookup cap reached. Routed to Needs Review." };
   if (!canRequest(p.breaker, p.now).allowed)
     return { allowed: false, reason: "AI circuit breaker is open after repeated failures. Routed to Needs Review." };
@@ -505,6 +511,7 @@ export interface ScanStoreDeps {
     aliases: Alias[];
     sessions: InventorySession[];
     counts: InventoryCount[];
+    scanEvents?: ScanEvent[];
   }>;
   // Fire-and-forget audit sink (cloud -> auditRepository.append). Optional: when absent (mock/default)
   // audit is a no-op. It must never throw into the scanner path; the store also guards every call.
@@ -1143,7 +1150,7 @@ function recomputeSyncStatus(state: {
 // reviews are keyed to their originating scan event via idempotencyKey's event segment;
 // we stash the scanEventId on the review's idempotencyKey, so derive it back here.
 function idForReview(r: UnknownCodeReview): string {
-  const parts = r.idempotencyKey.split(":");
+  const parts = (r.idempotencyKey ?? "").split(":");
   return parts[2] ?? r.id;
 }
 
@@ -1529,6 +1536,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     countsByKey.set(key, remote);
                   }
                   next.finalCounts = [...countsByKey.values()];
+                  const pendingScanEventIds = new Set(
+                    tenantPendingQueue
+                      .map((it) => it.scanEventId ?? it.entityId)
+                      .filter((id): id is string => !!id),
+                  );
+                  if (Array.isArray(data.scanEvents)) {
+                    const remoteFeed = data.scanEvents
+                      .filter((e) => e.sessionId === restored.id)
+                      .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+                    const feedById = new Map(remoteFeed.map((e) => [e.id, e]));
+                    for (const local of cur.scanFeed) {
+                      if (local.sessionId !== restored.id) continue;
+                      if (local.syncStatus === "synced" && !pendingScanEventIds.has(local.id)) continue;
+                      feedById.set(local.id, local);
+                    }
+                    next.scanFeed = [...feedById.values()].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+                  }
                 }
                 return next;
               });
@@ -5097,12 +5121,23 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         // Mark any earlier "unknown" feed rows for this code as resolved, so the feed reflects the
         // learned mapping instead of staying red.
-        const scanFeed = get().scanFeed.map((e) =>
-          e.cleanCode === review.cleanCode &&
-          (e.status === "unknown" || e.status === "needs_review" || e.status === "conflict")
-            ? { ...e, status: "resolved" as const, resolverStatus: "resolved" as const, matchedProductId: productId }
-            : e,
-        );
+        const resolvedScanEvents: ScanEvent[] = [];
+        const scanFeed = get().scanFeed.map((e) => {
+          if (
+            e.cleanCode === review.cleanCode &&
+            (e.status === "unknown" || e.status === "needs_review" || e.status === "conflict" || e.matchedProductId !== productId)
+          ) {
+            const resolved = {
+              ...e,
+              status: "resolved" as const,
+              resolverStatus: "resolved" as const,
+              matchedProductId: productId,
+            };
+            resolvedScanEvents.push(resolved);
+            return resolved;
+          }
+          return e;
+        });
 
         // TASK 3: drop the merged provisional placeholder from the product list before committing so the
         // resolved identity never coexists with its own duplicate row.
@@ -5173,6 +5208,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               payload: newAlias,
               idempotencyKey: aliasKeyOp,
               scanEventId: null,
+            }),
+          );
+        }
+        for (const event of resolvedScanEvents) {
+          const resolutionFingerprint = `${event.id}:${event.matchedProductId}:${event.status}:${event.resolverStatus}`;
+          queued.push(
+            makeQueueItem({
+              idFactory,
+              now,
+              businessId: state.businessId,
+              sessionId: event.sessionId,
+              entityType: "ScanEvent",
+              entityId: event.id,
+              operation: "SAVE_SCAN_EVENT",
+              payload: event,
+              idempotencyKey: buildIdempotencyKey(
+                state.businessId,
+                event.sessionId,
+                `${resolutionFingerprint}:human-resolution`,
+                "SAVE_SCAN_EVENT",
+              ),
+              scanEventId: event.id,
             }),
           );
         }

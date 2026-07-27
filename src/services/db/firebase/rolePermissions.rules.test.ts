@@ -938,6 +938,7 @@ describe.skipIf(!ready)("Firestore rules - owner/admin/counter role permissions"
       cleanCode: "012345678905",
       matchedProductId: productId,
       quantityDelta: 1,
+      createdAt: "2026-07-26T20:00:00.000Z",
     };
     await expect(
       target.apply(

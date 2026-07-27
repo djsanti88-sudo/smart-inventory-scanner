@@ -136,6 +136,27 @@ describe("scanStore - human resolution learns a permanent alias", () => {
     expect(countFor(store, "prod-coke")).toBe(2);
   });
 
+  it("persists human-resolved feed rows back to the backend scan event", () => {
+    const db = new MockDb();
+    const store = createTestScanStore({ db });
+    const event = store.getState().processScan("UNKNOWN123")!;
+    expect(db.getScanEvent(event.id)?.matchedProductId).not.toBe("prod-coke");
+    const reviewId = store.getState().needsReviewQueue[0].id;
+
+    store.getState().resolveUnknown(reviewId, "link_existing", { productId: "prod-coke" });
+
+    expect(store.getState().scanFeed.find((e) => e.id === event.id)).toMatchObject({
+      status: "resolved",
+      resolverStatus: "resolved",
+      matchedProductId: "prod-coke",
+    });
+    expect(db.getScanEvent(event.id)).toMatchObject({
+      status: "resolved",
+      resolverStatus: "resolved",
+      matchedProductId: "prod-coke",
+    });
+  });
+
   it("does not create duplicate aliases when resolve sync is retried", () => {
     const db = new MockDb();
     const store = createTestScanStore({ db });
