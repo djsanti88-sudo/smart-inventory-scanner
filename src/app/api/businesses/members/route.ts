@@ -8,6 +8,8 @@ export const runtime = "nodejs";
 const BUSINESS_ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
 const SAFE_ROLES = new Set<Role>(["admin", "counter", "viewer"]);
 
+class OwnerRoleChangeError extends Error {}
+
 interface MemberCreateRequest {
   businessId: string;
   email: string;
@@ -41,9 +43,8 @@ function cleanName(value: unknown, email: string): string {
 function cleanPassword(value: unknown): string | undefined | null {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") return null;
-  const password = value.trim();
-  if (password.length < 8 || password.length > 128) return null;
-  return password;
+  if (value.length < 8 || value.length > 128) return null;
+  return value;
 }
 
 function parseRequest(value: unknown): MemberCreateRequest | null {
@@ -144,24 +145,37 @@ export async function POST(request: Request): Promise<Response> {
     const memberRef = db.doc(
       `${COLLECTIONS.businessMembers}/${memberDocId(input.businessId, authUser.uid)}`,
     );
-    await Promise.all([
-      profileRef.set({
+
+    // Read-then-write inside a transaction closes the TOCTOU gap: the target's existing
+    // membership role must be checked in the same atomic operation as the write, otherwise
+    // a concurrent request could still race an owner role change through. This is the only
+    // guard against overwriting an existing owner's role (SAFE_ROLES only restricts the
+    // *requested* role, never the *target's current* role) — see verify/v1-owner-demotion.md.
+    await db.runTransaction(async (tx) => {
+      const existingMember = await tx.get(memberRef);
+      if (existingMember.exists && existingMember.data()?.role === "owner") {
+        throw new OwnerRoleChangeError();
+      }
+      tx.set(profileRef, {
         authUserId: authUser.uid,
         email: authUser.email ?? input.email,
         name: input.name,
         updatedAt: timestamp,
         ...(createdAuthUser ? { createdAt: timestamp, signedUpAt: timestamp } : {}),
-      }, { merge: true }),
-      memberRef.set({
+      }, { merge: true });
+      tx.set(memberRef, {
         businessId: input.businessId,
         userId: authUser.uid,
         role: input.role,
         invitedBy: ownerUid,
         updatedAt: timestamp,
         ...(createdAuthUser ? { createdAt: timestamp } : {}),
-      }, { merge: true }),
-    ]);
-  } catch {
+      }, { merge: true });
+    });
+  } catch (error) {
+    if (error instanceof OwnerRoleChangeError) {
+      return json({ ok: false, reason: "cannot_change_owner_role" }, 403);
+    }
     return json({ ok: false, reason: "member_link_unavailable" }, 503);
   }
 

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getUserByEmail: vi.fn(),
   createUser: vi.fn(),
   memberGet: vi.fn(),
+  targetMemberGet: vi.fn(),
   set: vi.fn(),
   doc: vi.fn(),
 }));
@@ -17,6 +18,15 @@ vi.mock("@/lib/firebaseAdmin", () => ({
   }),
   getAdminDb: () => ({
     doc: (...args: unknown[]) => mocks.doc(...args),
+    runTransaction: async (fn: (tx: {
+      get: (ref: { get: () => unknown }) => unknown;
+      set: (ref: { set: (data: unknown, opts: unknown) => unknown }, data: unknown, opts: unknown) => unknown;
+    }) => unknown) =>
+      fn({
+        get: (ref: { get: () => unknown }) => ref.get(),
+        set: (ref: { set: (data: unknown, opts: unknown) => unknown }, data: unknown, opts: unknown) =>
+          ref.set(data, opts),
+      }),
   }),
 }));
 vi.mock("firebase-admin/firestore", () => ({
@@ -41,12 +51,17 @@ beforeEach(() => {
   mocks.getUserByEmail.mockReset().mockRejectedValue({ code: "auth/user-not-found" });
   mocks.createUser.mockReset().mockResolvedValue({ uid: "staff-1", email: "tech@example.com" });
   mocks.memberGet.mockReset().mockResolvedValue({ exists: true, data: () => ({ role: "owner" }) });
+  mocks.targetMemberGet.mockReset().mockResolvedValue({ exists: false, data: () => undefined });
   mocks.set.mockReset().mockResolvedValue(undefined);
-  mocks.doc.mockReset().mockImplementation((path: string) => ({
-    path,
-    get: path === "businessMembers/biz-1_owner-1" ? mocks.memberGet : vi.fn(),
-    set: mocks.set,
-  }));
+  mocks.doc.mockReset().mockImplementation((path: string) => {
+    if (path === "businessMembers/biz-1_owner-1") {
+      return { path, get: mocks.memberGet, set: mocks.set };
+    }
+    if (path.startsWith("businessMembers/")) {
+      return { path, get: mocks.targetMemberGet, set: mocks.set };
+    }
+    return { path, get: vi.fn(), set: mocks.set };
+  });
 });
 
 describe("POST /api/businesses/members", () => {
@@ -133,5 +148,57 @@ describe("POST /api/businesses/members", () => {
     expect(response.status).toBe(403);
     expect(mocks.getUserByEmail).not.toHaveBeenCalled();
     expect(mocks.createUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects self-demotion when the caller targets their own owner membership", async () => {
+    // caller owner-1's email resolves back to their own existing Auth user
+    mocks.getUserByEmail.mockResolvedValue({ uid: "owner-1", email: "owner@example.com" });
+    mocks.targetMemberGet.mockResolvedValue({ exists: true, data: () => ({ role: "owner" }) });
+
+    const response = await POST(request({ businessId: "biz-1", email: "owner@example.com", role: "admin" }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, reason: "cannot_change_owner_role" });
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
+
+  it("rejects demoting a different existing owner's membership", async () => {
+    mocks.getUserByEmail.mockResolvedValue({ uid: "other-owner", email: "other-owner@example.com" });
+    mocks.targetMemberGet.mockResolvedValue({ exists: true, data: () => ({ role: "owner" }) });
+
+    const response = await POST(request({ businessId: "biz-1", email: "other-owner@example.com", role: "viewer" }));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, reason: "cannot_change_owner_role" });
+    expect(mocks.set).not.toHaveBeenCalled();
+  });
+
+  it("allows role changes for an existing non-owner member", async () => {
+    mocks.getUserByEmail.mockResolvedValue({ uid: "existing-1", email: "tech@example.com" });
+    mocks.targetMemberGet.mockResolvedValue({ exists: true, data: () => ({ role: "viewer" }) });
+
+    const response = await POST(request({ businessId: "biz-1", email: "tech@example.com", role: "admin" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.set).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "existing-1",
+      role: "admin",
+    }), { merge: true });
+  });
+
+  it("does not silently trim a temporary password before validating or using it", async () => {
+    const response = await POST(request({
+      businessId: "biz-1",
+      email: "tech@example.com",
+      name: "Tech One",
+      password: "  TempPass123!  ",
+      role: "counter",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createUser).toHaveBeenCalledWith(expect.objectContaining({
+      email: "tech@example.com",
+      password: "  TempPass123!  ",
+    }));
   });
 });
