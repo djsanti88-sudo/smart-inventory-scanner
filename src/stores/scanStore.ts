@@ -1425,7 +1425,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // finalCounts linger when no session restores, so a context switch must REPLACE all four or
           // the previous tenant's rows bleed through (two users OR one user with two businesses).
           const cleared = emptyTenantState();
-          set((s) => ({
+          set({
             businessId,
             userId,
             businessContextReady: true,
@@ -1437,12 +1437,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // The old tenant's session must not survive: ensureAutoSession would ADOPT it (spreading
             // its old businessId) and enqueue foreign SAVE_SESSIONs the new tenant's rules deny
             // forever. cleared.currentSession is null, so the next scan mints a fresh session here.
+            // NOTE: pendingSyncQueue is deliberately NOT filtered here - the sync drain is tenant-aware
+            // (tenantQueueIsolation.store.test.ts), so foreign-tenant items are preserved and drain
+            // when their own tenant becomes active again, never clogging under the wrong tenant.
             currentSession: cleared.currentSession,
             sessionId: cleared.sessionId,
-            // Drop sync items queued under ANOTHER tenant (e.g. a pre-sign-in demo-business
-            // SAVE_SESSION): the real backend's rules deny them forever, so they would clog
-            // "Waiting to save" permanently - and their underlying data is wiped right here anyway.
-            pendingSyncQueue: s.pendingSyncQueue.filter((q) => q.businessId === businessId),
             scanFeed: cleared.scanFeed,
             finalCounts: cleared.finalCounts,
             needsReviewQueue: cleared.needsReviewQueue,
@@ -1464,7 +1463,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // Tenant isolation: the previous tenant's archived scan log (codes + product names) must
             // never bleed into the next tenant's History page.
             sessionHistory: cleared.sessionHistory,
-          }));
+          });
         }
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {

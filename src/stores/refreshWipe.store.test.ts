@@ -186,7 +186,12 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store2.getState().finalCounts.length, "counts survive a true refresh").toBe(2);
   });
 
-  it("(f) a tenant SWITCH drops pending sync items queued under another tenant (a pre-sign-in demo-business item can never pass the real backend's rules and would clog 'Waiting to save' forever)", () => {
+  it("(f) a tenant SWITCH preserves another tenant's pending sync items (drained later when that tenant is active) and does NOT adopt the old tenant's session", () => {
+    // Certified model (fix/release-stabilization, tenantQueueIsolation.store.test.ts): the sync drain
+    // is tenant-aware, so a foreign-tenant queue item is NOT dropped on a context switch - it is
+    // preserved and drains when its own tenant becomes active again, so it never clogs under the wrong
+    // tenant. What the switch MUST do is null the old tenant's session object: ensureAutoSession would
+    // otherwise ADOPT it (keeping its old businessId) and re-enqueue foreign saves on the next scan.
     const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
     store.setState({
       pendingSyncQueue: [
@@ -194,9 +199,7 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
       ],
     });
     store.getState().setBusinessContext("b-real", "u1");
-    expect(store.getState().pendingSyncQueue).toEqual([]);
-    // The foreign tenant's session object must not survive either: ensureAutoSession would ADOPT it
-    // (keeping its old businessId) and re-enqueue undrainable foreign saves on the next scan.
+    expect(store.getState().pendingSyncQueue.map((q) => q.id)).toEqual(["q1"]); // foreign item preserved, not dropped
     expect(store.getState().currentSession).toBeNull();
   });
 
