@@ -14,6 +14,7 @@ _HTTP_VERBS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 _HTTP_ROUTE_PREFIX = re.compile(
     r"^(?:" + "|".join(_HTTP_VERBS) + r")(?:/(?:" + "|".join(_HTTP_VERBS) + r"))*(?:\s|/)"
 )
+_PATH_EXT = re.compile(r"\.(md|ts|tsx|mjs|py|json|yml|yaml|toml|js|jsx|css)$")
 
 _DEFAULT_PROGRESS_NOTE = "PROGRESS.md lags the newest plan (allowed by doctrine)"
 
@@ -42,16 +43,69 @@ def _looks_like_path_span(span: str) -> bool:
         return False
     if "/" in span:
         return True
-    return bool(re.search(r"\.(md|ts|tsx|mjs|py|json|yml|yaml|toml|js|jsx|css)$", span))
+    return _has_known_extension(span)
 
 
-def _dead_path_spans(text: str, root: Path) -> list[str]:
+def _has_known_extension(span: str) -> bool:
+    return bool(_PATH_EXT.search(span))
+
+
+def _src_relative_index(root: Path) -> frozenset[str]:
+    """src/-relative POSIX paths and bare basenames of every file under src/.
+
+    Docs in this repo routinely reference source files with an src-relative
+    shorthand (`services/resolver.ts` for `src/services/resolver.ts`) or a bare
+    filename (`brandFamilies.ts`). Indexing both lets the checker resolve those
+    instead of falsely calling a real file dead.
+    """
+    src = root / "src"
+    if not src.is_dir():
+        return frozenset()
+    entries: set[str] = set()
+    for path in src.rglob("*"):
+        if path.is_file():
+            entries.add(path.relative_to(src).as_posix())
+            entries.add(path.name)
+    return frozenset(entries)
+
+
+def _is_checkable_path(span: str, root: Path) -> bool:
+    """Whether a path-like span is worth checking against the filesystem.
+
+    Filters out tokens that look path-like but are not files: git branch names
+    (`feat/x`), bare API routes (`/api/x`), and other extension-less refs whose
+    first path segment is not a real directory. `@/` is the tsconfig src alias.
+    """
+    if _has_known_extension(span):
+        return True
+    if span.startswith("@/"):
+        return True
+    if span.startswith("/"):
+        return False  # leading-slash, extension-less -> API route, not a file
+    first = span.split("/", 1)[0]
+    return (root / first).is_dir() or (root / "src" / first).is_dir()
+
+
+def _path_resolves(span: str, root: Path, src_index: frozenset[str]) -> bool:
+    if (root / span).exists():
+        return True
+    if span.startswith("@/"):
+        alias = span[2:]
+        return alias in src_index or (root / "src" / alias).exists()
+    if (root / "src" / span).exists():
+        return True
+    return span in src_index
+
+
+def _dead_path_spans(text: str, root: Path, src_index: frozenset[str]) -> list[str]:
     dead: list[str] = []
     for match in _BACKTICK_SPAN.finditer(text):
         span = match.group(1).strip()
         if not _looks_like_path_span(span):
             continue
-        if not (root / span).exists():
+        if not _is_checkable_path(span, root):
+            continue
+        if not _path_resolves(span, root, src_index):
             dead.append(span)
     return dead
 
@@ -94,6 +148,7 @@ def _newest_plan_mtime(root: Path) -> float | None:
 
 def check_docs(root: Path, files: list[str], package_scripts: set[str]) -> list[CheckResult]:
     results: list[CheckResult] = []
+    src_index = _src_relative_index(root)
     for filename in files:
         started_at = _now()
         check_id = f"docs-staleness:{filename}"
@@ -113,7 +168,7 @@ def check_docs(root: Path, files: list[str], package_scripts: set[str]) -> list[
             continue
 
         text = doc_path.read_text(encoding="utf-8", errors="replace")
-        dead_paths = _dead_path_spans(text, root)
+        dead_paths = _dead_path_spans(text, root, src_index)
         dead_scripts = _dead_npm_scripts(text, package_scripts)
         broken_links = _broken_relative_links(text, doc_path.parent)
 

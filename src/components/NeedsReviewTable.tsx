@@ -107,7 +107,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   const warn = lastMismatchWarning && lastMismatchWarning.reviewId === review.id ? lastMismatchWarning : null;
 
   const [mode, setMode] = useState<"idle" | "create">("idle");
-  const [linkId, setLinkId] = useState(products[0]?.id ?? "");
+  const [linkId, setLinkId] = useState("");
   const [applyToCount, setApplyToCount] = useState(true);
   const [np, setNp] = useState({ name: "", brand: "", category: "" });
 
@@ -403,6 +403,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               onChange={(e) => setLinkId(e.target.value)}
               className="min-h-[44px] max-w-48 rounded-lg border border-zinc-300 px-2 text-base"
             >
+              <option value="" disabled>
+                Select a product...
+              </option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
                   {prettifyProductName(p.name)}
@@ -412,6 +415,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             <button
               type="button"
               data-testid="link-existing"
+              disabled={!linkId}
               onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes, ...importHumanOrigin })}
               className={primaryIsApprove ? btnSecondary : btnPrimary}
             >

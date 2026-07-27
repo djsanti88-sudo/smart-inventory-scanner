@@ -10,7 +10,7 @@ import { signOut } from "@/lib/auth";
 export function unsyncedSignOutMessage(left: number): string {
   return left === 0
     ? "Log out now? Your counts are saved - you can sign back in any time to keep going."
-    : `${left} scan${left === 1 ? "" : "s"} could not sync to the cloud yet. Signing out now will discard ${left === 1 ? "it" : "them"} permanently. Sign out anyway?`;
+    : `${left} queued change${left === 1 ? "" : "s"} could not sync across your businesses. Signing out now will discard ${left === 1 ? "it" : "them"} permanently. Sign out anyway?`;
 }
 
 /**

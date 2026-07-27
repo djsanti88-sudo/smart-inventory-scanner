@@ -136,6 +136,69 @@ describe("ReconcilePanel - report rendering", () => {
   });
 });
 
+describe("ReconcilePanel session scoping (M2, same leak class as F2)", () => {
+  // refreshFromCloud intentionally does an ADDITIVE cross-session merge into finalCounts (a tested
+  // cross-device sync path - see refreshFromCloud.store.test.ts). onRunCompare's deriveCountedByUid
+  // call must use only the CURRENT session's counts, not every session's counts merged into the store.
+  it("runs the compare using only the current session's counted qty, excluding another session's count for the same product", async () => {
+    useScanStore.setState({
+      products: [product],
+      aliases: [],
+      finalCounts: [
+        {
+          id: "c1", businessId: "biz-1", sessionId: "session-1", productId: "p1", quantity: 4,
+          lastScannedAt: "", aliasesSeen: [], scanEventIds: [], createdAt: "", updatedAt: "",
+          syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
+        },
+        // Merged in from another device's session by refreshFromCloud (overwrites p1's mapped qty to
+        // 100 in deriveCountedByUid's last-write-wins Map if not filtered by session first).
+        {
+          id: "cOther", businessId: "biz-1", sessionId: "other-session-id", productId: "p1", quantity: 100,
+          lastScannedAt: "", aliasesSeen: [], scanEventIds: [], createdAt: "", updatedAt: "",
+          syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
+        },
+      ],
+      needsReviewQueue: [],
+      businessId: "biz-1",
+      currentSession: {
+        id: "session-1",
+        businessId: "biz-1",
+        name: "Default Session",
+        location: "Main",
+        status: "active",
+        startedAt: "",
+        completedAt: null,
+        createdBy: "demo",
+        notes: "",
+        syncStatus: "synced",
+      },
+    });
+    useReconcileStore.setState({
+      session: { fileName: "shopware.csv", importedAt: "2026-07-15T00:00:00.000Z", adapter },
+      matches: null,
+      report: null,
+      _hasHydrated: true,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ matches: [matchedResult, unmatchedResult] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReconcilePanel />);
+    fireEvent.click(screen.getByTestId("reconcile-run"));
+    await screen.findByTestId("reconcile-report");
+
+    const delta = screen.getAllByTestId("reconcile-delta")[0];
+    // Expected 6, current-session counted 4 -> delta -2. If the other session's 100 leaked into
+    // deriveCountedByUid's finalCounts input, this would be +94 instead.
+    expect(delta.textContent).toBe("-2");
+
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("ReconcilePanel - Confirm barcode links (AM-R6 / AM-R10f)", () => {
   it("AM-R10f: NO approved alias exists before the user confirms; confirming creates one through the existing human-approval path; nothing is counted", () => {
     seedWithReport();
