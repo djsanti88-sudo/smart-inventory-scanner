@@ -1102,22 +1102,24 @@ function buildAliasesForCodes(params: {
 
 /** Recompute syncStatus on feed/counts/reviews from what remains in the pending queue. */
 function recomputeSyncStatus(state: {
+  businessId: string;
   scanFeed: ScanEvent[];
   finalCounts: InventoryCount[];
   needsReviewQueue: UnknownCodeReview[];
   pendingSyncQueue: PendingSyncItem[];
 }) {
+  const tenantQueue = state.pendingSyncQueue.filter((item) => item.businessId === state.businessId);
   const pendingEventIds = new Set(
-    state.pendingSyncQueue.map((p) => p.scanEventId).filter((x): x is string => !!x),
+    tenantQueue.map((p) => p.scanEventId).filter((x): x is string => !!x),
   );
   const erroredEventIds = new Set(
-    state.pendingSyncQueue
-      .filter((p) => p.status === "error")
+    tenantQueue
+      .filter((p) => p.status === "error" || p.status === "quarantined")
       .map((p) => p.scanEventId)
       .filter((x): x is string => !!x),
   );
   const pendingProductIds = new Set(
-    state.pendingSyncQueue
+    tenantQueue
       .filter((p) => p.operation === "INCREMENT_COUNT")
       .map((p) => (p.payload as IncrementPayload).productId),
   );
@@ -1204,6 +1206,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
     // each drain after the previous completes; every enqueue still triggers a drain that picks up the
     // latest queue. Per-item idempotency (transaction + ledger) remains the guarantee against true retries.
     let drainChain: Promise<void> = Promise.resolve();
+    let businessLoadGeneration = 0;
+    const queueItemIdentity = (item: PendingSyncItem) =>
+      `${item.businessId}\u0000${item.id}\u0000${item.idempotencyKey}`;
     const syncPendingCloud = (force: boolean): Promise<void> => {
       drainChain = drainChain.then(() => drainCloudOnce(force)).catch(() => {});
       return drainChain;
@@ -1222,23 +1227,48 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       // Snapshot the batch to process. We must NOT overwrite the whole queue at the end (items enqueued
       // by rapid scans DURING this async loop would be clobbered + silently lost). Instead, track this
       // batch's outcome by item id and reconcile against the LATEST queue, preserving anything new.
-      const batch = state.pendingSyncQueue;
+      const activeBusinessId = state.businessId;
+      const activeUserId = state.userId;
+      const batch = state.pendingSyncQueue.filter(
+        (item) => item.businessId === activeBusinessId && item.status !== "quarantined",
+      );
+      if (batch.length === 0) return;
       const syncedIds = new Set(get().syncedScanEventIds);
-      const appliedIds = new Set<string>();
-      const erroredById = new Map<string, PendingSyncItem>();
+      const appliedItems = new Set<string>();
+      const erroredItems = new Map<string, PendingSyncItem>();
       let lastErr: string | null = null;
       for (const item of batch) {
+        const live = get();
+        if (
+          !live.businessContextReady ||
+          live.businessId !== activeBusinessId ||
+          live.userId !== activeUserId
+        ) {
+          break;
+        }
+        const itemIdentity = queueItemIdentity(item);
         let res;
         try {
           res = await db.apply(item);
         } catch (e) {
-          res = { ok: false, alreadyApplied: false, error: e instanceof Error ? e.message : String(e) };
+          res = {
+            ok: false,
+            alreadyApplied: false,
+            error: e instanceof Error ? e.message : String(e),
+            retryable: true,
+          };
         }
         if (res.ok) {
-          appliedIds.add(item.id);
+          appliedItems.add(itemIdentity);
           if (item.scanEventId) syncedIds.add(item.scanEventId);
         } else {
-          erroredById.set(item.id, { ...item, status: "error", retryCount: item.retryCount + 1, lastError: res.error ?? "sync failed", updatedAt: now() });
+          erroredItems.set(itemIdentity, {
+            ...item,
+            status: res.retryable === false ? "quarantined" : "error",
+            retryCount: item.retryCount + 1,
+            lastError: res.error ?? "sync failed",
+            updatedAt: now(),
+          });
           lastErr = res.error ?? "sync failed";
         }
       }
@@ -1247,15 +1277,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // version, and KEEP any items enqueued while this pass was awaiting (the mutex's next pass drains
         // them). This avoids the read-modify-write race that previously dropped concurrent scans.
         const nextQueue = cur.pendingSyncQueue
-          .filter((it) => !appliedIds.has(it.id))
-          .map((it) => erroredById.get(it.id) ?? it);
+          .filter((it) => !appliedItems.has(queueItemIdentity(it)))
+          .map((it) => erroredItems.get(queueItemIdentity(it)) ?? it);
         const recomputed = recomputeSyncStatus({
+          businessId: cur.businessId,
           scanFeed: cur.scanFeed,
           finalCounts: cur.finalCounts,
           needsReviewQueue: cur.needsReviewQueue,
           pendingSyncQueue: nextQueue,
         });
-        return { pendingSyncQueue: nextQueue, syncedScanEventIds: [...syncedIds], lastSyncError: lastErr, ...recomputed };
+        const contextStillMatches =
+          cur.businessContextReady &&
+          cur.businessId === activeBusinessId &&
+          cur.userId === activeUserId;
+        return {
+          pendingSyncQueue: nextQueue,
+          syncedScanEventIds: [...syncedIds],
+          lastSyncError: contextStillMatches ? lastErr : cur.lastSyncError,
+          ...recomputed,
+        };
       });
     };
 
@@ -1314,6 +1354,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
       setBusinessContext: (businessId, userId) => {
+        const loadGeneration = ++businessLoadGeneration;
         const needsLoad = cloudBackend && !!deps.loadBusinessData;
         // REFRESH GUARD (data-loss fix): a page refresh re-resolves the SAME (businessId, userId)
         // this store already holds and calls setBusinessContext again (BusinessContextGate runs on
@@ -1322,7 +1363,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // scanFeed/needsReviewQueue (Firestore has no collections for them), so wiping here loses
         // unsynced scans and open reviews on every reload. Only an ACTUAL tenant/user change (the
         // isolation law below) replaces tenant state.
-        const sameTenant = get().businessId === businessId && get().userId === userId;
+        const contextState = get();
+        const sameTenant = contextState.businessId === businessId && contextState.userId === userId;
         if (sameTenant) {
           set({
             businessContextReady: true,
@@ -1340,12 +1382,29 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             businessContextReady: true,
             businessDataLoaded: !needsLoad,
             lastSyncError: null,
+            products: cleared.products,
+            aliases: cleared.aliases,
+            sessions: cleared.sessions,
+            currentSession: cleared.currentSession,
+            sessionId: cleared.sessionId,
             scanFeed: cleared.scanFeed,
             finalCounts: cleared.finalCounts,
             needsReviewQueue: cleared.needsReviewQueue,
+            countSnapshots: cleared.countSnapshots,
             settings: cleared.settings,
             firstScanAt: cleared.firstScanAt,
             recentLocations: cleared.recentLocations,
+            location: "Main",
+            syncedScanEventIds: [],
+            lastMismatchWarning: null,
+            lastAliasConflicts: null,
+            lastCategoryWarning: null,
+            aiLookupLogs: [],
+            shopOverrides: [],
+            feedbackEvents: [],
+            lastCleanupBackup: null,
+            lastProductDeleteBackup: null,
+            lastIdentifierBackfill: null,
             // Tenant isolation: the previous tenant's archived scan log (codes + product names) must
             // never bleed into the next tenant's History page.
             sessionHistory: cleared.sessionHistory,
@@ -1358,6 +1417,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           void (async () => {
             try {
               const data = await loader(businessId, userId);
+              if (
+                loadGeneration !== businessLoadGeneration ||
+                get().businessId !== businessId ||
+                get().userId !== userId
+              ) {
+                return;
+              }
               // Reconstruct the active count session + its finalCounts (survive-refresh). Prefer the most
               // recent ACTIVE session; else the most recent overall. finalCounts are the persisted count
               // lines for that session, mapped back to store shape. No session -> keep current defaults.
@@ -1379,7 +1445,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // queue), so that path degrades to the plain remote restore this used to be.
                   next.currentSession = cur.currentSession?.id === restored.id ? cur.currentSession : restored;
                   next.sessionId = restored.id;
-                  const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+                  const tenantPendingQueue = cur.pendingSyncQueue.filter((it) => it.businessId === businessId);
+                  const pendingCountItems = tenantPendingQueue.filter((it) => it.operation === "INCREMENT_COUNT");
                   const pendingCountKeys = new Set(
                     pendingCountItems
                       .map((it) => {
@@ -1397,7 +1464,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // row from a different/unsynced session (e.g. this device's own active session, when
                   // the remote answers with a different restored session) was silently dropped instead
                   // of merged - unsynced local work would vanish on a business-context refresh.
-                  const pendingSessionIds = new Set(cur.pendingSyncQueue.map((it) => it.sessionId));
+                  const pendingSessionIds = new Set(tenantPendingQueue.map((it) => it.sessionId));
                   const unsyncedCurrentSessionId =
                     cur.currentSession && cur.currentSession.syncStatus !== "synced" ? cur.currentSession.id : null;
                   const countsByKey = new Map(
@@ -1430,8 +1497,22 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 return next;
               });
             } catch (e) {
+              if (
+                loadGeneration !== businessLoadGeneration ||
+                get().businessId !== businessId ||
+                get().userId !== userId
+              ) {
+                return;
+              }
               // Surface the error but mark loaded so the UI does not hang forever (sync still paused on error).
               set({ lastSyncError: e instanceof Error ? e.message : "Failed to load business data", businessDataLoaded: true });
+            }
+            if (
+              loadGeneration !== businessLoadGeneration ||
+              get().businessId !== businessId ||
+              get().userId !== userId
+            ) {
+              return;
             }
             get().syncPending();
           })();
@@ -1488,6 +1569,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           userId: null,
           businessContextReady: !cloudBackend,
           businessDataLoaded: !cloudBackend,
+          products: cleared.products,
+          aliases: cleared.aliases,
+          sessions: cleared.sessions,
           scanFeed: cleared.scanFeed,
           finalCounts: cleared.finalCounts,
           needsReviewQueue: cleared.needsReviewQueue,
@@ -1503,10 +1587,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // is the variance ring buffer; currentSession/sessionId are the active-session identity.
           // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
           // sessionHistory carries the tenant's scanned codes - same residue rule.
-          countSnapshots: [],
+          countSnapshots: cleared.countSnapshots,
           sessionHistory: [],
-          currentSession: null,
-          sessionId: "",
+          currentSession: cleared.currentSession,
+          sessionId: cleared.sessionId,
         });
         if (typeof window !== "undefined" && window.localStorage) {
           try {
@@ -1874,11 +1958,28 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!cloudBackend || !deps.loadBusinessData) return; // mock/local path: already the source of truth
         const state = get();
         if (!state.businessContextReady || !state.userId || !state.businessId) return;
+        const businessId = state.businessId;
+        const userId = state.userId;
+        const loadGeneration = ++businessLoadGeneration;
         let data;
         try {
-          data = await deps.loadBusinessData(state.businessId, state.userId);
+          data = await deps.loadBusinessData(businessId, userId);
         } catch (e) {
+          if (
+            loadGeneration !== businessLoadGeneration ||
+            get().businessId !== businessId ||
+            get().userId !== userId
+          ) {
+            return;
+          }
           set({ lastSyncError: e instanceof Error ? e.message : "Failed to refresh from the cloud" });
+          return;
+        }
+        if (
+          loadGeneration !== businessLoadGeneration ||
+          get().businessId !== businessId ||
+          get().userId !== userId
+        ) {
           return;
         }
         set((cur) => {
@@ -1890,8 +1991,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // finalCounts pending-queue exclusion below: an unsynced local edit is authoritative until it
           // syncs, otherwise refreshFromCloud would clobber a human's correctProduct edit with the stale
           // remote value that has not seen it yet (Task 1 refresh-race guard).
+          const tenantPendingQueue = cur.pendingSyncQueue.filter((it) => it.businessId === businessId);
           const pendingProductIds = new Set(
-            cur.pendingSyncQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
+            tenantPendingQueue.filter((it) => it.operation === "SAVE_PRODUCT").map((it) => it.entityId),
           );
           const productsById = new Map(cur.products.map((p) => [p.id, p]));
           for (const p of data.products) {
@@ -1914,7 +2016,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
           // finalCounts: additive upsert by (sessionId,productId), EXCEPT any row still referenced by
           // a pending (unsynced) queue item - that row's local value is authoritative until it syncs.
-          const pendingCountItems = cur.pendingSyncQueue.filter((it) => it.operation === "INCREMENT_COUNT");
+          const pendingCountItems = tenantPendingQueue.filter((it) => it.operation === "INCREMENT_COUNT");
           const pendingCountKeys = new Set(
             pendingCountItems
               .map((it) => {
@@ -2459,6 +2561,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
 
         const recomputed = recomputeSyncStatus({
+          businessId: state.businessId,
           scanFeed: state.scanFeed,
           finalCounts: state.finalCounts,
           needsReviewQueue: state.needsReviewQueue,

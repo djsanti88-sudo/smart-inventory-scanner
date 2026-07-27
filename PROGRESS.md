@@ -285,3 +285,78 @@ progress, not started).
 
 ### Ultracode round close (2026-07-23 00:40)
 All fixes landed (21 commits), gates green (unit 2652/0, dom 697/0, ledger 45/45, golden, build), agy + sentinel clean. Preview inventory-5ha3w7se8 proof: 338/338 scans; re-paste = 0 API calls, qty exactly 2x; post-reload re-scan = 0 API calls (persist keeps identifiers + verified + businessId). Awaiting owner: promotion, deployment cleanup, never-again project.
+
+# 2026-07-26 - Inventory stabilization and recovery started
+
+- Owner approved the multi-phase stabilization-first plan.
+- Created isolated worktree `C:\tmp\inventory-stabilization` on
+  `fix/release-stabilization`, based on current `master` (`e5f0157`).
+- Original `feat/teach-bot` worktree and its untracked files remain untouched.
+- Added `docs/RELEASE_TARGETS.md` with canonical GitHub, Vercel, Firebase, Turso, runtime, preview,
+  production, rollback, and repository-state facts. No secrets or environment values are recorded.
+- Phase 1 parallel tracks: cloud sync safety, atomic auth provisioning, and role/rules alignment.
+- Production deploys, pushes, paid/live calls, and production configuration remain separately gated.
+
+## Checkpoint 2026-07-26: Stabilization Phase 1 gate PASSED locally
+
+Worktree `C:\tmp\inventory-stabilization`, branch `fix/release-stabilization`, based on
+`master` at `e5f0157`. The owner's dirty `feat/teach-bot` worktree remains untouched. No commit,
+push, deployment, paid provider call, or production data/configuration mutation was performed.
+
+Implemented:
+
+- Firebase signup, password login, and Google login now share one authenticated, atomic,
+  idempotent workspace-provisioning route. Account creation is distinguished from workspace setup
+  failure, and the UI provides repair/retry paths with safe Firebase error messages.
+- Membership loading resolves real business names, excludes missing/orphan parent businesses, and
+  requires explicit selection when multiple valid businesses exist.
+- Pending named-business requests use opaque per-request storage keys, so two interrupted requests
+  do not overwrite each other and raw UIDs/business names are not retained in browser storage.
+- Sync applied-key document IDs preserve safe legacy IDs and deterministically hash unsafe,
+  reserved, or oversized IDs. Full operation envelopes are validated and replay conflicts are
+  terminal instead of retrying forever.
+- Tenant switches clear tenant-visible state immediately, preserve separately partitioned pending
+  queues, stop stale drains, and prevent late loaders from restoring the prior tenant.
+- Counter count writes require an active owned session, a matching applied marker, an exact
+  quantity transition, and append-only scan-event identity. Duplicate scan events are no-ops.
+- Local Firebase development now configures both browser SDK and Admin SDK emulator context.
+
+Independent Critical/High review then found and locally repaired three authorization defects:
+
+- Admins could promote themselves to owner or remove an owner. Member identity is now immutable,
+  owner memberships are server-managed, and admins can manage only non-owner roles.
+- A foreign account could preclaim a predictable provisioning ID. Client business creation is now
+  disabled, every existing provisioning target must belong to the verified UID, and both default
+  and named requests atomically converge on a fresh fallback when a legacy ID is foreign.
+- Counters could forge a paired count without a real scan. Counter count writes now require a real
+  same-business, same-session, same-product `+1` scan event; duplicate-event metadata remains a
+  zero-delta no-op. Owner/admin maintenance adjustments retain their separate privileged path.
+
+Verified:
+
+- TypeScript: `npx tsc --noEmit --incremental false` passed.
+- Ledger: 45/45 passed.
+- Post-review provisioning: 15/15 passed.
+- Post-review focused auth/provisioning: 69/69 passed.
+- Post-review focused sync/tenant suites: 27/27 passed; 13 emulator cases were skipped.
+- Store regression suite: 532/532 passed.
+- Sign-out/orphan UI: 12/12 passed.
+- Emulator environment helper: 2/2 passed.
+- Earlier combined Auth + Firestore emulator sweep: 85/85 passed before the final rule-hardening
+  additions.
+- Full Vitest discovery reached 3,376 passing tests; the remaining 88 failures are corpus-backed
+  suites cascading from the unavailable generated SQLite corpus in this isolated worktree.
+- `git diff --check` and targeted changed-file lint passed with zero errors and two existing
+  unused-symbol warnings. Full-repository lint still has 46 unrelated pre-existing errors.
+
+Final Phase 1 proof (2026-07-26):
+
+- Firebase Auth + Firestore emulator: 13 files, 95/95 tests passed after the final rule hardening.
+- Full corpus-backed proof: 365 files passed, 3,472 tests passed, 59 intentionally skipped.
+- Next.js production build: passed. The temporary worktree now has a local lockfile-pinned
+  `node_modules` directory; Next 16 rejects a junction that points outside the worktree.
+- Release sentinel remains correctly blocked until this work is committed and an exact SHA receives
+  a production approval. Phase 2 preview proof starts from that committed SHA.
+
+Detailed report:
+`docs/superpowers/reports/2026-07-26-inventory-stabilization-phase1.md`.

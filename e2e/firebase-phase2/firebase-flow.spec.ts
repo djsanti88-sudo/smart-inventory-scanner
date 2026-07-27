@@ -46,19 +46,13 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await page.getByTestId("login-button").click();
   await page.waitForURL("**/scan");
 
-  // 2. No business selected yet -> the gate shows a clear message (no fake context).
-  await expect(page.getByTestId("business-context-banner")).toBeVisible();
-  await page.screenshot({ path: `${PROOF}/01-needs-business.png`, fullPage: true });
-
-  // 3. Select the real business -> the gate wires setBusinessContext(businessId, realUid).
-  await page.goto("/business");
-  await page.getByTestId(`select-business-${BIZ}`).click();
-  await page.waitForURL("**/scan");
+  // 2. The only valid membership is preserved and selected by the authenticated server flow.
   await expect(page.getByTestId("business-context-banner")).toHaveCount(0); // context ready
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // scanner focus intact
-  await page.screenshot({ path: `${PROOF}/02-context-ready.png`, fullPage: true });
+  await page.screenshot({ path: `${PROOF}/01-context-ready.png`, fullPage: true });
 
-  // 4. Start a real count session (persists a CountSession for survive-refresh).
+  // 3. Start a real count session (persists a CountSession for survive-refresh).
+  await page.getByText("Sessions and export", { exact: true }).click();
   await page.getByTestId("start-session").click();
 
   // 5. Scan a known product, then an alias code for the SAME product (two codes -> one product).

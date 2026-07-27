@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createBusiness, listMemberships, signOut, type Membership } from "@/lib/auth";
+import {
+  createBusiness,
+  ensureWorkspace,
+  listMemberships,
+  signOut,
+  type Membership,
+} from "@/lib/auth";
 import { setSelectedBusinessId } from "@/lib/selectedBusiness";
 import { useRouter } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
@@ -15,21 +21,33 @@ export default function BusinessPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    setMemberships(await listMemberships());
-    setLoading(false);
+    setLoading(true);
+    setLoadError("");
+    try {
+      setMemberships(await listMemberships());
+    } catch {
+      setLoadError("We could not load your businesses.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     let active = true;
-    listMemberships().then((m) => {
-      if (active) {
-        setMemberships(m);
-        setLoading(false);
-      }
-    });
+    listMemberships()
+      .then((nextMemberships) => {
+        if (active) setMemberships(nextMemberships);
+      })
+      .catch(() => {
+        if (active) setLoadError("We could not load your businesses.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
     return () => {
       active = false;
     };
@@ -51,6 +69,20 @@ export default function BusinessPage() {
     }
     setName("");
     await refresh();
+  }
+
+  async function handleRepairWorkspace() {
+    setBusy(true);
+    setError("");
+    const result = await ensureWorkspace();
+    if (result.status === "ready") {
+      await refresh();
+    } else if (result.status === "selection_required") {
+      await refresh();
+    } else if (result.status !== "cancelled") {
+      setError(result.error);
+    }
+    setBusy(false);
   }
 
   return (
@@ -79,12 +111,36 @@ export default function BusinessPage() {
 
       <ul className="mt-4 space-y-2" data-testid="membership-list">
         {loading && <li className="text-sm text-zinc-400">Loading...</li>}
-        {!loading && memberships.length === 0 && (
-          <li className="text-sm text-zinc-500">No businesses yet. Create one below to get started.</li>
+        {!loading && loadError && (
+          <li className="text-sm text-red-600" data-testid="business-load-error">
+            {loadError}{" "}
+            <button
+              type="button"
+              onClick={refresh}
+              data-testid="retry-business-load"
+              className="font-semibold text-blue-700 hover:underline"
+            >
+              Try again
+            </button>
+          </li>
+        )}
+        {!loading && !loadError && memberships.length === 0 && (
+          <li className="text-sm text-zinc-500">
+            No businesses yet.{" "}
+            <button
+              type="button"
+              onClick={handleRepairWorkspace}
+              disabled={busy}
+              data-testid="repair-workspace"
+              className="font-semibold text-blue-700 hover:underline disabled:opacity-50"
+            >
+              Set up my workspace
+            </button>
+          </li>
         )}
         {memberships.map((m) => (
           <li key={m.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3">
-            <span className="font-mono text-xs text-zinc-600">{m.businessId}</span>
+            <span className="text-sm font-medium text-zinc-800">{m.businessName}</span>
             <span className="flex items-center gap-2">
               <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700">{m.role}</span>
               <button
@@ -121,7 +177,7 @@ export default function BusinessPage() {
           </button>
         </div>
         {error && <p className="mt-2 text-sm text-red-600" data-testid="business-error">{error}</p>}
-        <p className="mt-2 text-xs text-zinc-400">You become the admin of any business you create.</p>
+        <p className="mt-2 text-xs text-zinc-400">You become the owner of any business you create.</p>
       </form>
     </div>
   );

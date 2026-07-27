@@ -7,6 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
 // with the mock run's 3100. NO auth bypass: the spec signs in through the real login UI.
 export default defineConfig({
   testDir: "./e2e/firebase-phase2",
+  timeout: 120_000,
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
@@ -18,7 +19,7 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npm run dev -- --port 3200",
+    command: "npm run dev:emulator -- --webpack --port 3200",
     url: "http://localhost:3200",
     reuseExistingServer: false,
     timeout: 180_000,

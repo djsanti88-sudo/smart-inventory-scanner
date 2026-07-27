@@ -75,7 +75,7 @@ export type SyncOperation =
   | "SAVE_PRODUCT"
   | "SAVE_SESSION";
 
-export type PendingItemStatus = "pending" | "syncing" | "synced" | "error";
+export type PendingItemStatus = "pending" | "syncing" | "synced" | "error" | "quarantined";
 
 export type AiCircuitState = "closed" | "open" | "half_open";
 

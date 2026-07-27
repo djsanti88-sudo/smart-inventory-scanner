@@ -16,57 +16,374 @@ service cloud.firestore {
     function memberPath(bid) {
       return /databases/$(database)/documents/businessMembers/$(bid + '_' + uid());
     }
-    function isMember(bid) { return isSignedIn() && exists(memberPath(bid)); }
+    function businessPath(bid) {
+      return /databases/$(database)/documents/businesses/$(bid);
+    }
+    function isMember(bid) {
+      return isSignedIn()
+        && exists(businessPath(bid))
+        && exists(memberPath(bid));
+    }
     function roleOf(bid) { return get(memberPath(bid)).data.role; }
     function hasRole(bid, roles) { return isMember(bid) && (roleOf(bid) in roles); }
     // A business-scoped doc, if it carries a businessId field, must match its path (defense in depth).
     function bizFieldOk(bid) {
       return !('businessId' in request.resource.data) || request.resource.data.businessId == bid;
     }
+    function isUnlockedSession(data) {
+      return (!('locked' in data) || data.locked == false)
+        && (!('lockedAt' in data) || data.lockedAt == null);
+    }
+    function sessionPath(bid, sid) {
+      return /databases/$(database)/documents/businesses/$(bid)/countSessions/$(sid);
+    }
+    function counterOwnActiveSession(bid, sid) {
+      return hasRole(bid, ['counter'])
+        && exists(sessionPath(bid, sid))
+        && get(sessionPath(bid, sid)).data.businessId == bid
+        && get(sessionPath(bid, sid)).data.createdBy == uid()
+        && get(sessionPath(bid, sid)).data.status == 'active'
+        && isUnlockedSession(get(sessionPath(bid, sid)).data);
+    }
+    function counterProductDataOk(data, bid, productId) {
+      return data.businessId == bid
+        && data.id == productId
+        && data.provisional == true
+        && data.verified == false
+        && data.status == 'active'
+        && !('unitCost' in data)
+        && (!('aliases' in data) || data.aliases.size() == 0)
+        && (!('provenanceTier' in data) || data.provenanceTier == 'provisional')
+        && (!('source' in data) || data.source == 'ai_gemini')
+        && (!('createdBy' in data) || data.createdBy == 'ai')
+        && (!('updatedBy' in data) || data.updatedBy == 'ai')
+        && (!('structuredBy' in data) || data.structuredBy != 'human');
+    }
+    function counterProductCreateOk(bid, productId) {
+      return hasRole(bid, ['counter'])
+        && counterProductDataOk(request.resource.data, bid, productId);
+    }
+    function validCounterSessionState() {
+      return (
+        request.resource.data.status == 'active'
+        && request.resource.data.completedAt == null
+      ) || (
+        request.resource.data.status == 'completed'
+        && request.resource.data.completedAt is string
+      );
+    }
+    function counterSessionCreateOk(bid, sessionId) {
+      return hasRole(bid, ['counter'])
+        && request.resource.data.businessId == bid
+        && request.resource.data.id == sessionId
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.status == 'active'
+        && request.resource.data.completedAt == null
+        && isUnlockedSession(request.resource.data);
+    }
+    function counterSessionUpdateOk(bid, sessionId) {
+      return hasRole(bid, ['counter'])
+        && resource.data.businessId == bid
+        && resource.data.id == sessionId
+        && resource.data.createdBy == uid()
+        && resource.data.status == 'active'
+        && isUnlockedSession(resource.data)
+        && request.resource.data.businessId == bid
+        && request.resource.data.id == sessionId
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.startedAt == resource.data.startedAt
+        && isUnlockedSession(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name',
+          'location',
+          'status',
+          'completedAt',
+          'notes',
+          'syncStatus',
+          'deviceId',
+          'updatedAt'
+        ])
+        && validCounterSessionState();
+    }
+    function markerFieldsOk(bid) {
+      return request.resource.data.keys().hasAll([
+          'businessId',
+          'entityType',
+          'entityId',
+          'sessionId',
+          'targetId',
+          'operation',
+          'scanEventId',
+          'payloadHash',
+          'at'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'businessId',
+          'entityType',
+          'entityId',
+          'sessionId',
+          'targetId',
+          'operation',
+          'scanEventId',
+          'payloadHash',
+          'at'
+        ])
+        && request.resource.data.businessId == bid
+        && request.resource.data.payloadHash is string
+        && request.resource.data.at == request.time;
+    }
+    function counterProductMarkerOk(bid) {
+      let marker = request.resource.data;
+      let target = getAfter(
+        /databases/$(database)/documents/businesses/$(bid)/products/$(marker.targetId)
+      ).data;
+      return marker.operation == 'SAVE_PRODUCT'
+        && marker.entityType == 'Product'
+        && marker.entityId == marker.targetId
+        && marker.scanEventId == null
+        && target.updatedAt == request.time
+        && counterProductDataOk(target, bid, marker.entityId);
+    }
+    function counterSessionMarkerOk(bid) {
+      let marker = request.resource.data;
+      let target = getAfter(
+        /databases/$(database)/documents/businesses/$(bid)/countSessions/$(marker.targetId)
+      ).data;
+      return marker.operation == 'SAVE_SESSION'
+        && marker.entityType == 'CountSession'
+        && marker.entityId == marker.targetId
+        && marker.sessionId == marker.entityId
+        && marker.scanEventId == null
+        && target.id == marker.entityId
+        && target.businessId == bid
+        && target.createdBy == uid()
+        && target.updatedAt == request.time
+        && isUnlockedSession(target)
+        && (
+          (target.status == 'active' && target.completedAt == null)
+          || (target.status == 'completed' && target.completedAt is string)
+        );
+    }
+    function counterScanEventMarkerOk(bid) {
+      let marker = request.resource.data;
+      let target = getAfter(
+        /databases/$(database)/documents/businesses/$(bid)/scanEvents/$(marker.targetId)
+      ).data;
+      return marker.operation == 'SAVE_SCAN_EVENT'
+        && marker.entityType == 'ScanEvent'
+        && marker.entityId == marker.targetId
+        && marker.scanEventId == marker.entityId
+        && target.id == marker.entityId
+        && target.businessId == bid
+        && target.sessionId == marker.sessionId
+        && target.createdAt == request.time
+        && counterOwnActiveSession(bid, marker.sessionId);
+    }
+    function counterUnknownMarkerOk(bid) {
+      let marker = request.resource.data;
+      let target = getAfter(
+        /databases/$(database)/documents/businesses/$(bid)/unknownCodeReviews/$(marker.targetId)
+      ).data;
+      return marker.operation == 'SAVE_UNKNOWN_SCAN'
+        && marker.entityType == 'UnknownCodeReview'
+        && marker.entityId == marker.targetId
+        && target.id == marker.entityId
+        && target.businessId == bid
+        && target.sessionId == marker.sessionId
+        && target.createdAt == request.time
+        && counterOwnActiveSession(bid, marker.sessionId);
+    }
+    function appliedKeyPath(bid, key) {
+      return /databases/$(database)/documents/businesses/$(bid)/_appliedKeys/$(key);
+    }
+    function counterCountMarkerOk(bid, key) {
+      let marker = request.resource.data;
+      let target = getAfter(
+        /databases/$(database)/documents/businesses/$(bid)/inventoryCounts/$(marker.targetId)
+      ).data;
+      let scanEvent = getAfter(
+        /databases/$(database)/documents/businesses/$(bid)/scanEvents/$(marker.scanEventId)
+      ).data;
+      return marker.operation == 'INCREMENT_COUNT'
+        && marker.entityType == 'InventoryCount'
+        && target.appliedKeyId == key
+        && marker.targetId == (marker.sessionId + '_' + target.productId)
+        && target.businessId == bid
+        && target.countSessionId == marker.sessionId
+        && target.updatedAt == request.time
+        && marker.scanEventId == target.lastScanEventId
+        && scanEvent.id == marker.scanEventId
+        && scanEvent.businessId == bid
+        && scanEvent.sessionId == marker.sessionId
+        && scanEvent.matchedProductId == target.productId
+        && scanEvent.quantityDelta == 1
+        && counterOwnActiveSession(bid, marker.sessionId);
+    }
+    function counterAppliedKeyCreateOk(bid, key) {
+      return hasRole(bid, ['counter'])
+        && markerFieldsOk(bid)
+        && (
+          counterProductMarkerOk(bid)
+          || counterSessionMarkerOk(bid)
+          || counterScanEventMarkerOk(bid)
+          || counterUnknownMarkerOk(bid)
+          || counterCountMarkerOk(bid, key)
+        );
+    }
+    function counterCountEnvelopeOk(bid, countId) {
+      let target = request.resource.data;
+      let marker = getAfter(appliedKeyPath(bid, target.appliedKeyId)).data;
+      let scanEvent = getAfter(
+        /databases/$(database)/documents/businesses/$(bid)/scanEvents/$(target.lastScanEventId)
+      ).data;
+      return target.keys().hasAll([
+          'businessId',
+          'countSessionId',
+          'productId',
+          'countedQuantity',
+          'scanEventIds',
+          'appliedKeyId',
+          'lastQuantityDelta',
+          'lastScanEventId',
+          'updatedAt'
+        ])
+        && target.appliedKeyId is string
+        && target.lastQuantityDelta is int
+        && target.lastScanEventId is string
+        && target.countedQuantity is int
+        && target.scanEventIds is list
+        && target.businessId == bid
+        && countId == (target.countSessionId + '_' + target.productId)
+        && target.updatedAt == request.time
+        && marker.businessId == bid
+        && marker.entityType == 'InventoryCount'
+        && marker.operation == 'INCREMENT_COUNT'
+        && marker.targetId == countId
+        && marker.sessionId == target.countSessionId
+        && marker.scanEventId == target.lastScanEventId
+        && marker.payloadHash is string
+        && marker.at == request.time
+        && scanEvent.id == target.lastScanEventId
+        && scanEvent.businessId == bid
+        && scanEvent.sessionId == target.countSessionId
+        && scanEvent.matchedProductId == target.productId
+        && scanEvent.quantityDelta == 1
+        && counterOwnActiveSession(bid, target.countSessionId);
+    }
+    function counterCountCreateOk(bid, countId) {
+      let target = request.resource.data;
+      return hasRole(bid, ['counter'])
+        && counterCountEnvelopeOk(bid, countId)
+        && target.lastQuantityDelta == 1
+        && target.countedQuantity == target.lastQuantityDelta
+        && target.scanEventIds == [target.lastScanEventId];
+    }
+    function counterCountUpdateOk(bid, countId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let eventAlreadyCounted = after.lastScanEventId in before.scanEventIds;
+      return hasRole(bid, ['counter'])
+        && counterCountEnvelopeOk(bid, countId)
+        && before.businessId == bid
+        && after.businessId == before.businessId
+        && after.countSessionId == before.countSessionId
+        && after.productId == before.productId
+        && after.diff(before).affectedKeys().hasOnly([
+          'countedQuantity',
+          'scanEventIds',
+          'appliedKeyId',
+          'lastQuantityDelta',
+          'lastScanEventId',
+          'updatedAt'
+        ])
+        && (
+          (
+            eventAlreadyCounted
+            && after.lastQuantityDelta == 0
+            && after.countedQuantity == before.countedQuantity
+            && after.scanEventIds == before.scanEventIds
+          )
+          || (
+            !eventAlreadyCounted
+            && after.lastQuantityDelta == 1
+            && after.countedQuantity == before.countedQuantity + after.lastQuantityDelta
+            && after.scanEventIds == before.scanEventIds.concat([after.lastScanEventId])
+          )
+        );
+    }
 
     // ----- user profiles: each user only their own (doc id = uid) -----
     match /userProfiles/{userId} {
-      allow read, create, update: if isSignedIn() && userId == uid();
+      allow read: if isSignedIn() && userId == uid();
+      allow create: if isSignedIn()
+        && userId == uid()
+        && !request.resource.data.keys().hasAny(['defaultBusinessId']);
+      allow update: if isSignedIn()
+        && userId == uid()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['defaultBusinessId']);
       allow delete: if false;
     }
 
+    // Provisioning request pointers are written only by the authenticated Admin SDK route.
+    match /businessProvisioningRequests/{requestId} {
+      allow read, write: if false;
+    }
+
     // ----- business memberships (doc id = `${businessId}_${userId}`) -----
-    function businessCreatedBy(bid) {
-      return exists(/databases/$(database)/documents/businesses/$(bid))
-        && get(/databases/$(database)/documents/businesses/$(bid)).data.createdBy == uid();
+    function validMemberRole(role) {
+      return role in ['owner', 'admin', 'counter', 'viewer'];
+    }
+    function validMemberIdentity(memberId, data) {
+      return data.businessId is string
+        && data.userId is string
+        && validMemberRole(data.role)
+        && memberId == (data.businessId + '_' + data.userId);
     }
     match /businessMembers/{memberId} {
       allow read: if isSignedIn() && resource != null
         && (resource.data.userId == uid() || isMember(resource.data.businessId));
-      // Bootstrap: a user may self-create their OWN owner membership ONLY for a business THEY created
-      // (the create-business flow writes the business doc with createdBy=uid first). Without the
-      // createdBy check, ANY signed-in user could grant themselves owner of ANY existing business and
-      // read its data - a tenant-isolation breach. Otherwise only an owner/admin of that business may
-      // add members. memberId must equal `${businessId}_${userId}`.
       allow create: if isSignedIn()
-        && memberId == (request.resource.data.businessId + '_' + request.resource.data.userId)
+        && validMemberIdentity(memberId, request.resource.data)
         && (
-          (request.resource.data.userId == uid()
-            && request.resource.data.role == 'owner'
-            && businessCreatedBy(request.resource.data.businessId))
-          || hasRole(request.resource.data.businessId, ['owner', 'admin'])
+          hasRole(request.resource.data.businessId, ['owner'])
+          || (
+            hasRole(request.resource.data.businessId, ['admin'])
+            && request.resource.data.role != 'owner'
+          )
         );
-      allow update, delete: if hasRole(resource.data.businessId, ['owner', 'admin']);
+      // Owner memberships are server-managed once created. This prevents an admin (or another owner)
+      // from promoting, demoting, or deleting the final owner through a client write.
+      allow update: if validMemberIdentity(memberId, resource.data)
+        && validMemberIdentity(memberId, request.resource.data)
+        && request.resource.data.businessId == resource.data.businessId
+        && request.resource.data.userId == resource.data.userId
+        && resource.data.role != 'owner'
+        && request.resource.data.role != 'owner'
+        && hasRole(resource.data.businessId, ['owner', 'admin']);
+      allow delete: if validMemberIdentity(memberId, resource.data)
+        && resource.data.role != 'owner'
+        && hasRole(resource.data.businessId, ['owner', 'admin']);
     }
 
     // ----- businesses + their scoped subcollections -----
     match /businesses/{bid} {
       allow read: if isMember(bid);
-      allow create: if isSignedIn() && request.resource.data.createdBy == uid();
-      allow update: if hasRole(bid, ['owner', 'admin']);
+      allow create: if false;
+      allow update: if hasRole(bid, ['owner', 'admin'])
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['createdBy']);
       allow delete: if hasRole(bid, ['owner']);
 
-      // products / aliases / settings / shopOverrides: managed by owner/admin; read by any member.
+      // Products are managed by owner/admin. Counters may only create an explicitly unverified,
+      // provisional row for immediate counting; they cannot promote or edit any product.
       match /products/{id} {
         allow read: if isMember(bid);
-        allow create, update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
+        allow create: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || counterProductCreateOk(bid, id);
+        allow update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
         allow delete: if hasRole(bid, ['owner', 'admin']);
       }
+      // Aliases/settings/shopOverrides remain owner/admin-only writes.
       match /aliases/{id} {
         allow read: if isMember(bid);
         allow create, update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
@@ -83,32 +400,55 @@ service cloud.firestore {
         allow delete: if hasRole(bid, ['owner', 'admin']);
       }
 
-      // countSessions: started/managed by owner/admin; counters may update; members read.
+      // Counters may start their own active session and update it only while its stored state remains
+      // active (including the one-way active -> completed transition). They cannot take ownership,
+      // reopen/edit completed sessions, touch another counter's session, or use owner lock controls.
       match /countSessions/{id} {
         allow read: if isMember(bid);
-        allow create: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
-        allow update: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow create: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || counterSessionCreateOk(bid, id);
+        allow update: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || counterSessionUpdateOk(bid, id);
         allow delete: if hasRole(bid, ['owner', 'admin']);
       }
 
       // scanEvents: counters (and up) create; immutable to non-admins.
       match /scanEvents/{id} {
         allow read: if isMember(bid);
-        allow create: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow create: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || (
+          request.resource.data.businessId == bid
+          && request.resource.data.id == id
+          && counterOwnActiveSession(bid, request.resource.data.sessionId)
+        );
         allow update, delete: if hasRole(bid, ['owner', 'admin']);
       }
 
-      // inventoryCounts: counters (and up) create/update.
+      // inventoryCounts: counters write only inside their own active, unlocked session.
       match /inventoryCounts/{id} {
         allow read: if isMember(bid);
-        allow create, update: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow create: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || counterCountCreateOk(bid, id);
+        allow update: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || counterCountUpdateOk(bid, id);
         allow delete: if hasRole(bid, ['owner', 'admin']);
       }
 
       // unknownCodeReviews: counters create; owner/admin review.
       match /unknownCodeReviews/{id} {
         allow read: if isMember(bid);
-        allow create: if hasRole(bid, ['owner', 'admin', 'counter']) && bizFieldOk(bid);
+        allow create: if (
+          hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid)
+        ) || (
+          request.resource.data.businessId == bid
+          && request.resource.data.id == id
+          && counterOwnActiveSession(bid, request.resource.data.sessionId)
+        );
         allow update: if hasRole(bid, ['owner', 'admin']) && bizFieldOk(bid);
         allow delete: if hasRole(bid, ['owner', 'admin']);
       }
@@ -124,7 +464,7 @@ service cloud.firestore {
       // member who can write scans/counts may create a key; never updated/deleted.
       match /_appliedKeys/{key} {
         allow read: if isMember(bid);
-        allow create: if hasRole(bid, ['owner', 'admin', 'counter']);
+        allow create: if hasRole(bid, ['owner', 'admin']) || counterAppliedKeyCreateOk(bid, key);
         allow update, delete: if false;
       }
     }

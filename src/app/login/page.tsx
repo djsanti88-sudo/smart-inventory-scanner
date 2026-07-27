@@ -2,7 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { signInWithPassword, signUp, signInWithGoogle, sendResetEmail, isAuthBypassEnabled } from "@/lib/auth";
+import {
+  ensureWorkspace,
+  signInWithPassword,
+  signUp,
+  signInWithGoogle,
+  sendResetEmail,
+  isAuthBypassEnabled,
+} from "@/lib/auth";
+import { setSelectedBusinessId } from "@/lib/selectedBusiness";
+import type { AuthFlowResult } from "@/services/auth/provisioningTypes";
 
 // Firebase email/password + Google login. In E2E/test bypass mode (never production) the form just routes
 // to /scan so existing Playwright specs keep working without a live auth backend.
@@ -14,11 +23,35 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [workspaceRetry, setWorkspaceRetry] = useState(false);
+
+  function handleAuthResult(result: AuthFlowResult) {
+    if (result.status === "ready") {
+      setSelectedBusinessId(result.businessId);
+      router.replace("/scan");
+      return;
+    }
+    if (result.status === "workspace_failed") {
+      setWorkspaceRetry(true);
+      setNotice(
+        result.accountCreated
+          ? "Your account was created, but its workspace still needs setup."
+          : "You are signed in, but your workspace still needs setup.",
+      );
+      return;
+    }
+    if (result.status === "selection_required") {
+      router.replace("/business");
+      return;
+    }
+    if (result.status === "auth_failed") setError(result.error);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setNotice("");
+    setWorkspaceRetry(false);
     if (isAuthBypassEnabled()) {
       router.replace("/scan");
       return;
@@ -33,19 +66,26 @@ export default function LoginPage() {
     }
     const res = mode === "signup" ? await signUp(email, password) : await signInWithPassword(email, password);
     setBusy(false);
-    if (res.error) { setError(res.error); return; }
-    router.replace(mode === "signup" ? "/business" : "/scan");
+    handleAuthResult(res);
   }
 
   async function handleGoogle() {
     setError("");
     setNotice("");
+    setWorkspaceRetry(false);
     if (isAuthBypassEnabled()) { router.replace("/scan"); return; }
     setBusy(true);
     const res = await signInWithGoogle();
     setBusy(false);
-    if (res.error) { setError(res.error); return; }
-    router.replace("/business");
+    handleAuthResult(res);
+  }
+
+  async function handleWorkspaceRetry() {
+    setBusy(true);
+    setError("");
+    const result = await ensureWorkspace();
+    setBusy(false);
+    handleAuthResult(result);
   }
 
   return (
@@ -84,6 +124,17 @@ export default function LoginPage() {
 
         {error && <p className="mt-3 text-base text-red-600" data-testid="login-error">{error}</p>}
         {notice && <p className="mt-3 text-base text-green-700" data-testid="login-notice">{notice}</p>}
+        {workspaceRetry && (
+          <button
+            type="button"
+            onClick={handleWorkspaceRetry}
+            disabled={busy}
+            data-testid="workspace-retry"
+            className="mt-3 inline-flex min-h-[48px] w-full items-center justify-center rounded-lg border border-blue-300 bg-white px-4 text-base font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+          >
+            Retry workspace setup
+          </button>
+        )}
 
         <button
           type="submit"
@@ -109,7 +160,12 @@ export default function LoginPage() {
         <div className="mt-3 flex items-center justify-between text-sm">
           <button
             type="button"
-            onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(""); setNotice(""); }}
+            onClick={() => {
+              setMode(mode === "signin" ? "signup" : "signin");
+              setError("");
+              setNotice("");
+              setWorkspaceRetry(false);
+            }}
             className="text-blue-700 hover:underline"
           >
             {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
@@ -118,7 +174,12 @@ export default function LoginPage() {
             <button
               type="button"
               data-testid="forgot-password"
-              onClick={() => { setMode("reset"); setError(""); setNotice(""); }}
+              onClick={() => {
+                setMode("reset");
+                setError("");
+                setNotice("");
+                setWorkspaceRetry(false);
+              }}
               className="text-blue-700 hover:underline"
             >
               Forgot password?
@@ -126,7 +187,12 @@ export default function LoginPage() {
           ) : (
             <button
               type="button"
-              onClick={() => { setMode("signin"); setError(""); setNotice(""); }}
+              onClick={() => {
+                setMode("signin");
+                setError("");
+                setNotice("");
+                setWorkspaceRetry(false);
+              }}
               className="text-blue-700 hover:underline"
             >
               Back to sign in
