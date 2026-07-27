@@ -77,12 +77,12 @@ export class FirebaseSyncTarget implements SyncTarget {
         switch (item.operation) {
           case "SAVE_SCAN_EVENT": {
             const ev = item.payload as ScanEvent;
-            tx.set(sub(COLLECTIONS.scanEvents, ev.id), { ...ev, businessId: bid, createdAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.scanEvents, ev.id), { ...ev, businessId: bid, syncedAt: serverTimestamp() });
             break;
           }
           case "SAVE_UNKNOWN_SCAN": {
             const r = item.payload as UnknownCodeReview;
-            tx.set(sub(COLLECTIONS.unknownCodeReviews, r.id), { ...r, businessId: bid, createdAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.unknownCodeReviews, r.id), { ...r, businessId: bid, syncedAt: serverTimestamp() });
             break;
           }
           case "RESOLVE_ALIAS": {
