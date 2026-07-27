@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   targetMemberGet: vi.fn(),
   set: vi.fn(),
   doc: vi.fn(),
+  runTransaction: vi.fn(),
 }));
 
 vi.mock("@/lib/firebaseAdmin", () => ({
@@ -21,12 +22,14 @@ vi.mock("@/lib/firebaseAdmin", () => ({
     runTransaction: async (fn: (tx: {
       get: (ref: { get: () => unknown }) => unknown;
       set: (ref: { set: (data: unknown, opts: unknown) => unknown }, data: unknown, opts: unknown) => unknown;
-    }) => unknown) =>
-      fn({
+    }) => unknown) => {
+      mocks.runTransaction();
+      return fn({
         get: (ref: { get: () => unknown }) => ref.get(),
         set: (ref: { set: (data: unknown, opts: unknown) => unknown }, data: unknown, opts: unknown) =>
           ref.set(data, opts),
-      }),
+      });
+    },
   }),
 }));
 vi.mock("firebase-admin/firestore", () => ({
@@ -160,6 +163,9 @@ describe("POST /api/businesses/members", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ ok: false, reason: "cannot_change_owner_role" });
     expect(mocks.set).not.toHaveBeenCalled();
+    // The guard must live INSIDE the transaction (atomic read+reject),
+    // not as a separate pre-read followed by an unguarded write.
+    expect(mocks.runTransaction).toHaveBeenCalled();
   });
 
   it("rejects demoting a different existing owner's membership", async () => {
@@ -171,6 +177,9 @@ describe("POST /api/businesses/members", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ ok: false, reason: "cannot_change_owner_role" });
     expect(mocks.set).not.toHaveBeenCalled();
+    // The guard must live INSIDE the transaction (atomic read+reject),
+    // not as a separate pre-read followed by an unguarded write.
+    expect(mocks.runTransaction).toHaveBeenCalled();
   });
 
   it("allows role changes for an existing non-owner member", async () => {
