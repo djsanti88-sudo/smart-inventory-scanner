@@ -42,13 +42,15 @@ import { pathToFileURL } from "node:url";
 import process from "node:process";
 
 const REPO_ROOT = process.cwd();
-const LOCK_PATH = path.join(REPO_ROOT, ".deploy-lock");
+const DEFAULT_LOCK_PATH = path.join(REPO_ROOT, ".deploy-lock");
 const STALE_MS = 30 * 60 * 1000; // 30 minutes
+const LOCK_PATH = path.resolve(process.env.DEPLOY_PREVIEW_LOCK_PATH || DEFAULT_LOCK_PATH);
 const DEPLOY_TIMEOUT_MS = Number(process.env.DEPLOY_PREVIEW_TIMEOUT_MS || 8 * 60 * 1000);
 const DEPLOY_COMPLETE_GRACE_MS = Number(process.env.DEPLOY_PREVIEW_COMPLETE_GRACE_MS || 20 * 1000);
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
+const FORCE_UNLOCK = args.includes("--force-unlock");
 
 function log(msg) {
   console.log(`[deploy-preview] ${msg}`);
@@ -65,13 +67,24 @@ function fail(msg) {
 // 1. Deploy lock
 // ---------------------------------------------------------------------------
 
-/** Reads the lock file, returns parsed JSON or null if absent/corrupt. */
+/**
+ * Reads the lock file, returning metadata for logging even when malformed/corrupt.
+ * `null` means missing file.
+ */
 export function readLock() {
   if (!existsSync(LOCK_PATH)) return null;
   try {
-    return JSON.parse(readFileSync(LOCK_PATH, "utf8"));
+    const raw = readFileSync(LOCK_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null
+      ? { ...(parsed), raw }
+      : { _invalid: true, raw };
   } catch {
-    return null; // corrupt lock file is treated as no lock (fail open, not closed)
+    let raw = "";
+    try {
+      raw = readFileSync(LOCK_PATH, "utf8");
+    } catch {}
+    return { _invalid: true, raw };
   }
 }
 
@@ -81,20 +94,43 @@ export function isStale(lock) {
   return Date.now() - lock.startedAt > STALE_MS;
 }
 
+function holderLine(lock) {
+  if (!lock || typeof lock !== "object") return "holder=unknown pid=unknown startedAt=unknown action=unknown";
+  const heldBy = typeof lock.heldBy === "string" ? `heldBy=${lock.heldBy}` : "heldBy=unknown";
+  const pid = typeof lock.pid === "number" ? `pid=${lock.pid}` : "pid=unknown";
+  const startedAt =
+    typeof lock.startedAt === "number"
+      ? `startedAt=${new Date(lock.startedAt).toISOString()}`
+      : "startedAt=unknown";
+  const action = typeof lock.action === "string" ? `action=${lock.action}` : "action=unknown";
+  const malformed = lock._invalid ? "malformed=true" : "malformed=false";
+  return `${heldBy} ${pid} ${startedAt} ${action} ${malformed}`;
+}
+
 /**
  * Acquires the deploy lock for this session. Returns the lock record on success, or null if
- * another session genuinely holds a fresh lock (caller should abort).
+ * lock cannot be obtained.
  */
 export function acquireLock(sessionId) {
   const existing = readLock();
-  if (existing && !isStale(existing)) {
-    return null; // someone else holds a live lock
+  if (existing && !FORCE_UNLOCK) {
+    if (isStale(existing)) {
+      warn(`existing stale lock blocked by policy (${holderLine(existing)})`);
+    } else {
+      warn(`deploy lock already held by another process (${holderLine(existing)})`);
+    }
+    return null;
   }
-  if (existing && isStale(existing)) {
-    warn(
-      `reclaiming stale lock held by session ${existing.heldBy} since ` +
-        `${new Date(existing.startedAt).toISOString()} (> 30 min old)`
-    );
+  if (existing && FORCE_UNLOCK) {
+    try {
+      unlinkSync(LOCK_PATH);
+      log(`force-unlock requested; removed existing lock (${holderLine(existing)})`);
+    } catch (e) {
+      if (e.code !== "ENOENT") {
+        warn(`force-unlock: failed to clear existing lock: ${e.message}`);
+        return null;
+      }
+    }
   }
   const record = {
     heldBy: sessionId,
@@ -102,8 +138,17 @@ export function acquireLock(sessionId) {
     action: "deploying",
     pid: process.pid,
   };
-  writeFileSync(LOCK_PATH, JSON.stringify(record, null, 2));
-  return record;
+  try {
+    writeFileSync(LOCK_PATH, JSON.stringify(record, null, 2), { flag: "wx" });
+    return record;
+  } catch (e) {
+    if (e.code === "EEXIST") {
+      const blocker = holderLine(existing);
+      warn(`deploy lock could not be claimed because it is already held (${blocker})`);
+      return null;
+    }
+    throw e;
+  }
 }
 
 /** Releases the lock ONLY if it is still held by this session (avoid releasing someone else's). */
@@ -326,9 +371,8 @@ export async function main() {
   if (!lock) {
     const existing = readLock();
     fail(
-      `deploy lock is held by another session (${existing?.heldBy}, started ` +
-        `${existing ? new Date(existing.startedAt).toISOString() : "unknown"}). ` +
-        `Refusing to proceed -- wait for it to finish or release, or ask the owner.`
+      `deploy lock acquisition blocked (${existing ? holderLine(existing) : "holder=unknown pid=unknown startedAt=unknown action=unknown"}). ` +
+      `Refusing to proceed -- wait for it to finish or release, or ask the owner.`
     );
     process.exit(1);
   }
