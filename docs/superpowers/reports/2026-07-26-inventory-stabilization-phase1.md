@@ -4,8 +4,10 @@ Date: 2026-07-26
 
 ## Outcome
 
-Phase 0 and the local Phase 1 gate are complete. Phase 2 authenticated preview proof starts after
-this exact change set is committed. Phases 3 through 6 have not started.
+Phase 0 and the local Phase 1 gate are complete. Phase 2 authenticated Preview proof is blocked:
+the current Preview bundle targets the production Firebase project, while the repository's Preview
+policy requires mock/no-login. A separate Firebase Preview project is required before that proof can
+begin. Phases 3 through 6 have not started.
 
 No commit, push, deployment, paid/live provider call, production data write, or production
 configuration change was made.
@@ -101,9 +103,11 @@ dependency versions were changed during this stabilization phase.
 
 ## Resume Order
 
-1. Commit Phase 0 and Phase 1 with the passing local proof.
-2. Create a preview from that exact SHA.
-3. Refresh Vercel inventory and test the newest preview, not an older alias.
-4. Begin Phase 2 stable-preview proof on that exact committed SHA.
+1. Provision a Firebase Preview project and Preview-scoped Admin credential outside the production
+   Firebase project.
+2. Set the matching Preview-only Firebase variables in Vercel and verify the deployed runtime project.
+3. Create a Preview from the exact candidate SHA through `node scripts/deploy-preview.mjs`.
+4. Refresh Vercel inventory and test the newest Preview and customer-facing Production alias.
+5. Begin Phase 2 stable-preview proof on that exact committed SHA.
 
 Production promotion remains separately gated by the exact phrase `DEPLOY THIS SHA`.

@@ -155,3 +155,7 @@ scripts/polish-eval-results.json
 # attachment; owner review happens against the freshly generated file each run).
 docs/pilot/point-s-backfill-worklist.csv
 .ladder-kv.json
+
+.vercel
+.env*
+.playwright-cli/

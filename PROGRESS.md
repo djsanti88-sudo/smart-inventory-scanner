@@ -2,7 +2,24 @@
 
 > Live status checkpoint. Update after every phase so a fresh session continues without guessing.
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
-> Last updated: 2026-07-20.
+> Last updated: 2026-07-26.
+
+## 2026-07-26 Stabilization Phase 2: BLOCKED by Preview environment safety
+
+Local Phase 1 stabilization is committed as `91bd1dc4be065aa2a2e8aea382c556e7161a7985` on
+`fix/release-stabilization`; its full local proof and Firebase emulator gates passed. No push or
+production deployment was made.
+
+Fresh Vercel inventory found that the newest Preview bundle is configured for
+`smart-inventory-scanner-app`, the production Firebase project. The repository's Preview env-parity
+gate forbids this configuration and correctly stopped a new Preview deployment. A name-only env
+check cannot prove a safe target project, so this must not be bypassed by changing the manifest.
+Provision a separate Firebase Preview project with matching browser config and a Preview-scoped Admin
+credential, then verify the runtime project before authenticated Preview tests.
+
+The Vercel customer-facing Production alias also resolves to an older deployment than Vercel's newest
+Production deployment. Release proof must refresh Vercel inventory and test both until the alias is
+reconciled. Production remains blocked pending the exact owner phrase `DEPLOY THIS SHA`.
 
 ## 2026-07-20 Phase 4 Stage A: Universal Import (ship gate COMPLETE, merge owner-gated)
 

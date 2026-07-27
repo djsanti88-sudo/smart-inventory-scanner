@@ -45,6 +45,20 @@ an oversight - it means every preview always runs the mock backend with no login
 what branch or code is deployed, so a preview link is always safe to hand out or click without
 touching real Firebase data. See `FIREBASE_SETUP.md` for the corresponding one-line policy note.
 
+### Current safety stop (2026-07-26)
+
+The currently deployed Preview bundle contains the public Firebase configuration for
+`smart-inventory-scanner-app`, the production Firebase project. That is a policy violation, not an
+alternative supported Preview mode. The env-parity gate correctly blocks another Preview deployment
+while those browser-facing Firebase variables remain present. Do not weaken the gate or remove the
+forbidden names to make it pass.
+
+Authenticated Preview proof requires a separate Firebase preview project, its matching browser
+configuration, and a server credential scoped to that preview project. A name-only Vercel env check
+cannot prove project separation, so the configuration must also be verified at runtime before any
+Preview account or scan testing. Until then, use Preview only for read-only smoke checks and use the
+Firebase emulator for authenticated automated proof.
+
 ## Production environment
 
 Production carries the real Firebase config (`NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_AUTH_MODE=live`,
