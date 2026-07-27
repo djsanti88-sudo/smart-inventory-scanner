@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { cleanScanCode, buildNormalizedCandidates } from "@/services/scanCleaner";
 import { COLLECTIONS } from "@/services/db/types";
+import type { ServiceAccount } from "firebase-admin/app";
 
 const EXPECTED_PROJECT = "smart-inventory-scanner-app";
 const argVal = (f: string): string | undefined => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : undefined; };
@@ -45,7 +46,7 @@ async function main() {
 
   const { initializeApp, cert, getApps } = await import("firebase-admin/app");
   const { getFirestore } = await import("firebase-admin/firestore");
-  if (!getApps().length) initializeApp({ credential: cert(sa as any), projectId: EXPECTED_PROJECT });
+  if (!getApps().length) initializeApp({ credential: cert(sa as unknown as ServiceAccount), projectId: EXPECTED_PROJECT });
   const db = getFirestore();
   const col = db.collection(COLLECTIONS.catalogEntries);
   console.log(`Verifying ${sample.length} random scans against LIVE global catalog...\n`);

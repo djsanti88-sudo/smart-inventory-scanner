@@ -3,8 +3,8 @@
 // wrong-VARIANT rate (right brand from prefix, but the auto-decoded size != the corpus ground truth).
 // Usage: node scripts/measure-relaxed-verify.ts --count=25 [--base=http://localhost:3200]
 import fs from "node:fs";
-import { TIRE_PREFIX_HINTS } from "../src/services/tire/tirePrefixHints.ts"; // pure data, no @/ alias
-import { hasCountableTireIdentity, tireSizeToken, KNOWN_TIRE_BRANDS } from "../src/services/ai/tireSpecs.ts";
+import { TIRE_PREFIX_HINTS, type PrefixHint } from "../src/services/tire/tirePrefixHints.ts"; // pure data, no @/ alias
+import { hasCountableTireIdentity, tireSizeToken, KNOWN_TIRE_BRANDS, type IdentityText } from "../src/services/ai/tireSpecs.ts";
 
 // Inlined VERBATIM from src/services/tire/tirePrefixLookup.ts (which uses an @/ alias that a standalone
 // node script can't resolve). Copied exactly so the simulation matches the live decoder's family logic.
@@ -15,7 +15,7 @@ function normalizeToGtin13(code: string): string | null {
   if (d.length === 14) return d.slice(1);
   return null;
 }
-function lookupTirePrefix(code: string, table: any = TIRE_PREFIX_HINTS): { prefix: string; brands: any[] } | null {
+function lookupTirePrefix(code: string, table: Record<string, PrefixHint[]> = TIRE_PREFIX_HINTS): { prefix: string; brands: PrefixHint[] } | null {
   const g = normalizeToGtin13(code);
   if (!g) return null;
   let best: { prefix: string; direct: boolean } | null = null;
@@ -33,8 +33,8 @@ function isBrandInPrefixFamily(code: string, brand: string, opts: { strongOnly?:
   if (!nb) return false;
   const m = lookupTirePrefix(code);
   if (!m) return false;
-  const family = opts.strongOnly ? m.brands.filter((h: any) => h.weight === "strong") : m.brands;
-  return family.some((h: any) => { const hn = brandNorm(h.brand); return !!hn && (hn === nb || hn.includes(nb) || nb.includes(hn)); });
+  const family = opts.strongOnly ? m.brands.filter((h: PrefixHint) => h.weight === "strong") : m.brands;
+  return family.some((h: PrefixHint) => { const hn = brandNorm(h.brand); return !!hn && (hn === nb || hn.includes(nb) || nb.includes(hn)); });
 }
 
 const arg = (n: string, d: string) => { const h = process.argv.find((a) => a.startsWith(`--${n}=`)); return h ? h.split("=")[1] : d; };
@@ -52,6 +52,12 @@ for (let i = 0; i < lines.length && sample.length < COUNT; i += step) {
 
 const CODE_CITED = new Set(["url_only", "snippet", "grounding_chunk", "fetched_source"]); // != "none" => code is in some source
 
+// Minimal shape of the /api/ai-lookup JSON response fields this script reads.
+interface AiLookupResponse {
+  decision?: { status?: string; evidenceStrength?: string };
+  results?: { productName?: string; brand?: string }[];
+}
+
 (async () => {
   try { const s = await (await fetch(BASE + "/api/ai-lookup")).json(); if (s.e2e) { console.error("server is e2e mock-only"); process.exit(1); } }
   catch { console.error(`cannot reach ${BASE}`); process.exit(1); }
@@ -63,14 +69,14 @@ const CODE_CITED = new Set(["url_only", "snippet", "grounding_chunk", "fetched_s
     const body = JSON.stringify({ mode: "decode-deep", scanContext: "tire", rawCode: t.code, cleanCode: t.code, codeType, confidenceThreshold: 0.85, allowImageSuggestions: true });
     try {
       const r = await fetch(BASE + "/api/ai-lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body });
-      const data: any = await r.json();
+      const data: AiLookupResponse = await r.json();
       const status = String(data?.decision?.status || "").toLowerCase();
       const ev = String(data?.decision?.evidenceStrength || "none");
       const prod = data?.results?.[0]?.productName || "";
       const aiBrand = data?.results?.[0]?.brand || "";
       // Mirror the decoder: if the structured brand is empty, infer it from the product name (same list).
       const inferred = aiBrand || (KNOWN_TIRE_BRANDS.find((b) => prod.toLowerCase().includes(b)) || "");
-      const identity = { productName: prod, brand: aiBrand } as any;
+      const identity: IdentityText = { productName: prod, brand: aiBrand };
 
       const prefixMatch = inferred ? isBrandInPrefixFamily(t.code, inferred, { strongOnly: true }) : false;
       const countable = hasCountableTireIdentity(identity);
@@ -83,7 +89,7 @@ const CODE_CITED = new Set(["url_only", "snippet", "grounding_chunk", "fetched_s
 
       wouldFlip++;
       const aiSize = tireSizeToken(identity);
-      const trueSize = tireSizeToken({ productName: t.size } as any);
+      const trueSize = tireSizeToken({ productName: t.size } satisfies IdentityText);
       const sizeOk = !!aiSize && !!trueSize && aiSize === trueSize;
       if (sizeOk) flipSizeCorrect++; else flipSizeWrong++;
       console.log(`  ${t.code} ${t.brand.padEnd(12)} ${status.padEnd(11)} ev=${ev.padEnd(14)} FLIP -> verified  size ai=${aiSize || "-"} true=${trueSize || "-"} ${sizeOk ? "OK" : "MISMATCH"}`);

@@ -12,6 +12,8 @@ import { createReadStream, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import { cleanScanCode, buildNormalizedCandidates } from "@/services/scanCleaner";
+import type { Firestore, CollectionReference, BulkWriter, BulkWriterError } from "firebase-admin/firestore";
+import type { ServiceAccount } from "firebase-admin/app";
 
 const EXPECTED_PROJECT = "smart-inventory-scanner-app";
 const COLLECTION = "retailCatalogEntries"; // SEPARATE from tires
@@ -62,7 +64,7 @@ async function main() {
   const limit = argVal("--limit") ? parseInt(argVal("--limit")!, 10) : 0;
   const path = resolve(argVal("--jsonl") || "data/retail-knowledge/retail_off.jsonl");
 
-  let db: any = null, col: any = null, bulk: any = null;
+  let db: Firestore | null = null, col: CollectionReference | null = null, bulk: BulkWriter | null = null;
   if (apply) {
     let raw = "";
     const sa = argVal("--sa");
@@ -74,11 +76,11 @@ async function main() {
     if (key.project_id !== EXPECTED_PROJECT) die(`service account project_id is not ${EXPECTED_PROJECT}`, 2);
     const { initializeApp, cert, getApps } = await import("firebase-admin/app");
     const { getFirestore } = await import("firebase-admin/firestore");
-    if (!getApps().length) initializeApp({ credential: cert(key as any), projectId: EXPECTED_PROJECT });
+    if (!getApps().length) initializeApp({ credential: cert(key as unknown as ServiceAccount), projectId: EXPECTED_PROJECT });
     db = getFirestore();
     col = db.collection(COLLECTION);
     bulk = db.bulkWriter();
-    bulk.onWriteError((err: any) => err.failedAttempts < 5); // retry up to 5x
+    bulk.onWriteError((err: BulkWriterError) => err.failedAttempts < 5); // retry up to 5x
   }
 
   console.log(`${dryRun ? "DRY-RUN" : "APPLY"} -> ${COLLECTION} | filter=${namesNoBrand ? "name-only(no brand)" : "name+brand"} | src=${path}`);
@@ -93,17 +95,17 @@ async function main() {
     if (!e) continue;
     kept++;
     if (apply) {
-      bulk.set(col.doc(e.id as string), e, { merge: true });
+      bulk!.set(col!.doc(e.id as string), e, { merge: true });
       written++;
-      if (written % 50000 === 0) { await bulk.flush(); console.log(`  scanned=${scanned} written=${written}`); }
+      if (written % 50000 === 0) { await bulk!.flush(); console.log(`  scanned=${scanned} written=${written}`); }
     } else if (kept % 250000 === 0) {
       console.log(`  scanned=${scanned} kept=${kept}`);
     }
     if (limit && kept >= limit) break;
   }
   if (apply) {
-    await bulk.close();
-    const total = await col.count().get();
+    await bulk!.close();
+    const total = await col!.count().get();
     console.log(JSON.stringify({ mode: "APPLIED", collection: COLLECTION, scanned, wrote: written, collectionTotalNow: total.data().count }, null, 2));
   } else {
     console.log(JSON.stringify({ mode: "DRY-RUN", scanned, highValueKept: kept }, null, 2));

@@ -9,6 +9,7 @@ import { MockDb } from "@/services/mockDb";
 import { sanitizeCatalogEntry } from "@/services/catalog/sanitizeCatalog";
 import { cleanScanCode, buildNormalizedCandidates } from "@/services/scanCleaner";
 import { COLLECTIONS } from "@/services/db/types";
+import type { ServiceAccount } from "firebase-admin/app";
 
 const argVal = (f: string) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : undefined; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -20,7 +21,7 @@ async function main() {
   if (typeof sa.private_key === "string") sa.private_key = (sa.private_key as string).replace(/\\n/g, "\n");
   const { initializeApp, cert, getApps } = await import("firebase-admin/app");
   const { getFirestore } = await import("firebase-admin/firestore");
-  if (!getApps().length) initializeApp({ credential: cert(sa as any), projectId: "smart-inventory-scanner-app" });
+  if (!getApps().length) initializeApp({ credential: cert(sa as unknown as ServiceAccount), projectId: "smart-inventory-scanner-app" });
   const adb = getFirestore();
 
   // Real cloud lookup (admin-backed), mapped exactly like the production dep.
@@ -47,7 +48,7 @@ async function main() {
 
   // Seed ONE shop-owned product+alias so we can prove ownership wins over the cloud.
   const ownedBarcode = "999100100107"; // not in the corpus
-  store.setState((s: any) => ({
+  store.setState((s) => ({
     products: [...s.products, { id: "owned-1", businessId: s.businessId, name: "MY HOUSE TIRE 200/50R16", brand: "House", category: "Tire", primaryBarcode: ownedBarcode, verified: true, aliases: [ownedBarcode], status: "active", source: "seed", confidence: 1, createdAt: "x", updatedAt: "x" }],
     aliases: [...s.aliases, { id: "owned-a", businessId: s.businessId, productId: "owned-1", cleanCode: ownedBarcode, normalizedCode: ownedBarcode, aliasType: "barcode", approved: true, confidence: 1, source: "seed", createdAt: "x", updatedAt: "x", lastSeenAt: "x", syncStatus: "synced", idempotencyKey: "k" }],
   }));
@@ -65,9 +66,9 @@ async function main() {
     store.getState().processScan(c.code);
     await sleep(400); // let async cloud lookup settle
     const st = store.getState();
-    const feed = st.scanFeed.find((e: any) => e.cleanCode === cleanScanCode(c.code).cleanCode);
-    const fb = st.feedbackEvents.filter((e: any) => e.code === cleanScanCode(c.code).cleanCode).map((e: any) => e.type);
-    const counted = st.finalCounts.reduce((a: number, x: any) => a + (x.quantity || 0), 0);
+    const feed = st.scanFeed.find((e) => e.cleanCode === cleanScanCode(c.code).cleanCode);
+    const fb = st.feedbackEvents.filter((e) => e.code === cleanScanCode(c.code).cleanCode).map((e) => e.type);
+    const counted = st.finalCounts.reduce((a: number, x) => a + (x.quantity || 0), 0);
     let outcome = "other";
     if (fb.includes("found_from_catalog")) { outcome = "found_from_catalog"; foundCatalog++; }
     else if (feed?.matchedProductId === "owned-1") { outcome = "shop_product"; owned++; }

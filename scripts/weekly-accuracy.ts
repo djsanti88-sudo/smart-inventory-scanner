@@ -9,7 +9,9 @@
 //
 // Plain JS in a .ts file (CommonJS, no "type":"module") so `node scripts/weekly-accuracy.ts` runs on
 // Node 24 type-stripping with no toolchain, matching scripts/live-decode-smoke.ts.
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS by design: runs via Node type-stripping (no "type":"module"), matches scripts/live-decode-smoke.ts pattern
 const fs = require("node:fs");
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS by design: runs via Node type-stripping (no "type":"module"), matches scripts/live-decode-smoke.ts pattern
 const path = require("node:path");
 
 let BASE = process.env.SMOKE_BASE_URL || "http://localhost:3000";
