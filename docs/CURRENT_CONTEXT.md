@@ -34,14 +34,20 @@ this file previously held is superseded; its durable outcomes are folded in belo
 4. Weekly DT-harvest schedule + harvest-branch merge.
 5. Access model timing: preview stays open access for now (owner decision); role foundation deferred.
 
-## 4. Access model (platformOwner vs customer) - TARGET, not built
+## 4. Access model (platformOwner vs customer) - the platform/customer split is BUILT; sub-roles are not
 - **platformOwner / Santiago**: raw/clean/normalized codes, aliases, global catalog, source
   evidence, provider diagnostics, internal exports, global alias repair.
 - **businessOwner / admin**: scan/count/manage shop data + product-facing info ONLY; no raw
   barcode/alias DB, no provider/AI/decode-trace/source-evidence.
 - **counter**: scan/count, product-facing only. **viewer**: read-only product-facing only.
-- _Current reality:_ role gating is NOT implemented; every authenticated user can see codes. This is
-  the known P0 gap of the deferred data-protection foundation (docs/HOTFIX_FOLLOWUPS.md).
+- _Current reality:_ `src/services/security/roleAccess.ts` defines `AccessLevel` ("platform" |
+  "business") and it is enforced server-side - `resolveScanServer.ts` and `serializers.ts`
+  (`sanitizeProduct`/`sanitizeScanEvent`/`sanitizeReview`) strip raw codes and evidence for the
+  "business" level, wired through ~27 call sites incl. `useAccessLevel.ts` and most app pages. What
+  is NOT built: the finer `BusinessRole` split (owner/admin/counter/viewer) - that type is declared
+  in `roleAccess.ts` but has no other production callers, so every authenticated business member
+  currently gets the same "business" access level. Do not claim owner/admin/counter/viewer
+  segregation works; only the platformOwner-vs-customer boundary is proven.
 
 ## 5. Standing safety rails
 - No push/deploy/paid-live calls/real-data writes without explicit owner word.

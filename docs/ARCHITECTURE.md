@@ -27,7 +27,9 @@ src/
 │   │                          usage counters, storage.ts (Turso/file), timeouts
 │   ├── tire-knowledge/        Tire corpus index (SQLite / Turso / generated-JSON fallback)
 │   ├── retail-knowledge/      ~4M-row retail barcode index (Open Food Facts derived)
-│   ├── knowledgeDb.ts         better-sqlite3 opener (decompresses .db.gz on Vercel)
+│   ├── knowledgeDb.ts         better-sqlite3 opener; local dev only - .vercelignore excludes both
+│   │                          knowledge.generated.db and .db.gz from the Vercel bundle, so
+│   │                          getKnowledgeDb() returns null in production (see note below)
 │   ├── decodeCacheStore.ts    L2 persistent decode cache (Turso/libsql)
 │   └── learnedProducts.ts     Server-persisted "learned products" suggestion tier
 ├── services/                  PURE SERVICES: no React, no next/* imports (convention enforced by
@@ -134,7 +136,7 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
 
 | Store | File | localStorage | Notes |
 |---|---|---|---|
-| scanStore | `src/stores/scanStore.ts` (~5,300 lines) | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
+| scanStore | `src/stores/scanStore.ts` (~7,000 lines) | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
 | reconcileStore | `src/stores/reconcileStore.ts` | own key, version 1 | Strips raw CSV field before persist |
 
 - Migration (`scanStoreMigrate`): version < 5 hard-resets learned data to seed; >= 5 is additive only
@@ -190,15 +192,22 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
    touches the cap. Do not add `checkAndIncrementDaily` callers.
 4. The count ledger is not in any file named "ledger": pure math in `services/inventory.ts`, stateful
    wiring in scanStore `processScan`/`markWrong`, proofs in `stores/ledgerInvariants.store.test.ts`.
-5. `scanStore.ts` is a 5,300-line monolith. Grep for symbols; do not expect file-per-concern.
+5. `scanStore.ts` is a ~7,000-line monolith. Grep for symbols; do not expect file-per-concern.
 6. "Every scan counts" is enforced by ORDERING (`ensureProvisionalCount` before any network), not by
    a named guard. Moving that call below an await is a law violation that no grep will catch.
 7. Gemini is wired but dead for decode; status responses can look like it participates. It does not.
 8. Brand-prefix conflict alone is advisory; only the evidence-weighted prefixFirewall hard-blocks,
    and strong app-verified evidence overrides even that.
 9. `markWrong` transfers quantity via repointed ScanEvents; it never zeroes or deletes.
-10. Two DB layers coexist on purpose: better-sqlite3 (knowledge corpus, local file / .db.gz on
-    Vercel) and Turso/libsql (decode cache, ladder usage). Do not unify them casually.
+10. Two DB layers coexist on purpose: better-sqlite3 (knowledge corpus) and Turso/libsql (decode
+    cache, ladder usage). The better-sqlite3 corpus DB is LOCAL-DEV-ONLY - `.vercelignore` excludes
+    both `knowledge.generated.db` and `knowledge.generated.db.gz` from the deployed bundle (they
+    blew the 100MB Vercel limit), so `getKnowledgeDb()` always returns null on Vercel; JSON fallback
+    (`tireKnowledgeIndex.ts` / `retailKnowledgeIndex.ts`) is the real Vercel/CI source of truth, with
+    the retail/tire corpora served from Turso at runtime. `knowledgeDb.ts`'s own header comment still
+    describes the old gz-decompress-to-/tmp design as if it runs on Vercel; that comment is stale too
+    - do not unify or "fix" it without checking `.vercelignore` and `.github/workflows/ci.yml`'s
+    CORPUS DB NOTE first. Do not unify the two DB layers casually.
 11. `server/upc/importBoundary.test.ts` statically fails the suite if client code imports
     `@/server/upc`. `services/upc/*` is the deliberately client-safe half. Same-sounding paths,
     different trust levels.

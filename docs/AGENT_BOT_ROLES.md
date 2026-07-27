@@ -14,12 +14,16 @@ port 3300) except the live bot (`playwright.bots.cloud.config.ts`, real god acco
 | ConfusedHumanBot | `npm run qa:bots:ux` | no-training UX scorecard + top confusions (incl. mobile) | RUNNING (report-only) |
 | ManagerBot | `npm run qa:bots:manager` | shop-manager workflow coverage + missing-feature classification | RUNNING (report-only) |
 | PerformanceBot | `npm run qa:bots:performance` | load + scan responsiveness + local payload smoke | RUNNING (report-only) |
-| ShopOwnerBot / AdminBot / CounterBot / ViewerBot | (folded into SecurityLeak/Export today) | role-segregated visibility | PARTIAL — needs the deferred client-side role model to be meaningful (single auth-bypass user today) |
+| ShopOwnerBot / AdminBot / CounterBot / ViewerBot | (folded into SecurityLeak/Export today) | role-segregated visibility | PARTIAL — platformOwner-vs-customer is enforced server-side (`roleAccess.ts` + `resolveScanServer.ts` + `serializers.ts`); the owner/admin/counter/viewer sub-split within "customer" has no enforcement yet, so these bots cannot yet prove sub-role segregation |
 
 ## Honest limitations
-- **Role segregation is not testable end-to-end yet** because client-side role gating is part of the
-  DEFERRED foundation (docs/HOTFIX_FOLLOWUPS.md). The role bots therefore report the CURRENT single-role
-  exposure truthfully (everything visible to everyone) instead of asserting gates that don't exist.
+- **Sub-role segregation (owner/admin/counter/viewer) is not testable end-to-end yet** - the
+  `BusinessRole` type is declared in `src/services/security/roleAccess.ts` but has no enforcement
+  callers, so every authenticated business member gets the same "business" `AccessLevel` today. The
+  platformOwner-vs-customer boundary above that IS enforced (see `resolveScanServer.ts`/
+  `serializers.ts`) and is what SecurityLeakBot/ExportBot actually verify. Verify current bot output
+  before asserting sub-role coverage either way - this doc records what is wired, not what a live run
+  proved this session.
 - SecurityLeakBot is strictly non-destructive: visibility/storage/export inspection only. No exploits,
   no writes, no auth attacks.
 

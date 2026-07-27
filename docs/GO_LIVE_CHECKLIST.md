@@ -5,11 +5,12 @@
 > (`inventory-lovat-six.vercel.app`). Steps marked **OWNER-GATED** must never be run by an agent
 > without explicit, in-the-moment owner approval - no exceptions, even mid-checklist.
 >
-> Deploy mechanics referenced below (GitHub disconnected from Vercel, preview vs. production, the
-> hookify prod gate) are canonical in `docs/DEPLOY_TRUTH.md` - read it first. Production deploys are
-> never automatic: they are explicit, owner-only CLI (`vercel --prod`) or Vercel dashboard promote
-> events, each requiring fresh in-conversation approval - do not assume a deploy already happened or
-> will happen as a side effect of anything else in this checklist.
+> Deploy mechanics referenced below (GitHub disconnected from Vercel, CI + branch protection on
+> `master`, preview vs. production, the hookify prod gate) are canonical in `docs/DEPLOY_TRUTH.md` -
+> read it first. Production deploys are never automatic: they are explicit, owner-only CLI
+> (`vercel --prod`) or Vercel dashboard promote events, each requiring fresh in-conversation
+> approval - do not assume a deploy already happened or will happen as a side effect of anything
+> else in this checklist, including a green CI run or a merge to `master`.
 >
 > Run the steps in order. Do not skip ahead: later steps assume earlier ones are verified, not just
 > attempted.

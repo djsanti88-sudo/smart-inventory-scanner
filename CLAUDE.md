@@ -79,7 +79,7 @@ PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `inte
 - The ledger core is NOT in a file named "ledger": pure math in `services/inventory.ts`, wiring in
   scanStore `processScan`/`markWrong`, proof in `npm run test:ledger`. `markWrong` is a quantity
   TRANSFER (repointed ScanEvents onto a fresh provisional), never a delete.
-- `stores/scanStore.ts` is a ~5,300-line monolith: grep for symbols, don't browse.
+- `stores/scanStore.ts` is a ~7,000-line monolith: grep for symbols, don't browse.
 - Two DB layers coexist on purpose: better-sqlite3 (knowledge corpus) and Turso/libsql (decode cache
   + ladder usage). `server/upc/*` is server-only (static import-boundary test); `services/upc/*` is
   the client-safe half.

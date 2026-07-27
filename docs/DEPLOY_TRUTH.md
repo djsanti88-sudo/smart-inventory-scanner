@@ -28,6 +28,22 @@ this project - never assume one implies the other.
   has approved in the moment. No agent session may run these without that explicit approval, even if
   a prior session already got a yes for a similar action - approval does not carry across sessions.
 
+## CI and branch protection exist, but do not deploy anything
+
+`.github/workflows/ci.yml` runs on every push and PR against `master`: `typecheck`, `unit-tests`,
+`build`, and a scoped `lint` job (Node 20, `npm ci`; mirrors `.github/workflows/playwright.yml`'s
+setup). `master` has GitHub branch protection with these 4 jobs as required status checks (strict -
+must be up to date with the base branch), force-push and branch deletion disallowed, and admin
+enforcement on (rules apply even to the owner). Required PR review count is 0 - CI passing is
+required, a second human approval is not.
+
+This is a correctness gate on the code landing on `master`, completely separate from the deploy
+mechanism above: merging to `master` still does not deploy anything (see `deploymentEnabled.master:
+false` above). CI does not build or check the `knowledge.generated.db` SQLite corpus - see the
+CORPUS DB NOTE at the top of `ci.yml` for why (JSON is the CI/Vercel source of truth; the DB is a
+local-dev-only performance optimization, excluded from both CI and the Vercel bundle via
+`.vercelignore`).
+
 ## Live enforcement: the hookify prod gate
 
 `.claude/hookify.vercel-prod-gate.local.md` is a local, deterministic hook (not just a doc convention)
