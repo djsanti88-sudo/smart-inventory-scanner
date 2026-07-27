@@ -23,7 +23,18 @@ describe("scanStore live decode auth", () => {
     globalThis.fetch = fetchSpy;
 
     try {
-      const store = createTestScanStore({ cloudBackend: true });
+      const applied: Array<{ operation: string; idempotencyKey: string }> = [];
+      const store = createTestScanStore({
+        cloudBackend: true,
+        db: {
+          apply: async (item) => {
+            applied.push(item);
+            return { ok: true, alreadyApplied: false };
+          },
+          setFailure: () => {},
+          reset: () => {},
+        },
+      });
       store.getState().setBusinessContext("business-live", "user-live");
       store.getState().updateSettings({ aiLookupEnabled: false });
       store.getState().processScan("086699205636");
@@ -37,6 +48,8 @@ describe("scanStore live decode auth", () => {
       expect(call).toBeDefined();
       const body = JSON.parse(String(call?.[1]?.body));
       expect(body).toMatchObject({ idToken: "firebase-token", businessId: "business-live", mode: "decode" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(applied.some((item) => item.operation === "SAVE_PRODUCT" && item.idempotencyKey.includes(":decode:"))).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }

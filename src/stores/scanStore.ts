@@ -1171,6 +1171,34 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       return { idToken: await user.getIdToken(), businessId };
     };
 
+    // The provisional product and scan event are written immediately so counting survives a slow decode.
+    // Once a decode enriches either record, persist that newer state too or a refresh would restore the
+    // placeholder rather than the identity the scanner just displayed.
+    const syncDecodedState = (reviewId: string) => {
+      if (!cloudBackend) return;
+      const state = get();
+      const review = state.needsReviewQueue.find((item) => item.id === reviewId);
+      if (!review || !state.businessContextReady || !state.sessionId) return;
+      const event = state.scanFeed.find(
+        (item) => item.sessionId === review.sessionId && item.cleanCode === review.cleanCode,
+      );
+      const product = event ? state.products.find((item) => item.id === event.matchedProductId) : undefined;
+      if (!event || !product) return;
+      const version = JSON.stringify([event.status, event.decodeStatus, event.reason, product.name, product.brand, product.primaryBarcode]);
+      enqueueAndSync([
+        makeQueueItem({
+          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+          entityType: "Product", entityId: product.id, operation: "SAVE_PRODUCT", payload: product,
+          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${product.id}:decode:${version}`, "SAVE_PRODUCT"), scanEventId: null,
+        }),
+        makeQueueItem({
+          idFactory, now, businessId: state.businessId, sessionId: event.sessionId,
+          entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: event,
+          idempotencyKey: buildIdempotencyKey(state.businessId, event.sessionId, `${event.id}:decode:${version}`, "SAVE_SCAN_EVENT"), scanEventId: event.id,
+        }),
+      ]);
+    };
+
     // Fire-and-forget audit. NEVER blocks or throws into the scanner/UI. Only emits with a REAL business
     // context (no fake businessId/actor); a no-op when no audit sink is wired (mock/default path).
     const emitAudit = (e: { entityType: string; entityId: string; action: string; metadata?: Record<string, unknown> }) => {
@@ -3802,6 +3830,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 ),
               }));
             }
+            syncDecodedState(reviewId);
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
