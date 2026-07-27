@@ -166,7 +166,16 @@ function parsePreviewUrl(stdout) {
   const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   for (const line of [...lines].reverse()) {
     const match = line.match(/https:\/\/\S+/);
-    if (match) return match[0];
+    if (!match) continue;
+    // Only accept real Vercel deployment URLs - stdout can carry dashboard
+    // links, docs links, or arbitrary https tokens if the CLI format changes.
+    let host;
+    try {
+      host = new URL(match[0]).hostname;
+    } catch {
+      continue;
+    }
+    if (host === "vercel.app" || host.endsWith(".vercel.app")) return match[0];
   }
   return null;
 }
