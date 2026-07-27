@@ -1163,6 +1163,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       get().syncPending();
     };
 
+    // Live decode is tenant-scoped. Mock/E2E mode remains token-free.
+    const aiRequestAuth = async (businessId: string): Promise<{ idToken?: string; businessId?: string }> => {
+      if (!cloudBackend) return {};
+      const user = await getSession();
+      if (!user || typeof user.getIdToken !== "function") return {};
+      return { idToken: await user.getIdToken(), businessId };
+    };
+
     // Fire-and-forget audit. NEVER blocks or throws into the scanner/UI. Only emits with a REAL business
     // context (no fake businessId/actor); a no-op when no audit sink is wired (mock/default path).
     const emitAudit = (e: { entityType: string; entityId: string; action: string; metadata?: Record<string, unknown> }) => {
@@ -2095,7 +2103,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Callers (the scan page) also call ensureAutoSession before every scan batch; this is the
         // hard backstop for any path (including the internal resolveUnknown -> processScan re-apply
         // call) that does not.
-        if (get().currentSession?.locked || get().currentSession?.status === "completed") {
+        if (!get().sessionId || !get().currentSession || get().currentSession?.locked || get().currentSession?.status === "completed") {
           get().ensureAutoSession();
         }
         const scanLocation = get().location;
@@ -2711,6 +2719,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              ...(await aiRequestAuth(state.businessId)),
               rawCode: rawCodeSanitized,
               cleanCode: cleanCodeSanitized,
               provider: s.primaryProvider,
@@ -3000,6 +3009,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 headers: { "Content-Type": "application/json" },
                 signal: abortController.signal,
                 body: JSON.stringify({
+                  ...(await aiRequestAuth(state.businessId)),
                   mode: "decode",
                   proRecheck: review.reopenedFromWrong === true, // auto-escalate a marked-wrong code to the stronger model
                   rawCode: rawCodeSanitized,
@@ -3046,6 +3056,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // initial call so a hung retry can never block the scanner past the abort window.
                 signal: abortController.signal,
                 body: JSON.stringify({
+                  ...(await aiRequestAuth(state.businessId)),
                   mode: "decode", proRecheck: review.reopenedFromWrong === true,
                   rawCode: rawCodeSanitized, cleanCode: cleanCodeSanitized, codeType,
                   confidenceThreshold: 0.8, allowImageSuggestions: s.allowImageSuggestions,
@@ -4156,6 +4167,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              ...(await aiRequestAuth(state.businessId)),
               mode: "decode-deep",
               // MANDATORY: without scanContext "tire" the route's page-fetch verify gate cannot fire,
               // so the exact UPC is never app-verified and decideDecode can never return "verified"
@@ -6111,7 +6123,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             headers: { "Content-Type": "application/json" },
             // proRecheck selects the strongest configured Gemini model server-side. Correction-only:
             // it does NOT change normal scan provider order or premium fallback.
-            body: JSON.stringify({ mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85 }),
+            body: JSON.stringify({
+              ...(await aiRequestAuth(get().businessId)),
+              mode: "decode", proRecheck: true, rawCode: review.rawCode, cleanCode: review.cleanCode, codeType: detectCodeType(review.cleanCode), confidenceThreshold: 0.85,
+            }),
           });
           const data = await res.json();
           const decision = data.decision;
