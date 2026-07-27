@@ -38,26 +38,22 @@ Plain preview/read-only commands (`vercel deploy` with no `--prod`, `vercel ls`,
 actual enforcement mechanism, not just written policy - a session cannot "forget" the No-Deploy Rule
 for these specific commands because the hook blocks them mechanically.
 
-## Preview environment: mock/no-login by design
+## Preview environment: dedicated authenticated Firebase project
 
-Preview deployments deliberately lack `NEXT_PUBLIC_FIREBASE_*` and `AUTH_MODE` env vars. This is not
-an oversight - it means every preview always runs the mock backend with no login wall, regardless of
-what branch or code is deployed, so a preview link is always safe to hand out or click without
-touching real Firebase data. See `FIREBASE_SETUP.md` for the corresponding one-line policy note.
+Preview deployments use `smart-inventory-preview`, a Firebase project separate from
+`smart-inventory-scanner-app` production. Preview carries its own browser Firebase configuration,
+explicit `FIREBASE_PROJECT_ID`, and Preview-scoped Admin credential so authentication, Firestore,
+sessions, and tenant-isolation can be tested without touching production users or inventory.
+
+Preview must never use emulator mode, a production-mode opt-in, raw service-account JSON, or platform
+owner overrides. `scripts/env-manifest.json` enforces the environment-variable names; runtime browser
+proof must also confirm the public Firebase project ID before any authenticated test.
 
 ### Current safety stop (2026-07-26)
 
-The currently deployed Preview bundle contains the public Firebase configuration for
-`smart-inventory-scanner-app`, the production Firebase project. That is a policy violation, not an
-alternative supported Preview mode. The env-parity gate correctly blocks another Preview deployment
-while those browser-facing Firebase variables remain present. Do not weaken the gate or remove the
-forbidden names to make it pass.
-
-Authenticated Preview proof requires a separate Firebase preview project, its matching browser
-configuration, and a server credential scoped to that preview project. A name-only Vercel env check
-cannot prove project separation, so the configuration must also be verified at runtime before any
-Preview account or scan testing. Until then, use Preview only for read-only smoke checks and use the
-Firebase emulator for authenticated automated proof.
+The previously deployed Preview bundle contained the production Firebase project. That deployment is
+not an acceptable authenticated test target. A dedicated Preview project now exists, but the Vercel
+Preview variables and runtime proof must be updated before a new authenticated Preview is deployed.
 
 ## Production environment
 

@@ -12,10 +12,10 @@ production deployment was made.
 
 Fresh Vercel inventory found that the newest Preview bundle is configured for
 `smart-inventory-scanner-app`, the production Firebase project. The repository's Preview env-parity
-gate forbids this configuration and correctly stopped a new Preview deployment. A name-only env
-check cannot prove a safe target project, so this must not be bypassed by changing the manifest.
-Provision a separate Firebase Preview project with matching browser config and a Preview-scoped Admin
-credential, then verify the runtime project before authenticated Preview tests.
+gate correctly stopped another deployment. A dedicated Firebase project, `smart-inventory-preview`,
+now exists with a protected `nam5` Firestore database and the repository's rules/indexes deployed.
+Its browser configuration, Preview-scoped Admin credential, and enabled authentication providers must
+be configured in Vercel before authenticated Preview tests.
 
 The Vercel customer-facing Production alias also resolves to an older deployment than Vercel's newest
 Production deployment. Release proof must refresh Vercel inventory and test both until the alias is
