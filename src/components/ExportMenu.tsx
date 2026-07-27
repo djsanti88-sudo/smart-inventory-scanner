@@ -120,7 +120,10 @@ export function ExportMenu() {
     const r = s.importProductsCsv(text);
     const conflictNote = r.conflicts.length ? `, ${r.conflicts.length} conflict(s) skipped` : "";
     const dupNote = r.duplicates ? `, ${r.duplicates} duplicate(s)` : "";
-    setImportMsg(`Imported ${r.productsCreated} products and ${r.aliasesCreated} barcodes from ${r.rowsParsed} rows${dupNote}${conflictNote}.`);
+    // QA Task 7 (owner decision): existing-barcode rows refresh descriptive fields only - never a
+    // quantity implication in this copy.
+    const refreshedNote = r.refreshed ? `, ${r.refreshed} matched existing product(s) (fields refreshed)` : "";
+    setImportMsg(`Imported ${r.productsCreated} products and ${r.aliasesCreated} barcodes from ${r.rowsParsed} rows${dupNote}${refreshedNote}${conflictNote}.`);
   }
 
   const FORMATS: { fmt: Fmt; label: string }[] = [
