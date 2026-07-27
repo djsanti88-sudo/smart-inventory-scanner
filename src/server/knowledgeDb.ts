@@ -6,11 +6,15 @@ import { tmpdir } from "node:os";
 
 // Shared SQLite knowledge database accessor. SERVER-SIDE ONLY.
 //
-// Two modes:
-//   1. LOCAL DEV: opens knowledge.generated.db directly (uncompressed, fast).
-//   2. VERCEL PRODUCTION: the function bundle contains knowledge.generated.db.gz (~125MB).
-//      On the first cold start, this module decompresses it to /tmp and opens from there.
-//      Fluid Compute reuses instances, so subsequent requests use the cached connection.
+// LOCAL DEV / WORKTREE ONLY: opens knowledge.generated.db directly (uncompressed, fast), or
+// decompresses knowledge.generated.db.gz to /tmp if only the compressed copy is present.
+//
+// VERCEL PRODUCTION does NOT use this file at all: both knowledge.generated.db and
+// knowledge.generated.db.gz are excluded from the deploy bundle via .vercelignore (the
+// uncompressed DB alone is ~343MB, well over Vercel's function size limit). Production reads the
+// tire/retail corpora through Turso/libsql (server/tire-knowledge, server/retail-knowledge), with
+// a generated-JSON fallback -- see docs/ARCHITECTURE.md section on corpus storage. resolveDbPath()
+// below returns null on Vercel (no local file, no stale /tmp copy) and callers fall through.
 //
 // Read-only. The DB is generated at build time by scripts/build-knowledge-db.mjs.
 

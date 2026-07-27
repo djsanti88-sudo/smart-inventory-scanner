@@ -11,7 +11,9 @@
 //
 // What this wrapper does, in order:
 //   1. Acquire an exclusive deploy lock (.deploy-lock at repo root) so only one session can be
-//      mid-deploy at a time. Stale locks (> 30 min old) are treated as abandoned and reclaimed.
+//      mid-deploy at a time. Stale locks (> 30 min old) are flagged as stale but still BLOCK by
+//      policy -- they are never auto-reclaimed. Clearing one requires the operator to pass
+//      --force-unlock explicitly.
 //   2. Run whatever preflight gates exist: scripts/check-fix-lineage.mjs and
 //      scripts/check-env-parity.mjs. Both are being built by parallel agents as of this writing, so
 //      their absence is tolerated with a warning, not a hard failure -- once they land, they start
