@@ -8,13 +8,25 @@ import BusinessPage from "@/app/(app)/business/page";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/lib/selectedBusiness", () => ({ setSelectedBusinessId: vi.fn() }));
+vi.mock("@/stores/scanStore", () => ({
+  useScanStore: { getState: () => ({ prepareSignOut: vi.fn().mockResolvedValue(0), resetForSignOut: vi.fn() }) },
+}));
+// listMemberships resolves the business name onto each Membership (server-validated join), so the
+// list renders the saved NAME directly - no separate name-fetch helper.
 vi.mock("@/lib/auth", () => ({
   createBusiness: vi.fn(),
+  createBusinessMember: vi.fn(),
+  ensureWorkspace: vi.fn(),
   signOut: vi.fn(),
   listMemberships: vi.fn().mockResolvedValue([
-    { id: "b-uuid-1234_u1", businessId: "b-uuid-1234-abcd-9999", userId: "u1", role: "owner" },
+    {
+      id: "b-uuid-1234_u1",
+      businessId: "b-uuid-1234-abcd-9999",
+      userId: "u1",
+      role: "owner",
+      businessName: "Polo's Point Tires",
+    },
   ]),
-  getBusinessNames: vi.fn().mockResolvedValue({ "b-uuid-1234-abcd-9999": "Polo's Point Tires" }),
 }));
 
 afterEach(() => cleanup());

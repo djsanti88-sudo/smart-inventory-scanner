@@ -224,6 +224,125 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     }
   });
 
+  it("(e3) fresh cloud load restores the active session scan feed from persisted scan events", async () => {
+    const session: InventorySession = {
+      id: "s1", businessId: "b1", name: "Cloud Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const remoteEvent = scanEvent("ev-cloud", "p1", "086699205636");
+    const remoteCount = count("p1", 1, ["ev-cloud"]);
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: async () => ({ products: [], aliases: [], sessions: [session], counts: [remoteCount], scanEvents: [remoteEvent] }),
+    });
+
+    store.getState().setBusinessContext("b1", "u1");
+    await vi.waitFor(() => expect(store.getState().businessDataLoaded).toBe(true));
+
+    expect(store.getState().sessionId).toBe("s1");
+    expect(store.getState().finalCounts.find((c) => c.productId === "p1")?.quantity).toBe(1);
+    expect(store.getState().scanFeed.map((e) => e.id)).toEqual(["ev-cloud"]);
+  });
+
+  it("(e4) cloud feed restore preserves a same-session unsynced local scan row", async () => {
+    const session: InventorySession = {
+      id: "s1", businessId: "b1", name: "Cloud Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const remoteEvent = { ...scanEvent("ev1", "p-remote", "086699205636"), reason: "stale remote" };
+    const localEvent = { ...scanEvent("ev1", "p-local", "086699205636"), reason: "local corrected", syncStatus: "pending" as const };
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: async () => ({ products: [], aliases: [], sessions: [session], counts: [count("p-local", 1, ["ev1"])], scanEvents: [remoteEvent] }),
+    });
+
+    store.setState({ businessId: "b1", userId: "u1", scanFeed: [localEvent] });
+    store.getState().setBusinessContext("b1", "u1");
+    await vi.waitFor(() => expect(store.getState().businessDataLoaded).toBe(true));
+
+    expect(store.getState().scanFeed).toHaveLength(1);
+    expect(store.getState().scanFeed[0]).toMatchObject({ id: "ev1", matchedProductId: "p-local", reason: "local corrected" });
+  });
+
+  it("(e5) cloud feed restore replaces stale synced local rows and excludes other-session rows", async () => {
+    const session: InventorySession = {
+      id: "s1", businessId: "b1", name: "Cloud Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const remoteEvent = { ...scanEvent("ev1", "p-remote", "086699205636"), reason: "remote canonical" };
+    const staleLocal = { ...scanEvent("ev1", "p-local", "086699205636"), reason: "stale local", syncStatus: "synced" as const };
+    const otherSessionLocal = {
+      ...scanEvent("ev-other", "p-other", "222"),
+      sessionId: "s-other",
+      reason: "other session local row",
+      syncStatus: "synced" as const,
+    };
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: async () => ({ products: [], aliases: [], sessions: [session], counts: [count("p-remote", 1, ["ev1"])], scanEvents: [remoteEvent] }),
+    });
+
+    store.setState({ businessId: "b1", userId: "u1", scanFeed: [staleLocal, otherSessionLocal] });
+    store.getState().setBusinessContext("b1", "u1");
+    await vi.waitFor(() => expect(store.getState().businessDataLoaded).toBe(true));
+
+    expect(store.getState().scanFeed).toHaveLength(1);
+    expect(store.getState().scanFeed[0]).toMatchObject({ id: "ev1", matchedProductId: "p-remote", reason: "remote canonical" });
+  });
+
+  it("(e6) cloud feed restore clears stale synced rows when the restored session has no remote scan events", async () => {
+    const session: InventorySession = {
+      id: "s1", businessId: "b1", name: "Cloud Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "synced",
+    };
+    const staleSameSession = { ...scanEvent("ev-stale", "p-stale", "111"), reason: "stale local", syncStatus: "synced" as const };
+    const staleOtherSession = {
+      ...scanEvent("ev-other", "p-other", "222"),
+      sessionId: "s-other",
+      reason: "other session local row",
+      syncStatus: "synced" as const,
+    };
+    const store = createTestScanStore({
+      cloudBackend: true,
+      loadBusinessData: async () => ({ products: [], aliases: [], sessions: [session], counts: [], scanEvents: [] }),
+    });
+
+    store.setState({ businessId: "b1", userId: "u1", scanFeed: [staleSameSession, staleOtherSession] });
+    store.getState().setBusinessContext("b1", "u1");
+    await vi.waitFor(() => expect(store.getState().businessDataLoaded).toBe(true));
+
+    expect(store.getState().scanFeed).toEqual([]);
+  });
+
+  it("(e7) sync-status recompute tolerates legacy open review rows without idempotencyKey", async () => {
+    const session: InventorySession = {
+      id: "s1", businessId: "b1", name: "Cloud Session", location: "Main", status: "active",
+      startedAt: "2026-01-01T00:00:00.000Z", completedAt: null, createdBy: "u1", notes: "", syncStatus: "pending",
+    };
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    store.setState({
+      businessContextReady: true,
+      businessDataLoaded: true,
+      businessId: "b1",
+      userId: "u1",
+      currentSession: session,
+      sessionId: "s1",
+      pendingSyncQueue: [{
+        id: "pending-review-event", businessId: "b1", sessionId: "s1", entityType: "ScanEvent", entityId: "legacy-review",
+        operation: "SAVE_SCAN_EVENT", payload: {}, status: "pending", retryCount: 0, lastError: null,
+        createdAt: "t", updatedAt: "t", idempotencyKey: "pending-review-event", scanEventId: "legacy-review",
+      }],
+      needsReviewQueue: [{
+        id: "legacy-review", businessId: "b1", rawCode: "999", cleanCode: "999", codeType: "unknown",
+        status: "open", decodeStatus: "needs_review", reason: "legacy", suggestedProductName: "",
+        createdAt: "t", scanCount: 1, lastScannedAt: "t",
+      } as unknown as UnknownCodeReview],
+    });
+
+    expect(() => store.getState().syncPending()).not.toThrow();
+    await vi.waitFor(() => expect(store.getState().needsReviewQueue[0].syncStatus).toBe("synced"));
+  });
+
   it("(e2) a deliberate suggest_link HOLD survives a rehydrate cycle (stamp guard input persists)", () => {
     // The post-resolve stamp sites spare rows deliberately held open via suggestedLinkProductId
     // (identity-merge suggest_link path). That guard reads the stamp off the persisted review row,

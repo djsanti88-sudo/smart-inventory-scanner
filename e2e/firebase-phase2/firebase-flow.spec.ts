@@ -48,7 +48,13 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   // Never call live AI in this run. Auto-decode MAY fire /api/ai-lookup (default settings), but
   // IS_E2E=1 forces the route mock-only - so the safety net asserts every response came from the
   // mock provider, not that zero calls happened (the old zero-calls assert predates auto-decode).
+  // We track both the request URLs (decode was attempted - free/local rungs run even without paid
+  // keys) and the response bodies (no live/paid provider ever returned data).
+  const decodeCalls: string[] = [];
   const aiResponses: Array<Promise<unknown>> = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/ai-lookup")) decodeCalls.push(r.url());
+  });
   page.on("response", (r) => {
     if (r.url().includes("/api/ai-lookup") && r.request().method() === "POST") {
       aiResponses.push(r.json().catch(() => null));
@@ -62,17 +68,10 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await page.getByTestId("login-button").click();
   await page.waitForURL("**/scan");
 
-  // 2. No business selected yet -> the gate shows a clear message (no fake context).
-  await expect(page.getByTestId("business-context-banner")).toBeVisible();
-  await page.screenshot({ path: `${PROOF}/01-needs-business.png`, fullPage: true });
-
-  // 3. Select the real business -> the gate wires setBusinessContext(businessId, realUid).
-  await page.goto("/business");
-  await page.getByTestId(`select-business-${BIZ}`).click();
-  await page.waitForURL("**/scan");
+  // 2. The only valid membership is preserved and selected by the authenticated server flow.
   await expect(page.getByTestId("business-context-banner")).toHaveCount(0); // context ready
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // scanner focus intact
-  await page.screenshot({ path: `${PROOF}/02-context-ready.png`, fullPage: true });
+  await page.screenshot({ path: `${PROOF}/01-context-ready.png`, fullPage: true });
 
   // 4. Start a real count session (persists a CountSession for survive-refresh).
   await openSecondaryControls(page);
@@ -112,11 +111,28 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await expect(page.getByTestId("business-context-banner")).toHaveCount(0);
   await expect(page.getByTestId(`qty-${KNOWN_PRODUCT_ID}`)).toHaveText("2"); // counts persisted, not doubled
   await expect(page.getByTestId("final-count-body")).toContainText("FB Mystery"); // learned product persisted
+  await expect(page.getByText("4 scans", { exact: true })).toBeVisible(); // scan feed also rebuilt from Firestore
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // scanner focus still works after reload
   await openSecondaryControls(page); // expand AFTER the focus assert - the summary click takes focus
   await page.screenshot({ path: `${PROOF}/05-after-refresh.png`, fullPage: true });
 
-  // 10. Finish the session (persists completed state + audit), then export a CSV.
+  // 10. Open History/session detail before finishing: the active session's scan timeline must be
+  // readable from Firestore after reload, not just the product-count summary.
+  await page.goto("/history");
+  await expect(page.getByTestId("history-table")).toBeVisible();
+  const activeHistoryRow = page.locator('[data-testid^="history-row-"]').first();
+  await expect(activeHistoryRow).toContainText("4");
+  await Promise.all([
+    page.waitForURL("**/sessions/**"),
+    activeHistoryRow.click({ position: { x: 20, y: 20 } }),
+  ]);
+  await expect(page.getByTestId("session-timeline-table").locator("tbody tr")).toHaveCount(4);
+  await expect(page.getByTestId("session-timeline-table")).toContainText(UNKNOWN_CODE);
+  await page.screenshot({ path: `${PROOF}/05b-history-detail-timeline.png`, fullPage: true });
+  await page.goto("/scan");
+
+  // 11. Finish the session (persists completed state + audit), then export a CSV.
+  await page.getByText("Sessions and export", { exact: true }).click();
   await page.getByTestId("finish-session").click();
   await waitDrained(page);
   await page.getByTestId("export-menu-trigger").click(); // exports now live in the unified Export dropdown
@@ -127,6 +143,9 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   expect(download.suggestedFilename()).toBe("final-counts.csv");
   await download.saveAs(`${PROOF}/final-counts.csv`);
   await page.screenshot({ path: `${PROOF}/06-finished-exported.png`, fullPage: true });
+
+  // Server decode was attempted, but in this Firebase proof it is mock-only (IS_E2E=1), not live AI.
+  expect(decodeCalls.length).toBeGreaterThanOrEqual(1);
 
   // No LIVE AI was ever called: every ai-lookup response must come from the mock provider.
   // A whole-body string match is too broad here: the ladder honestly LABELS every rung it evaluated

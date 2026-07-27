@@ -138,6 +138,19 @@ describe("ensureAutoSession", () => {
     expect(store.getState().currentSession!.status).toBe("active");
   });
 
+  it("processScan after cloud context reset opens a valid session before queueing the scan", () => {
+    const store = createTestScanStore({ now: () => "2026-07-19T16:00:00.000Z", cloudBackend: true });
+    store.getState().setBusinessContext("business-live", "user-live");
+    store.setState({ sessionId: "", currentSession: null });
+
+    const result = store.getState().processScan("012345678905");
+
+    expect(result).not.toBeNull();
+    expect(store.getState().sessionId).not.toBe("");
+    expect(store.getState().currentSession?.businessId).toBe("business-live");
+    expect(store.getState().pendingSyncQueue.every((item) => item.sessionId.length > 0)).toBe(true);
+  });
+
   it("ADOPTS an unclaimed active in-window session (no deviceId) and PRESERVES its counts instead of rotating", () => {
     // Regression: a hydrated pre-Phase-3 / mock session has no deviceId. On scan-page mount
     // ensureAutoSession must claim it for this device and keep its finalCounts, not open a fresh

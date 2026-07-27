@@ -1,12 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// vi.mock factories are hoisted above top-level const declarations; Vitest 4 throws a TDZ error if the
-// factory below references plain top-level consts. vi.hoisted runs before vi.mock and is safe to
-// reference inside it (see src/server/decode/pipeline.test.ts for the established repo pattern).
-const { signInWithPopup, sendPasswordResetEmail, GoogleAuthProvider } = vi.hoisted(() => ({
+const mocks = vi.hoisted(() => ({
   signInWithPopup: vi.fn(),
   sendPasswordResetEmail: vi.fn(),
-  GoogleAuthProvider: vi.fn(),
+  fetch: vi.fn(),
+  auth: { currentUser: null as unknown },
 }));
 
 vi.mock("firebase/auth", () => ({
@@ -14,50 +12,70 @@ vi.mock("firebase/auth", () => ({
   createUserWithEmailAndPassword: vi.fn(),
   signOut: vi.fn(),
   onAuthStateChanged: vi.fn(),
-  signInWithPopup: (...a: unknown[]) => signInWithPopup(...a),
-  sendPasswordResetEmail: (...a: unknown[]) => sendPasswordResetEmail(...a),
-  GoogleAuthProvider,
+  signInWithPopup: (...args: unknown[]) => mocks.signInWithPopup(...args),
+  sendPasswordResetEmail: (...args: unknown[]) => mocks.sendPasswordResetEmail(...args),
+  GoogleAuthProvider: vi.fn(),
 }));
-vi.mock("@/lib/firebaseClient", () => ({ getFirebaseAuth: () => ({}), getDb: () => ({}) }));
+vi.mock("@/lib/firebaseClient", () => ({
+  getFirebaseAuth: () => mocks.auth,
+  getDb: vi.fn(),
+}));
 vi.mock("@/services/auth/authBypass", () => ({ isAuthBypassEnabled: () => false }));
-vi.mock("firebase/firestore", () => ({
-  doc: vi.fn(), setDoc: vi.fn(), getDoc: vi.fn(() => Promise.resolve({ exists: () => false, data: () => undefined })),
-  // runTransaction invokes its callback with a fake tx whose get returns a not-exists snapshot.
-  runTransaction: vi.fn((_db: unknown, fn: (tx: unknown) => Promise<unknown>) =>
-    fn({ get: () => Promise.resolve({ exists: () => false, data: () => undefined }), set: vi.fn() }),
-  ),
-  getDocs: vi.fn(), query: vi.fn(),
-  collection: vi.fn(), where: vi.fn(), serverTimestamp: vi.fn(),
-}));
 
-import { signInWithGoogle, sendResetEmail } from "./auth";
+import { sendResetEmail, signInWithGoogle } from "./auth";
 
-beforeEach(() => { signInWithPopup.mockReset(); sendPasswordResetEmail.mockReset(); });
+const user = {
+  uid: "u1",
+  email: "a@b.co",
+  displayName: "A",
+  getIdToken: vi.fn().mockResolvedValue("token"),
+};
+
+beforeEach(() => {
+  mocks.signInWithPopup.mockReset();
+  mocks.sendPasswordResetEmail.mockReset();
+  mocks.fetch.mockReset().mockResolvedValue(
+    new Response(JSON.stringify({ status: "ready", businessId: "business-1" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  mocks.auth.currentUser = user;
+  vi.stubGlobal("fetch", mocks.fetch);
+});
 
 describe("signInWithGoogle", () => {
-  it("returns no error on success and ensures a profile", async () => {
-    signInWithPopup.mockResolvedValue({ user: { uid: "u1", email: "a@b.co", displayName: "A" } });
-    const res = await signInWithGoogle();
-    expect(res.error).toBeNull();
-    expect(signInWithPopup).toHaveBeenCalledOnce();
+  it("returns a ready workspace after a successful Google sign-in", async () => {
+    mocks.signInWithPopup.mockResolvedValue({ user });
+    const result = await signInWithGoogle();
+    expect(result.error).toBeNull();
+    expect(result.status).toBe("ready");
+    expect(mocks.signInWithPopup).toHaveBeenCalledOnce();
+    expect(mocks.fetch).toHaveBeenCalledOnce();
   });
-  it("returns the error message on failure", async () => {
-    signInWithPopup.mockRejectedValue(new Error("popup closed"));
-    const res = await signInWithGoogle();
-    expect(res.error).toBe("popup closed");
+
+  it("suppresses the expected popup-closed error", async () => {
+    mocks.signInWithPopup.mockRejectedValue({ code: "auth/popup-closed-by-user" });
+    const result = await signInWithGoogle();
+    expect(result.status).toBe("cancelled");
+    expect(result.error).toBeNull();
   });
 });
 
 describe("sendResetEmail", () => {
   it("returns no error on success", async () => {
-    sendPasswordResetEmail.mockResolvedValue(undefined);
-    const res = await sendResetEmail("a@b.co");
-    expect(res.error).toBeNull();
-    expect(sendPasswordResetEmail).toHaveBeenCalledOnce();
+    mocks.sendPasswordResetEmail.mockResolvedValue(undefined);
+    const result = await sendResetEmail("a@b.co");
+    expect(result.error).toBeNull();
+    expect(mocks.sendPasswordResetEmail).toHaveBeenCalledOnce();
   });
-  it("returns the error message on failure", async () => {
-    sendPasswordResetEmail.mockRejectedValue(new Error("no user"));
-    const res = await sendResetEmail("x@y.co");
-    expect(res.error).toBe("no user");
+
+  it("returns a safe message on failure", async () => {
+    mocks.sendPasswordResetEmail.mockRejectedValue({
+      code: "auth/network-request-failed",
+      message: "Firebase internal endpoint",
+    });
+    const result = await sendResetEmail("x@y.co");
+    expect(result.error).toBe("Check your internet connection and try again.");
   });
 });

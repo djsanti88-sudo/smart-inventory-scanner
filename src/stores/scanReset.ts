@@ -1,15 +1,30 @@
 import { DEFAULT_SETTINGS } from "@/stores/scanStore";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
-import type { ScanEvent, InventoryCount, UnknownCodeReview, Settings } from "@/types";
+import type { CountSnapshot } from "@/services/reports/varianceReport";
+import type {
+  Alias,
+  InventorySession,
+  Product,
+  ScanEvent,
+  InventoryCount,
+  UnknownCodeReview,
+  Settings,
+} from "@/types";
 
 // Tenant-scoped state that must be fully REPLACED (never merged) when the active business/user
 // changes: loadBusinessData() does NOT return settings/needsReviewQueue/scanFeed, and finalCounts
 // linger when no session restores. Used by setBusinessContext (switch) and resetForSignOut (Task 8).
 // Keeps two-users-one-browser AND one-user-two-businesses isolation honest.
 export function emptyTenantState(): {
+  products: Product[];
+  aliases: Alias[];
+  sessions: InventorySession[];
+  currentSession: InventorySession | null;
+  sessionId: string;
   scanFeed: ScanEvent[];
   finalCounts: InventoryCount[];
   needsReviewQueue: UnknownCodeReview[];
+  countSnapshots: CountSnapshot[];
   settings: Settings;
   firstScanAt: string | null;
   recentLocations: string[];
@@ -25,9 +40,15 @@ export function emptyTenantState(): {
   // or sign-out must reset it exactly like scanFeed, or the previous tenant's scanned codes leak into
   // the next tenant's History page.
   return {
+    products: [],
+    aliases: [],
+    sessions: [],
+    currentSession: null,
+    sessionId: "",
     scanFeed: [],
     finalCounts: [],
     needsReviewQueue: [],
+    countSnapshots: [],
     settings: { ...DEFAULT_SETTINGS },
     firstScanAt: null,
     recentLocations: [],

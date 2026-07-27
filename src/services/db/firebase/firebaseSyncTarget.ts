@@ -1,17 +1,58 @@
 import { type Firestore, collection, doc, getDocs, orderBy, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import type { PendingSyncItem, ScanEvent, Alias, UnknownCodeReview, Product, InventorySession } from "@/types";
-import type { SyncResult, FailureMode, IncrementPayload } from "@/services/mockDb";
+import type { SyncResult, IncrementPayload } from "@/services/mockDb";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import { COLLECTIONS } from "@/services/db/types";
+import {
+  appliedKeyDocumentId,
+  canonicalPayloadHash,
+  type FirebaseSyncErrorCode,
+  validatePendingSyncItem,
+} from "@/services/db/firebase/firebaseSyncSafety";
 
 // Firebase durable-write target. Drop-in for MockDb in the scan store's sync queue, so the optimistic
 // local UI + retry logic are preserved. The ONLY hard promise: NO DOUBLE COUNT. Every apply() runs in a
 // single Firestore transaction that (1) reads the per-business _appliedKeys/{idempotencyKey} doc, (2)
-// returns alreadyApplied without touching the count if it exists, else (3) creates the appliedKey doc,
-// writes the entity, and updates the count line - all atomically. Concurrent retries of the same item
-// therefore can never double-increment (one txn commits the key; the other re-reads it and no-ops).
+// returns alreadyApplied only when its complete envelope and payload hash match, else (3) creates the
+// appliedKey doc, writes the entity, and updates the count line - all atomically. Concurrent retries of
+// the same item therefore can never double-increment, while a key collision cannot suppress another write.
 
 const APPLIED_KEYS = "_appliedKeys";
+
+export type FirebaseSyncResult = SyncResult & { errorCode?: FirebaseSyncErrorCode };
+
+type AppliedMarkerEnvelope = {
+  businessId: string;
+  entityType: PendingSyncItem["entityType"];
+  entityId: string;
+  sessionId: string;
+  targetId: string;
+  operation: PendingSyncItem["operation"];
+  scanEventId: string | null;
+  payloadHash: string;
+};
+
+const MARKER_ENVELOPE_FIELDS: Array<keyof AppliedMarkerEnvelope> = [
+  "businessId",
+  "entityType",
+  "entityId",
+  "sessionId",
+  "targetId",
+  "operation",
+  "scanEventId",
+  "payloadHash",
+];
+
+function markerMatches(
+  stored: Record<string, unknown>,
+  expected: AppliedMarkerEnvelope,
+): boolean {
+  return MARKER_ENVELOPE_FIELDS.every((field) => stored[field] === expected[field]);
+}
+
+function withoutUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
 
 export class FirebaseSyncTarget implements SyncTarget {
   constructor(
@@ -20,7 +61,7 @@ export class FirebaseSyncTarget implements SyncTarget {
   ) {}
 
   // Failure simulation is a mock/test concept; the real target has none.
-  setFailure(_mode: FailureMode): void {}
+  setFailure(): void {}
 
   // Guarded: never destructively wipe real cloud data. Allowed only in emulator/test mode (no-op there;
   // tests clear Firestore via the emulator's clear endpoint / rules-unit-testing).
@@ -43,23 +84,63 @@ export class FirebaseSyncTarget implements SyncTarget {
     return snap.docs.map((d) => d.data() as ScanEvent);
   }
 
-  async apply(item: PendingSyncItem): Promise<SyncResult> {
+  async apply(item: PendingSyncItem): Promise<FirebaseSyncResult> {
+    const validationFailure = validatePendingSyncItem(item);
+    if (validationFailure) {
+      return {
+        ok: false,
+        alreadyApplied: false,
+        errorCode: validationFailure.errorCode,
+        error: `${validationFailure.errorCode}: ${validationFailure.message}`,
+        retryable: false,
+      };
+    }
+
     const bid = item.businessId;
-    if (!bid) return { ok: false, alreadyApplied: false, error: "missing businessId" };
-    if (!item.idempotencyKey) return { ok: false, alreadyApplied: false, error: "missing idempotencyKey" };
 
     const sub = (name: string, id: string) => doc(this.db, COLLECTIONS.businesses, bid, name, id);
-    const keyRef = doc(this.db, COLLECTIONS.businesses, bid, APPLIED_KEYS, item.idempotencyKey);
 
     try {
+      const keyId = await appliedKeyDocumentId(item.idempotencyKey);
+      const payloadHash = await canonicalPayloadHash(item.payload);
+      const markerTargetId =
+        item.operation === "INCREMENT_COUNT"
+          ? `${(item.payload as IncrementPayload).sessionId}_${(item.payload as IncrementPayload).productId}`
+          : item.entityId;
+      const expectedMarker: AppliedMarkerEnvelope = {
+        businessId: bid,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        sessionId: item.sessionId,
+        targetId: markerTargetId,
+        operation: item.operation,
+        scanEventId:
+          item.operation === "INCREMENT_COUNT"
+            ? (item.payload as IncrementPayload).scanEventId
+            : item.scanEventId ?? null,
+        payloadHash,
+      };
+      const keyRef = doc(this.db, COLLECTIONS.businesses, bid, APPLIED_KEYS, keyId);
       const result = await runTransaction(this.db, async (tx) => {
         // ----- ALL READS FIRST (Firestore transaction rule) -----
         const keySnap = await tx.get(keyRef);
-        if (keySnap.exists()) return { ok: true, alreadyApplied: true } as SyncResult;
+        if (keySnap.exists()) {
+          if (markerMatches(keySnap.data(), expectedMarker)) {
+            return { ok: true, alreadyApplied: true } as FirebaseSyncResult;
+          }
+          return {
+            ok: false,
+            alreadyApplied: false,
+            errorCode: "idempotency_conflict",
+            error: `idempotency_conflict: applied key ${keyId} belongs to a different sync operation`,
+            retryable: false,
+          } as FirebaseSyncResult;
+        }
 
         let countRef: ReturnType<typeof sub> | null = null;
         let prevQty = 0;
         let prevScanIds: string[] = [];
+        let scanEventAlreadyCounted = false;
         if (item.operation === "INCREMENT_COUNT") {
           const p = item.payload as IncrementPayload;
           countRef = sub(COLLECTIONS.inventoryCounts, `${p.sessionId}_${p.productId}`);
@@ -68,31 +149,35 @@ export class FirebaseSyncTarget implements SyncTarget {
             const d = countSnap.data() as { countedQuantity?: number; quantity?: number; scanEventIds?: string[] };
             prevQty = Number(d.countedQuantity ?? d.quantity ?? 0);
             prevScanIds = Array.isArray(d.scanEventIds) ? d.scanEventIds : [];
+            scanEventAlreadyCounted = prevScanIds.includes(p.scanEventId);
           }
         }
 
         // ----- THEN WRITES -----
-        tx.set(keyRef, { operation: item.operation, scanEventId: item.scanEventId ?? null, at: serverTimestamp() });
+        tx.set(keyRef, {
+          ...expectedMarker,
+          at: serverTimestamp(),
+        });
 
         switch (item.operation) {
           case "SAVE_SCAN_EVENT": {
             const ev = item.payload as ScanEvent;
-            tx.set(sub(COLLECTIONS.scanEvents, ev.id), { ...ev, businessId: bid, syncedAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.scanEvents, ev.id), withoutUndefined({ ...ev, businessId: bid, syncedAt: serverTimestamp() }));
             break;
           }
           case "SAVE_UNKNOWN_SCAN": {
             const r = item.payload as UnknownCodeReview;
-            tx.set(sub(COLLECTIONS.unknownCodeReviews, r.id), { ...r, businessId: bid, syncedAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.unknownCodeReviews, r.id), withoutUndefined({ ...r, businessId: bid, createdAt: serverTimestamp() }));
             break;
           }
           case "RESOLVE_ALIAS": {
             const a = item.payload as Alias;
-            tx.set(sub(COLLECTIONS.aliases, a.id), { ...a, businessId: bid, updatedAt: serverTimestamp() });
+            tx.set(sub(COLLECTIONS.aliases, a.id), withoutUndefined({ ...a, businessId: bid, updatedAt: serverTimestamp() }));
             break;
           }
           case "SAVE_PRODUCT": {
             const pr = item.payload as Product;
-            tx.set(sub(COLLECTIONS.products, pr.id), { ...pr, businessId: bid, updatedAt: serverTimestamp() }, { merge: true });
+            tx.set(sub(COLLECTIONS.products, pr.id), withoutUndefined({ ...pr, businessId: bid, updatedAt: serverTimestamp() }), { merge: true });
             break;
           }
           case "SAVE_SESSION": {
@@ -102,15 +187,17 @@ export class FirebaseSyncTarget implements SyncTarget {
             const sess = item.payload as InventorySession;
             tx.set(
               sub(COLLECTIONS.countSessions, sess.id),
-              { ...sess, businessId: bid, updatedAt: serverTimestamp() },
+              withoutUndefined({ ...sess, businessId: bid, updatedAt: serverTimestamp() }),
               { merge: true },
             );
             break;
           }
           case "INCREMENT_COUNT": {
             const p = item.payload as IncrementPayload;
-            // The appliedKey check above already prevents a second apply of THIS scan event, so the
-            // increment runs at most once. scanEventIds is kept for traceability (union, dedup-safe).
+            // A legacy/reconstructed queue can carry a fresh idempotency key for an event already
+            // present on the count row. Record the new marker and zero-delta metadata, but the event
+            // itself is still one fact and must never increment quantity twice.
+            const appliedDelta = scanEventAlreadyCounted ? 0 : p.quantityDelta;
             const nextScanIds = prevScanIds.includes(p.scanEventId) ? prevScanIds : [...prevScanIds, p.scanEventId];
             tx.set(
               countRef!,
@@ -118,8 +205,11 @@ export class FirebaseSyncTarget implements SyncTarget {
                 businessId: bid,
                 countSessionId: p.sessionId,
                 productId: p.productId,
-                countedQuantity: prevQty + p.quantityDelta,
+                countedQuantity: prevQty + appliedDelta,
                 scanEventIds: nextScanIds,
+                appliedKeyId: keyId,
+                lastQuantityDelta: appliedDelta,
+                lastScanEventId: p.scanEventId,
                 updatedAt: serverTimestamp(),
               },
               { merge: true },
@@ -130,11 +220,17 @@ export class FirebaseSyncTarget implements SyncTarget {
             throw new Error(`Unknown operation ${item.operation}`);
         }
 
-        return { ok: true, alreadyApplied: false } as SyncResult;
+        return { ok: true, alreadyApplied: false } as FirebaseSyncResult;
       });
       return result;
     } catch (e) {
-      return { ok: false, alreadyApplied: false, error: e instanceof Error ? e.message : String(e) };
+      return {
+        ok: false,
+        alreadyApplied: false,
+        errorCode: "firestore_transaction_failed",
+        error: e instanceof Error ? e.message : String(e),
+        retryable: true,
+      };
     }
   }
 }

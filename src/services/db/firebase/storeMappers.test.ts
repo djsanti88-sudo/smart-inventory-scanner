@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toStoreProduct, toStoreAlias, toStoreSession, toStoreCount } from "./storeMappers";
+import { toStoreProduct, toStoreAlias, toStoreSession, toStoreCount, toStoreScanEvent } from "./storeMappers";
 
 const BIZ = "biz-1";
 
@@ -64,5 +64,54 @@ describe("toStoreCount", () => {
     expect(c.quantity).toBe(3);
     expect(c.scanEventIds).toEqual([]);
     expect(c.appliedIdempotencyKeys).toEqual([]);
+  });
+});
+
+describe("toStoreScanEvent", () => {
+  it("maps Firestore scan events into store feed rows, including Timestamp-like createdAt values", () => {
+    const event = toStoreScanEvent("ev1", {
+      countSessionId: "s1",
+      rawCode: "086699205636",
+      cleanCode: "086699205636",
+      normalizedCode: "086699205636",
+      matchedProductId: "p-michelin",
+      matchType: "upc",
+      status: "known",
+      resolverStatus: "known",
+      codeType: "upc_a",
+      reason: "Exact match",
+      quantityDelta: 1,
+      quantityAfterScan: 1,
+      createdAt: { seconds: 1_700_000_000, nanoseconds: 123_000_000 },
+      idempotencyKey: "idem-ev1",
+      location: "Bay A",
+    }, BIZ);
+
+    expect(event).toMatchObject({
+      id: "ev1",
+      businessId: BIZ,
+      sessionId: "s1",
+      cleanCode: "086699205636",
+      normalizedCandidates: ["086699205636"],
+      matchedProductId: "p-michelin",
+      quantityDelta: 1,
+      quantityAfterScan: 1,
+      syncStatus: "synced",
+      syncError: null,
+      location: "Bay A",
+    });
+    expect(event.createdAt).toBe("2023-11-14T22:13:20.123Z");
+  });
+
+  it("prefers scannedAt over createdAt so restored feeds keep physical scan order", () => {
+    const event = toStoreScanEvent("ev2", {
+      sessionId: "s1",
+      rawCode: "9999999999",
+      cleanCode: "9999999999",
+      createdAt: { seconds: 1_700_000_100, nanoseconds: 0 },
+      scannedAt: "2023-11-14T22:13:19.000Z",
+    }, BIZ);
+
+    expect(event.createdAt).toBe("2023-11-14T22:13:19.000Z");
   });
 });

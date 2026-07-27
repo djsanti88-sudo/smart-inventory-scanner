@@ -50,9 +50,11 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     // continuity is the adopt-flow's job, so the switch now discards foreign-tenant queue items.
     const target = new FakeAsyncTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true });
+
+    // A pre-context scan enqueues under the pre-context (non-"biz-real") businessId.
     store.getState().processScan("999999999999");
     await flush();
-    expect(target.applied).toHaveLength(0);
+    expect(target.applied).toHaveLength(0); // paused: no context yet
 
     store.getState().setBusinessContext("biz-real", "user-real");
     await flush();
@@ -62,6 +64,22 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(target.applied).toHaveLength(0); // foreign-tenant items are never written to the new tenant
     expect(store.getState().lastSyncError).toBeNull();
     expect(store.getState().pendingSyncQueue).toHaveLength(0); // dropped, not stuck
+  });
+
+  it("scans made AFTER setBusinessContext drain to the cloud target", async () => {
+    const target = new FakeAsyncTarget();
+    const store = createTestScanStore({ db: target, cloudBackend: true });
+
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+    expect(store.getState().businessContextReady).toBe(true);
+    expect(store.getState().businessId).toBe("biz-real");
+
+    store.getState().processScan("999999999999"); // enqueues under the active "biz-real" tenant
+    await flush();
+    expect(target.applied.length).toBeGreaterThan(0); // same-tenant items drain
+    expect(store.getState().lastSyncError).toBeNull();
+    expect(store.getState().pendingSyncQueue).toHaveLength(0);
   });
 
   it("setBusinessContext loads the business's products/aliases so a scan resolves the approved alias", async () => {

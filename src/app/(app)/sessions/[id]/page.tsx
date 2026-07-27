@@ -13,45 +13,17 @@ import {
 } from "@/services/csvExport";
 import { useAccessLevel } from "@/services/security/useAccessLevel";
 import { getDb } from "@/lib/firebaseClient";
+import { getSession } from "@/lib/auth";
 import { useScanStore } from "@/stores/scanStore";
+import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
 import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
+import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";
 import type { SessionHistoryEntry } from "@/services/sessions/sessionHistory";
-import type { Product, ScanEvent } from "@/types";
+import type { ScanEvent } from "@/types";
 
 const TIMELINE_UNAVAILABLE = "Session timeline is not available for this data source.";
 const COUNTS_UNAVAILABLE = "Product counts are not available for this data source.";
-
-// Derives the session's product-counts spreadsheet from its scan timeline: each product/code's
-// session total is its chronologically LAST "known" event's quantityAfterScan (the ledger's running
-// count at that point - see services/inventory.ts / scanStore processScan), not a sum of deltas.
-// When an event's matchedProductId resolves through the store's getProduct (same selector the
-// current-session path uses), the row carries the full product for the spreadsheet columns; it
-// falls back to the event's cleanCode alone when the product is not in the store. No aliasesSeen:
-// the timeline carries no alias data, so the table omits that column for past sessions.
-// Exported for its unit test (SessionCountsTable.test.tsx).
-export function countsFromTimeline(
-  events: ScanEvent[],
-  getProduct: (id: string | null) => Product | undefined,
-): SessionCountRow[] {
-  const byKey = new Map<string, ScanEvent>();
-  for (const event of events) {
-    if (event.status !== "known") continue;
-    const key = event.matchedProductId ?? event.cleanCode;
-    const prior = byKey.get(key);
-    if (!prior || new Date(event.createdAt).getTime() >= new Date(prior.createdAt).getTime()) {
-      byKey.set(key, event);
-    }
-  }
-  return [...byKey.entries()].map(([key, event]) => ({
-    id: key,
-    code: event.cleanCode,
-    quantity: event.quantityAfterScan,
-    product: getProduct(event.matchedProductId),
-    location: event.location,
-    lastScannedAt: event.createdAt,
-  }));
-}
 
 function normalizeEventCreatedAt(event: ScanEvent): ScanEvent {
   const value = event.createdAt as unknown;
@@ -139,8 +111,21 @@ export default function SessionDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const firebaseBackend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
+
+    if (firebaseBackend && !businessId) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     void Promise.resolve()
+      .then(async () => {
+        // Firebase Auth can still be hydrating immediately after a reload or route transition.
+        // Wait for it before issuing the Firestore timeline query; otherwise a valid member can
+        // get one transient permission-denied and the active-session scan log shows an error.
+        if (firebaseBackend) await getSession();
+      })
       .then(() => {
         const target = getTimelineTarget();
         if (typeof target.getScanEventsBySession !== "function") {
@@ -175,6 +160,7 @@ export default function SessionDetailPage() {
   }
 
   return (
+    <BusinessContextGate>
     <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
       <Link href="/scan" className="text-sm text-blue-700 hover:underline">
         &larr; Back to scan
@@ -258,5 +244,6 @@ export default function SessionDetailPage() {
       </div>
       )}
     </div>
+    </BusinessContextGate>
   );
 }
