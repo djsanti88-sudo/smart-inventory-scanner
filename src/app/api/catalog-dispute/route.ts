@@ -73,7 +73,9 @@ function stringField(value: unknown): string {
 export async function POST(request: NextRequest) {
   const ip = ipFromRequest(request);
   try {
-    const rl = await checkRateLimit(ip, {
+    // "DISPUTE:" scope keeps this route's bucket separate from ai-lookup and the other catalog
+    // routes (same convention as "GET:"/"EXPORT:") - heavy AI traffic must not 429 disputes.
+    const rl = await checkRateLimit(`DISPUTE:${ip}`, {
       limit: intEnv(process.env.CATALOG_DISPUTE_RATE_LIMIT, CATALOG_DISPUTE_RATE_LIMIT),
       storage: await ladderStorage(),
     });

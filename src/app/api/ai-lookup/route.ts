@@ -247,7 +247,9 @@ export async function POST(request: Request) {
     // once storage is in hand; this closes the remaining hole where `await ladderStorage()` ITSELF throws
     // before checkRateLimit is even called. A storage hiccup must never take the whole app down.
     try {
-      const rl = await checkRateLimit(clientIp, { storage: await ladderStorage() });
+      // "POST:" scope gives the decode path its own bucket (same convention as this route's "GET:"
+      // and export's "EXPORT:") - catalog routes must not be exhaustible by scan traffic or vice versa.
+      const rl = await checkRateLimit(`POST:${clientIp}`, { storage: await ladderStorage() });
       if (!rl.allowed) {
         logServerEvent({ route: "/api/ai-lookup", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
         return Response.json(

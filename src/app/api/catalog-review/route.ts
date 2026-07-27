@@ -88,7 +88,9 @@ function bearerToken(request: NextRequest): string {
 export async function GET(request: NextRequest) {
   const ip = ipFromRequest(request);
   try {
-    const rl = await checkRateLimit(ip, {
+    // "REVIEW:" scope keeps this route's bucket separate from ai-lookup and the other catalog
+    // routes (same convention as "GET:"/"EXPORT:") - heavy AI traffic must not 429 review reads.
+    const rl = await checkRateLimit(`REVIEW:${ip}`, {
       limit: intEnv(process.env.CATALOG_REVIEW_RATE_LIMIT, CATALOG_REVIEW_RATE_LIMIT),
       storage: await ladderStorage(),
     });

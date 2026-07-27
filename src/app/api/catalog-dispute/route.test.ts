@@ -31,7 +31,7 @@ vi.mock("@/server/upc/storage", () => ({
 }));
 
 vi.mock("@/services/security/aiSpendGuard", () => ({
-  checkRateLimit: () => mocks.checkRateLimit(),
+  checkRateLimit: (...args: unknown[]) => mocks.checkRateLimit(...args),
   intEnv: (value: string | undefined, fallback: number) => {
     if (value === undefined) return fallback;
     const parsed = Number(value);
@@ -72,6 +72,13 @@ describe("POST /api/catalog-dispute request validation", () => {
     const payload = await response.json();
     expect(payload.reasonCode).toBe("rate_limited");
     expect(payload.error).toMatch(/Too many requests/i);
+  });
+
+  it("scopes its rate-limit bucket with the DISPUTE: prefix (never shares ai-lookup's bucket)", async () => {
+    await POST(req({ ...VALID_BODY }));
+    expect(mocks.checkRateLimit).toHaveBeenCalled();
+    const key = mocks.checkRateLimit.mock.calls[0][0] as string;
+    expect(key.startsWith("DISPUTE:")).toBe(true);
   });
 
   it("rejects a missing normalizedBarcode with 400", async () => {

@@ -60,7 +60,9 @@ export async function POST(
 ) {
   const ip = ipFromRequest(request);
   try {
-    const rl = await checkRateLimit(ip, {
+    // "REVIEW_ID:" scope keeps this route's bucket separate from ai-lookup and the other catalog
+    // routes (same convention as "GET:"/"EXPORT:") - heavy AI traffic must not 429 review actions.
+    const rl = await checkRateLimit(`REVIEW_ID:${ip}`, {
       limit: intEnv(process.env.CATALOG_REVIEW_RATE_LIMIT, CATALOG_REVIEW_ID_RATE_LIMIT),
       storage: await ladderStorage(),
     });
