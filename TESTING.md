@@ -1,7 +1,11 @@
 # Testing and Proof
 
-_Last updated 2026-07-12 (branch `feat/decode-ladder-goupc`). Sections below accumulate newest-last;
-older sections describe the coverage that existed when written._
+_Last updated 2026-07-12 (branch `feat/decode-ladder-goupc`); commands section spot-checked against
+package.json 2026-07-22 (branch `feat/teach-bot`) - still accurate, teach-bot harness commands added
+to docs/COMMANDS.md instead of duplicated here. Sections below accumulate newest-last; older sections
+describe the coverage that existed when written. Test coverage for Phases 2-6 and the teach-bot
+harness is not yet appended here (unverified as of 2026-07-22 whether that is intentional or a gap) -
+see PROGRESS.md checkpoints for the actual proof runs of that later work._
 
 ## Commands
 - `npm run test` - run all Vitest unit suites once (services + store).

@@ -70,7 +70,7 @@ describe("gptFromScratch", () => {
     expect(r.searches).toBe(2);
     expect(r.usdActual).toBeCloseTo((3000 / 1e6) * 5 + (900 / 1e6) * 30 + 0.02, 5);
     const body = JSON.parse(vi.mocked(f).mock.calls[0][1]!.body as string);
-    expect(body.model).toBe("gpt-5.5");
+    expect(body.model).toBe("gpt-5.4-mini");
     expect(body.tools).toEqual([{ type: "web_search", search_context_size: "medium" }]);
     expect(body.reasoning).toEqual({ effort: "low" });
     expect(body.max_output_tokens).toBe(6000);
@@ -250,10 +250,10 @@ describe("gptFromScratch", () => {
       }) as typeof fetch;
       return { fetchImpl, body: () => sentBody };
     };
-    test("defaults to gpt-5.5 when unset", async () => {
+    test("defaults to gpt-5.4-mini when unset", async () => {
       const c = capture();
       await gptFromScratch("049000006346", { apiKey: "k", fetchImpl: c.fetchImpl });
-      expect(c.body().model).toBe("gpt-5.5");
+      expect(c.body().model).toBe("gpt-5.4-mini");
     });
     test("uses the env model when set", async () => {
       process.env.GPT_LADDER_MODEL = "gpt-6-preview";

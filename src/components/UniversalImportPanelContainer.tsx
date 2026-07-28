@@ -19,6 +19,11 @@ export function UniversalImportPanelContainer() {
   const applyUniversalImport = useScanStore((state) => state.applyUniversalImport);
 
   async function loadMapping(sourceSignature: string): Promise<ColumnMapping | null> {
+    // No businessId yet (e.g. a fresh signup with no business membership resolved/selected): there is
+    // nothing to look up server-side. Skip the network call entirely rather than firing a request the
+    // server will 400/403 on, which used to throw and kill the whole import panel with a false "could
+    // not load the remembered mapping" error even though there was simply no mapping to try.
+    if (!businessId) return null;
     const idToken = await token();
     const query = new URLSearchParams({ businessId, sourceSignature });
     const response = await fetch(`/api/import-mapping?${query.toString()}`, {
@@ -30,6 +35,8 @@ export function UniversalImportPanelContainer() {
   }
 
   async function saveMapping(sourceSignature: string, mapping: ColumnMapping): Promise<void> {
+    // Same short-circuit as loadMapping: no businessId means there is no per-business memory to save.
+    if (!businessId) return;
     const idToken = await token();
     const response = await fetch("/api/import-mapping", {
       method: "PUT",

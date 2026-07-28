@@ -87,14 +87,15 @@ describe("NeedsReviewTable - hide solved (owner rule: resolved never lingers in 
 
   // Regression: "if it is resolved, it does not go to review." Sync state is irrelevant to whether a
   // SOLVED item still shows in Needs Review - a resolved row awaiting sync must not linger either.
-  it("hides a resolved item even when its sync is still pending", () => {
+  it("hides a resolved item even when its cloud backup has not synced yet (owner rule 2026-07-22: resolved = gone; sync retries invisibly in the background)", () => {
     useScanStore.setState({
       needsReviewQueue: [
-        review({ id: "pend1", cleanCode: "3000000000003", status: "resolved", syncStatus: "pending" }),
+        review({ id: "pend1", cleanCode: "3000000000003", status: "resolved", syncStatus: "pending", resolutionAction: "create_new" }),
       ],
     });
     render(<NeedsReviewTable />);
-    expect(screen.queryByTestId("review-row-3000000000003")).toBeNull(); // resolved -> hidden regardless of sync
+    expect(screen.queryByTestId("review-row-3000000000003")).toBeNull(); // resolved -> gone, regardless of sync
+    expect(screen.queryByText("create_new")).toBeNull(); // raw enum never reaches the UI
   });
 });
 

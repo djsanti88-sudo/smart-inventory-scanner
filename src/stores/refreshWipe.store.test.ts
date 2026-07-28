@@ -186,6 +186,47 @@ describe("setBusinessContext refresh must not wipe the current tenant's data", (
     expect(store2.getState().finalCounts.length, "counts survive a true refresh").toBe(2);
   });
 
+  it("(f) a tenant SWITCH preserves another tenant's pending sync items (drained later when that tenant is active) and does NOT adopt the old tenant's session", () => {
+    // Certified model (fix/release-stabilization, tenantQueueIsolation.store.test.ts): the sync drain
+    // is tenant-aware, so a foreign-tenant queue item is NOT dropped on a context switch - it is
+    // preserved and drains when its own tenant becomes active again, so it never clogs under the wrong
+    // tenant. What the switch MUST do is null the old tenant's session object: ensureAutoSession would
+    // otherwise ADOPT it (keeping its old businessId) and re-enqueue foreign saves on the next scan.
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    store.setState({
+      pendingSyncQueue: [
+        { id: "q1", businessId: "demo-business", sessionId: "session-1", entityType: "CountSession", entityId: "session-1", operation: "SAVE_SESSION", payload: {}, idempotencyKey: "k1", attempts: 0, status: "pending", createdAt: "t" } as never,
+      ],
+    });
+    store.getState().setBusinessContext("b-real", "u1");
+    expect(store.getState().pendingSyncQueue.map((q) => q.id)).toEqual(["q1"]); // foreign item preserved, not dropped
+    expect(store.getState().currentSession).toBeNull();
+  });
+
+  it("(g) upgrading a provisional via create_new enqueues SAVE_PRODUCT under a FRESH idempotency key (the scan-time save already consumed the stable key; reusing it makes the cloud applied-keys ledger silently skip the rename)", async () => {
+    const store = createTestScanStore({ cloudBackend: true, loadBusinessData: async () => ({ products: [], aliases: [], sessions: [], counts: [] }) });
+    store.getState().setBusinessContext("b1", "u1");
+    store.getState().processScan("9999999999"); // unknown -> provisional + SAVE_PRODUCT(stable key)
+    const review = store.getState().needsReviewQueue.find((r) => r.status === "open")!;
+    const provisionalSaveKeys = store
+      .getState()
+      .pendingSyncQueue.filter((q) => q.operation === "SAVE_PRODUCT")
+      .map((q) => q.idempotencyKey);
+
+    store.getState().resolveUnknown(review.id, "create_new", {
+      applyToCount: false, origin: "human",
+      newProduct: { name: "FB Mystery", primaryBarcode: "9999999999" },
+    });
+
+    const upgradeSaves = store
+      .getState()
+      .pendingSyncQueue.filter((q) => q.operation === "SAVE_PRODUCT" && (q.payload as { name?: string })?.name === "FB Mystery");
+    expect(upgradeSaves.length).toBeGreaterThan(0);
+    for (const item of upgradeSaves) {
+      expect(provisionalSaveKeys).not.toContain(item.idempotencyKey);
+    }
+  });
+
   it("(e3) fresh cloud load restores the active session scan feed from persisted scan events", async () => {
     const session: InventorySession = {
       id: "s1", businessId: "b1", name: "Cloud Session", location: "Main", status: "active",

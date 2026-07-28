@@ -30,6 +30,20 @@ The Windows wrapper `.\fable5.cmd` and `python -m tools.fable5` are equivalent.
 | `python -m tools.fable5 selftest` | Runs the five isolated detector canaries without worktrees or npm. | Free, offline. |
 | `python -m tools.fable5 stress --target <url>` | Runs the fail-closed scan stress battery. Localhost must use port 3400; cloud needs `--allow-cloud`. | Local is free. Every preview run is owner-gated; the monitor aborts on any AI lookup. |
 
+## Teach Bot (live-app learning harness)
+
+Built on `feat/teach-bot` / `feat/teach-bot-clean` (not yet on master; unverified as of 2026-07-22
+whether merged). Batch A modules shipped: `e2e/teach/{knowledge,ladder,manifest,sheets,triage}.mjs`
++ matching `node:test` suites, driving `testing/app-knowledge`, `testing/specs`, and
+`testing/tests/{candidates,permanent}`.
+
+| Script | What it does | Status |
+|---|---|---|
+| `npm run teach` | Runs `e2e/teach/teach.mjs` (the harness entry point) | `e2e/teach/teach.mjs` does not exist yet on this branch as of 2026-07-22 - package.json script currently points at a file not yet built |
+| `npm run teach:cleanup` | Runs `e2e/teach/cleanup.mjs` | Same gap - file not yet present |
+| `npm run teach:test` | `node --test "e2e/teach/**/*.test.mjs"` - the Batch A node:test suite (knowledge/ladder/manifest/sheets/triage) | Exists, runs today |
+| `npm run teach:regression` | `playwright test --config=playwright.teach.config.ts` - runs `testing/tests/permanent` against `TEACH_TARGET_URL` (defaults to the real production deployment, no local webServer) | Config exists; this is a LIVE-app-driving config, not mock E2E - treat as owner-gated like other live/production-facing runs |
+
 ## Dev servers
 
 | Script | What it does |
@@ -143,6 +157,7 @@ preflight gate before proposing any deploy action, GitHub-driven or emergency.
 | `npm run test:firebase:cloud-smoke` | **LIVE** cloud Firebase writes (self-cleaning throwaway business). |
 | `node scripts/create-god-account.mjs` / `repair-god-alias.mjs --repair` | **LIVE** real-account provisioning / repair (repair is read-only without `--repair`). |
 | `node scripts/gpt-ladder-live-proof.mts`, `scripts/fetchv2-*.mts` | **PAID** provider/discovery probes (credit-capped). |
+| `npm run deploy:rules:prod` | **LIVE** deploys `firestore.rules` + `firestore.indexes.json` to the REAL production project (`smart-inventory-scanner-app`, alias `prod` in `.firebaserc`). Not billed, but production-affecting: a wrong rules push changes who can read/write real customer data. Owner approval required before every run. |
 
 Cost truths that always apply: a client-aborted call is still billed server-side; unmeterable fees
 reserve documented worst case; reconcile against the provider console before quoting spend.
@@ -159,7 +174,8 @@ clone - this section is the durable name list. Client-exposed vars are
   `NEXT_PUBLIC_FIREBASE_ALLOW_PROD`, `NEXT_PUBLIC_FIREBASE_*` (app config), `NEXT_PUBLIC_REQUIRE_LOGIN`
 - Firebase server: `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON` / `_PATH`,
   `GOOGLE_APPLICATION_CREDENTIALS`, emulator hosts
-- AI providers (server-only secrets): `OPENAI_API_KEY` (+ `OPENAI_MODEL`, `GPT_LADDER_MODEL`,
+- AI providers (server-only secrets): `OPENAI_API_KEY` (+ `OPENAI_MODEL`, `GPT_LADDER_MODEL` - decode
+  ladder's paid GPT rung, defaults to `gpt-5.4-mini` as of 2026-07-27,
   `GPT_LADDER_DAILY_USD`), `GEMINI_API_KEY` (+ model vars; decode-disabled), `GO_UPC_API_KEY`
   (+ `GO_UPC_MONTHLY_LIMIT`), `FIRECRAWL_API_KEY` (+ `_1..4` rotation), `BRAVE_SEARCH_API_KEY`,
   `UPCITEMDB_DAILY_LIMIT`, `OPENFOODFACTS_PER_MINUTE_LIMIT`
