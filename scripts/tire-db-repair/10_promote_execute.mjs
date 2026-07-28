@@ -65,6 +65,59 @@ const OPERATIONAL_TABLES = [
 ];
 
 // -------------------------------------------------------------------------------------------
+// Re-review OPEN-1 / Codex C1's "zero-unapproved-missing live-part-number diff" hard gate:
+// APPROVED_PN_KEY_DROPS.csv is the ONLY authority for which live tire_part_numbers keys are
+// allowed to go missing across the promotion (today: exactly the 17 owner-ordered conflict-key
+// drops). Any other missing live key is an UNAPPROVED drop and fails verify (and the post-promote
+// smoke check). PROMOTE_APPROVED_DROPS overrides the path for the proof harness only.
+// -------------------------------------------------------------------------------------------
+const DEFAULT_APPROVED_DROPS_PATH = join(OUTPUT_DIR, "APPROVED_PN_KEY_DROPS.csv");
+const APPROVED_DROPS_PATH = process.env.PROMOTE_APPROVED_DROPS || DEFAULT_APPROVED_DROPS_PATH;
+
+/** Load the approved-drops CSV. Returns { exists, keys:Set<string> }. Lines starting with `#` are
+ *  comments; the first non-comment line is the header; the first CSV field of each subsequent line
+ *  is the normalized part-number key. Fail-safe on parse weirdness: an unreadable file is treated
+ *  as NOT existing (fail closed - a missing/broken approvals file means no drop is approved). */
+function loadApprovedDrops() {
+  if (!existsSync(APPROVED_DROPS_PATH)) return { exists: false, keys: new Set() };
+  try {
+    const lines = readFileSync(APPROVED_DROPS_PATH, "utf8")
+      .split(/\r?\n/)
+      .filter((l) => l.trim() !== "" && !l.trim().startsWith("#"));
+    const keys = new Set();
+    for (const line of lines.slice(1)) { // slice(1): skip the header row
+      const key = line.split(",")[0].trim();
+      if (key) keys.add(key);
+    }
+    return { exists: true, keys };
+  } catch {
+    return { exists: false, keys: new Set() };
+  }
+}
+
+/** Pure comparison core of the OPEN-1 gate, shared by verify and the post-promote smoke check.
+ *  Given the set of live (pre-swap) part-number keys and the set of keys in the replacement table
+ *  (staging before promote, the new live table after promote), classifies every missing live key
+ *  as approved (listed in APPROVED_PN_KEY_DROPS.csv) or unapproved.
+ *  PASS iff unapproved === 0 AND (missing === 0 OR the approvals file exists) - i.e. if ANY key is
+ *  missing while the approvals file is absent/unreadable, the gate fails closed. */
+function computePnKeyPreservation(liveKeys, replacementKeys, approvedDrops) {
+  const missing = [...liveKeys].filter((k) => !replacementKeys.has(k));
+  const approved = missing.filter((k) => approvedDrops.keys.has(k));
+  const unapproved = missing.filter((k) => !approvedDrops.keys.has(k));
+  const pass = unapproved.length === 0 && (missing.length === 0 || approvedDrops.exists);
+  const detail =
+    `missing=${missing.length}, approved=${approved.length}, unapproved=${unapproved.length}` +
+    (missing.length > 0 && !approvedDrops.exists
+      ? ` -- FAIL: keys are missing but the approved-drops file (${rel(APPROVED_DROPS_PATH)}) is absent/unreadable; no drop is approved without it`
+      : "") +
+    (unapproved.length > 0
+      ? ` -- UNAPPROVED: ${unapproved.slice(0, 20).join(", ")}${unapproved.length > 20 ? ", ..." : ""}`
+      : "");
+  return { missing, approved, unapproved, pass, detail };
+}
+
+// -------------------------------------------------------------------------------------------
 // Codex panel finding I3: operational-table isolation was previously true only of TODAY'S SQL
 // TEXT, never enforced by the executable. PROMOTE_STAGING_DIR can be pointed at ANY directory
 // (used deliberately by the test harness, but nothing stops a stale/tampered/wrong directory in a
@@ -659,6 +712,7 @@ async function cmdVerify({ dryRun, manifestArg }) {
     console.log("  Gate E: duplicate normalized_part_number in staging_tire_part_numbers (expect 0 groups) - DRY-RUN: not evaluated");
     console.log("  Gate F: orphan staging_tire_product_part_number_aliases rows (expect 0) - DRY-RUN: not evaluated");
     console.log("  Gate G: every live tires.barcode present in staging_tires (expect 0 missing) - DRY-RUN: not evaluated");
+    console.log("  Gate PN: every live tire_part_numbers key present in staging_tire_part_numbers, or explicitly listed in APPROVED_PN_KEY_DROPS.csv (unapproved missing = FAIL) - DRY-RUN: not evaluated");
     console.log("  Gate H: operational tables untouched (SELECT COUNT(*) unchanged vs backup manifest, informational) - DRY-RUN: not evaluated");
     console.log("[dry-run] verify: DRY-RUN COMPLETE - no gate was evaluated, no PASS/FAIL verdict was reached. Run without --dry-run to actually verify.");
     return { passed: null, gates: [], dryRun: true };
@@ -766,6 +820,21 @@ async function cmdVerify({ dryRun, manifestArg }) {
     };
   });
 
+  await gate("PN_live_part_number_keys_preserved", async () => {
+    // Re-review OPEN-1 / Codex C1: hard executable diff of live tire_part_numbers keys vs the
+    // staged replacement set. Gate G above covers only tires.barcode; without THIS gate a
+    // promotion could silently drop any live part-number key (the 17 owner-approved ones, or any
+    // new one) with no verify tripwire. Every missing live key must appear in
+    // APPROVED_PN_KEY_DROPS.csv (explicit owner decision, referenced + dated) or the gate fails.
+    const liveRes = await client.execute("SELECT normalized_part_number FROM tire_part_numbers");
+    const liveKeys = new Set(liveRes.rows.map((r) => String(r.normalized_part_number)));
+    const stagingRes = await client.execute("SELECT normalized_part_number FROM staging_tire_part_numbers");
+    const stagingKeys = new Set(stagingRes.rows.map((r) => String(r.normalized_part_number)));
+    const approvedDrops = loadApprovedDrops();
+    const result = computePnKeyPreservation(liveKeys, stagingKeys, approvedDrops);
+    return { pass: result.pass, detail: result.detail };
+  });
+
   await gate("H_operational_tables_untouched", async () => {
     // Informational: confirm none of the staging load created/renamed any operational table.
     const res = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
@@ -818,10 +887,13 @@ function postSwapIndexStatements() {
 
 /** Automated post-swap smoke test (panel finding I3). Runs the runtime-shaped lookups the panel's
  *  Gate I/J called for by hand: a barcode hit, a part-number two-step hit, and an alias-fallback
- *  hit, each sampled from the JUST-PROMOTED live tables. Returns { pass, checks } and NEVER throws
- *  (a lookup error is recorded as a failed check, not an unhandled exception) so cmdPromote can
- *  always decide PASS/FAIL and report clearly. */
-async function runPostSwapSmokeTest(client) {
+ *  hit, each sampled from the JUST-PROMOTED live tables, PLUS (re-review OPEN-1) a full
+ *  live-part-number key-preservation diff of `tire_part_numbers_old_<ts>` vs the new live
+ *  `tire_part_numbers`, honoring APPROVED_PN_KEY_DROPS.csv. `ts` identifies the _old_ generation
+ *  this promotion just created. Returns { pass, checks } and NEVER throws (a lookup error is
+ *  recorded as a failed check, not an unhandled exception) so cmdPromote can always decide
+ *  PASS/FAIL and report clearly. */
+async function runPostSwapSmokeTest(client, ts) {
   const checks = [];
   async function check(name, fn) {
     try {
@@ -893,6 +965,22 @@ async function runPostSwapSmokeTest(client) {
     return { pass: missing.length === 0, detail: missing.length === 0 ? "all 5 required indexes present" : `MISSING: ${missing.join(", ")}` };
   });
 
+  await check("smoke_pn_key_preservation", async () => {
+    // Re-review OPEN-1: post-swap edition of the verify PN gate - the pre-promotion live keys now
+    // live in tire_part_numbers_old_<ts>, and the promoted set IS the new live tire_part_numbers.
+    // Every key of the old live table must exist in the new one, or be explicitly listed in
+    // APPROVED_PN_KEY_DROPS.csv. This catches a wrong swap even if verify was skipped or a
+    // different staging generation was promoted than the one verified.
+    if (!ts) return { pass: false, detail: "no ts provided - cannot locate tire_part_numbers_old_<ts>" };
+    const oldRes = await client.execute(`SELECT normalized_part_number FROM tire_part_numbers_old_${ts}`);
+    const oldKeys = new Set(oldRes.rows.map((r) => String(r.normalized_part_number)));
+    const newRes = await client.execute("SELECT normalized_part_number FROM tire_part_numbers");
+    const newKeys = new Set(newRes.rows.map((r) => String(r.normalized_part_number)));
+    const approvedDrops = loadApprovedDrops();
+    const result = computePnKeyPreservation(oldKeys, newKeys, approvedDrops);
+    return { pass: result.pass, detail: result.detail };
+  });
+
   const pass = checks.every((c) => c.pass);
   return { pass, checks };
 }
@@ -925,7 +1013,7 @@ async function cmdPromote({ dryRun, manifestArg }) {
     for (const s of statements) console.log(`  ${s}`);
     console.log(`[dry-run] promote: *_old_${ts} tables would be kept (not dropped) for rollback.`);
     console.log("[dry-run] promote: would first re-check live counts + staging content hash against the bound run-manifest (panel finding C3).");
-    console.log("[dry-run] promote: would then run an automated post-swap smoke test (barcode / part-number / alias lookups + index presence).");
+    console.log("[dry-run] promote: would then run an automated post-swap smoke test (barcode / part-number / alias lookups + index presence + live-PN-key preservation vs APPROVED_PN_KEY_DROPS.csv).");
     return { ts, statements };
   }
 
@@ -973,7 +1061,7 @@ async function cmdPromote({ dryRun, manifestArg }) {
   await client.batch(statements, "write");
   console.log("promote: swap complete. Running post-swap smoke test...");
 
-  const { pass, checks } = await runPostSwapSmokeTest(client);
+  const { pass, checks } = await runPostSwapSmokeTest(client, ts);
   console.log("post-swap smoke test results:");
   for (const c of checks) console.log(`  ${c.pass ? "PASS" : "FAIL"} ${c.name}: ${c.detail}`);
 
@@ -1111,4 +1199,5 @@ export {
   MANIFEST_FILE_NAME, isAllowedTableName, extractTableNames, assertAllowedTables,
   hashStagingContent, readLiveCounts, findLatestManifestPath, resolveManifestPath,
   loadRunManifest, assertLiveUnchangedSinceManifest, assertStagingContentUnchangedSinceManifest,
+  loadApprovedDrops, computePnKeyPreservation, APPROVED_DROPS_PATH,
 };

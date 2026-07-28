@@ -96,6 +96,21 @@ let dbPath;
 let dbUrl;
 let backupDir;
 let stagingDir;
+let approvedDropsPath;
+
+/** Write the scratch approved-drops CSV (re-review OPEN-1). The fake-live fixture seeds one live
+ *  part-number key (LIVEPN0001) that intentionally does NOT exist in the real staging dataset - it
+ *  plays the role of the real promotion's 17 owner-approved dropped keys, so the PN-preservation
+ *  gate exercises the "missing but approved" path on every full-cycle run. Tests that need an
+ *  UNAPPROVED missing key add a second live key without touching this file. */
+function writeApprovedDrops(keys = ["LIVEPN0001"]) {
+  const lines = [
+    "# scratch approved-drops fixture (mirrors repair-2026-07-28/APPROVED_PN_KEY_DROPS.csv format)",
+    "normalized_part_number,owner_decision_reference,decision_date",
+    ...keys.map((k) => `${k},test fixture (plays the role of the 17 owner-approved drops),2026-07-28`),
+  ];
+  writeFileSync(approvedDropsPath, lines.join("\n") + "\n", "utf8");
+}
 
 function freshScratch() {
   scratchRoot = mkdtempSync(join(tmpdir(), "promote-proof-"));
@@ -114,6 +129,10 @@ function freshScratch() {
   for (const f of STAGING_SQL_FILES) {
     copyFileSync(join(REAL_STAGING_DIR, f), join(stagingDir, f));
   }
+  // Scratch approved-drops file (OPEN-1 gate), pointed at via PROMOTE_APPROVED_DROPS in runCli so
+  // tests never read or depend on the real checked-in APPROVED_PN_KEY_DROPS.csv.
+  approvedDropsPath = join(scratchRoot, "APPROVED_PN_KEY_DROPS.csv");
+  writeApprovedDrops();
 }
 
 /** Build the fake-live DB: same tables/columns as production, populated with a small but
@@ -185,6 +204,7 @@ function runCli(args, envOverrides = {}) {
     PROMOTE_TURSO_URL: dbUrl,
     PROMOTE_STAGING_DIR: stagingDir,
     PROMOTE_BACKUP_DIR: backupDir,
+    PROMOTE_APPROVED_DROPS: approvedDropsPath,
     ...envOverrides,
   };
   // This test process sets PROMOTE_SKIP_MAIN=1 on itself (see the dynamic import above) so that
@@ -412,6 +432,9 @@ test("full cycle: promote performs an atomic rename-swap", async () => {
   assert.match(res.stdout, /PASS smoke_barcode_lookup/);
   assert.match(res.stdout, /PASS smoke_part_number_two_step/);
   assert.match(res.stdout, /PASS smoke_index_presence/);
+  // OPEN-1: the post-promote smoke summary includes the PN key-preservation diff. The fixture's
+  // one pre-existing live key (LIVEPN0001) is approved-dropped, so: missing=1, approved=1, unapproved=0.
+  assert.match(res.stdout, /PASS smoke_pn_key_preservation: missing=1, approved=1, unapproved=0/);
   assert.match(res.stdout, /SMOKE TEST PASSED/);
 
   client.close();
@@ -973,4 +996,121 @@ test("M1 (Codex): verify --dry-run prints DRY-RUN markers, never a real gate PAS
     assert.match(line, /DRY-RUN: not evaluated/, `gate line missing not-evaluated tag: ${line}`);
   }
   cleanupScratch();
+});
+
+// ===============================================================================================
+// Re-review OPEN-1 / Codex C1's hard gate: live tire_part_numbers key preservation with an
+// explicit approved-drops file. Any live PN key missing from staging must appear in
+// APPROVED_PN_KEY_DROPS.csv or the verify gate (and post-promote smoke) FAILS.
+// ===============================================================================================
+
+test("OPEN-1 (a): PN gate PASSES when exactly the approved keys are missing (missing=N, approved=N, unapproved=0)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 0, verifyRes.stderr + verifyRes.stdout);
+  // The fixture's one live key (LIVEPN0001) is absent from staging AND listed in the scratch
+  // approved-drops file - the exact "only approved keys are missing" shape of the real 17-key run.
+  assert.match(verifyRes.stdout, /PASS PN_live_part_number_keys_preserved: missing=1, approved=1, unapproved=0/);
+  assert.match(verifyRes.stdout, /ALL GATES PASSED/);
+
+  cleanupScratch();
+});
+
+test("OPEN-1 (b): PN gate FAILS when one extra live key is absent from staging and NOT approved (unapproved=1)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // Add a SECOND live PN key that is neither in staging nor in the approved-drops file. Inserted
+  // BEFORE backup so the C3 live-drift check sees a consistent snapshot and cannot mask this gate.
+  const client = createClient({ url: dbUrl });
+  await client.execute(
+    `INSERT INTO tire_part_numbers (normalized_part_number, canonical_product_uid) VALUES ('LIVEPN_UNAPPROVED', 'SOME_UID')`
+  );
+  client.close();
+
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 1, "verify must exit non-zero when an unapproved live PN key would be dropped");
+  assert.match(verifyRes.stdout, /FAIL PN_live_part_number_keys_preserved: missing=2, approved=1, unapproved=1/);
+  assert.match(verifyRes.stdout, /UNAPPROVED: LIVEPN_UNAPPROVED/);
+  assert.match(verifyRes.stdout, /GATE FAILURE/);
+
+  cleanupScratch();
+});
+
+test("OPEN-1 (c): PN gate FAILS when the approved-drops file is missing while any live key is missing", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  // Remove the approved-drops file: LIVEPN0001 is still missing from staging, and with no
+  // approvals file present NO drop is approved - the gate must fail closed, not silently treat
+  // "no file" as "nothing to check".
+  rmSync(approvedDropsPath, { force: true });
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 1, "verify must fail closed when keys are missing and no approvals file exists");
+  assert.match(verifyRes.stdout, /FAIL PN_live_part_number_keys_preserved: missing=1, approved=0, unapproved=1/);
+  assert.match(verifyRes.stdout, /GATE FAILURE/);
+
+  cleanupScratch();
+});
+
+test("OPEN-1: post-promote smoke FAILS on an unapproved dropped key and retains _old_ tables", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // Second live PN key, unapproved. verify would catch it - but promote's own smoke must ALSO
+  // catch it independently (verify can be skipped; the smoke is the last tripwire).
+  const client = createClient({ url: dbUrl });
+  await client.execute(
+    `INSERT INTO tire_part_numbers (normalized_part_number, canonical_product_uid) VALUES ('LIVEPN_SMOKED', 'SOME_UID2')`
+  );
+  client.close();
+
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  // Skip verify deliberately - promote's smoke check must stand alone.
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "PNSMOKETS" });
+  assert.notEqual(promoteRes.code, 0, "promote must exit nonzero when the post-swap PN preservation smoke fails");
+  assert.match(promoteRes.stdout, /FAIL smoke_pn_key_preservation: missing=2, approved=1, unapproved=1/);
+  assert.match(promoteRes.stdout, /UNAPPROVED: LIVEPN_SMOKED/);
+  assert.match(promoteRes.stderr, /SMOKE TEST FAILED/);
+
+  const client2 = createClient({ url: dbUrl });
+  assert.ok(await tableExists(client2, "tires_old_PNSMOKETS"), "_old_ tables must be retained after a PN-preservation smoke failure");
+  assert.ok(await tableExists(client2, "tire_part_numbers_old_PNSMOKETS"));
+  client2.close();
+
+  cleanupScratch();
+});
+
+test("OPEN-1: the real checked-in APPROVED_PN_KEY_DROPS.csv contains exactly the 17 owner-approved keys", () => {
+  const realPath = join(
+    REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28", "repair-2026-07-28", "APPROVED_PN_KEY_DROPS.csv"
+  );
+  assert.ok(existsSync(realPath), "APPROVED_PN_KEY_DROPS.csv must exist in the repair package");
+  const lines = readFileSync(realPath, "utf8")
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== "" && !l.trim().startsWith("#"));
+  const keys = lines.slice(1).map((l) => l.split(",")[0].trim()).filter(Boolean).sort();
+  const SEVENTEEN = [
+    "20244", "9265031141", "312250", "352430", "352050", "345050", "345120", "360220", "360460",
+    "360280", "360420", "360800", "318010", "318180", "318320", "351200", "254350",
+  ].sort();
+  assert.deepEqual(keys, SEVENTEEN, "the approved-drops file must list exactly the 17 keys from PROMOTE_PREFLIGHT_REPORT.md Proof 2 - no more, no fewer");
+  // Every data row must carry a decision reference and date (owner-decision provenance).
+  for (const line of lines.slice(1)) {
+    const parts = line.split(",");
+    assert.ok(parts.length >= 3, `approved-drops row missing reference/date columns: ${line}`);
+    assert.match(parts[1], /PROMOTE_PREFLIGHT_REPORT|TURSO_DRYRUN_REPORT/, `row lacks an owner-decision reference: ${line}`);
+    assert.match(parts[2], /^\d{4}-\d{2}-\d{2}$/, `row lacks a decision date: ${line}`);
+  }
 });
