@@ -87,21 +87,22 @@ First time on a machine: `npx playwright install chromium`.
 | `npm run deploy:card` | Same sentinel, deploy-card output mode. |
 | `node scripts/release-hygiene.mjs` | Git-only uncommitted/unpushed check (repo lives on OneDrive; pushing is the real backup). `--json` for machine output. |
 
-## Deploy (GitHub-driven)
+## Deploy (GitHub-driven previews; production cutover in progress)
 
 Full mechanics and current truth: `docs/DEPLOY_TRUTH.md` - read it before reasoning about any of
-this. Short version: deploys are cut over to GitHub via Vercel's Git integration (cutover tracked in
-`docs/superpowers/plans/2026-07-27-github-truth-repo-health.md`). Opening a PR against `master` gets
-an automatic Vercel preview URL; merging an approved PR into protected `master` auto-deploys to
-production (or triggers an owner promote, if promotion is left in manual mode). Nobody deploys from a
-laptop as the normal path anymore.
+this. Short version: previews are cut over to GitHub via Vercel's Git integration. Opening a PR
+against `master` gets an automatic Vercel preview URL. Production is NOT yet cut over: branch
+protection is live on `master`, but `vercel.json` still disables Vercel's auto-deploy for `master`, so
+merging a PR does not yet auto-deploy to production - that flag removal is the deliberate final step
+and has not happened. Until then, production still ships via the manual/CLI path below.
 
-`node scripts/deploy-preview.mjs` is now an **emergency-only fallback** (e.g. Git integration itself
-is down), not the routine deploy path - it still acquires the `.deploy-lock`, runs the fix-lineage and
+`node scripts/deploy-preview.mjs` is **preview-only** (never `--prod`). Once production auto-deploy is
+live it is designed to become an emergency-only fallback (e.g. Git integration itself is down); today
+it remains a routinely-used preview tool. It acquires the `.deploy-lock`, runs the fix-lineage and
 env-parity gates below, runs a plain `vercel deploy` (never `--prod`), then the post-deploy smoke
 fingerprint; `--dry-run` exercises the lock/gates with no `vercel`/network call. It requires the same
 explicit owner authorization as any other deploy action before use. A raw `vercel deploy` still works
-and skips the lock and both gates - avoid it even for the emergency path.
+and skips the lock and both gates - avoid it even so.
 
 Production promote/rollback (`vercel --prod`, `vercel promote`, `vercel rollback`, `vercel alias set`)
 is **owner-only** and hard-blocked at the tool layer by `.claude/hookify.vercel-prod-gate.local.md` -

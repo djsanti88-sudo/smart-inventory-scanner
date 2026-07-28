@@ -40,7 +40,7 @@ target-state description below it.
    deployment automatically, unless promotion has been switched to manual in the Vercel project
    settings, in which case the owner promotes the build from the dashboard or CLI. Until the flag is
    removed, a merge to `master` does NOT deploy anything by itself - production still goes through the
-   manual/CLI path (see "Emergency fallback" below, which today is really still the primary path for
+   manual/CLI path (see "Local CLI deploy" below, which today is still the primary path for
    production).
 7. **Rollback.** Two supported paths: (a) Vercel's own promote/rollback (dashboard "Instant Rollback"
    to a prior production deployment, or `vercel rollback` CLI), or (b) `git revert` the offending
@@ -58,16 +58,20 @@ target-state description below it.
   `docs/GO_LIVE_CHECKLIST.md`.
 - **Paid/live API keys and any live-provider calls** - CI and preview builds run against mock
   providers; nothing in the pipeline itself calls a paid AI provider.
-- **The emergency-only local deploy path** - see below.
+- **The local CLI deploy path** - see below (today this is still how production actually ships,
+  pending the flag flip; it is designed to become emergency-only once production auto-deploys).
 - **Branch protection, required-check config, and the Vercel Git connection itself** - changing any
   of these is a deploy-mechanism change and needs the same explicit owner approval as a production
   promote.
 
-## Emergency fallback: local CLI deploy
+## Local CLI deploy (still the production path today; becomes emergency-only after the flag flips)
 
-`node scripts/deploy-preview.mjs` still exists but is now an **emergency-only fallback** - use it only
-when GitHub-driven previews are themselves unavailable (e.g. the Vercel Git integration is down or
-misconfigured), not as a routine alternative to opening a PR. It still requires the same explicit
+`node scripts/deploy-preview.mjs` is a **preview-only** wrapper (never `--prod`). For actual
+production shipping today, before the `vercel.json` flag is removed, production still goes out via
+the owner-only manual/CLI path described below, not this script. Once GitHub-driven production
+deploys are live, this script is designed to become an emergency-only fallback for previews - use it
+only when GitHub-driven previews are themselves unavailable (e.g. the Vercel Git integration is down
+or misconfigured), not as a routine alternative to opening a PR. It still requires the same explicit
 owner authorization as any other deploy action before it runs. Mechanically it is unchanged: it
 acquires an exclusive `.deploy-lock` (stale locks over 30 min are reclaimed), runs the fix-lineage and
 env-parity preflight gates below, runs a plain `vercel deploy` (never `--prod`), then runs the
@@ -139,9 +143,9 @@ check the other environments for parity before assuming it is everywhere the cod
   no network calls of its own: evaluates local git facts (dirty tree, staged secrets/generated files)
   plus cross-system facts passed in via `SENTINEL_*` env vars (Vercel project/alias, Firebase prod
   project, branch protection) into a blocker/warning list and a deploy card with the mandatory owner
-  approval phrase (`DEPLOY THIS SHA`). Never mutates anything and never deploys by itself. Still
-  useful as a preflight sanity check before merging a PR, even though the deploy itself is now
-  triggered by the merge rather than by this script.
+  approval phrase (`DEPLOY THIS SHA`). Never mutates anything and never deploys by itself. Useful as
+  a preflight sanity check before merging a PR today, and will remain useful once the merge itself
+  triggers the deploy after the `vercel.json` flag is removed.
 - `node scripts/check-fix-lineage.mjs [ref]` - git-ancestry based, not a hand-maintained file
   manifest: fails unless local `master` is an ancestor of the candidate ref (`ref` defaults to `HEAD`)
   AND every commit in `scripts/fix-lineage-pins.json` (if present) is also an ancestor. Exit 0 =
@@ -166,8 +170,8 @@ check the other environments for parity before assuming it is everywhere the cod
   Exit 0 = all checks passed, exit 1 = a mismatch, exit 2 = usage/network error.
   `--expect-lineage-mismatch` is for the script's own self-test only. Useful for spot-checking a
   production deploy after a merge, or the preview URL from a PR.
-- All three scripts above are wired into `scripts/deploy-preview.mjs` (the emergency fallback, see
-  above) and also runnable standalone for manual verification at any time.
+- All three scripts above are wired into `scripts/deploy-preview.mjs` (see "Local CLI deploy" above)
+  and also runnable standalone for manual verification at any time.
 
 ## What this replaces
 
