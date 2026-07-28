@@ -13,22 +13,17 @@ Git connection is still pending an owner dashboard step - see the next paragraph
 feature branch on its own never deploys anything by itself; it only deploys through the PR it is
 attached to.
 
-**Not yet flipped (snapshot as of 2026-07-28 - check `vercel.json` and PR #21's status directly for
-current truth, this timestamp will go stale):** `vercel.json` still sets
-`git.deploymentEnabled.master: false`, so merging a PR into `master` does not yet auto-deploy to
-production - that remains the pre-cutover manual/CLI path below until the flag is removed. The flag is
-deliberately the LAST step of the cutover, removed only after branch protection is confirmed live - see
-"Sequencing" below. Branch protection IS confirmed live as of this snapshot (required checks
-`[typecheck, unit-tests, build, lint]`, strict, `enforce_admins: true`); the PR-preview half of the
-Vercel Git connection is already active (see above), but the PRODUCTION half - setting Production
-Branch = `master` in the Vercel dashboard so git-driven production deploys are possible at all - is
-still a pending owner dashboard step. Once the flag is flipped (PR #21, deliberately merged
-last in the train), merging an approved PR into protected `master` will automatically deploy to
-production (or trigger an owner promote, if promotion is left in manual mode - see the production
-section below). The cutover itself is tracked in
-`docs/superpowers/plans/2026-07-27-github-truth-repo-health.md` once that plan is committed; until
-then, treat this section's "not yet flipped" note as the operative fact, not the target-state
-description below it.
+**Flag removed as of PR #21; dashboard connection is the remaining step.** `vercel.json` no longer
+sets `git.deploymentEnabled.master: false` - PR #21 removed it, the deliberate LAST step of the
+cutover, after branch protection was confirmed live (see "Sequencing" below). Branch protection IS
+confirmed live (required checks `[typecheck, unit-tests, build, lint]`, strict,
+`enforce_admins: true`); the PR-preview half of the Vercel Git connection is already active (see
+above). But removing the flag does not, by itself, make production deploys fire: the PRODUCTION half
+of the Git connection - setting Production Branch = `master` in the Vercel dashboard - is a separate,
+still-PENDING owner dashboard step (verified: the GitHub repo has zero webhooks configured). Two-part
+truth: (1) the `vercel.json` flag is gone as of PR #21; (2) Git-driven production deploys go live only
+once the owner completes the dashboard Git connection. Until step (2) happens, merging to `master`
+still deploys nothing by itself, and production continues to ship via the manual/CLI path below.
 
 ## The pipeline, end to end
 
@@ -71,13 +66,15 @@ description below it.
    mock, no-login, no-spend sandbox.
 5. **Owner merges.** The owner reviews and merges the PR (self-approval is allowed on this solo-owner
    repo; branch protection still requires the PR + green checks, it does not require a second human).
-6. **Master auto-deploys (once the flag is flipped).** Once `vercel.json`'s
-   `deploymentEnabled.master` flag is removed, merging to `master` will trigger a production Vercel
-   deployment automatically, unless promotion has been switched to manual in the Vercel project
-   settings, in which case the owner promotes the build from the dashboard or CLI. Until the flag is
-   removed, a merge to `master` does NOT deploy anything by itself - production still goes through the
-   manual/CLI path (see "Local CLI deploy" below, which today is still the primary path for
-   production).
+6. **Master auto-deploys (once the dashboard connection is live).** The `vercel.json` flag that used to
+   block this is gone as of PR #21, but that alone does not trigger production deploys: the Vercel
+   dashboard Git connection still needs Production Branch = `master` set, which is a pending owner
+   action (zero webhooks configured on the GitHub repo as of this writing). Once the owner completes
+   that dashboard step, merging to `master` will trigger a production Vercel deployment automatically,
+   unless promotion has been switched to manual in the Vercel project settings, in which case the owner
+   promotes the build from the dashboard or CLI. Until the dashboard connection is live, a merge to
+   `master` does NOT deploy anything by itself - production still goes through the manual/CLI path (see
+   "Local CLI deploy" below, which today is still the primary path for production).
 7. **Rollback.** Two paths that do different jobs - use both, in order, not either/or:
    - **(a) Fast stopgap (dashboard/CLI, changes what production serves right now).** Vercel's own
      promote/rollback: the dashboard may label this "Instant Rollback" or "Promote to Production" for a
@@ -89,13 +86,13 @@ description below it.
      merge commit and let the revert PR go through the normal pipeline (branch protection + required
      checks). This is what actually prevents the bug from coming back on the next merge. **Do this
      every time**, even after (a) already stopped the bleeding.
-   - **CRITICAL pre-cutover truth:** while `vercel.json` still sets `deploymentEnabled.master: false`
-     (i.e. before PR #21 flips it), merging a revert PR into `master` does **not** deploy anything - see
-     "Master auto-deploys (once the flag is flipped)" above. Until that flag is removed, a merged
-     `git revert` only fixes git history; production only changes via an explicit owner-approved
-     `vercel --prod` / `vercel promote` / `vercel rollback` call (see "Local CLI deploy" and "Live
-     enforcement" below). Do not assume merging a revert PR alone has fixed what production is serving
-     pre-cutover.
+   - **CRITICAL post-flag truth:** the `vercel.json` flag is removed as of PR #21, but until the owner
+     completes the dashboard Git connection (Production Branch = `master`), merging a revert PR into
+     `master` still does **not** deploy anything - see "Master auto-deploys (once the dashboard
+     connection is live)" above. Until that dashboard step is done, a merged `git revert` only fixes
+     git history; production only changes via an explicit owner-approved `vercel --prod` /
+     `vercel promote` / `vercel rollback` call (see "Local CLI deploy" and "Live enforcement" below).
+     Do not assume merging a revert PR alone has fixed what production is serving.
    - **EXCEPTION - never `git revert` the cutover flip PR (#21) itself.** Reverting #21 would
      re-introduce the `deploymentEnabled.master: false` block, and a revert that re-blocks deploys
      cannot deploy itself - it would strand whatever bad code is already live in production with no way
@@ -122,15 +119,16 @@ description below it.
   of these is a deploy-mechanism change and needs the same explicit owner approval as a production
   promote.
 
-## Local CLI deploy (still the production path today; becomes emergency-only after the flag flips)
+## Local CLI deploy (still the production path today; becomes emergency-only once the dashboard connection is live)
 
 `node scripts/deploy-preview.mjs` is a **preview-only** wrapper (never `--prod`). For actual
-production shipping today, before the `vercel.json` flag is removed, production still goes out via
-the owner-only manual/CLI path described below, not this script. Once GitHub-driven production
-deploys are live, this script is designed to become an emergency-only fallback for previews - use it
-only when GitHub-driven previews are themselves unavailable (e.g. the Vercel Git integration is down
-or misconfigured), not as a routine alternative to opening a PR. It still requires the same explicit
-owner authorization as any other deploy action before it runs. Mechanically it is unchanged: it
+production shipping today, before the owner completes the dashboard Git connection, production still
+goes out via the owner-only manual/CLI path described below, not this script. Once GitHub-driven
+production deploys are live (i.e. the dashboard Production Branch = `master` step is done), this
+script is designed to become an emergency-only fallback for previews - use it only when GitHub-driven
+previews are themselves unavailable (e.g. the Vercel Git integration is down or misconfigured), not as
+a routine alternative to opening a PR. It still requires the same explicit owner authorization as any
+other deploy action before it runs. Mechanically it is unchanged: it
 acquires an exclusive `.deploy-lock` (stale locks over 30 min are reclaimed), runs the fix-lineage and
 env-parity preflight gates below, runs a plain `vercel deploy` (never `--prod`), then runs the
 post-deploy smoke fingerprint against the resulting URL, releasing the lock in all cases.
@@ -158,14 +156,15 @@ fallback.
 
 ## Sequencing (why order matters for the cutover)
 
-Branch protection on `master` was put in place **before** the `vercel.json` auto-deploy flag is
-removed - protection is confirmed live today, the flag flip has not happened yet. Flipping the flag
-first, with no protection in place, would have meant any direct push to `master` deployed straight to
+Branch protection on `master` was put in place **before** the `vercel.json` auto-deploy flag was
+removed - protection was confirmed live first, then PR #21 removed the flag. Flipping the flag first,
+with no protection in place, would have meant any direct push to `master` deployed straight to
 production with no required checks - the exact failure mode the 2026-07-22 disconnect was originally
 reacting to, just automated instead of manual. Any future change to either branch protection or the
 Git integration setting must preserve that ordering: protection changes first, deploy-trigger changes
-last - so removing the `deploymentEnabled.master: false` flag is the final, still-pending step of this
-cutover, not something already done.
+last. The flag removal (PR #21) is done; the remaining step in that same ordering is the owner
+completing the dashboard Git connection (Production Branch = `master`), which is what will actually
+make merges to `master` deploy to production.
 
 ## Preview environment: dedicated authenticated Firebase project
 
@@ -244,7 +243,8 @@ everywhere the code expects it.
 
 Treat this file as authoritative over any older, vaguer description of "how deploy works" elsewhere in
 the docs. If another doc's deploy description conflicts with this one, this file wins; fix the other
-doc rather than trusting it. Today's actual state is the transition point: branch protection and CI
-required checks are live, but production deploy is still manual/CLI until the `vercel.json` flag is
-removed as the final cutover step - do not describe production as "auto-deploys on merge" as a
-present-tense fact until that flag is confirmed removed.
+doc rather than trusting it. Today's actual state is the transition point: branch protection, CI
+required checks, and the `vercel.json` flag removal (PR #21) are all done, but production deploy is
+still manual/CLI until the owner completes the dashboard Git connection (Production Branch =
+`master`) - do not describe production as "auto-deploys on merge" as a present-tense fact until that
+dashboard step is confirmed done.

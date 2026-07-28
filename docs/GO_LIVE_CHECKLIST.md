@@ -5,11 +5,14 @@
 > (`inventory-lovat-six.vercel.app`). Steps marked **OWNER-GATED** must never be run by an agent
 > without explicit, in-the-moment owner approval - no exceptions, even mid-checklist.
 >
-> Deploy mechanics referenced below (GitHub disconnected from Vercel, preview vs. production, the
-> hookify prod gate) are canonical in `docs/DEPLOY_TRUTH.md` - read it first. Production deploys are
-> never automatic: they are explicit, owner-only CLI (`vercel --prod`) or Vercel dashboard promote
-> events, each requiring fresh in-conversation approval - do not assume a deploy already happened or
-> will happen as a side effect of anything else in this checklist.
+> Deploy mechanics referenced below (the Vercel Git connection status, preview vs. production, the
+> hookify prod gate) are canonical in `docs/DEPLOY_TRUTH.md` - read it first. As of PR #21 the
+> `vercel.json` flag blocking Git auto-deploy for `master` is removed, but Git-driven production
+> deploys only go live once the owner completes the Vercel dashboard Production Branch = `master`
+> connection - a separate, still-pending owner action. Until then, production deploys stay explicit,
+> owner-only CLI (`vercel --prod`) or Vercel dashboard promote events, each requiring fresh
+> in-conversation approval - do not assume a deploy already happened or will happen as a side effect
+> of anything else in this checklist.
 >
 > Run the steps in order. Do not skip ahead: later steps assume earlier ones are verified, not just
 > attempted.
@@ -71,11 +74,13 @@ Missing, must be added before go-live:
 ## E. Deploy and verify
 
 7. **[OWNER-GATED]** Explicit production deploy/promote event: the owner runs `vercel --prod` (or
-   promotes via the Vercel dashboard) for this branch. This is never automatic and never triggered by
-   `git push` (see `docs/DEPLOY_TRUTH.md` - GitHub auto-deploy is disconnected). An agent session may
-   propose this step and run `npm run release:check` / `npm run deploy:card` as preflight, but the
-   deploy command itself is hard-blocked by `.claude/hookify.vercel-prod-gate.local.md` without the
-   owner's explicit approval in that exact conversation.
+   promotes via the Vercel dashboard) for this branch. Until the owner completes the Vercel dashboard
+   Git connection (Production Branch = `master`), this is never automatic and never triggered by
+   `git push` (see `docs/DEPLOY_TRUTH.md`). Once that dashboard connection is live, merge to `master`
+   becomes the production trigger instead, and this manual step becomes emergency-only. An agent
+   session may propose this step and run `npm run release:check` / `npm run deploy:card` as preflight,
+   but the deploy command itself is hard-blocked by `.claude/hookify.vercel-prod-gate.local.md`
+   without the owner's explicit approval in that exact conversation.
 8. Verify end to end, in this order:
    - Sign up a fresh test account through the real production UI.
    - Confirm the Auth user appears in Firebase Authentication for `smart-inventory-scanner-app`

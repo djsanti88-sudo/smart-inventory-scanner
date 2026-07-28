@@ -343,3 +343,14 @@ Why each choice was made. Newest decisions at the bottom of each section.
   after a decode result lands, until a human actually resolves them. Fixed on
   `fix/rung-trust-and-resolve-stamp` by skipping the stamp for rows carrying `suggestedLinkProductId`
   or `lastAliasConflicts`.
+
+## Deployment model update: vercel.json flag removed, dashboard connection still pending (owner, 2026-07-28)
+- Supersedes the "Deployment model: GitHub disconnected, manual/CLI deploys only (owner, 2026-07-22)"
+  entry above for the flag-state claim only; that entry's other context (Preview no-login history) is
+  historical record and stays as written. PR #21 (the cutover flip) removes `vercel.json`'s
+  `git.deploymentEnabled.master: false` block. That removal alone does not make Git-driven production
+  deploys fire: the Vercel dashboard Git connection (Production Branch = `master`) is a separate,
+  still-pending owner action - the GitHub repo has zero webhooks configured as of this entry. Until the
+  owner completes that dashboard step, merges to `master` still deploy nothing by itself and production
+  continues to ship via the manual/CLI path. Once the dashboard step is done, merge to `master` becomes
+  the production trigger. See `docs/DEPLOY_TRUTH.md` for the full current state.
