@@ -109,15 +109,18 @@ async function main() {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const REPO_ROOT = path.resolve(__dirname, "..", "..");
 
-  const DB_PATH = path.join(
-    REPO_ROOT,
-    "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db"
-  );
+  // Optional DB path override (e.g. a working copy driven by pipeline_driver.mjs). Defaults to
+  // the packaged repair working copy exactly as before when no argument is given.
+  const dbPathArg = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : null;
+  const DB_PATH = dbPathArg
+    ? path.resolve(dbPathArg)
+    : path.join(
+        REPO_ROOT,
+        "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db"
+      );
   const RULES_PATH = path.join(REPO_ROOT, "scripts/tire-db-repair/model_styling_rules.json");
-  const REPORT_PATH = path.join(
-    REPO_ROOT,
-    "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/C1_MODEL_STYLING_REPORT.md"
-  );
+  const REPORT_DIR = dbPathArg ? path.dirname(DB_PATH) : path.join(REPO_ROOT, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28");
+  const REPORT_PATH = path.join(REPORT_DIR, "C1_MODEL_STYLING_REPORT.md");
 
   const rulesData = JSON.parse(fs.readFileSync(RULES_PATH, "utf8"));
   const ruleIndex = buildRuleIndex(rulesData.rules);

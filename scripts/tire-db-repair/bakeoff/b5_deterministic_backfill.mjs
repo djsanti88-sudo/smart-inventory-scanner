@@ -49,20 +49,22 @@ import Database from "better-sqlite3";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
-const DB_PATH = path.join(
+// Optional DB path override (e.g. a working copy driven by pipeline_driver.mjs). Defaults to the
+// packaged repair working copy exactly as before when no argument is given, so standalone
+// invocation (the documented tonight-repair workflow) is byte-for-byte unchanged.
+const dbPathArg = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : null;
+const DEFAULT_DB_PATH = path.join(
   REPO_ROOT,
   "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db"
 );
+const DB_PATH = dbPathArg ? path.resolve(dbPathArg) : DEFAULT_DB_PATH;
+// Reports/side-effect files: alongside the working DB when a custom path is given, so a run
+// against a throwaway working copy never writes into the packaged deliverable directory.
+const REPORT_DIR = dbPathArg ? path.dirname(DB_PATH) : path.join(REPO_ROOT, "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28");
 const PACKAGE_DIR = path.join(REPO_ROOT, "backups/claude-tire-db-handoff-2026-07-28");
 const PREFIX_MAP_PATH = path.join(REPO_ROOT, "src/services/catalog/brandPrefixMap.json");
-const REPORT_PATH = path.join(
-  REPO_ROOT,
-  "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/B5_BACKFILL_REPORT.md"
-);
-const REMAINING_BLANKS_PATH = path.join(
-  REPO_ROOT,
-  "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/bakeoff/remaining_blanks.json"
-);
+const REPORT_PATH = path.join(REPORT_DIR, "B5_BACKFILL_REPORT.md");
+const REMAINING_BLANKS_PATH = path.join(REPORT_DIR, "bakeoff", "remaining_blanks.json");
 
 const PACKAGE_FILES = [
   "01_PROCESS_MERGED_pre_canonical.db",
@@ -499,10 +501,7 @@ const result = main();
 // blank counts / fill counts, done in the report step below when run without --verify-idempotent
 // a second time is expected to be run manually and its output pasted into the report, OR see
 // run-twice helper below).
-const SUMMARY_PATH = path.join(
-  REPO_ROOT,
-  "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/bakeoff/b5_run_summary.json"
-);
+const SUMMARY_PATH = path.join(REPORT_DIR, "bakeoff", "b5_run_summary.json");
 const existing = fs.existsSync(SUMMARY_PATH) ? JSON.parse(fs.readFileSync(SUMMARY_PATH, "utf8")) : { runs: [] };
 existing.runs.push({ at: new Date().toISOString(), ...result });
 fs.writeFileSync(SUMMARY_PATH, JSON.stringify(existing, null, 2) + "\n", "utf8");

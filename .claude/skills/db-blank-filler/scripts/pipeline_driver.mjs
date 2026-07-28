@@ -30,6 +30,7 @@
 //   --dry-run            plan + free-stage no-op preview; write nothing.
 
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -63,6 +64,14 @@ if (!DB) {
 }
 if (!existsSync(DB)) {
   console.error(`pipeline_driver: working DB not found at ${DB}`);
+  process.exit(1);
+}
+if (!Number.isFinite(DEADLINE_H)) {
+  console.error(`pipeline_driver: --deadline must be a finite number of hours, got "${argVal("--deadline", "4")}".`);
+  process.exit(1);
+}
+if (SLICE !== null && (!Number.isInteger(SLICE) || SLICE <= 0)) {
+  console.error(`pipeline_driver: --slice must be a positive integer row count, got "${argVal("--slice", "500")}".`);
   process.exit(1);
 }
 
@@ -127,15 +136,45 @@ run("style", process.execPath, ["scripts/tire-db-repair/06_model_styling.mjs", D
 // after reading the plan and (for the first ever run) the pilot economics report. This keeps the
 // owner-approval stop intact.
 if (!ONLY_STAGES || ONLY_STAGES.includes("codex")) {
-  const rows = PILOT ? 200 : (SLICE ?? 500);
+  const requestedRows = PILOT ? 200 : (SLICE ?? 500);
+  // Ground the plan in the WORKING DB's actual eligible-row count instead of always printing the
+  // requested number verbatim - an operator reading "plan-ready-live" for a 200-row pilot must be
+  // able to trust that 200 real rows exist to work, not a static number disconnected from the
+  // DB (found under adversarial testing 2026-07-28: an empty/near-empty working copy still
+  // reported "plan-ready-live" for a full 200-row pilot).
+  let eligibleRows = null;
+  try {
+    const require = createRequire(path.join(REPO_ROOT, "package.json"));
+    const Database = require("better-sqlite3");
+    const db = new Database(DB, { readonly: true });
+    const hasTires = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tires'").get();
+    if (hasTires) {
+      eligibleRows = db
+        .prepare(
+          `SELECT COUNT(*) c FROM tires
+           WHERE (manufacturer_part_number IS NULL OR TRIM(manufacturer_part_number) = '')
+             AND length(replace(ltrim(barcode, '0'), '', '')) > 6`
+        )
+        .get().c;
+    }
+    db.close();
+  } catch {
+    eligibleRows = null; // DB unreadable/no tires table - fall back to the requested number, unverified.
+  }
+  const rows = eligibleRows === null ? requestedRows : Math.min(requestedRows, eligibleRows);
+  const queueEmpty = eligibleRows === 0;
   const plan = {
     stage: "codex",
-    status: LIVE ? "plan-ready-live" : "skipped-not-live",
-    policy: PILOT ? "MPN pilot (200 rows) then STOP for economics review" : `capped slice of ${rows} rows`,
+    status: LIVE && !queueEmpty ? "plan-ready-live" : LIVE ? "empty-queue-nothing-to-dispatch" : "skipped-not-live",
+    policy: PILOT ? "MPN pilot (200 rows) then STOP for economics review" : `capped slice of ${requestedRows} rows`,
     priorityOrder: ["boss brands (nexen/arisun/blackhawk/fortune/falken)", "inventory-used rows", "valid-barcode rows"],
+    requestedRows,
+    eligibleRowsInWorkingDb: eligibleRows,
     rowsPlanned: rows,
     dispatchCommand: "scripts/tire-db-repair/bakeoff/b6_driver.sh <firstBatch> <lastBatch>  (operator-launched, subscription Codex)",
-    note: PILOT
+    note: queueEmpty
+      ? "Working DB has 0 eligible blank-MPN rows - nothing to dispatch. Do not launch b6_driver.sh."
+      : PILOT
       ? "FIRST invocation: run the 200-row pilot, then STOP and produce the economics report before any multi-night run."
       : "Post-pilot: consume one capped slice per run.",
   };

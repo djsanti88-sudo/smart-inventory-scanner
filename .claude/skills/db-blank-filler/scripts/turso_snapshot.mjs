@@ -19,7 +19,7 @@
 //   "no creds" from a real failure. NEVER fabricates data.
 
 import { createRequire } from "node:module";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -97,28 +97,65 @@ async function main() {
   }
 
   const client = createClient({ url, authToken });
-  if (existsSync(outPath)) rmSync(outPath);
-  const local = new Database(outPath);
-  local.pragma("journal_mode = WAL");
 
-  const summary = {};
-  for (const [name, spec] of Object.entries(TABLES)) {
-    local.prepare(spec.ddl).run();
-    const res = await client.execute(spec.select); // SELECT only
-    const cols = res.columns;
-    if (res.rows.length > 0) {
-      const placeholders = cols.map(() => "?").join(", ");
-      const ins = local.prepare(`INSERT INTO ${name} (${cols.join(", ")}) VALUES (${placeholders})`);
-      const tx = local.transaction((rows) => {
-        for (const row of rows) ins.run(cols.map((c) => (row[c] == null ? null : String(row[c]))));
-      });
-      // Cast every cell to TEXT except we let SQLite store NULLs; INTEGER cols coerce naturally.
-      tx(res.rows);
+  // Write-to-temp-then-rename: a snapshot is only ever visible at outPath once EVERY table has
+  // copied successfully. Without this, a crash/network-drop mid-copy (found under adversarial
+  // testing 2026-07-28) leaves a PARTIAL but structurally-valid SQLite file sitting at the final
+  // path - some tables populated, others empty/missing - indistinguishable from a complete
+  // snapshot to any caller that just checks existsSync(outPath). The temp file lives alongside
+  // outPath (same directory, so the final rename is an atomic same-filesystem move) and is always
+  // cleaned up on any failure path, never left as a look-alike ".db" file.
+  const tmpPath = `${outPath}.partial-${process.pid}-${Date.now()}.tmp`;
+  if (existsSync(tmpPath)) rmSync(tmpPath);
+
+  let local;
+  try {
+    local = new Database(tmpPath);
+    local.pragma("journal_mode = WAL");
+
+    const summary = {};
+    for (const [name, spec] of Object.entries(TABLES)) {
+      local.prepare(spec.ddl).run();
+      const res = await client.execute(spec.select); // SELECT only
+      const cols = res.columns;
+      if (res.rows.length > 0) {
+        const placeholders = cols.map(() => "?").join(", ");
+        const ins = local.prepare(`INSERT INTO ${name} (${cols.join(", ")}) VALUES (${placeholders})`);
+        const tx = local.transaction((rows) => {
+          for (const row of rows) ins.run(cols.map((c) => (row[c] == null ? null : String(row[c]))));
+        });
+        // Cast every cell to TEXT except we let SQLite store NULLs; INTEGER cols coerce naturally.
+        tx(res.rows);
+      }
+      summary[name] = res.rows.length;
     }
-    summary[name] = res.rows.length;
+    local.close();
+    local = null;
+
+    // WAL mode can leave -wal/-shm sidecar files; checkpoint isn't strictly required since we
+    // close cleanly above, but clean up any sidecars before the rename so only the .db file (and
+    // no stray WAL artifacts) lands at outPath.
+    for (const suffix of ["-wal", "-shm"]) {
+      const sidecar = tmpPath + suffix;
+      if (existsSync(sidecar)) rmSync(sidecar);
+    }
+
+    if (existsSync(outPath)) rmSync(outPath);
+    renameSync(tmpPath, outPath);
+    console.log(JSON.stringify({ mode: "live-read", outPath, rowsCopied: summary }));
+  } catch (e) {
+    if (local) {
+      try {
+        local.close();
+      } catch {
+        /* already closed or unusable; fall through to cleanup */
+      }
+    }
+    for (const p of [tmpPath, tmpPath + "-wal", tmpPath + "-shm"]) {
+      if (existsSync(p)) rmSync(p);
+    }
+    throw e;
   }
-  local.close();
-  console.log(JSON.stringify({ mode: "live-read", outPath, rowsCopied: summary }));
 }
 
 main().catch((e) => {

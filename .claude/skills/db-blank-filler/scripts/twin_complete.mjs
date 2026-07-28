@@ -48,6 +48,21 @@ const dbPath =
 const db = new Database(dbPath);
 db.pragma("busy_timeout = 30000");
 
+// --- required-table guard: fail with a clear, honest message instead of a raw SQLite stack ----
+const REQUIRED_TABLES = ["tires", "tire_barcode_aliases", "provenance", "remaining_blank_fill_audit"];
+const existingTables = new Set(
+  db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name)
+);
+const missingTables = REQUIRED_TABLES.filter((t) => !existingTables.has(t));
+if (missingTables.length > 0) {
+  console.error(
+    `twin_complete: ${dbPath} is missing required table(s): ${missingTables.join(", ")}. ` +
+      "This does not look like a tire-corpus working copy (offline copy or turso_snapshot.mjs output expected)."
+  );
+  db.close();
+  process.exit(1);
+}
+
 // --- additive primary-form designation column (idempotent) -----------------------------------
 const aliasCols = db.prepare("PRAGMA table_info(tire_barcode_aliases)").all().map((c) => c.name);
 if (!aliasCols.includes("is_primary_form")) {
@@ -91,18 +106,24 @@ const markPrimary = db.prepare(
 );
 
 // --- candidate queries -----------------------------------------------------------------------
+// `NOT GLOB '*[^0-9]*'` guards every twin candidate to digits-only: `length()` alone cannot tell
+// a real 12/13-digit GTIN from an alphanumeric vendor code or corrupted value of the same
+// character length, and twin math (substr/concat) on a non-numeric string mints a garbage
+// "twin" barcode (found under adversarial testing 2026-07-28: a 12-char alphanumeric string was
+// silently treated as a UPC-A and prefixed with '0' into a bogus 13-char alias). Barcodes are
+// TEXT always, but twin completion only ever applies to genuine numeric GTIN/UPC/EAN forms.
 // Direction A: UPC-A twin (drop leading zero of a 13-digit EAN starting with '0').
 const dirA = db.prepare(`
   SELECT a.barcode, a.canonical_product_id
   FROM tire_barcode_aliases a
-  WHERE length(a.barcode) = 13 AND substr(a.barcode, 1, 1) = '0'
+  WHERE length(a.barcode) = 13 AND substr(a.barcode, 1, 1) = '0' AND a.barcode NOT GLOB '*[^0-9]*'
     AND NOT EXISTS (SELECT 1 FROM tire_barcode_aliases b WHERE b.barcode = substr(a.barcode, 2))
 `).all();
 // Direction B: EAN-13 twin (prefix '0' to a 12-digit UPC-A).
 const dirB = db.prepare(`
   SELECT a.barcode, a.canonical_product_id
   FROM tire_barcode_aliases a
-  WHERE length(a.barcode) = 12
+  WHERE length(a.barcode) = 12 AND a.barcode NOT GLOB '*[^0-9]*'
     AND NOT EXISTS (SELECT 1 FROM tire_barcode_aliases b WHERE b.barcode = '0' || a.barcode)
 `).all();
 
@@ -185,12 +206,12 @@ console.log(
 // Idempotency / completeness check: after a real run, zero missing twins in either direction.
 const remainingA = db.prepare(`
   SELECT count(*) c FROM tire_barcode_aliases a
-  WHERE length(a.barcode) = 13 AND substr(a.barcode, 1, 1) = '0'
+  WHERE length(a.barcode) = 13 AND substr(a.barcode, 1, 1) = '0' AND a.barcode NOT GLOB '*[^0-9]*'
     AND NOT EXISTS (SELECT 1 FROM tire_barcode_aliases b WHERE b.barcode = substr(a.barcode, 2))
 `).get().c;
 const remainingB = db.prepare(`
   SELECT count(*) c FROM tire_barcode_aliases a
-  WHERE length(a.barcode) = 12
+  WHERE length(a.barcode) = 12 AND a.barcode NOT GLOB '*[^0-9]*'
     AND NOT EXISTS (SELECT 1 FROM tire_barcode_aliases b WHERE b.barcode = '0' || a.barcode)
 `).get().c;
 console.log(`remaining_missing_upc_twins=${remainingA} remaining_missing_ean_twins=${remainingB} (expect 0/0 after a real run)`);

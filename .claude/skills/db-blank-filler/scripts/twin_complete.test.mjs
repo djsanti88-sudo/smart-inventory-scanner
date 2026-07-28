@@ -81,6 +81,53 @@ test("is idempotent: a second run adds nothing", () => {
   db.close();
 });
 
+// Regression test for a real defect found under adversarial testing (2026-07-28): the candidate
+// queries used only length(barcode)=12/13 with no digit check, so an alphanumeric string of the
+// same character length (a corrupted or vendor-style value, not a real GTIN) was silently treated
+// as a UPC-A/EAN-13 twin candidate and string-concatenated into a garbage alias
+// (e.g. "0AB345678905" -> fabricated twin "00AB345678905"). Barcodes are TEXT always but twin
+// math must only ever apply to genuine all-digit GTIN/UPC/EAN forms.
+test("ignores same-length alphanumeric barcodes (never fabricates a non-numeric twin)", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "twin-nondigit-"));
+  const db2 = path.join(dir, "f.db");
+  makeFixture(db2);
+  {
+    const d = new Database(db2);
+    // 12-char alphanumeric value - same length as a UPC-A but not a real barcode.
+    d.prepare(
+      `INSERT INTO tires (barcode, canonical_product_uid, brand, model, size, barcode_type, source_count)
+       VALUES (?, ?, ?, ?, ?, ?, 0)`
+    ).run("0AB345678905".slice(0, 12), "UID-JUNK", "BrandJunk", "ModelJunk", "1", "unknown");
+    d.prepare(
+      `INSERT INTO tire_barcode_aliases (barcode, barcode_type, canonical_product_id, source_table, alias_confidence)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run("0AB345678905".slice(0, 12), "unknown", "UID-JUNK", "source_junk", 100);
+    d.close();
+  }
+  const rr = spawnSync(process.execPath, [SCRIPT, db2], { encoding: "utf8" });
+  assert.equal(rr.status, 0, rr.stderr);
+  const d = new Database(db2, { readonly: true });
+  const junkTwin = d.prepare("SELECT 1 FROM tire_barcode_aliases WHERE barcode = '0' || ?").get("0AB345678905".slice(0, 12));
+  assert.equal(junkTwin, undefined, "must never fabricate a twin for a non-numeric same-length barcode");
+  d.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Regression test: an invalid working copy (missing required tables) must fail with a clear,
+// actionable message and a non-zero exit - not a raw unhandled SqliteError stack trace.
+test("fails cleanly with an honest message when required tables are missing", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "twin-badschema-"));
+  const db2 = path.join(dir, "bad.db");
+  const d = new Database(db2);
+  d.exec("CREATE TABLE tires (barcode TEXT, canonical_product_uid TEXT, brand TEXT)");
+  d.close();
+  const r = spawnSync(process.execPath, [SCRIPT, db2], { encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /missing required table/i);
+  assert.doesNotMatch(r.stderr, /SqliteError/, "must not leak a raw SQLite stack trace");
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("--dry-run writes nothing", () => {
   const dir2 = mkdtempSync(path.join(tmpdir(), "twin-dry-"));
   const db2 = path.join(dir2, "f.db");

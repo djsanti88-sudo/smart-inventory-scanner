@@ -127,3 +127,11 @@ node --test .claude/skills/db-blank-filler/scripts/twin_complete.test.mjs \
 ```
 All must pass before trusting a run. They use a tiny in-temp fixture DB and never touch the
 packaged deliverable or live Turso.
+
+## Windows / shell notes
+Every command in this file is verified to run unchanged from both PowerShell (`cp` is aliased to
+`Copy-Item`; forward slashes work fine in Node and PowerShell path arguments) and Git Bash/WSL on
+this machine. `<WORK>` paths containing spaces are safe (all scripts here are invoked via an argv
+array, never a shell string, so no manual quoting workaround is needed beyond normal shell
+quoting of the path itself). All script files in this skill use LF line endings; do not let an
+editor or `core.autocrlf` convert them to CRLF.
