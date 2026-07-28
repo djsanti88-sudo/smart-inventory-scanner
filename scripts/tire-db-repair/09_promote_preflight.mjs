@@ -23,17 +23,31 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
 const PACKAGE_DIR = join(REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28");
 const OUTPUT_DIR = join(PACKAGE_DIR, "repair-2026-07-28");
-const STAGING_DIR = join(OUTPUT_DIR, "turso-staging");
 
-const WORKING_DB_PATH = join(OUTPUT_DIR, "REPAIRED_TIRE_DATABASE.db");
+// Optional overrides (all default unchanged - promote-#1's frozen artifacts and live behavior are
+// preserved bit-for-bit when no flags are passed) so a second working copy (e.g. a twin-completed
+// bakeoff variant) can run its own preflight into SEPARATE output files without ever overwriting
+// promote-#1's turso-staging/, PROMOTE_PREFLIGHT_REPORT.md, or CHANGED_FIELDS.csv.
+function argValue(flag) {
+  const i = process.argv.indexOf(flag);
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : null;
+}
+const dbArg = argValue("--db");
+const stagingDirArg = argValue("--staging-dir");
+const reportOutArg = argValue("--report-out");
+const changedFieldsOutArg = argValue("--changed-fields-out");
+const sddReportOutArg = argValue("--sdd-report-out");
+
+const STAGING_DIR = stagingDirArg ? join(REPO_ROOT, stagingDirArg) : join(OUTPUT_DIR, "turso-staging");
+const WORKING_DB_PATH = dbArg ? join(REPO_ROOT, dbArg) : join(OUTPUT_DIR, "REPAIRED_TIRE_DATABASE.db");
 const PART_NUMBER_CONFLICTS_CSV = join(OUTPUT_DIR, "PART_NUMBER_CONFLICTS.csv");
 const TURSO_DRYRUN_REPORT_MD = join(OUTPUT_DIR, "TURSO_DRYRUN_REPORT.md");
 
-const REPORT_OUT = join(OUTPUT_DIR, "PROMOTE_PREFLIGHT_REPORT.md");
-const CHANGED_FIELDS_CSV_OUT = join(OUTPUT_DIR, "CHANGED_FIELDS.csv");
-const SDD_REPORT_OUT = join(
-  REPO_ROOT, ".superpowers", "sdd", "2026-07-28-tire-db-repair-enrichment-bakeoff", "task-PREFLIGHT-report.md",
-);
+const REPORT_OUT = reportOutArg ? join(REPO_ROOT, reportOutArg) : join(OUTPUT_DIR, "PROMOTE_PREFLIGHT_REPORT.md");
+const CHANGED_FIELDS_CSV_OUT = changedFieldsOutArg ? join(REPO_ROOT, changedFieldsOutArg) : join(OUTPUT_DIR, "CHANGED_FIELDS.csv");
+const SDD_REPORT_OUT = sddReportOutArg
+  ? join(REPO_ROOT, sddReportOutArg)
+  : join(REPO_ROOT, ".superpowers", "sdd", "2026-07-28-tire-db-repair-enrichment-bakeoff", "task-PREFLIGHT-report.md");
 
 const FIELDS_TO_CHECK = ["brand", "model", "size", "load_index", "speed_rating", "manufacturer_part_number"];
 

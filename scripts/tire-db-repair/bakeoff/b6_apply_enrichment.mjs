@@ -265,6 +265,7 @@ function main() {
   const batchPath = getArg("--batch");
   const inputPath = getArg("--input");
   const sourceLabelOverride = getArg("--source-label");
+  const auditActionOverride = getArg("--audit-action");
 
   if (!batchPath || !inputPath) {
     console.error(
@@ -401,7 +402,7 @@ function main() {
         evidence_level: EVIDENCE_LEVEL,
       });
       auditStmt.run({
-        action: SOURCE_TAG,
+        action: auditActionOverride || SOURCE_TAG,
         trust_color: "green",
         confidence_score: result.confidence === "high" ? 90 : result.confidence === "medium" ? 70 : 50,
         canonical_product_uid: liveRow.canonical_product_uid,

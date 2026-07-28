@@ -29,10 +29,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
 const PACKAGE_DIR = join(REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28");
 const OUTPUT_DIR = join(PACKAGE_DIR, "repair-2026-07-28");
-const STAGING_DIR = join(OUTPUT_DIR, "turso-staging");
+
+// Optional --output-dir / --report-out overrides (default unchanged: turso-staging/ and
+// TURSO_DRYRUN_REPORT.md under OUTPUT_DIR) so a second working copy (e.g. a twin-completed
+// bakeoff variant) can be dry-run into a SEPARATE folder without ever overwriting the frozen
+// promote-#1 staging directory or report.
+function argValue(flag) {
+  const i = process.argv.indexOf(flag);
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : null;
+}
+const outputDirArg = argValue("--output-dir");
+const reportOutArg = argValue("--report-out");
+const STAGING_DIR = outputDirArg ? join(REPO_ROOT, outputDirArg) : join(OUTPUT_DIR, "turso-staging");
+const REPORT_OUT = reportOutArg ? join(REPO_ROOT, reportOutArg) : join(OUTPUT_DIR, "TURSO_DRYRUN_REPORT.md");
 
 const WORKING_DB_DEFAULT = join(OUTPUT_DIR, "REPAIRED_TIRE_DATABASE.db");
-const REPORT_OUT = join(OUTPUT_DIR, "TURSO_DRYRUN_REPORT.md");
 
 const dbPathArg = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : null;
 const workingDbPath = dbPathArg ?? WORKING_DB_DEFAULT;
