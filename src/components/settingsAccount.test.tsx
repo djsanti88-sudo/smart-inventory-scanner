@@ -80,7 +80,7 @@ describe("settings Account section", () => {
     expect(order).toEqual(["reset", "signOut"]);
   });
 
-  it("Sign out warns HONESTLY when scans could not sync, and cancel aborts entirely", async () => {
+  it("Sign out warns HONESTLY about queued changes across businesses, and cancel aborts entirely", async () => {
     getSession.mockResolvedValue({ email: "owner@example.com" });
     prepareSignOut.mockResolvedValue(2);
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -89,9 +89,10 @@ describe("settings Account section", () => {
     await screen.findByTestId("account-email");
     fireEvent.click(screen.getByTestId("sign-out"));
 
-    await waitFor(() =>
-      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("2 scans could not sync")),
-    );
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    const warning = confirmSpy.mock.calls[0]?.[0] ?? "";
+    expect(warning).toContain("2 queued changes could not sync");
+    expect(warning).toContain("across your businesses");
     // cancel: no wipe, no signOut
     expect(resetForSignOut).not.toHaveBeenCalled();
     expect(signOut).not.toHaveBeenCalled();

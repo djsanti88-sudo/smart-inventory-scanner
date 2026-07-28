@@ -42,19 +42,45 @@ describe("scanStore Firebase backend wiring (Loop 2)", () => {
     expect(store.getState().pendingSyncQueue.length).toBeGreaterThan(0);
   });
 
-  it("setBusinessContext drains the queue to the cloud target (async)", async () => {
+  it("setBusinessContext preserves foreign-tenant (pre-context) queue items and never writes them into the new tenant", async () => {
+    // Certified tenant-queue model (fix/release-stabilization + tenantQueueIsolation.store.test.ts):
+    // a pre-context scan enqueues under the pre-context "demo-business" tenant. Establishing a
+    // DIFFERENT tenant ("biz-real") must NOT write those foreign items into biz-real (isolation), but
+    // it must also NOT drop them - the sync drain is tenant-aware, so they are preserved and drain
+    // only when their own tenant is active again. Nothing clogs under the wrong tenant.
     const target = new FakeAsyncTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true });
+
+    // A pre-context scan enqueues under the pre-context ("demo-business") businessId.
     store.getState().processScan("999999999999");
     await flush();
-    expect(target.applied).toHaveLength(0);
+    expect(target.applied).toHaveLength(0); // paused: no context yet
+    const queuedBefore = store.getState().pendingSyncQueue.length;
+    expect(queuedBefore).toBeGreaterThan(0);
 
     store.getState().setBusinessContext("biz-real", "user-real");
     await flush();
     expect(store.getState().businessContextReady).toBe(true);
     expect(store.getState().userId).toBe("user-real");
     expect(store.getState().businessId).toBe("biz-real");
-    expect(target.applied.length).toBeGreaterThan(0); // queued items drained
+    // Foreign-tenant items are never written to the new tenant, but they are preserved (not dropped).
+    expect(target.applied).toHaveLength(0);
+    expect(store.getState().pendingSyncQueue.length).toBe(queuedBefore);
+    expect(store.getState().pendingSyncQueue.every((q) => q.businessId === "demo-business")).toBe(true);
+  });
+
+  it("scans made AFTER setBusinessContext drain to the cloud target", async () => {
+    const target = new FakeAsyncTarget();
+    const store = createTestScanStore({ db: target, cloudBackend: true });
+
+    store.getState().setBusinessContext("biz-real", "user-real");
+    await flush();
+    expect(store.getState().businessContextReady).toBe(true);
+    expect(store.getState().businessId).toBe("biz-real");
+
+    store.getState().processScan("999999999999"); // enqueues under the active "biz-real" tenant
+    await flush();
+    expect(target.applied.length).toBeGreaterThan(0); // same-tenant items drain
     expect(store.getState().lastSyncError).toBeNull();
     expect(store.getState().pendingSyncQueue).toHaveLength(0);
   });

@@ -9,7 +9,9 @@ import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 // shown only to the platform owner - a customer sees plain status + a Retry button and nothing scary.
 export function SyncStatusBar() {
   const online = useScanStore((s) => s.online);
-  const pending = useScanStore((s) => s.pendingSyncQueue.length);
+  const pending = useScanStore(
+    (s) => s.pendingSyncQueue.filter((item) => item.businessId === s.businessId).length,
+  );
   const lastSyncError = useScanStore((s) => s.lastSyncError);
   const simulateSyncFailure = useScanStore((s) => s.simulateSyncFailure);
   const setOnline = useScanStore((s) => s.setOnline);

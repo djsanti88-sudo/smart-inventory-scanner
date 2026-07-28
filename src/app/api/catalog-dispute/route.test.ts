@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   verifyIdToken: vi.fn(),
   disputeCatalogEntry: vi.fn(),
   memberGet: vi.fn(),
+  checkRateLimit: vi.fn(),
 }));
 
 vi.mock("@/lib/firebaseAdmin", () => ({
@@ -23,6 +24,19 @@ vi.mock("@/lib/firebaseAdmin", () => ({
 
 vi.mock("@/server/catalog/catalogDispute", () => ({
   disputeCatalogEntry: mocks.disputeCatalogEntry,
+}));
+
+vi.mock("@/server/upc/storage", () => ({
+  ladderStorage: async () => ({} as never),
+}));
+
+vi.mock("@/services/security/aiSpendGuard", () => ({
+  checkRateLimit: () => mocks.checkRateLimit(),
+  intEnv: (value: string | undefined, fallback: number) => {
+    if (value === undefined) return fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  },
 }));
 
 import { POST } from "@/app/api/catalog-dispute/route";
@@ -41,6 +55,7 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   mocks.verifyIdToken.mockReset().mockResolvedValue({ uid: "customer-uid", email: "customer@example.com" });
   mocks.disputeCatalogEntry.mockReset().mockResolvedValue({ ok: true, disputeCount: 1, changed: true, verificationStatus: "disputed" });
+  mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   // Default: caller IS a member of "biz-a" (the businessId VALID_BODY claims), matching resolve-scan's
   // membership-check harness default so existing happy-path tests stay green.
   mocks.memberGet.mockReset().mockResolvedValue({ exists: true });
@@ -49,6 +64,16 @@ beforeEach(() => {
 });
 
 describe("POST /api/catalog-dispute request validation", () => {
+  it("returns 429 when request-rate limit is exhausted", async () => {
+    mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: false, retryAfterMs: 900 });
+    const response = await POST(req({ ...VALID_BODY }));
+    expect(response.status).toBe(429);
+    expect(mocks.verifyIdToken).not.toHaveBeenCalled();
+    const payload = await response.json();
+    expect(payload.reasonCode).toBe("rate_limited");
+    expect(payload.error).toMatch(/Too many requests/i);
+  });
+
   it("rejects a missing normalizedBarcode with 400", async () => {
     const response = await POST(req({ idToken: "t", businessId: "biz-a" }));
     expect(response.status).toBe(400);
@@ -69,6 +94,27 @@ describe("POST /api/catalog-dispute request validation", () => {
     });
     const response = await POST(request);
     expect(response.status).toBe(400);
+  });
+
+  it("rejects an oversized businessId with 400", async () => {
+    const response = await POST(req({ idToken: "t", normalizedBarcode: "012345678905", businessId: "b".repeat(129), reason: "marked_wrong" }));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/businessId is too long/i);
+  });
+
+  it("rejects an oversized normalizedBarcode with 400", async () => {
+    const response = await POST(req({ idToken: "t", normalizedBarcode: "0".repeat(65), businessId: "biz-a", reason: "marked_wrong" }));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/normalizedBarcode is too long/i);
+  });
+
+  it("rejects an oversized reason with 400", async () => {
+    const response = await POST(req({ idToken: "t", normalizedBarcode: "012345678905", businessId: "biz-a", reason: "r".repeat(2001) }));
+    expect(response.status).toBe(400);
+    const payload = await response.json();
+    expect(payload.error).toMatch(/reason is too long/i);
   });
 });
 

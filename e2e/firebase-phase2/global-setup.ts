@@ -9,6 +9,15 @@ import {
   KNOWN_BARCODE,
   ALIAS_CODE,
 } from "./admin";
+import type { Firestore } from "firebase-admin/firestore";
+
+async function clearCollection(db: Firestore, path: string) {
+  const snap = await db.collection(path).get();
+  if (snap.empty) return;
+  const batch = db.batch();
+  for (const doc of snap.docs) batch.delete(doc.ref);
+  await batch.commit();
+}
 
 // Seeds the Firebase EMULATOR before the Firebase-backed Playwright run: a real Auth user (so the spec
 // signs in through the real login UI), a business + owner membership, and one known product with two
@@ -17,6 +26,20 @@ import {
 export default async function globalSetup() {
   const auth = adminAuth();
   const db = adminDb();
+
+  // The orchestrator and external QA cells can reuse a long-lived emulator instead of always running
+  // through `firebase emulators:exec`. Start each proof from a clean tenant so a previous learned alias
+  // for UNKNOWN_CODE cannot hide the review row and turn this into a false-green/false-red run.
+  await Promise.all([
+    clearCollection(db, `businesses/${BIZ}/products`),
+    clearCollection(db, `businesses/${BIZ}/aliases`),
+    clearCollection(db, `businesses/${BIZ}/scanEvents`),
+    clearCollection(db, `businesses/${BIZ}/inventoryCounts`),
+    clearCollection(db, `businesses/${BIZ}/countSessions`),
+    clearCollection(db, `businesses/${BIZ}/unknownReviews`),
+    clearCollection(db, `businesses/${BIZ}/auditLog`),
+    clearCollection(db, `businesses/${BIZ}/_appliedKeys`),
+  ]);
 
   // Idempotent: a fresh emulator each run, but tolerate a pre-existing user on reuse.
   try {

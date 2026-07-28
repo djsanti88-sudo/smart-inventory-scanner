@@ -63,6 +63,37 @@ beforeEach(() => {
   });
 });
 
+describe("UniversalImportPanelContainer - empty businessId (fresh signup, no membership yet)", () => {
+  it("does not fetch /api/import-mapping and does not throw when businessId is empty", async () => {
+    // Reproduces the prod 403: a fresh account has no selected/derived businessId yet, but the
+    // container used to fire GET /api/import-mapping?businessId= (empty) regardless, and the
+    // resulting non-ok response threw the amber "Could not load the remembered column mapping."
+    useScanStore.setState({ businessId: "", products: [] as Product[], aliases: [] as Alias[] });
+    const fetchMock = vi.fn().mockImplementation(async (input: unknown, init?: { body?: string }) => {
+      const url = String(input);
+      if (url.includes("/api/reconcile/match")) {
+        const posted = JSON.parse(init?.body ?? "{}") as { rows?: unknown[] };
+        const matches = (posted.rows ?? []).map(() => ({ status: "unmatched", reason: "No corpus candidate found.", confidence: 0 }));
+        return { ok: true, status: 200, json: async () => ({ matches }) };
+      }
+      throw new Error(`Unexpected fetch call in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<UniversalImportPanelContainer />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), {
+      target: { files: [new File([CSV], "boss.csv")] },
+    });
+
+    await waitFor(() => {
+      const matchCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/api/reconcile/match"));
+      expect(matchCall).toBeDefined();
+    });
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/import-mapping"))).toBe(false);
+    expect(screen.queryByTestId("import-error")).not.toBeInTheDocument();
+  });
+});
+
 describe("UniversalImportPanelContainer - loadMapping", () => {
   it("GET returns 200 with { mapping: null } -> resolves null and falls through to column inference (no throw)", async () => {
     const fetchMock = stubFetch({ ok: true, status: 200, body: { mapping: null } });

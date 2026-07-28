@@ -30,6 +30,20 @@ The Windows wrapper `.\fable5.cmd` and `python -m tools.fable5` are equivalent.
 | `python -m tools.fable5 selftest` | Runs the five isolated detector canaries without worktrees or npm. | Free, offline. |
 | `python -m tools.fable5 stress --target <url>` | Runs the fail-closed scan stress battery. Localhost must use port 3400; cloud needs `--allow-cloud`. | Local is free. Every preview run is owner-gated; the monitor aborts on any AI lookup. |
 
+## Teach Bot (live-app learning harness)
+
+Built on `feat/teach-bot` / `feat/teach-bot-clean` (not yet on master; unverified as of 2026-07-22
+whether merged). Batch A modules shipped: `e2e/teach/{knowledge,ladder,manifest,sheets,triage}.mjs`
++ matching `node:test` suites, driving `testing/app-knowledge`, `testing/specs`, and
+`testing/tests/{candidates,permanent}`.
+
+| Script | What it does | Status |
+|---|---|---|
+| `npm run teach` | Runs `e2e/teach/teach.mjs` (the harness entry point) | `e2e/teach/teach.mjs` does not exist yet on this branch as of 2026-07-22 - package.json script currently points at a file not yet built |
+| `npm run teach:cleanup` | Runs `e2e/teach/cleanup.mjs` | Same gap - file not yet present |
+| `npm run teach:test` | `node --test "e2e/teach/**/*.test.mjs"` - the Batch A node:test suite (knowledge/ladder/manifest/sheets/triage) | Exists, runs today |
+| `npm run teach:regression` | `playwright test --config=playwright.teach.config.ts` - runs `testing/tests/permanent` against `TEACH_TARGET_URL` (defaults to the real production deployment, no local webServer) | Config exists; this is a LIVE-app-driving config, not mock E2E - treat as owner-gated like other live/production-facing runs |
+
 ## Dev servers
 
 | Script | What it does |
@@ -87,23 +101,35 @@ First time on a machine: `npx playwright install chromium`.
 | `npm run deploy:card` | Same sentinel, deploy-card output mode. |
 | `node scripts/release-hygiene.mjs` | Git-only uncommitted/unpushed check (repo lives on OneDrive; pushing is the real backup). `--json` for machine output. |
 
-## Deploy (Vercel CLI)
+## Deploy (GitHub-driven previews; production cutover in progress)
 
-Full mechanics and current truth: `docs/DEPLOY_TRUTH.md` - read it before running any of this.
-Short version: GitHub auto-deploy is disconnected (`vercel.json`), so `git push` never deploys
-anything. Preview deploys go through `node scripts/deploy-preview.mjs` (the sanctioned wrapper: an
-exclusive `.deploy-lock`, then the fix-lineage and env-parity gates below, then a plain
-`vercel deploy`, then the post-deploy smoke fingerprint; `--dry-run` exercises the lock/gates with no
-`vercel`/network call). A raw `vercel deploy` still works but skips the lock and both gates.
+Full mechanics and current truth: `docs/DEPLOY_TRUTH.md` - read it before reasoning about any of
+this. Short version: previews are cut over to GitHub via Vercel's Git integration. Opening a PR
+against `master` gets an automatic Vercel preview URL. Production is NOT yet cut over: branch
+protection is live on `master`, but `vercel.json` still disables Vercel's auto-deploy for `master`, so
+merging a PR does not yet auto-deploy to production - that flag removal is the deliberate final step
+and has not happened. Until then, production still ships via the manual/CLI path below.
+
+`node scripts/deploy-preview.mjs` is **preview-only** (never `--prod`). It is emergency-only: use it
+only when GitHub-driven previews are themselves unavailable (e.g. the Vercel Git integration is down
+or misconfigured), not as a routine alternative to opening a PR. It acquires the `.deploy-lock`, runs the fix-lineage and
+env-parity gates below, runs a plain `vercel deploy` (never `--prod`), then the post-deploy smoke
+fingerprint; `--dry-run` exercises the lock/gates with no `vercel`/network call. It requires the same
+explicit owner authorization as any other deploy action before use. A raw `vercel deploy` still works
+and skips the lock and both gates - avoid it even so.
+
 Production promote/rollback (`vercel --prod`, `vercel promote`, `vercel rollback`, `vercel alias set`)
 is **owner-only** and hard-blocked at the tool layer by `.claude/hookify.vercel-prod-gate.local.md` -
 it will not run from an agent session without explicit in-conversation owner approval, even if a
-prior session already approved something similar. Run `npm run release:check` / `npm run deploy:card`
-(`scripts/release-sentinel.mjs`, see above) as the preflight gate before proposing any deploy action.
+prior session already approved something similar. `npm run deploy:rules:prod` (Firestore security
+rules) is a separate production surface outside Vercel entirely and stays owner-gated independently -
+merging a PR to master never touches Firestore rules. Run
+`npm run release:check` / `npm run deploy:card` (`scripts/release-sentinel.mjs`, see above) as the
+preflight gate before proposing any deploy action, GitHub-driven or emergency.
 
 | Script | What it does |
 |---|---|
-| `node scripts/deploy-preview.mjs [--dry-run]` | Sanctioned preview-deploy wrapper: lock + fix-lineage gate + env-parity gate + `vercel deploy` (preview only) + smoke fingerprint. |
+| `node scripts/deploy-preview.mjs [--dry-run]` | Emergency-only preview-deploy wrapper: lock + fix-lineage gate + env-parity gate + `vercel deploy` (preview only) + smoke fingerprint. Requires owner authorization; not the routine path once GitHub-driven previews are live. |
 | `node scripts/check-fix-lineage.mjs [ref]` | Fails if `master` (or a pinned commit in `scripts/fix-lineage-pins.json`) is not an ancestor of `ref` (default `HEAD`). |
 | `node scripts/check-env-parity.mjs [--env=production\|preview]` | Diffs Vercel env var NAMES (never values) against `scripts/env-manifest.json`'s required/forbidden sets. |
 | `node scripts/smoke-fingerprint.mjs <url> [--expect-lineage-mismatch]` | Post-deploy GET-only checks: `/api/ai-lookup` capability JSON, route fingerprint, failed-deploy masquerade page detection. |
@@ -131,6 +157,7 @@ prior session already approved something similar. Run `npm run release:check` / 
 | `npm run test:firebase:cloud-smoke` | **LIVE** cloud Firebase writes (self-cleaning throwaway business). |
 | `node scripts/create-god-account.mjs` / `repair-god-alias.mjs --repair` | **LIVE** real-account provisioning / repair (repair is read-only without `--repair`). |
 | `node scripts/gpt-ladder-live-proof.mts`, `scripts/fetchv2-*.mts` | **PAID** provider/discovery probes (credit-capped). |
+| `npm run deploy:rules:prod` | **LIVE** deploys `firestore.rules` + `firestore.indexes.json` to the REAL production project (`smart-inventory-scanner-app`, alias `prod` in `.firebaserc`). Not billed, but production-affecting: a wrong rules push changes who can read/write real customer data. Owner approval required before every run. |
 
 Cost truths that always apply: a client-aborted call is still billed server-side; unmeterable fees
 reserve documented worst case; reconcile against the provider console before quoting spend.
@@ -147,7 +174,8 @@ clone - this section is the durable name list. Client-exposed vars are
   `NEXT_PUBLIC_FIREBASE_ALLOW_PROD`, `NEXT_PUBLIC_FIREBASE_*` (app config), `NEXT_PUBLIC_REQUIRE_LOGIN`
 - Firebase server: `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON` / `_PATH`,
   `GOOGLE_APPLICATION_CREDENTIALS`, emulator hosts
-- AI providers (server-only secrets): `OPENAI_API_KEY` (+ `OPENAI_MODEL`, `GPT_LADDER_MODEL`,
+- AI providers (server-only secrets): `OPENAI_API_KEY` (+ `OPENAI_MODEL`, `GPT_LADDER_MODEL` - decode
+  ladder's paid GPT rung, defaults to `gpt-5.4-mini` as of 2026-07-27,
   `GPT_LADDER_DAILY_USD`), `GEMINI_API_KEY` (+ model vars; decode-disabled), `GO_UPC_API_KEY`
   (+ `GO_UPC_MONTHLY_LIMIT`), `FIRECRAWL_API_KEY` (+ `_1..4` rotation), `BRAVE_SEARCH_API_KEY`,
   `UPCITEMDB_DAILY_LIMIT`, `OPENFOODFACTS_PER_MINUTE_LIMIT`

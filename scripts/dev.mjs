@@ -12,13 +12,14 @@
 // these win over .env.local.
 
 import { spawn } from "node:child_process";
+import { buildDevEnvironment } from "./dev-environment.mjs";
 
 const mode = process.argv.includes("--prod") ? "prod" : process.argv.includes("--emulator") ? "emulator" : "mock";
 
 // Forward any extra args (e.g. -p 3002) to next dev, minus our mode flags.
 const passthrough = process.argv.slice(2).filter((a) => a !== "--prod" && a !== "--emulator" && a !== "--mock");
 
-const env = { ...process.env };
+const env = buildDevEnvironment(mode);
 const RED = "\x1b[41m\x1b[97m";
 const YEL = "\x1b[33m";
 const GRN = "\x1b[32m";

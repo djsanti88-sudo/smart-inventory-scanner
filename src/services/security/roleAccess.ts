@@ -52,11 +52,39 @@ export function accessLevelClient(identity: Identity): AccessLevel {
 }
 
 /**
+ * EXPLICIT local-mode flag (QA Task 6). When NO cloud backend is configured the app runs open-access /
+ * no-login on the platform operator's OWN device (there is no signed-in customer and userId is always
+ * null). That runtime is platform-equivalent for PERSISTENCE: it must get the FULL "platform" persist
+ * shape - never the customer ("business") strip, which would silently destroy the owner's own data
+ * (aliases + product barcodes) on every reload. The signal is the SAME one the store uses to pick its
+ * backend (NEXT_PUBLIC_FIREBASE_BACKEND !== "1" -> local mock backend). This is deliberately NOT
+ * userId==null: a genuine signed-in customer on a REAL cloud backend still resolves to "business".
+ *
+ * SCOPE (QA fix 2026-07-15): this flag governs ONLY the persistence access level (persistAccessLevel /
+ * buildPersistedScanState). It must NOT be folded into effectiveClientAccessLevel, because that function
+ * is ALSO the UI role hint (useAccessLevel). Forcing the UI role to "platform" for every local render
+ * defeats the customer role-gating + Model/name customer-sanitization guarantee (a customer-role view
+ * would then leak the alias DB and raw un-cleaned identity strings) and made those guarantees
+ * unprovable in unit tests. Data survival (persist) and UI role gating are decoupled on purpose.
+ */
+export function isLocalRuntime(): boolean {
+  // Cloud backend configured -> a real (possibly signed-in customer) tenant; NOT local mode.
+  if (process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1") return false;
+  // The human-bot E2E suite runs the mock backend but sets NEXT_PUBLIC_E2E_AUTH_BYPASS=1 to SIMULATE a
+  // signed-in CUSTOMER on purpose, so it can prove the customer ("business") persist strip + role gating.
+  // Honor that: an explicit simulated-customer session is NOT the open-access owner runtime.
+  if (process.env.NEXT_PUBLIC_E2E_AUTH_BYPASS === "1") return false;
+  return true;
+}
+
+/**
  * Client access level honoring the legacy-mock E2E override. The 11 mock Playwright specs exercise the
  * FULL platformOwner view (playwright.config.ts sets NEXT_PUBLIC_E2E_PLATFORM_OWNER=1); the human-bot
  * suite does NOT set it, so it stays a customer ("business"). Real cloud ignores the flag (it is never
- * set there) and uses the actual NEXT_PUBLIC_PLATFORM_OWNER_* allowlist. SINGLE source of truth shared
- * by the React hook (useAccessLevel) and the store persist split (Sec-4 partialize), so they never drift.
+ * set there) and uses the actual NEXT_PUBLIC_PLATFORM_OWNER_* allowlist. SINGLE source of truth for the
+ * UI ROLE HINT (useAccessLevel) - the customer role gating + Model/name sanitization depend on this
+ * returning "business" for a non-platformOwner identity. The local-runtime persist override is applied
+ * separately in persistAccessLevel, so data survival never weakens UI customer gating.
  */
 export function effectiveClientAccessLevel(identity: Identity): AccessLevel {
   if (process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER === "1") return "platform";
