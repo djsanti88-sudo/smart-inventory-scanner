@@ -395,6 +395,10 @@ production).
   run.
 - **CI**: new `.github/workflows/ci.yml` authored (tsc + lint + unit/dom + build), alongside the
   existing mock Playwright workflow; branch protection payload prepared, not yet applied.
+- **PR train status (2026-07-27)**: #12-#17 are MERGED, including #17 (the CI workflow itself).
+  #18-#21 remain OPEN, in merge order: #19, #20, #18, then #21 last (#21 is the cutover flip - flipping
+  `vercel.json`'s `deploymentEnabled.master` flag - and is deliberately merged after every other PR in
+  the train per the Sequencing rule in `docs/DEPLOY_TRUTH.md`).
 - **Cutover status**: pending owner gates in strict order per the plan - Preview-env live-AI-key
   lockdown, then CI required-check merge, then branch protection applied, then Vercel Git connection
   verified, then the `vercel.json` `deploymentEnabled.master` flag removed last. Docs

@@ -25,14 +25,18 @@ target-state description below it.
 
 1. **Branch.** Cut a feature branch from `master`.
 2. **PR.** Open a pull request against `master`.
-3. **CI required checks.** GitHub Actions runs on the PR: typecheck (`tsc --noEmit`), unit/dom tests
-   (`npm run test`), production build (`npm run build`), lint (`npm run lint`), plus the existing
-   mock Playwright E2E suite (`.github/workflows/playwright.yml`). All of these are required status
-   checks on `master` - a PR cannot merge while any of them are red.
+3. **CI required checks.** GitHub Actions runs `.github/workflows/ci.yml` on the PR, with four jobs:
+   typecheck (`tsc --noEmit`), unit-tests (`npm run test`, unit/dom projects), build (`npm run build`),
+   and lint (`npm run lint`). All four are required status checks on `master` - a PR cannot merge while
+   any of them are red. There is no separate Playwright CI workflow; the mock Playwright E2E suite
+   (`npm run test:e2e`) is not currently wired into a required GitHub Actions check.
 4. **Preview URL.** The Vercel GitHub bot comments the PR with a preview deployment URL once the
-   build succeeds. The preview always runs the mock backend with no login wall (see "Preview
-   environment" below) - a preview link is safe to hand out or click without touching real Firebase
-   data or spending live AI budget.
+   build succeeds. Preview runs against a dedicated, authenticated Firebase project
+   (`smart-inventory-preview`, separate from production) and carries live paid AI provider keys
+   (`GO_UPC_API_KEY`, `OPENAI_API_KEY`) so decode can be exercised end to end - see "Preview
+   environment" below for the full policy and the daily-cap guard that bounds that spend. A preview
+   link is safe to hand out or click for auth/scan testing against preview data, but it is NOT a
+   mock, no-login, no-spend sandbox.
 5. **Owner merges.** The owner reviews and merges the PR (self-approval is allowed on this solo-owner
    repo; branch protection still requires the PR + green checks, it does not require a second human).
 6. **Master auto-deploys (once the flag is flipped).** Once `vercel.json`'s
@@ -56,8 +60,10 @@ target-state description below it.
   production surface outside Vercel. Merging a PR to `master` never touches Firestore rules; rules
   changes still require the explicit `deploy:rules:prod` command run with owner sign-off per
   `docs/GO_LIVE_CHECKLIST.md`.
-- **Paid/live API keys and any live-provider calls** - CI and preview builds run against mock
-  providers; nothing in the pipeline itself calls a paid AI provider.
+- **Paid/live API keys and any live-provider calls** - CI runs against mock providers, so nothing in
+  the CI pipeline itself calls a paid AI provider. Preview is different: it carries real
+  `GO_UPC_API_KEY` / `OPENAI_API_KEY` values and can make live paid decode calls, bounded by the same
+  daily cap as production - see "Preview environment" below before treating a preview URL as spend-free.
 - **The local CLI deploy path** - see below (today this is still how production actually ships,
   pending the flag flip; it is designed to become emergency-only once production auto-deploys).
 - **Branch protection, required-check config, and the Vercel Git connection itself** - changing any
@@ -116,12 +122,18 @@ Preview deployments use `smart-inventory-preview`, a Firebase project separate f
 explicit `FIREBASE_PROJECT_ID`, and Preview-scoped Admin credential so authentication, Firestore,
 sessions, and tenant-isolation can be tested without touching production users or inventory. This
 supersedes the earlier mock/no-login-by-design Preview state; see `FIREBASE_SETUP.md` for the
-corresponding policy note. Live paid-AI provider keys must still never be present in the Preview
-environment - PR previews must never be able to burn paid AI budget just because a PR was opened.
+corresponding policy note.
+
+**Owner-ratified policy (2026-07-27): paid AI keys REMAIN in Preview.** `scripts/env-manifest.json`
+requires `GO_UPC_API_KEY` and `OPENAI_API_KEY` in the `preview` environment (same as production) so
+PR previews can exercise live decode end to end, not just against mocks. The guard against runaway
+spend is the daily AI cap (`AI_LOOKUP_DAILY_LIMIT`), shared across environments the same way it bounds
+production - NOT the absence of keys. A preview link is therefore not spend-free: opening a PR and
+exercising decode on its preview URL can burn paid budget, capped daily.
 
 Preview must never use emulator mode, a production-mode opt-in, raw service-account JSON, or platform
-owner overrides. `scripts/env-manifest.json` enforces the environment-variable names; runtime browser
-proof must also confirm the public Firebase project ID before any authenticated test.
+owner overrides - those remain forbidden by `scripts/env-manifest.json`. Runtime browser proof must
+also confirm the public Firebase project ID before any authenticated test.
 
 ### Current safety stop (2026-07-26)
 
@@ -156,9 +168,10 @@ check the other environments for parity before assuming it is everywhere the cod
   `vercel env ls <environment>` and diffs variable NAMES ONLY (never values - Vercel only ever shows
   Encrypted/Plain, and this script deliberately never runs `vercel env pull`) against
   `scripts/env-manifest.json`'s required/forbidden/optional sets per environment. Catches a required
-  var silently missing (e.g. `GO_UPC_API_KEY` absent from Preview) and a forbidden var silently
-  present (e.g. `NEXT_PUBLIC_FIREBASE_*` or a live AI key leaking into Preview, which would break the
-  mock/no-login and no-paid-spend guarantees above). Exit 0 = no gaps, exit 1 = gaps printed per
+  var silently missing (e.g. `GO_UPC_API_KEY` absent from Preview, which IS required there per the
+  Preview environment section above) and a forbidden var silently present (e.g. emulator mode, a
+  production-mode opt-in, or raw service-account JSON leaking into Preview, which would break the
+  dedicated-project isolation guarantee above). Exit 0 = no gaps, exit 1 = gaps printed per
   environment.
 - `node scripts/smoke-fingerprint.mjs <deployed-url> [--expect-lineage-mismatch]` - post-deploy,
   read-only GET checks against a URL that has already been deployed: the `/api/ai-lookup` capability

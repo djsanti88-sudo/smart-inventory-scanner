@@ -96,9 +96,9 @@ protection is live on `master`, but `vercel.json` still disables Vercel's auto-d
 merging a PR does not yet auto-deploy to production - that flag removal is the deliberate final step
 and has not happened. Until then, production still ships via the manual/CLI path below.
 
-`node scripts/deploy-preview.mjs` is **preview-only** (never `--prod`). Once production auto-deploy is
-live it is designed to become an emergency-only fallback (e.g. Git integration itself is down); today
-it remains a routinely-used preview tool. It acquires the `.deploy-lock`, runs the fix-lineage and
+`node scripts/deploy-preview.mjs` is **preview-only** (never `--prod`). It is emergency-only: use it
+only when GitHub-driven previews are themselves unavailable (e.g. the Vercel Git integration is down
+or misconfigured), not as a routine alternative to opening a PR. It acquires the `.deploy-lock`, runs the fix-lineage and
 env-parity gates below, runs a plain `vercel deploy` (never `--prod`), then the post-deploy smoke
 fingerprint; `--dry-run` exercises the lock/gates with no `vercel`/network call. It requires the same
 explicit owner authorization as any other deploy action before use. A raw `vercel deploy` still works
