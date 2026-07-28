@@ -146,8 +146,10 @@ Preview variables and runtime proof must be updated before a new authenticated P
 Production carries the real Firebase config (`NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_AUTH_MODE=live`,
 `FIREBASE_SERVICE_ACCOUNT_JSON`/`_BASE64`) per `docs/GO_LIVE_CHECKLIST.md`. As of 2026-07-22,
 production also includes `GO_UPC_API_KEY` so the paid Go-UPC rung of the decode ladder is live in
-production; this key is not present in Preview. Whenever a new env var is added to one environment,
-check the other environments for parity before assuming it is everywhere the code expects it.
+production. As of the 2026-07-27 owner-ratified Preview policy above, `GO_UPC_API_KEY` is now also
+required in Preview (no longer production-only) - see "Preview environment" above. Whenever a new env
+var is added to one environment, check the other environments for parity before assuming it is
+everywhere the code expects it.
 
 ## Preflight gates (facts in, verdict out)
 
