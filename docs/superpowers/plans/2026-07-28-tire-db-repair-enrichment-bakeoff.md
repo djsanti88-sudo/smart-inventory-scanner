@@ -216,3 +216,38 @@ GROUP BY old.canonical_product_uid;
 - Spec coverage: A1-A6 cover handoff sections 1-5, 7, 8; B1-B4 cover section 6 + the bakeoff; C1 covers model cleaning; D1 covers section 9. Deliverables list fully mapped.
 - Exact counts from the handoff are embedded as gates (82640, 29173, 6990, 6118, 235, 637, 5316, 4203, 4422).
 - Parallelism: A-track sequential within itself (A1->A6); B-track parallel to A (works on its own read snapshot + writes nothing to the DB); C1 after A3; D1 after A6 and B is not a dependency.
+
+---
+
+## Scaled run (added post-bakeoff per owner overnight authorization; verdict: Lane0 -> Codex -> Firecrawl-capped)
+
+### Task B5: Deterministic backfill at scale (free, no web)
+
+**Files:**
+- Create: `scripts/tire-db-repair/bakeoff/b5_deterministic_backfill.mjs`
+- Create (output): `repair-2026-07-28/B5_BACKFILL_REPORT.md`
+
+**Interfaces:**
+- Consumes: repaired DB post-A3 (boss fills applied). Runs BEFORE any web enrichment.
+- Produces: blank fills with provenance (`source_name='deterministic_backfill'`, evidence_level per rule) + audit rows; `repair-2026-07-28/bakeoff/remaining_blanks.json` (counts + row lists per field for B6).
+
+- [ ] **Step 1:** MPN backfill: for each tire row with blank `manufacturer_part_number`, join `tire_part_numbers` by `canonical_product_uid`; fill ONLY when the product maps to exactly ONE distinct normalized part number (multiple = skip, record `ambiguous_pn`). Audit action `backfill_pn_from_relationship`, trust green.
+- [ ] **Step 2:** Brand backfill via GS1 prefix (Lane 0 logic at scale): only prefixes mapping to exactly one brand family in the repo prefix map; audit action `backfill_brand_from_gs1_prefix`, trust green; conflicts with existing non-blank brand are NEVER written (record `prefix_brand_conflict` for review).
+- [ ] **Step 3:** Brand/model/size backfill from `canonical_tire_products` fields where the canonical product row carries the value and the tire row is blank (exact product identity, no inference). Audit action `backfill_from_canonical_product`.
+- [ ] **Step 4:** Idempotency proof (second run = 0 changes). Report before/after blank counts per field. Write `remaining_blanks.json`. Commit script + report.
+
+### Task B6: Codex scaled enrichment batches (subscription lane)
+
+**Files:**
+- Create: `scripts/tire-db-repair/bakeoff/b6_apply_enrichment.mjs` (applies lane results to DB through the trust gate)
+- Create (output): `repair-2026-07-28/ENRICHMENT_REVIEW.csv`, `repair-2026-07-28/B6_ENRICHMENT_REPORT.md`
+
+**Interfaces:**
+- Consumes: `remaining_blanks.json` from B5; Codex result format = the bakeoff lane result format.
+- Produces: enrichment fills with provenance (`source_name=<host>`, `source_ref=<url>`, evidence_level `web_trusted_single_source`); review CSV for everything below the gate.
+
+- [ ] **Step 1:** Priority queue per owner authorization: (1) five boss brands, (2) rows used by current inventory, (3) valid-barcode rows missing MPN, (4) blank brand/model/size rows. Placeholder/all-zero barcodes are EXCLUDED (unresearchable) and listed in the review CSV as `placeholder_barcode`.
+- [ ] **Step 2:** Batch Codex runs (~100-150 codes per run, same blind result contract as the bakeoff; web-search enabled; wrong answers penalized over blanks). Time-box the overnight window; stop dispatching new batches at the window edge; every completed batch is applied and audited independently.
+- [ ] **Step 3:** Apply through the trust gate: trusted-host allowlist (manufacturer domains, major retailers: discounttire, tirerack, tirebuyer, simpletire, priorityTire, walmart, ebay item pages with exact UPC print) + exact barcode tie + non-placeholder barcode. Blank-only fills, provenance upsert, audit rows (`action='codex_enrichment_fill'`, trust green). Below-gate results -> ENRICHMENT_REVIEW.csv with reason.
+- [ ] **Step 4:** Firecrawl fallback ONLY for boss-brand rows Codex missed, hard cap 100 operations total, same gate. Record actual ops used.
+- [ ] **Step 5:** Final report: fills per field per source, remaining blanks (honest), Codex batches/durations, Firecrawl ops, review-queue size. Re-run A6 validator - must stay GREEN. Commit scripts + report.
