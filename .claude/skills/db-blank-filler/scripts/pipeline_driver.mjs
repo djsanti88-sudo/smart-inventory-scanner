@@ -7,18 +7,30 @@
 // --live is passed. It NEVER writes to live Turso, never runs git, never deploys.
 //
 // Stages (deterministic-first, paid last), matching the owner-approved cascade:
-//   1. b5   deterministic backfill (free)      scripts/tire-db-repair/bakeoff/b5_deterministic_backfill.mjs
-//   2. twin twin completion both directions    .claude/skills/db-blank-filler/scripts/twin_complete.mjs
-//   3. style model styling pass (free)         scripts/tire-db-repair/06_model_styling.mjs
-//   4. codex GPT-5.5 batches (PAID, --live)    scripts/tire-db-repair/bakeoff/b6_driver.sh  [gated]
-//   5. firecrawl capped fallback (PAID, --live)                                             [gated]
-//   6. validate (free, gate)                   scripts/tire-db-repair/05_validate.mjs
+//   1. b5      deterministic backfill (free)      scripts/tire-db-repair/bakeoff/b5_deterministic_backfill.mjs
+//   2. twin    twin completion both directions    .claude/skills/db-blank-filler/scripts/twin_complete.mjs
+//   3. style   model styling pass (free)          scripts/tire-db-repair/06_model_styling.mjs
+//   4. codex   GPT-5.5 batches (PAID, --live)      scripts/tire-db-repair/bakeoff/b6_driver.sh  [gated]
+//   5. firecrawl capped fallback (PAID, --live)                                                [gated]
+//   6. validate (free, gate)                      scripts/tire-db-repair/05_validate.mjs
+//   7. promote (free, gate, MANDATORY pre-promote) scripts/tire-db-repair/09_promote_preflight.mjs
 //
 // Paid stages 4-5 are the ONLY web/enrichment lanes. Without --live they are SKIPPED and reported
 // as skipped (the free stages + validator still run - a safe dry pipeline). The MPN backlog policy
 // (200-row pilot, then capped 500-row slices) is surfaced here via --pilot / --slice but the
 // actual paid dispatch stays owner-gated (see SKILL.md): the driver stops before paid dispatch and
 // prints the batch plan unless --live AND (--pilot|--slice) are BOTH explicitly present.
+//
+// STANDING RULE (SUPERIORITY STAGE, owner order 2026-07-28): a Turso promote is BLOCKED unless the
+// promote-preflight verdict is SUPERIOR - 0 regressions (no live non-blank field going blank), 0
+// unexplained key losses (no live part-number key vanishing except the owner-ordered 17), and
+// operational/retail tables PROVEN untouched by the staged SQL. This is enforced by the "promote"
+// stage below: it runs 09_promote_preflight.mjs (READ-ONLY against live Turso; requires
+// TURSO_DATABASE_URL/TURSO_AUTH_TOKEN) and parses PROMOTE_PREFLIGHT_REPORT.md's verdict line. A
+// non-SUPERIOR verdict, a missing report, or missing Turso credentials all report
+// "blocked-not-superior" / "blocked-no-credentials" - never a silent skip that could be mistaken for
+// clearance to promote. The actual `08_promote_atomic.sql` execution against live Turso remains a
+// SEPARATE, explicitly owner-approved step; this stage never runs it.
 //
 // Flags:
 //   --db <path>          working DB (REQUIRED - never defaults to the packaged deliverable)
@@ -28,10 +40,14 @@
 //   --live               permit PAID stages (codex/firecrawl). Absent = free stages only.
 //   --stages a,b,c       run only the named stages (default: all).
 //   --dry-run            plan + free-stage no-op preview; write nothing.
+//   --promote            include the promote-preflight superiority gate (stage "promote"). Off by
+//                         default so a routine free-stage run never requires live Turso
+//                         credentials; pass this flag (or --stages promote) when checking
+//                         promote-readiness. Always read-only against live Turso.
 
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -56,6 +72,7 @@ const PILOT = hasFlag("--pilot");
 const SLICE = hasFlag("--slice") ? Number(argVal("--slice", "500")) : null;
 const LIVE = hasFlag("--live");
 const DRY_RUN = hasFlag("--dry-run");
+const PROMOTE = hasFlag("--promote");
 const ONLY_STAGES = hasFlag("--stages") ? argVal("--stages", "").split(",").map((s) => s.trim()) : null;
 
 if (!DB) {
@@ -192,5 +209,71 @@ if (!ONLY_STAGES || ONLY_STAGES.includes("firecrawl")) {
 
 // --- Stage 6: validator (free, gate) ---------------------------------------------------------
 run("validate", process.execPath, ["scripts/tire-db-repair/05_validate.mjs", DB]);
+
+// --- Stage 7: promote-preflight superiority gate (free, gate, MANDATORY pre-promote) ----------
+// Off by default (only runs when explicitly requested via --promote or --stages promote), since it
+// requires live Turso read credentials and always evaluates the PACKAGED deliverable (the promote
+// decision is inherently "is the packaged repaired DB, as staged, superior to what is live today" -
+// not a property of an arbitrary <WORK> copy). It NEVER writes to live Turso and NEVER runs the
+// actual promote SQL; it only computes and reports the SUPERIOR / NOT-SUPERIOR verdict that gates
+// the separate, explicitly owner-approved promotion step.
+const promoteSelected = ONLY_STAGES ? ONLY_STAGES.includes("promote") : PROMOTE;
+if (promoteSelected) {
+  if (ONLY_STAGES && !ONLY_STAGES.includes("promote")) {
+    report.stages.push({ stage: "promote", status: "not-selected" });
+  } else if (deadlinePassed()) {
+    report.stages.push({ stage: "promote", status: "skipped-deadline" });
+  } else if (DRY_RUN) {
+    report.stages.push({
+      stage: "promote",
+      status: "dry-run",
+      wouldRun: `${process.execPath} scripts/tire-db-repair/09_promote_preflight.mjs`,
+    });
+  } else {
+    const r = spawnSync(process.execPath, ["scripts/tire-db-repair/09_promote_preflight.mjs"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      timeout: Math.max(1, deadlineMs - Date.now()),
+    });
+    const stdoutTail = (r.stdout || "").trim().split("\n").slice(-3).join(" | ");
+    const stderrTail = (r.stderr || "").trim().split("\n").slice(-3).join(" | ");
+    if (r.status !== 0) {
+      // Missing Turso credentials (exit 1, FATAL message) or another hard failure: block promotion,
+      // never treat a failed preflight as clearance.
+      const noCreds = /TURSO_DATABASE_URL.*TURSO_AUTH_TOKEN.*not available/i.test(r.stderr || "");
+      report.stages.push({
+        stage: "promote",
+        status: noCreds ? "blocked-no-credentials" : "blocked-preflight-failed",
+        exit: r.status,
+        verdict: "NOT-SUPERIOR",
+        note: "PROMOTE BLOCKS: preflight could not run to completion, so superiority is unproven. Promotion stays blocked until this stage reports SUPERIOR.",
+        stdoutTail,
+        stderrTail,
+      });
+    } else {
+      const reportPath = path.join(
+        REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28", "repair-2026-07-28", "PROMOTE_PREFLIGHT_REPORT.md"
+      );
+      let verdict = "UNKNOWN";
+      if (existsSync(reportPath)) {
+        const text = readFileSync(reportPath, "utf8");
+        const m = text.match(/Superiority verdict:\s*\*\*(SUPERIOR|NOT-SUPERIOR)\*\*/);
+        if (m) verdict = m[1];
+      }
+      const superior = verdict === "SUPERIOR";
+      report.stages.push({
+        stage: "promote",
+        status: superior ? "superior-promote-allowed" : "blocked-not-superior",
+        verdict,
+        note: superior
+          ? "Preflight verdict SUPERIOR: 0 regressions, 0 unexplained key losses, operational tables proven untouched. Promotion may proceed to the SEPARATE, explicitly owner-approved live step."
+          : "PROMOTE BLOCKS: preflight verdict is not SUPERIOR (or could not be parsed). Never promote until this stage reports superior-promote-allowed.",
+        reportPath: existsSync(reportPath) ? path.relative(REPO_ROOT, reportPath).replace(/\\/g, "/") : null,
+        stdoutTail,
+        stderrTail,
+      });
+    }
+  }
+}
 
 finish();

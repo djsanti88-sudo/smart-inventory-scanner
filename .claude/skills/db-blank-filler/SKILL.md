@@ -74,6 +74,69 @@ The driver runs these stages against `<WORK>`:
 Without `--live`, stages 4-5 are reported as skipped and the free stages + validator still run
 (a safe dry pipeline you can always run to prove the mechanics).
 
+## SUPERIORITY STAGE - mandatory pre-promote gate (owner order, 2026-07-28)
+A Turso promote is BLOCKED unless the promote-preflight verdict is **SUPERIOR**: 0 regressions (no
+live non-blank field going blank), 0 unexplained key losses (no live part-number key vanishing
+except the 17 owner-ordered keys), and operational/retail tables PROVEN untouched by the staged SQL.
+This is not advisory - it is the hard gate between "pipeline is green" and "promotion is allowed."
+
+Run it explicitly (off by default; requires live Turso READ-ONLY credentials):
+```
+node .claude/skills/db-blank-filler/scripts/pipeline_driver.mjs --db <WORK> --promote --stages promote
+```
+or as part of a full run: add `--promote` to any `pipeline_driver.mjs` invocation. The stage invokes
+`scripts/tire-db-repair/09_promote_preflight.mjs` (SELECT-only against live Turso; never writes) and
+parses `PROMOTE_PREFLIGHT_REPORT.md`'s `Superiority verdict` line. Possible statuses:
+- `superior-promote-allowed` - the ONLY status that clears promotion to proceed (still a separate,
+  explicitly owner-approved live step; this stage never runs `08_promote_atomic.sql`).
+- `blocked-not-superior` - verdict was NOT-SUPERIOR or unparsable. Never promote.
+- `blocked-no-credentials` - TURSO_DATABASE_URL/TURSO_AUTH_TOKEN unavailable. Never promote.
+- `blocked-preflight-failed` - the preflight script errored. Never promote.
+
+There is no silent-skip path: if `--promote` is requested, the driver always reports one of the
+statuses above, never omits the stage. Without `--promote`/`--stages promote`, the stage does not
+run at all (routine free-stage runs never require live Turso credentials).
+
+## RUNTIME CONTRACT STAGE - new data class = new app-level test (owner law)
+Every data class this skill adds to the tire corpus MUST ship an app-level test proving real scan
+behavior, in the app's own test suites (`npx vitest run`), not just a skill-script smoke test. A
+promote should be treated as refused if a new data class landed without its contract test.
+Established contracts:
+- **EAN-13/UPC-A twin barcodes** (twin_complete.mjs, stage 2 above): flagship contract at
+  `src/stores/eanUpcTwinDedup.store.test.ts` - scanning a tire's EAN-13 code and then its UPC-A twin
+  (same physical tire) yields ONE product row with quantity 2, never a second product, and the
+  product's `primaryBarcode` is a single code (never a joined/dual-code string).
+- **Part-number aliases** (03_part_number_aliases.mjs / apply_pn_picks.mjs below): contract at
+  `src/server/tire-knowledge/tireKnowledgeIndex.partNumberAlias.test.ts` - a part-number alias
+  resolves to its canonical product through the tire-knowledge index lookup path.
+
+When you add a NEW data class (a new corpus field, a new alias type, a new merge rule), write its
+runtime contract test in the appropriate app suite (`src/stores/*.store.test.ts` for scan-flow
+behavior, `src/server/tire-knowledge/*.test.ts` for corpus-index behavior) before treating the
+enrichment as done, and reference it here.
+
+## Owner-picked part-number conflict resolution (apply_pn_picks.mjs)
+`03_part_number_aliases.mjs` / `01_repair_part_number_uids.mjs` quarantine part-number keys that
+conflict across two candidate canonical products (`tire_part_numbers_quarantine`), and produce
+`PN_CONFLICT_PICK_SHEET.csv` for a human to resolve (columns: `part_number_key, old_uid, candidate,
+brand, model, size, load_speed, barcode, PICK (mark X)`). Once the owner has marked exactly one row
+per key with an `X`, apply the picks:
+```
+node .claude/skills/db-blank-filler/scripts/apply_pn_picks.mjs --db <WORK> --csv <path-to-sheet.csv> [--dry-run]
+```
+Behavior:
+- Exactly ONE `X` per `part_number_key` is required to apply. Zero `X`s or two-or-more `X`s on the
+  same key: skipped with a WARN, never applied (ambiguous picks are a human problem, not silently
+  resolved).
+- An applied pick moves the key from `tire_part_numbers_quarantine` into the active
+  `tire_part_numbers` table, pointed at the picked candidate's `canonical_product_uid`, plus an
+  audit row (`stage2_enrichment_audit`, `action='owner_pick_conflict_resolution'`,
+  `trust_color='green'`) and a provenance row (`provenance`, `source_name='owner_decision'`).
+- Idempotent: re-running with the same sheet against an already-applied DB reports the key as
+  already-applied (never re-applied, never duplicates the audit/provenance row).
+- `--dry-run` plans without writing.
+- Fixture-covered: `node --test .claude/skills/db-blank-filler/scripts/apply_pn_picks.test.mjs`.
+
 ## New-row harvesting (boss-style xlsx)
 Ingest boss workbooks dropped in the harvest folder using the proven reconciler:
 `node scripts/tire-db-repair/02_boss_reconciliation.mjs` (text-only cell reads, GTIN validation,
@@ -97,9 +160,13 @@ buckets exact/affix/unresolved). NEVER insert unresolved rows - they go to revie
 
 ## Owner-approval STOPS (never automatic)
 1. **Turso promote.** After the pipeline is GREEN on the working copy, regenerate the staging SQL +
-   dry-run diff: `node scripts/tire-db-repair/07_turso_dryrun.mjs <WORK>`. Present the
-   `TURSO_DRYRUN_REPORT.md` diff. PROMOTE ONLY on explicit owner approval, in a separate step. The
-   skill never runs the promote SQL against live Turso on its own.
+   dry-run diff: `node scripts/tire-db-repair/07_turso_dryrun.mjs <WORK>`. Then run the SUPERIORITY
+   STAGE (`pipeline_driver.mjs --promote --stages promote`, or `09_promote_preflight.mjs` directly)
+   and confirm `superior-promote-allowed`. Present the `TURSO_DRYRUN_REPORT.md` diff AND the
+   `PROMOTE_PREFLIGHT_REPORT.md` verdict together. PROMOTE ONLY on explicit owner approval, in a
+   separate step, and ONLY when the verdict is SUPERIOR. The skill never runs the promote SQL
+   against live Turso on its own, and never presents promotion as ready when the verdict is
+   anything other than `superior-promote-allowed`.
 2. **MPN pilot -> multi-night.** Stop after the 200-row pilot economics report for owner sign-off.
 3. Any git push / deploy / real-data mutation stays owner-gated.
 
@@ -123,10 +190,17 @@ Every run is time-boxed (default 4h hard stop via `--deadline`). Always end with
 ```
 node --test .claude/skills/db-blank-filler/scripts/twin_complete.test.mjs \
             .claude/skills/db-blank-filler/scripts/pipeline_driver.test.mjs \
-            .claude/skills/db-blank-filler/scripts/turso_snapshot.test.mjs
+            .claude/skills/db-blank-filler/scripts/turso_snapshot.test.mjs \
+            .claude/skills/db-blank-filler/scripts/apply_pn_picks.test.mjs
 ```
 All must pass before trusting a run. They use a tiny in-temp fixture DB and never touch the
 packaged deliverable or live Turso.
+
+Plus the app-level runtime contract tests (owner law, see RUNTIME CONTRACT STAGE above):
+```
+npx vitest run src/stores/eanUpcTwinDedup.store.test.ts
+npx vitest run src/server/tire-knowledge/tireKnowledgeIndex.partNumberAlias.test.ts
+```
 
 ## Windows / shell notes
 Every command in this file is verified to run unchanged from both PowerShell (`cp` is aliased to
