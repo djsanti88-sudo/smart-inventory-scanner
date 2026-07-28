@@ -15,20 +15,66 @@
 //   7. Atomic-swap correctness: after promote, tires/tire_part_numbers contain staging's rows
 //      (not the old rows), and *_old_<ts> tables retain the pre-promotion rows.
 //
+// PROMOTE-FIX round (panel findings from panel-opus.md + panel-antigravity.md) additionally proves:
+//   C1: post-promote secondary indexes exist (idx_tire_barcode/idx_tire_part_number/idx_tire_uid on
+//       tires, idx_tire_part_numbers_uid on tire_part_numbers, idx_tire_pn_aliases_normalized on the
+//       alias table) - queried directly from sqlite_master, not inferred.
+//   I1: verify's exact-count gates catch a TRUNCATED staging load (count > 0 but short of the
+//       manifest's expected count) and refuse to fall back to a weak check when the manifest itself
+//       is missing.
+//   I2: rollback resolves ts via --ts (wins) > PROMOTE_TS env > auto-discovery, and REFUSES to guess
+//       when multiple _old_<ts> generations exist and neither is given.
+//   I3: promote runs an automated post-swap smoke test (barcode/part-number/alias lookups + index
+//       presence) and prints PASS/FAIL; a sabotaged swap FAILS loudly, exits nonzero, and retains
+//       the _old_<ts> tables for rollback.
+//   Antigravity #4: splitSqlStatements is fully quote-aware (comment-stripping happens in the SAME
+//       scan as statement-splitting), so a value with '--' at the start of a line inside an open
+//       string is never corrupted.
+//   Antigravity #5/#6: backup dumps schema.sql (CREATE TABLE + CREATE INDEX DDL) alongside the JSONL
+//       row dumps, and reports a pre/post-dump count consistency check per table.
+//   Antigravity #7 (minor): re-promoting with a colliding PROMOTE_TS fails with a clear message
+//       instead of a raw SQLite rename error.
+//
+// Codex panel additionally proves:
+//   C3: backup writes a run-manifest (liveCounts + stagingContentHash); stage/verify/promote each
+//       bind to it (--manifest or auto-discovered latest backup) and ABORT if live has moved or the
+//       staging dataset has changed since backup, rather than silently losing a concurrent write.
+//   I3: a hard table-name allowlist is enforced on every statement before execution; a sabotaged
+//       staging file referencing an operational table (e.g. retail) is refused, not executed.
+//   M1: verify --dry-run prints "DRY-RUN: not evaluated" and never PASS/FAIL wording, and returns
+//       passed: null (not true) so no caller can mistake it for a real result.
+//   (Codex C1 - the 17 dropped part-number keys - is an explicit owner-ordered decision already
+//   recorded in PROMOTE_PREFLIGHT_REPORT.md / TURSO_DRYRUN_REPORT.md; no code change for it here.)
+//
 // This test NEVER touches real Turso. It points PROMOTE_TURSO_URL at a local libsql `file:` URL
 // (proven to work identically to the remote client - same @libsql/client API) and
-// PROMOTE_STAGING_DIR / PROMOTE_BACKUP_DIR at scratch directories under the OS temp dir.
+// PROMOTE_STAGING_DIR / PROMOTE_BACKUP_DIR at scratch directories under the OS temp dir (staging SQL
+// files are COPIED from the real checked-in dataset into scratch, never read from in-place, so
+// stage()'s expected-count manifest write never touches tracked repo files).
 //
 // Usage: node --test scripts/tire-db-repair/10_promote_execute.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createClient } from "@libsql/client";
+
+// NOTE on why 10_promote_execute.mjs is loaded via a DYNAMIC import (not a static `import {...}`
+// at the top of this file): a static ESM import is hoisted above all other module-level statements
+// - including `process.env.PROMOTE_SKIP_MAIN = "1"` - so setting the env var textually "before" a
+// static import does NOT actually run before that import's module evaluation. Without
+// PROMOTE_SKIP_MAIN set first, importing the script in-process auto-invokes its main(), which then
+// parses THIS TEST RUNNER's own process.argv and can exit(2), killing the entire test worker
+// (observed exactly this: the whole file reported as one failing test, code ERR_TEST_FAILURE,
+// exitCode 2). A dynamic `await import(...)` is NOT hoisted, so setting the env var first in
+// normal statement order genuinely runs first.
+process.env.PROMOTE_SKIP_MAIN = "1";
+const { splitSqlStatements, countValueTuples, isAllowedTableName, assertAllowedTables, OPERATIONAL_TABLES } =
+  await import("./10_promote_execute.mjs");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -37,10 +83,19 @@ const REAL_STAGING_DIR = join(
 );
 const SCRIPT_PATH = join(__dirname, "10_promote_execute.mjs");
 
+const STAGING_SQL_FILES = [
+  "01_staging_tires.sql",
+  "02_staging_tire_part_numbers.sql",
+  "03_staging_tire_product_part_number_aliases.sql",
+  "04_staging_canonical_tire_products.sql",
+  "05_staging_provenance.sql",
+];
+
 let scratchRoot;
 let dbPath;
 let dbUrl;
 let backupDir;
+let stagingDir;
 
 function freshScratch() {
   scratchRoot = mkdtempSync(join(tmpdir(), "promote-proof-"));
@@ -48,6 +103,17 @@ function freshScratch() {
   dbUrl = `file:${dbPath.replace(/\\/g, "/")}`;
   backupDir = join(scratchRoot, "turso-backup");
   mkdirSync(backupDir, { recursive: true });
+  // Copy (never point directly at) the real checked-in staging SQL files into a scratch dir.
+  // cmdStage() now writes a stage_expected_counts.json manifest INTO its STAGING_DIR (panel finding
+  // I1's exact-count verify needs this manifest) - if tests pointed PROMOTE_STAGING_DIR at the real
+  // backups/.../turso-staging/ folder directly, every test run would leak that manifest file into
+  // tracked repo content. Copying to a scratch dir keeps the real dataset directory read-only from
+  // this test's perspective while still exercising the exact same real SQL content.
+  stagingDir = join(scratchRoot, "turso-staging");
+  mkdirSync(stagingDir, { recursive: true });
+  for (const f of STAGING_SQL_FILES) {
+    copyFileSync(join(REAL_STAGING_DIR, f), join(stagingDir, f));
+  }
 }
 
 /** Build the fake-live DB: same tables/columns as production, populated with a small but
@@ -117,15 +183,31 @@ function runCli(args, envOverrides = {}) {
   const env = {
     ...process.env,
     PROMOTE_TURSO_URL: dbUrl,
-    PROMOTE_STAGING_DIR: REAL_STAGING_DIR,
+    PROMOTE_STAGING_DIR: stagingDir,
     PROMOTE_BACKUP_DIR: backupDir,
     ...envOverrides,
   };
+  // This test process sets PROMOTE_SKIP_MAIN=1 on itself (see the dynamic import above) so that
+  // in-process importing 10_promote_execute.mjs for its pure helpers does not auto-invoke main().
+  // That must NOT propagate to the actual CLI subprocess spawned here, which needs main() to run.
+  delete env.PROMOTE_SKIP_MAIN;
   try {
     const out = execFileSync(process.execPath, [SCRIPT_PATH, ...args], { env, encoding: "utf8" });
     return { code: 0, stdout: out };
   } catch (e) {
     return { code: e.status ?? 1, stdout: e.stdout?.toString() ?? "", stderr: e.stderr?.toString() ?? "" };
+  }
+}
+
+/** Best-effort scratch cleanup. A lingering Windows file handle on the temp libsql DB (from the
+ *  short-lived CLI subprocess or this process's own createClient() calls) can make rmSync throw
+ *  EPERM even with maxRetries - that must never fail a test whose actual assertions already ran
+ *  and passed; the OS temp dir is reclaimed eventually regardless. */
+function cleanupScratch() {
+  try {
+    rmSync(scratchRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // best-effort only, see comment above
   }
 }
 
@@ -151,7 +233,7 @@ test("refusal gate: stage without PROMOTE_CONFIRM exits 3", () => {
   const res = runCli(["stage"], { PROMOTE_CONFIRM: "" });
   assert.equal(res.code, 3);
   assert.match(res.stderr, /REFUSED/);
-  rmSync(scratchRoot, { recursive: true, force: true });
+  cleanupScratch();
 });
 
 test("refusal gate: promote without PROMOTE_CONFIRM exits 3", () => {
@@ -159,7 +241,7 @@ test("refusal gate: promote without PROMOTE_CONFIRM exits 3", () => {
   const res = runCli(["promote"], { PROMOTE_CONFIRM: "" });
   assert.equal(res.code, 3);
   assert.match(res.stderr, /REFUSED/);
-  rmSync(scratchRoot, { recursive: true, force: true });
+  cleanupScratch();
 });
 
 test("refusal gate: rollback without PROMOTE_CONFIRM exits 3", () => {
@@ -167,7 +249,7 @@ test("refusal gate: rollback without PROMOTE_CONFIRM exits 3", () => {
   const res = runCli(["rollback"], { PROMOTE_CONFIRM: "" });
   assert.equal(res.code, 3);
   assert.match(res.stderr, /REFUSED/);
-  rmSync(scratchRoot, { recursive: true, force: true });
+  cleanupScratch();
 });
 
 test("refusal gate: --dry-run NEVER requires PROMOTE_CONFIRM", () => {
@@ -175,14 +257,14 @@ test("refusal gate: --dry-run NEVER requires PROMOTE_CONFIRM", () => {
   const res = runCli(["stage", "--dry-run"], { PROMOTE_CONFIRM: "" });
   assert.equal(res.code, 0);
   assert.doesNotMatch(res.stdout, /REFUSED/);
-  rmSync(scratchRoot, { recursive: true, force: true });
+  cleanupScratch();
 });
 
 test("refusal gate: unknown subcommand exits 2 with usage", () => {
   freshScratch();
   const res = runCli(["bogus"]);
   assert.equal(res.code, 2);
-  rmSync(scratchRoot, { recursive: true, force: true });
+  cleanupScratch();
 });
 
 // ===============================================================================================
@@ -314,6 +396,24 @@ test("full cycle: promote performs an atomic rename-swap", async () => {
   const decodeSentinelRes = await client.execute("SELECT sentinel FROM decode_cache WHERE barcode = '888888888888'");
   assert.equal(decodeSentinelRes.rows[0].sentinel, "DO_NOT_TOUCH");
 
+  // Panel finding C1: the promoted `tires` / `tire_part_numbers` / alias table must have their
+  // secondary indexes, not just PKs, so runtime UID lookups (tireKnowledgeIndex.ts's Turso paths)
+  // are not full-table scans. Query sqlite_master directly for the index names.
+  const indexRes = await client.execute("SELECT name, tbl_name FROM sqlite_master WHERE type='index'");
+  const indexByName = new Map(indexRes.rows.map((r) => [String(r.name), String(r.tbl_name)]));
+  assert.equal(indexByName.get("idx_tire_barcode"), "tires");
+  assert.equal(indexByName.get("idx_tire_part_number"), "tires");
+  assert.equal(indexByName.get("idx_tire_uid"), "tires");
+  assert.equal(indexByName.get("idx_tire_part_numbers_uid"), "tire_part_numbers");
+  assert.equal(indexByName.get("idx_tire_pn_aliases_normalized"), "tire_product_part_number_aliases");
+
+  // Post-swap smoke test output must report PASS for a good swap.
+  assert.match(res.stdout, /post-swap smoke test results/);
+  assert.match(res.stdout, /PASS smoke_barcode_lookup/);
+  assert.match(res.stdout, /PASS smoke_part_number_two_step/);
+  assert.match(res.stdout, /PASS smoke_index_presence/);
+  assert.match(res.stdout, /SMOKE TEST PASSED/);
+
   client.close();
 });
 
@@ -347,9 +447,530 @@ test("full cycle: rollback restores exactly the pre-promotion tables", async () 
 
   client.close();
   try {
-    rmSync(scratchRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    cleanupScratch();
   } catch {
     // Best-effort cleanup only; a lingering Windows file handle on the temp DB must never fail
     // the proof run (the OS temp dir is reclaimed eventually regardless).
   }
+});
+
+// ===============================================================================================
+// Panel finding I1: verify must catch a PARTIAL/TRUNCATED staging load via EXACT counts, not the
+// old count > 0 check. Simulate a crash mid-stage by truncating the live staging_tires table
+// AFTER a normal stage() run, then confirm verify fails specifically on the exact-count gate.
+// ===============================================================================================
+
+test("I1: verify FAILS on a truncated staging_tires load (exact-count gate, not count>0)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(stageRes.code, 0, stageRes.stderr);
+
+  // Confirm the manifest itself was written with the real dataset's full expected count.
+  const manifestPath = join(stagingDir, "stage_expected_counts.json");
+  assert.ok(existsSync(manifestPath), "expected stage() to write stage_expected_counts.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const fullCount = manifest.expectedCounts.staging_tires;
+  assert.ok(fullCount > 100, `expected a large real dataset count, got ${fullCount}`);
+
+  // Simulate a crash mid-stage: delete a chunk's worth of rows from the ALREADY-STAGED table so its
+  // live row count (still > 0) no longer matches the manifest's exact expected count. This is
+  // exactly the shape of damage a CHUNK-batched stage() crash would leave behind - a truncated
+  // table that is nonetheless non-empty.
+  const client = createClient({ url: dbUrl });
+  await client.execute(`DELETE FROM staging_tires WHERE rowid IN (SELECT rowid FROM staging_tires LIMIT 200)`);
+  const truncatedCount = await rowCount(client, "staging_tires");
+  assert.ok(truncatedCount > 0, "truncated table must still be non-empty (this is the count>0 blind spot)");
+  assert.notEqual(truncatedCount, fullCount);
+  client.close();
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 1, "verify must exit non-zero on a truncated load");
+  assert.match(verifyRes.stdout, /GATE FAILURE/);
+  assert.match(verifyRes.stdout, /FAIL B_staging_tires_count/);
+  assert.match(verifyRes.stdout, /MISMATCH/);
+
+  cleanupScratch();
+});
+
+test("I1: verify FAILS with a clear error when the expected-count manifest is missing", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  // Load staging tables directly via the SQL files WITHOUT going through cmdStage's manifest write,
+  // by running stage() then deleting the manifest - simulating a staging_dir that was populated by
+  // some other means (e.g. an operator running raw SQL) without ever writing the manifest.
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  rmSync(join(stagingDir, "stage_expected_counts.json"), { force: true });
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 1, "verify must refuse to fall back to a weak count>0 check");
+  assert.match(verifyRes.stdout, /FAIL Z_expected_counts_manifest_present/);
+  assert.match(verifyRes.stdout, /MISSING/);
+
+  cleanupScratch();
+});
+
+// ===============================================================================================
+// Panel finding I2: rollback must accept PROMOTE_TS env as well as --ts, with --ts taking
+// precedence, and must error (not silently guess) when neither is given and multiple _old_
+// generations exist.
+// ===============================================================================================
+
+test("I2: rollback resolves ts from PROMOTE_TS env when --ts is not passed", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "ENVTS1" });
+  assert.equal(promoteRes.code, 0, promoteRes.stderr);
+
+  // No --ts flag passed to rollback; only PROMOTE_TS env is set.
+  const rollbackRes = runCli(["rollback"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "ENVTS1" });
+  assert.equal(rollbackRes.code, 0, rollbackRes.stderr);
+  assert.match(rollbackRes.stdout, /ts=ENVTS1/);
+
+  const client = createClient({ url: dbUrl });
+  assert.equal(await rowCount(client, "tires"), 1, "rollback via PROMOTE_TS should restore the original 1-row live table");
+  assert.ok(await tableExists(client, "tires_failed_promotion_ENVTS1"));
+  client.close();
+
+  cleanupScratch();
+});
+
+test("I2: rollback prefers explicit --ts over PROMOTE_TS when both are set", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "EXPLICITTS" });
+  assert.equal(promoteRes.code, 0, promoteRes.stderr);
+
+  // PROMOTE_TS is set to a DIFFERENT (bogus) value; --ts must win.
+  const rollbackRes = runCli(["rollback", "--ts", "EXPLICITTS"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "SOME_OTHER_BOGUS_TS" });
+  assert.equal(rollbackRes.code, 0, rollbackRes.stderr);
+  assert.match(rollbackRes.stdout, /ts=EXPLICITTS/);
+
+  const client = createClient({ url: dbUrl });
+  assert.equal(await rowCount(client, "tires"), 1);
+  client.close();
+
+  cleanupScratch();
+});
+
+test("I2: rollback errors (does not silently guess) when neither --ts nor PROMOTE_TS is given and multiple _old_ generations exist", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // Create two separate _old_<ts> generations WITHOUT ever cleaning either one up, by manually
+  // renaming a copy of tires aside under a second _old_ name after a normal promote. This simulates
+  // an operator (or a broken script) leaving two stale _old_ generations around - the real hazard
+  // I2 targets - without relying on a second full promote cycle (which the re-promotion collision
+  // guard, Antigravity Minor #7, now correctly refuses since NEW_TABLES' live names would already
+  // exist from the first promote).
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const promote1 = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "GEN1" });
+  assert.equal(promote1.code, 0, promote1.stderr);
+
+  const client = createClient({ url: dbUrl });
+  await client.execute("CREATE TABLE tires_old_GEN2 (barcode TEXT PRIMARY KEY, canonical_product_uid TEXT)");
+  assert.ok(await tableExists(client, "tires_old_GEN1"));
+  assert.ok(await tableExists(client, "tires_old_GEN2"));
+  client.close();
+
+  const rollbackRes = runCli(["rollback"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "" });
+  assert.notEqual(rollbackRes.code, 0, "rollback must refuse to guess among multiple _old_ generations");
+  assert.match(rollbackRes.stderr + rollbackRes.stdout, /generations found|Refusing to guess/);
+
+  cleanupScratch();
+});
+
+// ===============================================================================================
+// Panel finding I3: promote runs an automated post-swap smoke test and prints PASS/FAIL; a FAIL
+// must leave the *_old_ tables in place and exit nonzero.
+// ===============================================================================================
+
+test("I3: promote's automated smoke test FAILS loudly when the swap produces a broken alias fallback, and _old_ tables are retained", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  // Sabotage staging BEFORE promote: make the alias table's normalized_part_number point at a
+  // canonical_product_id that does NOT exist in staging_canonical_tire_products / will not exist in
+  // staging_tires either, so the post-swap alias-fallback smoke check cannot resolve to a tires row.
+  const client = createClient({ url: dbUrl });
+  await client.execute(`DELETE FROM staging_tire_product_part_number_aliases`);
+  await client.execute(
+    `INSERT INTO staging_tire_product_part_number_aliases (canonical_product_id, normalized_part_number, display_part_number, source, trust_color, confidence_score, is_unambiguous)
+     VALUES ('NO_SUCH_UID_ANYWHERE', 'SABOTAGE_PN', 'SABOTAGE_PN', 'test', 'green', 100, 1)`
+  );
+  client.close();
+
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "SABOTAGETS" });
+  assert.notEqual(promoteRes.code, 0, "promote must exit nonzero when the post-swap smoke test fails");
+  assert.match(promoteRes.stdout, /post-swap smoke test results/);
+  assert.match(promoteRes.stdout, /FAIL smoke_alias_fallback/);
+  assert.match(promoteRes.stderr, /SMOKE TEST FAILED/);
+  assert.match(promoteRes.stderr, /rollback --ts SABOTAGETS/);
+
+  // The swap itself still happened (statements ran in the same batch as the smoke test check,
+  // which runs AFTER commit) - but _old_ tables must be retained, never dropped, so rollback
+  // remains possible.
+  const client2 = createClient({ url: dbUrl });
+  assert.ok(await tableExists(client2, "tires_old_SABOTAGETS"), "_old_ tables must be retained after a smoke-test failure");
+  client2.close();
+
+  cleanupScratch();
+});
+
+test("I3: promote's automated smoke test PASSES on a correctly-staged swap (already proven by the full-cycle test above; explicit standalone check)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "GOODTS" });
+  assert.equal(promoteRes.code, 0, promoteRes.stderr);
+  assert.match(promoteRes.stdout, /SMOKE TEST PASSED/);
+
+  cleanupScratch();
+});
+
+// ===============================================================================================
+// Minor (Antigravity panel #7): re-promotion collision must fail cleanly, not with a raw SQLite
+// rename error.
+// ===============================================================================================
+
+test("re-promotion collision: promoting twice with the SAME PROMOTE_TS fails with a clear message", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const promote1 = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "DUPTS" });
+  assert.equal(promote1.code, 0, promote1.stderr);
+
+  // Take a FRESH backup first: the first promote changed live tires/tire_part_numbers (they now
+  // hold the staged data), so the ORIGINAL backup's manifest is correctly stale per panel finding
+  // C3's live-drift check - a real operator would always re-run backup before a second promote
+  // attempt. This isolates the test to the re-promotion COLLISION guard specifically, rather than
+  // incidentally tripping the (also-correct) C3 live-drift guard first.
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  // Re-stage (promote consumed the staging_* tables) and attempt to promote AGAIN with the same ts.
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const promote2 = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "DUPTS" });
+  assert.notEqual(promote2.code, 0, "re-promoting with a colliding ts must fail, not silently corrupt");
+  assert.match(promote2.stderr, /REFUSING|already exist/);
+  assert.doesNotMatch(promote2.stderr, /SQLITE_ERROR|no such table/i);
+
+  cleanupScratch();
+});
+
+// ===============================================================================================
+// Antigravity panel Important #4: comment stripper must be quote-aware, not a naive line-prefix
+// filter, so a literal '--' at the START of a line INSIDE a multi-line string is never mistaken
+// for a comment.
+// ===============================================================================================
+
+test("splitSqlStatements: a value containing '--' does not get corrupted, including at line start inside a string", async () => {
+  // Case 1: '--' mid-string (the real-world case already present in provenance URLs).
+  const midString = `INSERT INTO t (a) VALUES ('https://example.com/11.00--r20-foo');`;
+  const stmts1 = splitSqlStatements(midString);
+  assert.equal(stmts1.length, 1);
+  assert.match(stmts1[0], /11\.00--r20-foo/);
+
+  // Case 2: a genuine full-line comment must still be stripped.
+  const withComment = `-- this is a comment\nINSERT INTO t (a) VALUES ('x');`;
+  const stmts2 = splitSqlStatements(withComment);
+  assert.equal(stmts2.length, 1);
+  assert.doesNotMatch(stmts2.join(""), /this is a comment/);
+
+  // Case 3: a value that legitimately STARTS a (wrapped) line with '--' while still inside an
+  // open single-quoted string must be preserved, not stripped as if it were a line comment. This
+  // is the exact gap the old two-pass (strip-comments-then-split) implementation had: it checked
+  // `line.trim().startsWith("--")` BEFORE the quote-aware scan ever ran, so a multi-line string
+  // value could be truncated.
+  const multilineValueStartingWithDashes =
+    "INSERT INTO t (a) VALUES ('first line\n--second line still inside the string');";
+  const stmts3 = splitSqlStatements(multilineValueStartingWithDashes);
+  assert.equal(stmts3.length, 1, "expected exactly one statement, not a truncated/corrupted split");
+  assert.match(stmts3[0], /--second line still inside the string/);
+
+  // Case 4: a semicolon inside a string must still not split the statement (regression check for
+  // the existing provenance-lineage-text behavior).
+  const semicolonInString = `INSERT INTO t (a) VALUES ('lineage; internal, no external license');`;
+  const stmts4 = splitSqlStatements(semicolonInString);
+  assert.equal(stmts4.length, 1);
+  assert.match(stmts4[0], /lineage; internal, no external license/);
+});
+
+// ===============================================================================================
+// Antigravity panel Important #5 + #6: backup must dump schema DDL (not just row data) and must
+// use keyset pagination with a before/after count consistency check (not naive OFFSET pagination).
+// ===============================================================================================
+
+test("backup: writes schema.sql with CREATE TABLE + CREATE INDEX DDL, and a consistent manifest", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  const res = runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(res.code, 0, res.stderr);
+
+  const dirs = readdirSync(backupDir);
+  assert.equal(dirs.length, 1);
+  const outDir = join(backupDir, dirs[0]);
+
+  const schemaPath = join(outDir, "schema.sql");
+  assert.ok(existsSync(schemaPath), "expected backup to write schema.sql");
+  const schemaSql = readFileSync(schemaPath, "utf8");
+  assert.match(schemaSql, /CREATE TABLE tires/);
+  assert.match(schemaSql, /CREATE TABLE tire_part_numbers/);
+  // Operational sentinel tables' schema must NOT leak into the tire-corpus backup (only
+  // LIVE_TABLES = tires/tire_part_numbers are backed up by cmdBackup; this backup only covers
+  // those two, not the full live schema).
+  assert.doesNotMatch(schemaSql, /CREATE TABLE retail/);
+  assert.doesNotMatch(schemaSql, /CREATE TABLE decode_cache/);
+
+  const manifest = JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8"));
+  assert.equal(manifest.schemaFile, "schema.sql");
+  assert.equal(manifest.tables.tires.consistent, true);
+  assert.equal(manifest.tables.tires.preDumpCount, manifest.tables.tires.postDumpCount);
+  assert.equal(manifest.tables.tires.rowCount, manifest.tables.tires.preDumpCount);
+
+  cleanupScratch();
+});
+
+test("countValueTuples: counts INSERT value-tuples matching the real staging file's own generator format", async () => {
+  const sample = `CREATE TABLE t (a TEXT);\nINSERT INTO t (a) VALUES\n  ('one'),\n  ('two'),\n  ('three');\n`;
+  assert.equal(countValueTuples(sample), 3);
+});
+
+// ===============================================================================================
+// Codex panel finding C3: no state previously bound backup -> stage -> verify -> promote across
+// separate command invocations; a live write landing between steps could be silently lost.
+// backup now writes a run-manifest (liveCounts + stagingContentHash); stage/verify/promote each
+// bind to it and REFUSE if live has moved or the staging dataset changed since backup.
+// ===============================================================================================
+
+test("C3: stage REFUSES to run without a prior backup (no run-manifest found)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  // Deliberately skip backup.
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(stageRes.code, 0, "stage must refuse without a bound run-manifest");
+  assert.match(stageRes.stderr, /no run-manifest found/);
+  cleanupScratch();
+});
+
+test("C3: stage REFUSES when a live write lands after backup but before stage (live-drift detection)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+
+  // Simulate a concurrent live write landing AFTER backup's snapshot: insert a new live tires row.
+  const client = createClient({ url: dbUrl });
+  await client.execute({
+    sql: `INSERT INTO tires (barcode, canonical_product_uid, brand, model, size) VALUES (?, 'DRIFT_UID', 'driftbrand', 'driftmodel', '111/11R11')`,
+    args: ["999000111222"],
+  });
+  client.close();
+
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(stageRes.code, 0, "stage must refuse when live has drifted since the bound backup");
+  assert.match(stageRes.stderr, /live has changed since the bound backup/);
+  assert.match(stageRes.stderr, /tires: backup saw 1, now 2/);
+
+  cleanupScratch();
+});
+
+test("C3: verify REFUSES when live drifts after stage (between stage and verify)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(stageRes.code, 0, stageRes.stderr);
+
+  // Live write lands AFTER stage completed, BEFORE verify runs.
+  const client = createClient({ url: dbUrl });
+  await client.execute({
+    sql: `INSERT INTO tire_part_numbers (normalized_part_number, canonical_product_uid) VALUES (?, 'DRIFT_UID_2')`,
+    args: ["DRIFTPN0002"],
+  });
+  client.close();
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(verifyRes.code, 0, "verify must refuse when live has drifted since the bound backup");
+  assert.match(verifyRes.stderr, /live has changed since the bound backup/);
+  assert.match(verifyRes.stderr, /tire_part_numbers: backup saw 1, now 2/);
+
+  cleanupScratch();
+});
+
+test("C3: promote REFUSES when live drifts after verify (last-gate re-check before the swap)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 0, verifyRes.stderr + verifyRes.stdout);
+
+  // Live write lands AFTER verify PASSED, BEFORE promote runs - the exact race C3 targets.
+  const client = createClient({ url: dbUrl });
+  await client.execute({
+    sql: `INSERT INTO tires (barcode, canonical_product_uid, brand, model, size) VALUES (?, 'DRIFT_UID_3', 'b', 'm', '1/1R1')`,
+    args: ["999000333444"],
+  });
+  client.close();
+
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "DRIFTTS" });
+  assert.notEqual(promoteRes.code, 0, "promote must refuse when live has drifted since the bound backup, even after verify passed");
+  assert.match(promoteRes.stderr, /live has changed since the bound backup/);
+
+  // Critically: the swap must NOT have happened - live tires must still be the ORIGINAL + drift
+  // row, not the staged data, and no _old_ table should exist for this ts.
+  const client2 = createClient({ url: dbUrl });
+  assert.equal(await rowCount(client2, "tires"), 2, "the aborted promote must not have executed the swap");
+  assert.ok(!(await tableExists(client2, "tires_old_DRIFTTS")));
+  client2.close();
+
+  cleanupScratch();
+});
+
+test("C3: stage REFUSES when the staging SQL content changes after backup (staging-content-hash drift)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+
+  // Mutate a staging SQL file's content AFTER backup hashed it.
+  const targetFile = join(stagingDir, "01_staging_tires.sql");
+  const original = readFileSync(targetFile, "utf8");
+  writeFileSync(targetFile, original + "\n-- tampered after backup\n", "utf8");
+
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(stageRes.code, 0, "stage must refuse when the staging dataset changed since backup");
+  assert.match(stageRes.stderr, /staging SQL files' content hash/);
+
+  cleanupScratch();
+});
+
+test("C3: an explicit --manifest path can bind to a specific (non-latest) backup", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  const firstBackup = runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(firstBackup.code, 0, firstBackup.stderr);
+  const firstBackupDirName = readdirSync(backupDir)[0];
+  const firstManifestPath = join(backupDir, firstBackupDirName, "manifest.json");
+
+  // A second backup captures a NEWER snapshot (still consistent, just a later timestamp dir).
+  const secondBackup = runCli(["backup"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "SECONDBACKUPTS" });
+  assert.equal(secondBackup.code, 0, secondBackup.stderr);
+
+  // Explicitly bind stage to the FIRST manifest (not auto-discovered latest) - must still succeed,
+  // proving --manifest is honored rather than always resolving to "latest".
+  const stageRes = runCli(["stage", "--manifest", firstManifestPath], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(stageRes.code, 0, stageRes.stderr);
+  assert.match(stageRes.stdout, new RegExp(firstBackupDirName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  cleanupScratch();
+});
+
+// ===============================================================================================
+// Codex panel finding I3: operational-table isolation must be an ENFORCED invariant of the
+// executable (a hard allowlist checked before every batch execution), not merely a property of
+// today's reviewed SQL text. A sabotaged staging file referencing an operational table must be
+// refused, never executed.
+// ===============================================================================================
+
+test("I3 (Codex): isAllowedTableName accepts every tire-scope table + staging/_old_/_failed_promotion variants, and sqlite_master", () => {
+  for (const t of ["tires", "tire_part_numbers", "tire_product_part_number_aliases", "canonical_tire_products", "provenance"]) {
+    assert.ok(isAllowedTableName(t), `expected base table ${t} to be allowed`);
+    assert.ok(isAllowedTableName(`staging_${t}`), `expected staging_${t} to be allowed`);
+    assert.ok(isAllowedTableName(`${t}_old_20260728_120000`), `expected ${t}_old_<ts> to be allowed`);
+    assert.ok(isAllowedTableName(`${t}_failed_promotion_20260728_120000`), `expected ${t}_failed_promotion_<ts> to be allowed`);
+  }
+  assert.ok(isAllowedTableName("sqlite_master"), "sqlite_master reads must be allowed");
+});
+
+test("I3 (Codex): isAllowedTableName REJECTS every operational table and arbitrary names", () => {
+  for (const t of OPERATIONAL_TABLES) {
+    assert.ok(!isAllowedTableName(t), `expected operational table ${t} to be REJECTED`);
+  }
+  assert.ok(!isAllowedTableName("retail"));
+  assert.ok(!isAllowedTableName("decode_cache"));
+  assert.ok(!isAllowedTableName("some_random_table"));
+  assert.ok(!isAllowedTableName("tires_staging")); // wrong prefix direction - must not be confused with staging_tires
+});
+
+test("I3 (Codex): assertAllowedTables throws a clear error on a statement referencing an operational table", () => {
+  assert.throws(
+    () => assertAllowedTables(["DELETE FROM retail;"], "test-label"),
+    /REFUSING to execute.*"retail"/s
+  );
+  assert.throws(
+    () => assertAllowedTables(["INSERT INTO decode_cache (barcode) VALUES ('x');"], "test-label"),
+    /REFUSING to execute.*"decode_cache"/s
+  );
+  // Allowed statements must NOT throw.
+  assert.doesNotThrow(() => assertAllowedTables(["CREATE TABLE IF NOT EXISTS staging_tires (barcode TEXT PRIMARY KEY);"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["ALTER TABLE tires RENAME TO tires_old_20260728;"], "test-label"));
+});
+
+test("I3 (Codex): stage REFUSES end-to-end when a sabotaged staging file references an operational table (retail)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // Sabotage: append a statement to a staging file that touches the operational `retail` table -
+  // exactly the attack I3 must catch regardless of source (tampered file, wrong PROMOTE_STAGING_DIR).
+  // The sabotage happens BEFORE backup here (not after) so the C3 staging-content-hash check (which
+  // fires first, and is itself a correct, separate defense) sees consistent content and does not
+  // mask the I3 allowlist assertion this test targets - a real attacker sabotaging the staging
+  // directory would do so before an operator runs backup+stage against it, not after.
+  const targetFile = join(stagingDir, "02_staging_tire_part_numbers.sql");
+  const original = readFileSync(targetFile, "utf8");
+  writeFileSync(targetFile, original + "\nDELETE FROM retail;\n", "utf8");
+
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(stageRes.code, 0, "stage must refuse when a staging file references an operational table");
+  assert.match(stageRes.stderr, /REFUSING to execute/);
+  assert.match(stageRes.stderr, /"retail"/);
+
+  // Confirm retail was NEVER touched - the sentinel row must be untouched.
+  const client = createClient({ url: dbUrl });
+  assert.equal(await rowCount(client, "retail"), 1, "retail must be completely untouched by the refused sabotage attempt");
+  client.close();
+
+  cleanupScratch();
+});
+
+// ===============================================================================================
+// Codex panel finding M1: verify --dry-run must print "DRY-RUN: not evaluated" and NEVER PASS/FAIL
+// wording, and must return passed: null (not true) so no caller mistakes it for a real result.
+// ===============================================================================================
+
+test("M1 (Codex): verify --dry-run prints DRY-RUN markers, never a real gate PASS/FAIL verdict, exits 0", () => {
+  freshScratch();
+  const res = runCli(["verify", "--dry-run"], { PROMOTE_CONFIRM: "" });
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /DRY-RUN: not evaluated/);
+  assert.match(res.stdout, /DRY-RUN COMPLETE/);
+  // The old bug (panel M1) was returning { passed: true } and printing gate descriptions that read
+  // as a real result. The fix's invariant: no line claims a gate actually PASSED or FAILED - every
+  // gate line is explicitly tagged "DRY-RUN: not evaluated", and the real verify() verdict strings
+  // ("ALL GATES PASSED" / "GATE FAILURE" / a bare "PASS <gate>" / "FAIL <gate>" line) never appear.
+  assert.doesNotMatch(res.stdout, /ALL GATES PASSED/);
+  assert.doesNotMatch(res.stdout, /GATE FAILURE/);
+  assert.doesNotMatch(res.stdout, /^\s*PASS /m);
+  assert.doesNotMatch(res.stdout, /^\s*FAIL /m);
+  // Every "Gate <letter>:" line must carry the explicit not-evaluated tag.
+  const gateLines = res.stdout.split("\n").filter((l) => /^\s*Gate [A-Z]/.test(l));
+  assert.ok(gateLines.length >= 8, `expected at least 8 gate description lines, got ${gateLines.length}`);
+  for (const line of gateLines) {
+    assert.match(line, /DRY-RUN: not evaluated/, `gate line missing not-evaluated tag: ${line}`);
+  }
+  cleanupScratch();
 });

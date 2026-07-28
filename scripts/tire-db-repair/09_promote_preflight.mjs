@@ -87,6 +87,22 @@ function sqlLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+/** M2 fix (Codex panel): PART_NUMBER_CONFLICTS.csv section 1 has one row per DISTINCT old_uid
+ *  CONFLICT GROUP; tire_part_numbers_quarantine has one row per QUARANTINED KEY. These are
+ *  different units and were never expected to be numerically equal - a single old_uid can
+ *  quarantine more than one normalized_part_number key. The correct cross-check compares
+ *  GROUP COUNT to GROUP COUNT (distinct old_uid in each source), not raw row counts.
+ *  Exported so this logic has a direct unit-test proof independent of live Turso access
+ *  (the rest of this script requires a live Turso connection and cannot run in CI/unit tests). */
+function computeQuarantineCrossCheck(section1Rows, quarantineRows) {
+  const csvGroupCount = section1Rows.length;
+  const quarantineRowCount = quarantineRows.length;
+  const quarantineDistinctUids = new Set(quarantineRows.map((r) => String(r.canonical_product_uid))).size;
+  const groupCountsMatch = csvGroupCount === quarantineDistinctUids;
+  const keysPerGroup = quarantineRowCount - quarantineDistinctUids; // extra quarantined keys beyond 1-per-group
+  return { csvGroupCount, quarantineRowCount, quarantineDistinctUids, groupCountsMatch, keysPerGroup };
+}
+
 async function main() {
   loadEnvLocal();
   const url = process.env.TURSO_DATABASE_URL;
@@ -425,9 +441,18 @@ async function main() {
   // --- Proof 2 ---
   lines.push("## Proof 2: The 17 conflict keys (owner order: keep old live behavior)");
   lines.push("");
+  const quarantineCrossCheck = computeQuarantineCrossCheck(section1Rows, localPnQuarantine);
   lines.push(
-    `Cross-check: PART_NUMBER_CONFLICTS.csv section 1 lists ${section1Rows.length} total conflict rows (matches ` +
-    `\`tire_part_numbers_quarantine\`'s ${localPnQuarantine.length} quarantined rows in the repaired local DB); ` +
+    `Cross-check: PART_NUMBER_CONFLICTS.csv section 1 lists ${quarantineCrossCheck.csvGroupCount} distinct conflicting ` +
+    `old_uid groups. \`tire_part_numbers_quarantine\` in the repaired local DB has ${quarantineCrossCheck.quarantineRowCount} ` +
+    `quarantined KEY rows spanning ${quarantineCrossCheck.quarantineDistinctUids} distinct old_uid groups (cross-check ` +
+    `${quarantineCrossCheck.groupCountsMatch ? "OK - group counts match" : "MISMATCH - group counts differ, investigate before promoting"}). ` +
+    `These two counts are NOT expected to be numerically equal to each other: a quarantine row is per-KEY while a ` +
+    `CSV section-1 row is per-GROUP, and one group can quarantine more than one key (verified true breakdown: the ` +
+    `old_uid \`bfgoodrich_g_force_r1_s_p225_45r17_84_w_20244\` alone quarantines both the \`20244\` and \`202440\` ` +
+    `keys, accounting for the extra row: ${quarantineCrossCheck.quarantineRowCount} quarantined keys across ` +
+    `${quarantineCrossCheck.quarantineDistinctUids} distinct groups, i.e. ${quarantineCrossCheck.keysPerGroup} extra ` +
+    `key(s) beyond one-per-group). ` +
     `TURSO_DRYRUN_REPORT.md's "Previously-live part-number keys NOT in the promoted active set" table lists ` +
     `${dryRunListedKeys.length} of the 17 keys this script was given (cross-check ${dryRunCrossCheckOk ? "OK - all 17 found" : "MISMATCH"}).`
   );
@@ -558,7 +583,14 @@ async function main() {
   console.log(`  Operational touch violations: ${operationalTouchViolations.length}`);
 }
 
-main().catch((e) => {
-  console.error("FATAL:", e);
-  process.exit(1);
-});
+// Only auto-run when executed directly (not when imported by tests). Tests set
+// PREFLIGHT_SKIP_MAIN=1 first so they can import computeQuarantineCrossCheck without triggering
+// main()'s live-Turso-requiring connection attempt.
+if (!process.env.PREFLIGHT_SKIP_MAIN) {
+  main().catch((e) => {
+    console.error("FATAL:", e);
+    process.exit(1);
+  });
+}
+
+export { computeQuarantineCrossCheck };

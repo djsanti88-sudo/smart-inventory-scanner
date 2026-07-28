@@ -12,6 +12,16 @@
 // local file: URL for the proof harness), and (b) the local filesystem under
 // backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/.
 //
+// FK-rename safety (Antigravity panel Critical #1, verified empirically against a local libsql DB,
+// not assumed): ALTER TABLE ... RENAME TO in SQLite/libsql DOES rewrite the REFERENCES clause of
+// any OTHER table that declares a FOREIGN KEY pointing at the renamed table (confirmed locally;
+// neither PRAGMA foreign_keys=OFF nor PRAGMA legacy_alter_table=ON prevents it). This repo's entire
+// schema-creation code was grepped exhaustively (scripts/build-knowledge-db.mjs,
+// src/server/decodeCacheStore.ts, src/server/upc/storage.ts, src/server/learnedProducts.ts, every
+// turso-staging/*.sql file) and declares ZERO foreign keys anywhere, so this promotion's
+// tires/tire_part_numbers renames have nothing to hijack. See 09_rollback.sql for the full note;
+// re-verify before ever adding a table with an FK referencing tires or tire_part_numbers.
+//
 // Usage:
 //   node scripts/tire-db-repair/10_promote_execute.mjs backup  [--dry-run]
 //   node scripts/tire-db-repair/10_promote_execute.mjs stage   [--dry-run]
@@ -27,8 +37,8 @@
 //   PROMOTE_TS                                     override the timestamp used for _old_<ts> /
 //                                                   backup dir naming (tests only; else Date.now())
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "node:fs";
+import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -54,6 +64,87 @@ const OPERATIONAL_TABLES = [
   "ladder_kv", "learned_products", "retail", "sqlite_sequence",
 ];
 
+// -------------------------------------------------------------------------------------------
+// Codex panel finding I3: operational-table isolation was previously true only of TODAY'S SQL
+// TEXT, never enforced by the executable. PROMOTE_STAGING_DIR can be pointed at ANY directory
+// (used deliberately by the test harness, but nothing stops a stale/tampered/wrong directory in a
+// real run), and stage() executes every statement `splitSqlStatements` finds in the five expected
+// filenames with NO table allowlist. This hard allowlist makes operational-table isolation an
+// INVARIANT of the executable itself, not a property of the currently-reviewed SQL files: every
+// statement about to be executed against the live/staging database is scanned for table names it
+// references, and execution refuses if any name falls outside the explicit allowlist below.
+// -------------------------------------------------------------------------------------------
+
+const BASE_TABLE_NAMES = [
+  "tires", "tire_part_numbers",
+  "tire_product_part_number_aliases", "canonical_tire_products", "provenance",
+];
+
+/** Every table name any statement executed by this script may legally reference: the tire-scope
+ *  base tables, their `staging_` prefix, and any `_old_<ts>` / `_failed_promotion_<ts>` suffixed
+ *  variant (ts can be anything - matched structurally, not against a specific value, since ts is
+ *  chosen at runtime). sqlite_master itself is allowed for READ (schema introspection / rename
+ *  detection); it is never a target of INSERT/UPDATE/DELETE/DROP in any statement this script builds. */
+function isAllowedTableName(name) {
+  if (name === "sqlite_master") return true;
+  if (BASE_TABLE_NAMES.includes(name)) return true;
+  if (BASE_TABLE_NAMES.some((t) => name === `staging_${t}`)) return true;
+  for (const t of BASE_TABLE_NAMES) {
+    if (name.startsWith(`${t}_old_`) || name.startsWith(`${t}_failed_promotion_`)) return true;
+  }
+  return false;
+}
+
+/** Extract every table name a single SQL statement references, covering the statement shapes this
+ *  script's own code and the staging SQL files actually use: CREATE TABLE [IF NOT EXISTS] <name>,
+ *  DROP TABLE [IF EXISTS] <name>, INSERT [OR REPLACE] INTO <name>, ALTER TABLE <name> ..., SELECT
+ *  ... FROM <name>, DELETE FROM <name>, UPDATE <name>, and a JOIN <name> clause. This is
+ *  deliberately conservative (a regex scan, not a full SQL parser) but is applied as a POSITIVE
+ *  allowlist gate - any statement referencing a name this scan does not recognize as safe is
+ *  rejected, so an unrecognized-but-dangerous construct fails closed rather than sneaking through. */
+function extractTableNames(statement) {
+  const names = new Set();
+  const patterns = [
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/gi,
+    /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/gi,
+    /INSERT\s+(?:OR\s+REPLACE\s+)?INTO\s+["'`]?(\w+)["'`]?/gi,
+    /ALTER\s+TABLE\s+["'`]?(\w+)["'`]?/gi,
+    /(?:^|\s)RENAME\s+TO\s+["'`]?(\w+)["'`]?/gi,
+    /FROM\s+["'`]?(\w+)["'`]?/gi,
+    /UPDATE\s+["'`]?(\w+)["'`]?\s+SET/gi,
+    /(?:INNER\s+|LEFT\s+|RIGHT\s+|OUTER\s+)?JOIN\s+["'`]?(\w+)["'`]?/gi,
+  ];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(statement)) !== null) {
+      names.add(m[1]);
+    }
+  }
+  return names;
+}
+
+/** Scan a batch of statements and throw a clear, actionable error the FIRST time any statement
+ *  references a table name outside the allowlist, naming the offending table and statement. Called
+ *  before any batch is executed (stage, promote, rollback) so a sabotaged/stale/wrong staging
+ *  directory cannot silently touch an operational table. */
+function assertAllowedTables(statements, label) {
+  for (const stmt of statements) {
+    const names = extractTableNames(stmt);
+    for (const name of names) {
+      if (!isAllowedTableName(name)) {
+        throw new Error(
+          `${label}: REFUSING to execute - statement references table "${name}", which is NOT in the ` +
+            `operational-isolation allowlist (tire-scope tables + their staging_/_old_/_failed_promotion_ ` +
+            `variants, plus sqlite_master for reads). This is a hard safety gate: it fires on ANY statement ` +
+            `naming an out-of-scope table (e.g. retail, decode_cache, or any other operational table), ` +
+            `whether from a tampered staging file, a wrong PROMOTE_STAGING_DIR, or a bug in this script. ` +
+            `Offending statement: ${stmt.length > 300 ? stmt.slice(0, 300) + " ... [truncated]" : stmt}`
+        );
+      }
+    }
+  }
+}
+
 const STAGING_FILES_ORDER = [
   "01_staging_tires.sql",
   "02_staging_tire_part_numbers.sql",
@@ -61,6 +152,34 @@ const STAGING_FILES_ORDER = [
   "04_staging_canonical_tire_products.sql",
   "05_staging_provenance.sql",
 ];
+
+// Maps each staging file to the staging table it loads, so stage() can compute an EXACT expected
+// row count (by counting INSERT value-tuples in the source file) and verify() can assert the live
+// staged count matches EXACTLY - not merely count > 0 (panel finding I1). This catches a crash
+// mid-stage (CHUNK-batched load, `:` see cmdStage) that leaves a staging table partially loaded:
+// a truncated load still has count > 0 but will not match the file's own tuple count.
+const STAGING_FILE_TO_TABLE = {
+  "01_staging_tires.sql": "staging_tires",
+  "02_staging_tire_part_numbers.sql": "staging_tire_part_numbers",
+  "03_staging_tire_product_part_number_aliases.sql": "staging_tire_product_part_number_aliases",
+  "04_staging_canonical_tire_products.sql": "staging_canonical_tire_products",
+  "05_staging_provenance.sql": "staging_provenance",
+};
+
+const MANIFEST_FILE_NAME = "stage_expected_counts.json";
+
+/** Count INSERT VALUES tuples in a staging SQL file. The generator (see turso-staging/*.sql
+ *  headers) always emits one tuple per line, indented exactly two spaces, starting with `(` right
+ *  after the indent (e.g. `  ('848983006257', ...),`). This mirrors splitSqlStatements' string-aware
+ *  approach only to the extent needed: since tuples never span multiple lines in these generated
+ *  files, a per-line prefix check is sufficient and avoids re-parsing full statements twice. */
+function countValueTuples(sqlText) {
+  let count = 0;
+  for (const line of sqlText.split(/\r?\n/)) {
+    if (/^\s{2}\(/.test(line)) count++;
+  }
+  return count;
+}
 
 function timestamp() {
   if (process.env.PROMOTE_TS) return process.env.PROMOTE_TS;
@@ -129,38 +248,43 @@ function parseArgs(argv) {
 // -------------------------------------------------------------------------------------------
 
 function splitSqlStatements(sqlText) {
-  // Strip full-line comments (this repo's generator only ever emits full-line `--` comments;
-  // no statement text contains a literal `--` sequence outside of a quoted string in the datasets
-  // we load).
-  const withoutComments = sqlText
-    .split(/\r?\n/)
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n");
-
-  // Split on `;` but NEVER inside a single-quoted SQL string literal, where `''` is the escaped
-  // quote. Several provenance rows contain a literal semicolon inside a text field (e.g.
-  // 'boss-workbook merge lineage; internal, no external license'), so a naive split(";") corrupts
-  // those statements. This is a small hand-rolled scanner, not a full SQL parser, but it only
-  // needs to track single-quote state to be correct for this repo's generated INSERT/CREATE SQL.
+  // Single quote-aware pass that strips `--` line-comments AND splits on statement-terminating
+  // `;`, all in one scan, tracking single-quoted-string state throughout. This replaced an earlier
+  // two-pass version that stripped `--` comments line-by-line BEFORE the quote-aware scanner ran
+  // (checking only `line.trim().startsWith("--")`), which was safe for every line in today's actual
+  // generated datasets (a provenance URL column contains `--` mid-string, e.g. '...11.00--r20...',
+  // but never at the START of a line) but would have silently corrupted a future/hypothetical row
+  // whose quoted text legitimately began a line with `--` inside a value that spans multiple lines
+  // (external review finding, Antigravity panel Important #4). Doing comment-stripping and
+  // statement-splitting in the SAME string-aware scan removes that class of bug entirely: `--`
+  // is only ever treated as a comment marker when encountered OUTSIDE a single-quoted string.
   const statements = [];
   let current = "";
   let inString = false;
-  for (let i = 0; i < withoutComments.length; i++) {
-    const ch = withoutComments[i];
+  let i = 0;
+  while (i < sqlText.length) {
+    const ch = sqlText[i];
+    if (!inString && ch === "-" && sqlText[i + 1] === "-") {
+      // Line comment starting outside a string: skip to (but not past) the next newline.
+      const nl = sqlText.indexOf("\n", i);
+      i = nl === -1 ? sqlText.length : nl; // leave the newline itself to be appended normally
+      continue;
+    }
     current += ch;
     if (ch === "'") {
-      if (inString && withoutComments[i + 1] === "'") {
+      if (inString && sqlText[i + 1] === "'") {
         // Escaped quote ('') - consume both characters as part of the string, stay inString.
-        current += withoutComments[i + 1];
-        i++;
-      } else {
-        inString = !inString;
+        current += sqlText[i + 1];
+        i += 2;
+        continue;
       }
+      inString = !inString;
     } else if (ch === ";" && !inString) {
       const trimmed = current.trim();
       if (trimmed.length > 0) statements.push(trimmed);
       current = "";
     }
+    i++;
   }
   const trailing = current.trim();
   if (trailing.length > 0) statements.push(trailing + ";");
@@ -184,47 +308,223 @@ async function execBatch(client, statements, { dryRun, label }) {
 // backup: dump live tires + tire_part_numbers (full rows, batched SELECTs) to timestamped local
 // files + a row-count manifest. READ-ONLY.
 // =============================================================================================
+/** Codex panel finding C3: no state previously bound backup -> stage -> verify -> promote across
+ *  separate command invocations, so a live write landing between steps could be silently lost (a
+ *  live INSERT after backup's count snapshot is invisible to every later gate, and is overwritten
+ *  by the promote swap). This hashes the exact staging SQL file CONTENTS (not just their names) so
+ *  the run-manifest also binds "which staging dataset" was verified, not only "what live looked
+ *  like". A cheap, dependency-free FNV-1a-style hash is sufficient here: this is a tamper/drift
+ *  DETECTOR for an operator-controlled multi-step CLI workflow, not a cryptographic integrity
+ *  boundary against an adversarial actor with write access to the staging directory. */
+function hashStagingContent() {
+  let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
+  for (const fname of STAGING_FILES_ORDER) {
+    const fpath = join(STAGING_DIR, fname);
+    const text = existsSync(fpath) ? readFileSync(fpath, "utf8") : `<<MISSING:${fname}>>`;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/** Read live COUNT(*) for every LIVE_TABLES member. Used both to write the run-manifest (backup)
+ *  and to re-check live state against it (stage/verify/promote), so the same shape is reused. */
+async function readLiveCounts(client) {
+  const counts = {};
+  for (const table of LIVE_TABLES) {
+    const res = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
+    counts[table] = Number(res.rows[0].c);
+  }
+  return counts;
+}
+
+/** Find the most recently created backup manifest.json under BACKUP_ROOT (by directory name sort,
+ *  which is safe because timestamp() produces sortable YYYYMMDD_HHMMSS-shaped or test-supplied
+ *  monotonic strings). Returns null if no backup has ever been run. */
+function findLatestManifestPath() {
+  if (!existsSync(BACKUP_ROOT)) return null;
+  const dirs = readdirSync(BACKUP_ROOT).sort();
+  for (let i = dirs.length - 1; i >= 0; i--) {
+    const candidate = join(BACKUP_ROOT, dirs[i], "manifest.json");
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Resolve the manifest path a subcommand should bind to: explicit --manifest wins, else the
+ *  latest backup's manifest.json, else null (caller decides whether that is fatal). */
+function resolveManifestPath(manifestArg) {
+  if (manifestArg) return isAbsolute(manifestArg) ? manifestArg : join(REPO_ROOT, manifestArg);
+  return findLatestManifestPath();
+}
+
+/** Load and validate a run-manifest, throwing a clear error if the path is missing or unreadable.
+ *  Used by stage/verify/promote to bind to the backup that must precede them. */
+function loadRunManifest(manifestPath, subcommandLabel) {
+  if (!manifestPath || !existsSync(manifestPath)) {
+    throw new Error(
+      `${subcommandLabel}: REFUSING to run - no run-manifest found (looked for ${manifestPath ? rel(manifestPath) : "any backup under " + rel(BACKUP_ROOT)}). ` +
+        `Run "node scripts/tire-db-repair/10_promote_execute.mjs backup" first (it writes manifest.json), ` +
+        `or pass --manifest <path> to bind explicitly to a specific backup. This binding exists so a live ` +
+        `write that lands between backup and ${subcommandLabel} is caught, not silently lost (panel finding C3).`
+    );
+  }
+  try {
+    return JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (e) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - could not parse manifest at ${rel(manifestPath)}: ${e.message}`);
+  }
+}
+
+/** Re-check current live counts against the manifest's snapshot; throws with a clear, actionable
+ *  message (never silently proceeds) if live has moved since backup. This is the deterministic
+ *  substitute for an owner-approved write freeze or quiescent window (panel finding C3/Antigravity
+ *  #6): rather than trusting that no one wrote to live between steps, this PROVES it by comparing
+ *  counts and aborting on any drift, telling the operator to re-run backup. */
+async function assertLiveUnchangedSinceManifest(client, manifest, subcommandLabel) {
+  if (!manifest.liveCounts) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - manifest at hand has no liveCounts snapshot (stale/incompatible manifest format).`);
+  }
+  const currentCounts = await readLiveCounts(client);
+  const drifted = [];
+  for (const table of LIVE_TABLES) {
+    if (currentCounts[table] !== manifest.liveCounts[table]) {
+      drifted.push(`${table}: backup saw ${manifest.liveCounts[table]}, now ${currentCounts[table]}`);
+    }
+  }
+  if (drifted.length > 0) {
+    throw new Error(
+      `${subcommandLabel}: REFUSING to run - live has changed since the bound backup (${drifted.join("; ")}). ` +
+        `A write landed between backup and ${subcommandLabel}; proceeding could silently lose it. ` +
+        `Re-run "node scripts/tire-db-repair/10_promote_execute.mjs backup" to take a fresh, current snapshot, ` +
+        `then re-run stage/verify/promote against the new manifest.`
+    );
+  }
+}
+
+/** Re-check the staging directory's CONTENT hash against the manifest's snapshot. Catches the case
+ *  where stage/verify/promote runs against a DIFFERENT staging dataset than the one backup/earlier
+ *  steps were bound to (files edited, regenerated, or a different PROMOTE_STAGING_DIR pointed at
+ *  after backup ran). */
+function assertStagingContentUnchangedSinceManifest(manifest, subcommandLabel) {
+  if (!manifest.stagingContentHash) return; // older/manual manifest without this field: skip, don't hard-fail
+  const currentHash = hashStagingContent();
+  if (currentHash !== manifest.stagingContentHash) {
+    throw new Error(
+      `${subcommandLabel}: REFUSING to run - the staging SQL files' content hash (${currentHash}) does not match ` +
+        `the hash bound at backup time (${manifest.stagingContentHash}). The staging dataset changed since backup ` +
+        `ran. Re-run backup against the CURRENT intended staging dataset before continuing.`
+    );
+  }
+}
+
 async function cmdBackup({ dryRun }) {
   const ts = timestamp();
   const outDir = join(BACKUP_ROOT, ts);
 
   if (dryRun) {
     console.log(`[dry-run] backup: would create ${rel(outDir)}/`);
+    console.log(`[dry-run] backup: would dump CREATE TABLE + CREATE INDEX DDL for each table to ${rel(join(outDir, "schema.sql"))}`);
     for (const table of LIVE_TABLES) {
-      console.log(`[dry-run] backup: would run "SELECT * FROM ${table}" in batches of 1000 rows,`);
+      console.log(`[dry-run] backup: would run keyset-paginated "SELECT * FROM ${table} WHERE <pk> > ? ORDER BY <pk> LIMIT 1000",`);
       console.log(`[dry-run] backup:   writing to ${rel(join(outDir, `${table}.jsonl`))}`);
+      console.log(`[dry-run] backup:   then re-COUNT(*) after the dump and compare to the pre-dump COUNT(*) (race detection)`);
     }
-    console.log(`[dry-run] backup: would write manifest to ${rel(join(outDir, "manifest.json"))}`);
+    console.log(`[dry-run] backup: would write manifest to ${rel(join(outDir, "manifest.json"))} including liveCounts + stagingContentHash (panel finding C3 run-manifest binding)`);
     return { outDir, manifest: null };
   }
 
   mkdirSync(outDir, { recursive: true });
   const client = await makeClient();
-  const manifest = { timestamp: ts, tables: {} };
+  // Run-manifest binding (panel finding C3): liveCounts is the live-state snapshot every later
+  // step (stage/verify/promote) will re-check itself against before proceeding; stagingContentHash
+  // binds the staging DATASET this backup was taken alongside, so a later step can detect either
+  // "live moved" or "staging dataset changed" drift, not just one or the other.
+  const liveCounts = await readLiveCounts(client);
+  const stagingContentHash = hashStagingContent();
+  const manifest = { timestamp: ts, tables: {}, liveCounts, stagingContentHash };
+
+  // Schema DDL dump (Antigravity panel Important #5): JSONL row-data alone cannot rebuild a table
+  // with its indexes/constraints. Capture the CREATE TABLE + CREATE INDEX statements for exactly
+  // the tables this backup covers (LIVE_TABLES: tires, tire_part_numbers) straight from
+  // sqlite_master, so `schema.sql` + the `.jsonl` dumps together are a complete bare-restore kit for
+  // THIS backup's scope. Deliberately scoped to LIVE_TABLES only (not every table in the database) -
+  // this command's contract is "backup tires + tire_part_numbers", and dumping unrelated operational
+  // tables' schema here would blur that scope without adding restore value (operational tables are
+  // never touched by this promotion at all, per OPERATIONAL_TABLES).
+  const schemaRes = await client.execute(
+    `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','index') AND tbl_name IN (${LIVE_TABLES.map((t) => `'${t}'`).join(",")}) ORDER BY type DESC, name`
+  );
+  const schemaStatements = schemaRes.rows
+    .filter((r) => r.sql) // auto-indexes (PK-backed) have a NULL sql and need no separate statement
+    .map((r) => `${r.sql};`);
+  const schemaPath = join(outDir, "schema.sql");
+  writeFileSync(
+    schemaPath,
+    `-- Schema DDL for LIVE_TABLES (${LIVE_TABLES.join(", ")}) captured at backup time (${ts}).\n` +
+      `-- Restore order: CREATE TABLE statements first, then load each table's .jsonl, then CREATE\n` +
+      `-- INDEX statements.\n\n` +
+      schemaStatements.join("\n") + (schemaStatements.length ? "\n" : ""),
+    "utf8"
+  );
+  manifest.schemaFile = "schema.sql";
+  console.log(`backup: wrote schema DDL (${schemaStatements.length} statements) to ${rel(schemaPath)}`);
 
   const BATCH = 1000;
   for (const table of LIVE_TABLES) {
     console.log(`backup: dumping ${table}...`);
-    const countRes = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
-    const total = Number(countRes.rows[0].c);
+    const pk = table === "tires" ? "barcode" : "normalized_part_number";
+    const preCountRes = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
+    const preCount = Number(preCountRes.rows[0].c);
     const filePath = join(outDir, `${table}.jsonl`);
     let written = 0;
-    // better-sqlite3/libsql have no native OFFSET-free cursor here; use a stable ORDER BY +
-    // LIMIT/OFFSET pagination. This is read-only and safe to re-run.
-    const pk = table === "tires" ? "barcode" : "normalized_part_number";
     let lines = [];
-    for (let offset = 0; offset < total; offset += BATCH) {
-      const res = await client.execute(
-        `SELECT * FROM ${table} ORDER BY ${pk} LIMIT ${BATCH} OFFSET ${offset}`
-      );
+    // Keyset pagination (Antigravity panel Important #6), NOT OFFSET-based: OFFSET re-scans and
+    // re-skips every prior row on each page, so a concurrent INSERT/DELETE ahead of the cursor
+    // during the dump can shift row positions and cause a row to be skipped or duplicated across
+    // pages. Keyset pagination (`WHERE pk > lastSeenPk ORDER BY pk LIMIT n`) anchors each page to
+    // the actual last key seen, which is stable under concurrent writes elsewhere in the table
+    // (new rows sort after the cursor and are simply picked up or missed consistently, never
+    // reshuffling already-paginated rows). This is still a live table without a snapshot/transaction
+    // boundary held open across pages, so true point-in-time consistency requires promote to run in
+    // a quiescent window (documented below); the count-consistency check catches any drift.
+    let lastKey = null;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const res = lastKey === null
+        ? await client.execute(`SELECT * FROM ${table} ORDER BY ${pk} LIMIT ${BATCH}`)
+        : await client.execute({ sql: `SELECT * FROM ${table} WHERE ${pk} > ? ORDER BY ${pk} LIMIT ${BATCH}`, args: [lastKey] });
+      if (res.rows.length === 0) break;
       for (const row of res.rows) {
         lines.push(JSON.stringify(row));
         written++;
       }
+      lastKey = res.rows[res.rows.length - 1][pk];
+      if (res.rows.length < BATCH) break;
     }
     writeFileSync(filePath, lines.join("\n") + (lines.length ? "\n" : ""), "utf8");
-    manifest.tables[table] = { rowCount: written, file: `${table}.jsonl` };
-    console.log(`backup: wrote ${written} rows to ${rel(filePath)}`);
+
+    // Race/drift detection: re-count after the dump. A mismatch means concurrent writes touched
+    // this table DURING the dump - the operator must re-run backup in a quiescent window rather
+    // than trust a dump taken while live traffic was still writing.
+    const postCountRes = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
+    const postCount = Number(postCountRes.rows[0].c);
+    const countDrift = postCount !== preCount;
+    const consistent = written === preCount && !countDrift;
+
+    manifest.tables[table] = {
+      rowCount: written,
+      file: `${table}.jsonl`,
+      preDumpCount: preCount,
+      postDumpCount: postCount,
+      consistent,
+    };
+    console.log(
+      `backup: wrote ${written} rows to ${rel(filePath)} (pre-count ${preCount}, post-count ${postCount})` +
+        (consistent ? "" : " -- WARNING: count drift detected, table was written to during the dump; re-run backup in a quiescent window before promoting")
+    );
   }
 
   const manifestPath = join(outDir, "manifest.json");
@@ -247,12 +547,13 @@ function stagingTableNamesInScope() {
   ];
 }
 
-async function cmdStage({ dryRun }) {
+async function cmdStage({ dryRun, manifestArg }) {
   requireConfirmOrExit(dryRun);
 
   const dropStatements = stagingTableNamesInScope().map((t) => `DROP TABLE IF EXISTS ${t};`);
 
   const fileStatements = [];
+  const expectedCounts = {};
   for (const fname of STAGING_FILES_ORDER) {
     const fpath = join(STAGING_DIR, fname);
     if (!existsSync(fpath)) {
@@ -261,6 +562,9 @@ async function cmdStage({ dryRun }) {
     const text = readFileSync(fpath, "utf8");
     const statements = splitSqlStatements(text);
     fileStatements.push({ file: fname, statements });
+    // Expected row count is derived from the SOURCE FILE itself (the tuple count the generator
+    // wrote), never from a hardcoded number, so this stays correct if the dataset is regenerated.
+    expectedCounts[STAGING_FILE_TO_TABLE[fname]] = countValueTuples(text);
   }
 
   if (dryRun) {
@@ -269,10 +573,29 @@ async function cmdStage({ dryRun }) {
     for (const { file, statements } of fileStatements) {
       console.log(`[dry-run] stage: would load ${rel(join(STAGING_DIR, file))} (${statements.length} statement(s))`);
     }
+    console.log(`[dry-run] stage: would write expected-count manifest ${JSON.stringify(expectedCounts)}`);
+    console.log(`[dry-run] stage: would re-check live counts + staging content hash against the bound run-manifest (panel finding C3) before proceeding`);
     return;
   }
 
+  // Panel finding C3: bind this run to a specific backup's run-manifest, and refuse if live has
+  // moved (or the staging dataset has changed) since that backup was taken. This makes the
+  // multi-step backup->stage->verify->promote workflow's implicit ordering an ENFORCED invariant
+  // instead of an assumption - a live write landing between steps is now DETECTED, not silently lost.
+  const manifestPath = resolveManifestPath(manifestArg);
+  const runManifest = loadRunManifest(manifestPath, "stage");
   const client = await makeClient();
+  await assertLiveUnchangedSinceManifest(client, runManifest, "stage");
+  assertStagingContentUnchangedSinceManifest(runManifest, "stage");
+  console.log(`stage: bound to run-manifest ${rel(manifestPath)} - live counts and staging content confirmed unchanged since backup.`);
+
+  // Panel finding I3: hard-enforce operational-table isolation on every statement about to run,
+  // regardless of where it came from (this script's own drop list, or the staging SQL files - which
+  // could be a stale/tampered/wrong PROMOTE_STAGING_DIR in a real run).
+  assertAllowedTables(dropStatements, "stage (drop)");
+  for (const { file, statements } of fileStatements) {
+    assertAllowedTables(statements, `stage (${file})`);
+  }
 
   console.log("stage: dropping any pre-existing staging_* tables (idempotent)...");
   await client.batch(dropStatements, "write");
@@ -288,6 +611,16 @@ async function cmdStage({ dryRun }) {
     }
     console.log(`stage: ${file} loaded.`);
   }
+
+  // Persist the expected-count manifest so verify() can assert EXACT counts (panel finding I1),
+  // catching a mid-run crash that leaves a staging table truncated (count > 0 but short of the
+  // source file's true tuple count). Written into STAGING_DIR so it travels with the dataset and
+  // survives process restarts between `stage` and `verify`.
+  mkdirSync(STAGING_DIR, { recursive: true });
+  const expectedCountsManifestPath = join(STAGING_DIR, MANIFEST_FILE_NAME);
+  writeFileSync(expectedCountsManifestPath, JSON.stringify({ generatedAt: new Date().toISOString(), expectedCounts }, null, 2), "utf8");
+  console.log(`stage: wrote expected-count manifest to ${rel(expectedCountsManifestPath)}`);
+
   console.log("stage: complete. Only staging_* tables were written.");
 }
 
@@ -295,23 +628,56 @@ async function cmdStage({ dryRun }) {
 // verify: run the gate queries against the live staging_* tables (counts match manifest, joins
 // healthy, all live keys present per preflight expectations, zero touches of operational tables).
 // =============================================================================================
-async function cmdVerify({ dryRun }) {
+/** Load the expected-count manifest written by stage(). Returns null if missing (e.g. verify run
+ *  without a prior stage in this STAGING_DIR) so callers can fail loudly instead of silently
+ *  degrading to a count>0 check. */
+function loadExpectedCountsManifest() {
+  const manifestPath = join(STAGING_DIR, MANIFEST_FILE_NAME);
+  if (!existsSync(manifestPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
+    return parsed.expectedCounts ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function cmdVerify({ dryRun, manifestArg }) {
   const gates = [];
 
   if (dryRun) {
-    console.log("[dry-run] verify: would run the following gates against staging_* tables:");
-    console.log("  Gate A: PRAGMA integrity_check");
-    console.log("  Gate B: SELECT COUNT(*) FROM staging_tires (compare to latest backup manifest tires count)");
-    console.log("  Gate C: SELECT COUNT(*) FROM staging_tire_part_numbers");
-    console.log("  Gate D: orphan staging_tire_part_numbers rows (LEFT JOIN staging_tires, expect 0)");
-    console.log("  Gate E: duplicate normalized_part_number in staging_tire_part_numbers (expect 0 groups)");
-    console.log("  Gate F: orphan staging_tire_product_part_number_aliases rows (expect 0)");
-    console.log("  Gate G: every live tires.barcode present in staging_tires (expect 0 missing)");
-    console.log("  Gate H: operational tables untouched (SELECT COUNT(*) unchanged vs backup manifest, informational)");
-    return { passed: true, gates: [], dryRun: true };
+    // Codex panel finding M1: dry-run previously returned { passed: true }, which reads as a real
+    // PASS to any caller/script that checks `.passed` - but NOTHING was evaluated; dry-run only
+    // prints the gate descriptions. Print an explicit "DRY-RUN: not evaluated" marker (never
+    // PASS/FAIL wording) and return passed: null so a caller cannot mistake this for a real result.
+    console.log("[dry-run] verify: DRY-RUN: not evaluated. Would run the following gates against staging_* tables:");
+    console.log("  Gate A: PRAGMA integrity_check - DRY-RUN: not evaluated");
+    console.log("  Gate B: staging_tires EXACT row count vs stage_expected_counts.json manifest - DRY-RUN: not evaluated");
+    console.log("  Gate C: staging_tire_part_numbers EXACT row count vs manifest - DRY-RUN: not evaluated");
+    console.log("  Gate C2: staging_tire_product_part_number_aliases / staging_canonical_tire_products / staging_provenance EXACT counts vs manifest - DRY-RUN: not evaluated");
+    console.log("  Gate D: orphan staging_tire_part_numbers rows (LEFT JOIN staging_tires, expect 0) - DRY-RUN: not evaluated");
+    console.log("  Gate E: duplicate normalized_part_number in staging_tire_part_numbers (expect 0 groups) - DRY-RUN: not evaluated");
+    console.log("  Gate F: orphan staging_tire_product_part_number_aliases rows (expect 0) - DRY-RUN: not evaluated");
+    console.log("  Gate G: every live tires.barcode present in staging_tires (expect 0 missing) - DRY-RUN: not evaluated");
+    console.log("  Gate H: operational tables untouched (SELECT COUNT(*) unchanged vs backup manifest, informational) - DRY-RUN: not evaluated");
+    console.log("[dry-run] verify: DRY-RUN COMPLETE - no gate was evaluated, no PASS/FAIL verdict was reached. Run without --dry-run to actually verify.");
+    return { passed: null, gates: [], dryRun: true };
   }
 
   const client = await makeClient();
+
+  // Panel finding C3: re-check this run is still bound to the same live/staging state the backup
+  // captured, before spending time on the gates below.
+  const runManifestPath = resolveManifestPath(manifestArg);
+  const runManifest = loadRunManifest(runManifestPath, "verify");
+  await assertLiveUnchangedSinceManifest(client, runManifest, "verify");
+  assertStagingContentUnchangedSinceManifest(runManifest, "verify");
+  console.log(`verify: bound to run-manifest ${rel(runManifestPath)} - live counts and staging content confirmed unchanged since backup.`);
+
+  // Panel finding I1: verify must catch a PARTIAL/TRUNCATED staging load, not just count > 0. The
+  // manifest written by stage() (counted from the staging SQL files themselves) is the source of
+  // truth for the exact expected count of every staged table.
+  const expectedCounts = loadExpectedCountsManifest();
 
   async function gate(name, fn) {
     try {
@@ -330,13 +696,35 @@ async function cmdVerify({ dryRun }) {
     return { pass: value.toLowerCase() === "ok", detail: value };
   });
 
-  const tiresCountRes = await client.execute("SELECT COUNT(*) c FROM staging_tires");
-  const tiresCount = Number(tiresCountRes.rows[0].c);
-  await gate("B_staging_tires_count", async () => ({ pass: tiresCount > 0, detail: `${tiresCount} rows` }));
+  await gate("Z_expected_counts_manifest_present", async () => ({
+    pass: expectedCounts !== null,
+    detail: expectedCounts !== null
+      ? `manifest loaded: ${JSON.stringify(expectedCounts)}`
+      : `MISSING ${rel(join(STAGING_DIR, MANIFEST_FILE_NAME))} - run stage first; refusing to fall back to a weak count>0 check`,
+  }));
 
-  const pnCountRes = await client.execute("SELECT COUNT(*) c FROM staging_tire_part_numbers");
-  const pnCount = Number(pnCountRes.rows[0].c);
-  await gate("C_staging_tire_part_numbers_count", async () => ({ pass: pnCount > 0, detail: `${pnCount} rows` }));
+  async function exactCountGate(name, table) {
+    return gate(name, async () => {
+      const res = await client.execute(`SELECT COUNT(*) c FROM ${table}`);
+      const actual = Number(res.rows[0].c);
+      const expected = expectedCounts ? expectedCounts[table] : undefined;
+      if (expected === undefined) {
+        return { pass: false, detail: `no expected count for ${table} in manifest (actual=${actual})` };
+      }
+      return {
+        pass: actual === expected,
+        detail: actual === expected
+          ? `${actual} rows (matches expected ${expected})`
+          : `MISMATCH: ${actual} rows, expected EXACTLY ${expected} (partial/truncated load?)`,
+      };
+    });
+  }
+
+  await exactCountGate("B_staging_tires_count", "staging_tires");
+  await exactCountGate("C_staging_tire_part_numbers_count", "staging_tire_part_numbers");
+  await exactCountGate("C2a_staging_aliases_count", "staging_tire_product_part_number_aliases");
+  await exactCountGate("C2b_staging_canonical_products_count", "staging_canonical_tire_products");
+  await exactCountGate("C2c_staging_provenance_count", "staging_provenance");
 
   await gate("D_orphan_part_numbers", async () => {
     const res = await client.execute(
@@ -394,34 +782,212 @@ async function cmdVerify({ dryRun }) {
 }
 
 // =============================================================================================
-// promote: ATOMIC swap in a single batch: rename tires->tires_old_<ts>, staging_tires->tires,
-// same for tire_part_numbers, then create the three new tables from staging. *_old_* tables are
-// kept (never dropped) for rollback.
+// Secondary indexes the promoted `tires` / `tire_part_numbers` / alias table need, mirroring the
+// local better-sqlite3 builder (build-knowledge-db.mjs:167-169 creates idx_tire_barcode,
+// idx_tire_part_number, idx_tire_uid) so every runtime lookup column used by
+// src/server/tire-knowledge/tireKnowledgeIndex.ts's Turso paths is covered - not just the PK.
+//
+// Panel finding C1: the bare rename-swap ships tables with ONLY their PRIMARY KEY covered
+// (barcode on tires, normalized_part_number on tire_part_numbers). Every UID-keyed lookup
+// (lookupPartNumberTurso's second step, lookupAllPartNumberTurso's JOIN, lookupPartNumberAliasTurso's
+// resolve-by-uid step) filters on tires.canonical_product_uid, which has NO index without this.
+// tire_product_part_number_aliases is looked up by normalized_part_number, which the table's
+// PRIMARY KEY (canonical_product_id, normalized_part_number) does NOT cover as a leading column
+// (SQLite/libsql can only use a composite index/PK for a leading-column search; normalized_part_number
+// is the second column here) - so it needs its own secondary index too.
+//
+// WHY THESE RUN AFTER THE RENAME (not indexed on the staging_* names before rename): libsql/SQLite
+// keeps an index attached to a table across ALTER TABLE ... RENAME TO (the index's root page moves
+// with the table, only sqlite_master's table-name pointer changes) - so indexing before or after
+// the rename would both leave the FINAL table with the index attached. Indexing AFTER is chosen
+// here because it lets a single ordered statement list read top-to-bottom as "rename, then index the
+// thing that now has the live name" - directly matching the live schema that must exist afterward -
+// and because it means a promote that only gets to the rename half (impossible in today's
+// single-batch atomic design, but a defensive choice against any future refactor that splits the
+// batch) still leaves indexes as a separate, easily-retried step rather than baked into a
+// still-being-renamed table.
+function postSwapIndexStatements() {
+  return [
+    "CREATE INDEX IF NOT EXISTS idx_tire_barcode ON tires(barcode);",
+    "CREATE INDEX IF NOT EXISTS idx_tire_part_number ON tires(manufacturer_part_number);",
+    "CREATE INDEX IF NOT EXISTS idx_tire_uid ON tires(canonical_product_uid);",
+    "CREATE INDEX IF NOT EXISTS idx_tire_part_numbers_uid ON tire_part_numbers(canonical_product_uid);",
+    "CREATE INDEX IF NOT EXISTS idx_tire_pn_aliases_normalized ON tire_product_part_number_aliases(normalized_part_number);",
+  ];
+}
+
+/** Automated post-swap smoke test (panel finding I3). Runs the runtime-shaped lookups the panel's
+ *  Gate I/J called for by hand: a barcode hit, a part-number two-step hit, and an alias-fallback
+ *  hit, each sampled from the JUST-PROMOTED live tables. Returns { pass, checks } and NEVER throws
+ *  (a lookup error is recorded as a failed check, not an unhandled exception) so cmdPromote can
+ *  always decide PASS/FAIL and report clearly. */
+async function runPostSwapSmokeTest(client) {
+  const checks = [];
+  async function check(name, fn) {
+    try {
+      const result = await fn();
+      checks.push({ name, ...result });
+    } catch (e) {
+      checks.push({ name, pass: false, detail: `ERROR: ${e.message}` });
+    }
+  }
+
+  await check("smoke_barcode_lookup", async () => {
+    const sampleRes = await client.execute("SELECT barcode FROM tires LIMIT 1");
+    if (sampleRes.rows.length === 0) return { pass: false, detail: "tires table is empty after promote" };
+    const barcode = sampleRes.rows[0].barcode;
+    const hitRes = await client.execute({ sql: "SELECT * FROM tires WHERE barcode = ?", args: [barcode] });
+    return {
+      pass: hitRes.rows.length === 1,
+      detail: hitRes.rows.length === 1 ? `barcode ${barcode} resolved` : `barcode ${barcode} did not resolve (${hitRes.rows.length} rows)`,
+    };
+  });
+
+  await check("smoke_part_number_two_step", async () => {
+    const sampleRes = await client.execute("SELECT normalized_part_number, canonical_product_uid FROM tire_part_numbers LIMIT 1");
+    if (sampleRes.rows.length === 0) return { pass: false, detail: "tire_part_numbers table is empty after promote" };
+    const { normalized_part_number: pn } = sampleRes.rows[0];
+    // Mirror lookupPartNumberTurso's exact two-step shape.
+    const step1 = await client.execute({
+      sql: "SELECT canonical_product_uid FROM tire_part_numbers WHERE normalized_part_number = ?",
+      args: [pn],
+    });
+    if (step1.rows.length === 0) return { pass: false, detail: `part number ${pn} missing on re-select` };
+    const uid = step1.rows[0].canonical_product_uid;
+    const step2 = await client.execute({ sql: "SELECT * FROM tires WHERE canonical_product_uid = ? LIMIT 1", args: [uid] });
+    return {
+      pass: step2.rows.length === 1,
+      detail: step2.rows.length === 1 ? `part number ${pn} -> uid ${uid} resolved` : `part number ${pn} -> uid ${uid} did NOT resolve to a tires row`,
+    };
+  });
+
+  await check("smoke_alias_fallback", async () => {
+    const sampleRes = await client.execute("SELECT normalized_part_number, canonical_product_id FROM tire_product_part_number_aliases LIMIT 1");
+    if (sampleRes.rows.length === 0) {
+      // Alias table can legitimately be empty; this is informational, not a hard failure.
+      return { pass: true, detail: "tire_product_part_number_aliases is empty (nothing to smoke-test)" };
+    }
+    const { normalized_part_number: pn } = sampleRes.rows[0];
+    // Mirror lookupPartNumberAliasTurso's exact shape.
+    const aliasRes = await client.execute({
+      sql: "SELECT DISTINCT canonical_product_id FROM tire_product_part_number_aliases WHERE normalized_part_number = ?",
+      args: [pn],
+    });
+    if (aliasRes.rows.length !== 1) return { pass: false, detail: `alias ${pn} resolved to ${aliasRes.rows.length} distinct products, expected 1` };
+    const uid = aliasRes.rows[0].canonical_product_id;
+    const tireRes = await client.execute({ sql: "SELECT * FROM tires WHERE canonical_product_uid = ? LIMIT 1", args: [uid] });
+    return {
+      pass: tireRes.rows.length === 1,
+      detail: tireRes.rows.length === 1 ? `alias ${pn} -> uid ${uid} resolved` : `alias ${pn} -> uid ${uid} did NOT resolve to a tires row`,
+    };
+  });
+
+  await check("smoke_index_presence", async () => {
+    const res = await client.execute("SELECT name, tbl_name FROM sqlite_master WHERE type='index'");
+    const names = new Set(res.rows.map((r) => String(r.name)));
+    const required = [
+      "idx_tire_barcode", "idx_tire_part_number", "idx_tire_uid",
+      "idx_tire_part_numbers_uid", "idx_tire_pn_aliases_normalized",
+    ];
+    const missing = required.filter((n) => !names.has(n));
+    return { pass: missing.length === 0, detail: missing.length === 0 ? "all 5 required indexes present" : `MISSING: ${missing.join(", ")}` };
+  });
+
+  const pass = checks.every((c) => c.pass);
+  return { pass, checks };
+}
+
 // =============================================================================================
-async function cmdPromote({ dryRun }) {
+// promote: ATOMIC swap in a single batch: rename tires->tires_old_<ts>, staging_tires->tires,
+// same for tire_part_numbers, create the three new tables from staging, THEN create the secondary
+// indexes on the now-live table names (panel finding C1). *_old_* tables are kept (never dropped)
+// for rollback. After the swap, an automated post-swap smoke test runs (panel finding I3); on
+// FAILURE the _old_ tables are left in place and the process exits nonzero telling the operator to
+// run rollback - the swap itself is not reverted automatically (that would race a second live
+// write against the just-promoted tables), but nothing forces the operator to accept a bad swap.
+// =============================================================================================
+async function cmdPromote({ dryRun, manifestArg }) {
   requireConfirmOrExit(dryRun);
   const ts = timestamp();
 
-  const statements = [
+  const renameStatements = [
     `ALTER TABLE tires RENAME TO tires_old_${ts};`,
     `ALTER TABLE staging_tires RENAME TO tires;`,
     `ALTER TABLE tire_part_numbers RENAME TO tire_part_numbers_old_${ts};`,
     `ALTER TABLE staging_tire_part_numbers RENAME TO tire_part_numbers;`,
     ...NEW_TABLES.map(({ staging, live }) => `ALTER TABLE ${staging} RENAME TO ${live};`),
   ];
+  const indexStatements = postSwapIndexStatements();
+  const statements = [...renameStatements, ...indexStatements];
 
   if (dryRun) {
     console.log(`[dry-run] promote: would execute the following in ONE atomic batch (ts=${ts}):`);
     for (const s of statements) console.log(`  ${s}`);
     console.log(`[dry-run] promote: *_old_${ts} tables would be kept (not dropped) for rollback.`);
+    console.log("[dry-run] promote: would first re-check live counts + staging content hash against the bound run-manifest (panel finding C3).");
+    console.log("[dry-run] promote: would then run an automated post-swap smoke test (barcode / part-number / alias lookups + index presence).");
     return { ts, statements };
   }
 
   const client = await makeClient();
-  console.log(`promote: executing atomic swap (ts=${ts})...`);
+
+  // Panel finding C3: re-check this run is still bound to the same live/staging state the backup
+  // captured. This is the LAST gate before the irreversible-in-practice swap executes, so it is
+  // checked here even though stage() and verify() already checked it earlier in the pipeline - a
+  // write could still land in the window between verify and promote.
+  const runManifestPath = resolveManifestPath(manifestArg);
+  const runManifest = loadRunManifest(runManifestPath, "promote");
+  await assertLiveUnchangedSinceManifest(client, runManifest, "promote");
+  assertStagingContentUnchangedSinceManifest(runManifest, "promote");
+  console.log(`promote: bound to run-manifest ${rel(runManifestPath)} - live counts and staging content confirmed unchanged since backup.`);
+
+  // Re-promotion collision guard (Antigravity panel Minor #7): a rename batch fails with a raw,
+  // unhelpful SQLite/libsql error mid-batch if ANY target name it would create already exists. Two
+  // distinct collision shapes are possible and both are checked here:
+  //   (a) `tires_old_<ts>` / `tire_part_numbers_old_<ts>` already exist - PROMOTE_TS was reused, or
+  //       two promote runs landed in the same clock-second (the ts-collision case).
+  //   (b) a NEW_TABLES live name (tire_product_part_number_aliases / canonical_tire_products /
+  //       provenance) already exists - this is the NORMAL shape of a SECOND promote after a prior
+  //       promote already succeeded (those tables have no `_old_` variant; they are a straight
+  //       rename with no live equivalent to rename away first), so it fires on any re-promote
+  //       attempt regardless of whether the ts collides, and is at least as common as case (a).
+  const existingRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
+  const existingNames = new Set(existingRes.rows.map((r) => String(r.name)));
+  const oldNamesThisRun = [`tires_old_${ts}`, `tire_part_numbers_old_${ts}`];
+  const newTableLiveNames = NEW_TABLES.map(({ live }) => live);
+  const collisions = [...oldNamesThisRun, ...newTableLiveNames].filter((n) => existingNames.has(n));
+  if (collisions.length > 0) {
+    throw new Error(
+      `promote: REFUSING to run - table name(s) already exist that this promotion would create or ` +
+        `rename onto: ${collisions.join(", ")}. This usually means a promotion already ran (either at ` +
+        `this same PROMOTE_TS, or an earlier successful promote already created the NEW_TABLES live ` +
+        `names, which have no _old_ variant to rename away). If a prior promotion should be superseded, ` +
+        `roll it back first (node scripts/tire-db-repair/10_promote_execute.mjs rollback), then re-run stage + promote.`
+    );
+  }
+
+  // Panel finding I3: hard-enforce operational-table isolation before the swap executes.
+  assertAllowedTables(statements, "promote");
+
+  console.log(`promote: executing atomic swap + index creation (ts=${ts})...`);
   await client.batch(statements, "write");
-  console.log("promote: complete. *_old_" + ts + " tables retained for rollback.");
-  return { ts, statements };
+  console.log("promote: swap complete. Running post-swap smoke test...");
+
+  const { pass, checks } = await runPostSwapSmokeTest(client);
+  console.log("post-swap smoke test results:");
+  for (const c of checks) console.log(`  ${c.pass ? "PASS" : "FAIL"} ${c.name}: ${c.detail}`);
+
+  if (!pass) {
+    console.error(
+      `promote: SMOKE TEST FAILED after swap (ts=${ts}). *_old_${ts} tables were retained (not dropped). ` +
+        `Do NOT treat this promotion as successful. Run: ` +
+        `node scripts/tire-db-repair/10_promote_execute.mjs rollback --ts ${ts} (with PROMOTE_CONFIRM=YES) to restore the prior live tables.`
+    );
+    return { ts, statements, smokeTest: { pass, checks }, failed: true };
+  }
+
+  console.log("promote: SMOKE TEST PASSED. *_old_" + ts + " tables retained for rollback.");
+  return { ts, statements, smokeTest: { pass, checks } };
 }
 
 // =============================================================================================
@@ -430,7 +996,14 @@ async function cmdPromote({ dryRun }) {
 async function cmdRollback({ dryRun, ts: tsArg }) {
   requireConfirmOrExit(dryRun);
 
-  let ts = tsArg;
+  // Panel finding I2: resolve the timestamp with explicit precedence so a caller who exported
+  // PROMOTE_TS (expecting symmetry with the promote invocation) never silently falls through to
+  // auto-discovery instead of the timestamp they intended. Precedence: --ts (explicit CLI flag)
+  // wins over PROMOTE_TS (env var) wins over auto-discovery from live table names. Auto-discovery
+  // itself now errors (rather than silently picking the latest) when MORE THAN ONE _old_
+  // generation exists on the target database, since guessing which one to restore in that case is
+  // exactly the silent-divergence hazard the panel flagged.
+  let ts = tsArg || process.env.PROMOTE_TS;
   let client = null;
   if (!ts) {
     if (dryRun) {
@@ -440,16 +1013,22 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
       // Discover the most recent _old_ suffix by inspecting table names.
       const res = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
       const names = res.rows.map((r) => String(r.name));
-      const match = names
+      const matches = names
         .map((n) => n.match(/^tires_old_(.+)$/))
         .filter(Boolean)
         .map((m) => m[1])
-        .sort()
-        .pop();
-      if (!match) {
+        .sort();
+      if (matches.length === 0) {
         throw new Error("rollback: no tires_old_<ts> table found; nothing to roll back to.");
       }
-      ts = match;
+      if (matches.length > 1) {
+        throw new Error(
+          `rollback: ${matches.length} tires_old_<ts> generations found (${matches.join(", ")}) and neither ` +
+            `--ts nor PROMOTE_TS was given. Refusing to guess which one to restore - pass --ts <timestamp> ` +
+            `or set PROMOTE_TS explicitly to the generation you intend to roll back to.`
+        );
+      }
+      ts = matches[0];
     }
   }
 
@@ -467,6 +1046,9 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
     return { ts, statements };
   }
 
+  // Panel finding I3: hard-enforce operational-table isolation before the rollback executes.
+  assertAllowedTables(statements, "rollback");
+
   if (!client) client = await makeClient();
   console.log(`rollback: executing atomic rollback (ts=${ts})...`);
   await client.batch(statements, "write");
@@ -481,28 +1063,32 @@ async function main() {
   const { subcommand, dryRun } = parseArgs(process.argv);
   const tsFlagIdx = process.argv.indexOf("--ts");
   const ts = tsFlagIdx >= 0 ? process.argv[tsFlagIdx + 1] : undefined;
+  const manifestFlagIdx = process.argv.indexOf("--manifest");
+  const manifestArg = manifestFlagIdx >= 0 ? process.argv[manifestFlagIdx + 1] : undefined;
 
   switch (subcommand) {
     case "backup":
       await cmdBackup({ dryRun });
       break;
     case "stage":
-      await cmdStage({ dryRun });
+      await cmdStage({ dryRun, manifestArg });
       break;
     case "verify": {
-      const { passed } = await cmdVerify({ dryRun });
+      const { passed } = await cmdVerify({ dryRun, manifestArg });
       if (!dryRun && !passed) process.exit(1);
       break;
     }
-    case "promote":
-      await cmdPromote({ dryRun });
+    case "promote": {
+      const result = await cmdPromote({ dryRun, manifestArg });
+      if (!dryRun && result?.failed) process.exit(1);
       break;
+    }
     case "rollback":
       await cmdRollback({ dryRun, ts });
       break;
     default:
       console.error(
-        "Usage: node scripts/tire-db-repair/10_promote_execute.mjs <backup|stage|verify|promote|rollback> [--dry-run] [--ts <timestamp>]"
+        "Usage: node scripts/tire-db-repair/10_promote_execute.mjs <backup|stage|verify|promote|rollback> [--dry-run] [--ts <timestamp>] [--manifest <path>]"
       );
       process.exit(2);
   }
@@ -521,4 +1107,8 @@ export {
   cmdBackup, cmdStage, cmdVerify, cmdPromote, cmdRollback,
   requireConfirmOrExit, resolveConnection, splitSqlStatements, timestamp,
   LIVE_TABLES, NEW_TABLES, OPERATIONAL_TABLES, STAGING_FILES_ORDER,
+  postSwapIndexStatements, runPostSwapSmokeTest, countValueTuples, loadExpectedCountsManifest,
+  MANIFEST_FILE_NAME, isAllowedTableName, extractTableNames, assertAllowedTables,
+  hashStagingContent, readLiveCounts, findLatestManifestPath, resolveManifestPath,
+  loadRunManifest, assertLiveUnchangedSinceManifest, assertStagingContentUnchangedSinceManifest,
 };
