@@ -259,7 +259,7 @@ async function main() {
     const path = writeStagingFile(
       "01_staging_tires.sql",
       "-- Dataset 1/5: tires. Idempotent: CREATE TABLE IF NOT EXISTS + INSERT OR REPLACE keyed on barcode.\n" +
-        "-- Source: local repaired DB `tires` table (82640 rows). DRY RUN ONLY - run against a Turso\n" +
+        `-- Source: local repaired DB \`tires\` table (${tires.length} rows). DRY RUN ONLY - run against a Turso\n` +
         "-- STAGING database, never against the live tables directly.",
       stmts
     );
@@ -278,7 +278,7 @@ async function main() {
     stmts.push(...insertBatchStatements("staging_tire_part_numbers", columns, partNumbersActive));
     const path = writeStagingFile(
       "02_staging_tire_part_numbers.sql",
-      "-- Dataset 2/5: tire_part_numbers, ACTIVE rows only (29139 of 29173; 34 quarantined rows are\n" +
+      `-- Dataset 2/5: tire_part_numbers, ACTIVE rows only (${partNumbersActive.length} of ${partNumbersActive.length + partNumbersQuarantine.length}; ${partNumbersQuarantine.length} quarantined rows are\n` +
         "-- excluded by design - see PART_NUMBER_CONFLICTS.csv - and are never promoted to live Turso.\n" +
         "-- Idempotent: CREATE TABLE IF NOT EXISTS + INSERT OR REPLACE keyed on normalized_part_number.",
       stmts
@@ -306,7 +306,7 @@ async function main() {
     stmts.push(...insertBatchStatements("staging_tire_product_part_number_aliases", columns, aliases));
     const path = writeStagingFile(
       "03_staging_tire_product_part_number_aliases.sql",
-      "-- Dataset 3/5: tire_product_part_number_aliases (1023 rows). This table does not exist on live\n" +
+      `-- Dataset 3/5: tire_product_part_number_aliases (${aliases.length} rows). This table does not exist on live\n` +
         "-- Turso today (Turso's runtime lookup path, src/server/tire-knowledge/tireKnowledgeIndex.ts\n" +
         "-- lookupPartNumberTurso, uses ONLY tire_part_numbers + tires; this alias table currently backs\n" +
         "-- the LOCAL better-sqlite3 lookup path only). Promoting it is additive and does not change\n" +
@@ -341,7 +341,7 @@ async function main() {
     stmts.push(...insertBatchStatements("staging_canonical_tire_products", columns, canonicalProducts));
     const path = writeStagingFile(
       "04_staging_canonical_tire_products.sql",
-      "-- Dataset 4/5: canonical_tire_products (79802 rows). Also new to Turso (see dataset 3 note).\n" +
+      `-- Dataset 4/5: canonical_tire_products (${canonicalProducts.length} rows). Also new to Turso (see dataset 3 note).\n` +
         "-- Idempotent: CREATE TABLE IF NOT EXISTS + INSERT OR REPLACE keyed on canonical_product_id.",
       stmts
     );
@@ -373,7 +373,7 @@ async function main() {
     stmts.push(...insertBatchStatements("staging_provenance", columns, provenance));
     const path = writeStagingFile(
       "05_staging_provenance.sql",
-      "-- Dataset 5/5: provenance (16038 rows). Also new to Turso. Idempotent: CREATE TABLE IF NOT\n" +
+      `-- Dataset 5/5: provenance (${provenance.length} rows). Also new to Turso. Idempotent: CREATE TABLE IF NOT\n` +
         "-- EXISTS + INSERT OR REPLACE keyed on id, with the same UNIQUE(product_id, barcode,\n" +
         "-- source_name, source_ref, sheet, row) constraint as the local repaired DB.",
       stmts
@@ -394,10 +394,10 @@ async function main() {
 -- Gate A: PRAGMA integrity_check must be 'ok' on the staging connection.
 PRAGMA integrity_check;
 
--- Gate B: staging_tires row count (expect 82640).
+-- Gate B: staging_tires row count (expect ${tires.length}).
 SELECT COUNT(*) AS staging_tires_count FROM staging_tires;
 
--- Gate C: staging_tire_part_numbers (active) row count (expect 29139).
+-- Gate C: staging_tire_part_numbers (active) row count (expect ${partNumbersActive.length}).
 SELECT COUNT(*) AS staging_tire_part_numbers_count FROM staging_tire_part_numbers;
 
 -- Gate D: every staging_tire_part_numbers row must join to a staging_tires row via
