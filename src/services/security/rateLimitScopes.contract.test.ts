@@ -49,4 +49,35 @@ describe("rate-limit bucket scoping", () => {
     }
     expect(violations, `unscoped rate-limit keys share one bucket across routes:\n${violations.join("\n")}`).toEqual([]);
   });
+
+  // Pins the ACTUAL literal prefix each of the four routes implicated in the Codex interaction-
+  // review finding passes to checkRateLimit, not just "some uppercase prefix". This fails if a
+  // route's specific prefix is renamed, collapsed onto another route's prefix (re-introducing
+  // shared-bucket collisions), or removed outright - the generic "is it scoped" check above would
+  // still pass if e.g. catalog-dispute's DISPUTE: was silently changed to REVIEW: (an ai-lookup/
+  // catalog-review collision), so this check locks the exact strings down per file.
+  it("pins the exact route-to-limiter key prefix for each known call site", () => {
+    const expected: Array<{ file: string; pattern: RegExp }> = [
+      { file: join(API_DIR, "ai-lookup", "route.ts"), pattern: /checkRateLimit\(\s*`GET:\$\{/ },
+      { file: join(API_DIR, "ai-lookup", "route.ts"), pattern: /checkRateLimit\(\s*`POST:\$\{/ },
+      { file: join(API_DIR, "catalog-dispute", "route.ts"), pattern: /checkRateLimit\(\s*`DISPUTE:\$\{/ },
+      { file: join(API_DIR, "catalog-review", "route.ts"), pattern: /checkRateLimit\(\s*`REVIEW:\$\{/ },
+      { file: join(API_DIR, "catalog-review", "[id]", "route.ts"), pattern: /checkRateLimit\(\s*`REVIEW_ID:\$\{/ },
+      { file: join(API_DIR, "account", "export", "route.ts"), pattern: /checkRateLimit\(\s*`EXPORT:\$\{/ },
+    ];
+    const missing: string[] = [];
+    for (const { file, pattern } of expected) {
+      let src: string;
+      try {
+        src = readFileSync(file, "utf8");
+      } catch {
+        missing.push(`${file}: file not found`);
+        continue;
+      }
+      if (!pattern.test(src)) {
+        missing.push(`${file}: expected checkRateLimit call matching ${pattern} not found (prefix renamed, collapsed onto another route, or removed)`);
+      }
+    }
+    expect(missing, `route-to-limiter key prefix drift detected:\n${missing.join("\n")}`).toEqual([]);
+  });
 });
