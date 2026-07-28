@@ -101,15 +101,12 @@ First time on a machine: `npx playwright install chromium`.
 | `npm run deploy:card` | Same sentinel, deploy-card output mode. |
 | `node scripts/release-hygiene.mjs` | Git-only uncommitted/unpushed check (repo lives on OneDrive; pushing is the real backup). `--json` for machine output. |
 
-## Deploy (GitHub-driven previews; production cutover in progress, dashboard step pending)
+## Deploy (GitHub-driven Preview and Production)
 
 Full mechanics and current truth: `docs/DEPLOY_TRUTH.md` - read it before reasoning about any of
-this. Short version: previews are cut over to GitHub via Vercel's Git integration. Opening a PR
-against `master` gets an automatic Vercel preview URL. Production is NOT yet cut over: branch
-protection is live on `master`, and PR #21 removed `vercel.json`'s auto-deploy block for `master`, but
-merging a PR still does not auto-deploy to production - the Vercel dashboard Git connection
-(Production Branch = `master`) is a separate, still-pending owner dashboard step. Until the owner
-completes that step, production still ships via the manual/CLI path below.
+this. Short version: Vercel's Git integration handles Preview PRs and Production merges to `master`.
+Strict branch protection requires typecheck, unit tests, build, lint, and Mock E2E. Docs-only commits
+are ignored by Vercel; successful Vercel deployments trigger the read-only post-deploy smoke workflow.
 
 `node scripts/deploy-preview.mjs` is **preview-only** (never `--prod`). It is emergency-only: use it
 only when GitHub-driven previews are themselves unavailable (e.g. the Vercel Git integration is down

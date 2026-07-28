@@ -4,6 +4,19 @@
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
 > Last updated: 2026-07-28.
 
+## 2026-07-28 Vercel Git cutover and release hardening: IN PROGRESS
+
+PR #21 (`40e04ed`) deployed through the connected Vercel Git integration and is `Ready` with
+Production aliases assigned. Preview environment variable names pass the 33-variable manifest with
+no forbidden names; runtime project-ID proof remains required on each fresh Preview.
+
+Branch `codex/vercel-release-hardening` fixes the stale `/sessions` smoke expectation under a
+regression test, adds a fail-closed docs-only Vercel ignored-build script, and adds a read-only
+post-deploy smoke workflow. Master branch protection now also requires `Mock E2E (chromium)` while
+preserving strict mode and the original four required checks. The CI-aligned unit scope (3,579
+passed), ledger (45/45), golden (2/2), typecheck, lint, production build, and Mock E2E (58/58) pass.
+The branch still needs PR Preview proof and the owner merge decision.
+
 ## 2026-07-26 Stabilization Phase 2: BLOCKED by Preview environment safety
 
 Local Phase 1 stabilization is committed as `91bd1dc4be065aa2a2e8aea382c556e7161a7985` on

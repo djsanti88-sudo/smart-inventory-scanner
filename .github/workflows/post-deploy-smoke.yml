@@ -1,0 +1,29 @@
+name: Post-deploy smoke
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-deploy-smoke-${{ github.event.deployment.id }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: post-deploy-smoke
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      contains(github.event.deployment_status.environment_url, 'vercel.app')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        # deployment_status can describe an untrusted PR SHA. Always run the reviewed smoke script
+        # from the default branch rather than executing code supplied by the deployment.
+
+      - name: Run read-only deployment fingerprint
+        env:
+          DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url }}
+        run: node scripts/smoke-fingerprint.mjs "$DEPLOYMENT_URL"
