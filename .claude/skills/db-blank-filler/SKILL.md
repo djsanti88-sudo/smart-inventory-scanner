@@ -6,8 +6,9 @@ description: >-
   "enrich the tire corpus", "fill the missing brand/model/size/MPN", "harvest new tire rows",
   "complete the barcode twins", "db round trip", or "snapshot Turso and enrich". Runs the proven
   cascade (deterministic Lane 0 -> Codex GPT-5.5 subscription batches -> capped Firecrawl fallback)
-  with a trusted-host + exact-barcode + blank-only gate, materializes UPC/EAN twins with a primary
-  form, and prepares (never auto-applies) a Turso promotion.
+  with a trusted-host + exact-barcode + blank-only gate, completes UPC/EAN twin COLUMNS on the
+  existing row (LEAN model, owner design 2026-07-28; no duplicate twin rows), and prepares
+  (never auto-applies) a Turso promotion.
 ---
 
 # db-blank-filler
@@ -54,12 +55,36 @@ The driver runs these stages against `<WORK>`:
 1. **b5 - deterministic backfill (free)**
    `node scripts/tire-db-repair/bakeoff/b5_deterministic_backfill.mjs <WORK>`
    MPN-from-relationship, GS1-prefix brand, canonical-product copy. Blank-only, idempotent.
-2. **twin - barcode twin completion, BOTH directions (free)**
-   `node .claude/skills/db-blank-filler/scripts/twin_complete.mjs <WORK>`
-   Adds the UPC-A twin for every leading-zero EAN-13 AND the 0-prefixed EAN-13 twin for every
-   12-digit UPC-A. Sets `tire_barcode_aliases.is_primary_form` = 1 on the 12-digit UPC-A (PRIMARY,
-   owner policy), 0 on its EAN-13 twin. Clones the tires row under the twin barcode so the
-   alias<->tire validator invariant stays 1:1. Idempotent; self-checks 0 missing twins.
+2. **twin - barcode twin COLUMN completion, BOTH directions (free) - LEAN model, current**
+   `node scripts/tire-db-repair/11_twin_columns.mjs <WORK>`
+   ONE row per tire, NO duplicate twin rows (owner design 2026-07-28, superseding the earlier
+   row-materialization approach below). Adds two columns to `tires`: `barcode_upc` TEXT (12-digit
+   UPC-A form, the PRIMARY/display code when it exists) and `barcode_ean13` TEXT (13-digit form),
+   derived deterministically from the row's own `barcode` PK:
+   - 13-digit starting with `0` -> `barcode_upc` = drop leading zero, `barcode_ean13` = itself.
+   - 12-digit -> `barcode_upc` = itself, `barcode_ean13` = `'0' + itself`.
+   - 13-digit NOT starting with `0` (69x China codes, etc.) -> `barcode_ean13` = itself,
+     `barcode_upc` = NULL. NEVER fabricate a UPC-A form that does not exist.
+   - 8/14-digit or any non-12/13-digit shape -> both NULL.
+   The `barcode` PK column is never touched. Idempotent (pure re-derivation from `barcode` every
+   run); writes one summary audit row per direction to `remaining_blank_fill_audit`
+   (`action='twin_columns_backfill'`), not one row per tire. Provenance is not needed - the columns
+   are derived from the row's own barcode, not from an external source. The pure derivation
+   function (`deriveTwinColumns`) is unit-tested in
+   `scripts/tire-db-repair/11_twin_columns.test.mjs` (`node --test`).
+   Note: ~2,793 rows in the corpus already exist as pre-existing separate 12-digit/13-digit twin
+   PAIRS (each is its own row with its own `canonical_product_uid`). This stage fills columns on
+   each of those rows individually; deduplicating those pre-existing twin-pair ROWS is explicitly
+   OUT OF SCOPE for this stage.
+
+   **DEPRECATED / OWNER-REJECTED (kept for reference, do not use for new runs):**
+   `node .claude/skills/db-blank-filler/scripts/twin_complete.mjs <WORK>` - the original row-
+   materialization approach. It CLONED the tires row under each twin barcode (a genuine duplicate
+   row, same product, two barcodes), which doubled the tires table (82,673 -> 131,440 rows on the
+   real corpus). The owner rejected this design 2026-07-28 in favor of the lean column-based
+   approach above. The script and its test (`twin_complete.test.mjs`) remain in the repo for
+   historical reference and are still individually runnable, but MUST NOT be used for new twin work
+   - always use `11_twin_columns.mjs` instead.
 3. **style - model styling pass (free)**
    `node scripts/tire-db-repair/06_model_styling.mjs <WORK>`
 4. **codex - GPT-5.5 batches (PAID, owner-gated)** - see MPN backlog policy below.
@@ -102,10 +127,12 @@ Every data class this skill adds to the tire corpus MUST ship an app-level test 
 behavior, in the app's own test suites (`npx vitest run`), not just a skill-script smoke test. A
 promote should be treated as refused if a new data class landed without its contract test.
 Established contracts:
-- **EAN-13/UPC-A twin barcodes** (twin_complete.mjs, stage 2 above): flagship contract at
+- **EAN-13/UPC-A twin barcodes** (11_twin_columns.mjs, stage 2 above): flagship contract at
   `src/stores/eanUpcTwinDedup.store.test.ts` - scanning a tire's EAN-13 code and then its UPC-A twin
   (same physical tire) yields ONE product row with quantity 2, never a second product, and the
-  product's `primaryBarcode` is a single code (never a joined/dual-code string).
+  product's `primaryBarcode` is a single code (never a joined/dual-code string). This contract lives
+  at the scan-resolution layer (canonical GTIN normalization) and is unchanged by the lean
+  column-based corpus model - it never depended on the corpus materializing a second tires row.
 - **Part-number aliases** (03_part_number_aliases.mjs / apply_pn_picks.mjs below): contract at
   `src/server/tire-knowledge/tireKnowledgeIndex.partNumberAlias.test.ts` - a part-number alias
   resolves to its canonical product through the tire-knowledge index lookup path.
@@ -188,13 +215,18 @@ Every run is time-boxed (default 4h hard stop via `--deadline`). Always end with
 
 ## Smoke tests (prove the glue scripts)
 ```
-node --test .claude/skills/db-blank-filler/scripts/twin_complete.test.mjs \
+node --test scripts/tire-db-repair/11_twin_columns.test.mjs \
             .claude/skills/db-blank-filler/scripts/pipeline_driver.test.mjs \
             .claude/skills/db-blank-filler/scripts/turso_snapshot.test.mjs \
             .claude/skills/db-blank-filler/scripts/apply_pn_picks.test.mjs
 ```
-All must pass before trusting a run. They use a tiny in-temp fixture DB and never touch the
+All must pass before trusting a run. They use a tiny in-temp fixture DB (or, for
+`11_twin_columns.test.mjs`, pure-function unit tests with no DB at all) and never touch the
 packaged deliverable or live Turso.
+
+`twin_complete.test.mjs` (the deprecated row-materialization script's own test) still passes if
+run directly, but is no longer part of the standard smoke-test set above since the script itself
+is owner-rejected for new work.
 
 Plus the app-level runtime contract tests (owner law, see RUNTIME CONTRACT STAGE above):
 ```

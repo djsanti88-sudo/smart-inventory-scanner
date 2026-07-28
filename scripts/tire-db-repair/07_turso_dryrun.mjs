@@ -258,13 +258,16 @@ async function main() {
   field_completeness_score TEXT,
   missing_fields TEXT,
   source_count INTEGER,
-  model_display TEXT
+  model_display TEXT,
+  barcode_upc TEXT,
+  barcode_ean13 TEXT
 );`);
     const columns = [
       "barcode", "canonical_product_uid", "brand", "brand_normalized", "model", "model_normalized",
       "size", "raw_size_text", "load_index", "speed_rating", "load_range", "type", "season",
       "manufacturer_part_number", "barcode_type", "confidence", "current_status", "usable_for",
       "field_completeness_score", "missing_fields", "source_count", "model_display",
+      "barcode_upc", "barcode_ean13",
     ];
     stmts.push(...insertBatchStatements("staging_tires", columns, tires));
     const path = writeStagingFile(
