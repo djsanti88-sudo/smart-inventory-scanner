@@ -27,13 +27,15 @@ describe("importProductsCsv key safety (Task 1b audit: no id-reuse collision exi
     const firstId = store.getState().products.find((p) => p.name === "Widget A")!.id;
     expect(db.snapshot().products[firstId]?.name).toBe("Widget A");
 
-    // Second import of the SAME CSV text: the barcode is now already owned, so this row becomes a
-    // conflict (not applied) rather than a second product - proves buildProductImport's OWN dedupe
-    // guard (unrelated to idempotency keys) already prevents a real duplicate here.
+    // Second import of the SAME CSV text: the barcode is now already owned, so this row REFRESHES the
+    // existing product's descriptive fields (QA Task 7, rescue/qafix 29cdc63) rather than creating a
+    // second product - proving buildProductImport's OWN dedupe guard (unrelated to idempotency keys)
+    // already prevents a real duplicate here. (Pre-qafix this row was reported as a conflict; the
+    // certified refresh-on-reimport behavior reclassifies it as a refresh, never a new product.)
     const second = store.getState().importProductsCsv(csv);
     await store.getState().syncPending();
     expect(second.productsCreated, "conflicting barcode is not re-applied as a new product").toBe(0);
-    expect(second.conflicts.some((c) => c.code === "049000050103")).toBe(true);
+    expect(second.refreshed, "the already-owned barcode row refreshes the existing product").toBeGreaterThan(0);
 
     // Import a DIFFERENT product with a fresh, valid, unseeded barcode: distinct id, distinct key, both writes land.
     const third = store.getState().importProductsCsv("name,barcode\nWidget B,012345678905");

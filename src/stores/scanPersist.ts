@@ -4,7 +4,7 @@
 // unit-testable in isolation (no store, no Firebase). The store's `partialize` delegates here.
 
 import { sanitizeProduct, sanitizeReview, sanitizeScanEvent } from "@/services/security/serializers";
-import { effectiveClientAccessLevel, type AccessLevel } from "@/services/security/roleAccess";
+import { effectiveClientAccessLevel, isLocalRuntime, type AccessLevel } from "@/services/security/roleAccess";
 
 // Minimal shape of the persistable fields we read off the store state. Typed loosely on purpose so this
 // stays decoupled from the (large) ScanState type and free of import cycles.
@@ -33,8 +33,19 @@ export interface PersistableScanState {
   sessionHistory: unknown[];
 }
 
-/** Resolve the persistence access level from the signed-in uid (defaults to customer when unknown). */
+/**
+ * Resolve the PERSISTENCE access level from the signed-in uid (defaults to customer when unknown).
+ *
+ * QA Task 6 (data survival): the no-login / open-access LOCAL runtime is the owner's OWN device (no cloud
+ * backend, userId always null). Persist stripping must NOT run there or the owner's own data - aliases +
+ * product barcodes - is silently destroyed on every reload, turning a KNOWN scan into an unknown. So local
+ * runtime persists at the full "platform" shape. This override lives HERE, on the persist seam only, and
+ * is deliberately NOT in effectiveClientAccessLevel (the UI role hint) - decoupling data survival from UI
+ * customer gating so the customer role-gating + Model/name sanitization guarantee stays intact & provable.
+ * A genuine signed-in customer on a REAL cloud backend still resolves to "business" and stays stripped.
+ */
 export function persistAccessLevel(userId: string | null): AccessLevel {
+  if (isLocalRuntime()) return "platform";
   return effectiveClientAccessLevel({ uid: userId });
 }
 
