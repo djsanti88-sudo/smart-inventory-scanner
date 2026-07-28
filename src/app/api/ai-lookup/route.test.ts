@@ -302,7 +302,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
+      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.4-mini") {
         return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
@@ -319,9 +319,9 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(json.decision.corroborationPath).toBe("gpt_self_report");
     expect(json.providerNames).toContain("gpt-5.5-ladder");
     expect(json.reasonCode).toBe("gpt_ladder");
-    // The ladder call itself must have actually happened (model gpt-5.5), proving this wasn't a
+    // The ladder call itself must have actually happened (model gpt-5.4-mini), proving this wasn't a
     // coincidental pass from some other path.
-    expect(fetchSpy.mock.calls.some(([u, init]) => String(u).includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5")).toBe(true);
+    expect(fetchSpy.mock.calls.some(([u, init]) => String(u).includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.4-mini")).toBe(true);
   }, 40000);
 
   it("gpt-5.5 ladder rung is SKIPPED with a visible reason when no OpenAI key is configured, and never calls the endpoint", async () => {
@@ -385,7 +385,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
+      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.4-mini") {
         return new Response(JSON.stringify(weakGuessBody), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
@@ -451,7 +451,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
+      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.4-mini") {
         return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
@@ -469,7 +469,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     expect(json.decision.corroborationPath).toBe("gpt_self_report");
     expect(json.reasonCode).toBe("gpt_ladder");
     expect(json.results[0].productName).toBe("Acme Widget Pro 500");
-    expect(fetchSpy.mock.calls.some(([u, init]) => String(u).includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5")).toBe(true);
+    expect(fetchSpy.mock.calls.some(([u, init]) => String(u).includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.4-mini")).toBe(true);
   }, 40000);
 
   it("Task 3b: GPT HTTP 500 on the Plan D floor preserves the floor result untouched and records worst-case spend", async () => {
@@ -639,7 +639,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
+      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.4-mini") {
         return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
@@ -765,7 +765,7 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
     fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.5") {
+      if (u.includes("api.openai.com/v1/responses") && modelOf(init) === "gpt-5.4-mini") {
         return new Response(JSON.stringify(verifiedBody), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
