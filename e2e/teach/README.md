@@ -86,6 +86,11 @@ orchestrator writes shared knowledge (atomic; personas never write concurrently)
 5 keyboard-wedge scanner · 6 refresh + duplicate resilience · 7 live decode + ladder trace (budgeted) ·
 8 import clean CSV · 9 import messy formats · 10 reconcile equal/different · 11 deep tenant isolation (L6).
 
+> **Lesson 7 is code-gated off by default.** It fires up to 3 real paid `/api/ai-lookup` calls.
+> It only runs when `TEACH_ALLOW_LIVE_DECODE=1` is set in the environment; otherwise it skips with an
+> honest logged reason (`live_decode_not_opted_in`) and spends nothing. This is enforced in code
+> (`lessons/7-live-decode-ladder-trace.mjs`), not just by this note.
+
 ## Tooling
 `@playwright/cli` (terminal Playwright/MCP driver) + official planner/generator/healer agents
 (`.claude/agents/playwright-test-*.md`, `.mcp.json`) + 6 project skills under `.claude/skills/`

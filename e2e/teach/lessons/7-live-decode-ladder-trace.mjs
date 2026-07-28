@@ -42,6 +42,25 @@ export default {
     const learned = {};
     const notes = [];
 
+    // OWNER-GATED live paid spend: this lesson clicks the "Look up with AI"
+    // button, firing up to 3 real POST /api/ai-lookup calls that burn provider
+    // budget against the live deployment. It must NEVER run on a default/bare
+    // `npm run teach` invocation. Require an explicit env opt-in
+    // (TEACH_ALLOW_LIVE_DECODE=1); without it, skip with an honest logged
+    // reason instead of silently spending money. This is a code-enforced gate,
+    // not just README convention (Codex-19 Finding 3).
+    if (process.env.TEACH_ALLOW_LIVE_DECODE !== '1') {
+      const skipNote =
+        'live decode SKIPPED: paid /api/ai-lookup spend is gated - set TEACH_ALLOW_LIVE_DECODE=1 to opt in (owner-gated live run).';
+      if (typeof console !== 'undefined' && console.log) console.log(`[teach] ${skipNote}`);
+      return {
+        pass: true,
+        findings: [],
+        learned: { skipped: true, reason: 'live_decode_not_opted_in' },
+        notes: skipNote,
+      };
+    }
+
     if (deploymentMode !== 'live_auth') {
       return {
         pass: true,
