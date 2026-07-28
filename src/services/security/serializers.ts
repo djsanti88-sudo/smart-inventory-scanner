@@ -16,14 +16,23 @@ export interface CustomerProduct {
   location: string;
   notes: string;
   status: string;
+  verified: boolean;
+  businessId: string;
 }
+
+// Fields whose absence must NOT be coerced to "" - `verified` is a boolean trust flag (defaulting a
+// missing value to "" would poison the resolver trust gate's `p.verified === true` check with a
+// truthy-but-wrong-typed value in some contexts and is simply the wrong type for a boolean field).
+const BOOLEAN_PRODUCT_FIELDS = new Set<string>(["verified"]);
 
 /** Product → role-shaped. platform: full object untouched. business: product-facing allowlist only. */
 export function sanitizeProduct<T extends Record<string, unknown>>(product: T, level: AccessLevel): T | CustomerProduct {
   if (level === "platform") return product;
   const p = product as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  for (const f of CUSTOMER_SAFE_PRODUCT_FIELDS) out[f] = p[f] ?? "";
+  for (const f of CUSTOMER_SAFE_PRODUCT_FIELDS) {
+    out[f] = BOOLEAN_PRODUCT_FIELDS.has(f) ? p[f] === true : p[f] ?? "";
+  }
   return out as unknown as CustomerProduct;
 }
 

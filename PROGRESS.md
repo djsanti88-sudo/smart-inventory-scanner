@@ -21,6 +21,54 @@ The Vercel customer-facing Production alias also resolves to an older deployment
 Production deployment. Release proof must refresh Vercel inventory and test both until the alias is
 reconciled. Production remains blocked pending the exact owner phrase `DEPLOY THIS SHA`.
 
+## Checkpoint 2026-07-22: Master plan Phases 1-6 COMPLETE; Teach Bot harness in progress; 2 real bugs found and being fixed
+
+Master plan (`docs/superpowers/plans/2026-07-19-master-plan.md`) Phases 1-6 are COMPLETE per its own
+D1-D11 defect register (all items resolved across the dated checkpoints below this one). Work since
+the 2026-07-20 P5/P5b/P6 checkpoint:
+
+- **Stress marathon (2026-07-22, COMPLETE):** 998-code marathon + 100-code re-ladder run at 99/100;
+  ladder repaired (budgets/preflight/4xx-$0 handling), canonical tire identity + idempotent enrichment
+  shipped. See memory `stress-marathon-shipped` for the full commit range (NOT pushed).
+- **Teach Bot harness (in progress, two branches):**
+  - `feat/teach-bot` (this repo's checked-out branch): Batch A modules shipped and committed
+    (`d09fa84 test(teach): finish sheets generator + node:test suite (Batch A)`) -
+    `e2e/teach/{knowledge,ladder,manifest,sheets,triage}.mjs` + matching `node --test` suites, backing
+    `testing/app-knowledge`, `testing/specs`, `testing/tests/{candidates,permanent}`, and
+    `playwright.teach.config.ts` (drives the real deployed app, not mock E2E - owner-gated like other
+    live-app runs). The package.json `teach` / `teach:cleanup` scripts point at `e2e/teach/teach.mjs`
+    and `e2e/teach/cleanup.mjs`, which do not exist yet on this branch as of 2026-07-22 - orchestrator
+    entry point still to be built.
+  - `feat/teach-bot-clean`: a separate, isolated-worktree build of the full harness (3 personas,
+    cumulative lessons, diagnose-only, ladder trace, budget caps), 127/127 + self-check, NOT run
+    against a live target and NOT pushed. Built in a separate worktree specifically to avoid
+    interfering with the live session on `feat/teach-bot`. See memory `teach-bot-harness`.
+- **2 confirmed bugs, fixes in progress (uncommitted on `feat/teach-bot`):**
+  1. **Trust-field persist strip** - `src/services/security/sensitiveFields.ts` /
+     `serializers.ts`: `CUSTOMER_SAFE_PRODUCT_FIELDS` was missing `verified` and `businessId`. On a
+     customer-role persist/reload round trip those fields were stripped, so the resolver trust gate
+     (`matchProductByIdentifiers`, `p.businessId === businessId && p.verified === true`) could never
+     match an already-verified product again after a reload - a real resolver regression, not just a
+     display issue. Fix adds both fields to the customer-safe allowlist and fixes boolean coercion
+     (`p[f] === true` instead of `p[f] ?? ""`) so a missing `verified` never becomes a truthy string.
+     Regression test added (`identifierPersist.test.ts`).
+  2. **Reconcile header map** - `src/services/reconcile/shopwareCsvAdapter.ts`: `findHeaderKey`
+     compared raw candidate strings against normalized (lowercased, whitespace-to-underscore) headers,
+     so a candidate like `"pn"` or `"item no."` written in human-readable form could silently
+     mismatch. Fix normalizes candidates the same way headers are normalized before comparing, and
+     adds missing synonyms (`p/sn`, `us_number`, `stock_number`). This matches master-plan defect D9
+     ("Reconcile header matching is a 4-name exact list; one miss rejects the whole file").
+  - Both fixes are in the working tree, tests updated alongside, NOT yet committed as of this
+    checkpoint (unverified whether full gates have been re-run since these edits - confirm before
+    calling this Phase-additional-work done).
+- **2 deploy regressions found and under local verification:** commit `41416dc fix(cloud): four
+  real-backend sync bugs caught by re-enabling the firebase E2E; business list shows names; suite
+  green twice` re-enabled the Firestore-emulator E2E path and caught real-backend sync defects that
+  the mock-backend suite could not see. (Unverified as of 2026-07-22 which specific 2 of the 4 fixed
+  bugs are meant by "2 deploy regressions" in the owner's session note - the commit message covers 4;
+  cross-check `.superpowers/sdd/` or the commit diff before quoting exact bug identities elsewhere.)
+- Push, PR, and production promote remain owner-gated; none of the above has been pushed.
+
 ## 2026-07-20 Phase 4 Stage A: Universal Import (ship gate COMPLETE, merge owner-gated)
 
 Branch `feat/decode-ladder-goupc`. Plan: `docs/superpowers/plans/2026-07-20-phase4-universal-import.md`

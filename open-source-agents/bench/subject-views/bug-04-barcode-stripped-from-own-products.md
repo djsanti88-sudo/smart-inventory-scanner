@@ -1,0 +1,83 @@
+# Case: bug-04-barcode-stripped-from-own-products
+## Task prompt (what the subject model sees)
+Review the following code for real defects. This is a security/privacy module for a multi-tenant inventory app that defines which product fields are safe to persist/render to a customer (non-platform-owner) role, versus platform-only fields that must never leave the server.
+## Input code
+```ts
+// src/services/security/sensitiveFields.ts
+// Central denylist of fields that customer roles must NEVER receive (UI, API, exports, localStorage).
+// PURE, no imports. The single source of truth used by every serializer + the SecurityLeakBot.
+
+export const SENSITIVE_FIELDS = [
+  "rawScannedCode", "rawCode", "raw_code",
+  "cleanCode", "clean_code",
+  "normalizedCode", "normalized_code", "normalizedCandidates", "normalized_candidates",
+  "barcode", "barcodes", "primaryBarcode", "primary_barcode",
+  "aliases", "aliasCodes", "alias_codes", "rawCodeExample", "raw_code_example",
+  "gtin", "upc", "ean",
+  "rawQrValue", "raw_qr_value",
+  "vendorCodes", "vendor_codes",
+  "sourceUrls", "source_urls", "sourceEvidence", "source_evidence", "evidence", "verifiedFacts",
+  "providerName", "provider_name", "providerNames", "aiProvider", "ai_provider",
+  "aiPrompt", "ai_prompt", "aiEvidence", "ai_evidence",
+  "decodeTrace", "decode_trace", "lookupPath", "lookup_path",
+  "globalCatalogId", "global_catalog_id", "globalAliasId", "global_alias_id",
+  "internalConfidenceDebug", "internal_confidence_debug",
+  "prompt", "fullAliasMap", "catalogIndex", "debugExport", "internalAuditDiagnostics",
+  "scanEventIds", "scan_event_ids", "aliasesSeen", "aliases_seen", "idempotencyKey", "idempotency_key",
+] as const;
+
+const SENSITIVE_SET = new Set<string>(SENSITIVE_FIELDS.map((f) => f.toLowerCase()));
+
+export function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_SET.has(key.toLowerCase());
+}
+
+/** Recursively strip sensitive keys from an object/array. Returns a NEW value; never mutates input. */
+export function stripSensitive<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => stripSensitive(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (isSensitiveKey(k)) continue;
+      out[k] = stripSensitive(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
+/** Customer-safe product-facing fields (allowlist). Used to BUILD sanitized shapes, not just strip. */
+export const CUSTOMER_SAFE_PRODUCT_FIELDS = [
+  "id", "name", "brand", "category", "specsShort", "primarySku", "imageUrl", "location", "notes", "status",
+] as const;
+
+// A customer's OWN pending Needs-Review item — only the fields they need to SEE + ACT on it, plus their
+// own scanned code (cleanCode, already shown to all roles in LiveScanFeed). EXCLUDES every provider/decode
+// internal (providerName, sourceUrls, verifiedFacts, decodeProviderSummaries, evidence/crossCheck/confidence)
+// AND every OTHER reusable code (rawCode/normalizedCandidates/suggestedAliases/gtin/upc/ean/primaryBarcode/
+// primarySku/productUrl/specsFull) so no reusable alias/catalog data reaches a customer's disk.
+export const CUSTOMER_SAFE_REVIEW_FIELDS = [
+  "id", "businessId", "sessionId", "cleanCode",
+  "suggestedProductName", "suggestedBrand", "suggestedCategory", "suggestedSpecsShort", "suggestedImageUrl",
+  "reason", "blockingReasons", "hasSuggestion", "decodeStatus", "status",
+  "createdAt", "resolvedAt", "resolvedBy", "resolutionAction", "syncStatus", "idempotencyKey",
+  // STABLE-ID FIX: a LOCAL product id (not a barcode/gtin/reusable code), safe to persist - lets
+  // resolveUnknown re-link this review's own provisional placeholder by id after a customer reload
+  // instead of by reconstructed name (which collides when two codes share a prefix-floor brand).
+  "provisionalProductId",
+  "importQuantity",
+] as const;
+
+// A customer's OWN scan-feed event survives reload as an activity log (Product, Qty after, Status, Reason,
+// Saved, Barcode). INCLUDES cleanCode: the code on THIS row is the shop's own physical scan of its own
+// label - the shop's own data, not a foreign tenant's - so it must survive reload the same way Needs
+// Review already keeps it (CUSTOMER_SAFE_REVIEW_FIELDS) at this same access level (QA fix #15: without it
+// the audit trail loses what was physically scanned after a reload). This is NOT the reusable code->product
+// alias/catalog database: that stays excluded via rawCode, normalizedCandidates, matchType, codeType,
+// decodeNote, notes, syncError (platform-only decode traces + internal formatting) which remain stripped.
+export const CUSTOMER_SAFE_SCANEVENT_FIELDS = [
+  "id", "businessId", "sessionId", "matchedProductId", "cleanCode", "location",
+  "status", "resolverStatus", "reason", "quantityDelta", "quantityAfterScan",
+  "decodeStatus", "syncStatus", "createdAt", "source", "idempotencyKey",
+] as const;
+```

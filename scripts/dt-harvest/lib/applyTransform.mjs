@@ -149,7 +149,7 @@ export function toCorpusRow(tireRow) {
     usable_for: "auto_count_candidate",
     field_completeness_score: "",
     missing_fields: "",
-    source_count: 0,
+    source_count: 1,
     source: "discounttire",
   };
 }

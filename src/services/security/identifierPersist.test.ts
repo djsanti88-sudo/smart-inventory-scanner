@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { sanitizeProduct } from "@/services/security/serializers";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
+import { matchProductByIdentifiers } from "@/services/aliasMatcher";
+import type { CleanedCode, Product } from "@/types";
 
 // Owner rule (2026-07-22, encoded in src/components/FinalCountTable.tsx:129-131): the barcode a shop
 // scanned onto THEIR OWN product row is THEIR data - already rendered to every role in the UI - so
@@ -60,5 +62,39 @@ describe("identifier fields survive customer ('business') persistence (2026-07-2
     // The reusable alias/vendor data on the product is still gone.
     expect(product1.aliases).toBeUndefined();
     expect(product1.vendorCodes).toBeUndefined();
+  });
+
+  // Regression for the trust-gate-breaking bug: CUSTOMER_SAFE_PRODUCT_FIELDS omitted `verified` and
+  // `businessId`, so after a customer persist/reload round-trip a verified product's own identifier
+  // (primaryBarcode/gtin/upc/ean) survived (per the fix above) but the resolver trust gate in
+  // matchProductByIdentifiers (src/services/aliasMatcher.ts:111, `p.businessId === businessId &&
+  // p.verified === true`) could never match it again - the shop's own already-verified products stopped
+  // resolving as "known" after every reload. This proves both fields round-trip AND the trust gate still
+  // matches post-reload.
+  it("sanitizeProduct(product, 'business') preserves verified and businessId", () => {
+    const verifiedProduct = { ...product, businessId: "biz-1", verified: true };
+    const p = sanitizeProduct(verifiedProduct, "business") as Record<string, unknown>;
+    expect(p.verified).toBe(true);
+    expect(p.businessId).toBe("biz-1");
+  });
+
+  it("a verified product still resolves as known via matchProductByIdentifiers after a full customer persist round-trip", () => {
+    const businessId = "biz-1";
+    const state = makeState();
+    state.products[0].verified = true;
+
+    const persisted = buildPersistedScanState(state, "business");
+    const rehydrated = JSON.parse(JSON.stringify(persisted)) as { products: Product[] };
+
+    const cleaned: CleanedCode = {
+      rawCode: "0123456789012",
+      cleanCode: "0123456789012",
+      normalizedCandidates: ["0123456789012"],
+    };
+
+    const resolution = matchProductByIdentifiers(cleaned, rehydrated.products, businessId);
+    expect(resolution, "the rehydrated product's own primaryBarcode still resolves as known").not.toBeNull();
+    expect(resolution?.matchType).toBe("primary_barcode");
+    expect(resolution?.productId).toBe("prod-1");
   });
 });

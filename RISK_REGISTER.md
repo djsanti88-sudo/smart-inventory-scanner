@@ -7,11 +7,11 @@ Per `ENGINEERING_DOCTRINE.md`. Significant tasks log risks here: risk, severity,
 | # | Risk | Severity | Likelihood | Mitigation | Approval | Status |
 |---|------|----------|-----------|------------|----------|--------|
 | 1 | Junk cleanup deletes real inventory data; `inventory` has no git safety net | High | Low | Full JSON backup auto-downloads BEFORE removal; persisted `lastCleanupBackup` + in-app Undo; only junk-named, unreferenced rows removed | Owner approved A/B/C plan | Mitigated |
-| 2 | Removing a product/alias breaks the deterministic resolver | Med | Low | A product/alias is removed only when no surviving good count references it; snapshot enables exact restore | — | Mitigated |
-| 3 | Bumping persist version to add a setting wipes learned data (migrate resets to seed) | High | — | Did NOT bump version; read `decodeBudgetMs` defensively (`?? 13000`) | — | Avoided |
-| 4 | Client sets an abusive decode budget (e.g. 10 min) | Low | Low | Server-side clamp to [5000, 20000] in `decodeBudget.ts` | — | Mitigated |
-| 5 | Firewall expansion over-blocks a real product name | Low | Low | Conservative phrase/word-boundary patterns; regression test asserts real names still pass | — | Mitigated |
-| 6 | Undo overwrites scans made after a cleanup | Med | Low | Undo restores additively (merge by id), never a full-state overwrite | — | Mitigated |
+| 2 | Removing a product/alias breaks the deterministic resolver | Med | Low | A product/alias is removed only when no surviving good count references it; snapshot enables exact restore | N/A | Mitigated |
+| 3 | Bumping persist version to add a setting wipes learned data (migrate resets to seed) | High | N/A | Did NOT bump version; read `decodeBudgetMs` defensively (`?? 13000`) | N/A | Avoided |
+| 4 | Client sets an abusive decode budget (e.g. 10 min) | Low | Low | Server-side clamp to [5000, 20000] in `decodeBudget.ts` | N/A | Mitigated |
+| 5 | Firewall expansion over-blocks a real product name | Low | Low | Conservative phrase/word-boundary patterns; regression test asserts real names still pass | N/A | Mitigated |
+| 6 | Undo overwrites scans made after a cleanup | Med | Low | Undo restores additively (merge by id), never a full-state overwrite | N/A | Mitigated |
 
 No production systems, paid APIs, new dependencies, or external calls were involved. All proof was mocked/local (no live tokens).
 
@@ -21,11 +21,11 @@ No production systems, paid APIs, new dependencies, or external calls were invol
 |---|------|-----|-----------|------------|----------|--------|
 | 1 | Private/shop/customer data leaks into the global catalog | High | Low | Type separation (CatalogEntry has no private fields); `sanitizeCatalogEntry` drops unknown fields + masks PII/cost; overrides/feedback are businessId-scoped; leak test | Owner rules #3/#4/#6 | Mitigated |
 | 2 | AI overwrites a verified catalog entry | High | Low | `applyAiCandidate` never changes a verified entry's identity/status (observe-only); AI writes pending; dedicated test | Owner rules #1/#2 | Mitigated |
-| 3 | Catalog-first wiring regresses scan/auto-decode | Med | Low | Pure `decideLookup` + tests; resolver untouched; catalog consulted only on needs_review; full regression suite green | — | Mitigated |
+| 3 | Catalog-first wiring regresses scan/auto-decode | Med | Low | Pure `decideLookup` + tests; resolver untouched; catalog consulted only on needs_review; full regression suite green | N/A | Mitigated |
 | 4 | Recommendation engine recommends removing a real product | High | Low | Seed/manual + still-counted products never offered; verified-status gate; weak/conflict default unchecked; backup + Undo + final owner click | Owner Q5/rules #7-9 | Mitigated |
-| 5 | False-green tests (wrong working directory) | Med | Observed | Always `cd` into inventory before vitest/tsc/eslint; re-ran correctly and fixed the 3 hidden failures | — | Resolved |
-| 6 | Stored URLs unsafe (javascript:/file:) | Low | Low | `safeHttpUrl` restricts catalog URLs to http(s) | — | Mitigated |
-| 7 | localStorage growth (catalog/feedback) | Med | Low | Feedback ring-buffer (cap 500); catalog bounded by distinct barcodes; persist try/caught | — | Mitigated |
+| 5 | False-green tests (wrong working directory) | Med | Observed | Always `cd` into inventory before vitest/tsc/eslint; re-ran correctly and fixed the 3 hidden failures | N/A | Resolved |
+| 6 | Stored URLs unsafe (javascript:/file:) | Low | Low | `safeHttpUrl` restricts catalog URLs to http(s) | N/A | Mitigated |
+| 7 | localStorage growth (catalog/feedback) | Med | Low | Feedback ring-buffer (cap 500); catalog bounded by distinct barcodes; persist try/caught | N/A | Mitigated |
 
 No cloud dependency added (owner rule #11). No live AI, no deploy, no persist-version bump.
 
@@ -127,8 +127,8 @@ No cloud dependency in tests, no live AI/Firecrawl in tests, no destructive migr
 
 | # | Risk | Sev | Likelihood | Mitigation | Approval | Status |
 |---|------|-----|-----------|------------|----------|--------|
-| 1 | Corpus row 086699294739 named `pilot_alpin_sport_4_suv` but external evidence + fixture correction say Michelin Pilot Sport 4 SUV (wrong model name would mis-grade/mislabel) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | — | Open |
-| 2 | Corpus row 8859305548272 size 265/75R16 vs Go-UPC 245/75R16 (size mismatch) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | — | Open |
+| 1 | Corpus row 086699294739 named `pilot_alpin_sport_4_suv` but external evidence + fixture correction say Michelin Pilot Sport 4 SUV (wrong model name would mis-grade/mislabel) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | N/A | Open |
+| 2 | Corpus row 8859305548272 size 265/75R16 vs Go-UPC 245/75R16 (size mismatch) | Low | Confirmed | Fix at next tire-corpus regeneration (out of scope for this task) | N/A | Open |
 
 ## Current open risks (2026-07-12, branch `feat/decode-ladder-goupc`)
 

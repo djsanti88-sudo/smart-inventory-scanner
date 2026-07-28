@@ -1,0 +1,7 @@
+# Defects
+
+1. **The global denylist strips fields that the customer-safe contracts explicitly require.** `cleanCode` is in `SENSITIVE_FIELDS` and also in both `CUSTOMER_SAFE_REVIEW_FIELDS` and `CUSTOMER_SAFE_SCANEVENT_FIELDS`. A serializer that builds an allowlisted review/feed row and then applies the advertised central `stripSensitive` policy removes the customer's own scanned barcode. After reload, the activity row and review item can no longer show which physical code was scanned, contrary to the documented behavior.
+
+2. **A customer's own product barcode cannot survive the product serializer.** `barcode` and `primaryBarcode` are globally denied and neither appears in `CUSTOMER_SAFE_PRODUCT_FIELDS`. Thus a shop can save a product tied to its label, but the customer-facing persisted/rendered copy loses that identifier and cannot reliably display or reuse the mapping after reload. Sensitivity must depend on ownership and entity context; a field-name-only recursive denylist cannot distinguish a tenant's own scan/product code from platform-wide reusable catalog data.
+
+3. **`idempotencyKey` is simultaneously forbidden and declared customer-safe.** It appears in the denylist and in both review/feed allowlists. If an allowlist builder is considered sufficient, it leaks a field the module says must never leave the server; if `stripSensitive` is applied afterward, the supposedly persisted sync identity disappears. The two exported policies cannot both enforce their stated contracts.

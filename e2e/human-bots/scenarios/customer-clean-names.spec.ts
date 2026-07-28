@@ -28,17 +28,20 @@ const seed = {
       syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
     }],
   },
-  version: 6,
 };
 
 test("CustomerCleanNamesBot: Counts shows clean Brand Model Size, no UPC/Fits (P5)", async ({ page }) => {
   mkdirSync(PROOF, { recursive: true });
   await page.goto("/scan");
+  // Wait for StoreHydrator's persist.rehydrate() to finish (it reads localStorage on mount, which
+  // would otherwise clobber a setState seed applied before hydration completes) before seeding state
+  // directly through the live store.
+  const body = page.getByTestId("final-count-body");
+  await expect(body).toBeVisible();
   await page.evaluate((state) => {
     const store = (window as unknown as { __scanStore?: { setState: (partial: unknown) => void } }).__scanStore;
     store?.setState(state);
   }, seed.state);
-  const body = page.getByTestId("final-count-body");
   await expect(body).toContainText("Defender LTX M/S 275/70R18");
   const text = await body.innerText();
   expect(text, "no raw UPC prefix shown to customer").not.toContain("UPC 086699205636");

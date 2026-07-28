@@ -1224,16 +1224,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       }
     };
 
-    // P6 C2: set-once stamp of this business's first EVER counted scan (any path). Called AFTER the
-    // count has already been applied at each call site (never before - TOP-LEVEL LAW: counting is never
-    // gated on this). Idempotent: a no-op once firstScanAt is already set, so re-scans/re-entries never
-    // overwrite the original timestamp. Local Zustand-persisted state only (MOCK-BACKEND rule, review
-    // F5) - live-auth mode mirroring this to the business doc is deferred, not built here.
-    const markFirstScanIfNeeded = () => {
-      if (get().firstScanAt != null) return;
-      set({ firstScanAt: now() });
-    };
-
     // Owner feature (2026-07-22): automatically archive the CURRENT session's live scanFeed into
     // sessionHistory the instant it ends or rotates away - called BEFORE the caller wipes scanFeed/
     // finalCounts, so a session with at least one scan is never silently lost. A zero-scan session is
@@ -1248,6 +1238,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       const entry = buildSessionHistoryEntry(s.currentSession, s.scanFeed, getProductName, now());
       if (!entry) return;
       set((cur) => ({ sessionHistory: appendSessionHistory(cur.sessionHistory, entry) }));
+    };
+
+    // P6 C2: set-once stamp of this business's first EVER counted scan (any path). Called AFTER the
+    // count has already been applied at each call site (never before - TOP-LEVEL LAW: counting is never
+    // gated on this). Idempotent: a no-op once firstScanAt is already set, so re-scans/re-entries never
+    // overwrite the original timestamp. Local Zustand-persisted state only (MOCK-BACKEND rule, review
+    // F5) - live-auth mode mirroring this to the business doc is deferred, not built here.
+    const markFirstScanIfNeeded = () => {
+      if (get().firstScanAt != null) return;
+      set({ firstScanAt: now() });
     };
 
     // Serialize cloud drains: rapid scans each call syncPending, and overlapping async drains would
@@ -1434,6 +1434,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             products: cleared.products,
             aliases: cleared.aliases,
             sessions: cleared.sessions,
+            // The old tenant's session must not survive: ensureAutoSession would ADOPT it (spreading
+            // its old businessId) and enqueue foreign SAVE_SESSIONs the new tenant's rules deny
+            // forever. cleared.currentSession is null, so the next scan mints a fresh session here.
+            // NOTE: pendingSyncQueue is deliberately NOT filtered here - the sync drain is tenant-aware
+            // (tenantQueueIsolation.store.test.ts), so foreign-tenant items are preserved and drain
+            // when their own tenant becomes active again, never clogging under the wrong tenant.
             currentSession: cleared.currentSession,
             sessionId: cleared.sessionId,
             scanFeed: cleared.scanFeed,
@@ -1462,7 +1468,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const loader = deps.loadBusinessData;
         if (cloudBackend && loader) {
           // Load THIS business's products/aliases from Firestore (replace, never merge another tenant's
-          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI.
+          // data), then drain anything queued. Failure is surfaced, not fatal to the local UI. The
+          // pending-aware finalCounts merge below keeps this device's unsynced increments authoritative,
+          // so no pre-drain is needed: a local row still referenced by an unsynced INCREMENT_COUNT queue
+          // item wins over the remote snapshot until it syncs (proven by refreshWipe tests a3/a4).
           void (async () => {
             try {
               const data = await loader(businessId, userId);
@@ -2781,6 +2790,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const cleanCodeSanitized = sanitizeForAiLookup(review.cleanCode).clean;
 
         try {
+          // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
+          // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
           const res = await fetch("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -3067,6 +3078,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const clampedBudgetMs = clampDecodeBudgetMs(s.decodeBudgetMs);
           const abortController = new AbortController();
           const abortTimer = setTimeout(() => abortController.abort(), clampedBudgetMs + 7000);
+          // D4-follow-up: live-auth mode requires idToken + businessId on every POST
+          // (route.ts:294-324) or this 401s "unauthenticated"; mock mode resolves {} and both call
+          // legs are unaffected. aiRequestAuth is resolved inline on each leg below.
           const decodeOnce = async () => {
             let res: Response;
             try {
@@ -4230,6 +4244,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           results?: AiLookupResult[];
         };
         try {
+          // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
+          // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
           const res = await fetch("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -6218,6 +6234,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
         patch({ correctionRecheckStatus: "requested", correctionRecheckedAt: now() });
         try {
+          // D4-follow-up: live-auth mode requires idToken + businessId on every POST (route.ts:294-324)
+          // or this 401s "unauthenticated" - mock mode resolves {} and is unaffected.
           const res = await fetch("/api/ai-lookup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
