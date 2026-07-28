@@ -1114,3 +1114,142 @@ test("OPEN-1: the real checked-in APPROVED_PN_KEY_DROPS.csv contains exactly the
     assert.match(parts[2], /^\d{4}-\d{2}-\d{2}$/, `row lacks a decision date: ${line}`);
   }
 });
+
+// ===============================================================================================
+// Fix round 3 (live promote #2 gap, task-PROMOTE2-EXEC-report.md): FULL DOUBLE-PROMOTE cycle.
+// Promote once, regenerate the staging package (one extra alias row = measurably different
+// generation), promote again. The old refusal ("NEW_TABLES live names already exist") must be
+// gone: the three NEW_TABLES now get the same rename-aside _old_<ts> treatment as
+// tires/tire_part_numbers. Then rollback of the SECOND promote must restore the FIRST promote's
+// state exactly - including the three NEW_TABLES' generation-1 content.
+// ===============================================================================================
+
+test("ROUND-3: full double-promote cycle - second promote succeeds, both _old_ generations coexist, rollback restores promote-#1 state exactly", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // ---- Promote #1 (first-promote path: NEW_TABLES created from staging) ----
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const promote1 = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "R3GEN1" });
+  assert.equal(promote1.code, 0, promote1.stderr);
+  assert.match(promote1.stdout, /first-promote path: NEW_TABLES created from staging/);
+
+  const c1 = createClient({ url: dbUrl });
+  const gen1TiresCount = await rowCount(c1, "tires");
+  const gen1PnCount = await rowCount(c1, "tire_part_numbers");
+  const gen1AliasCount = await rowCount(c1, "tire_product_part_number_aliases");
+  const gen1CanonicalCount = await rowCount(c1, "canonical_tire_products");
+  const gen1ProvenanceCount = await rowCount(c1, "provenance");
+  c1.close();
+
+  // ---- "New package": regenerate staging with ONE extra alias row so generation 2 is
+  // measurably different from generation 1 (gen2 alias count = gen1 + 1). The new row reuses an
+  // EXISTING canonical_product_id from the real dataset so verify's orphan gate F stays green. ----
+  const aliasFile = join(stagingDir, "03_staging_tire_product_part_number_aliases.sql");
+  const aliasOrig = readFileSync(aliasFile, "utf8");
+  const existingCanonicalId = aliasOrig.match(/\(\s*'(TIRE_[0-9A-F]+)'/)[1];
+  writeFileSync(
+    aliasFile,
+    aliasOrig +
+      "\nINSERT OR REPLACE INTO staging_tire_product_part_number_aliases (canonical_product_id, normalized_part_number, display_part_number, source, trust_color, confidence_score, is_unambiguous)\nVALUES\n" +
+      `  ('${existingCanonicalId}', 'R3NEWALIAS', 'R3NEWALIAS', 'test_round3_regen', 'green', 100, 1);\n`,
+    "utf8"
+  );
+
+  // ---- Promote #2 (second-promote path: NEW_TABLES renamed aside). Fresh backup is REQUIRED
+  // (live changed after promote #1 AND staging content changed) - exactly the real operational
+  // sequence from task-PROMOTE2-EXEC-report.md. ----
+  const backup2 = runCli(["backup"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "R3BACKUP2" });
+  assert.equal(backup2.code, 0, backup2.stderr);
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  const verify2 = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verify2.code, 0, verify2.stderr + verify2.stdout);
+  assert.match(verify2.stdout, /PASS PN_live_part_number_keys_preserved: missing=0, approved=0, unapproved=0/);
+  assert.match(verify2.stdout, /ALL GATES PASSED/);
+
+  const promote2 = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "R3GEN2" });
+  // THE round-3 fix: this is the exact call that live promote #2 was refused on. Refusal must be gone.
+  assert.equal(promote2.code, 0, promote2.stderr + promote2.stdout);
+  assert.doesNotMatch(promote2.stderr ?? "", /REFUSING/);
+  assert.match(promote2.stdout, /second-promote path: renaming aside tire_product_part_number_aliases, canonical_tire_products, provenance/);
+  assert.match(promote2.stdout, /PASS smoke_index_presence/);
+  assert.match(promote2.stdout, /PASS smoke_pn_key_preservation: missing=0, approved=0, unapproved=0/);
+  assert.match(promote2.stdout, /SMOKE TEST PASSED/);
+
+  const c2 = createClient({ url: dbUrl });
+  // All five live tables swapped to generation 2 (alias table proves it: +1 row, new key present).
+  assert.equal(await rowCount(c2, "tires"), gen1TiresCount);
+  assert.equal(await rowCount(c2, "tire_part_numbers"), gen1PnCount);
+  assert.equal(await rowCount(c2, "tire_product_part_number_aliases"), gen1AliasCount + 1);
+  assert.equal(await rowCount(c2, "canonical_tire_products"), gen1CanonicalCount);
+  assert.equal(await rowCount(c2, "provenance"), gen1ProvenanceCount);
+  const newAliasRow = await c2.execute("SELECT * FROM tire_product_part_number_aliases WHERE normalized_part_number = 'R3NEWALIAS'");
+  assert.equal(newAliasRow.rows.length, 1, "generation-2 alias row must be live after promote #2");
+
+  // Both _old_ generations coexist: GEN1 (tires/tpn only - first promote had no NEW_TABLES to
+  // rename aside) and GEN2 (all five).
+  for (const t of ["tires_old_R3GEN1", "tire_part_numbers_old_R3GEN1",
+                   "tires_old_R3GEN2", "tire_part_numbers_old_R3GEN2",
+                   "tire_product_part_number_aliases_old_R3GEN2",
+                   "canonical_tire_products_old_R3GEN2", "provenance_old_R3GEN2"]) {
+    assert.ok(await tableExists(c2, t), `expected ${t} to exist after the double promote`);
+  }
+  assert.ok(!(await tableExists(c2, "tire_product_part_number_aliases_old_R3GEN1")), "first promote had no prior alias generation to rename aside");
+
+  // Index-name carryover fix: every required index must be attached to the LIVE table, not to an
+  // _old_ generation (the pre-fix CREATE INDEX IF NOT EXISTS would have silently left the fresh
+  // tables unindexed here).
+  const idxRes = await c2.execute("SELECT name, tbl_name FROM sqlite_master WHERE type='index'");
+  const idxByName = new Map(idxRes.rows.map((r) => [String(r.name), String(r.tbl_name)]));
+  assert.equal(idxByName.get("idx_tire_barcode"), "tires");
+  assert.equal(idxByName.get("idx_tire_part_number"), "tires");
+  assert.equal(idxByName.get("idx_tire_uid"), "tires");
+  assert.equal(idxByName.get("idx_tire_part_numbers_uid"), "tire_part_numbers");
+  assert.equal(idxByName.get("idx_tire_pn_aliases_normalized"), "tire_product_part_number_aliases");
+
+  // Operational sentinels untouched through both promotes.
+  assert.equal(await rowCount(c2, "retail"), 1);
+  assert.equal(await rowCount(c2, "decode_cache"), 1);
+  c2.close();
+
+  // ---- Rollback of promote #2: must restore promote #1's state EXACTLY, including the three
+  // NEW_TABLES' generation-1 content (rename-back, NOT drop). ----
+  const rollback = runCli(["rollback", "--ts", "R3GEN2"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(rollback.code, 0, rollback.stderr);
+
+  const c3 = createClient({ url: dbUrl });
+  assert.equal(await rowCount(c3, "tires"), gen1TiresCount, "rollback must restore promote-#1 tires");
+  assert.equal(await rowCount(c3, "tire_part_numbers"), gen1PnCount);
+  assert.ok(await tableExists(c3, "tire_product_part_number_aliases"), "alias table must be RESTORED (not dropped) on a second-promote rollback");
+  assert.equal(await rowCount(c3, "tire_product_part_number_aliases"), gen1AliasCount, "alias table must hold generation-1 content again");
+  const rolledBackAlias = await c3.execute("SELECT * FROM tire_product_part_number_aliases WHERE normalized_part_number = 'R3NEWALIAS'");
+  assert.equal(rolledBackAlias.rows.length, 0, "the generation-2 alias row must be gone after rollback");
+  assert.equal(await rowCount(c3, "canonical_tire_products"), gen1CanonicalCount);
+  assert.equal(await rowCount(c3, "provenance"), gen1ProvenanceCount);
+
+  // Failed-promotion set exists for all five; GEN1's rollback net remains untouched.
+  for (const t of ["tires_failed_promotion_R3GEN2", "tire_part_numbers_failed_promotion_R3GEN2",
+                   "tire_product_part_number_aliases_failed_promotion_R3GEN2",
+                   "canonical_tire_products_failed_promotion_R3GEN2", "provenance_failed_promotion_R3GEN2"]) {
+    assert.ok(await tableExists(c3, t), `expected ${t} after second-promote rollback`);
+  }
+  assert.ok(await tableExists(c3, "tires_old_R3GEN1"), "promote-#1 rollback net must survive the promote-#2 rollback");
+  assert.ok(await tableExists(c3, "tire_part_numbers_old_R3GEN1"));
+
+  // Indexes recreated on the RESTORED live tables (incl. the restored alias table).
+  const idxRes3 = await c3.execute("SELECT name, tbl_name FROM sqlite_master WHERE type='index'");
+  const idxByName3 = new Map(idxRes3.rows.map((r) => [String(r.name), String(r.tbl_name)]));
+  assert.equal(idxByName3.get("idx_tire_uid"), "tires");
+  assert.equal(idxByName3.get("idx_tire_part_numbers_uid"), "tire_part_numbers");
+  assert.equal(idxByName3.get("idx_tire_pn_aliases_normalized"), "tire_product_part_number_aliases");
+
+  // Operational sentinels untouched through the whole double-promote + rollback journey.
+  assert.equal(await rowCount(c3, "retail"), 1);
+  const sentinel = await c3.execute("SELECT sentinel FROM retail WHERE barcode = '999999999999'");
+  assert.equal(sentinel.rows[0].sentinel, "DO_NOT_TOUCH");
+  assert.equal(await rowCount(c3, "decode_cache"), 1);
+  c3.close();
+
+  cleanupScratch();
+});

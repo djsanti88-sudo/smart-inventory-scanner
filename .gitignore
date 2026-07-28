@@ -159,3 +159,16 @@ docs/pilot/point-s-backfill-worklist.csv
 .vercel
 .env*
 .playwright-cli/
+
+# User-authorized, isolated KKM catalog snapshot. It must never enter the app corpus or Git.
+/data/kkm-catalog/kkm.sqlite
+/data/kkm-catalog/kkm.sqlite-shm
+/data/kkm-catalog/kkm.sqlite-wal
+
+# Source-isolated distributor catalog snapshots; never app corpus input or Git artifacts.
+/data/atd-catalog/atd.sqlite
+/data/atd-catalog/atd.sqlite-shm
+/data/atd-catalog/atd.sqlite-wal
+/data/ntw-catalog/ntw.sqlite
+/data/ntw-catalog/ntw.sqlite-shm
+/data/ntw-catalog/ntw.sqlite-wal

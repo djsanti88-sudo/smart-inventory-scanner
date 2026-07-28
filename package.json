@@ -52,6 +52,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "@vercel/analytics": "^2.0.1",
     "barcode-detector": "^3.2.1",
     "better-sqlite3": "^12.11.1",
     "csv-parse": "^7.0.0",

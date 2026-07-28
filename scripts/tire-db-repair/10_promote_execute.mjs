@@ -875,14 +875,36 @@ async function cmdVerify({ dryRun, manifestArg }) {
 // single-batch atomic design, but a defensive choice against any future refactor that splits the
 // batch) still leaves indexes as a separate, easily-retried step rather than baked into a
 // still-being-renamed table.
-function postSwapIndexStatements() {
-  return [
-    "CREATE INDEX IF NOT EXISTS idx_tire_barcode ON tires(barcode);",
-    "CREATE INDEX IF NOT EXISTS idx_tire_part_number ON tires(manufacturer_part_number);",
-    "CREATE INDEX IF NOT EXISTS idx_tire_uid ON tires(canonical_product_uid);",
-    "CREATE INDEX IF NOT EXISTS idx_tire_part_numbers_uid ON tire_part_numbers(canonical_product_uid);",
-    "CREATE INDEX IF NOT EXISTS idx_tire_pn_aliases_normalized ON tire_product_part_number_aliases(normalized_part_number);",
-  ];
+//
+// SECOND-PROMOTE INDEX-NAME CARRYOVER (fix round 3, found while building the double-promote path):
+// SQLite/libsql index names are GLOBAL per database, and a rename carries a table's indexes - WITH
+// their names - to the renamed table. So on a second promote, `tires` (holding idx_tire_barcode et
+// al from promote #1) is renamed to `tires_old_<ts2>` and TAKES the index names with it; a naive
+// `CREATE INDEX IF NOT EXISTS idx_tire_barcode ...` is then a silent NO-OP (the NAME exists, on
+// the old table) and the freshly promoted table would ship UNINDEXED - exactly the C1 regression,
+// reintroduced silently on every promote after the first. The fix: every index statement is a
+// `DROP INDEX IF EXISTS <name>` (frees the name from whichever generation holds it; the displaced
+// _old_ generation is a rollback net, not a query target, so losing its secondary indexes is
+// acceptable and rollback recreates them on restore) followed by a plain `CREATE INDEX` (no IF NOT
+// EXISTS - after the drop, a name collision would be a real error and must fail loud).
+const INDEX_DEFS = [
+  { name: "idx_tire_barcode", table: "tires", column: "barcode" },
+  { name: "idx_tire_part_number", table: "tires", column: "manufacturer_part_number" },
+  { name: "idx_tire_uid", table: "tires", column: "canonical_product_uid" },
+  { name: "idx_tire_part_numbers_uid", table: "tire_part_numbers", column: "canonical_product_uid" },
+  { name: "idx_tire_pn_aliases_normalized", table: "tire_product_part_number_aliases", column: "normalized_part_number" },
+];
+
+/** Index statements for the live table set. `tables` filters which tables get their indexes
+ *  (rollback needs this: on a FIRST-promote rollback the alias/canonical/provenance tables are
+ *  DROPPED, so creating an index on them would error). Defaults to all. */
+function postSwapIndexStatements(tables = null) {
+  return INDEX_DEFS
+    .filter((d) => tables === null || tables.includes(d.table))
+    .flatMap((d) => [
+      `DROP INDEX IF EXISTS ${d.name};`,
+      `CREATE INDEX ${d.name} ON ${d.table}(${d.column});`,
+    ]);
 }
 
 /** Automated post-swap smoke test (panel finding I3). Runs the runtime-shaped lookups the panel's
@@ -955,14 +977,18 @@ async function runPostSwapSmokeTest(client, ts) {
   });
 
   await check("smoke_index_presence", async () => {
+    // Checks ATTACHMENT (tbl_name), not just name existence: after a second promote, an index name
+    // can exist while attached to the renamed _old_ generation (index-name carryover) - a
+    // name-only check would silently pass while the live table is unindexed.
     const res = await client.execute("SELECT name, tbl_name FROM sqlite_master WHERE type='index'");
-    const names = new Set(res.rows.map((r) => String(r.name)));
-    const required = [
-      "idx_tire_barcode", "idx_tire_part_number", "idx_tire_uid",
-      "idx_tire_part_numbers_uid", "idx_tire_pn_aliases_normalized",
-    ];
-    const missing = required.filter((n) => !names.has(n));
-    return { pass: missing.length === 0, detail: missing.length === 0 ? "all 5 required indexes present" : `MISSING: ${missing.join(", ")}` };
+    const indexByName = new Map(res.rows.map((r) => [String(r.name), String(r.tbl_name)]));
+    const wrong = INDEX_DEFS
+      .filter((d) => indexByName.get(d.name) !== d.table)
+      .map((d) => `${d.name} (expected on ${d.table}, ${indexByName.has(d.name) ? `found on ${indexByName.get(d.name)}` : "MISSING"})`);
+    return {
+      pass: wrong.length === 0,
+      detail: wrong.length === 0 ? "all 5 required indexes present and attached to the live tables" : `WRONG/MISSING: ${wrong.join("; ")}`,
+    };
   });
 
   await check("smoke_pn_key_preservation", async () => {
@@ -987,34 +1013,43 @@ async function runPostSwapSmokeTest(client, ts) {
 
 // =============================================================================================
 // promote: ATOMIC swap in a single batch: rename tires->tires_old_<ts>, staging_tires->tires,
-// same for tire_part_numbers, create the three new tables from staging, THEN create the secondary
-// indexes on the now-live table names (panel finding C1). *_old_* tables are kept (never dropped)
-// for rollback. After the swap, an automated post-swap smoke test runs (panel finding I3); on
-// FAILURE the _old_ tables are left in place and the process exits nonzero telling the operator to
-// run rollback - the swap itself is not reverted automatically (that would race a second live
-// write against the just-promoted tables), but nothing forces the operator to accept a bad swap.
+// same for tire_part_numbers; the three NEW_TABLES get the SAME rename-aside treatment when their
+// live name already exists (second/subsequent promote - fix round 3, task-PROMOTE2-EXEC-report.md)
+// and the original straight create-from-staging rename when it does not (first promote). THEN the
+// secondary indexes are (re)created on the now-live table names (panel finding C1; DROP+CREATE, not
+// IF NOT EXISTS - see the index-name carryover note at INDEX_DEFS). *_old_<ts>* tables are kept
+// (never dropped) for rollback. After the swap, an automated post-swap smoke test runs (panel
+// finding I3); on FAILURE the _old_ tables are left in place and the process exits nonzero telling
+// the operator to run rollback - the swap itself is not reverted automatically (that would race a
+// second live write against the just-promoted tables), but nothing forces the operator to accept a
+// bad swap.
 // =============================================================================================
 async function cmdPromote({ dryRun, manifestArg }) {
   requireConfirmOrExit(dryRun);
   const ts = timestamp();
 
-  const renameStatements = [
+  const baseRenameStatements = [
     `ALTER TABLE tires RENAME TO tires_old_${ts};`,
     `ALTER TABLE staging_tires RENAME TO tires;`,
     `ALTER TABLE tire_part_numbers RENAME TO tire_part_numbers_old_${ts};`,
     `ALTER TABLE staging_tire_part_numbers RENAME TO tire_part_numbers;`,
-    ...NEW_TABLES.map(({ staging, live }) => `ALTER TABLE ${staging} RENAME TO ${live};`),
   ];
-  const indexStatements = postSwapIndexStatements();
-  const statements = [...renameStatements, ...indexStatements];
 
   if (dryRun) {
+    // NEW_TABLES handling is live-state-dependent (rename-aside only when the live name exists);
+    // dry-run has no client, so it prints the base statements plus an explicit description of the
+    // conditional branch rather than pretending to know live state.
     console.log(`[dry-run] promote: would execute the following in ONE atomic batch (ts=${ts}):`);
-    for (const s of statements) console.log(`  ${s}`);
+    for (const s of baseRenameStatements) console.log(`  ${s}`);
+    for (const { staging, live } of NEW_TABLES) {
+      console.log(`  [conditional] IF live table ${live} exists (a prior promote created it): ALTER TABLE ${live} RENAME TO ${live}_old_${ts}; then ALTER TABLE ${staging} RENAME TO ${live};`);
+      console.log(`  [conditional] ELSE (first promote): ALTER TABLE ${staging} RENAME TO ${live};`);
+    }
+    for (const s of postSwapIndexStatements()) console.log(`  ${s}`);
     console.log(`[dry-run] promote: *_old_${ts} tables would be kept (not dropped) for rollback.`);
     console.log("[dry-run] promote: would first re-check live counts + staging content hash against the bound run-manifest (panel finding C3).");
     console.log("[dry-run] promote: would then run an automated post-swap smoke test (barcode / part-number / alias lookups + index presence + live-PN-key preservation vs APPROVED_PN_KEY_DROPS.csv).");
-    return { ts, statements };
+    return { ts, statements: baseRenameStatements };
   }
 
   const client = await makeClient();
@@ -1029,35 +1064,58 @@ async function cmdPromote({ dryRun, manifestArg }) {
   assertStagingContentUnchangedSinceManifest(runManifest, "promote");
   console.log(`promote: bound to run-manifest ${rel(runManifestPath)} - live counts and staging content confirmed unchanged since backup.`);
 
-  // Re-promotion collision guard (Antigravity panel Minor #7): a rename batch fails with a raw,
-  // unhelpful SQLite/libsql error mid-batch if ANY target name it would create already exists. Two
-  // distinct collision shapes are possible and both are checked here:
-  //   (a) `tires_old_<ts>` / `tire_part_numbers_old_<ts>` already exist - PROMOTE_TS was reused, or
-  //       two promote runs landed in the same clock-second (the ts-collision case).
-  //   (b) a NEW_TABLES live name (tire_product_part_number_aliases / canonical_tire_products /
-  //       provenance) already exists - this is the NORMAL shape of a SECOND promote after a prior
-  //       promote already succeeded (those tables have no `_old_` variant; they are a straight
-  //       rename with no live equivalent to rename away first), so it fires on any re-promote
-  //       attempt regardless of whether the ts collides, and is at least as common as case (a).
   const existingRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
   const existingNames = new Set(existingRes.rows.map((r) => String(r.name)));
-  const oldNamesThisRun = [`tires_old_${ts}`, `tire_part_numbers_old_${ts}`];
-  const newTableLiveNames = NEW_TABLES.map(({ live }) => live);
-  const collisions = [...oldNamesThisRun, ...newTableLiveNames].filter((n) => existingNames.has(n));
+
+  // Fix round 3 (live promote #2 gap, task-PROMOTE2-EXEC-report.md): the three NEW_TABLES now get
+  // the SAME rename-aside treatment as tires/tire_part_numbers. On a second promote their live
+  // names already exist (created by promote #1); renaming them to `<name>_old_<ts>` inside the
+  // same atomic batch preserves the prior generation as a rollback net and frees the live name for
+  // the staged replacement. On a FIRST promote (live name absent) the original straight
+  // create-from-staging rename is used unchanged.
+  const newTableStatements = [];
+  const renamedAsideNewTables = [];
+  for (const { staging, live } of NEW_TABLES) {
+    if (existingNames.has(live)) {
+      newTableStatements.push(`ALTER TABLE ${live} RENAME TO ${live}_old_${ts};`);
+      renamedAsideNewTables.push(live);
+    }
+    newTableStatements.push(`ALTER TABLE ${staging} RENAME TO ${live};`);
+  }
+
+  // Re-promotion collision guard (Antigravity panel Minor #7, narrowed in fix round 3): with the
+  // NEW_TABLES rename-aside path in place, an existing NEW_TABLES live name is no longer a refusal
+  // (it is the normal second-promote input). The only remaining genuine collisions are the
+  // `_old_<ts>` names this batch would CREATE already existing - i.e. PROMOTE_TS was reused, or
+  // two promote runs landed in the same clock-second.
+  const oldNamesThisRun = [
+    `tires_old_${ts}`,
+    `tire_part_numbers_old_${ts}`,
+    ...renamedAsideNewTables.map((live) => `${live}_old_${ts}`),
+  ];
+  const collisions = oldNamesThisRun.filter((n) => existingNames.has(n));
   if (collisions.length > 0) {
     throw new Error(
-      `promote: REFUSING to run - table name(s) already exist that this promotion would create or ` +
-        `rename onto: ${collisions.join(", ")}. This usually means a promotion already ran (either at ` +
-        `this same PROMOTE_TS, or an earlier successful promote already created the NEW_TABLES live ` +
-        `names, which have no _old_ variant to rename away). If a prior promotion should be superseded, ` +
-        `roll it back first (node scripts/tire-db-repair/10_promote_execute.mjs rollback), then re-run stage + promote.`
+      `promote: REFUSING to run - _old_ table name(s) this promotion would create already exist: ` +
+        `${collisions.join(", ")}. This means a promotion already ran at this same timestamp "${ts}" ` +
+        `(PROMOTE_TS reused, or two promote runs landed in the same clock-second). Pick a different ` +
+        `PROMOTE_TS (or wait a second) and re-run; if the prior promotion at this ts should instead be ` +
+        `superseded, roll it back first (node scripts/tire-db-repair/10_promote_execute.mjs rollback --ts ${ts}).`
     );
   }
+
+  const statements = [...baseRenameStatements, ...newTableStatements, ...postSwapIndexStatements()];
 
   // Panel finding I3: hard-enforce operational-table isolation before the swap executes.
   assertAllowedTables(statements, "promote");
 
-  console.log(`promote: executing atomic swap + index creation (ts=${ts})...`);
+  console.log(
+    `promote: executing atomic swap + index creation (ts=${ts}` +
+      (renamedAsideNewTables.length > 0
+        ? `; second-promote path: renaming aside ${renamedAsideNewTables.join(", ")}`
+        : "; first-promote path: NEW_TABLES created from staging") +
+      ")..."
+  );
   await client.batch(statements, "write");
   console.log("promote: swap complete. Running post-swap smoke test...");
 
@@ -1120,24 +1178,59 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
     }
   }
 
-  const statements = [
+  const baseStatements = [
     `ALTER TABLE tires RENAME TO tires_failed_promotion_${ts};`,
     `ALTER TABLE tires_old_${ts} RENAME TO tires;`,
     `ALTER TABLE tire_part_numbers RENAME TO tire_part_numbers_failed_promotion_${ts};`,
     `ALTER TABLE tire_part_numbers_old_${ts} RENAME TO tire_part_numbers;`,
-    ...NEW_TABLES.map(({ live }) => `DROP TABLE IF EXISTS ${live};`),
   ];
 
   if (dryRun) {
     console.log(`[dry-run] rollback: would execute the following in ONE atomic batch (ts=${ts}):`);
-    for (const s of statements) console.log(`  ${s}`);
-    return { ts, statements };
+    for (const s of baseStatements) console.log(`  ${s}`);
+    for (const { live } of NEW_TABLES) {
+      console.log(`  [conditional] IF ${live}_old_${ts} exists (second-promote rollback): ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts}; then ALTER TABLE ${live}_old_${ts} RENAME TO ${live};`);
+      console.log(`  [conditional] ELSE (first-promote rollback): DROP TABLE IF EXISTS ${live};`);
+    }
+    console.log("  [conditional] then DROP INDEX IF EXISTS + CREATE INDEX for every restored table's secondary indexes");
+    return { ts, statements: baseStatements };
   }
+
+  // Fix round 3: mirror the promote-side NEW_TABLES rename-aside path. If `<live>_old_<ts>` exists
+  // for this ts (i.e. the promotion being rolled back was a SECOND promote that renamed a prior
+  // generation aside), restore that generation exactly like tires/tire_part_numbers: current live
+  // -> `_failed_promotion_<ts>`, `_old_<ts>` -> live. If it does not exist (first-promote
+  // rollback), the original behavior stands: DROP the live table (there was no prior generation).
+  if (!client) client = await makeClient();
+  const existingRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
+  const existingNames = new Set(existingRes.rows.map((r) => String(r.name)));
+
+  const newTableStatements = [];
+  const restoredNewTables = [];
+  for (const { live } of NEW_TABLES) {
+    if (existingNames.has(`${live}_old_${ts}`)) {
+      newTableStatements.push(`ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts};`);
+      newTableStatements.push(`ALTER TABLE ${live}_old_${ts} RENAME TO ${live};`);
+      restoredNewTables.push(live);
+    } else {
+      newTableStatements.push(`DROP TABLE IF EXISTS ${live};`);
+    }
+  }
+
+  // Recreate secondary indexes on the RESTORED tables (drop-by-name first: the index names travel
+  // with whichever generation last had them created - after this rollback that is the
+  // `_failed_promotion_<ts>` set - and index names are global, so the names must be freed before
+  // re-creating on the restored live tables). tires/tire_part_numbers are always restored; the
+  // alias table's index is only recreated when the alias table itself was restored (creating an
+  // index on a dropped table would error the whole batch).
+  const restoredTables = ["tires", "tire_part_numbers", ...restoredNewTables];
+  const indexStatements = postSwapIndexStatements(restoredTables);
+
+  const statements = [...baseStatements, ...newTableStatements, ...indexStatements];
 
   // Panel finding I3: hard-enforce operational-table isolation before the rollback executes.
   assertAllowedTables(statements, "rollback");
 
-  if (!client) client = await makeClient();
   console.log(`rollback: executing atomic rollback (ts=${ts})...`);
   await client.batch(statements, "write");
   console.log("rollback: complete. Original tables restored from *_old_" + ts + ".");
