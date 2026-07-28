@@ -83,7 +83,7 @@ GROUP BY old.canonical_product_uid;
 - [ ] **Step 1:** Load all 6990 rows preserving raw barcode text. For each row compute: normalized candidates (trim, strip spaces/dashes, safe zero-pad only when resulting GTIN check digit is valid), GTIN validity + level (GTIN-8/UPC-A/EAN-13/GTIN-14), normalized part-number variants (digit-only core, distributor-affix strip: leading `BH`/`F` etc. only when remainder matches a known core).
 - [ ] **Step 2:** Match in priority order: exact barcode -> exact part number -> distributor-affix core + brand + size agreement. Record match_method and evidence per row. Expected buckets: 6118 exact, ~235 affix, ~637 unresolved (compare to handoff numbers; investigate any drift, don't force it).
 - [ ] **Step 3:** For matched rows, fill blank `brand`/`model`/`size`/`manufacturer_part_number` in `tires` from boss values (blank-only fill; NEVER overwrite non-blank), insert provenance rows, log every write to `remaining_blank_fill_audit` with `trust_color='green'`, `action='boss_truth_fill'`.
-- [ ] **Step 4:** Special case Sheet2 row 8: store GTIN-14 `30029885620210` ONLY as packaging alias (new `packaging_level` + `quantity` columns or alias metadata; quantity unknown -> status `needs_quantity`, not counted as 1 tire).
+- [ ] **Step 4:** Special case Sheet2 row 8: GTIN-14 `30029885620210` goes to `BOSS_UNRESOLVED_REVIEW.csv` with status `packaging_needs_quantity` - do NOT store it as any alias until package level AND quantity are confirmed (handoff gate). Reconciliation CSV records it as `packaging code`.
 - [ ] **Step 5:** Write both CSVs with every handoff-required column (sheet, row, raw barcode, candidates, validity, part number variants, matched stable ID, method, evidence, final status). Gate: CSV row count = 6990 exactly. Idempotency: re-run changes nothing. Commit.
 
 ### Task A4: Part-number alias table
@@ -99,6 +99,7 @@ GROUP BY old.canonical_product_uid;
 - [ ] **Step 2:** Generate aliases: for every part number, digit-only + affix variants seen in boss data or `process_merge_audit` (`1600974`/`BH1600974`, `28847017`/`F28847017`); decimal-form variants only when the same barcode + product identity corroborates.
 - [ ] **Step 3:** Reclassify the 1095 `part_number_value_conflict` green events + 39 UID conflicts from `process_merge_audit` into: confirmed canonical / confirmed alias / safe affix alias / true conflict (review). Canonical MPN is never overwritten by a distributor variant.
 - [ ] **Step 4:** Gate: no duplicate `alias_normalized` pointing at different stable products without a conflict record; every alias joins to a live product. Commit.
+- [ ] **Step 5:** Wire the runtime to USE the alias table (handoff: "populate and use"): in `src/server/tire-knowledge/tireKnowledgeIndex.ts`, extend the part-number resolution to fall back to `tire_product_part_number_aliases` (normalized match -> canonical product) after the existing `tire_part_numbers` miss, for BOTH the local-SQLite and Turso paths. Ambiguous alias (multiple products) returns no match, never guesses. Add unit tests with a fixture DB proving: affix alias resolves, ambiguous alias does not, existing exact lookups unchanged. `npx vitest run` on the touched test files.
 
 ### Task A5: Provenance + source_count
 
@@ -125,8 +126,8 @@ GROUP BY old.canonical_product_uid;
 - Consumes: fully repaired DB.
 - Produces: exit-code validator used by every later run; `REPAIR_AUDIT.md` final report.
 
-- [ ] **Step 1:** Validator fails (nonzero exit) on ANY of: integrity_check != ok; orphan part-number mapping; barcode alias without tire row; tire without barcode alias; alias/tire stable-ID disagreement; duplicate normalized part-number keys -> different products without conflict record; any of the 5316 valid boss GTINs missing; key counts below baseline (82640/29173 minus documented quarantine); packaged input hash drift.
-- [ ] **Step 2:** `node --test` suite proving: exact barcode lookup, exact part-number lookup, safe affix lookup, ambiguous core does NOT auto-resolve, UPC/EAN leading-zero alias behavior, GTIN-14 packaging behavior (row 8 case), one lookup per boss brand. Use the same semantics as `tireKnowledgeIndex.ts`.
+- [ ] **Step 1:** Validator fails (nonzero exit) on ANY of: integrity_check != ok; orphan part-number mapping in the ACTIVE table (quarantined rows live in `tire_part_numbers_quarantine` and active+quarantine must sum to 29173); barcode alias without tire row; tire without barcode alias; alias/tire stable-ID disagreement; duplicate normalized part-number keys -> different products without conflict record; any of the 5316 valid boss GTINs missing; key counts below baseline (82640 tires, 29173 part-number rows across active+quarantine); packaged input hash drift.
+- [ ] **Step 2:** `node --test` suite proving: exact barcode lookup, exact part-number lookup, safe affix lookup (via the alias table), ambiguous core does NOT auto-resolve, UPC/EAN leading-zero alias behavior, GTIN-14 packaging behavior (row 8 case: NOT resolvable as a unit tire), one lookup per boss brand. Every lookup test runs the explicit two-step runtime path (part-number key -> canonical_product_uid, then tires by UID as a separate query), matching `tireKnowledgeIndex.ts` semantics on both backends.
 - [ ] **Step 3:** Run validator + tests, write `REPAIR_AUDIT.md` (RED vs GREEN table, all counts, quarantine list, drift notes), write `HASHES_AFTER.txt` proving packaged inputs unchanged and recording the repaired DB hash. Commit.
 
 ### Task B1: Bakeoff sample + harness
