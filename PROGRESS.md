@@ -441,18 +441,24 @@ production).
 - **Branch cleanup**: kill list prepared (archive-tag-then-delete per branch, tags pushed and
   verified via `git ls-remote --tags` before any delete) - execution is owner-gated at Gate 3, not yet
   run.
-- **CI**: new `.github/workflows/ci.yml` authored (tsc + lint + unit/dom + build), alongside the
-  existing mock Playwright workflow; branch protection payload prepared, not yet applied.
-- **PR train status (2026-07-27)**: #12-#17 are MERGED, including #17 (the CI workflow itself).
-  #19 (rescue/teach-bot, `c71e6d9`) and #20 (feat/decode-gpt-54-mini, `0e5b179`) are now MERGED too.
-  #18 and #21 remain OPEN, in merge order: #18, then #21 last (#21 is the cutover flip - flipping
-  `vercel.json`'s `deploymentEnabled.master` flag - and is deliberately merged after every other PR in
-  the train per the Sequencing rule in `docs/DEPLOY_TRUTH.md`).
-- **Cutover status**: pending owner gates in strict order per the plan - Preview-env live-AI-key
-  lockdown, then CI required-check merge, then branch protection applied, then Vercel Git connection
-  verified, then the `vercel.json` `deploymentEnabled.master` flag removed last. Docs
-  (`CLAUDE.md`, `docs/COMMANDS.md`, `docs/DEPLOY_TRUTH.md`) updated ahead of the cutover to describe
-  the target GitHub-driven state; `docs/GO_LIVE_CHECKLIST.md` still describes the old disconnected
-  state and needs a follow-up pass once cutover actually lands.
+- **CI**: `.github/workflows/ci.yml` authored (tsc + lint + unit/dom + build), alongside the existing
+  mock Playwright workflow (`.github/workflows/playwright.yml`, not a required check). Branch
+  protection is now **applied and confirmed live** on `master`: required status checks
+  `[typecheck, unit-tests, build, lint]`, `strict: true`, `enforce_admins: true` (verified via
+  `gh api repos/:owner/:repo/branches/master/protection`). The Vercel Git connection to this repo
+  remains a **pending owner dashboard step**, not yet confirmed/applied as of this checkpoint.
+- **PR train status (as of 2026-07-28, snapshot - see `docs/DEPLOY_TRUTH.md` or `gh pr list` for
+  current state)**: #12-#17 are MERGED, including #17 (the CI workflow itself). #19 (rescue/teach-bot,
+  `c71e6d9`) and #20 (feat/decode-gpt-54-mini, `0e5b179`) are now MERGED too. #18 and #21 remain OPEN,
+  in merge order: #18, then #21 last (#21 is the cutover flip - flipping `vercel.json`'s
+  `deploymentEnabled.master` flag - and is deliberately merged after every other PR in the train per
+  the Sequencing rule in `docs/DEPLOY_TRUTH.md`).
+- **Cutover status (as of 2026-07-28)**: Preview-env live-AI-key lockdown and CI required-check merge
+  are DONE; branch protection is now APPLIED and confirmed live (see above). Remaining steps, in
+  order: Vercel Git connection verified (owner dashboard, pending), then the `vercel.json`
+  `deploymentEnabled.master` flag removed last (PR #21). Docs (`CLAUDE.md`, `docs/COMMANDS.md`,
+  `docs/DEPLOY_TRUTH.md`) updated ahead of the cutover to describe the target GitHub-driven state;
+  `docs/GO_LIVE_CHECKLIST.md` still describes the old disconnected state and needs a follow-up pass
+  once cutover actually lands.
 - Next: owner reviews Gate 1-5 batches per the plan; nothing in this effort pushed master, merged a
   PR, deleted a branch, or touched Vercel/GitHub config without that approval.

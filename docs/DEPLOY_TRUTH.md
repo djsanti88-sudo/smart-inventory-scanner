@@ -11,25 +11,53 @@ Vercel's Git integration is connected to this repo, and branch protection is liv
 automatically produces a Vercel preview deployment. `git push` to a feature branch on its own never
 deploys anything by itself; it only deploys through the PR it is attached to.
 
-**Not yet flipped:** `vercel.json` still sets `git.deploymentEnabled.master: false`, so merging a PR
-into `master` does not yet auto-deploy to production - that remains the pre-cutover manual/CLI path
-below until the flag is removed. The flag is deliberately the LAST step of the cutover, removed only
-after branch protection is confirmed live - see "Sequencing" below. Once it is flipped, merging an
-approved PR into protected `master` will automatically deploy to production (or trigger an owner
-promote, if promotion is left in manual mode - see the production section below). The cutover itself
-is tracked in `docs/superpowers/plans/2026-07-27-github-truth-repo-health.md` once that plan is
-committed; until then, treat this section's "not yet flipped" note as the operative fact, not the
-target-state description below it.
+**Not yet flipped (snapshot as of 2026-07-28 - check `vercel.json` and PR #21's status directly for
+current truth, this timestamp will go stale):** `vercel.json` still sets
+`git.deploymentEnabled.master: false`, so merging a PR into `master` does not yet auto-deploy to
+production - that remains the pre-cutover manual/CLI path below until the flag is removed. The flag is
+deliberately the LAST step of the cutover, removed only after branch protection is confirmed live - see
+"Sequencing" below. Branch protection IS confirmed live as of this snapshot (required checks
+`[typecheck, unit-tests, build, lint]`, strict, `enforce_admins: true`); the Vercel Git connection
+itself is still a pending owner dashboard step. Once the flag is flipped (PR #21, deliberately merged
+last in the train), merging an approved PR into protected `master` will automatically deploy to
+production (or trigger an owner promote, if promotion is left in manual mode - see the production
+section below). The cutover itself is tracked in
+`docs/superpowers/plans/2026-07-27-github-truth-repo-health.md` once that plan is committed; until
+then, treat this section's "not yet flipped" note as the operative fact, not the target-state
+description below it.
 
 ## The pipeline, end to end
 
 1. **Branch.** Cut a feature branch from `master`.
 2. **PR.** Open a pull request against `master`.
-3. **CI required checks.** GitHub Actions runs `.github/workflows/ci.yml` on the PR, with four jobs:
-   typecheck (`tsc --noEmit`), unit-tests (`npm run test`, unit/dom projects), build (`npm run build`),
-   and lint (`npm run lint`). All four are required status checks on `master` - a PR cannot merge while
-   any of them are red. There is no separate Playwright CI workflow; the mock Playwright E2E suite
-   (`npm run test:e2e`) is not currently wired into a required GitHub Actions check.
+3. **CI required checks.** GitHub Actions runs `.github/workflows/ci.yml` on the PR, with four jobs -
+   note these run narrower/more specific commands than the plain `npm run test`/`npm run lint` scripts,
+   not identical to them:
+   - **typecheck**: `npx tsc --noEmit`.
+   - **unit-tests**: `npx vitest run`, with two explicit exclusions -
+     `--exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"` (needs a locally-built
+     knowledge DB not built in CI) and
+     `--exclude "src/components/UniversalImportPanel.fixtures.test.tsx"` (needs gitignored local-only
+     CSV fixtures with no CI-reachable generator). See the comments at the top of `ci.yml` for the full
+     rationale on both exclusions.
+   - **build**: `npm run build` (`next build`).
+   - **lint**: `npx eslint src --ignore-pattern "**/*.test.ts" --ignore-pattern "**/*.test.tsx"
+     --ignore-pattern "**/*.test.mjs"` - scoped to production `src` only, narrower than the plain
+     `npm run lint` script; `scripts/` and `e2e/` are not linted by this required check (46 pre-existing
+     errors live there, confined to non-production files - see the comment in `ci.yml`).
+
+   All four are required status checks on `master` (confirmed live via `branches/master/protection`:
+   `required_status_checks.contexts = [typecheck, unit-tests, build, lint]`, `strict: true`,
+   `enforce_admins: true`) - a PR cannot merge while any of them are red, including for the repo owner.
+   See point 3a below for the separate Playwright E2E workflow, which runs but is not one of these four
+   required checks.
+
+3a. **Playwright E2E workflow exists, but is not a required check.** `.github/workflows/playwright.yml`
+   runs the mock-backend Playwright suite (`npm run test:e2e`, the same suite `test:e2e` runs locally)
+   on every push and PR to `master`. It is a real, currently-running CI workflow, not a gap - it is just
+   not wired into branch protection's required-checks list, so a PR can merge even if this workflow is
+   red. `IS_E2E=1` in its `webServer` forces `/api/ai-lookup` mock-only, so this workflow never calls a
+   live AI provider.
 4. **Preview URL.** The Vercel GitHub bot comments the PR with a preview deployment URL once the
    build succeeds. Preview runs against a dedicated, authenticated Firebase project
    (`smart-inventory-preview`, separate from production) and carries live paid AI provider keys
@@ -46,10 +74,30 @@ target-state description below it.
    removed, a merge to `master` does NOT deploy anything by itself - production still goes through the
    manual/CLI path (see "Local CLI deploy" below, which today is still the primary path for
    production).
-7. **Rollback.** Two supported paths: (a) Vercel's own promote/rollback (dashboard "Instant Rollback"
-   to a prior production deployment, or `vercel rollback` CLI), or (b) `git revert` the offending
-   merge commit and let the revert PR go through the same pipeline. Prefer (a) for speed during an
-   active incident, (b) when the revert also needs to be reflected in git history going forward.
+7. **Rollback.** Two paths that do different jobs - use both, in order, not either/or:
+   - **(a) Fast stopgap (dashboard/CLI, changes what production serves right now).** Vercel's own
+     promote/rollback: the dashboard may label this "Instant Rollback" or "Promote to Production" for a
+     prior deployment, or the equivalent `vercel rollback` CLI command. This is the correct FIRST move
+     during an active incident - it changes what production serves immediately. It does **not** fix
+     `master`: the bad commit is still there, so the very next merge can re-ship the same bug unless
+     someone also does (b).
+   - **(b) Mandatory follow-up (`git revert`, fixes the source of truth).** `git revert` the offending
+     merge commit and let the revert PR go through the normal pipeline (branch protection + required
+     checks). This is what actually prevents the bug from coming back on the next merge. **Do this
+     every time**, even after (a) already stopped the bleeding.
+   - **CRITICAL pre-cutover truth:** while `vercel.json` still sets `deploymentEnabled.master: false`
+     (i.e. before PR #21 flips it), merging a revert PR into `master` does **not** deploy anything - see
+     "Master auto-deploys (once the flag is flipped)" above. Until that flag is removed, a merged
+     `git revert` only fixes git history; production only changes via the owner-gated emergency CLI
+     wrapper (`node scripts/deploy-preview.mjs`, preview-only, or an explicit owner-approved `vercel
+     --prod`/`vercel promote`/`vercel rollback` call - see "Local CLI deploy" and "Live enforcement"
+     below). Do not assume merging a revert PR alone has fixed what production is serving pre-cutover.
+   - **EXCEPTION - never `git revert` the cutover flip PR (#21) itself.** Reverting #21 would
+     re-introduce the `deploymentEnabled.master: false` block, and a revert that re-blocks deploys
+     cannot deploy itself - it would strand whatever bad code is already live in production with no way
+     for a further merge to fix it. If #21 itself needs to be undone, use path (a) (dashboard/CLI
+     rollback) instead, and handle the git-history fix as a separate, deliberate change reviewed on its
+     own terms.
 
 ## Still owner-gated (nothing here becomes automatic)
 
