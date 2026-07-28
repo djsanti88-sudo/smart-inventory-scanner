@@ -31,7 +31,9 @@ vanish from the feed or the totals is a defect, full stop.
 ## Current Status (read in this order)
 - Phase source of truth: the newest dated plan in `docs/superpowers/plans/` - currently
   `2026-07-19-master-plan.md` (owner-approved 6-phase sell-ready plan; its D1-D11 defect register
-  says what is fixed vs open). `PROGRESS.md` can lag behind it.
+  says what is fixed vs open). Phases 1-6 are COMPLETE per that plan's register (all D1-D11 items
+  resolved); see PROGRESS.md checkpoints for per-phase evidence. `PROGRESS.md` can still lag on
+  post-Phase-6 work (teach-bot harness, stress marathon, ladder repair) - check its dated checkpoints.
 - Long-running unpushed feature branches are normal here. Push, deploy, and production promotion are
   ALWAYS owner-gated.
 
@@ -62,6 +64,7 @@ vanish from the feed or the totals is a defect, full stop.
 | `npm run qa:revision` | Full handoff gate: tsc + lint + build + e2e + firebase + bots |
 | `npm run qa:bots[:tire\|:security\|:ux\|:data\|...]` | Human-bot browser proof, port 3300 |
 | `npm run proof:local` / `proof:full` | tsc + unit tests / + production build |
+| `npm run teach` / `teach:test` / `teach:regression` / `teach:cleanup` | Teach Bot live-app learning harness (see docs/COMMANDS.md) |
 
 Ports: dev 3000, mock e2e 3100, firebase e2e 3200, qa bots 3300.
 PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `intel:*`, `harvest:*`,
@@ -79,7 +82,7 @@ PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `inte
 - The ledger core is NOT in a file named "ledger": pure math in `services/inventory.ts`, wiring in
   scanStore `processScan`/`markWrong`, proof in `npm run test:ledger`. `markWrong` is a quantity
   TRANSFER (repointed ScanEvents onto a fresh provisional), never a delete.
-- `stores/scanStore.ts` is a ~5,300-line monolith: grep for symbols, don't browse.
+- `stores/scanStore.ts` is a ~6,500-line monolith: grep for symbols, don't browse.
 - Two DB layers coexist on purpose: better-sqlite3 (knowledge corpus) and Turso/libsql (decode cache
   + ladder usage). `server/upc/*` is server-only (static import-boundary test); `services/upc/*` is
   the client-safe half.
@@ -217,6 +220,21 @@ data-protection fix works unless a browser bot proved it through the real UI wit
 | `MANUAL_LIVE_TEST.md` | Owner-gated manual live decode checklist |
 | `FIREBASE_SETUP.md` / `FIREBASE_SECURITY.md` | Backend foundation + tenancy security model |
 | `docs/archive/` | Historical point-in-time reports (not kept current) |
+
+# Delegation Model Policy (owner order, 2026-07-26 - TWO SEPARATE LANES, never confuse them)
+- **Lane 1 - agent/subagent delegation (dev work):** all delegated executor work goes to
+  Codex on **GPT-5.5, MEDIUM reasoning effort** (owner-tiered 2026-07-26: exec = 5.5-medium;
+  deep-analysis panel = Sol-xhigh + Gemini-Flash-high + Fable adjudication, on trigger only),
+  billed to the ChatGPT SUBSCRIPTION only (OAuth; NEVER an API key; no service_tier overrides).
+  This is the machine default in `~/.codex/config.toml`. DEV TOOLING MUST NEVER READ
+  `.env.local`'s OPENAI_API_KEY - that key is Lane 2's exclusively (bakeoff/probe scripts
+  calling api.openai.com with it caused real owner charges 2026-07-26).
+  Claude-native subagents (graders/relays/searches) stay Sonnet/Haiku - they cannot run GPT.
+  Benchmarked basis: gpt-5.5 ties gpt-5.6-sol on bugs/triage/process at a fraction of cost.
+- **Lane 2 - the app's decode ladder (product runtime):** a completely separate system. Its
+  paid GPT rung uses the app's own server-side API key from `.env.local` per the ladder's
+  budget/cap rules. Nothing in Lane 1 ever touches that key, and nothing in Lane 2 ever
+  runs on the ChatGPT subscription.
 
 # Full Tool Arsenal Rule (owner order, 2026-07-04)
 

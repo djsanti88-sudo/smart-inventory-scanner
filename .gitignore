@@ -16,6 +16,14 @@
 /playwright-report
 /blob-report
 /.playwright
+# playwright-cli terminal-session scratch: console-*.log is caught by *.log below, but the
+# page-*.yml snapshots are not - ignore the whole run-artifact dir (files stay on disk).
+/.playwright-cli/
+# Playwright component-testing (CT) Vite build cache - regenerated, never source.
+/playwright/.cache/
+# Playwright handoff proof screenshots (artifacts from a specific teach-bot run) - the .md
+# handoff notes in docs/playwright/handoffs/ are kept; only the image dirs are ignored.
+docs/playwright/handoffs/proof*/
 # keep e2e/proof/ screenshots (they are deliberate proof artifacts)
 
 # next.js
@@ -155,3 +163,11 @@ scripts/polish-eval-results.json
 # attachment; owner review happens against the freshly generated file each run).
 docs/pilot/point-s-backfill-worklist.csv
 .ladder-kv.json
+
+# Teach Bot (2026-07-22): live-app learning test harness.
+# Run artifacts (screenshots/traces/video/reports/manifests) are large + may reference
+# per-run synthetic accounts; regenerated every run, never source. Keep the dir via .gitkeep.
+testing/artifacts/*
+!testing/artifacts/.gitkeep
+# Subagent-driven-development progress ledger (git-ignored scratch).
+.superpowers/

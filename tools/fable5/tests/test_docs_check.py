@@ -276,6 +276,82 @@ class DocsCheckTests(unittest.TestCase):
             for result in results:
                 self.assertIn(result.status, {"passed", "warning"})
 
+    def test_src_relative_shorthand_resolves(self) -> None:
+        # Docs reference source files relative to src/ (`services/resolver.ts` for
+        # `src/services/resolver.ts`); that real file must not be called dead.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CLAUDE.md").write_text("See `services/resolver.ts`.\n", encoding="utf-8")
+            target = root / "src" / "services" / "resolver.ts"
+            target.parent.mkdir(parents=True)
+            target.write_text("", encoding="utf-8")
+
+            results = check_docs(root, ["CLAUDE.md"], set())
+
+            self.assertEqual(results[0].status, "passed")
+
+    def test_at_alias_resolves_to_src(self) -> None:
+        # `@/` is the tsconfig alias for src/; both the file and the dir form must resolve.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CLAUDE.md").write_text(
+                "See `@/server/upc/index.ts` and the `@/server/upc` module.\n", encoding="utf-8"
+            )
+            target = root / "src" / "server" / "upc" / "index.ts"
+            target.parent.mkdir(parents=True)
+            target.write_text("", encoding="utf-8")
+
+            results = check_docs(root, ["CLAUDE.md"], set())
+
+            self.assertEqual(results[0].status, "passed")
+
+    def test_branch_name_token_is_not_flagged_as_dead_path(self) -> None:
+        # A git branch name looks path-like but is not a file; do not flag it.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CLAUDE.md").write_text(
+                "Work continues on `feat/decode-ladder-goupc`.\n", encoding="utf-8"
+            )
+
+            results = check_docs(root, ["CLAUDE.md"], set())
+
+            self.assertEqual(results[0].status, "passed")
+
+    def test_bare_filename_under_src_resolves(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CLAUDE.md").write_text("`brandFamilies.ts` keeps siblings.\n", encoding="utf-8")
+            target = root / "src" / "services" / "catalog" / "brandFamilies.ts"
+            target.parent.mkdir(parents=True)
+            target.write_text("", encoding="utf-8")
+
+            results = check_docs(root, ["CLAUDE.md"], set())
+
+            self.assertEqual(results[0].status, "passed")
+
+    def test_leading_slash_route_is_not_flagged_as_dead_path(self) -> None:
+        # A bare API-route reference (no HTTP verb prefix) is not a filesystem path.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CLAUDE.md").write_text("`/api/ai-lookup` runs the ladder.\n", encoding="utf-8")
+
+            results = check_docs(root, ["CLAUDE.md"], set())
+
+            self.assertEqual(results[0].status, "passed")
+
+    def test_dead_src_relative_shorthand_is_still_caught(self) -> None:
+        # Leniency must not suppress a genuinely dead src-relative reference.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "src").mkdir()
+            (root / "CLAUDE.md").write_text("See `services/ghost.ts`.\n", encoding="utf-8")
+
+            results = check_docs(root, ["CLAUDE.md"], set())
+
+            result = results[0]
+            self.assertEqual(result.status, "warning")
+            self.assertIn("services/ghost.ts", result.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

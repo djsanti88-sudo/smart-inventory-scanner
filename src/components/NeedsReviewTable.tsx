@@ -107,7 +107,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   const warn = lastMismatchWarning && lastMismatchWarning.reviewId === review.id ? lastMismatchWarning : null;
 
   const [mode, setMode] = useState<"idle" | "create">("idle");
-  const [linkId, setLinkId] = useState(products[0]?.id ?? "");
+  const [linkId, setLinkId] = useState("");
   const [applyToCount, setApplyToCount] = useState(true);
   const [np, setNp] = useState({ name: "", brand: "", category: "" });
 
@@ -131,6 +131,14 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   // Task 9b: a parked "suggested" review is still AWAITING the human (never styled/treated as
   // resolved). Defense in depth - the table filter above already excludes suggested reviews.
   const resolved = review.status !== "open" && review.status !== "suggested";
+
+  // Identity-merge suggest_link (QA 2026-07-15 issue 3): when the decode fuzzily matches a product
+  // ALREADY in the shop, resolveUnknown parks the candidate on suggestedLinkProductId and refuses to
+  // mint a duplicate. Rendering that candidate as a one-tap "Link to <product>" is the only way the
+  // operator can act on it - without it, "Approve suggestion" was a silent no-op on these rows.
+  const suggestedLinkProduct = review.suggestedLinkProductId
+    ? products.find((p) => p.id === review.suggestedLinkProductId && p.status !== "archived")
+    : undefined;
 
   // P4: elderly-readable controls. One PRIMARY action per row (blue filled, >=44px, text-base); everything
   // else is a same-size outline so nothing scary competes with the primary. Approve is primary when there is
@@ -282,9 +290,8 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             </div>
           </div>
         )}
-        {resolved ? (
-          <span className="text-sm text-zinc-600">{review.resolutionAction ?? review.status}</span>
-        ) : mode === "create" ? (
+        {resolved ? null : mode === "create" ? ( // resolved rows are filtered out above; branch kept as defense in depth
+
           <div className="flex w-64 flex-col gap-1.5" data-testid="create-form">
             <input
               aria-label="product name"
@@ -336,7 +343,30 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
-            {review.hasSuggestion && review.suggestedProductName && (
+            {suggestedLinkProduct && (
+              <span className="w-full text-sm text-zinc-600" data-testid="suggest-link-note">
+                This looks like a product already in your list: {prettifyProductName(suggestedLinkProduct.name)}.
+                Link it so it is not duplicated.
+              </span>
+            )}
+            {suggestedLinkProduct && (
+              <button
+                type="button"
+                data-testid="link-suggested"
+                onClick={() =>
+                  resolveUnknown(review.id, "link_existing", {
+                    productId: suggestedLinkProduct.id,
+                    applyToCount,
+                    selectedAliasCodes: selectedCodes,
+                  })
+                }
+                title="Connect this code to the matching product already in your list"
+                className={btnPrimary}
+              >
+                Link to {prettifyProductName(suggestedLinkProduct.name)}
+              </button>
+            )}
+            {!suggestedLinkProduct && review.hasSuggestion && review.suggestedProductName && (
               <button
                 type="button"
                 data-testid="approve-suggestion"
@@ -372,6 +402,9 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
               onChange={(e) => setLinkId(e.target.value)}
               className="min-h-[44px] max-w-48 rounded-lg border border-zinc-300 px-2 text-base"
             >
+              <option value="" disabled>
+                Select a product...
+              </option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
                   {prettifyProductName(p.name)}
@@ -381,6 +414,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             <button
               type="button"
               data-testid="link-existing"
+              disabled={!linkId}
               onClick={() => resolveUnknown(review.id, "link_existing", { productId: linkId, applyToCount, selectedAliasCodes: selectedCodes, ...importHumanOrigin })}
               className={primaryIsApprove ? btnSecondary : btnPrimary}
             >

@@ -132,6 +132,92 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(secret, log_text)
         self.assertIn("<redacted>", log_text)
 
+    async def _run(self, spec: CheckSpec, root: Path, report_dir: Path | None = None):
+        return await run_checks(
+            root=root,
+            config=make_config((spec,)),
+            gate="fast",
+            report_dir=report_dir or (root / "report"),
+            changed_files=[],
+            workspace_key="abc",
+            cache=EvidenceCache(root / "cache.sqlite3", enabled=False),
+            policy=SafetyPolicy(),
+            callback=lambda _: None,
+        )
+
+    # A command that fails on its first run and passes on the second, keyed by a
+    # marker file in cwd - simulates a transient failure (e.g. tsc reading a tree
+    # while another process edits it).
+    _FLAKY = (
+        "import os, sys\n"
+        "m = os.path.join(os.getcwd(), '.rc-marker')\n"
+        "if os.path.exists(m):\n"
+        "    sys.exit(0)\n"
+        "open(m, 'w').close()\n"
+        "sys.exit(1)\n"
+    )
+
+    async def test_transient_blocking_failure_recovers_on_reconfirm(self) -> None:
+        spec = CheckSpec(
+            check_id="flaky",
+            description="fails once then passes",
+            command=("python", "-c", self._FLAKY),
+            gates=frozenset({"fast"}),
+            blocking=True,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = await self._run(spec, root)
+        result = results[0]
+        self.assertEqual(result.status, "passed")
+        self.assertIn("reconfirm", (result.reason or "").lower())
+
+    async def test_persistent_blocking_failure_stays_failed_after_reconfirm(self) -> None:
+        spec = CheckSpec(
+            check_id="broken",
+            description="always fails",
+            command=("python", "-c", "import sys; sys.exit(1)"),
+            gates=frozenset({"fast"}),
+            blocking=True,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results = await self._run(spec, root)
+        self.assertEqual(results[0].status, "failed")
+
+    async def test_non_blocking_failure_is_not_reconfirmed(self) -> None:
+        spec = CheckSpec(
+            check_id="nonblock",
+            description="non-blocking flaky",
+            command=("python", "-c", self._FLAKY),
+            gates=frozenset({"fast"}),
+            blocking=False,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report_dir = root / "report"
+            results = await self._run(spec, root, report_dir)
+            self.assertFalse((report_dir / "logs" / "nonblock.reconfirm.log").exists())
+        self.assertEqual(results[0].status, "warning")
+        self.assertNotIn("reconfirm", (results[0].reason or "").lower())
+
+    async def test_timeout_failure_is_not_reconfirmed(self) -> None:
+        spec = CheckSpec(
+            check_id="slow",
+            description="hangs",
+            command=("python", "-c", "import time; time.sleep(10)"),
+            gates=frozenset({"fast"}),
+            blocking=True,
+            timeout_seconds=1,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report_dir = root / "report"
+            results = await self._run(spec, root, report_dir)
+            self.assertFalse((report_dir / "logs" / "slow.reconfirm.log").exists())
+        self.assertEqual(results[0].status, "failed")
+        self.assertIn("Timed out", results[0].reason or "")
+
 
 if __name__ == "__main__":
     unittest.main()

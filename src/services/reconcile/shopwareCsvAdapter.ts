@@ -17,12 +17,17 @@ export const SHOPWARE_COLUMN_MAP = {
     "part_#",
     "part #",
     "pn",
+    "p/sn",
     "item_no.",
     "item no.",
     "item_no",
     "item no",
     "mfg_part_number",
     "mfg part number",
+    "us_number",
+    "us number",
+    "stock_number",
+    "stock number",
   ],
   aliasPartNumbers: ["alias_part_numbers", "alias part numbers", "alt_part_numbers"],
   brand: ["brand", "make"],
@@ -37,10 +42,22 @@ export const SHOPWARE_COLUMN_MAP = {
   priceCostColumns: ["cost", "retail", "price", "unit_cost", "list_price", "msrp"],
 } as const;
 
+/** Normalize a header/candidate string the SAME way real headers are normalized (line ~80 below):
+ *  lowercase + collapse whitespace runs to a single underscore. Applying this to candidates too
+ *  keeps the map human-readable ("part number") while guaranteeing it can never desync from the
+ *  header transform again. */
+function normalizeHeaderLike(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, "_");
+}
+
 /** First present header key among a set of accepted synonyms (case-insensitive, already lowercased). */
 function findHeaderKey(headers: string[], candidates: readonly string[]): string | undefined {
   const set = new Set(headers);
-  return candidates.find((c) => set.has(c));
+  for (const candidate of candidates) {
+    const normalized = normalizeHeaderLike(candidate);
+    if (set.has(normalized)) return normalized;
+  }
+  return undefined;
 }
 
 /** Parse a numeric cell; returns undefined (not NaN/0) when blank or unparseable. */

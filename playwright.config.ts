@@ -12,7 +12,9 @@ export default defineConfig({
   // all. It is a manual live-probe script, not part of the automated mocked suite (TEST SAFETY:
   // automated tests never call live providers - see CLAUDE.md "Aggressive Auto Decode Mode" +
   // MANUAL_LIVE_TEST.md). Excluded here so `npx playwright test` never depends on network/live-AI state.
-  testIgnore: ["**/firebase-phase2/**", "**/human-bots/**", "**/household-decode-test.spec.ts"],
+  // **/seed.spec.ts is the Playwright test-agents scaffold (created by `playwright init-agents`);
+  // it lives in ./e2e for the agents but must never run in this mock proof suite.
+  testIgnore: ["**/firebase-phase2/**", "**/human-bots/**", "**/household-decode-test.spec.ts", "**/seed.spec.ts"],
   fullyParallel: false,
   workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],

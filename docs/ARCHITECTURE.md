@@ -1,8 +1,9 @@
 # Architecture Map
 
-> Verified against the code on `feat/decode-ladder-goupc`, 2026-07-19. This is the deep companion to
-> the "Architecture at a Glance" section in `CLAUDE.md`. If this doc and the code disagree, the code
-> wins; fix this doc in the same commit.
+> Verified against the code on `feat/decode-ladder-goupc`, 2026-07-19; spot-checked (file paths +
+> scanStore line count) against `feat/teach-bot` on 2026-07-22, corrections applied inline. This is
+> the deep companion to the "Architecture at a Glance" section in `CLAUDE.md`. If this doc and the
+> code disagree, the code wins; fix this doc in the same commit.
 
 ## 1. Directory map (`src/`, top 2 levels)
 
@@ -134,7 +135,7 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
 
 | Store | File | localStorage | Notes |
 |---|---|---|---|
-| scanStore | `src/stores/scanStore.ts` (~5,300 lines) | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
+| scanStore | `src/stores/scanStore.ts` (~6,500 lines) | key `sis-scan-v1`, version 7 | Role-aware partialize via `scanPersist.ts` |
 | reconcileStore | `src/stores/reconcileStore.ts` | own key, version 1 | Strips raw CSV field before persist |
 
 - Migration (`scanStoreMigrate`): version < 5 hard-resets learned data to seed; >= 5 is additive only
@@ -190,7 +191,7 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
    touches the cap. Do not add `checkAndIncrementDaily` callers.
 4. The count ledger is not in any file named "ledger": pure math in `services/inventory.ts`, stateful
    wiring in scanStore `processScan`/`markWrong`, proofs in `stores/ledgerInvariants.store.test.ts`.
-5. `scanStore.ts` is a 5,300-line monolith. Grep for symbols; do not expect file-per-concern.
+5. `scanStore.ts` is a ~6,500-line monolith. Grep for symbols; do not expect file-per-concern.
 6. "Every scan counts" is enforced by ORDERING (`ensureProvisionalCount` before any network), not by
    a named guard. Moving that call below an await is a law violation that no grep will catch.
 7. Gemini is wired but dead for decode; status responses can look like it participates. It does not.

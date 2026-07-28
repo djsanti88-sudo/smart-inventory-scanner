@@ -1,5 +1,33 @@
 import { describe, it, expect } from "vitest";
 import { evaluateSentinel, buildDeployCard, maskEnvNames } from "./release-sentinel.mjs";
+import { execSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const SCRIPT_PATH = path.resolve(process.cwd(), "scripts/release-sentinel.mjs");
+
+function runScript(cwd, env = {}, args = []) {
+  return spawnSync(process.execPath, [SCRIPT_PATH, ...args], {
+    encoding: "utf8",
+    cwd,
+    shell: false,
+    env: {
+      ...process.env,
+      ...env,
+    },
+  });
+}
+
+function makeCleanGitRepo() {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "release-sentinel-cli-"));
+  fs.writeFileSync(path.join(cwd, "README.md"), "lock check fixtures\n");
+  execSync("git init", { cwd });
+  execSync("git -c user.name=ci -c user.email=ci@example.com add README.md", { cwd });
+  execSync("git -c user.name=ci -c user.email=ci@example.com commit -m boot", { cwd });
+  const head = execSync("git rev-parse HEAD", { cwd, encoding: "utf8" }).trim();
+  return { cwd, head };
+}
 
 // release-sentinel is a PURE deploy-safety gate: facts in -> blockers/card out, no network, no mutation.
 // A fully clean, single-source-of-truth, demo-Firebase, owner-approved input is the only CLEAR state.
@@ -70,5 +98,63 @@ describe("release-sentinel (dry-run deploy gate; read-only, no mutation)", () =>
     expect(card.verdict).toBe("BLOCKED");
     expect(JSON.stringify(card)).not.toContain("leak-me");
     expect(card.rollbackTarget).toBe("baseline-v1");
+  });
+
+  it("flags git read failures as a BLOCKED verdict with an explicit reason", () => {
+    const blocked = evaluateSentinel({
+      ...clean,
+      gitReadFailures: [
+        { command: "git status --porcelain", error: "git: failed" },
+      ],
+    });
+    expect(blocked.verdict).toBe("BLOCKED");
+    expect(blocked.blockers.map((b) => b.kind)).toContain("git_read_failed");
+  });
+
+  it("exits 0 for CLEAR on script invocation", () => {
+    const { cwd, head } = makeCleanGitRepo();
+    const result = runScript(cwd, {
+      SENTINEL_APPROVED_SHA: head,
+      SENTINEL_ROLLBACK: "baseline-v1",
+    });
+    expect(result.status).toBe(0);
+  });
+
+  it("exits 1 for BLOCKED by default when rollback target is missing", () => {
+    const { cwd, head } = makeCleanGitRepo();
+    const result = runScript(cwd, {
+      SENTINEL_APPROVED_SHA: head,
+    });
+    expect(result.status).toBe(1);
+    const body = JSON.parse(result.stdout);
+    expect(body.verdict).toBe("BLOCKED");
+    expect(body.blockers.map((b) => b.kind)).toContain("missing_rollback");
+  });
+
+  it("allows BLOCKED inputs with --report-only", () => {
+    const { cwd, head } = makeCleanGitRepo();
+    const result = runScript(cwd, {
+      SENTINEL_APPROVED_SHA: head,
+    }, ["--report-only"]);
+    expect(result.status).toBe(0);
+    const body = JSON.parse(result.stdout);
+    expect(body.verdict).toBe("BLOCKED");
+    expect(body.blockers.map((b) => b.kind)).toContain("missing_rollback");
+  });
+
+  it("is BLOCKED when git calls fail (and exposes git_read_failed)", () => {
+    const { cwd, head } = makeCleanGitRepo();
+    const result = runScript(
+      cwd,
+      {
+        SENTINEL_APPROVED_SHA: head,
+        SENTINEL_ROLLBACK: "baseline-v1",
+        PATH: "",
+      },
+    );
+    expect(result.status).toBe(1);
+    const body = JSON.parse(result.stdout);
+    expect(body.verdict).toBe("BLOCKED");
+    expect(body.blockers.map((b) => b.kind)).toContain("git_read_failed");
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
-import { countsFromTimeline } from "@/app/(app)/sessions/[id]/page";
+import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";
 import type { Product, ScanEvent } from "@/types";
 
 function makeProduct(over: Partial<Product>): Product {
@@ -171,6 +171,37 @@ describe("countsFromTimeline product join", () => {
     expect(unresolved?.product).toBeUndefined(); // honest: no fabricated identity
     expect(unresolved?.code).toBe("999888777666");
     expect(unresolved?.quantity).toBe(2);
+  });
+
+  it("keeps human-resolved scan events in past-session timeline counts", () => {
+    const storeProduct = makeProduct({ id: "p1" });
+    const getProduct = (id: string | null) => (id === "p1" ? storeProduct : undefined);
+
+    const rowsOut = countsFromTimeline(
+      [
+        knownEvent({
+          id: "e1",
+          cleanCode: "086699205636",
+          matchedProductId: "p1",
+          quantityAfterScan: 1,
+          createdAt: "2026-07-22T10:00:00.000Z",
+        }),
+        knownEvent({
+          id: "e2",
+          cleanCode: "086699205636",
+          matchedProductId: "p1",
+          status: "resolved",
+          quantityAfterScan: 2,
+          createdAt: "2026-07-22T10:01:00.000Z",
+        }),
+      ],
+      getProduct,
+    );
+
+    expect(rowsOut).toHaveLength(1);
+    expect(rowsOut[0]?.id).toBe("p1");
+    expect(rowsOut[0]?.quantity).toBe(2);
+    expect(rowsOut[0]?.product?.name).toBe("Michelin Defender LTX M/S");
   });
 
   it("rendering timeline-derived rows shows the resolved product name and the cleanCode fallback for the unresolved one", () => {

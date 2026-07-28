@@ -7,6 +7,11 @@ import { defineConfig, devices } from "@playwright/test";
 // with the mock run's 3100. NO auth bypass: the spec signs in through the real login UI.
 export default defineConfig({
   testDir: "./e2e/firebase-phase2",
+  // Windows + Next webpack cold-compiles several app routes during this single proof (login, scan,
+  // review, history, session detail). The customer path remains fast after each route compiles, but the
+  // first-run proof can legitimately exceed 120s on a busy workstation. Keep the timeout aligned with the
+  // webServer budget so the test measures behavior instead of the local compiler warm-up.
+  timeout: 180_000,
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
@@ -18,7 +23,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npm run dev -- --port 3200",
+    // dev:emulator selects the Firebase EMULATOR backend (scripts/dev.mjs --emulator); --webpack forces
+    // the stable webpack compiler so the first-run route cold-compiles are deterministic on Windows.
+    command: "npm run dev:emulator -- --webpack --port 3200",
     url: "http://localhost:3200",
     reuseExistingServer: false,
     timeout: 180_000,
@@ -31,6 +38,10 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_BACKEND: "1",
       NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "1",
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-smart-inventory",
+      // Live auth mode, same as the production env. Without this the authMode refactor defaults to
+      // "mock", cloud=false, and the business-context gate never engages - the spec then fails at its
+      // first banner assertion while testing nothing real.
+      NEXT_PUBLIC_AUTH_MODE: "live",
       // This spec exercises the FULL platformOwner end-to-end workflow (scan unknown -> Needs Review ->
       // create product -> learn alias -> export code-bearing CSV) and asserts that workflow survives a
       // full-page refresh. That is the platformOwner view, so we force it here exactly as the mock suite

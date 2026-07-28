@@ -29,6 +29,8 @@ export interface SyncResult {
   ok: boolean;
   alreadyApplied: boolean;
   error?: string;
+  errorCode?: string;
+  retryable?: boolean;
 }
 
 /** Failure simulation is for MOCK/TEST proof only - never used by production logic. */

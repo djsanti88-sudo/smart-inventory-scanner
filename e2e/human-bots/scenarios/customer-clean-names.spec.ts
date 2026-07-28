@@ -6,12 +6,15 @@ import { mkdirSync } from "node:fs";
 // is untouched (platformOwner still sees it raw). Seeds a messy-named counted product and checks the render.
 
 const PROOF = "e2e/proof/daily-2026-06-22";
-const KEY = "sis-scan-v1";
 const RAW = "UPC 086699205636 - Defender LTX M/S 275/70R18 Fits: 2004 Chevrolet";
 
 const seed = {
   state: {
     businessId: "demo-business", sessionId: "sess-cn",
+    currentSession: {
+      id: "sess-cn", businessId: "demo-business", name: "Clean Names Session", location: "Main", status: "active",
+      startedAt: "t", completedAt: null, createdBy: "h", notes: "", syncStatus: "synced",
+    },
     products: [{
       id: "prod-messy", businessId: "demo-business", name: RAW, brand: "Michelin", category: "tire",
       specsShort: "275/70R18", specsFull: "", primarySku: "", primaryBarcode: "086699205636", gtin: "",
@@ -25,15 +28,20 @@ const seed = {
       syncStatus: "synced", syncError: null, appliedIdempotencyKeys: [],
     }],
   },
-  version: 6,
 };
 
 test("CustomerCleanNamesBot: Counts shows clean Brand Model Size, no UPC/Fits (P5)", async ({ page }) => {
   mkdirSync(PROOF, { recursive: true });
-  await page.addInitScript(([k, v]) => window.localStorage.setItem(k, v), [KEY, JSON.stringify(seed)] as const);
-
   await page.goto("/scan");
+  // Wait for StoreHydrator's persist.rehydrate() to finish (it reads localStorage on mount, which
+  // would otherwise clobber a setState seed applied before hydration completes) before seeding state
+  // directly through the live store.
   const body = page.getByTestId("final-count-body");
+  await expect(body).toBeVisible();
+  await page.evaluate((state) => {
+    const store = (window as unknown as { __scanStore?: { setState: (partial: unknown) => void } }).__scanStore;
+    store?.setState(state);
+  }, seed.state);
   await expect(body).toContainText("Defender LTX M/S 275/70R18");
   const text = await body.innerText();
   expect(text, "no raw UPC prefix shown to customer").not.toContain("UPC 086699205636");

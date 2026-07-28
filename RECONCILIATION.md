@@ -3,7 +3,7 @@
 Per `ENGINEERING_DOCTRINE.md`. Records when old project instructions were reconciled against the
 doctrine and the owner's current instructions.
 
-## 2026-06-14 — A/B/C batch
+## 2026-06-14 - A/B/C batch
 
 - **Files inspected:** `ENGINEERING_DOCTRINE.md` (global), `CLAUDE.md`, `AGENTS.md`, `PROGRESS.md`,
   `DECISIONS.md`, `TESTING.md`, `plans/2026-06-decode-speed-and-pagefetch.md`, plus the source files
@@ -15,16 +15,16 @@ doctrine and the owner's current instructions.
   This batch deliberately adds UI (Settings decode-budget input [B]; "Clean junk product rows" + Undo [C]).
 - **Resolution:** the owner's explicit A/B/C approval is a current owner instruction, which outranks an older
   project note (hierarchy: current owner instruction > doctrine > project docs > older notes). The intent
-  also differs — C is a backed-up, reversible *bulk* cleanup, not a per-row delete control. Adopted the new
+  also differs - C is a backed-up, reversible *bulk* cleanup, not a per-row delete control. Adopted the new
   UI; the older "no UI changes" note is treated as scoped to that earlier hotfix only.
 - **Rules adopted:** doctrine proof gates, server-side clamp, no-partial labeling, backup-before-data-change,
   semantic firewall (untrusted data), data-safety over convenience (no destructive persist-version bump).
-- **Rules overridden:** "No UI changes" (older hotfix note) — superseded for this approved batch.
+- **Rules overridden:** "No UI changes" (older hotfix note) - superseded for this approved batch.
 - **Open questions / blockers:** none. (Owner offered the option to make C headless instead of a button; not
   requested, so the button + Undo were built.)
 - **Marker:** A/B/C reconciliation complete 2026-06-14.
 
-## 2026-06-14 — Shared catalog + recommendation-first cleanup
+## 2026-06-14 - Shared catalog + recommendation-first cleanup
 
 - **Files inspected:** `ENGINEERING_DOCTRINE.md`, `CLAUDE.md`, `AGENTS.md`, `PROGRESS.md`, `DECISIONS.md`,
   `TESTING.md`, `RISK_REGISTER.md`, plus resolver/store/settings/route/types/mockDb/seed/NeedsReviewTable source.
@@ -40,7 +40,7 @@ doctrine and the owner's current instructions.
 - **Open questions / blockers:** none. (Admin review UI intentionally deferred per owner Q9=B; data model is in place.)
 - **Marker:** catalog/cleanup reconciliation complete 2026-06-14.
 
-## 2026-06-14 — Confidence-based auto-verify (speed-first)
+## 2026-06-14 - Confidence-based auto-verify (speed-first)
 
 - **Files inspected:** doctrine + CLAUDE.md + PROGRESS/DECISIONS/TESTING/RISK_REGISTER + the evidence layer
   (evidenceVerifier, decode types), catalog services, scanStore catalog-first/liveDecode, sanitizer/pageFetch SSRF.

@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/fable5-sessionstart.ps1"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/hooks/fable5-stop.ps1"
+          },
+          {
+            "type": "command",
+            "command": "node scripts/hooks/deep-review-radar.mjs",
+            "timeout": 20,
+            "statusMessage": "Deep-review radar scoring the change-set"
+          }
+        ]
+      }
+    ]
+  }
+}

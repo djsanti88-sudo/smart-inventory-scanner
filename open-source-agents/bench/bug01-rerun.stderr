@@ -1,0 +1,2 @@
+[local-run] model=gpt-oss-20b role=analyst lens=- effort=high
+[local-run] 292.2s | prompt=1587 completion=4465 tokens | $0.00 (local)

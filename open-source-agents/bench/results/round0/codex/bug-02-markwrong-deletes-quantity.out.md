@@ -1,0 +1,5 @@
+# Defects
+
+1. **`markWrong` deletes the product's entire count instead of preserving/reassigning the affected quantity.** Suppose P has five units: one scan through a bad alias and four valid scans or manual adjustments. Flagging the bad match removes P's whole `finalCounts` row, losing all five units. It should reverse or transfer only the quantity attributable to the bad match and retain the rest. Removing the row also loses its applied-scan-event history, making later replay capable of counting preserved events again.
+
+2. **A code-level correction is incorrectly broadened to every code seen for the product.** `seenCodes` contains all feed codes ever matched to `productId`, not the code/event the user flagged. The function consequently deactivates every approved alias in that set, detaches all corresponding feed rows, and unverifies the product globally. If code A was incorrectly aliased to P but code B is P's valid barcode, marking the A match wrong also breaks B and prevents P from resolving by its valid identifiers. The API needs the offending code/event and must scope the correction to it.
