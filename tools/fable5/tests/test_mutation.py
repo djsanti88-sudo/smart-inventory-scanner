@@ -166,6 +166,24 @@ class MutationTests(unittest.TestCase):
 
         self.assertEqual(run.call_args.kwargs["timeout"], 120)
 
+    def test_run_test_command_survives_undecodable_process_output(self) -> None:
+        # Regression (Argus cp1252 crash): a mutant's vitest output contained byte 0x9d, which is
+        # undefined in the Windows cp1252 default AND invalid under strict UTF-8. With a bare
+        # text=True capture, subprocess.run crashed its reader thread mid-mutation. The runner must
+        # decode as UTF-8 with errors="replace" and survive, returning the replacement character.
+        from tools.fable5 import mutation
+
+        emit = "import sys; sys.stdout.buffer.write(b'\\x9d'); sys.stdout.flush()"
+        result = mutation._run_test_command(
+            [sys.executable, "-c", emit],
+            cwd=Path.cwd(),
+            environment=dict(os.environ),
+            timeout_seconds=MUTANT_TIMEOUT_SECONDS,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("�", result.stdout)  # replacement char proves UTF-8 errors="replace"
+
     def test_pr_monthly_or_explicit_flag_requests_mutation(self) -> None:
         parser = build_parser()
         self.assertTrue(_mutation_requested(parser.parse_args(["review-build", "--gate", "pr"])))

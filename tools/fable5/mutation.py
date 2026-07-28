@@ -203,6 +203,10 @@ def _run_test_command(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # Tool output (vitest, git, mklink) is UTF-8; the Windows cp1252 default crashes the
+        # capture reader thread on bytes like 0x9d. Decode UTF-8 and never fail on odd bytes.
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout_seconds,
         check=False,
     )
@@ -215,6 +219,8 @@ def _add_worktree(root: Path, worktree: Path) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
         check=False,
     )
@@ -234,6 +240,8 @@ def _create_node_modules_junction(root: Path, worktree: Path) -> Path:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
             check=False,
         )
@@ -262,6 +270,8 @@ def _remove_worktree(root: Path, worktree: Path) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
         check=False,
     )
@@ -271,6 +281,8 @@ def _remove_worktree(root: Path, worktree: Path) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=30,
         check=False,
     )
