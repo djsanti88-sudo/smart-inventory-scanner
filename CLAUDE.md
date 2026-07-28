@@ -179,10 +179,12 @@ PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `inte
 
 ## No-Deploy Rule & Forbidden Actions (require explicit approval, even mid-plan)
 Previews now happen ONLY through GitHub: opening a PR against `master` gets an automatic Vercel
-preview. Production is mid-cutover: branch protection on `master` is live, but `vercel.json` still
-disables Vercel's Git auto-deploy for `master`, so a merged PR does NOT yet auto-deploy to production -
-production still ships via the owner-only manual/CLI path until that flag is removed as the final
-cutover step (`docs/DEPLOY_TRUTH.md` has the full state). Local `vercel deploy` and
+preview. Production is mid-cutover: branch protection on `master` is live, and PR #21 removed
+`vercel.json`'s Git auto-deploy block for `master`, but that alone does not make deploys fire - the
+Vercel dashboard Git connection (Production Branch = `master`) is still a pending owner action, so a
+merged PR does NOT yet auto-deploy to production. Production still ships via the owner-only
+manual/CLI path until the owner completes that dashboard step (`docs/DEPLOY_TRUTH.md` has the full
+state). Local `vercel deploy` and
 `vercel deploy --prod` remain forbidden without explicit owner approval in the moment either way.
 Also gated: git push; paid/live API calls; production DB or credentials; deleting/overwriting real
 data; sending business data to third-party APIs; connecting to real business systems; live payments;

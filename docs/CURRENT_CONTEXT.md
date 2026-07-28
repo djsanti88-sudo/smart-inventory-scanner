@@ -3,6 +3,10 @@
 _Last updated: 2026-07-12. Keep this current as facts change. The 2026-06 Track-1/QA-army context
 this file previously held is superseded; its durable outcomes are folded in below._
 
+> **2026-07-28 correction:** the `git.deploymentEnabled.master=false` flag cited below was removed by
+> PR #21. That alone does not make deploys fire - the Vercel dashboard Git connection (Production
+> Branch = `master`) is still a pending owner action. See `docs/DEPLOY_TRUTH.md` for the current state.
+
 ## 1. Branches
 - `master` - has consensus cross-check decode merged (2026-07-03, PR #10 + #7). NOT deployed to
   production (`vercel.json` sets `git.deploymentEnabled.master=false`).
