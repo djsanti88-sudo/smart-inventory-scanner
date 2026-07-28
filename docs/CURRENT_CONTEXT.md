@@ -9,7 +9,8 @@ this file previously held is superseded; its durable outcomes are folded in belo
 
 ## 1. Branches
 - `master` - has consensus cross-check decode merged (2026-07-03, PR #10 + #7). NOT deployed to
-  production (`vercel.json` sets `git.deploymentEnabled.master=false`).
+  production (at the time of this snapshot `vercel.json` set `git.deploymentEnabled.master=false`;
+  that flag was removed by PR #21 - see the 2026-07-28 correction above).
 - `feat/decode-ladder-goupc` - **THE ACTIVE BRANCH**, 163 commits ahead of master, NOT pushed.
   Carries: decode ladder (corpus -> Go-UPC -> Fetch V2 -> GPT-5.5), Gemini removed from decode,
   atomic paid-rung-only daily cap (default 500), decode UX fixes (16 commits), size-aware identity
