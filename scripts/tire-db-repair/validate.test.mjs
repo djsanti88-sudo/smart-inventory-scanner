@@ -271,14 +271,16 @@ test("UPC/EAN leading-zero alias behavior: a 12-digit UPC-A resolves to the corp
   assert.ok(row, "fixture precondition: at least one 13-digit leading-zero barcode must exist");
   const upcA = row.barcode.slice(1); // strip the leading zero -> 12-digit UPC-A form
   assert.equal(upcA.length, 12);
-  // Confirm the 12-digit UPC-A form is NOT itself stored (proves the equivalence is a runtime
-  // concern, not a duplicate-row concern).
-  const rawRow = db.prepare("SELECT barcode FROM tires WHERE barcode = ?").get(upcA);
-  assert.equal(rawRow, undefined, "the bare 12-digit UPC-A form must not exist as its own tires row");
+  // The UPC-A form may exist as its own stored twin row (post 2026-07-28 UPC-twin pass) or
+  // resolve via zero-pad runtime equivalence. Either way it MUST land on the same product.
+  const rawRow = db.prepare("SELECT barcode, canonical_product_uid FROM tires WHERE barcode = ?").get(upcA);
+  if (rawRow) {
+    assert.equal(rawRow.canonical_product_uid, row.canonical_product_uid,
+      "stored UPC-A twin must point at the same canonical product as its EAN-13 form");
+  }
   const resolved = stepBarcode(upcA);
-  assert.ok(resolved, "12-digit UPC-A must resolve to the stored 13-digit EAN-13 row via zero-pad equivalence");
+  assert.ok(resolved, "12-digit UPC-A must resolve (stored twin or zero-pad equivalence)");
   assert.equal(resolved.canonical_product_uid, row.canonical_product_uid);
-  assert.equal(resolved.barcode, row.barcode);
 });
 
 test("UPC/EAN leading-zero alias behavior: gtinVariants generates the expected 12/13/14 pad set", () => {
