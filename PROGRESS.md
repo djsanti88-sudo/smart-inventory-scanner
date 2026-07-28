@@ -15,7 +15,10 @@ regression test, adds a fail-closed docs-only Vercel ignored-build script, and a
 post-deploy smoke workflow. Master branch protection now also requires `Mock E2E (chromium)` while
 preserving strict mode and the original four required checks. The CI-aligned unit scope (3,579
 passed), ledger (45/45), golden (2/2), typecheck, lint, production build, and Mock E2E (58/58) pass.
-The branch still needs PR Preview proof and the owner merge decision.
+PR #23 Preview is `Ready`, passes the smoke fingerprint, and its deployed client contains
+`smart-inventory-preview` with no Production Firebase project ID. Autonoma's non-reporting Vercel
+Deployment Check was temporarily removed from Preview and Production; the integration remains
+installed. The branch still needs the owner merge decision.
 
 ## 2026-07-26 Stabilization Phase 2: BLOCKED by Preview environment safety
 

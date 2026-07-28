@@ -64,6 +64,11 @@ push does not deploy on its own; the Preview is attached to its pull request.
    `.github/workflows/post-deploy-smoke.yml` listens for successful Vercel `deployment_status` events
    and runs the read-only smoke fingerprint against the event's deployment URL. It does not run paid
    decode calls or write application data.
+6b. **Autonoma deployment check is temporarily disabled.** On 2026-07-28, the Autonoma Vercel
+   Deployment Check was removed from both Preview and Production because its GitHub check suite stayed
+   queued with zero check runs and left otherwise-ready deployments stuck at `deployment-alias`
+   pending. The Autonoma integration itself remains installed. GitHub's five required branch checks
+   still gate merges, and the post-deploy smoke workflow remains active.
 7. **Rollback.** Two paths that do different jobs - use both, in order, not either/or:
    - **(a) Fast stopgap (dashboard/CLI, changes what production serves right now).** Vercel's own
      promote/rollback: the dashboard may label this "Instant Rollback" or "Promote to Production" for a
