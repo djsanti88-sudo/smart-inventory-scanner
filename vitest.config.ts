@@ -33,7 +33,19 @@ export default defineConfig({
           include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts", "src/server/**/*.test.ts", "src/app/**/*.test.ts", "src/lib/**/*.test.ts", "scripts/**/*.test.mjs"],
           // src/services/camera touches window.BarcodeDetector and HTMLVideoElement, which need a DOM -
           // excluded here and picked up by the "dom" project below instead.
-          exclude: ["src/services/camera/**"],
+          // scripts/kkm-catalog and scripts/tire-db-repair/*.test.mjs are node:test suites run via
+          // `node --test`, not vitest - vitest's glob would otherwise collect them and fail with
+          // "No test suite found".
+          exclude: [
+            "src/services/camera/**",
+            "scripts/kkm-catalog/**/*.test.mjs",
+            "scripts/tire-db-repair/03_part_number_aliases.test.mjs",
+            "scripts/tire-db-repair/09_promote_preflight.test.mjs",
+            "scripts/tire-db-repair/10_promote_execute.test.mjs",
+            "scripts/tire-db-repair/11_twin_columns.test.mjs",
+            "scripts/tire-db-repair/model_styling.test.mjs",
+            "scripts/tire-db-repair/validate.test.mjs",
+          ],
         },
       },
       {

@@ -8,7 +8,8 @@
 // The script's custom-dbPath mode writes PART_NUMBER_CONFLICTS.csv next to the fixture db and skips
 // the packaged-input hash guard, so this test never touches the real repair-2026-07-28 outputs.
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { test, describe, before, after } from "node:test";
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,7 +89,7 @@ function buildFixtureDb(path) {
   db.close();
 }
 
-beforeAll(() => {
+before(() => {
   tempDir = mkdtempSync(join(tmpdir(), "a4-alias-fixture-"));
   dbPath = join(tempDir, "fixture.db");
   csvPath = join(tempDir, "PART_NUMBER_CONFLICTS.csv");
@@ -96,50 +97,50 @@ beforeAll(() => {
   scriptOutput = execFileSync(process.execPath, [SCRIPT, dbPath], { encoding: "utf8" });
 });
 
-afterAll(() => {
+after(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
 describe("03_part_number_aliases.mjs - ambiguous-candidate demotion branch (fixture run)", () => {
-  it("exits 0 with all gates passed (execFileSync throws on nonzero exit)", () => {
-    expect(scriptOutput).toContain("All gates passed.");
+  test("exits 0 with all gates passed (execFileSync throws on nonzero exit)", () => {
+    assert.ok(scriptOutput.includes("All gates passed."));
   });
 
-  it("demotes BOTH sides of the ambiguous candidate: reported in the summary, key NOT in the alias table", () => {
-    expect(scriptOutput).toContain("demoted to conflict (ambiguous across candidates+existing data): 2");
+  test("demotes BOTH sides of the ambiguous candidate: reported in the summary, key NOT in the alias table", () => {
+    assert.ok(scriptOutput.includes("demoted to conflict (ambiguous across candidates+existing data): 2"));
 
     const db = new Database(dbPath, { readonly: true });
     const ambiguousRows = db
       .prepare("SELECT * FROM tire_product_part_number_aliases WHERE normalized_part_number = ?")
       .all("ZZAMBIG555555");
     db.close();
-    expect(ambiguousRows).toHaveLength(0);
+    assert.equal(ambiguousRows.length, 0);
   });
 
-  it("records the demotion as a 'true conflict' row in the CSV written next to the fixture db", () => {
-    expect(existsSync(csvPath)).toBe(true);
+  test("records the demotion as a 'true conflict' row in the CSV written next to the fixture db", () => {
+    assert.equal(existsSync(csvPath), true);
     const csv = readFileSync(csvPath, "utf8");
     const demotionLines = csv
       .split("\n")
       .filter((line) => line.includes("true conflict") && line.includes("demoted from alias to conflict"));
-    expect(demotionLines).toHaveLength(2); // one conflict record per demoted candidate product
-    expect(demotionLines.some((l) => l.includes("TIRE_FIXTURE_X"))).toBe(true);
-    expect(demotionLines.some((l) => l.includes("TIRE_FIXTURE_Y"))).toBe(true);
+    assert.equal(demotionLines.length, 2); // one conflict record per demoted candidate product
+    assert.ok(demotionLines.some((l) => l.includes("TIRE_FIXTURE_X")));
+    assert.ok(demotionLines.some((l) => l.includes("TIRE_FIXTURE_Y")));
   });
 
-  it("still writes the UNAMBIGUOUS candidate from the same run (demotion is per-key, not per-run)", () => {
+  test("still writes the UNAMBIGUOUS candidate from the same run (demotion is per-key, not per-run)", () => {
     const db = new Database(dbPath, { readonly: true });
     const rows = db
       .prepare("SELECT * FROM tire_product_part_number_aliases WHERE normalized_part_number = ?")
       .all("BH333000");
     db.close();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].canonical_product_id).toBe("TIRE_FIXTURE_Z");
-    expect(rows[0].is_unambiguous).toBe(1);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].canonical_product_id, "TIRE_FIXTURE_Z");
+    assert.equal(rows[0].is_unambiguous, 1);
   });
 
-  it("fixture run never touches the real repair outputs (CSV lands in the temp dir, hash guard skipped)", () => {
-    expect(scriptOutput).toContain("Custom dbPath given (fixture/test run)");
-    expect(scriptOutput).toContain(csvPath);
+  test("fixture run never touches the real repair outputs (CSV lands in the temp dir, hash guard skipped)", () => {
+    assert.ok(scriptOutput.includes("Custom dbPath given (fixture/test run)"));
+    assert.ok(scriptOutput.includes(csvPath));
   });
 });
