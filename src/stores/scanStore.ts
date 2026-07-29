@@ -726,7 +726,7 @@ export interface ScanState {
    *  minted provisional's id. markWrong depends on this return to target the CORRECT provisional when
    *  the marked-wrong product is itself a provisional sharing the same primaryBarcode (Task 9 finding:
    *  an unordered products.find could pick the OLD provisional and inflate the total). */
-  ensureProvisionalCount: (code: string, reason: string) => string;
+  ensureProvisionalCount: (code: string, reason: string, opts?: { freshTransferKeys?: boolean }) => string;
   /** F5 bundle-surgery (wave 2, 2026-07-20): fire-and-forget enrichment for a provisional row's bare
    *  "Unidentified item (...)" label. Called AFTER the row already appears + counts (never before -
    *  TOP-LEVEL LAW is unaffected). Fetches /api/prefix-floor for the DERIVED-tier (2.3MB corpus) brand
@@ -964,6 +964,75 @@ export function transferOrphanCount(
       : [...next, { ...orphanRow, productId: targetId, updatedAt: nowIso }];
   }
   return next;
+}
+
+// F-03 (audit remediation 2026-07-29): transferOrphanCount above is PURE local-state math - it never
+// enqueues a sync op, so an orphan merge that mutates finalCounts locally leaves the backend holding
+// the old (oid) InventoryCount row forever. The next refreshFromCloud/second-device load re-adds it
+// ALONGSIDE the repointed target row, silently doubling the quantity - the same class of bug
+// deleteProductsInternal's "SYNC THE REPOINT" fix (reviewed defect 2026-07-22, ~:6809) already closed
+// for product deletes. Mirror that EXACT balanced-pair pattern here: a zero-out INCREMENT_COUNT on the
+// orphan's identity plus a re-add INCREMENT_COUNT on the target's identity, per affected session row,
+// both using FRESH per-transfer idempotency keys (never the original counting key) so the Firestore
+// applied-key dedupe cannot reject the corrected write as an idempotency_conflict (the FirebaseSyncTarget
+// marker's targetId is derived from the payload's own productId, so reusing an old counting key that was
+// stamped against a different productId's marker collides). Called by every transferOrphanCount call
+// site with the counts snapshot from BEFORE the transfer (so the moved quantity/session/count-id are
+// still visible), immediately followed by transferOrphanCount itself for the local state update. The
+// affected ScanEvents are also durably re-pointed with fresh SAVE_SCAN_EVENT keys: a cloud reload must
+// not retain their former identity even though the count pair itself has already balanced quantity.
+function buildOrphanTransferSyncOps(params: {
+  finalCountsBeforeTransfer: InventoryCount[];
+  scanFeedBeforeTransfer: ScanEvent[];
+  oid: string;
+  targetId: string;
+  businessId: string;
+  idFactory: () => string;
+  now: () => string;
+}): PendingSyncItem[] {
+  const { finalCountsBeforeTransfer, scanFeedBeforeTransfer, oid, targetId, businessId, idFactory, now } = params;
+  const ops: PendingSyncItem[] = [];
+  for (const c of finalCountsBeforeTransfer) {
+    if (c.productId !== oid || c.quantity <= 0) continue;
+    const outKey = buildIdempotencyKey(businessId, c.sessionId, `${c.id}:orphan-transfer-out`, "INCREMENT_COUNT");
+    const outPayload: IncrementPayload = {
+      businessId,
+      sessionId: c.sessionId,
+      productId: oid,
+      scanEventId: `${c.id}:orphan-transfer`,
+      quantityDelta: -c.quantity,
+      idempotencyKey: outKey,
+    };
+    ops.push(
+      makeQueueItem({ idFactory, now, businessId, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: outPayload, idempotencyKey: outKey, scanEventId: null }),
+    );
+    const inKey = buildIdempotencyKey(businessId, c.sessionId, `${c.id}:orphan-transfer-in`, "INCREMENT_COUNT");
+    const inPayload: IncrementPayload = {
+      businessId,
+      sessionId: c.sessionId,
+      productId: targetId,
+      scanEventId: `${c.id}:orphan-transfer`,
+      quantityDelta: c.quantity,
+      idempotencyKey: inKey,
+    };
+    ops.push(
+      makeQueueItem({ idFactory, now, businessId, sessionId: c.sessionId, entityType: "InventoryCount", entityId: c.id, operation: "INCREMENT_COUNT", payload: inPayload, idempotencyKey: inKey, scanEventId: null }),
+    );
+  }
+  for (const event of scanFeedBeforeTransfer) {
+    if (event.matchedProductId !== oid) continue;
+    const repointedEvent: ScanEvent = { ...event, matchedProductId: targetId };
+    const saveKey = buildIdempotencyKey(
+      businessId,
+      event.sessionId,
+      `${event.id}:orphan-transfer:${targetId}`,
+      "SAVE_SCAN_EVENT",
+    );
+    ops.push(
+      makeQueueItem({ idFactory, now, businessId, sessionId: event.sessionId, entityType: "ScanEvent", entityId: event.id, operation: "SAVE_SCAN_EVENT", payload: repointedEvent, idempotencyKey: saveKey, scanEventId: event.id }),
+    );
+  }
+  return ops;
 }
 
 /**
@@ -3654,6 +3723,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 if (mergeOrphanId && mergeOrphanId !== mergeTargetId) {
                   const oid = mergeOrphanId;
                   const targetId = mergeTargetId;
+                  // F-03: sync the repoint (mirrors deleteProductsInternal's balanced-pair fix) - a
+                  // local-only transfer leaves the backend holding the orphan's count forever.
+                  const transferOps = buildOrphanTransferSyncOps({
+                    finalCountsBeforeTransfer: get().finalCounts,
+                    scanFeedBeforeTransfer: get().scanFeed,
+                    oid,
+                    targetId,
+                    businessId: cur.businessId,
+                    idFactory,
+                    now,
+                  });
                   set((st) => ({
                     products: st.products.filter((p) => p.id !== oid),
                     finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
@@ -3661,6 +3741,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                       e.matchedProductId === oid ? { ...e, matchedProductId: targetId } : e,
                     ),
                   }));
+                  if (transferOps.length > 0) enqueueAndSync(transferOps);
                 }
               } else if (!provId) {
                 provId = `prod-${idFactory()}`;
@@ -4072,8 +4153,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
       },
 
-      ensureProvisionalCount: (code, reason) => {
+      ensureProvisionalCount: (code, reason, opts) => {
         const st0 = get();
+        const freshTransferKeys = opts?.freshTransferKeys === true;
         // IDEMPOTENT: if this code is already counted (any path), do nothing - never double count.
         const counted = new Set(st0.finalCounts.map((c) => c.productId));
         const existing = st0.products.find(
@@ -4135,6 +4217,15 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             } as ScanEvent);
         if (!ev) {
           countedEvent.idempotencyKey = buildIdempotencyKey(st0.businessId, st0.sessionId, countedEvent.id, "INCREMENT_COUNT");
+        } else if (freshTransferKeys) {
+          // F-03: markWrong/orphan-transfer callers repoint an EXISTING feed row that may already have
+          // been synced under its PREVIOUS (wrong) identity. Reusing its inherited idempotencyKey here
+          // would resend the SAME key against a DIFFERENT productId - Firestore's applied-key dedupe
+          // stores the ORIGINAL marker (targetId = old productId) and rejects the mismatched replay as
+          // idempotency_conflict (retryable:false), so the correction never reaches the backend. Mint a
+          // FRESH transfer key (never the original counting key) so this repoint is a genuinely new,
+          // never-before-applied write.
+          countedEvent.idempotencyKey = buildIdempotencyKey(st0.businessId, st0.sessionId, `${ev.id}:transfer:${provId}`, "INCREMENT_COUNT");
         }
         if (countedEvent) {
           const r = incrementInventoryCount(counts, countedEvent, idFactory);
@@ -4208,6 +4299,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             businessId: bId, sessionId: sId, productId: provId, scanEventId: countedEvent.id,
             quantityDelta: 1, idempotencyKey: countedEvent.idempotencyKey,
           };
+          // F-03: the SAVE_SCAN_EVENT key normally reconstructs deterministically from the event's own id
+          // (safe on the FIRST-ever sync of that id). A freshTransferKeys repoint reuses an id that may
+          // ALREADY be synced under the previous identity, so it needs the SAME `:transfer:${provId}`
+          // suffix as the INCREMENT_COUNT key above (never the bare id) or Firestore's applied-key dedupe
+          // rejects the corrected payload as idempotency_conflict.
+          const saveScanEventKey = freshTransferKeys
+            ? buildIdempotencyKey(bId, sId, `${countedEvent.id}:transfer:${provId}`, "SAVE_SCAN_EVENT")
+            : buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT");
           enqueueAndSync([
             // Task 1b fix (same recipe as correctProduct, commit 024c849): a bare
             // `businessId:sessionId:provId:SAVE_PRODUCT` key collides with resolveUnknown's later
@@ -4217,7 +4316,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // later distinct write to this id mint different keys; the key is still minted once here and
             // reused verbatim on every retry of THIS item, so retry dedupe is unaffected.
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "Product", entityId: provId, operation: "SAVE_PRODUCT", payload: provProduct, idempotencyKey: buildIdempotencyKey(bId, sId, `${provId}:provisional`, "SAVE_PRODUCT"), scanEventId: null }),
-            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: buildIdempotencyKey(bId, sId, countedEvent.id, "SAVE_SCAN_EVENT"), scanEventId: countedEvent.id }),
+            makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "ScanEvent", entityId: countedEvent.id, operation: "SAVE_SCAN_EVENT", payload: countedEvent, idempotencyKey: saveScanEventKey, scanEventId: countedEvent.id }),
             makeQueueItem({ idFactory, now, businessId: bId, sessionId: sId, entityType: "InventoryCount", entityId: countId, operation: "INCREMENT_COUNT", payload: incPayload, idempotencyKey: countedEvent.idempotencyKey, scanEventId: countedEvent.id }),
           ]);
         }
@@ -4659,6 +4758,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               if (ownProvId && ownProvId !== mergeTargetId) {
                 const oid = ownProvId;
                 const targetId = mergeTargetId;
+                // F-03: sync the repoint (mirrors deleteProductsInternal's balanced-pair fix) - a
+                // local-only transfer leaves the backend holding the orphan's count forever.
+                const transferOps = buildOrphanTransferSyncOps({
+                  finalCountsBeforeTransfer: get().finalCounts,
+                  scanFeedBeforeTransfer: get().scanFeed,
+                  oid,
+                  targetId,
+                  businessId: state.businessId,
+                  idFactory,
+                  now,
+                });
                 set((st) => {
                   const finalCounts = transferOrphanCount(st.finalCounts, oid, targetId, now());
                   return {
@@ -4676,6 +4786,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     ),
                   };
                 });
+                if (transferOps.length > 0) enqueueAndSync(transferOps);
               } else {
                 set((st) => ({
                   needsReviewQueue: st.needsReviewQueue.map((r) =>
@@ -5257,12 +5368,26 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (removeOrphanId) {
           const oid = removeOrphanId;
           const targetId = orphanTransferTargetId;
+          // F-03: sync the repoint (mirrors deleteProductsInternal's balanced-pair fix) - a
+          // local-only transfer leaves the backend holding the orphan's count forever.
+          const transferOps = targetId
+            ? buildOrphanTransferSyncOps({
+                finalCountsBeforeTransfer: get().finalCounts,
+                scanFeedBeforeTransfer: get().scanFeed,
+                oid,
+                targetId,
+                businessId: state.businessId,
+                idFactory,
+                now,
+              })
+            : [];
           set((st) => ({
             finalCounts: transferOrphanCount(st.finalCounts, oid, targetId, now()),
             scanFeed: st.scanFeed.map((e) =>
               e.matchedProductId === oid ? { ...e, matchedProductId: targetId ?? null } : e,
             ),
           }));
+          if (transferOps.length > 0) enqueueAndSync(transferOps);
         }
 
         // Queue idempotent SAVE_PRODUCT (new products only) BEFORE the alias, so a reloaded alias always
@@ -6146,6 +6271,26 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           //     does not blank primaryBarcode). Its `counted` set is built from finalCounts, so removing
           //     the row here is what lets the mint below proceed.
           set((s) => ({ finalCounts: s.finalCounts.filter((c) => c.productId !== productId) }));
+          // F-03 FIX: sync the removal (mirrors deleteProductsInternal's "SYNC THE REPOINT" balanced-pair
+          // fix, reviewed defect 2026-07-22, scanStore.ts ~6809) - without this the backend keeps the
+          // wrong product's InventoryCount doc forever, so a fresh cloud reload / second-device load
+          // would restore its quantity even as the corrected identity below also counts it (2 becomes 4).
+          // FRESH per-transfer key (never the original counting key) so the applied-key dedupe cannot
+          // reject this as an idempotency_conflict.
+          if (wrongQty > 0) {
+            const outKey = buildIdempotencyKey(state.businessId, count.sessionId, `${count.id}:markwrong-transfer-out`, "INCREMENT_COUNT");
+            const outPayload: IncrementPayload = {
+              businessId: state.businessId,
+              sessionId: count.sessionId,
+              productId,
+              scanEventId: `${count.id}:markwrong-transfer`,
+              quantityDelta: -wrongQty,
+              idempotencyKey: outKey,
+            };
+            enqueueAndSync([
+              makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: count.sessionId, entityType: "InventoryCount", entityId: count.id, operation: "INCREMENT_COUNT", payload: outPayload, idempotencyKey: outKey, scanEventId: null }),
+            ]);
+          }
           if (code && wrongQty > 0) {
             // (b) Mint + count the Unidentified provisional off the first reopened feed row (step 2
             //     already reset the wrong product's rows to matchedProductId: null / needs_review, which
@@ -6159,7 +6304,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             //     already counted one event on the NEW row - inflating the total. The id-keyed lookup
             //     below is deterministic; excluding productId is defense in depth so the repoint can
             //     never target the product being corrected away from.
-            const mintedId = get().ensureProvisionalCount(code, `Marked wrong - re-identify. Previous match "${product?.name ?? ""}" removed.`);
+            const mintedId = get().ensureProvisionalCount(
+              code,
+              `Marked wrong - re-identify. Previous match "${product?.name ?? ""}" removed.`,
+              // F-03: this repoints an EXISTING reopened feed row that may already be synced under the
+              // wrong identity - see ensureProvisionalCount's freshTransferKeys comment for why the
+              // inherited key must not be reused.
+              { freshTransferKeys: true },
+            );
             const provRow = get().products.find(
               (p) => p.id === mintedId && p.id !== productId && p.provisional === true && p.status !== "archived",
             );
@@ -6175,11 +6327,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 const stNow = get();
                 const cur = stNow.finalCounts.find((c) => c.productId === provRow.id);
                 if (cur?.scanEventIds.includes(ev2.id)) continue;
-                const r = incrementInventoryCount(
-                  stNow.finalCounts,
-                  { ...ev2, matchedProductId: provRow.id, status: "known", quantityDelta: 1 },
-                  idFactory,
-                );
+                const repointedEvent: ScanEvent = { ...ev2, matchedProductId: provRow.id, status: "known", quantityDelta: 1 };
+                const r = incrementInventoryCount(stNow.finalCounts, repointedEvent, idFactory);
+                repointedEvent.quantityAfterScan = r.count.quantity;
                 set((s2) => ({
                   finalCounts: r.counts,
                   scanFeed: s2.scanFeed.map((e) =>
@@ -6188,6 +6338,25 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                       : e,
                   ),
                 }));
+                // F-03 FIX: sync this repointed event. FRESH transfer keys (never ev2's original
+                // SAVE_SCAN_EVENT/INCREMENT_COUNT keys, which were stamped against the OLD (wrong)
+                // product's Firestore applied-key marker and would be rejected as idempotency_conflict
+                // on replay against the new productId) - same reasoning as ensureProvisionalCount's
+                // freshTransferKeys path above.
+                const saveKey = buildIdempotencyKey(state.businessId, state.sessionId, `${ev2.id}:markwrong-transfer:${provRow.id}`, "SAVE_SCAN_EVENT");
+                const incKey = buildIdempotencyKey(state.businessId, state.sessionId, `${ev2.id}:markwrong-transfer:${provRow.id}`, "INCREMENT_COUNT");
+                const repointedIncPayload: IncrementPayload = {
+                  businessId: state.businessId,
+                  sessionId: state.sessionId,
+                  productId: provRow.id,
+                  scanEventId: ev2.id,
+                  quantityDelta: 1,
+                  idempotencyKey: incKey,
+                };
+                enqueueAndSync([
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "ScanEvent", entityId: ev2.id, operation: "SAVE_SCAN_EVENT", payload: repointedEvent, idempotencyKey: saveKey, scanEventId: ev2.id }),
+                  makeQueueItem({ idFactory, now, businessId: state.businessId, sessionId: state.sessionId, entityType: "InventoryCount", entityId: r.count.id, operation: "INCREMENT_COUNT", payload: repointedIncPayload, idempotencyKey: incKey, scanEventId: ev2.id }),
+                ]);
               }
               // (d) Feed-trim safety net: if the wrong count carried MORE events than the current feed
               //     exposes (a persist-trimmed feed), carry the residual on a SYNTHETIC BACKING EVENT
