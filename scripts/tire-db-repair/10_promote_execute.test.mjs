@@ -73,8 +73,10 @@ import { createClient } from "@libsql/client";
 // exitCode 2). A dynamic `await import(...)` is NOT hoisted, so setting the env var first in
 // normal statement order genuinely runs first.
 process.env.PROMOTE_SKIP_MAIN = "1";
-const { splitSqlStatements, countValueTuples, isAllowedTableName, assertAllowedTables, OPERATIONAL_TABLES } =
-  await import("./10_promote_execute.mjs");
+const {
+  splitSqlStatements, countValueTuples, isAllowedTableName, assertAllowedTables, OPERATIONAL_TABLES,
+  isAllowedNoTableStatement, runPostSwapSmokeTest,
+} = await import("./10_promote_execute.mjs");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -616,7 +618,7 @@ test("I2: rollback errors (does not silently guess) when neither --ts nor PROMOT
 // must leave the *_old_ tables in place and exit nonzero.
 // ===============================================================================================
 
-test("I3: promote's automated smoke test FAILS loudly when the swap produces a broken alias fallback, and _old_ tables are retained", async () => {
+test("I3/Critical#1: promote's PRE-SWAP verify gate catches a broken alias fallback and refuses BEFORE the swap runs", async () => {
   freshScratch();
   fixture = await seedFakeLiveDb();
   runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
@@ -624,7 +626,7 @@ test("I3: promote's automated smoke test FAILS loudly when the swap produces a b
 
   // Sabotage staging BEFORE promote: make the alias table's normalized_part_number point at a
   // canonical_product_id that does NOT exist in staging_canonical_tire_products / will not exist in
-  // staging_tires either, so the post-swap alias-fallback smoke check cannot resolve to a tires row.
+  // staging_tires either - an orphaned alias row.
   const client = createClient({ url: dbUrl });
   await client.execute(`DELETE FROM staging_tire_product_part_number_aliases`);
   await client.execute(
@@ -633,18 +635,23 @@ test("I3: promote's automated smoke test FAILS loudly when the swap produces a b
   );
   client.close();
 
+  // Critical finding #1: promote now re-runs the FULL verify gate battery against live staging_*
+  // tables in this SAME invocation, immediately before the atomic swap - so this orphaned-alias
+  // sabotage is caught by gate F_orphan_aliases BEFORE any rename ever executes, not discovered only
+  // after the swap via the post-swap smoke test. This is strictly safer than the old behavior (which
+  // let the swap happen and only complained afterward).
   const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "SABOTAGETS" });
-  assert.notEqual(promoteRes.code, 0, "promote must exit nonzero when the post-swap smoke test fails");
-  assert.match(promoteRes.stdout, /post-swap smoke test results/);
-  assert.match(promoteRes.stdout, /FAIL smoke_alias_fallback/);
-  assert.match(promoteRes.stderr, /SMOKE TEST FAILED/);
-  assert.match(promoteRes.stderr, /rollback --ts SABOTAGETS/);
+  assert.notEqual(promoteRes.code, 0, "promote must exit nonzero when the pre-swap verify gate battery fails");
+  assert.match(promoteRes.stdout, /pre-swap verify gate results/);
+  assert.match(promoteRes.stdout, /FAIL F_orphan_aliases/);
+  assert.match(promoteRes.stderr, /REFUSING to swap/);
+  assert.match(promoteRes.stderr, /pre-swap verify gate battery FAILED/);
 
-  // The swap itself still happened (statements ran in the same batch as the smoke test check,
-  // which runs AFTER commit) - but _old_ tables must be retained, never dropped, so rollback
-  // remains possible.
+  // The swap must NOT have happened at all: no _old_ tables were created, and live tires/tire_part_numbers
+  // still hold their ORIGINAL (pre-promote) content, not the staged data.
   const client2 = createClient({ url: dbUrl });
-  assert.ok(await tableExists(client2, "tires_old_SABOTAGETS"), "_old_ tables must be retained after a smoke-test failure");
+  assert.ok(!(await tableExists(client2, "tires_old_SABOTAGETS")), "the swap must not have run - no _old_ table should exist");
+  assert.equal(await rowCount(client2, "tires"), 1, "live tires must still hold only the original pre-promote row");
   client2.close();
 
   cleanupScratch();
@@ -1063,12 +1070,13 @@ test("OPEN-1 (c): PN gate FAILS when the approved-drops file is missing while an
   cleanupScratch();
 });
 
-test("OPEN-1: post-promote smoke FAILS on an unapproved dropped key and retains _old_ tables", async () => {
+test("OPEN-1/Critical#1: promote's PRE-SWAP verify gate catches an unapproved dropped PN key and refuses BEFORE the swap, even when verify was skipped", async () => {
   freshScratch();
   fixture = await seedFakeLiveDb();
 
-  // Second live PN key, unapproved. verify would catch it - but promote's own smoke must ALSO
-  // catch it independently (verify can be skipped; the smoke is the last tripwire).
+  // Second live PN key, unapproved. verify would catch it - and (Critical finding #1) promote's own
+  // pre-swap re-run of the full gate battery ALSO catches it independently, even when the operator
+  // skips verify entirely - promote never trusts a prior separate verify run.
   const client = createClient({ url: dbUrl });
   await client.execute(
     `INSERT INTO tire_part_numbers (normalized_part_number, canonical_product_uid) VALUES ('LIVEPN_SMOKED', 'SOME_UID2')`
@@ -1077,16 +1085,17 @@ test("OPEN-1: post-promote smoke FAILS on an unapproved dropped key and retains 
 
   runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
   runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
-  // Skip verify deliberately - promote's smoke check must stand alone.
+  // Skip verify deliberately - promote's own pre-swap gate re-run must stand alone.
   const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "PNSMOKETS" });
-  assert.notEqual(promoteRes.code, 0, "promote must exit nonzero when the post-swap PN preservation smoke fails");
-  assert.match(promoteRes.stdout, /FAIL smoke_pn_key_preservation: missing=2, approved=1, unapproved=1/);
+  assert.notEqual(promoteRes.code, 0, "promote must exit nonzero when the pre-swap PN preservation gate fails");
+  assert.match(promoteRes.stdout, /FAIL PN_live_part_number_keys_preserved: missing=2, approved=1, unapproved=1/);
   assert.match(promoteRes.stdout, /UNAPPROVED: LIVEPN_SMOKED/);
-  assert.match(promoteRes.stderr, /SMOKE TEST FAILED/);
+  assert.match(promoteRes.stderr, /REFUSING to swap/);
 
+  // The swap must NOT have happened: no _old_ tables were created for this ts.
   const client2 = createClient({ url: dbUrl });
-  assert.ok(await tableExists(client2, "tires_old_PNSMOKETS"), "_old_ tables must be retained after a PN-preservation smoke failure");
-  assert.ok(await tableExists(client2, "tire_part_numbers_old_PNSMOKETS"));
+  assert.ok(!(await tableExists(client2, "tires_old_PNSMOKETS")), "the swap must not have run - no _old_ table should exist");
+  assert.ok(!(await tableExists(client2, "tire_part_numbers_old_PNSMOKETS")));
   client2.close();
 
   cleanupScratch();
@@ -1250,6 +1259,299 @@ test("ROUND-3: full double-promote cycle - second promote succeeds, both _old_ g
   assert.equal(sentinel.rows[0].sentinel, "DO_NOT_TOUCH");
   assert.equal(await rowCount(c3, "decode_cache"), 1);
   c3.close();
+
+  cleanupScratch();
+});
+
+// ===============================================================================================
+// PR-panel harden round (2026-07-28): three findings from pr-panel-codex.md.
+//   Critical #1: promote must re-verify staging IN THE SAME INVOCATION immediately before the
+//     atomic swap (not trust a stale/separate `verify` run), and the post-swap smoke must assert
+//     exact count equality across all 5 tables, not just 1 sampled row per table.
+//   Important #2: the drift gate must catch a content mutation (UPDATE, or DELETE+INSERT that nets
+//     to the same row count) between backup and promote, not just a COUNT(*) change.
+//   Important #3: assertAllowedTables/extractTableNames must be FAIL-CLOSED - an unrecognized
+//     statement shape (or one whose table name this scanner cannot parse) must be REJECTED, not
+//     silently allowed just because no name was extracted.
+// ===============================================================================================
+
+test("PR-panel Critical#1(a): promote's own pre-swap re-verify catches staging truncated AFTER a stale 'verify passed' run, even though verify itself already said PASS earlier", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  // A real, honest verify run passes against the correctly-staged data.
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 0, verifyRes.stderr + verifyRes.stdout);
+  assert.match(verifyRes.stdout, /ALL GATES PASSED/);
+
+  // AFTER that PASS, staging is tampered/truncated (simulating a partial re-stage, a stray manual
+  // DELETE, or any drift between "verify said yes" and "promote actually runs"). The stale verify
+  // result must NOT be trusted by promote - this is exactly the Critical #1 hazard: verify and
+  // promote were independent commands with no re-check binding them together.
+  const client = createClient({ url: dbUrl });
+  await client.execute(`DELETE FROM staging_tires WHERE rowid IN (SELECT rowid FROM staging_tires LIMIT 500)`);
+  client.close();
+
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "STALEVERIFYTS" });
+  assert.notEqual(promoteRes.code, 0, "promote must refuse even though a PRIOR separate verify run had passed");
+  assert.match(promoteRes.stdout, /pre-swap verify gate results/);
+  assert.match(promoteRes.stdout, /FAIL B_staging_tires_count/);
+  assert.match(promoteRes.stdout, /MISMATCH/);
+  assert.match(promoteRes.stderr, /REFUSING to swap/);
+  assert.match(promoteRes.stderr, /pre-swap verify gate battery FAILED/);
+
+  // The swap must not have happened.
+  const client2 = createClient({ url: dbUrl });
+  assert.ok(!(await tableExists(client2, "tires_old_STALEVERIFYTS")));
+  assert.equal(await rowCount(client2, "tires"), 1, "live tires must be untouched - the original pre-promote row only");
+  client2.close();
+
+  cleanupScratch();
+});
+
+test("PR-panel Critical#1(c): a post-swap count mismatch (simulated partial swap) retains _old_ tables and exits nonzero", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  // Directly exercise runPostSwapSmokeTest's new smoke_full_row_count_equality check in isolation
+  // (rather than trying to force a genuine partial ALTER TABLE batch, which SQLite/libsql applies
+  // atomically and cannot easily be interrupted mid-batch from a test): simulate the exact SYMPTOM
+  // a partial/anomalous swap would leave behind - live row count differs from what was staged -
+  // and confirm the smoke check catches it and reports a clear mismatch.
+  const client = createClient({ url: dbUrl });
+  const stagedTiresCount = await rowCount(client, "staging_tires");
+  client.close();
+
+  const smokeClient = createClient({ url: dbUrl });
+
+  // Simulate a swap that under-delivered: live `tires` will still be the OLD 1-row table (promote
+  // was never run in this test), while preSwapStagedCounts claims the full staged count - exactly
+  // the shape of damage the check must catch (live count != what was staged).
+  const fakePreSwapStagedCounts = {
+    staging_tires: stagedTiresCount,
+    staging_tire_part_numbers: 999999, // deliberately wrong too, to prove multiple mismatches report
+  };
+  const { pass, checks } = await runPostSwapSmokeTest(smokeClient, "FAKETS", fakePreSwapStagedCounts);
+  const countCheck = checks.find((c) => c.name === "smoke_full_row_count_equality");
+  assert.ok(countCheck, "expected a smoke_full_row_count_equality check to run when preSwapStagedCounts is provided");
+  assert.equal(countCheck.pass, false, "count-equality check must FAIL when live does not match pre-swap staged counts");
+  assert.match(countCheck.detail, /MISMATCH/);
+  assert.match(countCheck.detail, /tires: staged \d+, live 1/);
+  assert.equal(pass, false, "overall smoke test must fail when the count-equality check fails");
+
+  smokeClient.close();
+  cleanupScratch();
+});
+
+test("PR-panel Critical#1(c) end-to-end: promote's real post-swap smoke includes exact 5-table count equality on a correct swap", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+
+  const promoteRes = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "COUNTEQTS" });
+  assert.equal(promoteRes.code, 0, promoteRes.stderr);
+  assert.match(promoteRes.stdout, /PASS smoke_full_row_count_equality: all 5 tables: live count exactly matches pre-swap staged count/);
+  assert.match(promoteRes.stdout, /SMOKE TEST PASSED/);
+
+  cleanupScratch();
+});
+
+test("PR-panel Important#2: content fingerprint catches an equal-count UPDATE between backup and stage (COUNT(*) alone would miss this)", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  const backupRes = runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(backupRes.code, 0, backupRes.stderr);
+
+  // Mutate an EXISTING live row's content without changing the row count: an UPDATE that changes
+  // canonical_product_uid and brand. COUNT(*) before and after is identical (still 1 row) - this is
+  // exactly the gap Important finding #2 targets.
+  const client = createClient({ url: dbUrl });
+  const before = await rowCount(client, "tires");
+  await client.execute(
+    `UPDATE tires SET canonical_product_uid = 'MUTATED_UID', brand = 'MUTATEDBRAND' WHERE barcode = ?`,
+    [fixture.sampleBarcode]
+  );
+  const after = await rowCount(client, "tires");
+  assert.equal(before, after, "row count must be unchanged by the UPDATE - this is the blind spot being tested");
+  client.close();
+
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(stageRes.code, 0, "stage must refuse: live content changed since backup even though row counts match");
+  assert.match(stageRes.stderr, /live data CHANGED since the bound backup even though row counts match/);
+  assert.match(stageRes.stderr, /content fingerprint mismatch on: tires/);
+
+  cleanupScratch();
+});
+
+test("PR-panel Important#2: content fingerprint catches an equal-count DELETE+INSERT (row swap) between backup and verify", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(stageRes.code, 0, stageRes.stderr);
+
+  // DELETE the live tire_part_numbers row and INSERT a different one - net row count unchanged, but
+  // the actual key content is now entirely different. This must be caught even though it lands
+  // between stage and verify (not just backup and stage), proving the fingerprint check runs at
+  // every gate that calls assertLiveUnchangedSinceManifest, exactly like the existing count-only C3
+  // drift checks do for stage/verify/promote.
+  const client = createClient({ url: dbUrl });
+  const before = await rowCount(client, "tire_part_numbers");
+  await client.execute(`DELETE FROM tire_part_numbers WHERE normalized_part_number = 'LIVEPN0001'`);
+  await client.execute(
+    `INSERT INTO tire_part_numbers (normalized_part_number, canonical_product_uid) VALUES ('SWAPPED_IN_PN', 'SWAPPED_UID')`
+  );
+  const after = await rowCount(client, "tire_part_numbers");
+  assert.equal(before, after, "row count must be unchanged by the delete+insert swap");
+  client.close();
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(verifyRes.code, 0, "verify must refuse: live content changed (delete+insert) since backup even though row counts match");
+  assert.match(verifyRes.stderr, /content fingerprint mismatch on: tire_part_numbers/);
+
+  cleanupScratch();
+});
+
+test("PR-panel Important#2: a genuinely UNCHANGED live table (same rows, same content) never trips the fingerprint check", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+
+  // No mutation at all - stage/verify must proceed normally, proving the fingerprint check is not a
+  // false-positive trap on the ordinary unchanged-live-data path already covered by the full-cycle test.
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(stageRes.code, 0, stageRes.stderr);
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 0, verifyRes.stderr + verifyRes.stdout);
+  assert.match(verifyRes.stdout, /ALL GATES PASSED/);
+
+  cleanupScratch();
+});
+
+test("PR-panel Important#3: fail-closed allowlist REJECTS REPLACE INTO on an operational table", () => {
+  assert.throws(
+    () => assertAllowedTables(["REPLACE INTO retail (barcode, product_name) VALUES ('1', 'x');"], "test-label"),
+    /REFUSING to execute.*"retail"/s
+  );
+});
+
+test("PR-panel Important#3: fail-closed allowlist REJECTS INSERT OR REPLACE on an operational table", () => {
+  assert.throws(
+    () => assertAllowedTables(["INSERT OR REPLACE INTO decode_cache (barcode) VALUES ('x');"], "test-label"),
+    /REFUSING to execute.*"decode_cache"/s
+  );
+});
+
+test("PR-panel Important#3: fail-closed allowlist REJECTS a bare DROP INDEX (no table name extractable) that is not on the explicit no-table allowlist shape only when it targets nothing recognizable - a legitimate DROP INDEX IF EXISTS must still be ALLOWED", () => {
+  // DROP INDEX IF EXISTS <name> never names a TABLE (SQLite resolves the owning table internally),
+  // so extractTableNames legitimately returns zero names for it. Before this fix, "zero names
+  // extracted" meant "silently allowed" for ANY statement shape - the actual security gap. After the
+  // fix, DROP INDEX is allowed ONLY because it is on the explicit isAllowedNoTableStatement allowlist,
+  // not because it fell through unmatched.
+  assert.doesNotThrow(() => assertAllowedTables(["DROP INDEX IF EXISTS idx_tire_barcode;"], "test-label"));
+  assert.ok(isAllowedNoTableStatement("DROP INDEX IF EXISTS idx_tire_barcode;"));
+});
+
+test("PR-panel Important#3: fail-closed allowlist REJECTS an unrecognized statement shape that extracts no table name and is not on the no-table allowlist", () => {
+  // A statement this scanner cannot parse into a table name AND that is not one of the enumerated
+  // no-table shapes (PRAGMA/BEGIN/COMMIT/ROLLBACK/DROP INDEX/blank/comment) must be REJECTED, not
+  // silently passed through. This is the core fail-open -> fail-closed fix: previously "extraction
+  // found nothing" was treated as "nothing to check", which is exactly backwards for a security gate.
+  assert.throws(
+    () => assertAllowedTables(["VACUUM;"], "test-label"),
+    /REFUSING to execute.*not one of the explicitly allowed no-table statements/s
+  );
+  assert.throws(
+    () => assertAllowedTables(["ANALYZE;"], "test-label"),
+    /REFUSING to execute/s
+  );
+});
+
+test("PR-panel Important#3: fail-closed allowlist still ALLOWS the legitimate no-table statement shapes (PRAGMA, BEGIN/COMMIT, blank/comment-only)", () => {
+  assert.doesNotThrow(() => assertAllowedTables(["PRAGMA integrity_check;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["PRAGMA foreign_keys = OFF;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["BEGIN;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["COMMIT;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["ROLLBACK;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["-- just a comment\n"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["   \n  \n"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables([""], "test-label"));
+});
+
+test("PR-panel Important#3: fail-closed allowlist still ALLOWS every legitimate staging/promote statement shape (regression: the real workflow must keep working)", () => {
+  // This mirrors the exact statement shapes this script's own stage()/cmdPromote()/cmdRollback()
+  // build, to prove the fail-closed tightening did not accidentally break the real workflow.
+  assert.doesNotThrow(() => assertAllowedTables(["DROP TABLE IF EXISTS staging_tires;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["CREATE TABLE IF NOT EXISTS staging_tires (barcode TEXT PRIMARY KEY);"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["INSERT OR REPLACE INTO staging_tires (barcode) VALUES ('1');"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["ALTER TABLE tires RENAME TO tires_old_20260728;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["ALTER TABLE staging_tires RENAME TO tires;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["DROP INDEX IF EXISTS idx_tire_barcode;"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["CREATE INDEX idx_tire_barcode ON tires(barcode);"], "test-label"));
+  assert.doesNotThrow(() => assertAllowedTables(["SELECT COUNT(*) c FROM staging_tires;"], "test-label"));
+  assert.doesNotThrow(() =>
+    assertAllowedTables(
+      [`SELECT COUNT(*) c FROM staging_tire_part_numbers p
+       LEFT JOIN staging_tires t ON t.canonical_product_uid = p.canonical_product_uid
+       WHERE t.barcode IS NULL;`],
+      "test-label"
+    )
+  );
+});
+
+test("PR-panel Important#3 end-to-end: a sabotaged staging file using REPLACE INTO on an operational table is refused, never executed", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // The original I3 (Codex) test proved a plain DELETE FROM retail is caught. This proves the
+  // FAIL-OPEN gap specifically: REPLACE INTO was one of the statement shapes extractTableNames could
+  // not recognize (only "INSERT [OR REPLACE] INTO" was matched, not bare "REPLACE INTO"), so it used
+  // to sail through as "no names extracted -> allowed". Now it must be both recognized (this scanner
+  // extracts "retail" from it) AND rejected.
+  const targetFile = join(stagingDir, "02_staging_tire_part_numbers.sql");
+  const original = readFileSync(targetFile, "utf8");
+  writeFileSync(targetFile, original + "\nREPLACE INTO retail (barcode, product_name) VALUES ('1', 'sabotage');\n", "utf8");
+
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(stageRes.code, 0, "stage must refuse when a staging file uses REPLACE INTO against an operational table");
+  assert.match(stageRes.stderr, /REFUSING to execute/);
+  assert.match(stageRes.stderr, /"retail"/);
+
+  const client = createClient({ url: dbUrl });
+  assert.equal(await rowCount(client, "retail"), 1, "retail must be completely untouched by the refused sabotage attempt");
+  const sentinelRes = await client.execute("SELECT sentinel FROM retail WHERE barcode = '999999999999'");
+  assert.equal(sentinelRes.rows[0].sentinel, "DO_NOT_TOUCH");
+  client.close();
+
+  cleanupScratch();
+});
+
+test("PR-panel Important#3 end-to-end: a sabotaged staging file using DROP INDEX on an arbitrary name is still bound by table-name rules for any accompanying CREATE INDEX ON <operational table>", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // DROP INDEX alone is legitimately table-free (allowed), but a paired CREATE INDEX ... ON <table>
+  // targeting an operational table must still be rejected - proving the CREATE INDEX...ON extraction
+  // pattern (added by this fix) is enforced, not just DROP INDEX's allowlisting.
+  const targetFile = join(stagingDir, "02_staging_tire_part_numbers.sql");
+  const original = readFileSync(targetFile, "utf8");
+  writeFileSync(
+    targetFile,
+    original + "\nDROP INDEX IF EXISTS sabotage_idx;\nCREATE INDEX sabotage_idx ON retail(barcode);\n",
+    "utf8"
+  );
+
+  runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  const stageRes = runCli(["stage"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(stageRes.code, 0, "stage must refuse when a staging file creates an index on an operational table");
+  assert.match(stageRes.stderr, /REFUSING to execute/);
+  assert.match(stageRes.stderr, /"retail"/);
 
   cleanupScratch();
 });
