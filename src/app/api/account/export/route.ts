@@ -181,6 +181,16 @@ export async function POST(request: NextRequest) {
         logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "not_member", businessId: requestedBusinessId, status: 403 });
         return json({ error: "Not a member of this business." }, 403);
       }
+      // F-04 (2026-07-29 audit fix): a full account export includes role-restricted collections
+      // (e.g. auditLog, per firestore.rules ~:457-462 which limits auditLog reads to owner/admin).
+      // The Admin SDK bypasses Firestore rules entirely, so this route must enforce the same
+      // owner/admin-only policy itself. Membership alone is NOT sufficient - viewer/counter get an
+      // exact 403 for the WHOLE export, before any collection is read.
+      const role = member.data()?.role;
+      if (role !== "owner" && role !== "admin") {
+        logServerEvent({ route: "/api/account/export", event: "auth_reject", reasonCode: "insufficient_role", businessId: requestedBusinessId, status: 403 });
+        return json({ error: "Account export requires an owner or admin role." }, 403);
+      }
     } catch (error) {
       if (authConfigurationError(error)) {
         logServerEvent({ route: "/api/account/export", event: "auth_unavailable", reasonCode: "auth_unavailable", businessId: requestedBusinessId, status: 503 });

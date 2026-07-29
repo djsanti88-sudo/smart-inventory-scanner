@@ -48,7 +48,8 @@ vi.mock("@/lib/firebaseAdmin", () => ({
       return {
         get: async () => {
           if (path.startsWith(`${"businessMembers"}/`)) {
-            return { exists: await mocks.memberGet() };
+            const result = await mocks.memberGet();
+            return { exists: result.exists, data: () => ({ role: result.role }) };
           }
           if (path.startsWith("businesses/")) {
             const doc = mocks.businessDoc;
@@ -117,7 +118,7 @@ beforeEach(() => {
   vi.stubEnv("IS_E2E", "");
   vi.stubEnv("ACCOUNT_EXPORT_MAX_DOCS", "");
   mocks.verifyIdToken.mockReset().mockResolvedValue({ uid: "u1" });
-  mocks.memberGet.mockReset().mockResolvedValue(true);
+  mocks.memberGet.mockReset().mockResolvedValue({ exists: true, role: "owner" });
   mocks.queriedPaths = [];
   mocks.tenantData = {
     "biz-1": {
@@ -149,6 +150,30 @@ beforeEach(() => {
 });
 
 describe("POST /api/account/export authentication", () => {
+  it.each(["viewer", "counter"])("returns exactly 403 for a %s before reading tenant collections", async (role) => {
+    mocks.memberGet.mockResolvedValue({ exists: true, role });
+
+    const response = await POST(
+      exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).not.toHaveProperty("collections");
+    expect(mocks.queriedPaths).toEqual(["businessMembers/biz-1_u1"]);
+  });
+
+  it.each(["owner", "admin"])("allows a %s to export the full tenant bundle including auditLog", async (role) => {
+    mocks.memberGet.mockResolvedValue({ exists: true, role });
+    mocks.tenantData["biz-1"].auditLog = [{ id: "a1", data: { action: "exported" } }];
+
+    const response = await POST(
+      exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).collections.auditLog).toBeDefined();
+  });
+
   it("rejects live-mode export without an ID token", async () => {
     const response = await POST(exportRequest({ businessId: "biz-1" }));
     expect(response.status).toBe(401);
