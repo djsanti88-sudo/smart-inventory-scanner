@@ -186,3 +186,8 @@ docs/pilot/point-s-backfill-worklist.csv
 # per-run synthetic accounts; regenerated every run, never source. Keep the dir via .gitkeep.
 testing/artifacts/*
 !testing/artifacts/.gitkeep
+
+# Session scratch / local run artifacts (never source)
+.tmp/
+outputs/
+.codex/environments/
