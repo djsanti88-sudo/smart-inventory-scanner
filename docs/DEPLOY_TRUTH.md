@@ -8,30 +8,31 @@ point here rather than restate it - this file is what gets updated when the mech
 
 Vercel's Git integration is connected to this repo FOR PREVIEWS: opening a pull request against
 `master` automatically produces a Vercel preview deployment (observed working), and branch protection
-is live on `master` (required checks: typecheck, unit-tests, build, lint). The PRODUCTION half of the
-Git connection is still pending an owner dashboard step - see the next paragraph. `git push` to a
+is live on `master` (five required checks: typecheck, unit-tests, build, lint, and `Mock E2E (chromium)`).
+The PRODUCTION half of the Git connection needs authenticated Vercel dashboard confirmation before its
+trigger status can be claimed - see the next paragraph. `git push` to a
 feature branch on its own never deploys anything by itself; it only deploys through the PR it is
 attached to.
 
 **Flag removed as of PR #21; dashboard connection is the remaining step.** `vercel.json` no longer
 sets `git.deploymentEnabled.master: false` - PR #21 removed it, the deliberate LAST step of the
 cutover, after branch protection was confirmed live (see "Sequencing" below). Branch protection IS
-confirmed live (required checks `[typecheck, unit-tests, build, lint]`, strict,
+confirmed live (required checks `[typecheck, unit-tests, build, lint, Mock E2E (chromium)]`, strict,
 `enforce_admins: true`); the PR-preview half of the Vercel Git connection is already active (see
-above). But removing the flag does not, by itself, make production deploys fire: the PRODUCTION half
-of the Git connection - setting Production Branch = `master` in the Vercel dashboard - is a separate,
-still-PENDING owner dashboard step (verified: the GitHub repo has zero webhooks configured). Two-part
-truth: (1) the `vercel.json` flag is gone as of PR #21; (2) Git-driven production deploys go live only
-once the owner completes the dashboard Git connection. Until step (2) happens, merging to `master`
-still deploys nothing by itself, and production continues to ship via the manual/CLI path below.
+above). But removing the flag does not, by itself, establish the production trigger. The PRODUCTION
+deployment record/dashboard was not authenticated for this documentation audit, so the Production Branch
+= `master` connection must be confirmed there before stating that merges deploy. Until authenticated
+Vercel confirmation establishes otherwise, treat merging to `master` as deploying nothing by itself and
+use the owner-approved manual/CLI production path below.
 
 ## The pipeline, end to end
 
 1. **Branch.** Cut a feature branch from `master`.
 2. **PR.** Open a pull request against `master`.
-3. **CI required checks.** GitHub Actions runs `.github/workflows/ci.yml` on the PR, with four jobs -
-   note these run narrower/more specific commands than the plain `npm run test`/`npm run lint` scripts,
-   not identical to them:
+3. **CI required checks.** GitHub Actions runs `.github/workflows/ci.yml`'s four jobs plus the
+   separate mock Playwright workflow as five required checks on the PR. The four `ci.yml` jobs run
+   narrower/more specific commands than the plain `npm run test`/`npm run lint` scripts, not identical
+   to them:
    - **typecheck**: `npx tsc --noEmit`.
    - **unit-tests**: `npx vitest run`, with two explicit exclusions -
      `--exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"` (needs a locally-built
@@ -45,18 +46,16 @@ still deploys nothing by itself, and production continues to ship via the manual
      `npm run lint` script; `scripts/` and `e2e/` are not linted by this required check (46 pre-existing
      errors live there, confined to non-production files - see the comment in `ci.yml`).
 
-   All four are required status checks on `master` (confirmed live via `branches/master/protection`:
-   `required_status_checks.contexts = [typecheck, unit-tests, build, lint]`, `strict: true`,
-   `enforce_admins: true`) - a PR cannot merge while any of them are red, including for the repo owner.
-   See point 3a below for the separate Playwright E2E workflow, which runs but is not one of these four
-   required checks.
+   Together with `Mock E2E (chromium)` below, all five are required status checks on `master`
+   (confirmed live via `branches/master/protection`: `required_status_checks.contexts = [typecheck,
+   unit-tests, build, lint, Mock E2E (chromium)]`, `strict: true`, `enforce_admins: true`) - a PR
+   cannot merge while any of them are red, including for the repo owner.
 
-3a. **Playwright E2E workflow exists, but is not a required check.** `.github/workflows/playwright.yml`
-   runs the mock-backend Playwright suite (`npm run test:e2e`, the same suite `test:e2e` runs locally)
-   on every push and PR to `master`. It is a real, currently-running CI workflow, not a gap - it is just
-   not wired into branch protection's required-checks list, so a PR can merge even if this workflow is
-   red. `IS_E2E=1` in its `webServer` forces `/api/ai-lookup` mock-only, so this workflow never calls a
-   live AI provider.
+3a. **Playwright Mock E2E is the fifth required check.** `.github/workflows/playwright.yml` runs the
+   mock-backend Playwright suite (`npm run test:e2e`, the same suite `test:e2e` runs locally) on every
+   push and PR to `master`. Its required check is `Mock E2E (chromium)`, so a PR cannot merge while it
+   is red. `IS_E2E=1` in its `webServer` forces `/api/ai-lookup` mock-only, so this workflow never calls
+   a live AI provider.
 4. **Preview URL.** The Vercel GitHub bot comments the PR with a preview deployment URL once the
    build succeeds. Preview runs against a dedicated, authenticated Firebase project
    (`smart-inventory-preview`, separate from production) and carries live paid AI provider keys
@@ -66,15 +65,12 @@ still deploys nothing by itself, and production continues to ship via the manual
    mock, no-login, no-spend sandbox.
 5. **Owner merges.** The owner reviews and merges the PR (self-approval is allowed on this solo-owner
    repo; branch protection still requires the PR + green checks, it does not require a second human).
-6. **Master auto-deploys (once the dashboard connection is live).** The `vercel.json` flag that used to
-   block this is gone as of PR #21, but that alone does not trigger production deploys: the Vercel
-   dashboard Git connection still needs Production Branch = `master` set, which is a pending owner
-   action (zero webhooks configured on the GitHub repo as of this writing). Once the owner completes
-   that dashboard step, merging to `master` will trigger a production Vercel deployment automatically,
-   unless promotion has been switched to manual in the Vercel project settings, in which case the owner
-   promotes the build from the dashboard or CLI. Until the dashboard connection is live, a merge to
-   `master` does NOT deploy anything by itself - production still goes through the manual/CLI path (see
-   "Local CLI deploy" below, which today is still the primary path for production).
+6. **Master deployment trigger (requires authenticated dashboard confirmation).** The `vercel.json`
+   flag that used to block this is gone as of PR #21, but that alone does not establish the Vercel
+   production trigger. Confirm the current Production Branch and promotion policy in the authenticated
+   Vercel dashboard/Production deployment record before saying that a merge deploys automatically. Until
+   that confirmation exists, a merge to `master` does NOT deploy anything by itself; production still
+   goes through the owner-approved manual/CLI path (see "Local CLI deploy" below).
 7. **Rollback.** Two paths that do different jobs - use both, in order, not either/or:
    - **(a) Fast stopgap (dashboard/CLI, changes what production serves right now).** Vercel's own
      promote/rollback: the dashboard may label this "Instant Rollback" or "Promote to Production" for a
