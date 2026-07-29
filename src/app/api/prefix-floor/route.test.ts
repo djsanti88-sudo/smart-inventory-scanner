@@ -1,6 +1,13 @@
 // src/app/api/prefix-floor/route.test.ts
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const rateLimit = vi.hoisted(() => vi.fn());
+vi.mock("@/services/security/aiSpendGuard", () => ({
+  checkRateLimit: (...args: unknown[]) => rateLimit(...args),
+  intEnv: (value: string | undefined, fallback: number) => Number(value) || fallback,
+}));
+vi.mock("@/server/upc/storage", () => ({ ladderStorage: vi.fn().mockResolvedValue({}) }));
 import { GET } from "@/app/api/prefix-floor/route";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): this endpoint is the enrichment door the client uses to get
@@ -13,7 +20,19 @@ function req(url: string): Request {
   return new Request(url);
 }
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  rateLimit.mockResolvedValue({ allowed: true, retryAfterMs: 0 });
+});
+
 describe("/api/prefix-floor", () => {
+  it("remains unauthenticated but returns 429 after its public lookup quota is exhausted", async () => {
+    rateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
+
+    const res = await GET(req("http://localhost/api/prefix-floor?code=051596000004") as never);
+
+    expect(res.status).toBe(429);
+  });
   it("400s on a non-digit code", async () => {
     const res = await GET(req("http://localhost/api/prefix-floor?code=abc") as never);
     expect(res.status).toBe(400);

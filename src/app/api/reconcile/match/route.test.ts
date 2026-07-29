@@ -8,6 +8,28 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+const authMocks = vi.hoisted(() => ({
+  verifyIdToken: vi.fn(),
+  memberGet: vi.fn(),
+  checkRateLimit: vi.fn(),
+}));
+
+vi.mock("@/lib/firebaseAdmin", () => ({
+  getAdminAuth: () => ({ verifyIdToken: authMocks.verifyIdToken }),
+  getAdminDb: () => ({
+    doc: () => ({ get: authMocks.memberGet }),
+  }),
+}));
+
+vi.mock("@/services/security/aiSpendGuard", () => ({
+  checkRateLimit: (...args: unknown[]) => authMocks.checkRateLimit(...args),
+  intEnv: (value: string | undefined, fallback: number) => Number(value) || fallback,
+}));
+
+vi.mock("@/server/upc/storage", () => ({
+  ladderStorage: vi.fn().mockResolvedValue({}),
+}));
+
 const mockLookupAll = vi.fn();
 const mockBySize = vi.fn();
 vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", () => ({
@@ -43,6 +65,17 @@ function makeRequest(body: unknown): Request {
   });
 }
 
+function liveRequest(body: Record<string, unknown>, contentLength?: string): Request {
+  return new Request("http://localhost/api/reconcile/match", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(contentLength ? { "content-length": contentLength } : {}),
+    },
+    body: JSON.stringify({ businessId: "biz-1", idToken: "firebase-token", ...body }),
+  });
+}
+
 function validRow(over: Record<string, unknown> = {}) {
   return {
     externalId: "90000027117",
@@ -56,10 +89,84 @@ function validRow(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "mock");
+  vi.stubEnv("IS_E2E", "");
   vi.clearAllMocks();
+  authMocks.verifyIdToken.mockResolvedValue({ uid: "u1" });
+  authMocks.memberGet.mockResolvedValue({ exists: true });
+  authMocks.checkRateLimit.mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   mockLookupAll.mockResolvedValue([]);
   mockBySize.mockResolvedValue([]);
   mockRetailLookup.mockResolvedValue(null);
+});
+
+describe("POST /api/reconcile/match - auth and extraction bounds", () => {
+  it("returns 401 before any corpus lookup when live auth has no token", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+
+    const res = await POST(makeRequest({ businessId: "biz-1", rows: [validRow()] }));
+
+    expect(res.status).toBe(401);
+    expect(mockLookupAll).not.toHaveBeenCalled();
+  });
+
+  it("returns 413 before parsing when declared content length exceeds the request limit", async () => {
+    const res = await POST(liveRequest({ rows: [validRow()] }, String(1024 * 1024)));
+
+    expect(res.status).toBe(413);
+    expect(authMocks.verifyIdToken).not.toHaveBeenCalled();
+  });
+
+  it("allows a member's small authenticated request", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+
+    const res = await POST(liveRequest({ rows: [validRow()] }));
+
+    expect(res.status).toBe(200);
+    expect(authMocks.verifyIdToken).toHaveBeenCalledWith("firebase-token");
+  });
+
+  it("returns 429 when the authenticated caller exceeds the route limit", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+    authMocks.checkRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
+
+    const res = await POST(liveRequest({ rows: [validRow()] }));
+
+    expect(res.status).toBe(429);
+  });
+
+  it("never honors the E2E bypass in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+    vi.stubEnv("IS_E2E", "1");
+    vi.stubEnv("NEXT_PUBLIC_E2E_AUTH_BYPASS", "1");
+
+    const res = await POST(makeRequest({ businessId: "biz-1", rows: [validRow()] }));
+
+    expect(res.status).toBe(401);
+    expect(authMocks.verifyIdToken).not.toHaveBeenCalled();
+  });
+
+  it("only returns the reviewed response DTO keys recursively", async () => {
+    const res = await POST(makeRequest({ rows: [validRow()] }));
+    const body = await res.json();
+    const allowed = new Set([
+      "matches", "row", "externalId", "partNumbers", "brand", "model", "sizeText", "specs", "barcode", "name", "category", "qty",
+      "status", "reason", "candidate", "uid", "sizeToken", "partNumber", "confidence", "matchBasis", "candidates", "linkageSuggestion", "viaAffixCore",
+      "retailCatalogMatch", "productName", "familyLabel",
+    ]);
+    const assertAllowed = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(assertAllowed);
+      else if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          expect(allowed.has(key)).toBe(true);
+          assertAllowed(child);
+        }
+      }
+    };
+    assertAllowed(body);
+  });
 });
 
 describe("POST /api/reconcile/match - validation (400 on garbage)", () => {

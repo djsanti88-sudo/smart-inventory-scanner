@@ -16,6 +16,11 @@ vi.mock("@/services/exportFormats", () => ({
   downloadCsv: vi.fn(),
 }));
 
+const getSession = vi.fn();
+vi.mock("@/lib/auth", () => ({
+  getSession: (...args: unknown[]) => getSession(...args),
+}));
+
 import { downloadCsv } from "@/services/exportFormats";
 
 // A real, check-digit-valid UPC-A that is NOT in any seed data.
@@ -82,6 +87,8 @@ function seedWithReport() {
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  getSession.mockReset().mockResolvedValue({ getIdToken: vi.fn().mockResolvedValue("firebase-token") });
   window.localStorage.clear();
   useReconcileStore.setState({ session: null, matches: null, report: null, _hasHydrated: true });
 });
@@ -137,6 +144,26 @@ describe("ReconcilePanel - report rendering", () => {
 });
 
 describe("ReconcilePanel session scoping (M2, same leak class as F2)", () => {
+  it("sends the active business and Firebase token when live auth is enabled", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+    useScanStore.setState({
+      products: [product], aliases: [], finalCounts: [], needsReviewQueue: [], businessId: "biz-1",
+      currentSession: null,
+    });
+    useReconcileStore.setState({
+      session: { fileName: "shopware.csv", importedAt: "", adapter }, matches: null, report: null, _hasHydrated: true,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ matches: [matchedResult, unmatchedResult] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReconcilePanel />);
+    fireEvent.click(screen.getByTestId("reconcile-run"));
+    await screen.findByTestId("reconcile-report");
+
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(request).toMatchObject({ businessId: "biz-1", idToken: "firebase-token" });
+  });
+
   // refreshFromCloud intentionally does an ADDITIVE cross-session merge into finalCounts (a tested
   // cross-device sync path - see refreshFromCloud.store.test.ts). onRunCompare's deriveCountedByUid
   // call must use only the CURRENT session's counts, not every session's counts merged into the store.
