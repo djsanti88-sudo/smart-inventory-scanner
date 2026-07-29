@@ -89,6 +89,46 @@ describe("Phase 8C side-door firewall - deterministic count path", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("counts each physical conflict scan (F-02, TOP-LAW): repeated context-conflict scans count every physical scan", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ scanContext: "tire" });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      if (String(url).includes("/api/prefix-floor")) {
+        return { ok: true, json: async () => ({ floor: { name: "Coca-Cola / product unconfirmed", brand: "Coca-Cola", familyLabel: null } }) } as Response;
+      }
+      throw new Error("unexpected fetch");
+    }) as unknown as typeof fetch;
+
+    try {
+      // Freeze sync so the pending queue is inspectable before MockDb's synchronous auto-drain
+      // consumes it (same technique as correctProductSync.store.test.ts) - counting itself is local
+      // and synchronous regardless of sync success (TOP-LEVEL LAW), so this does not affect the
+      // count/feed assertions below.
+      store.getState().setSimulateSyncFailure(true);
+
+      // Same context-conflicted code, scanned TWICE (two physical items on the shelf).
+      store.getState().processScan("049000028904");
+      store.getState().processScan("049000028904");
+
+      // Counting half of the TOP-LEVEL LAW: 2 physical scans = count 2, never against the poisoned
+      // prod-coke identity.
+      const total = store.getState().finalCounts.reduce((n, c) => n + c.quantity, 0);
+      expect(total, "the scan counts exactly twice (owner rule scan N = count N)").toBe(2);
+      expect(countFor(store, "prod-coke"), "the suspect/poisoned product is never counted").toBe(0);
+
+      // Visibility half of the law: both physical scans appear on the feed.
+      expect(store.getState().scanFeed.length).toBe(2);
+
+      // Durability: two DISTINCT counting events must be queued for sync - no reused counting key.
+      const incrs = store.getState().pendingSyncQueue.filter((q) => q.operation === "INCREMENT_COUNT");
+      expect(incrs.length, "two distinct INCREMENT_COUNT sync ops queued").toBe(2);
+      expect(new Set(incrs.map((q) => q.idempotencyKey)).size, "distinct idempotency keys, never reused").toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("Phase 8C markWrong - clears verified identity so it cannot re-match", () => {
