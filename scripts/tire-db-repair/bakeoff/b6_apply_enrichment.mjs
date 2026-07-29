@@ -127,6 +127,12 @@ const TRUSTED_HOSTS = [
   "123pneus.fr", // Delticom brand (France)
   "motorradreifendirekt.de", // Delticom brand (motorcycle tires)
   "reifen.de", // major German tire retailer
+  // Owner-approved additions (2026-07-28): large, well-known US tire/auto-parts retailers seen
+  // producing exact-barcode-tied evidence in the MPN pilot review queue. Note: MPN web research
+  // is CANCELLED per standing owner order, so these primarily benefit any future brand/model/size
+  // enrichment the owner re-authorizes; the exact-barcode + evidence gate still applies to each.
+  "carid.com", // CARiD - major US online auto-parts/tire retailer
+  "tiresandwheels.com", // major US online tire & wheel retailer
   // Manufacturer domains (brief: "manufacturer domains")
   "michelin.com",
   "goodyear.com",
