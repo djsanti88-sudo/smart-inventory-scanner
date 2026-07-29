@@ -40,6 +40,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -59,6 +60,9 @@ const NEW_TABLES = [
   { staging: "staging_canonical_tire_products", live: "canonical_tire_products" },
   { staging: "staging_provenance", live: "provenance" },
 ];
+// The atomic swap publishes these five tables.  LIVE_TABLES remains the original two-table
+// rename set below; every backup/manifest/drift read must use this complete set instead.
+const SWAPPED_TABLES = [...LIVE_TABLES, ...NEW_TABLES.map(({ live }) => live)];
 const OPERATIONAL_TABLES = [
   "decode_cache", "decode_archive", "decode_outcomes", "goupc_miss_cache", "goupc_usage",
   "ladder_kv", "learned_products", "retail", "sqlite_sequence",
@@ -441,11 +445,27 @@ function hashStagingContent() {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** Read live COUNT(*) for every LIVE_TABLES member. Used both to write the run-manifest (backup)
+/** Return the subset of requested tables that exists right now.  First promotion deliberately has
+ * no live alias/canonical/provenance table; absence is data, not an error or an empty table. */
+async function existingTableNames(client, tables = SWAPPED_TABLES) {
+  const placeholders = tables.map(() => "?").join(", ");
+  const res = await client.execute({
+    sql: `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`,
+    args: tables,
+  });
+  return new Set(res.rows.map((row) => String(row.name)));
+}
+
+/** Read live COUNT(*) for every swapped table. Used both to write the run-manifest (backup)
  *  and to re-check live state against it (stage/verify/promote), so the same shape is reused. */
 async function readLiveCounts(client) {
   const counts = {};
-  for (const table of LIVE_TABLES) {
+  const existing = await existingTableNames(client);
+  for (const table of SWAPPED_TABLES) {
+    if (!existing.has(table)) {
+      counts[table] = "ABSENT";
+      continue;
+    }
     const res = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
     counts[table] = Number(res.rows[0].c);
   }
@@ -453,13 +473,8 @@ async function readLiveCounts(client) {
 }
 
 // -------------------------------------------------------------------------------------------
-// Panel finding (Important #2): the drift gate above (readLiveCounts/assertLiveUnchangedSinceManifest)
-// compares ONLY COUNT(*). An UPDATE to an existing row, or a DELETE+INSERT that nets to the same row
-// count, is completely invisible to that check and would be silently overwritten by the promote
-// swap. This content fingerprint closes that gap: for each LIVE_TABLES member it computes a single
-// aggregate hash (a SQLite-side SUM of a per-row hash expression - an aggregate query, never a
-// row-by-row loop in JS) over the primary key AND the mutable columns that matter to correctness,
-// so an update to an existing row's data changes the fingerprint even though COUNT(*) does not move.
+// A count-only drift gate misses same-count edits. SQLite/libSQL exposes no collision-resistant
+// row hash, so the fingerprint streams rows in primary-key order into Node SHA-256 instead.
 // -------------------------------------------------------------------------------------------
 const FINGERPRINT_COLUMNS = {
   // Primary key first (barcode/normalized_part_number), then the columns whose mutation would
@@ -471,44 +486,79 @@ const FINGERPRINT_COLUMNS = {
     "manufacturer_part_number", "confidence", "current_status",
   ],
   tire_part_numbers: ["normalized_part_number", "canonical_product_uid"],
+  tire_product_part_number_aliases: [
+    "canonical_product_id", "normalized_part_number", "display_part_number", "source", "trust_color",
+    "confidence_score", "is_unambiguous",
+  ],
+  canonical_tire_products: [
+    "canonical_product_id", "brand", "model", "size", "load_index", "speed_rating", "load_range",
+    "type", "season", "alias_count", "canonicalization_confidence", "canonicalization_reason",
+  ],
+  provenance: [
+    "id", "product_id", "barcode", "source_name", "source_ref", "sheet", "row", "batch_id",
+    "imported_at", "evidence_level", "license_note", "content_hash",
+  ],
 };
 
-/** Build the SQL fragment used by readLiveContentFingerprint to fingerprint one table's rows in a
- *  single aggregate query (no row-by-row JS work, no SQLite hash builtin required). Each row's
- *  fingerprinted columns are concatenated (NULL coalesced to a sentinel so NULL vs '' stays
- *  distinguishable) into one delimited text value, then two independent aggregates are computed over
- *  it: SUM(length(...)) and SUM(unicode(...) * (length(...)+1)). Combining both aggregates makes an
- *  in-place content mutation (an UPDATE, or a DELETE+INSERT that preserves row count) overwhelmingly
- *  likely to change at least one of them, even in the unlikely case a pure length-only sum happened
- *  to cancel out across rows. This is a drift DETECTOR for an operator-controlled CLI workflow
- *  (matching the non-cryptographic scope already stated for hashStagingContent()), not a
- *  cryptographic integrity boundary. */
-function buildRowHashExpr(columns) {
-  const concatExpr = columns
-    .map((c) => `COALESCE(${c}, '__NULL__')`)
-    .join(` || '|' || `);
-  return (
-    `SUM(length(${concatExpr})) || ':' || ` +
-    `SUM(unicode(${concatExpr}) * (length(${concatExpr}) + 1))`
-  );
+const FINGERPRINT_PRIMARY_KEYS = {
+  tires: ["barcode"],
+  tire_part_numbers: ["normalized_part_number"],
+  tire_product_part_number_aliases: ["canonical_product_id", "normalized_part_number"],
+  canonical_tire_products: ["canonical_product_id"],
+  provenance: ["id"],
+};
+
+/** Injective typed, byte-length-prefixed field encoding. Values which look alike in delimiter
+ * concatenation (NULL/"", "a|b"/two fields, UTF-16 vs UTF-8 lengths) cannot collide here. */
+function updateTypedValue(hash, value) {
+  if (value === null || value === undefined) return hash.update("N:0:");
+  let tag;
+  let bytes;
+  if (typeof value === "string") { tag = "S"; bytes = Buffer.from(value, "utf8"); }
+  else if (typeof value === "number") { tag = "D"; bytes = Buffer.from(String(value), "utf8"); }
+  else if (typeof value === "bigint") { tag = "I"; bytes = Buffer.from(value.toString(), "utf8"); }
+  else if (typeof value === "boolean") { tag = "B"; bytes = Buffer.from(value ? "1" : "0", "utf8"); }
+  else if (value instanceof Uint8Array) { tag = "X"; bytes = Buffer.from(value); }
+  else if (value instanceof Date) { tag = "T"; bytes = Buffer.from(value.toISOString(), "utf8"); }
+  else { throw new Error(`Unsupported fingerprint value type: ${typeof value}`); }
+  hash.update(`${tag}:${bytes.length}:`);
+  hash.update(bytes);
 }
 
-/** Compute a content fingerprint for every LIVE_TABLES member: a single aggregate query per table
- *  (never row-by-row in JS) combining SUM(length(...)) and SUM(unicode(...) * (length+1)) over every
- *  fingerprinted column concatenated per row. Two aggregates are combined (not just one SUM) so that
- *  a row-content swap between two rows of equal total length is still very likely to change at least
- *  one of the two sums (the unicode()-weighted sum is sensitive to leading-character changes that a
- *  pure length sum would miss). Returns { table: "sumLen:sumUnicode" } strings, directly comparable. */
+function keysetPredicate(keys) {
+  return keys.map((key, i) => `${keys.slice(0, i).map((prior) => `${prior} = ?`).join(" AND ")}${i ? " AND " : ""}${key} > ?`).join(" OR ");
+}
+
+/** PK-ordered, keyset-paginated streaming SHA-256 for every swapped table. */
 async function readLiveContentFingerprint(client) {
   const fingerprint = {};
-  for (const table of LIVE_TABLES) {
+  const existing = await existingTableNames(client);
+  for (const table of SWAPPED_TABLES) {
+    if (!existing.has(table)) {
+      fingerprint[table] = "ABSENT";
+      continue;
+    }
     const columns = FINGERPRINT_COLUMNS[table];
-    const hashExpr = buildRowHashExpr(columns);
-    const res = await client.execute(`SELECT ${hashExpr} AS fp FROM ${table}`);
-    const value = res.rows[0]?.fp;
-    // An empty table's SUM() returns NULL in SQLite; normalize to an explicit sentinel so "empty"
-    // has a stable, comparable fingerprint value rather than the string "null" leaking through.
-    fingerprint[table] = value === null || value === undefined ? "EMPTY:0" : String(value);
+    const keys = FINGERPRINT_PRIMARY_KEYS[table];
+    const hash = createHash("sha256");
+    hash.update(`table:${table};columns:${columns.join(",")};`);
+    let lastKey = null;
+    while (true) {
+      const res = lastKey === null
+        ? await client.execute(`SELECT ${columns.join(", ")} FROM ${table} ORDER BY ${keys.join(", ")} LIMIT 1000`)
+        : await client.execute({
+          sql: `SELECT ${columns.join(", ")} FROM ${table} WHERE ${keysetPredicate(keys)} ORDER BY ${keys.join(", ")} LIMIT 1000`,
+          args: keys.flatMap((_, i) => [...lastKey.slice(0, i), lastKey[i]]),
+        });
+      if (res.rows.length === 0) break;
+      for (const row of res.rows) {
+        hash.update(`R:${columns.length}:`);
+        for (const column of columns) updateTypedValue(hash, row[column]);
+      }
+      lastKey = keys.map((key) => res.rows[res.rows.length - 1][key]);
+      if (res.rows.length < 1000) break;
+    }
+    fingerprint[table] = hash.digest("hex");
   }
   return fingerprint;
 }
@@ -571,7 +621,7 @@ async function assertLiveUnchangedSinceManifest(client, manifest, subcommandLabe
   }
   const currentCounts = await readLiveCounts(client);
   const drifted = [];
-  for (const table of LIVE_TABLES) {
+  for (const table of SWAPPED_TABLES) {
     if (currentCounts[table] !== manifest.liveCounts[table]) {
       drifted.push(`${table}: backup saw ${manifest.liveCounts[table]}, now ${currentCounts[table]}`);
     }
@@ -588,7 +638,7 @@ async function assertLiveUnchangedSinceManifest(client, manifest, subcommandLabe
   if (manifest.liveContentFingerprint) {
     const currentFingerprint = await readLiveContentFingerprint(client);
     const contentDrifted = [];
-    for (const table of LIVE_TABLES) {
+    for (const table of SWAPPED_TABLES) {
       if (currentFingerprint[table] !== manifest.liveContentFingerprint[table]) {
         contentDrifted.push(table);
       }
@@ -628,7 +678,7 @@ async function cmdBackup({ dryRun }) {
   if (dryRun) {
     console.log(`[dry-run] backup: would create ${rel(outDir)}/`);
     console.log(`[dry-run] backup: would dump CREATE TABLE + CREATE INDEX DDL for each table to ${rel(join(outDir, "schema.sql"))}`);
-    for (const table of LIVE_TABLES) {
+    for (const table of SWAPPED_TABLES) {
       console.log(`[dry-run] backup: would run keyset-paginated "SELECT * FROM ${table} WHERE <pk> > ? ORDER BY <pk> LIMIT 1000",`);
       console.log(`[dry-run] backup:   writing to ${rel(join(outDir, `${table}.jsonl`))}`);
       console.log(`[dry-run] backup:   then re-COUNT(*) after the dump and compare to the pre-dump COUNT(*) (race detection)`);
@@ -659,7 +709,7 @@ async function cmdBackup({ dryRun }) {
   // tables' schema here would blur that scope without adding restore value (operational tables are
   // never touched by this promotion at all, per OPERATIONAL_TABLES).
   const schemaRes = await client.execute(
-    `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','index') AND tbl_name IN (${LIVE_TABLES.map((t) => `'${t}'`).join(",")}) ORDER BY type DESC, name`
+    `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','index') AND tbl_name IN (${SWAPPED_TABLES.map((t) => `'${t}'`).join(",")}) ORDER BY type DESC, name`
   );
   const schemaStatements = schemaRes.rows
     .filter((r) => r.sql) // auto-indexes (PK-backed) have a NULL sql and need no separate statement
@@ -667,7 +717,7 @@ async function cmdBackup({ dryRun }) {
   const schemaPath = join(outDir, "schema.sql");
   writeFileSync(
     schemaPath,
-    `-- Schema DDL for LIVE_TABLES (${LIVE_TABLES.join(", ")}) captured at backup time (${ts}).\n` +
+    `-- Schema DDL for swapped tables (${SWAPPED_TABLES.join(", ")}) captured at backup time (${ts}).\n` +
       `-- Restore order: CREATE TABLE statements first, then load each table's .jsonl, then CREATE\n` +
       `-- INDEX statements.\n\n` +
       schemaStatements.join("\n") + (schemaStatements.length ? "\n" : ""),
@@ -677,9 +727,15 @@ async function cmdBackup({ dryRun }) {
   console.log(`backup: wrote schema DDL (${schemaStatements.length} statements) to ${rel(schemaPath)}`);
 
   const BATCH = 1000;
-  for (const table of LIVE_TABLES) {
+  const existing = await existingTableNames(client);
+  for (const table of SWAPPED_TABLES) {
+    if (!existing.has(table)) {
+      manifest.tables[table] = { state: "ABSENT", rowCount: "ABSENT", file: null, consistent: true };
+      console.log(`backup: ${table} is ABSENT (first-promotion additive table)`);
+      continue;
+    }
     console.log(`backup: dumping ${table}...`);
-    const pk = table === "tires" ? "barcode" : "normalized_part_number";
+    const pk = FINGERPRINT_PRIMARY_KEYS[table];
     const preCountRes = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
     const preCount = Number(preCountRes.rows[0].c);
     const filePath = join(outDir, `${table}.jsonl`);
@@ -695,17 +751,19 @@ async function cmdBackup({ dryRun }) {
     // boundary held open across pages, so true point-in-time consistency requires promote to run in
     // a quiescent window (documented below); the count-consistency check catches any drift.
     let lastKey = null;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const res = lastKey === null
-        ? await client.execute(`SELECT * FROM ${table} ORDER BY ${pk} LIMIT ${BATCH}`)
-        : await client.execute({ sql: `SELECT * FROM ${table} WHERE ${pk} > ? ORDER BY ${pk} LIMIT ${BATCH}`, args: [lastKey] });
+        ? await client.execute(`SELECT * FROM ${table} ORDER BY ${pk.join(", ")} LIMIT ${BATCH}`)
+        : await client.execute({
+          sql: `SELECT * FROM ${table} WHERE ${keysetPredicate(pk)} ORDER BY ${pk.join(", ")} LIMIT ${BATCH}`,
+          args: pk.flatMap((_, i) => [...lastKey.slice(0, i), lastKey[i]]),
+        });
       if (res.rows.length === 0) break;
       for (const row of res.rows) {
         lines.push(JSON.stringify(row));
         written++;
       }
-      lastKey = res.rows[res.rows.length - 1][pk];
+      lastKey = pk.map((key) => res.rows[res.rows.length - 1][key]);
       if (res.rows.length < BATCH) break;
     }
     writeFileSync(filePath, lines.join("\n") + (lines.length ? "\n" : ""), "utf8");
@@ -1226,6 +1284,9 @@ async function runPostSwapSmokeTest(client, ts, preSwapStagedCounts = null) {
 async function cmdPromote({ dryRun, manifestArg }) {
   requireConfirmOrExit(dryRun);
   const ts = timestamp();
+  if (!dryRun) {
+    console.log("promote: OPERATOR GATE - keep all other Turso writers paused through acceptance or rollback; see scripts/tire-db-repair/TURSO_PROMOTION_RUNBOOK.md.");
+  }
 
   const baseRenameStatements = [
     `ALTER TABLE tires RENAME TO tires_old_${ts};`,
@@ -1371,6 +1432,9 @@ async function cmdPromote({ dryRun, manifestArg }) {
 // =============================================================================================
 async function cmdRollback({ dryRun, ts: tsArg }) {
   requireConfirmOrExit(dryRun);
+  if (!dryRun) {
+    console.log("rollback: OPERATOR GATE - keep all other Turso writers paused through failed-table delta recovery; see scripts/tire-db-repair/TURSO_PROMOTION_RUNBOOK.md.");
+  }
 
   // Panel finding I2: resolve the timestamp with explicit precedence so a caller who exported
   // PROMOTE_TS (expecting symmetry with the promote invocation) never silently falls through to

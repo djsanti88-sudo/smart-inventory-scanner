@@ -75,12 +75,16 @@ import { createClient } from "@libsql/client";
 process.env.PROMOTE_SKIP_MAIN = "1";
 const {
   splitSqlStatements, countValueTuples, isAllowedTableName, assertAllowedTables, OPERATIONAL_TABLES,
-  isAllowedNoTableStatement, runPostSwapSmokeTest,
+  isAllowedNoTableStatement, runPostSwapSmokeTest, readLiveCounts, readLiveContentFingerprint,
+  FINGERPRINT_COLUMNS,
 } = await import("./10_promote_execute.mjs");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
-const REAL_STAGING_DIR = join(
+// The production staging package is intentionally gitignored because it is a large generated
+// artifact.  Isolated worktrees therefore provide it explicitly for local-only proof; normal
+// checkouts still use the package at its historical repository location.
+const REAL_STAGING_DIR = process.env.PROMOTE_TEST_STAGING_SOURCE || join(
   REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28", "repair-2026-07-28", "turso-staging"
 );
 const SCRIPT_PATH = join(__dirname, "10_promote_execute.mjs");
@@ -198,6 +202,61 @@ async function seedFakeLiveDb() {
 
   client.close();
   return { sampleBarcode };
+}
+
+/** Seed the later-promotion shape, where all five tables already exist.  The three tables added by
+ * the first promotion deliberately use their real primary keys, so fingerprint pagination must
+ * honor each table's own PK order rather than assuming tire barcodes everywhere. */
+async function seedFakeLiveDbWithAllFiveTables() {
+  const seeded = await seedFakeLiveDb();
+  const client = createClient({ url: dbUrl });
+  await client.execute(`CREATE TABLE tire_product_part_number_aliases (
+    canonical_product_id TEXT NOT NULL,
+    normalized_part_number TEXT NOT NULL,
+    display_part_number TEXT NOT NULL,
+    source TEXT NOT NULL,
+    trust_color TEXT NOT NULL,
+    confidence_score INTEGER NOT NULL,
+    is_unambiguous INTEGER NOT NULL,
+    PRIMARY KEY (canonical_product_id, normalized_part_number)
+  )`);
+  await client.execute(`CREATE TABLE canonical_tire_products (
+    canonical_product_id TEXT PRIMARY KEY,
+    brand TEXT,
+    model TEXT,
+    size TEXT,
+    load_index TEXT,
+    speed_rating TEXT,
+    load_range TEXT,
+    type TEXT,
+    season TEXT,
+    alias_count INTEGER NOT NULL,
+    canonicalization_confidence INTEGER NOT NULL,
+    canonicalization_reason TEXT NOT NULL
+  )`);
+  await client.execute(`CREATE TABLE provenance (
+    id INTEGER PRIMARY KEY,
+    product_id TEXT,
+    barcode TEXT,
+    source_name TEXT,
+    source_ref TEXT,
+    sheet TEXT,
+    row TEXT,
+    batch_id TEXT,
+    imported_at TEXT,
+    evidence_level TEXT,
+    license_note TEXT,
+    content_hash TEXT
+  )`);
+  await client.execute(`INSERT INTO tire_product_part_number_aliases VALUES
+    ('LIVE_CANONICAL', 'LIVE_ALIAS', 'LIVE_ALIAS', 'fixture', 'green', 100, 1)`);
+  await client.execute(`INSERT INTO canonical_tire_products VALUES
+    ('LIVE_CANONICAL', 'oldbrand', 'oldmodel', '000/00R00', '', '', '', '', '', 1, 100, 'fixture')`);
+  await client.execute(`INSERT INTO provenance VALUES
+    (1, 'LIVE_CANONICAL', '000000000000', 'fixture', 'fixture-ref', 'Sheet1', '1', 'fixture',
+     '2026-07-29T00:00:00.000Z', 'trusted', '', 'fixture-hash')`);
+  client.close();
+  return seeded;
 }
 
 function runCli(args, envOverrides = {}) {
@@ -784,6 +843,71 @@ test("countValueTuples: counts INSERT value-tuples matching the real staging fil
 // backup now writes a run-manifest (liveCounts + stagingContentHash); stage/verify/promote each
 // bind to it and REFUSE if live has moved or the staging dataset changed since backup.
 // ===============================================================================================
+
+test("F-05 first promotion: all five manifest reads distinguish absent new tables from empty tables", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  const client = createClient({ url: dbUrl });
+
+  const counts = await readLiveCounts(client);
+  const fingerprint = await readLiveContentFingerprint(client);
+  for (const table of ["tire_product_part_number_aliases", "canonical_tire_products", "provenance"]) {
+    assert.equal(counts[table], "ABSENT", `${table} count must be explicitly absent`);
+    assert.equal(fingerprint[table], "ABSENT", `${table} digest must be explicitly absent`);
+    assert.notEqual(fingerprint[table], "EMPTY:0", `${table} absent must not masquerade as empty`);
+  }
+  client.close();
+
+  const backup = runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(backup.code, 0, backup.stderr);
+  const manifest = JSON.parse(readFileSync(join(backupDir, readdirSync(backupDir)[0], "manifest.json"), "utf8"));
+  for (const table of ["tires", "tire_part_numbers", "tire_product_part_number_aliases", "canonical_tire_products", "provenance"]) {
+    assert.ok(Object.hasOwn(manifest.liveCounts, table), `manifest must bind ${table} count`);
+    assert.ok(Object.hasOwn(manifest.liveContentFingerprint, table), `manifest must bind ${table} digest`);
+  }
+  assert.equal(manifest.liveCounts.provenance, "ABSENT");
+  assert.equal(manifest.liveContentFingerprint.provenance, "ABSENT");
+
+  assert.equal(runCli(["stage"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+  const verify = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verify.code, 0, verify.stderr + verify.stdout);
+  cleanupScratch();
+});
+
+test("F-05 subsequent promotion: typed streaming digests cover all five tables and catch newer-table drift", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDbWithAllFiveTables();
+  const client = createClient({ url: dbUrl });
+  const before = await readLiveContentFingerprint(client);
+  for (const table of ["tires", "tire_part_numbers", "tire_product_part_number_aliases", "canonical_tire_products", "provenance"]) {
+    assert.ok(Object.hasOwn(before, table), `fingerprint must include ${table}`);
+    assert.match(before[table], /^[a-f0-9]{64}$/, `${table} must use SHA-256`);
+    assert.ok(Array.isArray(FINGERPRINT_COLUMNS[table]), `${table} must declare canonical columns`);
+  }
+  await client.execute({
+    sql: "UPDATE tires SET brand = ? WHERE barcode = ?",
+    args: ["xxxxxxxx", fixture.sampleBarcode], // same byte length as oldbrand
+  });
+  const after = await readLiveContentFingerprint(client);
+  assert.notEqual(after.tires, before.tires, "same-length mutable edit must change SHA-256");
+  client.close();
+
+  const backup = runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(backup.code, 0, backup.stderr);
+  const manifest = JSON.parse(readFileSync(join(backupDir, readdirSync(backupDir)[0], "manifest.json"), "utf8"));
+  for (const table of ["tires", "tire_part_numbers", "tire_product_part_number_aliases", "canonical_tire_products", "provenance"]) {
+    assert.ok(Object.hasOwn(manifest.tables, table), `backup must dump ${table}`);
+  }
+  assert.equal(runCli(["stage"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+
+  const driftClient = createClient({ url: dbUrl });
+  await driftClient.execute("UPDATE provenance SET source_ref = 'changed-ref' WHERE id = 1");
+  driftClient.close();
+  const verify = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(verify.code, 0, "newer-table content drift must block verify");
+  assert.match(verify.stderr, /content fingerprint mismatch on: provenance/);
+  cleanupScratch();
+});
 
 test("C3: stage REFUSES to run without a prior backup (no run-manifest found)", async () => {
   freshScratch();
