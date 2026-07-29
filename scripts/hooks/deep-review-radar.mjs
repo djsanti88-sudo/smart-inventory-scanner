@@ -14,6 +14,12 @@ const ROOT = process.cwd();
 const STATE = join(ROOT, ".claude", ".deep-review-radar.json");
 const THRESHOLD = 25;
 
+// F-11 (owner order, 2026-07-29): env-driven no-write/dry-run mode. When set, the radar still runs its
+// full deterministic scoring (so its decision logic stays testable), but never writes the debounce state
+// file to disk - proof-of-concept / test invocations must leave zero filesystem trace. Without this var
+// set, behavior is byte-for-byte unchanged from before.
+const NO_WRITE = process.env.SCANBIN_HOOKS_DRY_RUN === "1" || process.env.SCANBIN_HOOKS_DRY_RUN === "true";
+
 const WEIGHTS = [
   [/scanStore|services\/inventory|resolver|idempot|pendingSync|cloudDrain/i, 5],
   [/auth|security|share\/route|firestore\.rules|firebase|sensitiveFields|serializ/i, 5],
@@ -49,7 +55,9 @@ const fingerprint = createHash("sha1").update(numstat).digest("hex").slice(0, 12
 let last = "";
 try { last = JSON.parse(readFileSync(STATE, "utf8")).fingerprint; } catch {}
 if (last === fingerprint) process.exit(0);
-try { writeFileSync(STATE, JSON.stringify({ fingerprint, score, at: new Date().toISOString() })); } catch {}
+if (!NO_WRITE) {
+  try { writeFileSync(STATE, JSON.stringify({ fingerprint, score, at: new Date().toISOString() })); } catch {}
+}
 
 const reason =
   `DEEP-REVIEW RADAR (deterministic, $0): the current working-tree change scored ${score} ` +
