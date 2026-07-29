@@ -335,8 +335,10 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
 
   it("getScanEventsBySession preserves physical scan chronology when sync order is reversed", async () => {
     const t = target();
-    await t.apply({ ...incItem("late-key", "late", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "late", businessId: BIZ, sessionId: SID, cleanCode: "222", createdAt: "2026-07-19T16:05:00.000Z" } });
-    await t.apply({ ...incItem("early-key", "early", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "early", businessId: BIZ, sessionId: SID, cleanCode: "111", createdAt: "2026-07-19T16:00:00.000Z" } });
+    const late = await t.apply({ ...incItem("late-key", "late", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", entityId: "late", payload: { id: "late", businessId: BIZ, sessionId: SID, cleanCode: "222", createdAt: "2026-07-19T16:05:00.000Z" } });
+    const early = await t.apply({ ...incItem("early-key", "early", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", entityId: "early", payload: { id: "early", businessId: BIZ, sessionId: SID, cleanCode: "111", createdAt: "2026-07-19T16:00:00.000Z" } });
+    expect(late).toMatchObject({ ok: true, alreadyApplied: false });
+    expect(early).toMatchObject({ ok: true, alreadyApplied: false });
 
     const events = await t.getScanEventsBySession!(BIZ, SID);
 

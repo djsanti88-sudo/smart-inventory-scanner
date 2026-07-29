@@ -61,6 +61,9 @@ describe.skipIf(!ready)("markWrong durable transfer survives a cloud reload (emu
     // 1. Drive the REAL store (local mock backend) to produce the actual scan event + the actual
     //    markWrong transfer ops - not hand-built approximations of the payload shape.
     const store = createTestScanStore({ db: new MockDb() });
+    // The local store's default test business is not the business seeded in this emulator fixture.
+    // Keep every generated queue item inside the authenticated tenant under test.
+    store.setState({ businessId: BIZ });
     store.getState().updateSettings({ aiLookupEnabled: false });
     const code = "049000006277";
     const productId = "seed-wrong-emu-1";
