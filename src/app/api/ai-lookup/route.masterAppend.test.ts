@@ -17,6 +17,11 @@ vi.mock("@/server/catalog/masterAppend", () => ({
   appendMasterCatalogEntry: (...a: unknown[]) => appendMasterCatalogEntry(...a),
 }));
 
+const logServerEvent = vi.fn();
+vi.mock("@/server/log", () => ({
+  logServerEvent: (...args: unknown[]) => logServerEvent(...args),
+}));
+
 const ORIG = { ...process.env };
 
 beforeEach(() => {
@@ -32,6 +37,7 @@ beforeEach(() => {
     verificationStatus: "verified",
     provenanceTier: "ladder_verified_strong",
   });
+  logServerEvent.mockReset();
 });
 afterEach(() => {
   process.env.IS_E2E = ORIG.IS_E2E;
@@ -98,6 +104,11 @@ describe("ai-lookup master-append hook wiring (P5b Task 2)", () => {
     const { POST } = await import("./route");
     const res = await POST(decodeReq());
     expect(res.status).toBe(429);
+    expect(logServerEvent).toHaveBeenCalledWith(expect.objectContaining({
+      event: "daily_cap_exhausted",
+      reasonCode: "daily_cap",
+      status: 429,
+    }));
     await new Promise((r) => setTimeout(r, 0));
     expect(buildMasterCatalogEntry).not.toHaveBeenCalled();
     expect(appendMasterCatalogEntry).not.toHaveBeenCalled();

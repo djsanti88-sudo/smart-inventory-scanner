@@ -38,6 +38,7 @@ import { loadBusinessData } from "@/services/db/firebase/businessDataLoader";
 import { auditRepository, catalogRepository } from "@/services/db/firebase/repositories";
 import { getDb } from "@/lib/firebaseClient";
 import { getSession } from "@/lib/auth";
+import { postTelemetry } from "@/lib/telemetry";
 import {
   evaluateAiGate,
   initBreaker,
@@ -4041,6 +4042,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
         } catch (e) {
           const nextBreaker = recordFailure(gate.breaker, nowMs);
+          // Emit only on the closed/half-open -> open transition. This best-effort request must not
+          // participate in the scan/decode control flow or report a raw scan/provider error.
+          if (gate.breaker.state !== "open" && nextBreaker.state === "open") {
+            void postTelemetry("breaker_open", "decode_failure_threshold_reached");
+          }
           // Task 2: a daily_cap 429 gets its own honest, non-retry-promising copy - there is no
           // automatic decode-on-cap-reset queue, so telling the user to just wait would be false.
           // Every other failure (network / self-inflicted rate limit / provider error) keeps the
