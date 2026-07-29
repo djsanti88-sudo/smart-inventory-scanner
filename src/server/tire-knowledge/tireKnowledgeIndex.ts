@@ -74,6 +74,8 @@ let _stmtBarcode: ReturnType<import("better-sqlite3").Database["prepare"]> | nul
 let _stmtPartNumber: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 let _stmtAllPartNumber: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 let _stmtBySize: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
+let _stmtPartNumberAlias: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
+let _stmtByUid: ReturnType<import("better-sqlite3").Database["prepare"]> | null = null;
 
 function getStmtBarcode() {
   if (_stmtBarcode) return _stmtBarcode;
@@ -128,6 +130,35 @@ function getStmtBySize() {
     // tireSizeToken-style token (already space-free and uppercase).
     _stmtBySize = db.prepare("SELECT * FROM tires WHERE UPPER(REPLACE(size, ' ', '')) = ?");
     return _stmtBySize;
+  } catch { return null; }
+}
+
+/** Task A4: part-number ALIAS fallback (tire_product_part_number_aliases), tried only after the
+ *  canonical tire_part_numbers lookup misses. Deliberately NO LIMIT and no is_unambiguous filter in
+ *  the SQL itself: the caller must see every distinct canonical_product_id a normalized key maps to
+ *  so ambiguity is decided in application code, never by SQL row order (LIMIT 1 would silently pick
+ *  a side). is_unambiguous is stored per-row at population time (03_part_number_aliases.mjs), but is
+ *  re-derived live here from the actual DISTINCT count so a stale flag can never cause a false match. */
+function getStmtPartNumberAlias() {
+  if (_stmtPartNumberAlias) return _stmtPartNumberAlias;
+  const db = getKnowledgeDb();
+  if (!db) return null;
+  try {
+    _stmtPartNumberAlias = db.prepare(
+      "SELECT DISTINCT canonical_product_id FROM tire_product_part_number_aliases WHERE normalized_part_number = ?",
+    );
+    return _stmtPartNumberAlias;
+  } catch { return null; }
+}
+
+/** Resolve a canonical_product_uid directly to its tires row. Backs the alias-table fallback above. */
+function getStmtByUid() {
+  if (_stmtByUid) return _stmtByUid;
+  const db = getKnowledgeDb();
+  if (!db) return null;
+  try {
+    _stmtByUid = db.prepare("SELECT * FROM tires WHERE canonical_product_uid = ? LIMIT 1");
+    return _stmtByUid;
   } catch { return null; }
 }
 
@@ -275,12 +306,24 @@ export async function lookupByExactPartNumber(partNumber: string): Promise<TireK
       const row = (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
       if (row) return row;
     }
+    // Task A4: tire_part_numbers/tires miss on every candidate key -> fall back to the
+    // distributor/boss part-number ALIAS table before giving up on this backend.
+    for (const key of candidates) {
+      const row = lookupPartNumberAliasSqlite(key);
+      if (row) return row;
+    }
     return null;
   }
 
   for (const key of candidates) {
     const tursoRow = await lookupPartNumberTurso(key);
     if (tursoRow) return tursoRow;
+  }
+  // Task A4: same alias fallback on the Turso path, tried only after every candidate key has
+  // missed the canonical tire_part_numbers two-step lookup above.
+  for (const key of candidates) {
+    const aliasRow = await lookupPartNumberAliasTurso(key);
+    if (aliasRow) return aliasRow;
   }
 
   const idx = getJsonIndex();
@@ -291,6 +334,50 @@ export async function lookupByExactPartNumber(partNumber: string): Promise<TireK
     if (row) return row;
   }
   return null;
+}
+
+/** Task A4: SQLite part-number ALIAS fallback (tire_product_part_number_aliases), tried only after
+ *  the canonical tires/tire_part_numbers lookup misses. Ambiguous alias (the normalized key maps to
+ *  more than one distinct canonical_product_id) returns null - never guesses by picking a row. */
+function lookupPartNumberAliasSqlite(key: string): TireKnowledgeRow | null {
+  const aliasStmt = getStmtPartNumberAlias();
+  const uidStmt = getStmtByUid();
+  if (!aliasStmt || !uidStmt) return null;
+  try {
+    const aliasRows = aliasStmt.all(key) as Array<{ canonical_product_id: string }>;
+    if (aliasRows.length !== 1) return null; // 0 = no alias; >1 = ambiguous, never guess
+    const uid = aliasRows[0].canonical_product_id;
+    if (!uid) return null;
+    return (uidStmt.get(uid) as TireKnowledgeRow | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Task A4: Turso part-number ALIAS fallback. Same ambiguity contract as getStmtPartNumberAlias:
+ *  fetch every DISTINCT canonical_product_id the normalized key maps to, resolve to a tires row
+ *  only when exactly one distinct product is present. Fail-safe: any error returns null, never throws. */
+async function lookupPartNumberAliasTurso(key: string): Promise<TireKnowledgeRow | null> {
+  try {
+    const client = await getTireTursoClient();
+    if (!client) return null;
+    const aliasResult = await client.execute({
+      sql: "SELECT DISTINCT canonical_product_id FROM tire_product_part_number_aliases WHERE normalized_part_number = ?",
+      args: [key],
+    });
+    if (aliasResult.rows.length !== 1) return null; // 0 = no alias; >1 = ambiguous, never guess
+    const uid = aliasResult.rows[0].canonical_product_id as string;
+    if (!uid) return null;
+    const tireResult = await client.execute({
+      sql: "SELECT * FROM tires WHERE canonical_product_uid = ? LIMIT 1",
+      args: [uid],
+    });
+    if (tireResult.rows.length === 0) return null;
+    return rowFromTurso(tireResult.rows[0]);
+  } catch (e) {
+    console.warn("[tire-knowledge] Turso part-number ALIAS lookup failed:", (e as Error).message);
+    return null;
+  }
 }
 
 /** Turso: ALL rows for a normalized part number via a single join. Fail-safe: errors return []. */
@@ -392,6 +479,8 @@ export function __resetTireKnowledgeCacheForTests(): void {
   _stmtPartNumber = null;
   _stmtAllPartNumber = null;
   _stmtBySize = null;
+  _stmtPartNumberAlias = null;
+  _stmtByUid = null;
   _jsonIndex = null;
   _uidToRow = null;
   _tursoClient = null;

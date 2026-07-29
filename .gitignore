@@ -164,10 +164,31 @@ scripts/polish-eval-results.json
 docs/pilot/point-s-backfill-worklist.csv
 .ladder-kv.json
 
+.vercel
+.env*
+.playwright-cli/
+
+# User-authorized, isolated KKM catalog snapshot. It must never enter the app corpus or Git.
+/data/kkm-catalog/kkm.sqlite
+/data/kkm-catalog/kkm.sqlite-shm
+/data/kkm-catalog/kkm.sqlite-wal
+
+# Source-isolated distributor catalog snapshots; never app corpus input or Git artifacts.
+/data/atd-catalog/atd.sqlite
+/data/atd-catalog/atd.sqlite-shm
+/data/atd-catalog/atd.sqlite-wal
+/data/ntw-catalog/ntw.sqlite
+/data/ntw-catalog/ntw.sqlite-shm
+/data/ntw-catalog/ntw.sqlite-wal
+
 # Teach Bot (2026-07-22): live-app learning test harness.
 # Run artifacts (screenshots/traces/video/reports/manifests) are large + may reference
 # per-run synthetic accounts; regenerated every run, never source. Keep the dir via .gitkeep.
 testing/artifacts/*
 !testing/artifacts/.gitkeep
-# Subagent-driven-development progress ledger (git-ignored scratch).
-.superpowers/
+
+# Session scratch / local run artifacts (never source)
+.tmp/
+outputs/
+.codex/environments/
+.claude/worktrees/
