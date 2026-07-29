@@ -172,7 +172,12 @@ buckets exact/affix/unresolved). NEVER insert unresolved rows - they go to revie
 `scripts/tire-db-repair/03_part_number_aliases.mjs` and provenance via `04_provenance.mjs`.
 
 ## MPN backlog policy (owner-gated, manual trigger only)
-- ~48k MPN blanks are web-only. FIRST invocation: run a **200-row pilot** and STOP with an
+- **STANDING OWNER ORDER (2026-07-28): part-number web research is CANCELLED.** The boss workbook
+  is the only ongoing source of manufacturer part numbers. The 82 pilot fills already applied are
+  kept (evidence-backed, live). Do NOT run any MPN enrichment below unless the owner EXPLICITLY
+  re-authorizes it in the moment. Never overwrite a boss-sourced or existing part number.
+- (Retained for reference only, do not trigger unprompted:) ~48k MPN blanks are web-only. If ever
+  re-authorized, FIRST invocation: run a **200-row pilot** and STOP with an
   economics report (fills, review delta, batches used, spend, projected full-run cost). Do not
   start a multi-night run until the owner approves the pilot.
   `pipeline_driver.mjs --db <WORK> --pilot --live` (prints the pilot plan; you then launch the
