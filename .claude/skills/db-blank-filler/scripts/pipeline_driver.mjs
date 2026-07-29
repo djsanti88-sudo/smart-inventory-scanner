@@ -8,7 +8,7 @@
 //
 // Stages (deterministic-first, paid last), matching the owner-approved cascade:
 //   1. b5      deterministic backfill (free)      scripts/tire-db-repair/bakeoff/b5_deterministic_backfill.mjs
-//   2. twin    twin completion both directions    .claude/skills/db-blank-filler/scripts/twin_complete.mjs
+//   2. twin    twin COLUMNS (lean, owner-approved) scripts/tire-db-repair/11_twin_columns.mjs
 //   3. style   model styling pass (free)          scripts/tire-db-repair/06_model_styling.mjs
 //   4. codex   GPT-5.5 batches (PAID, --live)      scripts/tire-db-repair/bakeoff/b6_driver.sh  [gated]
 //   5. firecrawl capped fallback (PAID, --live)                                                [gated]
@@ -141,8 +141,11 @@ function finish() {
 // --- Stage 1: deterministic backfill (free) --------------------------------------------------
 run("b5", process.execPath, ["scripts/tire-db-repair/bakeoff/b5_deterministic_backfill.mjs", DB]);
 
-// --- Stage 2: twin completion both directions (free, gated by its own idempotency check) -----
-run("twin", process.execPath, [".claude/skills/db-blank-filler/scripts/twin_complete.mjs", DB, ...(DRY_RUN ? ["--dry-run"] : [])]);
+// --- Stage 2: twin COLUMNS, lean model (free, owner-approved 2026-07-28) ----------------------
+// Adds barcode_upc + barcode_ean13 COLUMNS to the existing tires row (+0 rows). This REPLACES the
+// deprecated row-materialization approach (twin_complete.mjs), which the owner rejected because it
+// doubled the tires table (82,673 -> 131,440 rows). Never call twin_complete.mjs from here again.
+run("twin", process.execPath, ["scripts/tire-db-repair/11_twin_columns.mjs", DB, ...(DRY_RUN ? ["--dry-run"] : [])]);
 
 // --- Stage 3: model styling (free) -----------------------------------------------------------
 run("style", process.execPath, ["scripts/tire-db-repair/06_model_styling.mjs", DB]);

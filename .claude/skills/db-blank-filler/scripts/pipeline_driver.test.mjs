@@ -55,6 +55,28 @@ test("dry-run plans free stages and SKIPS paid stages without --live", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// Regression test for the PR panel Antigravity I2 finding (2026-07-28): stage 2 must invoke the
+// owner-approved LEAN TWIN COLUMNS script (11_twin_columns.mjs), never the deprecated/owner-rejected
+// row-materialization script (twin_complete.mjs), which doubled the tires table (82,673 -> 131,440
+// rows) when it was wired in previously.
+test("stage 2 ('twin') invokes the lean twin-columns script, never the deprecated row-clone script", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "pipe-twinwiring-"));
+  const db = path.join(dir, "f.db");
+  makeFixture(db);
+  const r = run(["--db", db, "--dry-run"]);
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(r.stdout);
+  const twin = report.stages.find((s) => s.stage === "twin");
+  assert.ok(twin, "twin stage must be present");
+  assert.match(twin.wouldRun, /11_twin_columns\.mjs/, "stage 2 must call the lean columns script");
+  assert.doesNotMatch(
+    twin.wouldRun,
+    /twin_complete\.mjs/,
+    "stage 2 must NEVER call the deprecated row-materialization script"
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("pilot flag requests a 200-row MPN plan, capped honestly by the working DB's real eligible-row count", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "pipe-pilot-"));
   const db = path.join(dir, "f.db");

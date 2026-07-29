@@ -25,9 +25,42 @@ before(() => {
 });
 after(() => rmSync(dir, { recursive: true, force: true }));
 
+// The script is deprecated/owner-rejected and now refuses to run without an explicit --db plus the
+// "I understand" flag (I1 guard, see twin_complete.mjs header). Tests exercise the guarded script
+// itself, so they always pass both.
 function runScript(args) {
-  return spawnSync(process.execPath, [SCRIPT, dbPath, ...args], { encoding: "utf8" });
+  return spawnSync(
+    process.execPath,
+    [SCRIPT, "--db", dbPath, "--i-understand-this-is-deprecated-row-mode", ...args],
+    { encoding: "utf8" }
+  );
 }
+
+// I1 guard regression tests (2026-07-28 PR panel fix): this deprecated row-cloning script must
+// refuse to run against a real DB unless BOTH --db and --i-understand-this-is-deprecated-row-mode
+// are explicitly passed, so nobody accidentally doubles the tires table again.
+test("refuses to run with no flags at all (I1 guard)", () => {
+  const r = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /DEPRECATED and OWNER-REJECTED/);
+  assert.match(r.stderr, /11_twin_columns\.mjs/, "must point operators to the lean columns script");
+});
+
+test("refuses to run with --db but WITHOUT the understand-deprecation flag", () => {
+  const r = spawnSync(process.execPath, [SCRIPT, "--db", dbPath], { encoding: "utf8" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /DEPRECATED and OWNER-REJECTED/);
+});
+
+test("refuses to run with the understand-deprecation flag but WITHOUT --db", () => {
+  const r = spawnSync(
+    process.execPath,
+    [SCRIPT, "--i-understand-this-is-deprecated-row-mode"],
+    { encoding: "utf8" }
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /DEPRECATED and OWNER-REJECTED/);
+});
 
 test("adds twins in both directions and sets primary-form designation", () => {
   const r = runScript([]);
@@ -104,7 +137,11 @@ test("ignores same-length alphanumeric barcodes (never fabricates a non-numeric 
     ).run("0AB345678905".slice(0, 12), "unknown", "UID-JUNK", "source_junk", 100);
     d.close();
   }
-  const rr = spawnSync(process.execPath, [SCRIPT, db2], { encoding: "utf8" });
+  const rr = spawnSync(
+    process.execPath,
+    [SCRIPT, "--db", db2, "--i-understand-this-is-deprecated-row-mode"],
+    { encoding: "utf8" }
+  );
   assert.equal(rr.status, 0, rr.stderr);
   const d = new Database(db2, { readonly: true });
   const junkTwin = d.prepare("SELECT 1 FROM tire_barcode_aliases WHERE barcode = '0' || ?").get("0AB345678905".slice(0, 12));
@@ -121,7 +158,11 @@ test("fails cleanly with an honest message when required tables are missing", ()
   const d = new Database(db2);
   d.exec("CREATE TABLE tires (barcode TEXT, canonical_product_uid TEXT, brand TEXT)");
   d.close();
-  const r = spawnSync(process.execPath, [SCRIPT, db2], { encoding: "utf8" });
+  const r = spawnSync(
+    process.execPath,
+    [SCRIPT, "--db", db2, "--i-understand-this-is-deprecated-row-mode"],
+    { encoding: "utf8" }
+  );
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /missing required table/i);
   assert.doesNotMatch(r.stderr, /SqliteError/, "must not leak a raw SQLite stack trace");
@@ -135,7 +176,11 @@ test("--dry-run writes nothing", () => {
   const d1 = new Database(db2, { readonly: true });
   const before = d1.prepare("SELECT count(*) c FROM tire_barcode_aliases").get().c;
   d1.close();
-  const r = spawnSync(process.execPath, [SCRIPT, db2, "--dry-run"], { encoding: "utf8" });
+  const r = spawnSync(
+    process.execPath,
+    [SCRIPT, "--db", db2, "--i-understand-this-is-deprecated-row-mode", "--dry-run"],
+    { encoding: "utf8" }
+  );
   assert.equal(r.status, 0, r.stderr);
   const d2 = new Database(db2, { readonly: true });
   const after = d2.prepare("SELECT count(*) c FROM tire_barcode_aliases").get().c;

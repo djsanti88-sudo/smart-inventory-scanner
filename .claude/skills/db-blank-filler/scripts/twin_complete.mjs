@@ -25,7 +25,17 @@
 //
 // Barcodes are TEXT always. No git, no live Turso, no network, no paid work.
 //
-// Usage: node twin_complete.mjs <dbPath> [--dry-run]
+// *** DEPRECATED / OWNER-REJECTED (2026-07-28) ***  Do not use this script for new twin work.
+// The owner-approved model is LEAN TWIN COLUMNS: scripts/tire-db-repair/11_twin_columns.mjs adds
+// barcode_upc + barcode_ean13 COLUMNS to the existing tires row (+0 rows). This script instead
+// CLONES the tires row under each twin barcode, which doubled the real corpus's tires table
+// (82,673 -> 131,440 rows). It is kept in the repo for historical reference only (per the owner's
+// "keep for reference" decision) and MUST NOT be wired into pipeline_driver.mjs or any other
+// production caller. To prevent an accidental run against a real DB, this script now REFUSES to
+// run unless invoked with BOTH an explicit --db <path> AND --i-understand-this-is-deprecated-row-mode.
+//
+// Usage (guarded): node twin_complete.mjs --db <dbPath> --i-understand-this-is-deprecated-row-mode [--dry-run]
+// Correct lean approach instead: node scripts/tire-db-repair/11_twin_columns.mjs <dbPath> [--dry-run]
 
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -36,14 +46,30 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const require = createRequire(path.join(REPO_ROOT, "package.json"));
 const Database = require("better-sqlite3");
 
-const dbPathArg = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : null;
+function argVal(name) {
+  const i = process.argv.indexOf(name);
+  const next = i !== -1 ? process.argv[i + 1] : undefined;
+  return next && !next.startsWith("--") ? next : undefined;
+}
+
 const DRY_RUN = process.argv.includes("--dry-run");
-const dbPath =
-  dbPathArg ??
-  path.join(
-    REPO_ROOT,
-    "backups/claude-tire-db-handoff-2026-07-28/repair-2026-07-28/REPAIRED_TIRE_DATABASE.db"
+const explicitDb = argVal("--db");
+const understandsDeprecation = process.argv.includes("--i-understand-this-is-deprecated-row-mode");
+
+if (!explicitDb || !understandsDeprecation) {
+  console.error(
+    "twin_complete.mjs is DEPRECATED and OWNER-REJECTED for new work: it clones the tires row " +
+      "under each twin barcode, which doubled the real corpus's tires table (82,673 -> 131,440 rows).\n" +
+      "The owner-approved approach is LEAN TWIN COLUMNS: run scripts/tire-db-repair/11_twin_columns.mjs " +
+      "<dbPath> [--dry-run] instead - it adds barcode_upc + barcode_ean13 COLUMNS to the existing row " +
+      "(+0 rows), no duplicate twin rows.\n" +
+      "If you genuinely intend to run this deprecated row-cloning script anyway (reference/testing only, " +
+      "never against a real corpus), pass BOTH --db <path> and --i-understand-this-is-deprecated-row-mode."
   );
+  process.exit(1);
+}
+
+const dbPath = explicitDb;
 
 const db = new Database(dbPath);
 db.pragma("busy_timeout = 30000");
