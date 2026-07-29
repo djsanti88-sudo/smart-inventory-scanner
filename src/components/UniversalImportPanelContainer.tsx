@@ -47,10 +47,15 @@ export function UniversalImportPanelContainer() {
   }
 
   async function matchRows(rows: MappedImportRow[]): Promise<PreviewMatchResult[]> {
+    const idToken = await token();
     const response = await fetch("/api/reconcile/match", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: rows.map((row) => row.expected) }),
+      body: JSON.stringify({
+        rows: rows.map((row) => row.expected),
+        businessId,
+        ...(idToken ? { idToken } : {}),
+      }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? "Could not match the uploaded rows.");

@@ -10,6 +10,8 @@ import { deriveCountedByUid } from "@/services/reconcile/countedByUid";
 import { resolveRawScan } from "@/services/resolver";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { downloadCsv } from "@/services/exportFormats";
+import { getSession } from "@/lib/auth";
+import { isLiveAuth } from "@/services/auth/authMode";
 
 // Reconcile panel (Task 7): upload a Shop-Ware CSV export, match it against the local tire corpus
 // server-side, and compare the expected quantities with what THIS session counted. Its own page,
@@ -107,10 +109,12 @@ export function ReconcilePanel() {
     setRunning(true);
     setMatchError("");
     try {
+      const user = isLiveAuth() ? await getSession() : null;
+      const idToken = user ? await user.getIdToken() : undefined;
       const res = await fetch("/api/reconcile/match", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rows: session.adapter.rows }),
+        body: JSON.stringify({ rows: session.adapter.rows, businessId, ...(idToken ? { idToken } : {}) }),
       });
       if (!res.ok) {
         setMatchError(`The match request failed (status ${res.status}). Your imported file is still here - try again.`);
