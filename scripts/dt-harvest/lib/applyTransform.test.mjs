@@ -135,7 +135,7 @@ describe("toCorpusRow", () => {
       current_status: "active_retail",
       usable_for: "auto_count_candidate",
       source: "discounttire",
-      source_count: 0,
+      source_count: 1,
     });
   });
 

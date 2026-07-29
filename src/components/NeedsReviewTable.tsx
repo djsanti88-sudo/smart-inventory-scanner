@@ -290,9 +290,8 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
             </div>
           </div>
         )}
-        {resolved ? (
-          <span className="text-sm text-zinc-600">{review.resolutionAction ?? review.status}</span>
-        ) : mode === "create" ? (
+        {resolved ? null : mode === "create" ? ( // resolved rows are filtered out above; branch kept as defense in depth
+
           <div className="flex w-64 flex-col gap-1.5" data-testid="create-form">
             <input
               aria-label="product name"

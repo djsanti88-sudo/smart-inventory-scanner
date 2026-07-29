@@ -23,6 +23,8 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
+    // dev:emulator selects the Firebase EMULATOR backend (scripts/dev.mjs --emulator); --webpack forces
+    // the stable webpack compiler so the first-run route cold-compiles are deterministic on Windows.
     command: "npm run dev:emulator -- --webpack --port 3200",
     url: "http://localhost:3200",
     reuseExistingServer: false,
@@ -36,6 +38,9 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_BACKEND: "1",
       NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "1",
       NEXT_PUBLIC_FIREBASE_PROJECT_ID: "demo-smart-inventory",
+      // Live auth mode, same as the production env. Without this the authMode refactor defaults to
+      // "mock", cloud=false, and the business-context gate never engages - the spec then fails at its
+      // first banner assertion while testing nothing real.
       NEXT_PUBLIC_AUTH_MODE: "live",
       // This spec exercises the FULL platformOwner end-to-end workflow (scan unknown -> Needs Review ->
       // create product -> learn alias -> export code-bearing CSV) and asserts that workflow survives a

@@ -29,16 +29,36 @@ async function scan(page: Page, code: string) {
 
 async function waitDrained(page: Page) {
   // Cloud sync is async; wait until everything queued has reached the emulator before asserting/refresh.
-  await expect(page.getByTestId("pending-count")).toContainText("Waiting to save: 0", { timeout: 15_000 });
+  // 45s: the drain's transient-failure retry backoff can exceed 15s on the emulator; the assertion
+  // still demands a FULL drain, it just gives the backoff room (proven: the counter reaches 0).
+  await expect(page.getByTestId("pending-count")).toContainText("Waiting to save: 0", { timeout: 45_000 });
+}
+
+// The "Sessions and export" secondary controls are a collapsed <details> for real users (P4) and only
+// auto-expand under the auth-bypass flag, which this REAL-login suite rightly does not set. Expand it
+// exactly like a user would before touching session/export/sync controls (idempotent).
+async function openSecondaryControls(page: Page) {
+  const details = page.locator("details").filter({ hasText: "Sessions and export" });
+  if (!(await details.getAttribute("open").then((v) => v !== null))) {
+    await details.locator("summary").click();
+  }
 }
 
 test("Firebase-backed end-to-end (real auth, real business context, survive-refresh)", async ({ page }) => {
-  // The dev server is launched with IS_E2E=1, so /api/ai-lookup is mock-only and cannot call live
-  // providers. The client is allowed to POST there so free/local corpus/cache rungs can run even when
-  // paid provider keys are missing.
+  // Never call live AI in this run. Auto-decode MAY fire /api/ai-lookup (default settings), but
+  // IS_E2E=1 forces the route mock-only - so the safety net asserts every response came from the
+  // mock provider, not that zero calls happened (the old zero-calls assert predates auto-decode).
+  // We track both the request URLs (decode was attempted - free/local rungs run even without paid
+  // keys) and the response bodies (no live/paid provider ever returned data).
   const decodeCalls: string[] = [];
+  const aiResponses: Array<Promise<unknown>> = [];
   page.on("request", (r) => {
     if (r.url().includes("/api/ai-lookup")) decodeCalls.push(r.url());
+  });
+  page.on("response", (r) => {
+    if (r.url().includes("/api/ai-lookup") && r.request().method() === "POST") {
+      aiResponses.push(r.json().catch(() => null));
+    }
   });
 
   // 1. REAL sign-in through the login UI (Auth emulator).
@@ -53,8 +73,8 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // scanner focus intact
   await page.screenshot({ path: `${PROOF}/01-context-ready.png`, fullPage: true });
 
-  // 3. Start a real count session (persists a CountSession for survive-refresh).
-  await page.getByText("Sessions and export", { exact: true }).click();
+  // 4. Start a real count session (persists a CountSession for survive-refresh).
+  await openSecondaryControls(page);
   await page.getByTestId("start-session").click();
 
   // 5. Scan a known product, then an alias code for the SAME product (two codes -> one product).
@@ -75,12 +95,13 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await row.getByTestId("open-create").click();
   await row.getByLabel("product name").fill("FB Mystery");
   await row.getByTestId("create-save").click();
-  await expect(page.getByTestId(`review-row-${UNKNOWN_CODE}`)).toHaveCount(0);
+  await expect(row).toBeHidden(); // resolved rows leave the queue immediately (owner rule 2026-07-22)
   await waitDrained(page); // ensure SAVE_PRODUCT + RESOLVE_ALIAS reached the emulator before reloading /scan
   await page.screenshot({ path: `${PROOF}/04-approved.png`, fullPage: true });
 
   // 8. Rescan the now-learned code -> resolves Known (no new review), and appears in final counts.
   await page.goto("/scan");
+  await openSecondaryControls(page);
   await scan(page, UNKNOWN_CODE);
   await expect(page.getByTestId("final-count-body")).toContainText("FB Mystery");
   await waitDrained(page);
@@ -92,6 +113,7 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
   await expect(page.getByTestId("final-count-body")).toContainText("FB Mystery"); // learned product persisted
   await expect(page.getByText("4 scans", { exact: true })).toBeVisible(); // scan feed also rebuilt from Firestore
   await expect(page.getByTestId("scanner-input")).toBeFocused(); // scanner focus still works after reload
+  await openSecondaryControls(page); // expand AFTER the focus assert - the summary click takes focus
   await page.screenshot({ path: `${PROOF}/05-after-refresh.png`, fullPage: true });
 
   // 10. Open History/session detail before finishing: the active session's scan timeline must be
@@ -124,6 +146,43 @@ test("Firebase-backed end-to-end (real auth, real business context, survive-refr
 
   // Server decode was attempted, but in this Firebase proof it is mock-only (IS_E2E=1), not live AI.
   expect(decodeCalls.length).toBeGreaterThanOrEqual(1);
+
+  // No LIVE AI was ever called: every ai-lookup response must come from the mock provider.
+  // A whole-body string match is too broad here: the ladder honestly LABELS every rung it evaluated
+  // (e.g. providerNames/ladderReasons naming "fetchv2" or "gpt") even when that rung was SKIPPED under
+  // e2e mock mode (IS_E2E forces the route to wire only mockProvider - see api/ai-lookup/route.ts
+  // e2eMode() branch), so those labels legitimately appear in a mock-only response. The real signal
+  // that a rung actually EXECUTED and returned data is providerStatuses[].status === "ok" paired with
+  // a non-mock provider name; a "skipped"/other status entry naming a paid provider is honest bookkeeping,
+  // not a live call.
+  const BANNED_LIVE_PROVIDERS = /go-?upc|fetchv2|firecrawl|openai|gemini|brave/i;
+  const aiBodies = (await Promise.all(aiResponses)).filter(Boolean) as Array<Record<string, unknown>>;
+  for (const b of aiBodies) {
+    const statuses = Array.isArray((b as { providerStatuses?: unknown }).providerStatuses)
+      ? ((b as { providerStatuses: Array<Record<string, unknown>> }).providerStatuses)
+      : [];
+    for (const st of statuses) {
+      const provider = String(st.provider ?? "");
+      const status = String(st.status ?? "");
+      if (status === "ok") {
+        expect(provider.toLowerCase(), "a live/paid provider must never report status=ok in e2e mock mode").not.toMatch(BANNED_LIVE_PROVIDERS);
+        expect(provider.toLowerCase(), "any non-mock provider reporting status=ok is a live leak").toMatch(/mock/);
+      }
+    }
+    // Debug/decision fields never claim a live provider VERIFIED evidence in mock mode.
+    const decision = (b as { decision?: { evidenceStrength?: string } }).decision;
+    if (decision?.evidenceStrength && decision.evidenceStrength !== "none") {
+      const evidences = Array.isArray((b as { evidences?: unknown }).evidences)
+        ? ((b as { evidences: Array<Record<string, unknown>> }).evidences)
+        : [];
+      for (const ev of evidences) {
+        const sources = Array.isArray(ev.matchedSources) ? (ev.matchedSources as unknown[]).join(",") : "";
+        if (ev.verified === true) {
+          expect(sources.toLowerCase(), "verified evidence must never cite a live/paid provider in e2e mock mode").not.toMatch(BANNED_LIVE_PROVIDERS);
+        }
+      }
+    }
+  }
 
   // ---- Genuine persistence proof: assert the EMULATOR state directly via the Admin SDK ----
   const db = adminDb();

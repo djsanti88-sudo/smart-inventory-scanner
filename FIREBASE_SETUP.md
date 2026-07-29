@@ -50,18 +50,34 @@ NEXT_PUBLIC_FIREBASE_APP_ID=demo-app-id
 ```
 
 ## Connecting a REAL cloud project (Phase 2, with owner approval)
-1. Create the project (intended id: `smart-inventory-scanner`) in the Firebase console (or
-   `firebase projects:create`).
+The real production project already exists: id `smart-inventory-scanner-app` (aliased `prod` in
+`.firebaserc`; confirmed by `scripts/cloud-smoke.mjs`, the `EXPECTED_PROJECT` guard in the seed/import
+scripts, and `coordination/PROD_CLEANUP_PLAN.md`).
+1. Project `smart-inventory-scanner-app` already exists in the Firebase console; do not recreate it.
+   (If ever starting a brand-new project instead, use `firebase projects:create`.)
 2. Add a Web App; copy its config into the `NEXT_PUBLIC_FIREBASE_*` vars and set
    `NEXT_PUBLIC_FIREBASE_USE_EMULATOR=0`.
-3. Enable Email/Password (and Google, if desired) in Authentication.
-4. For server-side Admin access, set a LOCAL service-account file path (never the JSON contents, never
-   committed):
-   ```
-   FIREBASE_SERVICE_ACCOUNT_PATH=C:\Users\djsan\secure-keys\smart-inventory-firebase-service-account.json
-   ```
-   or use `GOOGLE_APPLICATION_CREDENTIALS`.
-5. Deploy rules: `firebase deploy --only firestore:rules` (NOT done in Phase 1; needs approval).
+3. Enable Email/Password (and Google, if desired) in Authentication. Add the production domain
+   (`inventory-lovat-six.vercel.app`) to Auth authorized domains, or sign-in fails with
+   `auth/unauthorized-domain`.
+4. For server-side Admin access, credentials differ by environment:
+   - **Local dev**: a LOCAL service-account file path (never the JSON contents, never committed):
+     ```
+     FIREBASE_SERVICE_ACCOUNT_PATH=C:\Users\djsan\secure-keys\smart-inventory-firebase-service-account.json
+     ```
+     or use `GOOGLE_APPLICATION_CREDENTIALS` (also a local path).
+   - **Vercel (production/serverless)**: there is no filesystem to point a path at, so the raw
+     service-account JSON is set directly as an env var:
+     - `FIREBASE_SERVICE_ACCOUNT_JSON` = the full service-account JSON contents (primary).
+     - `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64` = the same JSON, base64-encoded (fallback, used only if
+       the primary var is absent).
+     - `FIREBASE_SERVICE_ACCOUNT_PATH` and `GOOGLE_APPLICATION_CREDENTIALS` must NOT be set on Vercel:
+       they name a filesystem path that does not exist there, so the admin SDK would fail to init.
+       These two stay local-dev-only. See `src/lib/firebaseAdmin.ts` and
+       `src/services/firebaseAdmin/serviceAccount.ts` for the exact resolution order.
+5. Deploy rules: `npm run deploy:rules:prod` (wraps
+   `firebase deploy --only firestore:rules,firestore:indexes --project smart-inventory-scanner-app`).
+   **LIVE, owner-gated** - never run without explicit approval; see `docs/COMMANDS.md`.
 
 ## Demo data
 `demo-smart-inventory` is empty by default. Sign up via `/login`, then create a business at `/business`

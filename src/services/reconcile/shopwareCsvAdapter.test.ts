@@ -111,6 +111,18 @@ describe("parseShopwareCsv", () => {
     },
   );
 
+  it.each(["p/sn", "US Number", "Stock Number", "Part Number"])(
+    "accepts real-world part-number header %s (dead-synonym + missing-synonym regression)",
+    (header) => {
+      const result = parseShopwareCsv(`${header},Make,Model,Tire Size,QOH\nABC-1,Acme,Road,225/45R18,7\n`);
+      expect(result.unparseable).toEqual([]);
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].externalId).toBe("ABC-1");
+      expect(result.rows[0].brand).toBe("Acme");
+      expect(result.rows[0].qty).toBe(7);
+    },
+  );
+
   it("shows every normalized header when the required identity column is absent", () => {
     const result = parseShopwareCsv("Alpha,Beta,Gamma\none,two,three\n");
     expect(result.unparseable).toEqual([

@@ -2,7 +2,7 @@
 
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth, connectAuthEmulator, type Auth } from "firebase/auth";
-import { getFirestore, connectFirestoreEmulator, type Firestore } from "firebase/firestore";
+import { initializeFirestore, getFirestore, connectFirestoreEmulator, type Firestore } from "firebase/firestore";
 
 // Browser Firebase app (Auth + Firestore). Uses only public NEXT_PUBLIC_FIREBASE_* config. When
 // NEXT_PUBLIC_FIREBASE_USE_EMULATOR=1 it connects to the local emulators (no cloud, no secrets). For the
@@ -39,7 +39,18 @@ export function getFirebaseAuth(): Auth {
 }
 
 export function getDb(): Firestore {
-  const d = getFirestore(app());
+  // ignoreUndefinedProperties: store entities carry optional fields (a known scan never gets a
+  // decodeStatus, for example). Firestore rejects `undefined` values outright, which made EVERY
+  // known-scan SAVE_SCAN_EVENT fail permanently against the real backend (caught 2026-07-22 when
+  // the emulator e2e first ran against the real backend again). With the flag, undefined fields are
+  // simply omitted from the written doc. initializeFirestore throws if called after getFirestore
+  // for the same app, so fall back to the already-initialized instance.
+  let d: Firestore;
+  try {
+    d = initializeFirestore(app(), { ignoreUndefinedProperties: true });
+  } catch {
+    d = getFirestore(app());
+  }
   if (useEmulator && !dbWired) {
     connectFirestoreEmulator(d, FIRESTORE_EMULATOR_HOST, FIRESTORE_EMULATOR_PORT);
     dbWired = true;

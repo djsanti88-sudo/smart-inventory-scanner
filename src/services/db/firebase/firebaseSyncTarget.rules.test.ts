@@ -332,4 +332,15 @@ describe.skipIf(!ready)("FirebaseSyncTarget - transaction-safe idempotency (emul
     const events = await t.getScanEventsBySession!(BIZ, SID);
     expect(events.map((e) => e.id)).toEqual(["gev1", "gev2"]);
   });
+
+  it("getScanEventsBySession preserves physical scan chronology when sync order is reversed", async () => {
+    const t = target();
+    await t.apply({ ...incItem("late-key", "late", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "late", businessId: BIZ, sessionId: SID, cleanCode: "222", createdAt: "2026-07-19T16:05:00.000Z" } });
+    await t.apply({ ...incItem("early-key", "early", 0), operation: "SAVE_SCAN_EVENT", entityType: "ScanEvent", payload: { id: "early", businessId: BIZ, sessionId: SID, cleanCode: "111", createdAt: "2026-07-19T16:00:00.000Z" } });
+
+    const events = await t.getScanEventsBySession!(BIZ, SID);
+
+    expect(events.map((e) => e.id)).toEqual(["early", "late"]);
+    expect(events.map((e) => e.createdAt)).toEqual(["2026-07-19T16:00:00.000Z", "2026-07-19T16:05:00.000Z"]);
+  });
 });
