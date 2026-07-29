@@ -191,3 +191,4 @@ testing/artifacts/*
 .tmp/
 outputs/
 .codex/environments/
+.claude/worktrees/
