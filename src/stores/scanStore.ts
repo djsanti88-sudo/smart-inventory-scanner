@@ -2384,7 +2384,81 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // OWNER RULE "scan N = count N": even a known-but-context-conflicted scan must COUNT (the physical
           // item is on the shelf). Count it provisionally against a SAFE "Unidentified item" placeholder -
           // never against the suspect/poisoned matched product - and keep the review open so a human confirms
-          // the real identity. ensureProvisionalCount is idempotent, so this never double-counts.
+          // the real identity. ensureProvisionalCount is idempotent PER CODE (mints the placeholder once and
+          // counts it once) - it never counts a REPEAT physical scan of the same conflicted code (F-02,
+          // TOP-LAW). Detect a repeat the same way the provMatchId bridge does for non-conflict provisionals
+          // (2208-2222): if a safe placeholder for this code is ALREADY counted, mint a FRESH counting event
+          // (this scan's own scanEventId + idempotency keys) directly against that placeholder - never
+          // against the poisoned resolution.productId - so N repeated conflict scans produce N counts.
+          const conflictCandidates = [cleaned.cleanCode, ...(cleaned.normalizedCandidates ?? [])];
+          const conflictCountedIds = new Set(get().finalCounts.map((c) => c.productId));
+          const repeatPlaceholderId =
+            get().products.find(
+              (p) =>
+                conflictCountedIds.has(p.id) &&
+                p.status !== "archived" &&
+                p.provisional === true &&
+                [p.primaryBarcode, p.gtin, p.upc, p.ean, p.primarySku]
+                  .map((c) => (c ?? "").trim())
+                  .some((c) => !!c && conflictCandidates.includes(c)),
+            )?.id ?? null;
+          if (repeatPlaceholderId) {
+            const repeatEvent: ScanEvent = {
+              ...event,
+              matchedProductId: repeatPlaceholderId,
+              status: "known",
+              quantityDelta: 1,
+              decodeStatus: "suggested",
+            };
+            const { counts, count } = incrementInventoryCount(get().finalCounts, repeatEvent, idFactory);
+            repeatEvent.quantityAfterScan = count.quantity;
+            set((s) => ({
+              scanFeed: s.scanFeed.map((e) => (e.id === repeatEvent.id ? repeatEvent : e)),
+              finalCounts: counts.map((c) =>
+                c.productId === repeatEvent.matchedProductId && c.sessionId === repeatEvent.sessionId
+                  ? { ...c, location: scanLocation }
+                  : c,
+              ),
+            }));
+            // P6 C2: written AFTER the count above is applied - never before (TOP-LEVEL LAW).
+            markFirstScanIfNeeded();
+            const repeatIncPayload: IncrementPayload = {
+              businessId,
+              sessionId,
+              productId: repeatPlaceholderId,
+              scanEventId,
+              quantityDelta: 1,
+              idempotencyKey: keyFor("INCREMENT_COUNT"),
+            };
+            enqueueAndSync([
+              makeQueueItem({
+                idFactory,
+                now,
+                businessId,
+                sessionId,
+                entityType: "ScanEvent",
+                entityId: scanEventId,
+                operation: "SAVE_SCAN_EVENT",
+                payload: repeatEvent,
+                idempotencyKey: keyFor("SAVE_SCAN_EVENT"),
+                scanEventId,
+              }),
+              makeQueueItem({
+                idFactory,
+                now,
+                businessId,
+                sessionId,
+                entityType: "InventoryCount",
+                entityId: count.id,
+                operation: "INCREMENT_COUNT",
+                payload: repeatIncPayload,
+                idempotencyKey: keyFor("INCREMENT_COUNT"),
+                scanEventId,
+              }),
+            ]);
+            get().recordFeedback("conflict_detected", { code: cleaned.cleanCode });
+            return repeatEvent;
+          }
           get().ensureProvisionalCount(cleaned.cleanCode, conflictText);
           // STABLE-ID FIX: the placeholder now exists (minted just above); stamp its id onto this review
           // (new or pre-existing open one) so resolveUnknown can re-link by id after a customer reload
