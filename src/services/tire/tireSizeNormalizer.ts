@@ -25,6 +25,10 @@ const METRIC = /(?:(?<![A-Z0-9])(P|LT|ST)\s*)?(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*
 // N.NNN" dimension like "16 X 2.125" false-matched by splitting the decimal mid-digit ("2.1" width +
 // "25" rim, fabricating "16X2.1R25") - there is no separator there at all for this to require.
 const FLOTATION = /(?:(?<![A-Z0-9])(P|LT|ST))?(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
+// A few confirmed light-truck listings write the flotation separator as a slash rather than X
+// ("LT37/12.50R22"). This variant is deliberately stricter than ordinary flotation: its LT/P/ST
+// prefix must be directly attached, otherwise "37/12.50R22" is ambiguous with a ratio/part number.
+const PREFIX_SLASH_FLOTATION = /(?<![A-Z0-9])(P|LT|ST)(\d{2})\s*\/\s*(\d{1,2}\.\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)(?![A-Z0-9/])/i;
 // (Bug 2 fix) Plausibility bounds for the flotation match: diameter (the "35" in 35X12.50R20) 22-44in,
 // width (the "12.50") 4-18in, rim 8-30in - mirrors structurer.ts's isPlausibleTireSize bounds for the
 // exact same shape. Guards a technically-separator-bearing but implausible match.
@@ -87,6 +91,12 @@ export function matchTireSize(input: string | null | undefined): TireSizeMatch |
   m = FLOTATION.exec(s);
   if (m && okFlotationDiameter(Number(m[2])) && okFlotationWidth(Number(m[3])) && okRim(Number(m[5]))) {
     const prefix = (m[1] ?? "").toUpperCase();
+    return withLoadSpeed(`${prefix}${m[2]}X${m[3]}R${m[5]}`, s, m[0]);
+  }
+
+  m = PREFIX_SLASH_FLOTATION.exec(s);
+  if (m && okFlotationDiameter(Number(m[2])) && okFlotationWidth(Number(m[3])) && okRim(Number(m[5]))) {
+    const prefix = m[1].toUpperCase();
     return withLoadSpeed(`${prefix}${m[2]}X${m[3]}R${m[5]}`, s, m[0]);
   }
 

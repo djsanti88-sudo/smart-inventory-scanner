@@ -26,6 +26,10 @@ const CASES: Array<[string, string | null]> = [
   // --- flotation with no prefix must still work unchanged ---
   ["33X12.50R20", "33X12.50R20"],
   ["35X12.50R17", "35X12.50R17"],
+  // --- directly attached construction-prefix slash flotation ---
+  ["LT37/12.50R22", "LT37X12.50R22"],
+  ["LT35/12.50R17", "LT35X12.50R17"],
+  ["LT35/11.50R20", "LT35X11.50R20"],
   // --- spaced shorthand WITH an R separator (Group A item 3): "205 50 R17" ---
   ["205 50 R17", "205/50R17"],
   // --- case / whitespace tolerance ---
@@ -53,6 +57,12 @@ const CASES: Array<[string, string | null]> = [
   ["16 X 2.125", null],
   ["K50 16 X 2.125", null],
   ["700 X 23C", null], // road-bike tire dimension, not a flotation size
+  ["37/12.50R22", null], // slash flotation requires an attached LT/P/ST construction prefix
+  ["LT16/2.125R25", null], // directly attached but implausible flotation dimensions
+  ["LT 37/12.50R22", null], // separated prefix must not be promoted to a trusted size
+  ["LT37/12.50R22ZZ", null], // a trusted slash-flotation token cannot be a prefix of an identifier
+  ["LT37/12.50R221", null], // nor a prefix of a longer rim-like number
+  ["LT37/12.50R22/123", null], // nor a prefix of a slash-delimited identifier
 ];
 
 describe("normalizeTireSize", () => {
@@ -70,6 +80,7 @@ describe("matchTireSize (raw span for description stripping)", () => {
     ["P255/50R19", "P255/50R19"],
     ["LT35x12.50R20", "LT35x12.50R20"],
     ["ST235/80R16", "ST235/80R16"],
+    ["Falken Wildpeak LT37/12.50R22", "LT37/12.50R22"],
   ])("matches the size token without consuming a preceding model suffix: %s", (input, raw) => {
     expect(matchTireSize(input)?.raw).toBe(raw);
   });

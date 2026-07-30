@@ -29,6 +29,15 @@ describe("extractTireFields", () => {
     expect(out.description).toBe("R250");
   });
 
+  it("extracts a directly attached LT slash-flotation size and strips its raw span", () => {
+    const out = extractTireFields({
+      productName: "Falken Wildpeak LT37/12.50R22",
+      brand: "Falken",
+    });
+    expect(out.size).toBe("LT37X12.50R22");
+    expect(out.description).toBe("Wildpeak");
+  });
+
   it("does NOT fabricate: unknown size/brand/part stay blank and the raw text is kept in description", () => {
     const out = extractTireFields({ productName: "Mystery Closeout Item 7755 Lot", brand: "" });
     expect(out.size).toBeNull();

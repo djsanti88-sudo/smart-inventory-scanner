@@ -28,8 +28,12 @@ export const KNOWN_TIRE_BRANDS = [
 // notation some barcode DBs use (245/65-17) - it is the SAME size, just a different separator; the spec
 // COMPLETENESS check still independently requires a load index + speed rating, so this never relaxes specs.
 const METRIC_SIZE = /\b(LT|P|ST)?\d{3}\/\d{2}\s?(Z?R|-)\s?\d{2}\b/i;
-// Commercial / flotation: 11R22.5, 295/75R22.5, 35X12.5R20.
-const COMMERCIAL_SIZE = /\b\d{2}(\.\d)?(X\d{2}(\.\d)?)?R\d{2}(\.\d)?\b/i;
+// Commercial / flotation: 11R22.5, 295/75R22.5, 35X12.5R20. Do not start inside a slash
+// expression, which would otherwise treat the tail of an unprefixed slash-flotation ratio as a size.
+const COMMERCIAL_SIZE = /(?<![A-Z0-9/.])\d{2}(\.\d)?(X\d{2}(\.\d)?)?R\d{2}(\.\d)?\b/i;
+// Confirmed slash flotation exists only with a construction prefix directly attached (LT37/12.50R22).
+// This intentionally rejects both 37/12.50R22 and LT 37/12.50R22.
+const PREFIX_SLASH_FLOTATION_SIZE = /(?<![A-Z0-9])(LT|P|ST)(?:2[2-9]|3\d|4[0-4])\/([4-9]|1[0-8])\.\d{1,2}(?:Z?R|-)(?:0[89]|1\d|2\d|30)(?:\.\d)?(?![A-Z0-9/])/i;
 // Agricultural / implement: 6.00-19, 14.5-20, 16.9-26, 12-16.5, 9.5L-14, 30.5L-32.
 // Keep both sides in practical tire ranges so calendar dates and arbitrary long part numbers do not
 // become a tire size merely because they contain a dash.
@@ -56,17 +60,18 @@ function hasIndependentTireContext(r: IdentityText | null | undefined): boolean 
 /** A tire size pattern (metric or commercial) appears anywhere in the result text. */
 export function hasTireSize(r: IdentityText | null | undefined): boolean {
   const t = haystack(r);
-  return METRIC_SIZE.test(t) || COMMERCIAL_SIZE.test(t) || (AGRICULTURAL_SIZE.test(t) && hasIndependentTireContext(r));
+  return METRIC_SIZE.test(t) || PREFIX_SLASH_FLOTATION_SIZE.test(t) || COMMERCIAL_SIZE.test(t) || (AGRICULTURAL_SIZE.test(t) && hasIndependentTireContext(r));
 }
 
 /** The normalized tire SIZE token (e.g. "245/75R16"), spaces removed + uppercased, or "" if none. Used to
  *  require two independent extractions to agree on the EXACT size before treating them as corroborating. */
 export function tireSizeToken(r: IdentityText | null | undefined): string {
   const t = haystack(r);
-  const m = t.match(METRIC_SIZE) || t.match(COMMERCIAL_SIZE) || (hasIndependentTireContext(r) ? t.match(AGRICULTURAL_SIZE) : null);
+  const m = t.match(METRIC_SIZE) || t.match(PREFIX_SLASH_FLOTATION_SIZE) || t.match(COMMERCIAL_SIZE) || (hasIndependentTireContext(r) ? t.match(AGRICULTURAL_SIZE) : null);
   if (!m) return "";
   // Canonicalize the separator (dash -> R) so "245/65-17" and "245/65R17" compare equal.
   const token = m[0].replace(/\s+/g, "").toUpperCase();
+  if (PREFIX_SLASH_FLOTATION_SIZE.test(m[0])) return token.replace(/^((?:LT|P|ST)\d{2})\//, "$1X");
   return METRIC_SIZE.test(m[0]) ? token.replace(/(\d{2})-(\d{2})$/, "$1R$2") : token;
 }
 
@@ -74,7 +79,7 @@ export function tireSizeToken(r: IdentityText | null | undefined): string {
  *  or "" if none. Read AFTER the size is removed so the size's own "R" is never mistaken for a speed letter -
  *  same removal order hasRequiredTireSpecs() uses. Reuses the existing LOAD_SPEED regex (no new pattern). */
 export function tireLoadSpeedToken(r: IdentityText | null | undefined): string {
-  let t = haystack(r).replace(METRIC_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
+  let t = haystack(r).replace(METRIC_SIZE, " ").replace(PREFIX_SLASH_FLOTATION_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
   if (hasIndependentTireContext(r)) t = t.replace(AGRICULTURAL_SIZE, " ");
   const m = t.match(LOAD_SPEED);
   return m ? m[0].replace(/\s+/g, "").toUpperCase() : "";
@@ -118,9 +123,9 @@ export function isTireContext(r: IdentityText | null | undefined): boolean {
 export function hasRequiredTireSpecs(r: IdentityText | null | undefined): boolean {
   const t = haystack(r);
   if (!hasTireSize(r)) return false;
-  const isCommercial = (COMMERCIAL_SIZE.test(t) || (AGRICULTURAL_SIZE.test(t) && hasIndependentTireContext(r))) && !METRIC_SIZE.test(t);
+  const isCommercial = (PREFIX_SLASH_FLOTATION_SIZE.test(t) || COMMERCIAL_SIZE.test(t) || (AGRICULTURAL_SIZE.test(t) && hasIndependentTireContext(r))) && !METRIC_SIZE.test(t);
   if (isCommercial) return true; // commercial/flotation: a valid size is sufficient
-  let rest = t.replace(METRIC_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
+  let rest = t.replace(METRIC_SIZE, " ").replace(PREFIX_SLASH_FLOTATION_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
   if (hasIndependentTireContext(r)) rest = rest.replace(AGRICULTURAL_SIZE, " ");
   return LOAD_SPEED.test(rest); // consumer/LT metric: require load index + speed rating too
 }
@@ -131,7 +136,7 @@ const TIRE_NOISE = /\b(tires?|tyres?|radial|all[- ]?season|all[- ]?terrain|mud[-
 /** The model/line name remaining in the product name after removing brand, size, load/speed and noise. */
 export function tireModelToken(r: IdentityText | null | undefined): string {
   const name = (r?.productName ?? "");
-  let rest = name.replace(METRIC_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
+  let rest = name.replace(METRIC_SIZE, " ").replace(PREFIX_SLASH_FLOTATION_SIZE, " ").replace(COMMERCIAL_SIZE, " ");
   if (hasIndependentTireContext(r)) rest = rest.replace(AGRICULTURAL_SIZE, " ");
   rest = rest.replace(LOAD_SPEED, " ");
   const brand = (r?.brand && r.brand.trim()) || inferTireBrandFromName(name);
