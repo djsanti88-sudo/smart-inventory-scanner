@@ -21,6 +21,7 @@
     "test:watch": "vitest",
     "test:golden": "vitest run src/eval/goldenBaseline.test.ts",
     "test:corpus-drift": "vitest run src/server/tire-knowledge/corpusDrift.test.ts",
+    "test:refresh-tire-meta": "node --test scripts/refresh-tire-meta.test.mjs",
     "test:ledger": "vitest run src/stores/ledgerInvariants.store.test.ts src/stores/unknownEnqueue.store.test.ts src/stores/mergeUnion.store.test.ts src/stores/markWrongTransfer.store.test.ts src/stores/provenanceTier.store.test.ts src/stores/goldenClasses.store.test.ts src/services/inventory.replay.test.ts src/server/upc/ladderTimeout.test.ts",
     "test:e2e": "playwright test",
     "test:a11y": "playwright test e2e/a11y.spec.ts",
@@ -61,6 +62,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "@vercel/speed-insights": "^2.0.0",
     "barcode-detector": "^3.2.1",
     "better-sqlite3": "^12.11.1",
     "csv-parse": "^7.0.0",

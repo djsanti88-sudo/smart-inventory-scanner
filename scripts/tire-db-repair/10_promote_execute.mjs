@@ -24,9 +24,9 @@
 //
 // Usage:
 //   node scripts/tire-db-repair/10_promote_execute.mjs backup  [--dry-run]
-//   node scripts/tire-db-repair/10_promote_execute.mjs stage   [--dry-run]
-//   node scripts/tire-db-repair/10_promote_execute.mjs verify  [--dry-run]
-//   node scripts/tire-db-repair/10_promote_execute.mjs promote [--dry-run]
+//   node scripts/tire-db-repair/10_promote_execute.mjs stage   [--dry-run] [--manifest <path>] --expected-manifest-sha256 <sha256>
+//   node scripts/tire-db-repair/10_promote_execute.mjs verify  [--dry-run] [--manifest <path>] --expected-manifest-sha256 <sha256>
+//   node scripts/tire-db-repair/10_promote_execute.mjs promote [--dry-run] [--manifest <path>] --expected-manifest-sha256 <sha256>
 //   node scripts/tire-db-repair/10_promote_execute.mjs rollback [--dry-run]
 //
 // Env overrides (used by the proof harness to point at a local fake-live DB instead of real
@@ -191,7 +191,7 @@ function extractTableNames(statement) {
 // rejected as fail-closed noise - this script's own postSwapIndexStatements()/rollback index
 // recreation legitimately emit DROP INDEX IF EXISTS <name>; statements with no ON <table> clause.
 const NO_TABLE_STATEMENT_PATTERNS = [
-  /^PRAGMA\s+\w+/i,
+  /^PRAGMA\s+integrity_check\s*;?\s*$/i,
   /^BEGIN\b/i,
   /^COMMIT\b/i,
   /^ROLLBACK\b/i,
@@ -214,11 +214,21 @@ function isBlankOrCommentOnly(statement) {
 /** True iff `statement` is one of the small set of statement shapes that legitimately reference NO
  *  table at all (schema-introspection-free control statements). This is an explicit, enumerated
  *  allowlist - NOT a catch-all - so a statement outside both this list and extractTableNames' output
- *  is rejected rather than silently passed (panel finding I3: fail CLOSED, not fail OPEN). */
+ *  is rejected rather than silently passed (panel finding I3: fail CLOSED, not fail OPEN). The only
+ *  permitted PRAGMA is read-only integrity_check; mutable connection/schema PRAGMAs are refused. */
 function isAllowedNoTableStatement(statement) {
   const trimmed = statement.trim();
   if (isBlankOrCommentOnly(trimmed)) return true;
   return NO_TABLE_STATEMENT_PATTERNS.some((re) => re.test(trimmed));
+}
+
+function isPragmaStatement(statement) {
+  return /^\s*PRAGMA\b/i.test(statement);
+}
+
+function isSchemaTableWrite(statement, names) {
+  return names.has("sqlite_master") &&
+    /^\s*(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+(?:VIRTUAL\s+)?TABLE|DROP\s+TABLE|ALTER\s+TABLE)\s+["'`]?sqlite_master\b/i.test(statement);
 }
 
 /** Scan a batch of statements and throw a clear, actionable error the FIRST time any statement
@@ -237,6 +247,13 @@ function assertAllowedTables(statements, label) {
     const names = extractTableNames(stmt);
     if (names.size === 0) {
       if (isAllowedNoTableStatement(stmt)) continue;
+      if (isPragmaStatement(stmt)) {
+        throw new Error(
+          `${label}: REFUSING to execute - only the read-only PRAGMA integrity_check is allowed; ` +
+          `state-changing PRAGMAs (including writable_schema and foreign_keys settings) are unsafe. ` +
+          `Offending statement: ${stmt}`
+        );
+      }
       throw new Error(
         `${label}: REFUSING to execute - statement did not match any recognized table-bearing SQL shape ` +
           `AND is not one of the explicitly allowed no-table statements (PRAGMA, BEGIN/COMMIT/ROLLBACK, ` +
@@ -244,6 +261,12 @@ function assertAllowedTables(statements, label) {
           `shape is refused rather than silently permitted, so a construct this scanner does not understand ` +
           `can never bypass operational-table isolation. ` +
           `Offending statement: ${stmt.length > 300 ? stmt.slice(0, 300) + " ... [truncated]" : stmt}`
+      );
+    }
+    if (isSchemaTableWrite(stmt, names)) {
+      throw new Error(
+        `${label}: REFUSING to execute - sqlite_master is read-only for this promotion; schema-table writes ` +
+        `can alter database metadata outside the reviewed table swap. Offending statement: ${stmt}`
       );
     }
     for (const name of names) {
@@ -295,6 +318,28 @@ function countValueTuples(sqlText) {
     if (/^\s{2}\(/.test(line)) count++;
   }
   return count;
+}
+
+function expectedCountsFromStagingFiles() {
+  const expectedCounts = {};
+  for (const fname of STAGING_FILES_ORDER) {
+    const fpath = join(STAGING_DIR, fname);
+    if (!existsSync(fpath)) throw new Error(`Missing staging SQL file: ${rel(fpath)}`);
+    expectedCounts[STAGING_FILE_TO_TABLE[fname]] = countValueTuples(readFileSync(fpath, "utf8"));
+  }
+  return expectedCounts;
+}
+
+function hashArtifactContent(content) {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function hashFileOrMissing(path) {
+  return existsSync(path) ? hashArtifactContent(readFileSync(path, "utf8")) : "MISSING";
+}
+
+function expectedCountsManifestContent(expectedCounts) {
+  return JSON.stringify({ expectedCounts }, null, 2);
 }
 
 function timestamp() {
@@ -354,7 +399,17 @@ function requireConfirmOrExit(dryRun) {
 function parseArgs(argv) {
   const subcommand = argv[2];
   const dryRun = argv.includes("--dry-run");
-  return { subcommand, dryRun };
+  const valueAfter = (flag) => {
+    const index = argv.indexOf(flag);
+    return index >= 0 ? argv[index + 1] : undefined;
+  };
+  return {
+    subcommand,
+    dryRun,
+    ts: valueAfter("--ts"),
+    manifestArg: valueAfter("--manifest"),
+    expectedManifestSha256: valueAfter("--expected-manifest-sha256"),
+  };
 }
 
 // -------------------------------------------------------------------------------------------
@@ -583,9 +638,10 @@ function resolveManifestPath(manifestArg) {
   return findLatestManifestPath();
 }
 
-/** Load and validate a run-manifest, throwing a clear error if the path is missing or unreadable.
- *  Used by stage/verify/promote to bind to the backup that must precede them. */
-function loadRunManifest(manifestPath, subcommandLabel) {
+/** Load a run-manifest only when its byte-level SHA-256 matches an operator-supplied value that
+ *  was recorded outside the mutable backup/staging directory. This makes the backup manifest an
+ *  integrity boundary: editing it to match edited source-artifact hashes cannot authorize a run. */
+function loadRunManifest(manifestPath, subcommandLabel, expectedManifestSha256) {
   if (!manifestPath || !existsSync(manifestPath)) {
     throw new Error(
       `${subcommandLabel}: REFUSING to run - no run-manifest found (looked for ${manifestPath ? rel(manifestPath) : "any backup under " + rel(BACKUP_ROOT)}). ` +
@@ -594,9 +650,24 @@ function loadRunManifest(manifestPath, subcommandLabel) {
         `write that lands between backup and ${subcommandLabel} is caught, not silently lost (panel finding C3).`
     );
   }
+  if (!/^[a-fA-F0-9]{64}$/.test(expectedManifestSha256 ?? "")) {
+    throw new Error(
+      `${subcommandLabel}: REFUSING to run - --expected-manifest-sha256 <64-hex SHA-256> is required. ` +
+        `Record the digest printed by backup outside the backup/staging directory and pass it unchanged.`
+    );
+  }
   try {
-    return JSON.parse(readFileSync(manifestPath, "utf8"));
+    const manifestBytes = readFileSync(manifestPath);
+    const actualManifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
+    if (actualManifestSha256 !== expectedManifestSha256.toLowerCase()) {
+      throw new Error(
+        `manifest SHA-256 ${actualManifestSha256} does not match independently supplied expected digest ` +
+          `${expectedManifestSha256.toLowerCase()}; the manifest may have changed since backup.`
+      );
+    }
+    return JSON.parse(manifestBytes.toString("utf8"));
   } catch (e) {
+    if (String(e.message).includes("manifest SHA-256")) throw e;
     throw new Error(`${subcommandLabel}: REFUSING to run - could not parse manifest at ${rel(manifestPath)}: ${e.message}`);
   }
 }
@@ -671,6 +742,35 @@ function assertStagingContentUnchangedSinceManifest(manifest, subcommandLabel) {
   }
 }
 
+/** Bind every non-SQL input that changes the verify/promotion decision to the backup manifest.
+ *  The hash values are recorded during backup, before stage creates its count artifact.  This
+ *  prevents a later edit to the expected-count file or approved-drop decision from silently
+ *  changing what verify/promote accept for the same run. */
+function assertSourceArtifactsBoundToManifest(manifest, subcommandLabel) {
+  if (!manifest.stageExpectedCountsHash || !manifest.approvedDropsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - bound run-manifest lacks required stage-count/approved-drops hashes; run backup again.`);
+  }
+  const expectedHash = hashArtifactContent(expectedCountsManifestContent(expectedCountsFromStagingFiles()));
+  if (expectedHash !== manifest.stageExpectedCountsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - staging SQL-derived expected counts no longer match the hash bound in the run-manifest; run backup again.`);
+  }
+  const approvedDropsHash = hashFileOrMissing(APPROVED_DROPS_PATH);
+  if (approvedDropsHash !== manifest.approvedDropsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - approved-drops artifact hash does not match the bound run-manifest; its approval decision changed since backup.`);
+  }
+}
+
+function assertStageCountArtifactBoundToManifest(manifest, subcommandLabel) {
+  if (!manifest.stageExpectedCountsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - bound run-manifest lacks the stage_expected_counts.json hash; run backup and stage again.`);
+  }
+  const manifestPath = join(STAGING_DIR, MANIFEST_FILE_NAME);
+  const actualHash = hashFileOrMissing(manifestPath);
+  if (actualHash !== manifest.stageExpectedCountsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - stage_expected_counts.json hash does not match the bound run-manifest; re-run backup and stage.`);
+  }
+}
+
 async function cmdBackup({ dryRun }) {
   const ts = timestamp();
   const outDir = join(BACKUP_ROOT, ts);
@@ -698,7 +798,10 @@ async function cmdBackup({ dryRun }) {
   const liveCounts = await readLiveCounts(client);
   const liveContentFingerprint = await readLiveContentFingerprint(client);
   const stagingContentHash = hashStagingContent();
-  const manifest = { timestamp: ts, tables: {}, liveCounts, liveContentFingerprint, stagingContentHash };
+  const stageExpectedCounts = expectedCountsFromStagingFiles();
+  const stageExpectedCountsHash = hashArtifactContent(expectedCountsManifestContent(stageExpectedCounts));
+  const approvedDropsHash = hashFileOrMissing(APPROVED_DROPS_PATH);
+  const manifest = { timestamp: ts, tables: {}, liveCounts, liveContentFingerprint, stagingContentHash, stageExpectedCountsHash, approvedDropsHash };
 
   // Schema DDL dump (Antigravity panel Important #5): JSONL row-data alone cannot rebuild a table
   // with its indexes/constraints. Capture the CREATE TABLE + CREATE INDEX statements for exactly
@@ -791,8 +894,11 @@ async function cmdBackup({ dryRun }) {
 
   const manifestPath = join(outDir, "manifest.json");
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  const manifestSha256 = createHash("sha256").update(readFileSync(manifestPath)).digest("hex");
   console.log(`backup: wrote manifest to ${rel(manifestPath)}`);
-  return { outDir, manifest };
+  console.log(`backup: manifest SHA-256: ${manifestSha256}`);
+  console.log(`backup: record this digest outside ${rel(outDir)} and pass --expected-manifest-sha256 ${manifestSha256} to stage, verify, and promote.`);
+  return { outDir, manifest, manifestSha256 };
 }
 
 // =============================================================================================
@@ -809,7 +915,7 @@ function stagingTableNamesInScope() {
   ];
 }
 
-async function cmdStage({ dryRun, manifestArg }) {
+async function cmdStage({ dryRun, manifestArg, expectedManifestSha256 }) {
   requireConfirmOrExit(dryRun);
 
   const dropStatements = stagingTableNamesInScope().map((t) => `DROP TABLE IF EXISTS ${t};`);
@@ -845,10 +951,11 @@ async function cmdStage({ dryRun, manifestArg }) {
   // multi-step backup->stage->verify->promote workflow's implicit ordering an ENFORCED invariant
   // instead of an assumption - a live write landing between steps is now DETECTED, not silently lost.
   const manifestPath = resolveManifestPath(manifestArg);
-  const runManifest = loadRunManifest(manifestPath, "stage");
+  const runManifest = loadRunManifest(manifestPath, "stage", expectedManifestSha256);
   const client = await makeClient();
   await assertLiveUnchangedSinceManifest(client, runManifest, "stage");
   assertStagingContentUnchangedSinceManifest(runManifest, "stage");
+  assertSourceArtifactsBoundToManifest(runManifest, "stage");
   console.log(`stage: bound to run-manifest ${rel(manifestPath)} - live counts and staging content confirmed unchanged since backup.`);
 
   // Panel finding I3: hard-enforce operational-table isolation on every statement about to run,
@@ -880,7 +987,7 @@ async function cmdStage({ dryRun, manifestArg }) {
   // survives process restarts between `stage` and `verify`.
   mkdirSync(STAGING_DIR, { recursive: true });
   const expectedCountsManifestPath = join(STAGING_DIR, MANIFEST_FILE_NAME);
-  writeFileSync(expectedCountsManifestPath, JSON.stringify({ generatedAt: new Date().toISOString(), expectedCounts }, null, 2), "utf8");
+  writeFileSync(expectedCountsManifestPath, expectedCountsManifestContent(expectedCounts), "utf8");
   console.log(`stage: wrote expected-count manifest to ${rel(expectedCountsManifestPath)}`);
 
   console.log("stage: complete. Only staging_* tables were written.");
@@ -1032,7 +1139,7 @@ async function runVerifyGates(client) {
   return { passed, gates };
 }
 
-async function cmdVerify({ dryRun, manifestArg }) {
+async function cmdVerify({ dryRun, manifestArg, expectedManifestSha256 }) {
   if (dryRun) {
     // Codex panel finding M1: dry-run previously returned { passed: true }, which reads as a real
     // PASS to any caller/script that checks `.passed` - but NOTHING was evaluated; dry-run only
@@ -1053,14 +1160,15 @@ async function cmdVerify({ dryRun, manifestArg }) {
     return { passed: null, gates: [], dryRun: true };
   }
 
-  const client = await makeClient();
-
   // Panel finding C3: re-check this run is still bound to the same live/staging state the backup
   // captured, before spending time on the gates below.
   const runManifestPath = resolveManifestPath(manifestArg);
-  const runManifest = loadRunManifest(runManifestPath, "verify");
+  const runManifest = loadRunManifest(runManifestPath, "verify", expectedManifestSha256);
+  const client = await makeClient();
   await assertLiveUnchangedSinceManifest(client, runManifest, "verify");
   assertStagingContentUnchangedSinceManifest(runManifest, "verify");
+  assertSourceArtifactsBoundToManifest(runManifest, "verify");
+  assertStageCountArtifactBoundToManifest(runManifest, "verify");
   console.log(`verify: bound to run-manifest ${rel(runManifestPath)} - live counts and staging content confirmed unchanged since backup.`);
 
   const { passed, gates } = await runVerifyGates(client);
@@ -1281,7 +1389,7 @@ async function runPostSwapSmokeTest(client, ts, preSwapStagedCounts = null) {
 // second live write against the just-promoted tables), but nothing forces the operator to accept a
 // bad swap.
 // =============================================================================================
-async function cmdPromote({ dryRun, manifestArg }) {
+async function cmdPromote({ dryRun, manifestArg, expectedManifestSha256 }) {
   requireConfirmOrExit(dryRun);
   const ts = timestamp();
   if (!dryRun) {
@@ -1312,16 +1420,17 @@ async function cmdPromote({ dryRun, manifestArg }) {
     return { ts, statements: baseRenameStatements };
   }
 
-  const client = await makeClient();
-
   // Panel finding C3: re-check this run is still bound to the same live/staging state the backup
   // captured. This is the LAST gate before the irreversible-in-practice swap executes, so it is
   // checked here even though stage() and verify() already checked it earlier in the pipeline - a
   // write could still land in the window between verify and promote.
   const runManifestPath = resolveManifestPath(manifestArg);
-  const runManifest = loadRunManifest(runManifestPath, "promote");
+  const runManifest = loadRunManifest(runManifestPath, "promote", expectedManifestSha256);
+  const client = await makeClient();
   await assertLiveUnchangedSinceManifest(client, runManifest, "promote");
   assertStagingContentUnchangedSinceManifest(runManifest, "promote");
+  assertSourceArtifactsBoundToManifest(runManifest, "promote");
+  assertStageCountArtifactBoundToManifest(runManifest, "promote");
   console.log(`promote: bound to run-manifest ${rel(runManifestPath)} - live counts and staging content confirmed unchanged since backup.`);
 
   // Critical finding #1(a): promote must NEVER trust a prior, separate `verify` invocation - staging
@@ -1484,7 +1593,7 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
     for (const s of baseStatements) console.log(`  ${s}`);
     for (const { live } of NEW_TABLES) {
       console.log(`  [conditional] IF ${live}_old_${ts} exists (second-promote rollback): ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts}; then ALTER TABLE ${live}_old_${ts} RENAME TO ${live};`);
-      console.log(`  [conditional] ELSE (first-promote rollback): DROP TABLE IF EXISTS ${live};`);
+      console.log(`  [conditional] ELSE (first-promote rollback): ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts};`);
     }
     console.log("  [conditional] then DROP INDEX IF EXISTS + CREATE INDEX for every restored table's secondary indexes");
     return { ts, statements: baseStatements };
@@ -1494,7 +1603,8 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
   // for this ts (i.e. the promotion being rolled back was a SECOND promote that renamed a prior
   // generation aside), restore that generation exactly like tires/tire_part_numbers: current live
   // -> `_failed_promotion_<ts>`, `_old_<ts>` -> live. If it does not exist (first-promote
-  // rollback), the original behavior stands: DROP the live table (there was no prior generation).
+  // rollback), preserve the current additive table under `_failed_promotion_<ts>` instead of
+  // dropping it. It may contain post-swap writes that must be explicitly reconciled.
   if (!client) client = await makeClient();
   const existingRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
   const existingNames = new Set(existingRes.rows.map((r) => String(r.name)));
@@ -1507,7 +1617,7 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
       newTableStatements.push(`ALTER TABLE ${live}_old_${ts} RENAME TO ${live};`);
       restoredNewTables.push(live);
     } else {
-      newTableStatements.push(`DROP TABLE IF EXISTS ${live};`);
+      newTableStatements.push(`ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts};`);
     }
   }
 
@@ -1535,26 +1645,22 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
 // main
 // =============================================================================================
 async function main() {
-  const { subcommand, dryRun } = parseArgs(process.argv);
-  const tsFlagIdx = process.argv.indexOf("--ts");
-  const ts = tsFlagIdx >= 0 ? process.argv[tsFlagIdx + 1] : undefined;
-  const manifestFlagIdx = process.argv.indexOf("--manifest");
-  const manifestArg = manifestFlagIdx >= 0 ? process.argv[manifestFlagIdx + 1] : undefined;
+  const { subcommand, dryRun, ts, manifestArg, expectedManifestSha256 } = parseArgs(process.argv);
 
   switch (subcommand) {
     case "backup":
       await cmdBackup({ dryRun });
       break;
     case "stage":
-      await cmdStage({ dryRun, manifestArg });
+      await cmdStage({ dryRun, manifestArg, expectedManifestSha256 });
       break;
     case "verify": {
-      const { passed } = await cmdVerify({ dryRun, manifestArg });
+      const { passed } = await cmdVerify({ dryRun, manifestArg, expectedManifestSha256 });
       if (!dryRun && !passed) process.exit(1);
       break;
     }
     case "promote": {
-      const result = await cmdPromote({ dryRun, manifestArg });
+      const result = await cmdPromote({ dryRun, manifestArg, expectedManifestSha256 });
       if (!dryRun && result?.failed) process.exit(1);
       break;
     }
@@ -1563,7 +1669,7 @@ async function main() {
       break;
     default:
       console.error(
-        "Usage: node scripts/tire-db-repair/10_promote_execute.mjs <backup|stage|verify|promote|rollback> [--dry-run] [--ts <timestamp>] [--manifest <path>]"
+        "Usage: node scripts/tire-db-repair/10_promote_execute.mjs <backup|stage|verify|promote|rollback> [--dry-run] [--ts <timestamp>] [--manifest <path>] [--expected-manifest-sha256 <64-hex>]"
       );
       process.exit(2);
   }

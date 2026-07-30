@@ -25,7 +25,6 @@ const telemetry = (body: unknown, headers: HeadersInit = {}) => new Request("htt
 describe("POST /api/telemetry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ladderStorage.mockResolvedValue({});
     checkRateLimit.mockResolvedValue({ allowed: true, retryAfterMs: 0, remaining: 99 });
   });
 
@@ -65,6 +64,23 @@ describe("POST /api/telemetry", () => {
     const response = await POST(telemetry({ event: "client_error" }, { "content-length": "999999" }));
     expect(response.status).toBe(413);
     expect(checkRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("uses one bounded anonymous limiter key when forwarded headers rotate", async () => {
+    expect((await POST(telemetry(
+      { event: "client_error" },
+      { "x-forwarded-for": "198.51.100.1" },
+    ))).status).toBe(204);
+    expect((await POST(telemetry(
+      { event: "client_error" },
+      { "x-forwarded-for": "198.51.100.2", "x-real-ip": "198.51.100.3" },
+    ))).status).toBe(204);
+
+    expect(checkRateLimit).toHaveBeenCalledTimes(2);
+    expect(checkRateLimit.mock.calls[0][0]).toBe("TELEMETRY:anonymous:client_error");
+    expect(checkRateLimit.mock.calls[1][0]).toBe("TELEMETRY:anonymous:client_error");
+    expect(checkRateLimit.mock.calls[0][1]).not.toHaveProperty("storage");
+    expect(ladderStorage).not.toHaveBeenCalled();
   });
 
   it("returns 429 when the rate limiter rejects the request", async () => {

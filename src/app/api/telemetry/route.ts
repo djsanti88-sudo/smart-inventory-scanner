@@ -2,7 +2,6 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
-import { ladderStorage } from "@/server/upc/storage";
 import { logServerEvent } from "@/server/log";
 
 export const runtime = "nodejs";
@@ -20,12 +19,6 @@ function json(body: unknown, statusOrInit: number | ResponseInit): NextResponse 
     ? { status: statusOrInit, headers: { "Cache-Control": "no-store" } }
     : { ...statusOrInit, headers: { ...statusOrInit.headers, "Cache-Control": "no-store" } };
   return NextResponse.json(body, init);
-}
-
-function ipFromRequest(request: Request): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-    || request.headers.get("x-real-ip")
-    || "local";
 }
 
 function sanitizeDetail(value: unknown): string | undefined {
@@ -65,9 +58,12 @@ export async function POST(request: Request): Promise<Response> {
   const event = body.event as TelemetryEvent;
 
   try {
-    const rate = await checkRateLimit(ipFromRequest(request), {
+    // This endpoint has no authenticated identity. Never use forwarding headers as durable
+    // limiter keys: clients can forge unlimited values and grow ladder_kv without bound. The
+    // allowlisted event name gives diagnostics two fixed anonymous buckets while keeping a
+    // storage-backed cap on the endpoint's resource use.
+    const rate = await checkRateLimit(`TELEMETRY:anonymous:${event}`, {
       limit: intEnv(process.env.TELEMETRY_RATE_LIMIT, TELEMETRY_RATE_LIMIT),
-      storage: await ladderStorage(),
     });
     if (!rate.allowed) {
       return json(

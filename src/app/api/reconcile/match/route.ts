@@ -56,8 +56,8 @@ function authConfigurationError(error: unknown): boolean {
   return /credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(message);
 }
 
-async function authorize(businessId: string, idToken: string): Promise<NextResponse | null> {
-  if (isAuthBypassEnabled() || !isLiveAuth()) return null;
+async function authorize(businessId: string, idToken: string): Promise<NextResponse | { uid: string | null }> {
+  if (isAuthBypassEnabled() || !isLiveAuth()) return { uid: null };
   if (!idToken) return json({ error: "Sign in required." }, 401);
   let uid: string;
   try {
@@ -70,7 +70,7 @@ async function authorize(businessId: string, idToken: string): Promise<NextRespo
     const member = await getAdminDb()
       .doc(`${COLLECTIONS.businessMembers}/${memberDocId(businessId, uid)}`)
       .get();
-    return member.exists ? null : json({ error: "Not a member of this business." }, 403);
+    return member.exists ? { uid } : json({ error: "Not a member of this business." }, 403);
   } catch (error) {
     if (authConfigurationError(error)) return json({ error: "Server auth is not configured." }, 503);
     return json({ error: "Could not verify business membership." }, 503);
@@ -174,15 +174,21 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const parsed = body as { rows?: unknown; businessId?: unknown; idToken?: unknown } | null;
   const businessId = text(parsed?.businessId);
-  const denied = await authorize(businessId, text(parsed?.idToken));
-  if (denied) return denied;
+  const authorization = await authorize(businessId, text(parsed?.idToken));
+  if (authorization instanceof NextResponse) return authorization;
 
-  const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
+  // Live buckets use server-verified identities. Auth-bypass/mock mode shares one fixed bucket:
+  // mock callers have no verified identity, so their supplied businessId must never shape durable
+  // limiter state or permit unlimited 5,000-row requests.
+  const rateLimitKey = authorization.uid
+    ? `RECONCILE:${businessId}:${authorization.uid}`
+    : "RECONCILE:mock";
   try {
-    const rate = await checkRateLimit(`RECONCILE:${businessId}:${clientIp}`, {
+    const rate = await checkRateLimit(rateLimitKey, {
       limit: intEnv(process.env.RECONCILE_MATCH_RATE_LIMIT, 30),
       windowMs: intEnv(process.env.RECONCILE_MATCH_RATE_WINDOW_MS, 60_000),
       storage: await ladderStorage(),
+      failClosedOnStorageError: true,
     });
     if (!rate.allowed) {
       return NextResponse.json({ error: "Too many reconcile requests. Slow down and try again.", retryAfterMs: rate.retryAfterMs }, {
@@ -191,7 +197,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       });
     }
   } catch {
-    logServerEvent({ route: "/api/reconcile/match", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
+    logServerEvent({ route: "/api/reconcile/match", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 503 });
+    return json({ error: "Rate limiting is temporarily unavailable. Try again shortly." }, 503);
   }
 
   const rows = parsed?.rows;

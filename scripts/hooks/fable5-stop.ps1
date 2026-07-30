@@ -7,17 +7,21 @@
 # transcript_path). We pipe it straight through unmodified.
 #
 # F-11 (owner order, 2026-07-29): env-driven no-write/dry-run mode. When
-# $env:SCANBIN_HOOKS_DRY_RUN is "1" or "true", the stdin/hook_support decision
-# call still runs (so FIRE/no-FIRE logic stays exercised and testable), but the
-# detached review-build process - which is the thing that eventually writes
-# report artifacts to disk - is never spawned. Without the flag set, behavior
-# is unchanged.
+# $env:SCANBIN_HOOKS_DRY_RUN is "1" or "true", hook_support evaluates the
+# decision without recording debounce/cap state or preview URLs, and the
+# detached review-build process is never spawned. Without the flag set,
+# behavior is unchanged.
 
 $proj = (Resolve-Path "$PSScriptRoot\..\..").Path
 $stdin = [Console]::In.ReadToEnd()
 $noWrite = ($env:SCANBIN_HOOKS_DRY_RUN -eq "1") -or ($env:SCANBIN_HOOKS_DRY_RUN -eq "true")
 
-$output = $stdin | python -m tools.fable5.hook_support stop-hook --repo "$proj" 2>&1
+if ($noWrite) {
+    $output = $stdin | python -m tools.fable5.hook_support stop-hook --repo "$proj" --dry-run 2>&1
+}
+else {
+    $output = $stdin | python -m tools.fable5.hook_support stop-hook --repo "$proj" 2>&1
+}
 Write-Output $output
 
 if ($output -match "FIRE" -and $noWrite) {

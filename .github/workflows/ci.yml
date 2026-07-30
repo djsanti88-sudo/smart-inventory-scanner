@@ -101,6 +101,9 @@ jobs:
           --exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"
           --exclude "src/components/UniversalImportPanel.fixtures.test.tsx"
 
+      - name: Verify tire metadata refresh preserves the generated payload
+        run: npm run test:refresh-tire-meta
+
   build:
     name: build
     runs-on: ubuntu-latest

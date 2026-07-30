@@ -115,35 +115,6 @@ export async function POST(request: NextRequest) {
     return json({ error: "Account export requires a signed-in member." }, 403);
   }
 
-  // Fix 1: durable, storage-backed per-IP rate limit on the live export path, same seam
-  // /api/ai-lookup uses (checkRateLimit + ladderStorage()). A distinct "EXPORT:" key prefix keeps
-  // this counter independent of the ai-lookup rate limiter's buckets.
-  //
-  // Fail-open hardening: the whole block is wrapped so a storage init throw (e.g. Turso/libsql
-  // unreachable) never crashes the export into a raw 500 - it logs and falls through without rate
-  // limiting instead, matching checkRateLimit's own documented fail-open philosophy. A storage
-  // hiccup must never break exports for an already-verified member.
-  try {
-    const clientIp =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "local";
-    const rl = await checkRateLimit(`EXPORT:${clientIp}`, {
-      limit: intEnv(process.env.ACCOUNT_EXPORT_RATE_LIMIT, 10),
-      windowMs: intEnv(process.env.ACCOUNT_EXPORT_RATE_WINDOW_MS, 60_000),
-      storage: await ladderStorage(),
-    });
-    if (!rl.allowed) {
-      logServerEvent({ route: "/api/account/export", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
-      return NextResponse.json(
-        { error: "Too many export requests. Slow down and try again.", retryAfterMs: rl.retryAfterMs },
-        { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
-      );
-    }
-  } catch {
-    logServerEvent({ route: "/api/account/export", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 200 });
-  }
-
   let uid: string | null = null;
 
   // authBypass is always false past this point (refused above), so this block always runs -
@@ -199,6 +170,29 @@ export async function POST(request: NextRequest) {
       logServerEvent({ route: "/api/account/export", event: "error", reasonCode: "membership_check_failed", businessId: requestedBusinessId, status: 503 });
       return json({ error: "Could not verify business membership." }, 503);
     }
+  }
+
+  // A durable limiter key may only use verified, bounded identities. Client-controlled forwarding
+  // headers are deliberately excluded: they are spoofable and each novel value otherwise grows
+  // ladder_kv indefinitely. Rate limiting happens after token, membership, and role validation so
+  // rejected requests never consume a member's export bucket.
+  try {
+    const rl = await checkRateLimit(`EXPORT:${requestedBusinessId}:${uid}`, {
+      limit: intEnv(process.env.ACCOUNT_EXPORT_RATE_LIMIT, 10),
+      windowMs: intEnv(process.env.ACCOUNT_EXPORT_RATE_WINDOW_MS, 60_000),
+      storage: await ladderStorage(),
+      failClosedOnStorageError: true,
+    });
+    if (!rl.allowed) {
+      logServerEvent({ route: "/api/account/export", event: "rate_limited", reasonCode: "rate_limited", status: 429 });
+      return NextResponse.json(
+        { error: "Too many export requests. Slow down and try again.", retryAfterMs: rl.retryAfterMs },
+        { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
+    }
+  } catch {
+    logServerEvent({ route: "/api/account/export", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 503 });
+    return json({ error: "Rate limiting is temporarily unavailable. Try again shortly." }, 503);
   }
 
   // Fix 1: the prior demo-tenant pin for authBypass mode is dead code now that authBypass is

@@ -38,6 +38,18 @@ export default defineConfig({
     // business-context gate instead of the scanner input.
     // NEXT_PUBLIC_E2E_PLATFORM_OWNER=1: the legacy 11 mock specs exercise the FULL platformOwner view
     // (raw codes, AI status, all exports). The human-bot suite does NOT set this, so it runs as a customer.
-    env: { ...process.env, IS_E2E: "1", NEXT_PUBLIC_E2E_AUTH_BYPASS: "1", NEXT_PUBLIC_FIREBASE_BACKEND: "0", NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "0", NEXT_PUBLIC_E2E_PLATFORM_OWNER: "1" },
+    env: {
+      ...process.env,
+      IS_E2E: "1",
+      NEXT_PUBLIC_E2E_AUTH_BYPASS: "1",
+      NEXT_PUBLIC_FIREBASE_BACKEND: "0",
+      NEXT_PUBLIC_FIREBASE_USE_EMULATOR: "0",
+      NEXT_PUBLIC_E2E_PLATFORM_OWNER: "1",
+      // Playwright merges this map over process.env, and Next preserves already-defined values
+      // instead of replacing them from .env.local. Empty strings therefore fail closed to the
+      // local file adapters and prevent mock E2E from opening a live Turso connection.
+      TURSO_DATABASE_URL: "",
+      TURSO_AUTH_TOKEN: "",
+    },
   },
 });

@@ -24,6 +24,7 @@ type FakeDoc = { id: string; data: Record<string, unknown> } | null;
 const mocks = vi.hoisted(() => ({
   verifyIdToken: vi.fn(),
   memberGet: vi.fn(),
+  checkRateLimit: vi.fn(),
   // businessId -> collectionName -> array of {id, data}
   tenantData: {} as Record<string, Record<string, Array<{ id: string; data: Record<string, unknown> }>>>,
   businessDoc: null as FakeDoc,
@@ -31,6 +32,14 @@ const mocks = vi.hoisted(() => ({
   profileDoc: null as FakeDoc,
   queriedPaths: [] as string[],
 }));
+
+vi.mock("@/services/security/aiSpendGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/security/aiSpendGuard")>();
+  return {
+    ...actual,
+    checkRateLimit: (...args: unknown[]) => mocks.checkRateLimit(...args),
+  };
+});
 
 function makeQuerySnap(rows: Array<{ id: string; data: Record<string, unknown> }>) {
   return {
@@ -102,10 +111,10 @@ import fs from "node:fs";
 
 const tmpLadderDir = path.join(os.tmpdir(), `ladder-storage-export-route-test-${process.pid}`);
 
-function exportRequest(body: unknown): NextRequest {
+function exportRequest(body: unknown, headers: Record<string, string> = {}): NextRequest {
   return new NextRequest("http://localhost:3000/api/account/export", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -119,6 +128,7 @@ beforeEach(() => {
   vi.stubEnv("ACCOUNT_EXPORT_MAX_DOCS", "");
   mocks.verifyIdToken.mockReset().mockResolvedValue({ uid: "u1" });
   mocks.memberGet.mockReset().mockResolvedValue({ exists: true, role: "owner" });
+  mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   mocks.queriedPaths = [];
   mocks.tenantData = {
     "biz-1": {
@@ -160,6 +170,7 @@ describe("POST /api/account/export authentication", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).not.toHaveProperty("collections");
     expect(mocks.queriedPaths).toEqual(["businessMembers/biz-1_u1"]);
+    expect(mocks.checkRateLimit).not.toHaveBeenCalled();
   });
 
   it.each(["owner", "admin"])("allows a %s to export the full tenant bundle including auditLog", async (role) => {
@@ -172,6 +183,10 @@ describe("POST /api/account/export authentication", () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).collections.auditLog).toBeDefined();
+    expect(mocks.checkRateLimit).toHaveBeenCalledWith(
+      "EXPORT:biz-1:u1",
+      expect.objectContaining({ limit: 10, windowMs: 60_000, failClosedOnStorageError: true }),
+    );
   });
 
   it("rejects live-mode export without an ID token", async () => {
@@ -179,6 +194,7 @@ describe("POST /api/account/export authentication", () => {
     expect(response.status).toBe(401);
     expect(mocks.verifyIdToken).not.toHaveBeenCalled();
     expect(mocks.memberGet).not.toHaveBeenCalled();
+    expect(mocks.checkRateLimit).not.toHaveBeenCalled();
   });
 
   it("rejects a non-member with 403 and does not leak collection data", async () => {
@@ -189,6 +205,7 @@ describe("POST /api/account/export authentication", () => {
     expect(response.status).toBe(403);
     const payload = await response.json();
     expect(payload).not.toHaveProperty("collections");
+    expect(mocks.checkRateLimit).not.toHaveBeenCalled();
   });
 
   it("returns 401 without a businessId in live mode with no token", async () => {
@@ -228,6 +245,42 @@ describe("POST /api/account/export authentication", () => {
 });
 
 describe("POST /api/account/export rate limiting (live path)", () => {
+  it("does not consume durable rate-limit state before authenticating the caller", async () => {
+    vi.stubEnv("ACCOUNT_EXPORT_RATE_LIMIT", "1");
+    vi.stubEnv("ACCOUNT_EXPORT_RATE_WINDOW_MS", "60000");
+
+    const anonymous = await POST(exportRequest({ businessId: "biz-1" }));
+    expect(anonymous.status).toBe(401);
+    expect(mocks.checkRateLimit).not.toHaveBeenCalled();
+
+    const authenticated = await POST(exportRequest({ businessId: "biz-1", idToken: "firebase-token" }));
+    expect(authenticated.status).toBe(200);
+    expect(mocks.checkRateLimit).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an authenticated member in one limiter bucket when forwarded headers rotate", async () => {
+    vi.stubEnv("ACCOUNT_EXPORT_RATE_LIMIT", "1");
+    vi.stubEnv("ACCOUNT_EXPORT_RATE_WINDOW_MS", "60000");
+    mocks.checkRateLimit
+      .mockResolvedValueOnce({ allowed: true, retryAfterMs: 0 })
+      .mockResolvedValueOnce({ allowed: false, retryAfterMs: 60_000 });
+
+    const first = await POST(exportRequest(
+      { businessId: "biz-1", idToken: "firebase-token" },
+      { "x-forwarded-for": "198.51.100.1" },
+    ));
+    expect(first.status).toBe(200);
+
+    const second = await POST(exportRequest(
+      { businessId: "biz-1", idToken: "firebase-token" },
+      { "x-forwarded-for": "198.51.100.2", "x-real-ip": "198.51.100.3" },
+    ));
+    expect(second.status).toBe(429);
+    expect(mocks.checkRateLimit).toHaveBeenCalledTimes(2);
+    expect(mocks.checkRateLimit.mock.calls[0][0]).toBe("EXPORT:biz-1:u1");
+    expect(mocks.checkRateLimit.mock.calls[1][0]).toBe("EXPORT:biz-1:u1");
+  });
+
   it("allows a normal request through under the default limit", async () => {
     const response = await POST(
       exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),
@@ -235,9 +288,12 @@ describe("POST /api/account/export rate limiting (live path)", () => {
     expect(response.status).toBe(200);
   });
 
-  it("blocks with 429 + Retry-After once the per-IP limit is exhausted", async () => {
+  it("blocks with 429 + Retry-After once the member limit is exhausted", async () => {
     vi.stubEnv("ACCOUNT_EXPORT_RATE_LIMIT", "1");
     vi.stubEnv("ACCOUNT_EXPORT_RATE_WINDOW_MS", "60000");
+    mocks.checkRateLimit
+      .mockResolvedValueOnce({ allowed: true, retryAfterMs: 0 })
+      .mockResolvedValueOnce({ allowed: false, retryAfterMs: 60_000 });
 
     const first = await POST(exportRequest({ businessId: "biz-1", idToken: "firebase-token" }));
     expect(first.status).toBe(200);
@@ -251,19 +307,18 @@ describe("POST /api/account/export rate limiting (live path)", () => {
     expect(payload.retryAfterMs).toBeGreaterThan(0);
   });
 
-  // Fix 1 (final review pass): a storage init throw (e.g. Turso/libsql unreachable) must never crash
-  // the export into a raw 500 - checkRateLimit's own philosophy is fail-open, and this route's
-  // try/catch around the rate-limit block must honor that for a verified member.
-  it("fails open (still 200) when ladderStorage() throws during the rate-limit check", async () => {
+  it("fails closed with 503 when limiter storage is unavailable after authorization", async () => {
     const storageMod = await import("@/server/upc/storage");
     vi.spyOn(storageMod, "ladderStorage").mockRejectedValueOnce(new Error("storage unavailable"));
 
     const response = await POST(
       exportRequest({ businessId: "biz-1", idToken: "firebase-token" }),
     );
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
     const payload = await response.json();
-    expect(payload.businessId).toBe("biz-1");
+    expect(payload).toEqual({ error: "Rate limiting is temporarily unavailable. Try again shortly." });
+    // Authorization still precedes rate limiting, but no tenant collection is read after the limiter fails.
+    expect(mocks.queriedPaths).toEqual(["businessMembers/biz-1_u1"]);
   });
 });
 

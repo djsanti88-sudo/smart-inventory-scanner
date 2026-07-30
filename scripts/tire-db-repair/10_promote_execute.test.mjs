@@ -61,6 +61,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createClient } from "@libsql/client";
 
 // NOTE on why 10_promote_execute.mjs is loaded via a DYNAMIC import (not a static `import {...}`
@@ -259,7 +260,32 @@ async function seedFakeLiveDbWithAllFiveTables() {
   return seeded;
 }
 
-function runCli(args, envOverrides = {}) {
+function manifestPathForCliArgs(args) {
+  const manifestFlagIdx = args.indexOf("--manifest");
+  if (manifestFlagIdx >= 0) return args[manifestFlagIdx + 1];
+  if (!existsSync(backupDir)) return null;
+  const dirs = readdirSync(backupDir).sort();
+  for (let i = dirs.length - 1; i >= 0; i--) {
+    const candidate = join(backupDir, dirs[i], "manifest.json");
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function sha256File(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function runCli(args, envOverrides = {}, { autoManifestDigest = true } = {}) {
+  const command = args[0];
+  const needsManifestDigest = ["stage", "verify", "promote"].includes(command);
+  const hasManifestDigest = args.includes("--expected-manifest-sha256");
+  const manifestPath = autoManifestDigest && needsManifestDigest && !hasManifestDigest
+    ? manifestPathForCliArgs(args)
+    : null;
+  const argsWithManifestDigest = manifestPath
+    ? [...args, "--expected-manifest-sha256", sha256File(manifestPath)]
+    : args;
   const env = {
     ...process.env,
     PROMOTE_TURSO_URL: dbUrl,
@@ -273,7 +299,7 @@ function runCli(args, envOverrides = {}) {
   // That must NOT propagate to the actual CLI subprocess spawned here, which needs main() to run.
   delete env.PROMOTE_SKIP_MAIN;
   try {
-    const out = execFileSync(process.execPath, [SCRIPT_PATH, ...args], { env, encoding: "utf8" });
+    const out = execFileSync(process.execPath, [SCRIPT_PATH, ...argsWithManifestDigest], { env, encoding: "utf8" });
     return { code: 0, stdout: out };
   } catch (e) {
     return { code: e.status ?? 1, stdout: e.stdout?.toString() ?? "", stderr: e.stderr?.toString() ?? "" };
@@ -519,8 +545,13 @@ test("full cycle: rollback restores exactly the pre-promotion tables", async () 
   const restoredPn = await client.execute(`SELECT * FROM tire_part_numbers WHERE normalized_part_number = 'LIVEPN0001'`);
   assert.equal(restoredPn.rows.length, 1);
 
-  // The failed-promotion tables (renamed-away "new" tables) exist but new tables were dropped.
+  // First-promotion additive tables have no `_old_` predecessor to restore, but their
+  // post-swap content may contain writes that landed before rollback. Preserve it for explicit
+  // delta recovery instead of dropping it.
   assert.ok(await tableExists(client, `tires_failed_promotion_${promotedTs}`));
+  assert.ok(await tableExists(client, `tire_product_part_number_aliases_failed_promotion_${promotedTs}`));
+  assert.ok(await tableExists(client, `canonical_tire_products_failed_promotion_${promotedTs}`));
+  assert.ok(await tableExists(client, `provenance_failed_promotion_${promotedTs}`));
   assert.ok(!(await tableExists(client, "tire_product_part_number_aliases")));
   assert.ok(!(await tableExists(client, "canonical_tire_products")));
   assert.ok(!(await tableExists(client, "provenance")));
@@ -579,7 +610,7 @@ test("I1: verify FAILS on a truncated staging_tires load (exact-count gate, not 
   cleanupScratch();
 });
 
-test("I1: verify FAILS with a clear error when the expected-count manifest is missing", async () => {
+test("I1: verify FAILS closed when the expected-count manifest is missing", async () => {
   freshScratch();
   fixture = await seedFakeLiveDb();
   runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
@@ -591,8 +622,7 @@ test("I1: verify FAILS with a clear error when the expected-count manifest is mi
 
   const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
   assert.equal(verifyRes.code, 1, "verify must refuse to fall back to a weak count>0 check");
-  assert.match(verifyRes.stdout, /FAIL Z_expected_counts_manifest_present/);
-  assert.match(verifyRes.stdout, /MISSING/);
+  assert.match(verifyRes.stderr, /stage_expected_counts\.json hash does not match the bound run-manifest/);
 
   cleanupScratch();
 });
@@ -919,6 +949,45 @@ test("C3: stage REFUSES to run without a prior backup (no run-manifest found)", 
   cleanupScratch();
 });
 
+test("manifest integrity boundary: stage requires the separately recorded backup digest", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  const backup = runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(backup.code, 0, backup.stderr);
+
+  const manifestPath = manifestPathForCliArgs(["stage"]);
+  assert.ok(manifestPath, "backup must produce a manifest to bind");
+  const expectedDigest = sha256File(manifestPath);
+
+  const stageWithoutDigest = runCli(["stage"], { PROMOTE_CONFIRM: "YES" }, { autoManifestDigest: false });
+  assert.notEqual(stageWithoutDigest.code, 0, "stage must reject an omitted independently supplied manifest digest");
+  assert.match(stageWithoutDigest.stderr, /expected-manifest-sha256/);
+
+  assert.equal(runCli(["stage"], { PROMOTE_CONFIRM: "YES" }).code, 0, "test setup must stage with the recorded digest");
+  for (const command of ["verify", "promote"]) {
+    const result = runCli([command], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "DIGESTTEST" }, { autoManifestDigest: false });
+    assert.notEqual(result.code, 0, `${command} must reject an omitted independently supplied manifest digest`);
+    assert.match(result.stderr, /expected-manifest-sha256/);
+  }
+
+  // An attacker/editor can change an input AND rewrite the matching hash *inside* manifest.json.
+  // The digest recorded outside that mutable directory must still stop the run before those paired
+  // changes are trusted.
+  writeApprovedDrops(["LIVEPN0001", "TAMPEREDPN"]);
+  const rewrittenManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  rewrittenManifest.approvedDropsHash = sha256File(approvedDropsPath);
+  writeFileSync(manifestPath, JSON.stringify(rewrittenManifest, null, 2), "utf8");
+
+  const stageWithOriginalDigest = runCli(
+    ["stage", "--expected-manifest-sha256", expectedDigest],
+    { PROMOTE_CONFIRM: "YES" },
+    { autoManifestDigest: false }
+  );
+  assert.notEqual(stageWithOriginalDigest.code, 0, "a rewritten manifest must not authorize a paired source-artifact edit");
+  assert.match(stageWithOriginalDigest.stderr, /manifest SHA-256.*does not match/i);
+  cleanupScratch();
+});
+
 test("C3: stage REFUSES when a live write lands after backup but before stage (live-drift detection)", async () => {
   freshScratch();
   fixture = await seedFakeLiveDb();
@@ -1175,7 +1244,7 @@ test("OPEN-1 (b): PN gate FAILS when one extra live key is absent from staging a
   cleanupScratch();
 });
 
-test("OPEN-1 (c): PN gate FAILS when the approved-drops file is missing while any live key is missing", async () => {
+test("OPEN-1 (c): verify FAILS closed when the approved-drops artifact is missing", async () => {
   freshScratch();
   fixture = await seedFakeLiveDb();
   runCli(["backup"], { PROMOTE_CONFIRM: "YES" });
@@ -1188,8 +1257,7 @@ test("OPEN-1 (c): PN gate FAILS when the approved-drops file is missing while an
 
   const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
   assert.equal(verifyRes.code, 1, "verify must fail closed when keys are missing and no approvals file exists");
-  assert.match(verifyRes.stdout, /FAIL PN_live_part_number_keys_preserved: missing=1, approved=0, unapproved=1/);
-  assert.match(verifyRes.stdout, /GATE FAILURE/);
+  assert.match(verifyRes.stderr, /approved-drops artifact hash does not match the bound run-manifest/);
 
   cleanupScratch();
 });
@@ -1598,13 +1666,59 @@ test("PR-panel Important#3: fail-closed allowlist REJECTS an unrecognized statem
 
 test("PR-panel Important#3: fail-closed allowlist still ALLOWS the legitimate no-table statement shapes (PRAGMA, BEGIN/COMMIT, blank/comment-only)", () => {
   assert.doesNotThrow(() => assertAllowedTables(["PRAGMA integrity_check;"], "test-label"));
-  assert.doesNotThrow(() => assertAllowedTables(["PRAGMA foreign_keys = OFF;"], "test-label"));
   assert.doesNotThrow(() => assertAllowedTables(["BEGIN;"], "test-label"));
   assert.doesNotThrow(() => assertAllowedTables(["COMMIT;"], "test-label"));
   assert.doesNotThrow(() => assertAllowedTables(["ROLLBACK;"], "test-label"));
   assert.doesNotThrow(() => assertAllowedTables(["-- just a comment\n"], "test-label"));
   assert.doesNotThrow(() => assertAllowedTables(["   \n  \n"], "test-label"));
   assert.doesNotThrow(() => assertAllowedTables([""], "test-label"));
+});
+
+test("Turso safety: allowlist refuses schema-table writes and state-changing PRAGMAs", () => {
+  assert.throws(
+    () => assertAllowedTables(["DELETE FROM sqlite_master WHERE type = 'table';"], "test-label"),
+    /REFUSING to execute.*sqlite_master.*read-only/i
+  );
+  assert.throws(
+    () => assertAllowedTables(["PRAGMA writable_schema = ON;"], "test-label"),
+    /REFUSING to execute.*read-only PRAGMA/i
+  );
+  assert.throws(
+    () => assertAllowedTables(["PRAGMA foreign_keys = OFF;"], "test-label"),
+    /REFUSING to execute.*read-only PRAGMA/i
+  );
+  assert.doesNotThrow(() => assertAllowedTables(["PRAGMA integrity_check;"], "test-label"));
+});
+
+test("Turso safety: verify refuses a stage-count artifact changed after stage", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  assert.equal(runCli(["backup"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+  assert.equal(runCli(["stage"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+
+  const expectedCountsPath = join(stagingDir, "stage_expected_counts.json");
+  const changed = JSON.parse(readFileSync(expectedCountsPath, "utf8"));
+  changed.expectedCounts.staging_tires += 1;
+  writeFileSync(expectedCountsPath, JSON.stringify(changed, null, 2), "utf8");
+
+  const verify = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.notEqual(verify.code, 0, "verify must refuse a stage artifact whose content no longer matches the bound backup manifest");
+  assert.match(verify.stderr, /stage_expected_counts\.json.*hash.*bound run-manifest/i);
+  cleanupScratch();
+});
+
+test("Turso safety: promote refuses an approved-drop artifact changed after backup", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+  assert.equal(runCli(["backup"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+  assert.equal(runCli(["stage"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+
+  writeFileSync(approvedDropsPath, readFileSync(approvedDropsPath, "utf8") + "EXTRA_DROP,unauthorized,2026-07-29\n", "utf8");
+
+  const promote = runCli(["promote"], { PROMOTE_CONFIRM: "YES", PROMOTE_TS: "APPROVALMUTATION" });
+  assert.notEqual(promote.code, 0, "promote must refuse an approvals artifact whose content changed since backup");
+  assert.match(promote.stderr, /approved-drops.*hash.*bound run-manifest/i);
+  cleanupScratch();
 });
 
 test("PR-panel Important#3: fail-closed allowlist still ALLOWS every legitimate staging/promote statement shape (regression: the real workflow must keep working)", () => {

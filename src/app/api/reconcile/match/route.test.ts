@@ -65,12 +65,17 @@ function makeRequest(body: unknown): Request {
   });
 }
 
-function liveRequest(body: Record<string, unknown>, contentLength?: string): Request {
+function liveRequest(
+  body: Record<string, unknown>,
+  contentLength?: string,
+  headers: Record<string, string> = {},
+): Request {
   return new Request("http://localhost/api/reconcile/match", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(contentLength ? { "content-length": contentLength } : {}),
+      ...headers,
     },
     body: JSON.stringify({ businessId: "biz-1", idToken: "firebase-token", ...body }),
   });
@@ -127,6 +132,16 @@ describe("POST /api/reconcile/match - auth and extraction bounds", () => {
     expect(authMocks.verifyIdToken).toHaveBeenCalledWith("firebase-token");
   });
 
+  it("uses one fixed limiter bucket for mock-mode reconcile requests", async () => {
+    const res = await POST(makeRequest({ businessId: "caller-controlled", rows: [validRow()] }));
+
+    expect(res.status).toBe(200);
+    expect(authMocks.checkRateLimit).toHaveBeenCalledWith(
+      "RECONCILE:mock",
+      expect.objectContaining({ limit: 30, windowMs: 60_000, failClosedOnStorageError: true }),
+    );
+  });
+
   it("returns 429 when the authenticated caller exceeds the route limit", async () => {
     vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
     authMocks.checkRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
@@ -134,6 +149,45 @@ describe("POST /api/reconcile/match - auth and extraction bounds", () => {
     const res = await POST(liveRequest({ rows: [validRow()] }));
 
     expect(res.status).toBe(429);
+  });
+
+  it("fails closed with 503 when limiter storage is unavailable after authorization", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+    authMocks.checkRateLimit.mockRejectedValueOnce(new Error("storage unavailable"));
+
+    const res = await POST(liveRequest({ rows: [validRow()] }));
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "Rate limiting is temporarily unavailable. Try again shortly." });
+    expect(authMocks.verifyIdToken).toHaveBeenCalledWith("firebase-token");
+    expect(authMocks.memberGet).toHaveBeenCalledTimes(1);
+    expect(authMocks.checkRateLimit).toHaveBeenCalledWith(
+      "RECONCILE:biz-1:u1",
+      expect.objectContaining({ limit: 30, windowMs: 60_000, failClosedOnStorageError: true }),
+    );
+    expect(mockLookupAll).not.toHaveBeenCalled();
+    expect(mockBySize).not.toHaveBeenCalled();
+  });
+
+  it("keeps an authenticated member in one limiter bucket when forwarded headers rotate", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+
+    const first = await POST(liveRequest(
+      { rows: [validRow()] },
+      undefined,
+      { "x-forwarded-for": "198.51.100.1" },
+    ));
+    const second = await POST(liveRequest(
+      { rows: [validRow()] },
+      undefined,
+      { "x-forwarded-for": "198.51.100.2", "x-real-ip": "198.51.100.3" },
+    ));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(authMocks.checkRateLimit).toHaveBeenCalledTimes(2);
+    expect(authMocks.checkRateLimit.mock.calls[0][0]).toBe("RECONCILE:biz-1:u1");
+    expect(authMocks.checkRateLimit.mock.calls[1][0]).toBe("RECONCILE:biz-1:u1");
   });
 
   it("never honors the E2E bypass in production", async () => {

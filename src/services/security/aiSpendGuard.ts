@@ -78,7 +78,13 @@ const RATE_LIMIT_KEY_PREFIX = "ratelimit:";
  */
 export async function checkRateLimit(
   ip: string,
-  opts: { limit?: number; windowMs?: number; now?: number; storage?: RateLimitStorage } = {}
+  opts: {
+    limit?: number;
+    windowMs?: number;
+    now?: number;
+    storage?: RateLimitStorage;
+    failClosedOnStorageError?: boolean;
+  } = {}
 ): Promise<{ allowed: boolean; retryAfterMs: number; remaining: number }> {
   // Default 600/window (window default 60s): a real bulk-scan session (owner report: a fast
   // 300-code run) mass-429'd under the old 120 default. 600 = ~10 scans/second sustained - well
@@ -105,6 +111,7 @@ export async function checkRateLimit(
     if (count > limit) return { allowed: false, retryAfterMs: Math.max(0, resetAt - now), remaining: 0 };
     return { allowed: true, retryAfterMs: 0, remaining: Math.max(0, limit - count) };
   } catch (err) {
+    if (opts.failClosedOnStorageError) throw err;
     console.warn("[checkRateLimit] storage error, falling back to in-memory:", err);
     return checkRateLimitInMemory(key, limit, windowMs, now);
   }

@@ -86,7 +86,13 @@ def _daily_marker_path(root: Path, day: str) -> Path:
     return _hookmarks_dir(root) / f"daily-{day}.json"
 
 
-def should_fire(root: Path, plan_key: str, now_iso: str | None = None) -> bool:
+def should_fire(
+    root: Path,
+    plan_key: str,
+    now_iso: str | None = None,
+    *,
+    record: bool = True,
+) -> bool:
     """Decide whether a hook-triggered review should fire for this plan.
 
     Two independent gates, both must allow:
@@ -94,14 +100,12 @@ def should_fire(root: Path, plan_key: str, now_iso: str | None = None) -> bool:
        newer than DEBOUNCE_MINUTES.
     2. Global daily cap: a counter file for today's UTC date must be below
        DAILY_CAP fires.
-    On success, both markers are written/incremented and True is returned.
+    On success, both markers are written/incremented and True is returned,
+    unless ``record`` is false for a no-write dry-run decision.
     """
     now = datetime.fromisoformat(now_iso) if now_iso else datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-
-    hookmarks_dir = _hookmarks_dir(root)
-    hookmarks_dir.mkdir(parents=True, exist_ok=True)
 
     plan_marker = _plan_marker_path(root, plan_key)
     if plan_marker.is_file():
@@ -126,10 +130,13 @@ def should_fire(root: Path, plan_key: str, now_iso: str | None = None) -> bool:
     if count >= DAILY_CAP:
         return False
 
-    plan_marker.write_text(
-        json.dumps({"plan_key": plan_key, "fired_at": now.isoformat()}), encoding="utf-8"
-    )
-    daily_marker.write_text(json.dumps({"date": day, "count": count + 1}), encoding="utf-8")
+    if record:
+        hookmarks_dir = _hookmarks_dir(root)
+        hookmarks_dir.mkdir(parents=True, exist_ok=True)
+        plan_marker.write_text(
+            json.dumps({"plan_key": plan_key, "fired_at": now.isoformat()}), encoding="utf-8"
+        )
+        daily_marker.write_text(json.dumps({"date": day, "count": count + 1}), encoding="utf-8")
     return True
 
 
@@ -179,7 +186,7 @@ def _write_pending_previews(root: Path, urls: list[str]) -> None:
     pending_path.write_text(json.dumps({"urls": list(merged.keys())}), encoding="utf-8")
 
 
-def run_stop_hook(root: Path, stdin_text: str) -> int:
+def run_stop_hook(root: Path, stdin_text: str, *, no_write: bool = False) -> int:
     try:
         payload = json.loads(stdin_text) if stdin_text.strip() else {}
     except json.JSONDecodeError:
@@ -187,12 +194,13 @@ def run_stop_hook(root: Path, stdin_text: str) -> int:
 
     diff_text = _git_diff(root) + _git_diff(root, "--cached")
     plan_key = str(root)
-    if detect_phase_completion(diff_text) and should_fire(root, plan_key):
+    if detect_phase_completion(diff_text) and should_fire(root, plan_key, record=not no_write):
         print("FIRE")
 
     transcript_tail = _read_transcript_tail(payload.get("transcript_path"))
     urls = extract_preview_urls(transcript_tail)
-    _write_pending_previews(root, urls)
+    if not no_write:
+        _write_pending_previews(root, urls)
     return 0
 
 
@@ -258,6 +266,9 @@ def build_parser() -> argparse.ArgumentParser:
         "stop-hook", help="Handle the Stop hook: detect phase completion, fire."
     )
     stop_hook.add_argument("--repo", help="Repository root. Defaults to the current directory.")
+    stop_hook.add_argument(
+        "--dry-run", action="store_true", help="Evaluate without writing hook state."
+    )
     session_hook = subparsers.add_parser(
         "sessionstart-hook", help="Print up to 4 lines of session-start context."
     )
@@ -271,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.repo).resolve() if args.repo else Path.cwd()
     if args.command == "stop-hook":
         stdin_text = sys.stdin.read() if not sys.stdin.isatty() else ""
-        return run_stop_hook(root, stdin_text)
+        return run_stop_hook(root, stdin_text, no_write=args.dry_run)
     if args.command == "sessionstart-hook":
         return run_sessionstart_hook(root)
     parser.error(f"Unsupported command: {args.command}")

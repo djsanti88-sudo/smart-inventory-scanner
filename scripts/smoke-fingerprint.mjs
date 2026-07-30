@@ -5,8 +5,7 @@
 //   1. /api/ai-lookup capability JSON matches scripts/smoke-expected.json (missingKeys empty,
 //      goUpc.configured, daily.limit, decodeLadder order, geminiUsedForDecode false).
 //   2. Route fingerprint: /scan (200|307), /history 200, /catalog-review 200, /reconcile 200,
-//      /sessions 404 (no index route under src/app/(app)/sessions - only sessions/[id] exists,
-//      so 404 here is EXPECTED and correct, not a bug).
+//      /sessions 307 because redirects are intentionally inspected without following them.
 //   3. Vercel's "Deployment has failed" masquerade page: a failed-build deployment can still answer
 //      200 while serving Vercel's own error HTML instead of the app. Checked on /scan's body.
 //
@@ -38,10 +37,22 @@ const ROUTE_FINGERPRINT = [
   { path: "/history", expectedStatuses: [200] },
   { path: "/catalog-review", expectedStatuses: [200] },
   { path: "/reconcile", expectedStatuses: [200] },
-  // No index page.tsx under src/app/(app)/sessions - only sessions/[id]/page.tsx exists.
-  // 404 here is EXPECTED and correct; it is a fingerprint of intentional route shape, not a defect.
-  { path: "/sessions", expectedStatuses: [404] },
+  { path: "/sessions", expectedStatuses: [307] },
 ];
+
+export function isAllowedDeploymentUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
+    const host = url.hostname.toLowerCase();
+    return (
+      host === "inventory-lovat-six.vercel.app" ||
+      /^inventory-[a-z0-9-]+-sharpenly\.vercel\.app$/.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
 
 function fail(msg) {
   console.error(msg);
@@ -183,7 +194,7 @@ function printMismatches(baseUrl, mismatches) {
 async function main() {
   const args = process.argv.slice(2);
   const baseUrl = args[0];
-  if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
+  if (!baseUrl || !isAllowedDeploymentUrl(baseUrl)) {
     fail("Usage: node scripts/smoke-fingerprint.mjs <deployment-url>");
   }
 
@@ -201,12 +212,14 @@ async function main() {
 
   console.log(`SMOKE FINGERPRINT PASSED against ${baseUrl}`);
   console.log("  - /api/ai-lookup capability JSON matches smoke-expected.json");
-  console.log("  - route fingerprint matches (200/307/404 as expected, including intentional /sessions 404)");
+  console.log("  - route fingerprint matches (200/307/404 as expected)");
   console.log("  - no Vercel failed-deploy masquerade detected on /scan");
   process.exit(0);
 }
 
-main().catch((e) => {
-  console.error("Smoke fingerprint crashed:", e);
-  process.exit(2);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error("Smoke fingerprint crashed:", e);
+    process.exit(2);
+  });
+}
