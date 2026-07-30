@@ -13,18 +13,18 @@ export type TireSizeMatch = {
 };
 
 // Metric / P-metric / LT / ST: P225/65ZR18, 225/60R18, LT285/55R20, 295/75R22.5 (decimal rim ok).
-const METRIC = /(P|LT|ST)?\s*(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*(\d{2}(?:\.\d)?)/i;
+const METRIC = /(?:(?<![A-Z0-9])(P|LT|ST)\s*)?(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*(\d{2}(?:\.\d)?)/i;
 // Flotation: 35X12.50R20 (the middle is a decimal; construction letter optional). A construction
-// prefix (LT/P/ST) can sit directly attached to the flotation number ("LT33X12.50R20") - mirrors
-// METRIC's optional (P|LT|ST)? so the prefix is captured as PART of the size, never left dangling
-// in the surrounding text to leak into a model/description field.
+// prefix (LT/P/ST) is only consumed when directly attached to the flotation number
+// ("LT33X12.50R20"). A separated token ("... model LT 35X12.50R20") is ambiguous and must
+// remain available to the surrounding model/description parser.
 //
 // (Bug 2 fix, owner mandate 2026-07-21): the ZR/R/- separator before the rim is now MANDATORY (was
 // optional), matching every real flotation size in the corpus (COMMERCIAL's own comment already notes
 // "decimal rim required to avoid false positives" for the same reason). Without it, a bicycle "NN X
 // N.NNN" dimension like "16 X 2.125" false-matched by splitting the decimal mid-digit ("2.1" width +
 // "25" rim, fabricating "16X2.1R25") - there is no separator there at all for this to require.
-const FLOTATION = /(P|LT|ST)?\s*(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
+const FLOTATION = /(?:(?<![A-Z0-9])(P|LT|ST))?(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
 // (Bug 2 fix) Plausibility bounds for the flotation match: diameter (the "35" in 35X12.50R20) 22-44in,
 // width (the "12.50") 4-18in, rim 8-30in - mirrors structurer.ts's isPlausibleTireSize bounds for the
 // exact same shape. Guards a technically-separator-bearing but implausible match.
@@ -58,8 +58,11 @@ function findLoadSpeed(remainder: string): { canonical: string; raw: string } | 
 }
 
 function withLoadSpeed(base: string, input: string, rawSize: string): TireSizeMatch {
-  // Remove the size span first so the size's own digits / "R" cannot be misread as load index or speed.
-  const ls = findLoadSpeed(input.replace(rawSize, " "));
+  // A load/speed is a suffix of its size. Looking through the entire remaining description can
+  // mistake a model code such as "SU318 H" for "318H" when the actual 111T follows the size.
+  const sizeOffset = input.indexOf(rawSize);
+  const suffix = sizeOffset >= 0 ? input.slice(sizeOffset + rawSize.length) : "";
+  const ls = findLoadSpeed(suffix);
   return { canonical: ls ? `${base} ${ls.canonical}` : base, raw: rawSize, rawLoadSpeed: ls?.raw };
 }
 

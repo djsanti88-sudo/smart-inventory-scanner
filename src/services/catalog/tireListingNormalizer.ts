@@ -291,9 +291,10 @@ export function parseTireIdentity(raw: string | null | undefined): ParsedTireIde
     "class", "grade", "ply", "cylinder",
   ]);
 
-  // A bare tire load-range/ply class code trailing the model (e.g. "E", "C", "D2", "10PLY") - only
-  // meaningful adjacent to a size, never part of a model designation.
-  const LOAD_CLASS_RE = /^[A-Z]\d?$|^\d{1,2}PLY$/i;
+  // A bare tire load-range/ply class code trailing the model (e.g. "E", "C", "D2", "10PLY").
+  // H and T are common literal model tokens (as in "SU318 H T"), so they must never be removed
+  // as load-range noise.
+  const LOAD_CLASS_RE = /^(?:[B-G]\d?|\d{1,2}PLY)$/i;
 
   // A slash-joined compound (e.g. "SUV/Crossover") is edge-noise only when EVERY sub-word is noise -
   // this must never strip a real model fitment code like "A/T2" or "M/S" (those contain non-noise

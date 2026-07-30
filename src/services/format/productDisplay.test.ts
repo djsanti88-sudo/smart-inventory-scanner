@@ -27,6 +27,10 @@ describe("prettifyProductName", () => {
     expect(prettifyProductName("cs5_ultra_touring")).toBe("CS5 Ultra Touring");
   });
 
+  it("preserves the trusted corpus SU318 H T model code tokens", () => {
+    expect(prettifyProductName("su318_h_t")).toBe("SU318 H T");
+  });
+
   it("title-cases each part of a hyphenated token", () => {
     expect(prettifyProductName("eagle_sport_all-season")).toBe("Eagle Sport All-Season");
   });

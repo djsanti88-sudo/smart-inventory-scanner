@@ -18,10 +18,10 @@ const LETTER_PAIRS: Record<string, string> = {
   "m,s": "M/S",
 };
 
-// Short alphanumeric model codes like "cs5" or "g2" (letters+digits, length <= 4) are uppercased
+// Short alphanumeric model codes like "cs5", "g2", or "su318" (letters+digits, length <= 5) are uppercased
 // wholesale. Longer digit-containing words like "season2" are real words with a trailing digit, not
 // model codes, so they get Title Case instead.
-const MAX_MODEL_CODE_LENGTH = 4;
+const MAX_MODEL_CODE_LENGTH = 5;
 
 function isShortModelCode(part: string): boolean {
   return /\d/.test(part) && part.length <= MAX_MODEL_CODE_LENGTH;

@@ -165,6 +165,18 @@ describe("canonicalTireDisplayName", () => {
 });
 
 describe("enrichProductIdentity - Group B canonical name assembly + specsShort + category default + multiVariant", () => {
+  it("keeps the exact trusted Westlake SU318 H T model identity in the display name and structured model", () => {
+    const result = enrichProductIdentity({
+      // Corpus-shaped productName for exact barcode 758823159756, canonical UID
+      // TIRE_1FC7676888480560C338: westlake / su318_h_t / 255/70R16 / 111T.
+      payload: { name: "Westlake SU318 H T 255/70R16 111T", brand: "Westlake", category: "Tire", specsShort: "255/70R16 111T" },
+      existing: { name: "", brand: "", category: "", specsShort: "", specsFull: "" },
+    });
+
+    expect(result.name).toBe("Westlake SU318 H T 255/70R16 111T");
+    expect(result.structuredModel).toBe("SU318 H T");
+  });
+
   it("replaces name with the canonical display form when brand+model+size all confidently parse (fixture 1)", () => {
     const result = enrichProductIdentity({
       payload: { name: "Fortune Set Of 4 FSR305 265/50R20 111T XL Tires" },

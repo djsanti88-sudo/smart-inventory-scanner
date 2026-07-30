@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeTireSize, matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
+import { parseTireIdentity } from "@/services/catalog/tireListingNormalizer";
 
 // TEST-FIRST table: every common tire-size shape -> ONE canonical string. Unknown -> null (never guess).
 const CASES: Array<[string, string | null]> = [
@@ -61,6 +62,27 @@ describe("normalizeTireSize", () => {
 });
 
 describe("matchTireSize (raw span for description stripping)", () => {
+  it.each([
+    ["Atlas Force UHP 255/50R19 107Y", "255/50R19"],
+    ["Nexen Roadian HP 275/55R20", "275/55R20"],
+    ["Btr55st 235/80R16", "235/80R16"],
+    ["Catchfors M T II LT 35x12.50R20", "35x12.50R20"],
+    ["P255/50R19", "P255/50R19"],
+    ["LT35x12.50R20", "LT35x12.50R20"],
+    ["ST235/80R16", "ST235/80R16"],
+  ])("matches the size token without consuming a preceding model suffix: %s", (input, raw) => {
+    expect(matchTireSize(input)?.raw).toBe(raw);
+  });
+
+  it("keeps a separated LT token in the parsed model before a flotation size", () => {
+    expect(parseTireIdentity("Catchfors M T II LT 35x12.50R20").model).toBe("Catchfors M T II LT");
+  });
+
+  it("does not read a model code's trailing digits and letter as the load/speed", () => {
+    const match = matchTireSize("Westlake SU318 H T 255/70R16 111T");
+    expect(match?.canonical).toBe("255/70R16 111T");
+  });
+
   it("returns the canonical value AND the raw matched substring", () => {
     const m = matchTireSize("Michelin Defender LTX M/S 235/65R18 104H BSW");
     expect(m?.canonical).toBe("235/65R18 104H");

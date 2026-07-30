@@ -178,6 +178,21 @@ describe("cleanListingTitle - Bug 3: words are removed, never replaced", () => {
 // Item A2: parseTireIdentity must isolate a clean Model field, never the whole listing string.
 // ---------------------------------------------------------------------------------------------
 describe("parseTireIdentity - A2 model isolation", () => {
+  it.each(["B", "C", "D", "E", "F", "G"])(
+    "strips a bare Load Range %s token after the size instead of leaking it into the model",
+    (loadRange) => {
+      const id = parseTireIdentity(`Fortune FSR310 LT265/75R16 123/120Q ${loadRange} Tire`);
+      expect(id.model).toBe("FSR310");
+    },
+  );
+
+  it("keeps H and T when they are literal tokens in the SU318 H T model", () => {
+    const id = parseTireIdentity("Westlake SU318 H T 255/70R16 111T");
+    // Westlake is supplied separately by the trusted corpus and is not guessed by this parser;
+    // the parser's responsibility here is to retain the literal H/T model suffix.
+    expect(id.model).toBe("Westlake SU318 H T");
+  });
+
   it("parses Fortune Tormenta A/T2 full identity (840139644399 case)", () => {
     const id = parseTireIdentity(
       "Fortune Tormenta A/T2 All Terrain LT245/75R16 120/116S E Light Truck Tire",
