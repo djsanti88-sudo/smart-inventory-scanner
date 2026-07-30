@@ -1,0 +1,167 @@
+import { createHash } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import type { InventoryCount, ScanEvent } from "@/types";
+import { buildLocalDemoLedgerProof } from "./localDemoLedgerProof";
+import { validateBatchResult } from "../../../scripts/tire-demo-proof/validate-result.mjs";
+
+const SESSION = "local-proof-session";
+
+function batch() {
+  const rows = Array.from({ length: 100 }, (_, index) => ({
+    barcode: `code-${index + 1}`,
+    canonicalProductUid: `canonical-${index + 1}`,
+  }));
+  const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return {
+    schemaVersion: 1 as const,
+    gitSha: "a".repeat(40),
+    databaseSha256: "b".repeat(64),
+    seed: "scanbin-local-tire-demo-v1",
+    batch: 1,
+    batchSha256: digest(rows),
+    expectedBarcodesSha256: digest(rows.map((row) => row.barcode)),
+    expectedCanonicalProductUidsSha256: digest(rows.map((row) => row.canonicalProductUid)),
+    rows,
+  };
+}
+
+function event(index: number, patch: Partial<ScanEvent> = {}): ScanEvent {
+  return {
+    id: `event-${index + 1}`,
+    businessId: "local-demo",
+    sessionId: SESSION,
+    rawCode: `code-${index + 1}`,
+    cleanCode: `code-${index + 1}`,
+    normalizedCandidates: [],
+    matchedProductId: `product-${index + 1}`,
+    matchType: "unknown",
+    status: "known",
+    resolverStatus: "known",
+    codeType: "upc_a",
+    reason: "Local tire corpus",
+    decodeStatus: "verified",
+    quantityDelta: 1,
+    quantityAfterScan: 1,
+    createdAt: `2026-07-29T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+    source: "scan",
+    notes: "",
+    syncStatus: "synced",
+    syncError: null,
+    idempotencyKey: `key-${index + 1}`,
+    ...patch,
+  };
+}
+
+function count(index: number, eventId = `event-${index + 1}`): InventoryCount {
+  return {
+    id: `count-${index + 1}`,
+    businessId: "local-demo",
+    sessionId: SESSION,
+    productId: `product-${index + 1}`,
+    quantity: 1,
+    lastScannedAt: "2026-07-29T00:00:00.000Z",
+    aliasesSeen: [],
+    scanEventIds: [eventId],
+    createdAt: "2026-07-29T00:00:00.000Z",
+    updatedAt: "2026-07-29T00:00:00.000Z",
+    syncStatus: "synced",
+    syncError: null,
+    appliedIdempotencyKeys: [],
+  };
+}
+
+function validInput() {
+  const scanFeed = Array.from({ length: 100 }, (_, index) => event(index));
+  return {
+    batch: batch(),
+    sessionId: SESSION,
+    scanFeed,
+    finalCounts: Array.from({ length: 100 }, (_, index) => count(index)),
+    generatedAt: "2026-07-29T12:00:00.000Z",
+  };
+}
+
+describe("buildLocalDemoLedgerProof", () => {
+  it("rebuilds a stable, passing 100-event proof and maps canonical IDs only from the locked batch", () => {
+    const input = validInput();
+    const proof = buildLocalDemoLedgerProof({ ...input, scanFeed: [...input.scanFeed].reverse() });
+
+    expect(proof.assertions.passed).toBe(true);
+    expect(proof.assertions).toMatchObject({
+      allExpectedBarcodesSeenExactlyOnce: true,
+      unexpectedBarcodeCount: 0,
+      duplicateEventIdCount: 0,
+      missingEventIdCount: 0,
+      unmatchedEventCount: 0,
+      finalEqualsReplay: true,
+      countEventIdsEqualReplayEventIds: true,
+      everyCountEventIdExistsInFeed: true,
+      expectedQuantity: 100,
+      finalQuantity: 100,
+      replayedQuantity: 100,
+      noDrops: true,
+      noDuplicates: true,
+    });
+    expect(proof.events[0]).toMatchObject({ eventId: "event-1", canonicalProductUid: "canonical-1" });
+    expect(proof.events[0]?.status).toBe("verified");
+    expect(proof.events.map((row) => row.eventId)).toEqual(Array.from({ length: 100 }, (_, index) => `event-${index + 1}`));
+
+    const validation = validateBatchResult(input.batch, {
+      observations: input.batch.rows.map((row, index) => ({
+        barcode: row.barcode,
+        canonicalProductUid: row.canonicalProductUid,
+        eventId: `event-${index + 1}`,
+        matchedProductId: `product-${index + 1}`,
+        feedVisible: true,
+        status: "verified",
+        latencyMs: index,
+        consoleErrors: [],
+        nonLocalRequests: [],
+      })),
+      serverEgressAttempts: [],
+      ledgerProof: proof,
+    });
+    expect(validation.passed).toBe(true);
+  });
+
+  it("fails closed for missing, extra, duplicate, unmatched, and malformed event facts", () => {
+    const input = validInput();
+    const corrupted = [
+      input.scanFeed.slice(1),
+      [...input.scanFeed, event(101, { cleanCode: "extra-code" })],
+      [...input.scanFeed.slice(0, 99), event(99, { id: "event-99" })],
+      [...input.scanFeed.slice(0, 99), event(99, { matchedProductId: null })],
+      [...input.scanFeed.slice(0, 99), event(99, { id: "" })],
+    ];
+    for (const scanFeed of corrupted) {
+      expect(buildLocalDemoLedgerProof({ ...input, scanFeed }).assertions.passed).toBe(false);
+    }
+  });
+
+  it("fails closed for final/replay disagreements and count references absent from the feed", () => {
+    const input = validInput();
+    const alteredQuantity = input.finalCounts.map((row, index) => index === 0 ? { ...row, quantity: 2 } : row);
+    const missingReference = input.finalCounts.map((row, index) => index === 0 ? { ...row, scanEventIds: ["not-in-feed"] } : row);
+
+    const quantityProof = buildLocalDemoLedgerProof({ ...input, finalCounts: alteredQuantity });
+    expect(quantityProof.assertions.finalEqualsReplay).toBe(false);
+    expect(quantityProof.assertions.passed).toBe(false);
+
+    const referenceProof = buildLocalDemoLedgerProof({ ...input, finalCounts: missingReference });
+    expect(referenceProof.assertions.everyCountEventIdExistsInFeed).toBe(false);
+    expect(referenceProof.assertions.passed).toBe(false);
+  });
+
+  it("fails closed for offsetting plus-two/zero scan facts even when totals appear correct", () => {
+    const input = validInput();
+    const scanFeed = input.scanFeed.map((row, index) => {
+      if (index === 0) return { ...row, quantityDelta: 2, quantityAfterScan: 2 };
+      if (index === 1) return { ...row, quantityDelta: 0, quantityAfterScan: 0 };
+      return row;
+    });
+    const proof = buildLocalDemoLedgerProof({ ...input, scanFeed });
+    expect(proof.assertions.noDrops).toBe(false);
+    expect(proof.assertions.noDuplicates).toBe(false);
+    expect(proof.assertions.passed).toBe(false);
+  });
+});
