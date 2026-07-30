@@ -3,6 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 @AGENTS.md
+@GUARDRAILS.md
 
 > Operate under the master Engineering Doctrine: `C:\Users\djsan\.claude\ENGINEERING_DOCTRINE.md`
 > (prove don't assume; plan-gate non-trivial work; no partials; sized proof + reports). Owner
@@ -29,11 +30,12 @@ unidentifiable code still counts as an "Unidentified item" row. Any change that 
 vanish from the feed or the totals is a defect, full stop.
 
 ## Current Status (read in this order)
-- Phase source of truth: the newest dated plan in `docs/superpowers/plans/` - currently
-  `2026-07-19-master-plan.md` (owner-approved 6-phase sell-ready plan; its D1-D11 defect register
-  says what is fixed vs open). Phases 1-6 are COMPLETE per that plan's register (all D1-D11 items
-  resolved); see PROGRESS.md checkpoints for per-phase evidence. `PROGRESS.md` can still lag on
-  post-Phase-6 work (teach-bot harness, stress marathon, ladder repair) - check its dated checkpoints.
+- Phase source of truth: ALWAYS the newest dated plan in `docs/superpowers/plans/` - currently
+  `2026-07-29-product-readiness-master-plan.md` (the $150/mo GA roadmap; M0 grounding detail in
+  `2026-07-29-docs-consolidation-and-repo-health.md`; the `audit-fixes` branch work is
+  `2026-07-29-audit-remediation.md`). The 2026-07-19 master plan (Phases 1-6) is COMPLETE and
+  archived. If this line names an older file than the newest date in that folder, the folder wins.
+  `REPO_HEALTH.md` holds branch/sync truth; `PROGRESS.md` holds dated checkpoints.
 - Long-running unpushed feature branches are normal here. Push, deploy, and production promotion are
   ALWAYS owner-gated.
 
@@ -136,6 +138,8 @@ PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `inte
 
 ## Resolver Trust Rules (CRITICAL - product identity accuracy)
 - Wrong product identity is FAILURE. Unknown is ACCEPTABLE. Prefer Needs Review over a wrong guess.
+- Barcodes and part numbers are TEXT always - never numeric types (numeric coercion drops leading
+  zeros and corrupts long GTINs). Applies to every layer: corpus, resolver, imports, exports.
 - `services/resolver.ts` returns `known` ONLY from an APPROVED alias (`alias.approved === true`) or a
   VERIFIED product identifier (`product.verified === true`). AI/mock results are SUGGESTIONS only:
   never auto-saved as aliases, never mark a scan Known, and only counted through the auto-count gate above.
@@ -208,7 +212,7 @@ command can be argued around; it needs the owner's explicit in-conversation appr
 ## Human Bot Proof Gate
 Human-bot proof + safe security-leak checks are REQUIRED before handoff for scanner, inventory, role,
 export, catalog, alias, product-resolution, and customer-facing changes. Unit tests are NOT
-sufficient. See `docs/REVISION_GATE.md`, `docs/QA_BOTS.md`, `docs/AGENT_BOT_ROLES.md`; run the
+sufficient. See `docs/QA_BOTS.md` (personas + how-to-run + pre-handoff gate, merged 2026-07-29); run the
 relevant `npm run qa:bots:*` (or `qa:revision`); live-account resolution changes also need
 `qa:bots:live`. Playwright writes proof screenshots to `e2e/proof/`. Do not claim a resolution or
 data-protection fix works unless a browser bot proved it through the real UI with a screenshot.
@@ -229,8 +233,10 @@ data-protection fix works unless a browser bot proved it through the real UI wit
 | `docs/superpowers/plans/` | Dated plans - the newest master plan is the phase source of truth |
 | `PROGRESS.md` / `DECISIONS.md` / `TESTING.md` | Status checkpoint / decision log / test coverage map |
 | `LESSONS_LEARNED.md` | Permanent hard-won lessons (L1-L13; L11 Gemini billing, L12 double-charge) |
-| `docs/DECODER_ARCHITECTURE.md` | Canonical decode-pipeline doc (`docs/decode/` is SUPERSEDED) |
-| `docs/QA_BOTS.md` / `docs/REVISION_GATE.md` / `docs/AGENT_BOT_ROLES.md` | The human-bot proof gate |
+| `docs/DECODER_ARCHITECTURE.md` | Canonical decode-pipeline doc (behavioral semantics; wiring in ARCHITECTURE.md §3) |
+| `docs/QA_BOTS.md` | The human-bot proof gate (personas, commands, pre-handoff checklist - merged doc) |
+| `docs/README.md` | THE docs index (living/reference/historical) + L0-L4 hierarchy + lifecycle rule |
+| `GUARDRAILS.md` / `REPO_HEALTH.md` | Always-loaded invariants + repo/GitHub sync truth + tech debt |
 | `MANUAL_LIVE_TEST.md` | Owner-gated manual live decode checklist |
 | `FIREBASE_SETUP.md` / `FIREBASE_SECURITY.md` | Backend foundation + tenancy security model |
 | `docs/archive/` | Historical point-in-time reports (not kept current) |
