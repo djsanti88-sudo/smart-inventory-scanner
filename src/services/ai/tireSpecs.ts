@@ -30,7 +30,7 @@ export const KNOWN_TIRE_BRANDS = [
 const METRIC_SIZE = /\b(LT|P|ST)?\d{3}\/\d{2}\s?(Z?R|-)\s?\d{2}\b/i;
 // Commercial / flotation: 11R22.5, 295/75R22.5, 35X12.5R20. Do not start inside a slash
 // expression, which would otherwise treat the tail of an unprefixed slash-flotation ratio as a size.
-const COMMERCIAL_SIZE = /(?<![A-Z0-9/.])(?<!\b(?:LT|P|ST)\s+)\d{2}(\.\d)?(X\d{2}(\.\d{1,2})?)?R\d{2}(\.\d)?\b/i;
+const COMMERCIAL_SIZE = /(?<![A-Z0-9/.])(?<!\b(?:LT|P|ST)\s+)\d{2}(\.\d)?(X\d{1,2}(\.\d{1,2})?)?R\d{2}(\.\d)?\b/i;
 // Confirmed slash flotation exists only with a construction prefix directly attached (LT37/12.50R22).
 // This intentionally rejects both 37/12.50R22 and LT 37/12.50R22.
 const PREFIX_SLASH_FLOTATION_SIZE = /(?<![A-Z0-9])(LT|P|ST)(?:2[2-9]|3\d|4[0-4])\/([4-9]|1[0-8])\.\d{1,2}(?:Z?R|-)(?:0[89]|1\d|2\d|30)(?:\.\d)?(?![A-Z0-9/])/i;

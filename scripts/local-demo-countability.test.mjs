@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "vitest";
 
 import {
@@ -6,6 +7,10 @@ import {
   reconstructLocalDemoProviderIdentity,
   resolvesKnownAgainstLocalDemoSeed,
 } from "./local-demo-countability.ts";
+
+const bossVerifiedRegression = JSON.parse(
+  readFileSync(new URL("./fixtures/boss-verified-88.fixture.json", import.meta.url), "utf8"),
+);
 
 function checkDigit(body) {
   let sum = 0;
@@ -91,4 +96,13 @@ test("provider display identity reuses the trusted-corpus projector for Boss com
   );
   assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("29575225")).displaySize, "295/75R22.5");
   assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("35125020")).displaySize, "35125020");
+});
+
+test("all formerly verified-but-not-countable Boss rows now project a countable identity", () => {
+  assert.equal(bossVerifiedRegression.length, 88);
+  assert.equal(new Set(bossVerifiedRegression.map((row) => row.barcode)).size, 88);
+  for (const row of bossVerifiedRegression) {
+    assert.equal(reconstructLocalDemoProviderIdentity(row).displaySize, row.expected, row.barcode);
+    assert.equal(isCountableLocalDemoRow({ ...trustedRow(row.size), ...row }), true, row.barcode);
+  }
 });

@@ -1,0 +1,794 @@
+[
+  {
+    "barcode": "191563001471",
+    "size": "33125015",
+    "raw_size_text": "33125015",
+    "model": "33x12_50r15lt_c_roadian_at_pro_ra8",
+    "model_display": "33x12 50r15lt C Roadian AT PRO RA8",
+    "brand": "nexen",
+    "expected": "33X12.50R15"
+  },
+  {
+    "barcode": "191563001518",
+    "size": "35125018",
+    "raw_size_text": "35125018",
+    "model": "35x12_50r18lt_f_roadian_at_pro_ra8",
+    "model_display": "35x12 50r18lt F Roadian AT PRO RA8",
+    "brand": "nexen",
+    "expected": "35X12.50R18"
+  },
+  {
+    "barcode": "191563001525",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_f_roadian_at_pro_ra8",
+    "model_display": "35x12 50r20lt F Roadian AT PRO RA8",
+    "brand": "nexen",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "191563001532",
+    "size": "33125015",
+    "raw_size_text": "33125015",
+    "model": "33x12_50r15lt_c_roadian_mtx",
+    "model_display": "33x12 50r15lt C Roadian MTX",
+    "brand": "nexen",
+    "expected": "33X12.50R15"
+  },
+  {
+    "barcode": "191563001549",
+    "size": "35125015",
+    "raw_size_text": "35125015",
+    "model": "35x12_50r15lt_c_roadian_mtx",
+    "model_display": "35x12 50r15lt C Roadian MTX",
+    "brand": "nexen",
+    "expected": "35X12.50R15"
+  },
+  {
+    "barcode": "191563001624",
+    "size": "33125018",
+    "raw_size_text": "33125018",
+    "model": "33x12_50r18lt_f_roadian_mtx",
+    "model_display": "33x12 50r18lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "33X12.50R18"
+  },
+  {
+    "barcode": "191563001631",
+    "size": "35125018",
+    "raw_size_text": "35125018",
+    "model": "35x12_50r18lt_f_roadian_mtx",
+    "model_display": "35x12 50r18lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "35X12.50R18"
+  },
+  {
+    "barcode": "191563001648",
+    "size": "33125020",
+    "raw_size_text": "33125020",
+    "model": "33x12_50r20lt_f_roadian_mtx",
+    "model_display": "33x12 50r20lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "33X12.50R20"
+  },
+  {
+    "barcode": "191563001655",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_f_roadian_mtx",
+    "model_display": "35x12 50r20lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "191563001662",
+    "size": "37125020",
+    "raw_size_text": "37125020",
+    "model": "37x12_50r20lt_f_roadian_mtx",
+    "model_display": "37x12 50r20lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "37X12.50R20"
+  },
+  {
+    "barcode": "191563001679",
+    "size": "33125022",
+    "raw_size_text": "33125022",
+    "model": "33x12_50r22lt_f_roadian_mtx",
+    "model_display": "33x12 50r22lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "33X12.50R22"
+  },
+  {
+    "barcode": "191563001686",
+    "size": "35125022",
+    "raw_size_text": "35125022",
+    "model": "35x12_50r22lt_f_roadian_mtx",
+    "model_display": "35x12 50r22lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "35X12.50R22"
+  },
+  {
+    "barcode": "191563001693",
+    "size": "37135022",
+    "raw_size_text": "37135022",
+    "model": "37x13_50r22lt_f_roadian_mtx",
+    "model_display": "37x13 50r22lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "37X13.50R22"
+  },
+  {
+    "barcode": "191563001754",
+    "size": "37135020",
+    "raw_size_text": "37135020",
+    "model": "37x13_50r20lt_f_roadian_mtx",
+    "model_display": "37x13 50r20lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "37X13.50R20"
+  },
+  {
+    "barcode": "191563015904",
+    "size": "33125020",
+    "raw_size_text": "33125020",
+    "model": "33x12_50r20lt_roadian_atx",
+    "model_display": "33x12 50r20lt Roadian ATX",
+    "brand": "nexen",
+    "expected": "33X12.50R20"
+  },
+  {
+    "barcode": "191563016161",
+    "size": "35125018",
+    "raw_size_text": "35125018",
+    "model": "35x12_50r18lt_f_roadian_atx",
+    "model_display": "35x12 50r18lt F Roadian ATX",
+    "brand": "nexen",
+    "expected": "35X12.50R18"
+  },
+  {
+    "barcode": "191563016185",
+    "size": "35125017",
+    "raw_size_text": "35125017",
+    "model": "35x12_50r17lt_f_roadian_atx",
+    "model_display": "35x12 50r17lt F Roadian ATX",
+    "brand": "nexen",
+    "expected": "35X12.50R17"
+  },
+  {
+    "barcode": "191563016352",
+    "size": "31105015",
+    "raw_size_text": "31105015",
+    "model": "31x10_50r15lt_c_roadian_atx",
+    "model_display": "31x10 50r15lt C Roadian ATX",
+    "brand": "nexen",
+    "expected": "31X10.50R15"
+  },
+  {
+    "barcode": "191563016376",
+    "size": "33125015",
+    "raw_size_text": "33125015",
+    "model": "33x12_50r15lt_c_roadian_atx",
+    "model_display": "33x12 50r15lt C Roadian ATX",
+    "brand": "nexen",
+    "expected": "33X12.50R15"
+  },
+  {
+    "barcode": "191563018912",
+    "size": "33125017",
+    "raw_size_text": "33125017",
+    "model": "33x12_50r17lt_f_roadian_mtx",
+    "model_display": "33x12 50r17lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "33X12.50R17"
+  },
+  {
+    "barcode": "191563018950",
+    "size": "35125017",
+    "raw_size_text": "35125017",
+    "model": "35x12_50r17lt_f_roadian_mtx_q",
+    "model_display": "35x12 50r17lt F Roadian MTX Q",
+    "brand": "nexen",
+    "expected": "35X12.50R17"
+  },
+  {
+    "barcode": "191563020311",
+    "size": "37125017",
+    "raw_size_text": "37125017",
+    "model": "37x12_50r17lt_f_roadian_mtx",
+    "model_display": "37x12 50r17lt F Roadian MTX",
+    "brand": "nexen",
+    "expected": "37X12.50R17"
+  },
+  {
+    "barcode": "191563036923",
+    "size": "3512520",
+    "raw_size_text": "3512520",
+    "model": "35x12_5r20lt_f_roadian_atx",
+    "model_display": "35x12 5r20lt F Roadian ATX",
+    "brand": "nexen",
+    "expected": "35X12.5R20"
+  },
+  {
+    "barcode": "191563036992",
+    "size": "3312522",
+    "raw_size_text": "3312522",
+    "model": "33x12_5r22lt_f_roadian_atx",
+    "model_display": "33x12 5r22lt F Roadian ATX",
+    "brand": "nexen",
+    "expected": "33X12.5R22"
+  },
+  {
+    "barcode": "840139606687",
+    "size": "22570195",
+    "raw_size_text": "22570195",
+    "model": "g_fdr601_regional_osd",
+    "model_display": "G FDR601 Regional OSD",
+    "brand": "fortune",
+    "expected": "225/70R19.5"
+  },
+  {
+    "barcode": "840139632617",
+    "size": "35125018",
+    "raw_size_text": "35125018",
+    "model": "35x12_50r18lt_e_tormenta_m_t_fsr",
+    "model_display": "35x12 50r18lt E Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R18"
+  },
+  {
+    "barcode": "840139633577",
+    "size": "35125022",
+    "raw_size_text": "35125022",
+    "model": "35x12_50r22lt_f_tormenta_m_t_fsr",
+    "model_display": "35x12 50r22lt F Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R22"
+  },
+  {
+    "barcode": "840139633584",
+    "size": "33125022",
+    "raw_size_text": "33125022",
+    "model": "33x12_50r22lt_e_tormenta_m_t_fsr",
+    "model_display": "33x12 50r22lt E Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "33X12.50R22"
+  },
+  {
+    "barcode": "840139633591",
+    "size": "37125022",
+    "raw_size_text": "37125022",
+    "model": "37x12_50r22lt_f_tormenta_m_t_fsr",
+    "model_display": "37x12 50r22lt F Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "37X12.50R22"
+  },
+  {
+    "barcode": "840139633973",
+    "size": "37135022",
+    "raw_size_text": "37135022",
+    "model": "37x13_50r22lt_f_tormenta_m_t_fsr",
+    "model_display": "37x13 50r22lt F Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R22"
+  },
+  {
+    "barcode": "840139634161",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_f_tormenta_r_t_fsr",
+    "model_display": "35x12 50r20lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "840139634239",
+    "size": "33125018",
+    "raw_size_text": "33125018",
+    "model": "33x12_50r18lt_f_tormenta_r_t_fsr",
+    "model_display": "33x12 50r18lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "33X12.50R18"
+  },
+  {
+    "barcode": "840139634253",
+    "size": "37135020",
+    "raw_size_text": "37135020",
+    "model": "37x13_50r20lt_e_tormenta_r_t_fsr",
+    "model_display": "37x13 50r20lt E Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R20"
+  },
+  {
+    "barcode": "840139634789",
+    "size": "37135017",
+    "raw_size_text": "37135017",
+    "model": "37x13_50r17lt_e_tormenta_r_t_fsr",
+    "model_display": "37x13 50r17lt E Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R17"
+  },
+  {
+    "barcode": "840139634857",
+    "size": "37135018",
+    "raw_size_text": "37135018",
+    "model": "37x13_50r18lt_f_tormenta_r_t_fsr",
+    "model_display": "37x13 50r18lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R18"
+  },
+  {
+    "barcode": "840139634956",
+    "size": "35125022",
+    "raw_size_text": "35125022",
+    "model": "35x12_50r22lt_e_tormenta_r_t_fsr",
+    "model_display": "35x12 50r22lt E Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R22"
+  },
+  {
+    "barcode": "840139634970",
+    "size": "35135020",
+    "raw_size_text": "35135020",
+    "model": "35x13_50r20lt_e_tormenta_r_t_fsr",
+    "model_display": "35x13 50r20lt E Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "35X13.50R20"
+  },
+  {
+    "barcode": "840139635014",
+    "size": "35125024",
+    "raw_size_text": "35125024",
+    "model": "35x12_50r24lt_f_tormenta_r_t_fsr",
+    "model_display": "35x12 50r24lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R24"
+  },
+  {
+    "barcode": "840139635021",
+    "size": "37135024",
+    "raw_size_text": "37135024",
+    "model": "37x13_50r24lt_f_tormenta_r_t_fsr",
+    "model_display": "37x13 50r24lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R24"
+  },
+  {
+    "barcode": "840139635038",
+    "size": "37125022",
+    "raw_size_text": "37125022",
+    "model": "37x12_50r22lt_e_tormenta_r_t_fsr",
+    "model_display": "37x12 50r22lt E Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X12.50R22"
+  },
+  {
+    "barcode": "840139635045",
+    "size": "37135022",
+    "raw_size_text": "37135022",
+    "model": "37x13_50r22lt_e_tormenta_r_t_fsr",
+    "model_display": "37x13 50r22lt E Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R22"
+  },
+  {
+    "barcode": "840139635052",
+    "size": "40155024",
+    "raw_size_text": "40155024",
+    "model": "40x15_50r24lt_e_tormenta_r_t_fsr",
+    "model_display": "40x15 50r24lt E Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "40X15.50R24"
+  },
+  {
+    "barcode": "840139640827",
+    "size": "33125020",
+    "raw_size_text": "33125020",
+    "model": "33x12_50r20lt_f_tormenta_m_t_fsr",
+    "model_display": "33x12 50r20lt F Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "33X12.50R20"
+  },
+  {
+    "barcode": "840139640834",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_f_tormenta_m_t_fsr",
+    "model_display": "35x12 50r20lt F Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "840139640841",
+    "size": "37135020",
+    "raw_size_text": "37135020",
+    "model": "37x13_50r20lt_f_tormenta_m_t_fsr",
+    "model_display": "37x13 50r20lt F Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R20"
+  },
+  {
+    "barcode": "840139642852",
+    "size": "35125017",
+    "raw_size_text": "35125017",
+    "model": "35x12_50r17lt_f_tormenta_r_t_fsr",
+    "model_display": "35x12 50r17lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R17"
+  },
+  {
+    "barcode": "840139642876",
+    "size": "37135017",
+    "raw_size_text": "37135017",
+    "model": "37x13_50r17lt_f_tormenta_r_t_fsr",
+    "model_display": "37x13 50r17lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X13.50R17"
+  },
+  {
+    "barcode": "840139642883",
+    "size": "37125017",
+    "raw_size_text": "37125017",
+    "model": "37x12_50r17lt_f_tormenta_r_t_fsr",
+    "model_display": "37x12 50r17lt F Tormenta R T FSR",
+    "brand": "fortune",
+    "expected": "37X12.50R17"
+  },
+  {
+    "barcode": "840139642913",
+    "size": "35125017",
+    "raw_size_text": "35125017",
+    "model": "35x12_50r17lt_f_tormenta_m_t_fsr",
+    "model_display": "35x12 50r17lt F Tormenta M T FSR",
+    "brand": "fortune",
+    "expected": "35X12.50R17"
+  },
+  {
+    "barcode": "840139644580",
+    "size": "31105015",
+    "raw_size_text": "31105015",
+    "model": "31x10_50r15lt_c_tormenta_a_t2",
+    "model_display": "31x10 50r15lt C Tormenta A T2",
+    "brand": "fortune",
+    "expected": "31X10.50R15"
+  },
+  {
+    "barcode": "840139644597",
+    "size": "35125017",
+    "raw_size_text": "35125017",
+    "model": "35x12_50r17lt_f_tormenta_a_t2",
+    "model_display": "35x12 50r17lt F Tormenta A T2",
+    "brand": "fortune",
+    "expected": "35X12.50R17"
+  },
+  {
+    "barcode": "840139644603",
+    "size": "35125018",
+    "raw_size_text": "35125018",
+    "model": "35x12_50r18lt_f_tormenta_a_t2",
+    "model_display": "35x12 50r18lt F Tormenta A T2",
+    "brand": "fortune",
+    "expected": "35X12.50R18"
+  },
+  {
+    "barcode": "840139644610",
+    "size": "33125020",
+    "raw_size_text": "33125020",
+    "model": "33x12_50r20lt_f_tormenta_a_t2",
+    "model_display": "33x12 50r20lt F Tormenta A T2",
+    "brand": "fortune",
+    "expected": "33X12.50R20"
+  },
+  {
+    "barcode": "840139644627",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_f_tormenta_a_t2",
+    "model_display": "35x12 50r20lt F Tormenta A T2",
+    "brand": "fortune",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "840139644634",
+    "size": "35125022",
+    "raw_size_text": "35125022",
+    "model": "35x12_50r22lt_f_tormenta_a_t2",
+    "model_display": "35x12 50r22lt F Tormenta A T2",
+    "brand": "fortune",
+    "expected": "35X12.50R22"
+  },
+  {
+    "barcode": "840139644641",
+    "size": "37125022",
+    "raw_size_text": "37125022",
+    "model": "37x12_50r22lt_f_tormenta_a_t2",
+    "model_display": "37x12 50r22lt F Tormenta A T2",
+    "brand": "fortune",
+    "expected": "37X12.50R22"
+  },
+  {
+    "barcode": "848983003294",
+    "size": "29575225",
+    "raw_size_text": "29575225",
+    "model": "g_ri_ecorun",
+    "model_display": "G RI Ecorun",
+    "brand": "falken",
+    "expected": "295/75R22.5"
+  },
+  {
+    "barcode": "848983003300",
+    "size": "28575245",
+    "raw_size_text": "28575245",
+    "model": "g_ri_ecorun",
+    "model_display": "G RI Ecorun",
+    "brand": "falken",
+    "expected": "285/75R24.5"
+  },
+  {
+    "barcode": "848983004208",
+    "size": "3095015",
+    "raw_size_text": "3095015",
+    "model": "30x9_50r15lt_c_wildpeak_m_t",
+    "model_display": "30x9 50r15lt C Wildpeak M T",
+    "brand": "falken",
+    "expected": "30X9.50R15"
+  },
+  {
+    "barcode": "848983007667",
+    "size": "3095015",
+    "raw_size_text": "3095015",
+    "model": "30x9_50r15lt_c_rubitrek_a_t_rbl",
+    "model_display": "30x9 50r15lt C Rubitrek A T RBL",
+    "brand": "falken",
+    "expected": "30X9.50R15"
+  },
+  {
+    "barcode": "848983015983",
+    "size": "25570225",
+    "raw_size_text": "25570225",
+    "model": "h_bi830",
+    "model_display": "H BI830",
+    "brand": "falken",
+    "expected": "255/70R22.5"
+  },
+  {
+    "barcode": "848983025678",
+    "size": "3095015",
+    "raw_size_text": "3095015",
+    "model": "30x9_50r15lt_c_wildpeak_a_t4w",
+    "model_display": "30x9 50r15lt C Wildpeak A T4w",
+    "brand": "falken",
+    "expected": "30X9.50R15"
+  },
+  {
+    "barcode": "848983025777",
+    "size": "35125015",
+    "raw_size_text": "35125015",
+    "model": "35x12_50r15lt_c_wildpeak_a_t4w",
+    "model_display": "35x12 50r15lt C Wildpeak A T4w",
+    "brand": "falken",
+    "expected": "35X12.50R15"
+  },
+  {
+    "barcode": "848983026569",
+    "size": "37125018",
+    "raw_size_text": "37125018",
+    "model": "37x12_50r18lt_e_wildpeak_a_t4w_rwl",
+    "model_display": "37x12 50r18lt E Wildpeak A T4w RWL",
+    "brand": "falken",
+    "expected": "37X12.50R18"
+  },
+  {
+    "barcode": "8848116018494",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_e_ridgecrawler_a_t",
+    "model_display": "35x12 50r20lt E Ridgecrawler A T",
+    "brand": "blackhawk",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "8848116021302",
+    "size": "35125017",
+    "raw_size_text": "35125017",
+    "model": "35x12_50r17lt_e_ridgecrawler_a_t",
+    "model_display": "35x12 50r17lt E Ridgecrawler A T",
+    "brand": "blackhawk",
+    "expected": "35X12.50R17"
+  },
+  {
+    "barcode": "8848116041881",
+    "size": "29575225",
+    "raw_size_text": "29575225",
+    "model": "h_bfl60_fst_top_line_lhs",
+    "model_display": "H BFL60 FST TOP LINE LHS",
+    "brand": "blackhawk",
+    "expected": "295/75R22.5"
+  },
+  {
+    "barcode": "8848116041959",
+    "size": "29575225",
+    "raw_size_text": "29575225",
+    "model": "g_btl70_fst_top_line_lht",
+    "model_display": "G BTL70 FST TOP LINE LHT",
+    "brand": "blackhawk",
+    "expected": "295/75R22.5"
+  },
+  {
+    "barcode": "8848116051705",
+    "size": "29575225",
+    "raw_size_text": "29575225",
+    "model": "g_bdl71w_fst_top_line_csd",
+    "model_display": "G Bdl71w FST TOP LINE CSD",
+    "brand": "blackhawk",
+    "expected": "295/75R22.5"
+  },
+  {
+    "barcode": "8848116051712",
+    "size": "29575225",
+    "raw_size_text": "29575225",
+    "model": "h_bdl71w_fst_top_line_csd",
+    "model_display": "H Bdl71w FST TOP LINE CSD",
+    "brand": "blackhawk",
+    "expected": "295/75R22.5"
+  },
+  {
+    "barcode": "8859305541655",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_e_zg06_at",
+    "model_display": "35x12 50r20lt E ZG06 AT",
+    "brand": "arisun",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "8859305541716",
+    "size": "33125020",
+    "raw_size_text": "33125020",
+    "model": "33x12_50r20lt_f_aresta_a_t_zg06",
+    "model_display": "33x12 50r20lt F Aresta A T ZG06",
+    "brand": "arisun",
+    "expected": "33X12.50R20"
+  },
+  {
+    "barcode": "8859305542270",
+    "size": "35125017",
+    "raw_size_text": "35125017",
+    "model": "35x12_50r17lt_e_aresta_r_t_zg07",
+    "model_display": "35x12 50r17lt E Aresta R T ZG07",
+    "brand": "arisun",
+    "expected": "35X12.50R17"
+  },
+  {
+    "barcode": "8859305542331",
+    "size": "33125018",
+    "raw_size_text": "33125018",
+    "model": "33x12_50r18lt_e_aresta_r_t_zg07",
+    "model_display": "33x12 50r18lt E Aresta R T ZG07",
+    "brand": "arisun",
+    "expected": "33X12.50R18"
+  },
+  {
+    "barcode": "8859305542355",
+    "size": "35125018",
+    "raw_size_text": "35125018",
+    "model": "35x12_50r18lt_e_aresta_r_t_zg07",
+    "model_display": "35x12 50r18lt E Aresta R T ZG07",
+    "brand": "arisun",
+    "expected": "35X12.50R18"
+  },
+  {
+    "barcode": "8859305542416",
+    "size": "33125020",
+    "raw_size_text": "33125020",
+    "model": "33x12_50r20lt_e_aresta_r_t_zg07",
+    "model_display": "33x12 50r20lt E Aresta R T ZG07",
+    "brand": "arisun",
+    "expected": "33X12.50R20"
+  },
+  {
+    "barcode": "8859305542430",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_e_aresta_r_t_zg07",
+    "model_display": "35x12 50r20lt E Aresta R T ZG07",
+    "brand": "arisun",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "8859305542492",
+    "size": "33125022",
+    "raw_size_text": "33125022",
+    "model": "33x12_50r22lt_e_aresta_r_t_zg07",
+    "model_display": "33x12 50r22lt E Aresta R T ZG07",
+    "brand": "arisun",
+    "expected": "33X12.50R22"
+  },
+  {
+    "barcode": "8859305542515",
+    "size": "35125022",
+    "raw_size_text": "35125022",
+    "model": "35x12_50r22lt_e_aresta_r_t_zg07",
+    "model_display": "35x12 50r22lt E Aresta R T ZG07",
+    "brand": "arisun",
+    "expected": "35X12.50R22"
+  },
+  {
+    "barcode": "8859305549200",
+    "size": "35125020",
+    "raw_size_text": "35125020",
+    "model": "35x12_50r20lt_e_aresta_m_t_zg08",
+    "model_display": "35x12 50r20lt E Aresta M T ZG08",
+    "brand": "arisun",
+    "expected": "35X12.50R20"
+  },
+  {
+    "barcode": "8859305555881",
+    "size": "33125020",
+    "raw_size_text": "33125020",
+    "model": "33x12_50r20lt_e_aresta_m_t_zg08",
+    "model_display": "33x12 50r20lt E Aresta M T ZG08",
+    "brand": "arisun",
+    "expected": "33X12.50R20"
+  },
+  {
+    "barcode": "887613067404",
+    "size": "31105015",
+    "raw_size_text": "31105015",
+    "model": "31x10_50r15lt_c_roadian_mt",
+    "model_display": "31x10 50r15lt C Roadian MT",
+    "brand": "nexen",
+    "expected": "31X10.50R15"
+  },
+  {
+    "barcode": "887613275007",
+    "size": "31105015",
+    "raw_size_text": "31105015",
+    "model": "31x10_50r15lt_c_roadian_at_pro_ra8",
+    "model_display": "31x10 50r15lt C Roadian AT PRO RA8",
+    "brand": "nexen",
+    "expected": "31X10.50R15"
+  },
+  {
+    "barcode": "887613275304",
+    "size": "3095015",
+    "raw_size_text": "3095015",
+    "model": "30x9_50r15lt_c_roadian_at_pro_ra8",
+    "model_display": "30x9 50r15lt C Roadian AT PRO RA8",
+    "brand": "nexen",
+    "expected": "30X9.50R15"
+  },
+  {
+    "barcode": "887613400706",
+    "size": "31105015",
+    "raw_size_text": "31105015",
+    "model": "31x10_50r15lt_c_roadian_htx_rh5",
+    "model_display": "31x10 50r15lt C Roadian HTX RH5",
+    "brand": "nexen",
+    "expected": "31X10.50R15"
+  },
+  {
+    "barcode": "8935366901338",
+    "size": "44550225",
+    "raw_size_text": "44550225",
+    "model": "l_bdl73_fst_top_line_regionaldrive161l",
+    "model_display": "L BDL73 FST TOP LINE Regionaldrive161l",
+    "brand": "blackhawk",
+    "expected": "445/50R22.5"
+  },
+  {
+    "barcode": "8936096305113",
+    "size": "29575225",
+    "raw_size_text": "29575225",
+    "model": "g_bfr57_fst_regional_steer",
+    "model_display": "G BFR57 FST Regional Steer",
+    "brand": "blackhawk",
+    "expected": "295/75R22.5"
+  },
+  {
+    "barcode": "8936096307742",
+    "size": "29575225",
+    "raw_size_text": "29575225",
+    "model": "g_btl67_fst_long_haul_trailer",
+    "model_display": "G BTL67 FST LONG HAUL Trailer",
+    "brand": "blackhawk",
+    "expected": "295/75R22.5"
+  }
+]
