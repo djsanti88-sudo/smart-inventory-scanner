@@ -129,7 +129,7 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
 /** Local-demo corpus resolution deliberately accepts only the conservative SQLite evidence tier. */
 export async function resolveExactBarcodeLocal(code: string): Promise<CorpusDecodeResult | null> {
   const row = await lookupByExactBarcodeLocal(code);
-  if (!row || !isTrustedLocalDemoTireRow(row)) return null;
+  if (!row || !isTrustedLocalDemoTireRow(row, row.localDemoTwinSelected === true)) return null;
   const result = toResult(row, true);
   const decision: DecodeDecision = {
     status: "verified", confidence: CONF[row.confidence] ?? 0.92,

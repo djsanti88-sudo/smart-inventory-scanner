@@ -271,6 +271,16 @@ describe("toResult barcode_type convention mismatch (real corpus uses upc/ean/gt
 });
 
 describe("resolveExactBarcodeLocal", () => {
+  it.each([
+    ["0191563023534", "TIRE_55254237B5B4A3EDBA4F", 0], ["0840139632891", "TIRE_A7CF1E969FD89D80A1CC", 1],
+    ["0840139634185", "TIRE_74188C2ACA0A222D8828", 1], ["0840139634192", "TIRE_9CD235EB74EC55EC1067", 1],
+    ["0840139644412", "TIRE_2F26F0539C8A2465C811", 1], ["0191563020021", "TIRE_3C17C832ED7A76BE3065", 0],
+    ["0191563001082", "TIRE_960542DC8D8B39DD8B30", 0], ["0840139634222", "TIRE_701E5F9AF71438E18357", 1],
+  ])("verifies the selected low-source Boss twin %s only with its index marker", async (barcode, uid, source_count) => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode, canonical_product_uid: uid, barcode_type: "ean", confidence: "process_verified_green", source_count, localDemoTwinSelected: true });
+    await expect(resolveExactBarcodeLocal(barcode)).resolves.toMatchObject({ canonicalProductUid: uid, decision: { status: "verified" } });
+  });
+
   it("accepts only the conservative local SQLite row and exposes its canonical id", async () => {
     mockLookupByExactBarcodeLocal.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "848983006257", barcode_type: "upc", source_count: 2 });
     const result = await resolveExactBarcodeLocal("848983006257");

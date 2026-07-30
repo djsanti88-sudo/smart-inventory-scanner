@@ -46,4 +46,12 @@ describe("local demo tire trust", () => {
       expect(isTrustedLocalDemoTireRow({ ...eligible, ...patch })).toBe(false);
     }
   });
+
+  it("keeps the ordinary two-source gate unless the index marked an already-validated twin", () => {
+    const sourceOne = { ...eligible, source_count: 1 };
+    expect(isTrustedLocalDemoTireRow(sourceOne)).toBe(false);
+    expect(isTrustedLocalDemoTireRow({ ...sourceOne, localDemoTwinSelected: true })).toBe(false);
+    expect(isTrustedLocalDemoTireRow({ ...sourceOne, localDemoTwinSelected: true }, true)).toBe(true);
+    expect(isTrustedLocalDemoTireRow({ ...sourceOne, localDemoTwinSelected: true, model: "", model_display: "" }, true)).toBe(false);
+  });
 });

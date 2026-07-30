@@ -6,6 +6,7 @@ import { getKnowledgeDb } from "@/server/knowledgeDb";
 import { getTursoClient as getRetailTursoClient, type TursoClient } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import { lookupCandidates } from "@/services/upc/gtin";
 import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
+import { isTrustedLocalDemoTireRow, isValidLocalDemoGtin } from "@/server/tire-knowledge/localDemoTrust.mjs";
 
 // SERVER-ONLY tire knowledge index reader. Uses SQLite for microsecond lookups with ~5MB memory.
 // The `server-only` import makes this a BUILD ERROR if imported from a client component.
@@ -27,6 +28,8 @@ export interface TireKnowledgeRow {
   confidence: string; current_status: string; usable_for: string;
   field_completeness_score: string; missing_fields: string;
   source_count: number;
+  /** Ephemeral marker set only after the local UPC/EAN twin identity gate passes. */
+  localDemoTwinSelected?: boolean;
 }
 
 export interface TireKnowledgeMeta extends Record<string, unknown> { schema_version?: string; generated_at?: string; trusted_rows_ingested?: number; barcode_index_count?: number; harvester_snapshot_used?: boolean; }
@@ -289,11 +292,45 @@ export async function lookupByExactBarcodeLocal(code: string): Promise<TireKnowl
   if (!key) return null;
   const stmt = getStmtBarcode();
   if (!stmt) throw new Error("Local SQLite tire database is unavailable.");
-  for (const candidate of lookupCandidates(key)) {
-    const row = (stmt.get(candidate) as TireKnowledgeRow | undefined) ?? null;
-    if (row) return row;
+  const candidates = lookupCandidates(key);
+  const rows = candidates.map((candidate) => (stmt.get(candidate) as TireKnowledgeRow | undefined) ?? null);
+  const raw = rows[0];
+  // A scanner may send the UPC form while the corpus stores only the independently trusted
+  // zero-padded EAN (or vice versa). Preserve the established candidate fallback, but never
+  // mint the narrower twin exception without a raw identity row to compare.
+  if (!raw) return rows.slice(1).find((row): row is TireKnowledgeRow => Boolean(row && isTrustedLocalDemoTireRow(row))) ?? null;
+  // Preserve existing raw-first behavior whenever the raw row independently clears ordinary trust.
+  if (isTrustedLocalDemoTireRow(raw)) return raw;
+  for (const companion of rows.slice(1)) {
+    if (companion && isSafeLocalDemoTwin(raw, companion)) {
+      return { ...companion, localDemoTwinSelected: true };
+    }
   }
-  return null;
+  return raw;
+}
+
+function isUpcType(value: string): boolean { return value === "upc" || value === "upc_a"; }
+function isEanType(value: string): boolean { return value === "ean" || value === "ean_13"; }
+function trimmed(value: string | undefined): string { return String(value ?? "").trim(); }
+
+/** Narrow local-only exception: exact UPC-A/EAN-13 twins, never generic trust promotion. */
+function isSafeLocalDemoTwin(raw: TireKnowledgeRow, companion: TireKnowledgeRow): boolean {
+  const rawCode = trimmed(raw.barcode);
+  const companionCode = trimmed(companion.barcode);
+  if (!isValidLocalDemoGtin(rawCode) || !isValidLocalDemoGtin(companionCode)) return false;
+  if (!((rawCode.length === 12 && companionCode.length === 13) || (rawCode.length === 13 && companionCode.length === 12))) return false;
+  if (rawCode.replace(/^0+/, "") !== companionCode.replace(/^0+/, "")) return false;
+  if (!((isUpcType(trimmed(raw.barcode_type)) && isEanType(trimmed(companion.barcode_type))) || (isEanType(trimmed(raw.barcode_type)) && isUpcType(trimmed(companion.barcode_type))))) return false;
+  if (!trimmed(raw.canonical_product_uid) || raw.canonical_product_uid !== companion.canonical_product_uid) return false;
+  const rawMpn = trimmed(raw.manufacturer_part_number);
+  const companionMpn = trimmed(companion.manufacturer_part_number);
+  if (rawMpn && companionMpn && !tirePartNumberVariants(rawMpn).some((variant) => tirePartNumberVariants(companionMpn).includes(variant))) return false;
+  return trimmed(companion.confidence) === "process_verified_green"
+    && trimmed(companion.current_status) === "active_retail"
+    && trimmed(companion.usable_for) === "auto_count_candidate"
+    && Boolean(trimmed(companion.brand))
+    && Boolean(trimmed(companion.model_display) || trimmed(companion.model))
+    && Boolean(trimmed(companion.size));
 }
 
 /**

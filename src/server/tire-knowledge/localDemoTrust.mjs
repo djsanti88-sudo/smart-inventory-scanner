@@ -14,7 +14,7 @@ export function isValidLocalDemoGtin(value) {
   return (10 - (sum % 10)) % 10 === check;
 }
 
-export function isTrustedLocalDemoTireRow(row) {
+export function isTrustedLocalDemoTireRow(row, allowVerifiedTwin = false) {
   if (!row || typeof row !== "object") return false;
   const barcode = text(row.barcode);
   const model = text(row.model_display || row.model);
@@ -27,6 +27,6 @@ export function isTrustedLocalDemoTireRow(row) {
     && Boolean(text(row.size))
     && text(row.current_status) === "active_retail"
     && text(row.usable_for) === "auto_count_candidate"
-    && Number(row.source_count) >= 2
+    && (Number(row.source_count) >= 2 || (allowVerifiedTwin && row.localDemoTwinSelected === true))
     && (text(row.barcode_type) === "upc" || text(row.barcode_type) === "ean");
 }
