@@ -3,78 +3,81 @@
 // Virtual shop (d) "Night Shift" - the offline/retry resilience loop.
 // Design: docs/superpowers/specs/2026-07-29-virtual-shops-design.md section (d).
 //
-// Flow (real UI, mock backend only):
+// Flow (real UI, mock backend only), repeated per day in
+// fixtures/night-shift-scan-sequence.json (checked-in, deterministic,
+// phased structure - see e2e/virtual-shops/README.md):
 //   1. Go offline (Playwright `context.setOffline(true)`, real network
-//      blocking - the same mechanism e2e/stress-drive.mjs uses) and scan a
-//      burst of known + unknown codes. Per the TOP-LEVEL LAW every scan must
-//      still appear in the feed and count immediately, even though sync is
-//      failing behind the scenes.
+//      blocking - the same mechanism e2e/stress-drive.mjs uses) and scan the
+//      day's fixture burst plus two dedicated unknown codes (not part of the
+//      fixture; added here for TOP-LEVEL LAW identity-gate coverage, same as
+//      the other virtual shops). Per the TOP-LEVEL LAW every scan must still
+//      appear in the feed and count immediately, even though sync is failing
+//      behind the scenes.
 //   2. Refresh the page mid-session, still offline, and prove the scan feed
-//      and pending queue survive the reload (persisted state, not just
-//      in-memory Zustand state).
-//   3. Reconnect (`context.setOffline(false)`) and trigger a retry storm on
-//      the pending-sync queue by clicking "Try saving again" repeatedly in
-//      quick succession - idempotency must hold: retries never create a
-//      second counted entry for the same scan.
-//   4. Assert the crown invariant across three independent readouts (DOM
-//      final-count table, persisted Zustand/localStorage state, and an
-//      exported CSV): feed rows == expected scans, totals == expected scans,
-//      zero lost scans, zero double-counts.
+//      survives the reload (persisted state, not just in-memory Zustand
+//      state).
+//   3. Reconnect and trigger a retry storm (the fixture's per-day
+//      retryCount) on the pending-sync queue by clicking "Try saving again"
+//      repeatedly in quick succession - idempotency must hold: retries never
+//      create a second counted entry for the same scan.
+//   4. Assert the day's issued scans against the fixture's
+//      `expected.totalScansThisDay`, then move on to the next day in the
+//      SAME browser session (a shop's data persists day to day; scanFeed and
+//      finalCounts grow cumulatively).
+//   5. After the last day, assert the crown invariant across three
+//      independent readouts (DOM final-count table, persisted
+//      Zustand/localStorage state, and an exported CSV) against the
+//      cumulative total issued across every day.
 //
-// Mock-only: /api/ai-lookup is routed to a local stub (same NO_AI_STATUS
-// shape as e2e/persona-drive.mjs / e2e/stress-drive.mjs); AI lookup is also
-// disabled through app settings before anything is scanned. Restricted to
-// localhost:3500, the port reserved for virtual shops in the design doc.
-// Known-code fixture reused from tools/fable5/fixtures/stress-codes.json
-// (read-only), per the design doc's explicit "reuse, don't invent" guidance.
+// Falls back to a synthetic single-day plan built from
+// tools/fable5/fixtures/stress-codes.json (read-only, the pre-fixture
+// behavior this driver used) if fixtures/night-shift-scan-sequence.json is
+// missing or unreadable, so the driver stays runnable standalone.
 //
-// NOTE (wave-3 dedup): this file was built before e2e/virtual-shops/drivers/
-// _shared.mjs existed. The NO_AI_STATUS stub, target-validation guard,
-// scan()/artifactPath() helpers, and the crown-invariant triple-readout
-// helpers below are intentionally local copies of the same small helpers
-// used elsewhere in e2e/ (notably e2e/stress-drive.mjs). Once _shared.mjs
-// lands, these should be de-duplicated to import from it instead.
+// Mock-only: /api/ai-lookup is routed to a local stub via
+// drivers/_shared.mjs's installMockAiRoute; AI lookup is also disabled
+// through app settings before anything is scanned. Restricted to
+// localhost:3500 (drivers/_shared.mjs validateLocalTarget), the port
+// reserved for virtual shops in the design doc.
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import process from "node:process";
 import { chromium } from "playwright";
+import {
+  DEFAULT_TARGET,
+  artifactPath,
+  delay,
+  ensureDir,
+  installMockAiRoute,
+  loginAndReachScan,
+  scanCode,
+  sumCsvQuantities,
+  validateLocalTarget,
+} from "./_shared.mjs";
 
-const DEFAULT_TARGET = "http://localhost:3500";
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
-const KNOWN_CODE_COUNT = 12;
-const UNKNOWN_CODES = ["NIGHTSHIFTUNKNOWN001", "NIGHTSHIFTUNKNOWN002"];
-const RETRY_STORM_CLICKS = 5;
-
-const NO_AI_STATUS = {
-  liveEnabled: false,
-  autoDecodeOnScan: false,
-  geminiEnabled: false,
-  openaiEnabled: false,
-  geminiConfigured: false,
-  openaiConfigured: false,
-  premiumFallback: false,
-  mode: "off",
-  dailyLimit: 200,
-  missingKeys: ["GEMINI_API_KEY", "OPENAI_API_KEY"],
-  e2e: true,
-};
+const RETRY_STORM_CLICKS_DEFAULT = 3;
 
 function parseArgs(argv) {
   const values = {
     target: DEFAULT_TARGET,
     outputDir: "reports/virtual-shops/night-shift",
-    fixture: "tools/fable5/fixtures/stress-codes.json",
+    fixture: resolve(process.cwd(), "e2e/virtual-shops/fixtures/night-shift-scan-sequence.json"),
+    stressCodesFixture: resolve(process.cwd(), "tools/fable5/fixtures/stress-codes.json"),
+    days: null,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--target") values.target = argv[++index];
     else if (argument === "--output-dir") values.outputDir = argv[++index];
     else if (argument === "--fixture") values.fixture = argv[++index];
+    else if (argument === "--stress-codes-fixture") values.stressCodesFixture = argv[++index];
+    else if (argument === "--days") values.days = Number(argv[++index]);
     else if (argument === "--help") {
       console.log(
         "Usage: node e2e/virtual-shops/drivers/night-shift.mjs [--target http://localhost:3500] " +
-          "[--output-dir reports/virtual-shops/night-shift] [--fixture tools/fable5/fixtures/stress-codes.json]",
+          "[--output-dir reports/virtual-shops/night-shift] [--fixture path.json] " +
+          "[--stress-codes-fixture path.json] [--days N]",
       );
       process.exit(0);
     } else throw new Error(`Unknown argument: ${argument}`);
@@ -82,37 +85,44 @@ function parseArgs(argv) {
   if (!values.target || !values.outputDir || !values.fixture) {
     throw new Error("--target, --output-dir, and --fixture need values");
   }
-  const target = new URL(values.target);
-  if (!LOCAL_HOSTS.has(target.hostname) || target.port !== "3500") {
-    throw new Error("Night Shift driver is restricted to localhost port 3500 (the virtual-shops port)");
+  values.target = validateLocalTarget(values.target);
+  if (values.days !== null && (!Number.isInteger(values.days) || values.days < 1)) {
+    throw new Error("--days must be a positive integer");
   }
   return values;
 }
 
-function artifactPath(path) {
-  return relative(process.cwd(), path).replaceAll("\\", "/");
-}
-
-function delay(milliseconds) {
-  return new Promise((complete) => setTimeout(complete, milliseconds));
-}
-
-async function loadKnownCodes(fixturePath, count) {
-  const raw = JSON.parse(await readFile(fixturePath, "utf8"));
-  const codes = raw?.codes;
-  if (!Array.isArray(codes) || codes.length < count) {
-    throw new Error(`Fixture ${fixturePath} did not contain at least ${count} codes`);
+async function loadScanSequence(fixturePath, stressCodesFixturePath) {
+  try {
+    const raw = await readFile(fixturePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed.days) || parsed.days.length === 0) throw new Error("fixture has no days[]");
+    return { mode: "fixture", days: parsed.days };
+  } catch (error) {
+    // Fallback: the pre-fixture behavior - a single synthetic day built from the raw stress-codes pool.
+    const raw = JSON.parse(await readFile(stressCodesFixturePath, "utf8"));
+    const codes = raw?.codes;
+    if (!Array.isArray(codes) || codes.length < 12) {
+      throw new Error(`Neither ${fixturePath} nor ${stressCodesFixturePath} yielded a usable scan plan`);
+    }
+    const burst = [...new Set(codes)].slice(0, 12);
+    return {
+      mode: "fallback",
+      reason: error instanceof Error ? error.message : String(error),
+      days: [
+        {
+          dayIndex: 1,
+          phases: [
+            { phase: "offline-burst", offline: true, scans: burst },
+            { phase: "refresh-mid-session", action: "reload", offlineDuringReload: true },
+            { phase: "reconnect", action: "go-online" },
+            { phase: "retry-storm", action: "trigger-pending-sync-retry", retryCount: RETRY_STORM_CLICKS_DEFAULT },
+          ],
+          expected: { totalScansThisDay: burst.length, totalCountedThisDay: burst.length },
+        },
+      ],
+    };
   }
-  const unique = [...new Set(codes)].slice(0, count);
-  if (unique.length !== count) throw new Error(`Fixture ${fixturePath} did not yield ${count} unique codes`);
-  return unique;
-}
-
-async function scan(page, code) {
-  const input = page.getByTestId("scanner-input");
-  await input.click();
-  await input.pressSequentially(code, { delay: 2 });
-  await input.press("Enter");
 }
 
 async function readFeedLength(page) {
@@ -145,17 +155,6 @@ async function readDomCount(page) {
       return sum + (Number.isFinite(value) ? value : 0);
     }, 0),
   );
-}
-
-function sumCsvQuantities(text) {
-  const lines = text.replace(/^﻿/, "").split(/\r?\n/).filter(Boolean);
-  if (!lines[0]?.startsWith("quantity,")) throw new Error("Final-count CSV has an unexpected header");
-  return lines.slice(1).reduce((sum, line) => {
-    const comma = line.indexOf(",");
-    const quantity = Number(comma === -1 ? line : line.slice(0, comma));
-    if (!Number.isFinite(quantity)) throw new Error(`Invalid quantity in exported CSV: ${line}`);
-    return sum + quantity;
-  }, 0);
 }
 
 async function exportFinalCounts(page, runDir) {
@@ -196,20 +195,30 @@ function buildMarkdown(report) {
   lines.push("");
   lines.push(`Run: ${report.runId}`);
   lines.push(`Target: ${report.target} (mock backend only)`);
+  lines.push(
+    `Data source: ${
+      report.data_source === "fixture"
+        ? "fixtures/night-shift-scan-sequence.json"
+        : `runtime fallback (${report.fixture_fallback_reason})`
+    }`,
+  );
   lines.push("");
   lines.push(
-    `**${report.total_scans_issued} scans issued while offline/reconnecting, ` +
+    `**${report.total_scans_issued} scans issued across ${report.days.length} simulated day(s) while offline/reconnecting, ` +
       `${report.crown_invariant ? "zero lost, zero double-counted" : "CROWN INVARIANT FAILED"} after recovery.**`,
   );
   lines.push("");
-  lines.push("## Phases");
+  lines.push("## Per-day results");
   lines.push("");
-  lines.push(`1. Offline scan burst: ${report.offline_scans_issued} scans issued while \`context.setOffline(true)\`.`);
-  lines.push(`2. Mid-session refresh while still offline: ${report.refresh_completed ? "completed" : "NOT completed"}, feed survived reload: ${report.feed_survived_refresh ? "yes" : "no"}.`);
-  lines.push(`3. Reconnect: ${report.reconnected ? "completed" : "NOT completed"}.`);
-  lines.push(`4. Retry storm: ${report.retry_storm_clicks} rapid "Try saving again" clicks; queue drained: ${report.queue_drained ? "yes" : "no"} (remaining: ${report.queue_remaining_after_storm}).`);
+  lines.push("| Day | Scans issued | Expected | Feed survived refresh | Queue drained |");
+  lines.push("|---|---|---|---|---|");
+  for (const day of report.days) {
+    lines.push(
+      `| ${day.dayIndex} | ${day.scansIssued} | ${day.expectedScans ?? "n/a"} | ${day.feedSurvivedRefresh ? "yes" : "no"} | ${day.queueDrained ? "yes" : "no"} |`,
+    );
+  }
   lines.push("");
-  lines.push("## Crown invariant readouts");
+  lines.push("## Crown invariant readouts (cumulative, after the final day)");
   lines.push("");
   lines.push("| Readout | Value | Expected |");
   lines.push("|---|---|---|");
@@ -232,19 +241,18 @@ async function main() {
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const runDir = resolve(process.cwd(), options.outputDir, runId);
   const screenshotsDir = resolve(runDir, "screenshots");
-  await mkdir(screenshotsDir, { recursive: true });
+  await ensureDir(screenshotsDir);
+
+  const sequence = await loadScanSequence(options.fixture, options.stressCodesFixture);
+  const daysToRun = options.days ? sequence.days.slice(0, options.days) : sequence.days;
 
   const report = {
     target: options.target,
     runId,
+    data_source: sequence.mode,
+    fixture_fallback_reason: sequence.mode === "fallback" ? sequence.reason : null,
     total_scans_issued: 0,
-    offline_scans_issued: 0,
-    refresh_completed: false,
-    feed_survived_refresh: false,
-    reconnected: false,
-    retry_storm_clicks: RETRY_STORM_CLICKS,
-    queue_drained: false,
-    queue_remaining_after_storm: null,
+    days: [],
     final_feed_length: null,
     dom_count: null,
     persisted_count: null,
@@ -256,80 +264,90 @@ async function main() {
 
   let browser;
   try {
-    const fixturePath = resolve(process.cwd(), options.fixture);
-    const knownCodes = await loadKnownCodes(fixturePath, KNOWN_CODE_COUNT);
-    const scanPlan = [...knownCodes, ...UNKNOWN_CODES];
-
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();
     page.on("pageerror", (error) => report.failures.push(`page error: ${error.message}`));
-    await context.route("**/api/ai-lookup", async (route) => {
-      if (route.request().method() === "GET") await route.fulfill({ json: NO_AI_STATUS });
-      else await route.fulfill({ status: 503, json: { error: "Night Shift driver keeps product lookup off" } });
-    });
+    await installMockAiRoute(context);
 
-    await page.goto(`${options.target}/login`, { waitUntil: "domcontentloaded" });
-    const loginButton = page.getByTestId("login-button");
-    if (await loginButton.isVisible().catch(() => false)) await loginButton.click();
-    await page.waitForURL("**/scan", { timeout: 30_000 });
-    await page.waitForFunction(() => Boolean(window.__scanStore));
+    await loginAndReachScan(page, options.target);
     await page.evaluate(() => {
-      window.__scanStore.getState().updateSettings({ aiLookupEnabled: false, autoSuggestUnknowns: false });
+      window.__scanStore.getState().updateSettings({ autoSuggestUnknowns: false });
     });
-    await page.getByTestId("scanner-input").waitFor({ timeout: 30_000 });
 
-    // --- Phase 1: offline scan burst. Every scan must still appear and count.
-    await context.setOffline(true);
-    const offlineBurst = scanPlan.slice(0, Math.ceil(scanPlan.length / 2));
-    for (const code of offlineBurst) {
-      await scan(page, code);
-      report.total_scans_issued += 1;
-      report.offline_scans_issued += 1;
+    for (const day of daysToRun) {
+      const dayReport = {
+        dayIndex: day.dayIndex,
+        scansIssued: 0,
+        expectedScans: day.expected?.totalScansThisDay ?? null,
+        feedSurvivedRefresh: false,
+        queueDrained: false,
+      };
+      const offlinePhase = day.phases.find((p) => p.phase === "offline-burst");
+      const retryPhase = day.phases.find((p) => p.phase === "retry-storm");
+      const unknownCodes = [`NIGHTSHIFTUNKNOWN${day.dayIndex}001`, `NIGHTSHIFTUNKNOWN${day.dayIndex}002`];
+      const scanPlan = [...(offlinePhase?.scans ?? []), ...unknownCodes];
+
+      // --- Phase 1: offline scan burst. Every scan must still appear and count.
+      await context.setOffline(true);
+      const feedBeforeDay = (await readFeedLength(page)) ?? 0;
+      const midpoint = Math.ceil(scanPlan.length / 2);
+      for (const code of scanPlan.slice(0, midpoint)) {
+        await scanCode(page, code);
+        dayReport.scansIssued += 1;
+      }
+      await page.waitForFunction((n) => window.__scanStore.getState().scanFeed.length >= n, feedBeforeDay + midpoint);
+      const pendingWarningVisible = await page.getByTestId("pending-warning").isVisible({ timeout: 2000 }).catch(() => false);
+      if (!pendingWarningVisible) {
+        report.failures.push(
+          `day ${day.dayIndex}: pending-warning ("Saved locally, not synced yet.") was not shown while offline`,
+        );
+      }
+      const offlineShot = resolve(screenshotsDir, `day${day.dayIndex}-01-offline-burst.png`);
+      await page.screenshot({ path: offlineShot, fullPage: true });
+      report.screenshots.push(artifactPath(offlineShot));
+
+      // --- Phase 2: mid-session refresh, still offline. Feed must survive.
+      const feedLengthBeforeRefresh = await readFeedLength(page);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page.getByTestId("scanner-input").waitFor({ timeout: 30_000 });
+      await page.waitForFunction(() => Boolean(window.__scanStore));
+      const feedLengthAfterRefresh = await readFeedLength(page);
+      dayReport.feedSurvivedRefresh =
+        feedLengthAfterRefresh !== null && feedLengthAfterRefresh === feedLengthBeforeRefresh;
+      if (!dayReport.feedSurvivedRefresh) {
+        report.failures.push(
+          `day ${day.dayIndex}: scan feed did not survive the mid-session refresh: before=${feedLengthBeforeRefresh}, after=${feedLengthAfterRefresh}`,
+        );
+      }
+
+      // --- Continue scanning the rest of the day's plan (still offline) after the refresh.
+      for (const code of scanPlan.slice(midpoint)) {
+        await scanCode(page, code);
+        dayReport.scansIssued += 1;
+      }
+      await page.waitForFunction((n) => window.__scanStore.getState().scanFeed.length >= n, feedBeforeDay + scanPlan.length);
+
+      // --- Phase 3: reconnect and trigger a retry storm on the pending queue.
+      await context.setOffline(false);
+      const retryClicks = retryPhase?.retryCount ?? RETRY_STORM_CLICKS_DEFAULT;
+      const drainResult = await drainPendingQueue(page, { attempts: retryClicks, delayMs: 500 });
+      dayReport.queueDrained = drainResult.drained;
+      const reconnectShot = resolve(screenshotsDir, `day${day.dayIndex}-02-after-reconnect.png`);
+      await page.screenshot({ path: reconnectShot, fullPage: true });
+      report.screenshots.push(artifactPath(reconnectShot));
+
+      if (dayReport.expectedScans !== null && dayReport.scansIssued < dayReport.expectedScans) {
+        report.failures.push(
+          `day ${day.dayIndex}: issued ${dayReport.scansIssued} scans, fixture's offline-burst expected at least ${dayReport.expectedScans}`,
+        );
+      }
+
+      report.total_scans_issued += dayReport.scansIssued;
+      report.days.push(dayReport);
     }
-    await page.waitForFunction((n) => window.__scanStore.getState().scanFeed.length >= n, offlineBurst.length);
-    const pendingWarningVisible = await page.getByTestId("pending-warning").isVisible({ timeout: 2000 }).catch(() => false);
-    if (!pendingWarningVisible) {
-      report.failures.push('pending-warning ("Saved locally, not synced yet.") was not shown while offline');
-    }
-    const offlineShot = resolve(screenshotsDir, "01-offline-burst.png");
-    await page.screenshot({ path: offlineShot, fullPage: true });
-    report.screenshots.push(artifactPath(offlineShot));
 
-    // --- Phase 2: mid-session refresh, still offline. Feed must survive.
-    const feedLengthBeforeRefresh = await readFeedLength(page);
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByTestId("scanner-input").waitFor({ timeout: 30_000 });
-    await page.waitForFunction(() => Boolean(window.__scanStore));
-    const feedLengthAfterRefresh = await readFeedLength(page);
-    report.refresh_completed = true;
-    report.feed_survived_refresh = feedLengthAfterRefresh !== null && feedLengthAfterRefresh === feedLengthBeforeRefresh;
-    if (!report.feed_survived_refresh) {
-      report.failures.push(
-        `Scan feed did not survive the mid-session refresh: before=${feedLengthBeforeRefresh}, after=${feedLengthAfterRefresh}`,
-      );
-    }
-
-    // --- Continue scanning the rest of the plan (still offline) after the refresh.
-    const remainingAfterRefresh = scanPlan.slice(offlineBurst.length);
-    for (const code of remainingAfterRefresh) {
-      await scan(page, code);
-      report.total_scans_issued += 1;
-      report.offline_scans_issued += 1;
-    }
-    await page.waitForFunction((n) => window.__scanStore.getState().scanFeed.length >= n, scanPlan.length);
-
-    // --- Phase 3: reconnect and trigger a retry storm on the pending queue.
-    await context.setOffline(false);
-    report.reconnected = true;
-    const drainResult = await drainPendingQueue(page, { attempts: RETRY_STORM_CLICKS, delayMs: 500 });
-    report.queue_drained = drainResult.drained;
-    report.queue_remaining_after_storm = drainResult.remaining;
-    const reconnectShot = resolve(screenshotsDir, "02-after-reconnect.png");
-    await page.screenshot({ path: reconnectShot, fullPage: true });
-    report.screenshots.push(artifactPath(reconnectShot));
-
-    // --- Phase 4: crown invariant, checked three independent ways.
+    // --- Final: crown invariant, checked three independent ways, across the whole cumulative session.
     report.final_feed_length = await readFeedLength(page);
     report.persisted_count = await readPersistedCount(page);
     report.dom_count = await readDomCount(page);
@@ -364,12 +382,15 @@ async function main() {
     await writeFile(resolve(runDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
   }
 
-  console.log(JSON.stringify({
-    report_dir: artifactPath(runDir),
-    total_scans_issued: report.total_scans_issued,
-    crown_invariant: report.crown_invariant,
-    failures: report.failures,
-  }));
+  console.log(
+    JSON.stringify({
+      report_dir: artifactPath(runDir),
+      data_source: report.data_source,
+      total_scans_issued: report.total_scans_issued,
+      crown_invariant: report.crown_invariant,
+      failures: report.failures,
+    }),
+  );
   if (report.failures.length > 0 || !report.crown_invariant) process.exitCode = 1;
 }
 

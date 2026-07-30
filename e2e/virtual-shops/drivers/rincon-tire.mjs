@@ -91,11 +91,21 @@ function parseArgs(argv) {
   return options;
 }
 
-async function runDay({ page, dayIndex, known, unknown, scansPerDay, friction, screenshotsDir, runningTotal }) {
+async function runDay({ page, dayIndex, known, unknown, scansPerDay, friction, screenshotsDir, runningTotal, resolvedUnknownCodes }) {
   const dayCodes = [];
   for (let index = 0; index < scansPerDay; index += 1) dayCodes.push(known[index % known.length].code);
-  // A couple of genuinely unknown codes route to Needs Review each day, same as the design doc's daily loop.
-  const dailyUnknown = unknown.slice(0, Math.min(2, unknown.length));
+  // A couple of genuinely unknown codes route to Needs Review each day, same as the design doc's daily
+  // loop. Rotate through the fixture's unknown pool per day (never re-serve the same 2 codes) so each
+  // day's Ignore resolution actually opens a FRESH review row: once a code is resolved (even via
+  // "Ignore"), resolveUnknown's open/suggested-only guard (scanStore.ts) means re-scanning that same
+  // code never reopens a new review - it just increments the existing placeholder's count, by design
+  // (never spam Needs Review for a code a human already dismissed). Reusing day 1's codes on day 2
+  // would make the review-resolution step fail every time through no fault of the app.
+  const perDay = Math.min(2, unknown.length);
+  const startIndex = ((dayIndex - 1) * perDay) % unknown.length;
+  const dailyUnknown = unknown.length <= perDay
+    ? unknown.slice(0, perDay)
+    : Array.from({ length: perDay }, (_, offset) => unknown[(startIndex + offset) % unknown.length]);
 
   let activationMs = null;
   const dayStarted = performance.now();
@@ -123,8 +133,20 @@ async function runDay({ page, dayIndex, known, unknown, scansPerDay, friction, s
   for (const code of dailyUnknown) {
     await page.goto(new URL("/review", page.url()).toString(), { waitUntil: "domcontentloaded" });
     const row = page.getByTestId(`review-row-${code}`);
-    const visible = await row.isVisible().catch(() => false);
+    // The review page hydrates (React mount + Zustand rehydrate) after "domcontentloaded" fires, so a
+    // one-shot isVisible() right after goto races the render and false-negatives. waitFor with a real
+    // timeout lets Playwright poll instead of sampling a single frame.
+    const visible = await row
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
     if (!visible) {
+      // A code already resolved on an earlier day never reopens a fresh review row (scanStore.ts
+      // resolveUnknown only acts on status "open"/"suggested"; a re-scan of an already-resolved code
+      // just increments the existing placeholder's count). That is expected app behavior, not friction -
+      // only flag it when this code has NOT been resolved before (the fixture rotation above should make
+      // this rare; the fallback fixture's 2-code pool can still exhaust and hit it).
+      if (resolvedUnknownCodes.has(code)) continue;
       await friction.log({
         dayIndex,
         phase: "needs-review-resolution",
@@ -134,14 +156,20 @@ async function runDay({ page, dayIndex, known, unknown, scansPerDay, friction, s
       });
       continue;
     }
-    await row.getByTestId("mark-item-unidentified").click().catch(async () => {
-      await friction.log({
-        dayIndex,
-        phase: "needs-review-resolution",
-        severity: "minor",
-        description: `Fallback resolution control not found for ${code}; left in Needs Review`,
+    // "ignore-review" is the real control (NeedsReviewTable.tsx: resolveUnknown(review.id, "ignore", {}))
+    // that resolves the row out of the open queue; "mark-item-unidentified" never existed in the app.
+    await row
+      .getByTestId("ignore-review")
+      .click()
+      .then(() => resolvedUnknownCodes.add(code))
+      .catch(async () => {
+        await friction.log({
+          dayIndex,
+          phase: "needs-review-resolution",
+          severity: "minor",
+          description: `Fallback resolution control not found for ${code}; left in Needs Review`,
+        });
       });
-    });
   }
 
   await page.goto(new URL("/scan", page.url()).toString(), { waitUntil: "domcontentloaded" });
@@ -219,6 +247,7 @@ async function main() {
 
   const metrics = { scansAttempted: 0, scansCounted: 0, daysSimulated: 0, activationMsFirstDay: null, scansPerMinuteByDay: [] };
   const runningTotal = { value: 0 };
+  const resolvedUnknownCodes = new Set();
   const failures = [];
 
   try {
@@ -240,6 +269,7 @@ async function main() {
           friction,
           screenshotsDir,
           runningTotal,
+          resolvedUnknownCodes,
         });
         metrics.scansAttempted += dayResult.scansToday;
         metrics.scansCounted = runningTotal.value;
