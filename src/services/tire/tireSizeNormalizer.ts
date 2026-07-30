@@ -46,10 +46,16 @@ const okRim = (r: number) => r >= 8 && r <= 30;
 
 // Load index (2-3 digits, optionally dual NNN/NNN) followed by a single speed-rating letter.
 const LOAD_SPEED = /(\d{2,3}(?:\/\d{2,3})?)\s*([A-Z])\b/gi;
+// Agricultural compound rating. This is deliberately recognized only at the start of the
+// post-size suffix passed to findLoadSpeed, so model codes such as RT 955R are never consumed.
+const AGRICULTURAL_COMPOUND_LOAD_SPEED = /^\s*(\d{2,3}(?:\/\d{2,3})?(?:A8\/B|D\/A8))\b/i;
 // Standard speed-rating letters. Excludes I, O (not used), X and Z (Z is carried inside the size as ZR).
 const SPEED_LETTERS = new Set("ABCDEFGHJKLMNPQRSTUVWY".split(""));
 
 function findLoadSpeed(remainder: string): { canonical: string; raw: string } | null {
+  const agricultural = AGRICULTURAL_COMPOUND_LOAD_SPEED.exec(remainder);
+  if (agricultural) return { canonical: agricultural[1].toUpperCase(), raw: agricultural[0].trim() };
+
   for (const m of remainder.matchAll(LOAD_SPEED)) {
     const speed = m[2].toUpperCase();
     if (SPEED_LETTERS.has(speed)) return { canonical: `${m[1]}${speed}`, raw: m[0] };

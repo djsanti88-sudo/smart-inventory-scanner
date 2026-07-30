@@ -51,6 +51,15 @@ describe("extractTireFields", () => {
     expect(out.description).toBe("Wildpeak");
   });
 
+  it("removes an agricultural compound load/speed suffix without consuming the model code", () => {
+    const out = extractTireFields({
+      productName: "BKT Agrimax RT 955 R-1 380/85R28 136A8/B",
+      brand: "BKT",
+    });
+    expect(out.size).toBe("380/85R28 136A8/B");
+    expect(out.description).toBe("BKT Agrimax RT 955 R-1");
+  });
+
   it("null/undefined identity -> all blank", () => {
     const out = extractTireFields(null);
     expect(out).toEqual({ size: null, brand: null, partNumber: null, description: "" });

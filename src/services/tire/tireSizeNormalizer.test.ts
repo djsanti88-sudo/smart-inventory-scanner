@@ -83,6 +83,28 @@ describe("matchTireSize (raw span for description stripping)", () => {
     expect(match?.canonical).toBe("255/70R16 111T");
   });
 
+  it.each([
+    ["BKT Agrimax RT 955 R-1 230/95R48 136A8/B", "230/95R48 136A8/B", "136A8/B", "BKT Agrimax RT 955 R-1"],
+    ["BKT Agrimax RT 955 R-1 300/95R52 151A8/B", "300/95R52 151A8/B", "151A8/B", "BKT Agrimax RT 955 R-1"],
+    ["BKT Agrimax RT 955 R-1 340/85R48 152A8/B", "340/85R48 152A8/B", "152A8/B", "BKT Agrimax RT 955 R-1"],
+    ["BKT Agrimax RT 955 R-1 270/95R54 146A8/B", "270/95R54 146A8/B", "146A8/B", "BKT Agrimax RT 955 R-1"],
+    ["BKT Agrimax RT 945 R-1w 320/90R50 150A8/B", "320/90R50 150A8/B", "150A8/B", "BKT Agrimax RT 945 R-1w"],
+    ["BKT Agrimax RT 945 R-1w 320/90R46 146A8/B", "320/90R46 146A8/B", "146A8/B", "BKT Agrimax RT 945 R-1w"],
+    ["BKT Agrimax RT 955 R-1 270/95R38 140A8/B", "270/95R38 140A8/B", "140A8/B", "BKT Agrimax RT 955 R-1"],
+    ["BKT Agrimax RT 853 R-1 480/80R38 149A8/B", "480/80R38 149A8/B", "149A8/B", "BKT Agrimax RT 853 R-1"],
+    ["BKT Agrimax RT 945 R-1w 380/90R50 151A8/B", "380/90R50 151A8/B", "151A8/B", "BKT Agrimax RT 945 R-1w"],
+  ])("keeps agricultural model codes while recognizing the post-size compound load/speed: %s", (input, canonical, rawLoadSpeed, model) => {
+    expect(matchTireSize(input)).toMatchObject({ canonical, rawLoadSpeed });
+    expect(parseTireIdentity(input).model).toBe(model);
+  });
+
+  it("recognizes the corpus-backed agricultural dual-load D/A8 suffix", () => {
+    expect(matchTireSize("Ascenso MDR 1000 440/80R30 153/157D/A8")).toMatchObject({
+      canonical: "440/80R30 153/157D/A8",
+      rawLoadSpeed: "153/157D/A8",
+    });
+  });
+
   it("returns the canonical value AND the raw matched substring", () => {
     const m = matchTireSize("Michelin Defender LTX M/S 235/65R18 104H BSW");
     expect(m?.canonical).toBe("235/65R18 104H");
