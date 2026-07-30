@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 function norm(value) { return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase(); }
 function hash(value) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 function sameDisplay(left, right) { return norm(left) === norm(right); }
+function modelDisplayKey(value) { return String(value ?? "").toLowerCase().replace(/[\s_./-]/g, ""); }
+function sameModelDisplay(left, right) { return modelDisplayKey(left) === modelDisplayKey(right); }
 function sameCanonicalProductUid(left, right) { return left === right; }
 function percentile(values, percentage) { if (!values.length) return 0; const sorted = [...values].sort((a, b) => a - b); return sorted[Math.ceil((percentage / 100) * sorted.length) - 1]; }
 function fail(failures, barcode, rule, expected, observed) { failures.push({ barcode, rule, expected, observed }); }
@@ -28,7 +30,7 @@ export function validateBatchResult(batch, result, anchor) {
     const observation = byBarcode.get(row.barcode);
     if (!observation) { fail(failures, row.barcode, "missing_barcode", row.barcode, undefined); continue; }
     for (const [key, expectedValue] of [["canonicalProductUid", row.canonicalProductUid], ["brand", row.brand], ["model", row.model], ["size", row.size]]) {
-      if (String(expectedValue ?? "").trim() && !(key === "canonicalProductUid" ? sameCanonicalProductUid(observation[key], expectedValue) : sameDisplay(observation[key], expectedValue))) fail(failures, row.barcode, key, expectedValue, observation[key]);
+      if (String(expectedValue ?? "").trim() && !(key === "canonicalProductUid" ? sameCanonicalProductUid(observation[key], expectedValue) : key === "model" ? sameModelDisplay(observation[key], expectedValue) : sameDisplay(observation[key], expectedValue))) fail(failures, row.barcode, key, expectedValue, observation[key]);
     }
     if (norm(observation.status) !== "verified") fail(failures, row.barcode, "verified_status", "verified", observation.status);
   }

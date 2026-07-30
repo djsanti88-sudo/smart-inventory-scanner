@@ -13,6 +13,34 @@ function good() {
   return { observations: expectedRows.map((row, index) => ({ ...row, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, manifestSha256, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, canonicalIdentityMismatchCount:0, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [] };
 }
 test("accepts an exact hash-bound 100-event proof and uses nearest-rank percentiles", () => { const result = validateBatchResult(batch, good()); assert.equal(result.passed, true); assert.equal(result.countedQuantity, 100); assert.equal(result.p95Ms, 94); });
+test("accepts model display variants that differ only by case or explicit delimiters", () => {
+  for (const observedModel of ["su318ht", "SU318_H_T", "SU318/H/T", "SU318-H-T", " SU318   H\tT "]) {
+    const locked = structuredClone(batch);
+    locked.rows[0].model = "SU318 H T";
+    locked.batchSha256 = digest(locked.rows);
+    locked.expectedBarcodesSha256 = digest(locked.rows.map((row) => row.barcode));
+    locked.expectedCanonicalProductUidsSha256 = digest(locked.rows.map((row) => row.canonicalProductUid));
+    const value = good();
+    Object.assign(value.ledgerProof.manifest, { batchSha256: locked.batchSha256, expectedBarcodesSha256: locked.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: locked.expectedCanonicalProductUidsSha256 });
+    value.observations[0].model = observedModel;
+    assert.equal(validateBatchResult(locked, value).passed, true, observedModel);
+  }
+});
+test("rejects model changes that are not explicit display delimiters", () => {
+  for (const [expectedModel, observedModel] of [["SU318 H T", "SU T"], ["RP18", "RP8"], ["AT3", "AT"], ["A/S+", "A/S"]]) {
+    const locked = structuredClone(batch);
+    locked.rows[0].model = expectedModel;
+    locked.batchSha256 = digest(locked.rows);
+    locked.expectedBarcodesSha256 = digest(locked.rows.map((row) => row.barcode));
+    locked.expectedCanonicalProductUidsSha256 = digest(locked.rows.map((row) => row.canonicalProductUid));
+    const value = good();
+    Object.assign(value.ledgerProof.manifest, { batchSha256: locked.batchSha256, expectedBarcodesSha256: locked.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: locked.expectedCanonicalProductUidsSha256 });
+    value.observations[0].model = observedModel;
+    const validation = validateBatchResult(locked, value);
+    assert.equal(validation.passed, false, `${expectedModel} vs ${observedModel}`);
+    assert.ok(validation.failures.some((failure) => failure.rule === "model"), `${expectedModel} vs ${observedModel}`);
+  }
+});
 test("rejects case- and whitespace-changed canonical UIDs across every proof identity boundary", () => {
   for (const [name, mutate, rule] of [
     ["observation vs manifest case", (value) => { value.observations[0].canonicalProductUid = "UID-0"; }, "canonicalProductUid"],
