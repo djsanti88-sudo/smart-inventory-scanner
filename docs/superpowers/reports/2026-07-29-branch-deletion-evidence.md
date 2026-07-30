@@ -118,3 +118,101 @@ git branch -D test
 Note: several of these branches have active `.claude/worktrees/*` or `C:/tmp/*`
 worktrees attached (per REPO_HEALTH.md); `git branch -D` will refuse to delete a
 branch checked out in a worktree until `git worktree remove` runs first.
+
+## EXECUTED — 2026-07-29 22:21 CDT (Agent F8, owner-approved, local-only, no push)
+
+Ran `git worktree list` immediately before deletion to re-check for conflicts, then
+re-verified each candidate with `git cherry master <branch> | grep -c '^+'` right
+before deleting it, per the owner's explicit rule: never delete a branch checked out
+in a worktree.
+
+Result: **all 16 "merged into master" branches, plus `demo-readiness-vercel-partnumber`,
+had an active worktree attached** (`C:/tmp/wt-*`, `C:/tmp/inventory-*`, or
+`.claude/worktrees/agent-a47380b0deaa5e8d2`) and were **SKIPPED** — not touched, per
+rule. The 7 `af/*` branches were held per standing instruction (wait for `audit-fixes`
+to land). Only 2 of the ~19 SAFE-DELETE branches were both cherry-clean and
+worktree-free at execution time:
+
+```bash
+git branch -D fix/exact-code-evidence-verification   # 0 unique commits vs master, no worktree — DELETED
+git branch -D test                                    # 0 unique commits vs master, no worktree — DELETED
+```
+
+Deleted:
+1. `fix/exact-code-evidence-verification` (was `243ca442`) — 0 unique commits, no worktree.
+2. `test` (was `68cccc65`) — 0 unique commits, no worktree.
+
+Skipped (worktree conflict, held for owner to remove worktree first, then re-verify
+and delete):
+- `docs/github-deploy-truth` (`C:/tmp/wt-ci`)
+- `feat/camera-scan` (`C:/tmp/wt-camera`)
+- `feat/csv-import` (`C:/tmp/wt-csv`)
+- `feat/decode-gpt-54-mini` (`C:/tmp/wt-54mini`)
+- `feat/free-rungs` (`C:/tmp/wt-rungs`)
+- `feat/variance-report` (`C:/tmp/wt-variance`)
+- `fix/deploy-tooling-hardening` (`C:/tmp/wt-master-cert`)
+- `fix/redo-round` (`C:/tmp/wt-round2`)
+- `fix/release-stabilization` (`C:/tmp/inventory-stabilization`)
+- `fix/rung-trust-and-resolve-stamp` (`C:/Users/djsan/inventory-wt-diag`)
+- `flip/vercel-git-enable` (`C:/tmp/wt-flip`)
+- `rescue/argus-cp1252` (`C:/tmp/wt-argus-fix`)
+- `rescue/phase3-followups` (`C:/tmp/wt-p3-follow`)
+- `rescue/qafix` (`C:/tmp/wt-qafix`)
+- `rescue/teach-bot` (`C:/tmp/wt-rescue-teach`)
+- `worktree-agent-a47380b0deaa5e8d2` (`.claude/worktrees/agent-a47380b0deaa5e8d2`)
+- `demo-readiness-vercel-partnumber` (`C:/tmp/inventory-demo`)
+
+Held per standing instruction (not attempted): `af/01-scan-ledger` through
+`af/07-platform-tooling` (wait for `audit-fixes` to land),
+`benchmark-tire-db-automation` (PARKED), the 4 REVIEW branches, `audit-fixes`,
+`chore/docs-consolidation`, `master`.
+
+No worktree conflicts were force-resolved and no worktrees were removed — the owner
+did not authorize `git worktree remove` in this task, only branch deletion for
+worktree-free branches.
+
+## FOLLOW-UP EXECUTED — 2026-07-29 (Agent F8b, owner-approved, local-only, no push)
+
+The owner authorized `git worktree remove` for this follow-up. Processed each of the
+17 branches held above: found its worktree path (`git worktree list`), ran a dirty
+check (`git -C <path> status --porcelain`), and only removed the worktree + deleted
+the branch when it was completely clean.
+
+**11 removed** (worktree clean → `git worktree remove` → re-verified
+`git cherry master <branch>` = 0 unique → `git branch -D`):
+
+| Branch | Worktree | Notes |
+|---|---|---|
+| docs/github-deploy-truth | C:/tmp/wt-ci | clean removal |
+| feat/camera-scan | C:/tmp/wt-camera | clean removal |
+| feat/csv-import | C:/tmp/wt-csv | `git worktree remove` errored `Invalid argument` deleting the dir on Windows but unregistered it; leftover dir confirmed empty of git metadata and removed with `rm -rf` |
+| feat/decode-gpt-54-mini | C:/tmp/wt-54mini | clean removal |
+| feat/free-rungs | C:/tmp/wt-rungs | same `Invalid argument` leftover-dir pattern as wt-csv; `rm -rf` after unregister confirmed |
+| feat/variance-report | C:/tmp/wt-variance | same `Invalid argument` leftover-dir pattern; `rm -rf` after unregister confirmed |
+| fix/deploy-tooling-hardening | C:/tmp/wt-master-cert | clean removal |
+| fix/redo-round | C:/tmp/wt-round2 | clean removal |
+| flip/vercel-git-enable | C:/tmp/wt-flip | same `Invalid argument` leftover-dir pattern; left `prunable` in `git worktree list` until `git worktree prune` ran, then `git branch -D` succeeded |
+| rescue/phase3-followups | C:/tmp/wt-p3-follow | `git worktree remove` errored `Invalid argument`; leftover dir removed with `rm -rf` |
+| rescue/qafix | C:/tmp/wt-qafix | clean removal |
+
+**6 skipped-dirty** (worktree left untouched, branch NOT deleted, held for owner):
+
+| Branch | Worktree | Dirty files (first 5) |
+|---|---|---|
+| fix/release-stabilization | C:/tmp/inventory-stabilization | `?? .powercells/`, `?? e2e/qa-powercell.spec.ts`, `?? scripts/antigravity-qa-runner.mjs`, `?? scripts/qa-runner.mjs` |
+| fix/rung-trust-and-resolve-stamp | C:/Users/djsan/inventory-wt-diag | ` M .superpowers/sdd/progress.md` |
+| rescue/argus-cp1252 | C:/tmp/wt-argus-fix | `?? dev/` |
+| rescue/teach-bot | C:/tmp/wt-rescue-teach | 30 modified files: ` M e2e/auto-count-tire.spec.ts`, ` M e2e/auto-decode.spec.ts`, ` M e2e/auto-verify.spec.ts`, ` M e2e/batch-approve.spec.ts`, ` M e2e/count-always.spec.ts`, plus `testing/app-knowledge/*` |
+| worktree-agent-a47380b0deaa5e8d2 | C:/Users/djsan/inventory/.claude/worktrees/agent-a47380b0deaa5e8d2 | ` M src/app/api/ai-lookup/route.ts`, ` M src/app/api/catalog-dispute/route.ts`, ` M src/app/api/catalog-review/[id]/route.ts`, ` M src/app/api/catalog-review/route.ts`, ` M src/services/security/aiSpendGuard.test.ts` |
+| demo-readiness-vercel-partnumber | C:/tmp/inventory-demo | Staged/untracked QA-bot proof artifacts under `reports/agent-bots/latest/*`, `reports/demo-readiness/*`, `reports/human-bots/latest/*`, `reports/platform-security/*` (many `A`/`AM`/`AD` entries) |
+
+Not touched (per rule, unchanged from the first pass): the main working tree,
+`benchmark-tire-db-automation`, `audit-fixes`, `chore/docs-consolidation`, `master`,
+`af/01-scan-ledger` through `af/07-platform-tooling`, and the 4 REVIEW branches.
+
+`git worktree prune` ran at the end of this pass; no other worktrees were affected.
+
+**Running tally:** 13 branches removed total across both passes (2 from the first
+pass + 11 from this follow-up), 6 branches skipped-dirty and still held, 7 `af/*`
+branches still held pending `audit-fixes` landing, 4 REVIEW branches still held
+pending manual review, `benchmark-tire-db-automation` still parked.
