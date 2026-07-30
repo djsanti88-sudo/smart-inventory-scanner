@@ -53,10 +53,17 @@ interface ReconcileState {
   matches: MatchResult[] | null;
   /** Built report for the current matches; null until a match run completes. */
   report: ReconcileReport | null;
+  /** Opt-in, LOCAL-ONLY per-part-number unit cost map for the dollar-variance headline (M3/H1).
+   *  Deliberately a SEPARATE field from `session.adapter` - session.adapter.rows is the object
+   *  sent to /api/reconcile/match (see ReconcilePanel.onRunCompare); unitCosts is never read by
+   *  that fetch call, so cost data structurally cannot leave the browser through it. Defaults to
+   *  an empty map (feature off) until a caller opts in at import time. */
+  unitCosts: Record<string, number>;
   _hasHydrated: boolean;
   setHasHydrated: (v: boolean) => void;
-  /** AM-R9: REPLACE the active session with a fresh import; stale results are dropped. */
-  startSession: (adapter: AdapterResult, fileName: string) => void;
+  /** AM-R9: REPLACE the active session with a fresh import; stale results (and any stale unit
+   *  cost map from a prior file) are dropped. `unitCosts` defaults to {} when omitted. */
+  startSession: (adapter: AdapterResult, fileName: string, unitCosts?: Record<string, number>) => void;
   setResults: (matches: MatchResult[], report: ReconcileReport) => void;
   /** Wipe this store's browser-local data (state + its own persisted key). Called by the
    *  existing Settings "Clear local cache" action alongside scanStore.clearLocalCache. */
@@ -69,14 +76,16 @@ export const useReconcileStore = create<ReconcileState>()(
       session: null,
       matches: null,
       report: null,
+      unitCosts: {},
       _hasHydrated: false,
       setHasHydrated: (v) => set({ _hasHydrated: v }),
 
-      startSession: (adapter, fileName) =>
+      startSession: (adapter, fileName, unitCosts) =>
         set({
           session: { fileName, importedAt: new Date().toISOString(), adapter },
           matches: null,
           report: null,
+          unitCosts: unitCosts ?? {},
         }),
 
       setResults: (matches, report) => set({ matches, report }),
@@ -85,7 +94,7 @@ export const useReconcileStore = create<ReconcileState>()(
         // Reset state FIRST (this also persists the empty state), THEN remove the key so no
         // reconcile data survives on disk (persist writes on every set, so the reverse order
         // would immediately re-create the key with the emptied state).
-        set({ session: null, matches: null, report: null });
+        set({ session: null, matches: null, report: null, unitCosts: {} });
         if (typeof window !== "undefined" && window.localStorage) {
           try {
             window.localStorage.removeItem(RECONCILE_PERSIST_KEY);
@@ -123,6 +132,10 @@ export const useReconcileStore = create<ReconcileState>()(
         session: s.session ? { ...s.session, adapter: stripRawForPersist(s.session.adapter) } : null,
         matches: s.matches,
         report: s.report,
+        // Unit costs are small (one number per SKU, no free-text columns) and are, by definition
+        // of this feature, LOCAL-ONLY data the owner opted to store on this device - unlike `raw`
+        // there is no quota-risk reason to strip them.
+        unitCosts: s.unitCosts,
       }),
       onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
     },

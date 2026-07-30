@@ -1,0 +1,84 @@
+=== Live decode smoke test ===
+base: http://localhost:3000 | LIVE_AI_TEST: 1 (will spend tokens)
+
+--- AI status (no tokens) ---
+{
+  "liveEnabled": true,
+  "autoDecodeOnScan": true,
+  "geminiEnabled": true,
+  "openaiEnabled": true,
+  "geminiConfigured": true,
+  "openaiConfigured": true,
+  "geminiSearchGrounding": true,
+  "openaiWebSearch": true,
+  "geminiModel": "gemini-flash-latest",
+  "openaiModel": "gpt-5-mini",
+  "geminiProModel": "gemini-2.5-pro",
+  "openaiProModel": "gpt-5",
+  "pageFetchAndRead": true,
+  "premiumFallback": true,
+  "mode": "aggressive",
+  "dailyLimit": 100,
+  "missingKeys": [],
+  "e2e": false
+}
+
+==================== 070330645936 ====================
+1.  raw code: 070330645936
+2.  code type: upc_a
+3.  gemini enabled: true | configured: true | grounding: true
+4.  openai enabled: true | configured: true | web search: true
+5.  gemini called: false
+6.  openai called: false
+7.  gemini productName: (not called/failed)
+8.  openai productName: (not called/failed)
+9.  sourceUrls: ["https://go-upc.com/search?q=070330645936","https://www.upcitemdb.com/upc/070330645936"]
+10. sourceSnippets/grounding: []
+11. exactCodeEvidenceVerifiedByApp: true
+12. final decision: verified
+13. reason: Verified AI Decode: single provider, but the app independently confirmed the exact code in strong evidence.
+14. shows product in Live Scan Feed (verified): true
+15. goes to Needs Review: false
+    evidence strengths: ["fetched_source"]
+    >> LATENCY: 8017 ms | timedOut: false | budget: 13000 ms | models: ["gemini-flash-latest","gpt-5-mini"]
+    productName: "Exclusive Smokes Bic Lighter Texas — UPC 70330645936 — Go" (must be a real product, never a website/search title)
+
+==================== 6977228152610 ====================
+1.  raw code: 6977228152610
+2.  code type: ean_13
+3.  gemini enabled: true | configured: true | grounding: true
+4.  openai enabled: true | configured: true | web search: true
+5.  gemini called: false
+6.  openai called: false
+7.  gemini productName: (not called/failed)
+8.  openai productName: (not called/failed)
+9.  sourceUrls: ["https://go-upc.com/search?q=6977228152610"]
+10. sourceSnippets/grounding: []
+11. exactCodeEvidenceVerifiedByApp: true
+12. final decision: verified
+13. reason: Verified AI Decode: single provider, but the app independently confirmed the exact code in strong evidence.
+14. shows product in Live Scan Feed (verified): true
+15. goes to Needs Review: false
+    evidence strengths: ["fetched_source"]
+    >> LATENCY: 8004 ms | timedOut: false | budget: 13000 ms | models: ["gemini-flash-latest","gpt-5-mini"]
+    productName: "Phatoil Lavender Essential Oil Premium Grade 100ml 3.38fl Oz Two Packs Unopened — EAN 6977228152610 — Go" (must be a real product, never a website/search title)
+
+==================== 710154236681 ====================
+1.  raw code: 710154236681
+2.  code type: upc_a
+3.  gemini enabled: true | configured: true | grounding: true
+4.  openai enabled: true | configured: true | web search: true
+5.  gemini called: false
+6.  openai called: false
+7.  gemini productName: (not called/failed)
+8.  openai productName: (not called/failed)
+9.  sourceUrls: []
+10. sourceSnippets/grounding: []
+11. exactCodeEvidenceVerifiedByApp: false
+12. final decision: needs_review
+13. reason: No provider returned a usable product. Try Retry live decode, or resolve manually.
+14. shows product in Live Scan Feed (verified): false
+15. goes to Needs Review: true
+    evidence strengths: ["fetched_source"]
+    >> LATENCY: 10013 ms | timedOut: false | budget: 13000 ms | models: ["gemini-flash-latest","gpt-5-mini"]
+    productName: "" (must be a real product, never a website/search title)

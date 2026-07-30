@@ -1,11 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { LadderStorage } from "@/server/upc/storage";
+
+// M1 deep-review fix 1 (re-leak): the "disputed" remerge path in appendMasterCatalogEntry must never
+// write disputedBy/auditLog onto the PUBLIC catalogEntries parent doc (mirrors the split
+// catalogDispute.ts already enforces - see catalogModeration.rules.test.ts). Mock firebase-admin's
+// FieldValue the same sentinel-object way route.test.ts already does, so the "strip the legacy fields
+// off the parent" assertion can check for the delete sentinel without a live Firestore app.
+vi.mock("firebase-admin/firestore", () => ({
+  FieldValue: {
+    delete: () => ({ __op: "delete" }),
+  },
+}));
+
 import {
   buildMasterCatalogEntry,
   appendMasterCatalogEntry,
   __resetMasterAppendErrorLatchForTests,
   type MasterAppendInput,
 } from "./masterAppend";
-import type { LadderStorage } from "@/server/upc/storage";
 
 function baseInput(overrides: Partial<MasterAppendInput> = {}): MasterAppendInput {
   return {
@@ -172,34 +184,172 @@ describe("appendMasterCatalogEntry (Admin-SDK upsert, mocked)", () => {
   // Catalog revocation round (design §2.4b CRITICAL): a disputed entry must NEVER be silently
   // re-verified by the very next strong ladder decode of the same code - that would undo a live
   // dispute with no human in the loop. The re-decode instead lands as a "pending" re-candidate,
-  // preserving the dispute history (disputeCount/disputedBy/auditLog) so the reviewing human sees
-  // both the fresh evidence AND the dispute trail together.
-  it("re-append over a disputed doc lands as pending (never silently re-verifies), preserving dispute history", async () => {
-    const existing = {
-      verificationStatus: "disputed",
-      provenanceTier: "ladder_verified_strong",
-      disputeCount: 1,
-      disputedBy: [{ businessId: "biz-a", at: "2026-07-20T00:00:00.000Z" }],
-      auditLog: [{ at: "2026-07-20T00:00:00.000Z", action: "disputed", by: "biz-a" }],
+  // preserving the dispute history (disputeCount) so the reviewing human sees both the fresh
+  // evidence AND the dispute trail together.
+  //
+  // M1 deep-review fix 1 (RE-LEAK): disputedBy/auditLog (raw businessId + free-text reason) were
+  // moved off the public catalogEntries parent doc by commit f416404e (see catalogDispute.ts /
+  // catalogModeration.rules.test.ts), but THIS remerge path independently re-wrote
+  // existing.disputedBy/auditLog straight back onto the parent whenever it fired - re-opening the
+  // exact leak the split was supposed to close. Fix: never spread those fields onto the parent; if
+  // present on the existing doc (legacy - predates the moderation split), migrate them into the
+  // locked moderation subcollection doc in the SAME transaction and strip them off the parent with
+  // FieldValue.delete().
+  function makeModRef() {
+    return { __kind: "moderation" as const };
+  }
+  function makeParentRefWithModeration(id: string, modRef: { __kind: "moderation" }) {
+    return {
+      id,
+      collection: vi.fn((name: string) => {
+        if (name !== "moderation") throw new Error(`unexpected subcollection ${name}`);
+        return { doc: vi.fn((docId: string) => (docId === "log" ? modRef : { __kind: "moderation" as const })) };
+      }),
     };
-    const { tx, setCalls } = makeMockTx(existing, true);
+  }
+  function makeDisputedTx(
+    parentData: Record<string, unknown>,
+    modData: Record<string, unknown> | undefined,
+    modExists: boolean,
+  ) {
+    const setCalls: Array<{ ref: unknown; data: unknown; opts: unknown }> = [];
+    const tx = {
+      get: vi.fn((ref: { __kind?: string }) =>
+        Promise.resolve(
+          ref?.__kind === "moderation"
+            ? { exists: modExists, data: () => modData }
+            : { exists: true, data: () => parentData },
+        ),
+      ),
+      set: vi.fn((ref: unknown, data: unknown, opts: unknown) => {
+        setCalls.push({ ref, data, opts });
+      }),
+    };
+    return { tx, setCalls };
+  }
+
+  it("re-append over a disputed doc lands as pending (never silently re-verifies), preserving disputeCount", async () => {
+    const existing = { verificationStatus: "disputed", provenanceTier: "ladder_verified_strong", disputeCount: 1 };
+    const { tx, setCalls } = makeDisputedTx(existing, undefined, false);
+    const modRef = makeModRef();
+    const parentRef = makeParentRefWithModeration(entry.id, modRef);
     const db = {
-      collection: vi.fn(() => ({ doc: vi.fn(() => ({ id: entry.id })) })),
+      collection: vi.fn(() => ({ doc: vi.fn(() => parentRef) })),
       runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
     } as unknown as FirebaseFirestore.Firestore;
 
     const result = await appendMasterCatalogEntry(entry, { db });
     expect(result).toBe("written");
     expect(setCalls).toHaveLength(1);
-    const [, data] = setCalls[0];
-    const payload = data as Record<string, unknown>;
+    const payload = setCalls[0].data as Record<string, unknown>;
     // Fresh identity fields land, but verificationStatus is demoted to "pending" - never "verified".
     expect(payload.verificationStatus).toBe("pending");
     expect(payload.name).toBe(entry.name);
-    // Dispute history is preserved untouched, not clobbered by the merge write.
+    // Dispute history (the plain count, never raw businessId/free text) is preserved untouched.
     expect(payload.disputeCount).toBe(1);
-    expect(payload.disputedBy).toEqual(existing.disputedBy);
-    expect(payload.auditLog).toEqual(existing.auditLog);
+  });
+
+  it("NEVER re-writes disputedBy/auditLog onto the public parent doc, even when absent from the existing doc", async () => {
+    const existing = { verificationStatus: "disputed", provenanceTier: "ladder_verified_strong", disputeCount: 2 };
+    const { tx, setCalls } = makeDisputedTx(existing, undefined, false);
+    const modRef = makeModRef();
+    const parentRef = makeParentRefWithModeration(entry.id, modRef);
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => parentRef) })),
+      runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db });
+    expect(result).toBe("written");
+    const payload = setCalls[0].data as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("disputedBy");
+    expect(payload).not.toHaveProperty("auditLog");
+    // No legacy fields on the existing doc -> nothing to migrate, moderation subcollection untouched.
+    expect(parentRef.collection).not.toHaveBeenCalled();
+    expect(setCalls).toHaveLength(1);
+  });
+
+  it("migrates LEGACY disputedBy/auditLog off a pre-split parent doc into the locked moderation subcollection, stripping them from the parent with FieldValue.delete()", async () => {
+    const legacyDisputedBy = [{ businessId: "biz-a", at: "2026-07-20T00:00:00.000Z" }];
+    const legacyAuditLog = [{ at: "2026-07-20T00:00:00.000Z", action: "disputed", by: "biz-a" }];
+    const existing = {
+      verificationStatus: "disputed",
+      provenanceTier: "ladder_verified_strong",
+      disputeCount: 1,
+      disputedBy: legacyDisputedBy,
+      auditLog: legacyAuditLog,
+    };
+    const { tx, setCalls } = makeDisputedTx(existing, undefined, false);
+    const modRef = makeModRef();
+    const parentRef = makeParentRefWithModeration(entry.id, modRef);
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => parentRef) })),
+      runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db });
+    expect(result).toBe("written");
+    expect(setCalls).toHaveLength(2);
+
+    const parentSet = setCalls.find((c) => c.ref === parentRef)!;
+    const parentPayload = parentSet.data as Record<string, unknown>;
+    expect(parentPayload.verificationStatus).toBe("pending");
+    expect(parentPayload.disputeCount).toBe(1);
+    // The legacy fields are explicitly stripped (FieldValue.delete() sentinel), not merely omitted -
+    // merge:true alone would leave pre-existing parent fields untouched.
+    expect(parentPayload.disputedBy).toEqual({ __op: "delete" });
+    expect(parentPayload.auditLog).toEqual({ __op: "delete" });
+
+    const modSet = setCalls.find((c) => c.ref === modRef)!;
+    expect(modSet.opts).toEqual({ merge: true });
+    const modPayload = modSet.data as Record<string, unknown>;
+    expect(modPayload.disputedBy).toEqual(legacyDisputedBy);
+    expect(modPayload.auditLog).toEqual(legacyAuditLog);
+  });
+
+  it("merges legacy parent dispute fields into an ALREADY-populated moderation doc without duplicating businessIds or dropping audit entries", async () => {
+    const legacyDisputedBy = [
+      { businessId: "biz-a", at: "2026-07-01T00:00:00.000Z" },
+      { businessId: "biz-legacy-only", at: "2026-07-02T00:00:00.000Z" },
+    ];
+    const legacyAuditLog = [{ at: "2026-07-01T00:00:00.000Z", action: "disputed", by: "biz-a" }];
+    const existing = {
+      verificationStatus: "disputed",
+      provenanceTier: "ladder_verified_strong",
+      disputeCount: 3,
+      disputedBy: legacyDisputedBy,
+      auditLog: legacyAuditLog,
+    };
+    const existingModDisputedBy = [
+      { businessId: "biz-a", at: "2026-07-20T00:00:00.000Z" },
+      { businessId: "biz-c", at: "2026-07-21T00:00:00.000Z" },
+    ];
+    const existingModAuditLog = [{ at: "2026-07-20T00:00:00.000Z", action: "disputed", by: "biz-a" }];
+    const modData = { disputedBy: existingModDisputedBy, auditLog: existingModAuditLog };
+
+    const { tx, setCalls } = makeDisputedTx(existing, modData, true);
+    const modRef = makeModRef();
+    const parentRef = makeParentRefWithModeration(entry.id, modRef);
+    const db = {
+      collection: vi.fn(() => ({ doc: vi.fn(() => parentRef) })),
+      runTransaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    } as unknown as FirebaseFirestore.Firestore;
+
+    const result = await appendMasterCatalogEntry(entry, { db });
+    expect(result).toBe("written");
+
+    const modSet = setCalls.find((c) => c.ref === modRef)!;
+    const modPayload = modSet.data as Record<string, unknown>;
+    const mergedDisputedBy = modPayload.disputedBy as Array<{ businessId: string }>;
+    // Existing moderation entries are preserved as-is; the legacy biz-a is NOT duplicated (it's
+    // already recorded in moderation); the legacy-only business is folded in.
+    expect(mergedDisputedBy.map((d) => d.businessId)).toEqual(["biz-a", "biz-c", "biz-legacy-only"]);
+    const mergedAuditLog = modPayload.auditLog as unknown[];
+    expect(mergedAuditLog).toHaveLength(2); // legacy entry + existing moderation entry - neither dropped.
+
+    const parentPayload = setCalls.find((c) => c.ref === parentRef)!.data as Record<string, unknown>;
+    expect(parentPayload.disputedBy).toEqual({ __op: "delete" });
+    expect(parentPayload.auditLog).toEqual({ __op: "delete" });
   });
 
   it("allows overwrite (retry idempotency) when the existing doc is NOT human_verified", async () => {

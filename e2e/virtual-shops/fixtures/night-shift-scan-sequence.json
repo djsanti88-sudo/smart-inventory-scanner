@@ -1,0 +1,136 @@
+{
+  "shopKey": "night-shift",
+  "source": "Codes reused read-only from tools/fable5/fixtures/stress-codes.json (not modified); this shop is about the sync/reliability layer, not catalog realism.",
+  "sourceCodesFile": "tools/fable5/fixtures/stress-codes.json",
+  "codePoolSize": 40,
+  "burstSizePerDay": 10,
+  "deterministic": true,
+  "days": [
+    {
+      "dayIndex": 1,
+      "phases": [
+        {
+          "phase": "offline-burst",
+          "offline": true,
+          "scans": [
+            "000000191180",
+            "0051342128136",
+            "0051342128327",
+            "0051342189243",
+            "005134219731",
+            "005134227217",
+            "005134227231",
+            "005134227248",
+            "005830101279",
+            "0092971197179"
+          ]
+        },
+        {
+          "phase": "refresh-mid-session",
+          "action": "reload",
+          "offlineDuringReload": true
+        },
+        {
+          "phase": "reconnect",
+          "action": "go-online"
+        },
+        {
+          "phase": "retry-storm",
+          "action": "trigger-pending-sync-retry",
+          "retryCount": 3,
+          "note": "Resubmit the SAME pending ScanEvents created during offline-burst (via the app's own retry mechanism / reconnect drain, never by re-scanning). Every ScanEvent keeps the idempotencyKey it was assigned at scan time; retrying must never create a duplicate InventoryCount.scanEventIds entry."
+        }
+      ],
+      "expected": {
+        "totalScansThisDay": 10,
+        "totalCountedThisDay": 10,
+        "pendingQueueDrainedAfterReconnect": true,
+        "duplicateCountsAfterRetryStorm": 0
+      }
+    },
+    {
+      "dayIndex": 2,
+      "phases": [
+        {
+          "phase": "offline-burst",
+          "offline": true,
+          "scans": [
+            "0092971224653",
+            "015582410000",
+            "029142337300",
+            "029142337317",
+            "029142337324",
+            "029142337348",
+            "029142337379",
+            "029142337386",
+            "029142337393",
+            "029142337478"
+          ]
+        },
+        {
+          "phase": "refresh-mid-session",
+          "action": "reload",
+          "offlineDuringReload": true
+        },
+        {
+          "phase": "reconnect",
+          "action": "go-online"
+        },
+        {
+          "phase": "retry-storm",
+          "action": "trigger-pending-sync-retry",
+          "retryCount": 3,
+          "note": "Resubmit the SAME pending ScanEvents created during offline-burst (via the app's own retry mechanism / reconnect drain, never by re-scanning). Every ScanEvent keeps the idempotencyKey it was assigned at scan time; retrying must never create a duplicate InventoryCount.scanEventIds entry."
+        }
+      ],
+      "expected": {
+        "totalScansThisDay": 10,
+        "totalCountedThisDay": 10,
+        "pendingQueueDrainedAfterReconnect": true,
+        "duplicateCountsAfterRetryStorm": 0
+      }
+    },
+    {
+      "dayIndex": 3,
+      "phases": [
+        {
+          "phase": "offline-burst",
+          "offline": true,
+          "scans": [
+            "029142337492",
+            "029142337508",
+            "029142337522",
+            "029142337720",
+            "029142337775",
+            "029142337805",
+            "029142337867",
+            "029142337874",
+            "029142337881",
+            "029142337898"
+          ]
+        },
+        {
+          "phase": "refresh-mid-session",
+          "action": "reload",
+          "offlineDuringReload": true
+        },
+        {
+          "phase": "reconnect",
+          "action": "go-online"
+        },
+        {
+          "phase": "retry-storm",
+          "action": "trigger-pending-sync-retry",
+          "retryCount": 3,
+          "note": "Resubmit the SAME pending ScanEvents created during offline-burst (via the app's own retry mechanism / reconnect drain, never by re-scanning). Every ScanEvent keeps the idempotencyKey it was assigned at scan time; retrying must never create a duplicate InventoryCount.scanEventIds entry."
+        }
+      ],
+      "expected": {
+        "totalScansThisDay": 10,
+        "totalCountedThisDay": 10,
+        "pendingQueueDrainedAfterReconnect": true,
+        "duplicateCountsAfterRetryStorm": 0
+      }
+    }
+  ]
+}

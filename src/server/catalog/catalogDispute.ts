@@ -74,13 +74,23 @@ export async function disputeCatalogEntry(
     }
 
     const ref = db.collection(COLLECTIONS.catalogEntries).doc(resolved.id);
+    // Moderation trail (disputedBy/auditLog): raw businessId + free-text reasons. The PARENT doc
+    // (`catalogEntries/{id}`) is intentionally public-read (sanitized catalog fields only) -
+    // Firestore rules cannot field-filter a `get`, so these two fields must never live there. They
+    // live in this locked subcollection doc instead (rules: allow read, write: if false - server-only
+    // via Admin SDK). Single fixed-id doc so the transaction's read/write count stays small and
+    // predictable (one extra doc, not one-doc-per-dispute-event).
+    const modRef = ref.collection("moderation").doc("log");
 
     const result = await db.runTransaction(async (tx: FirebaseFirestore.Transaction) => {
-      const snap = await tx.get(ref);
+      // Both reads happen before any write (Firestore transaction requirement) - branch, then write.
+      const [snap, modSnap] = await Promise.all([tx.get(ref), tx.get(modRef)]);
       const existing: Partial<DbCatalogEntry> = (snap.exists ? (snap.data() as DbCatalogEntry | undefined) : undefined) ?? {};
+      const modData: Pick<DbCatalogEntry, "disputedBy" | "auditLog"> =
+        (modSnap.exists ? (modSnap.data() as Pick<DbCatalogEntry, "disputedBy" | "auditLog"> | undefined) : undefined) ?? {};
       const now = new Date().toISOString();
 
-      const disputedBy = Array.isArray(existing.disputedBy) ? [...existing.disputedBy] : [];
+      const disputedBy = Array.isArray(modData.disputedBy) ? [...modData.disputedBy] : [];
       const alreadyDisputedByThisBusiness = disputedBy.some((d) => d.businessId === businessId);
 
       // Already-rejected doc: a dispute must never resurrect or otherwise mutate a human tombstone.
@@ -96,9 +106,11 @@ export async function disputeCatalogEntry(
 
       if (alreadyDisputedByThisBusiness) {
         // Idempotent no-op on the count (design §2.2 step 3): refresh this business's `at` timestamp
-        // only, never re-increment disputeCount and never re-append an auditLog entry.
+        // only, never re-increment disputeCount and never re-append an auditLog entry. The refresh
+        // (and updatedAt bump) go to the moderation doc / parent doc respectively - never merged.
         const refreshedDisputedBy = disputedBy.map((d) => (d.businessId === businessId ? { ...d, at: now } : d));
-        tx.update(ref, { disputedBy: refreshedDisputedBy, updatedAt: now });
+        tx.set(modRef, { disputedBy: refreshedDisputedBy }, { merge: true });
+        tx.update(ref, { updatedAt: now });
         return {
           ok: true as const,
           disputeCount: existing.disputeCount ?? disputedBy.length,
@@ -121,7 +133,7 @@ export async function disputeCatalogEntry(
         by: businessId,
         ...(reason ? { reason } : {}),
       };
-      const auditLog = Array.isArray(existing.auditLog) ? [...existing.auditLog, auditEntry] : [auditEntry];
+      const auditLog = Array.isArray(modData.auditLog) ? [...modData.auditLog, auditEntry] : [auditEntry];
 
       // Trust-asymmetry demotion rule (design §2.1 steps 3/4): ladder_verified_strong demotes on the
       // FIRST dispute (never human-reviewed, cheapest to knock back down); human_verified needs
@@ -134,16 +146,17 @@ export async function disputeCatalogEntry(
       const shouldDemote = isHumanVerified ? nextDisputeCount >= HUMAN_VERIFIED_THRESHOLD : true;
       const alreadyDisputed = existing.verificationStatus === "disputed";
 
-      const update: Record<string, unknown> = {
+      // PARENT (public) doc: disputeCount/verificationStatus/updatedAt ONLY. disputedBy/auditLog
+      // NEVER land here (that is the entire fix for the public-read leak - see modRef above).
+      const parentUpdate: Record<string, unknown> = {
         disputeCount: nextDisputeCount,
-        disputedBy: cappedDisputedBy,
-        auditLog,
         updatedAt: now,
       };
       if (shouldDemote && !alreadyDisputed) {
-        update.verificationStatus = "disputed";
+        parentUpdate.verificationStatus = "disputed";
       }
-      tx.update(ref, update);
+      tx.update(ref, parentUpdate);
+      tx.set(modRef, { disputedBy: cappedDisputedBy, auditLog }, { merge: true });
 
       return {
         ok: true as const,

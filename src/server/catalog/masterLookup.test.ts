@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { lookupMasterCatalog, __resetMasterLookupMemoForTests } from "./masterLookup";
 
-// Sync Truth Task 4 (owner-approved 2026-07-22, docs/superpowers/plans/2026-07-22-sync-truth-five-steps.md):
+// Sync Truth Task 4 (owner-approved 2026-07-22, docs/archive/superpowers/plans/2026-07-22-sync-truth-five-steps.md):
 // unit tests for the pure master-catalog rung. Firestore is mocked via the injectable `deps.db` seam
 // (mirrors masterAppend.test.ts's makeMockDb/makeMockTx pattern), never a live Admin SDK instance.
 

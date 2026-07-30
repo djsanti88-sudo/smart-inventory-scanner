@@ -1,22 +1,72 @@
 # Testing and Proof
 
-_Last updated 2026-07-12 (branch `feat/decode-ladder-goupc`); commands section spot-checked against
-package.json 2026-07-22 (branch `feat/teach-bot`) - still accurate, teach-bot harness commands added
-to docs/COMMANDS.md instead of duplicated here. Sections below accumulate newest-last; older sections
-describe the coverage that existed when written. Test coverage for Phases 2-6 and the teach-bot
-harness is not yet appended here (unverified as of 2026-07-22 whether that is intentional or a gap) -
-see PROGRESS.md checkpoints for the actual proof runs of that later work._
+Last verified: 2026-07-29 (coverage map rebuilt from the actual test tree)
+
+_Commands section verified against `package.json` scripts 2026-07-29. Coverage map below replaces the
+prior narrative (stale since 2026-07-12) with an area-by-area survey of the actual test tree: file
+counts from `Glob`, gate commands from `package.json`, gaps called out plainly where a shipped area has
+thin or no visible automated coverage. Historical sections further down (dated, newest-last) are kept
+as a record of specific hotfix proof runs and are NOT re-verified as current; treat them as history, not
+present-tense truth. Teach Bot harness commands live in `docs/COMMANDS.md` (not duplicated here)._
 
 ## Commands
-- `npm run test` - run all Vitest unit suites once (services + store).
+- `npm run test` - run all Vitest unit + dom suites once (`vitest run`, two projects: `unit` = node,
+  `dom` = jsdom; see `vitest.config.ts`).
 - `npm run test:watch` - Vitest watch mode.
+- `npm run test:ledger` - the 8-file crown invariant suite (ledgerInvariants, unknownEnqueue, mergeUnion,
+  markWrongTransfer, provenanceTier, goldenClasses store tests + inventory.replay + ladderTimeout).
+  Run for ANY counting/ledger change.
+- `npm run test:golden` - `src/eval/goldenBaseline.test.ts` only (offline golden-baseline gate).
+- `npm run test:corpus-drift` - `src/server/tire-knowledge/corpusDrift.test.ts` only.
 - `npx playwright install chromium` - one-time, before the first E2E run.
-- `npm run test:e2e` - Playwright E2E (auto-starts dev server on port 3100, writes proof to e2e/proof/).
-- `npm run qa:bots:*` / `npm run qa:revision` - human-bot browser proof suites (see docs/QA_BOTS.md,
-  docs/REVISION_GATE.md). REQUIRED before handoff for scanner/inventory/role/export/catalog/alias/
-  resolution/customer-facing changes; `qa:bots:live` for live-account resolution changes.
-- `npm run test:firebase` - tenant-isolation + repo proof against the Firebase emulator.
-- `npm run dev` - manual run (http://localhost:3000, or `npm run dev -- --port 3100`).
+- `npm run test:e2e` - Playwright E2E, mock backend, port 3100, `IS_E2E=1` (auto-starts dev server,
+  writes proof to `e2e/proof/`).
+- `npm run test:e2e:firebase` - Playwright E2E against the Firebase emulator, port 3200
+  (`playwright.firebase.config.ts`).
+- `npm run test:firebase` - Firestore rules + repository suite against the emulator
+  (`firebase emulators:exec ... "vitest run src/services/db/firebase"`); these `.rules.test.ts` files
+  self-skip (gated on `FIRESTORE_EMULATOR_HOST`) under plain `npm run test`.
+- `npm run qa:bots:*` / `npm run qa:revision` - human-bot browser proof suites, port 3300 (see
+  `docs/QA_BOTS.md`, `docs/REVISION_GATE.md`). REQUIRED before handoff for scanner/inventory/role/
+  export/catalog/alias/resolution/customer-facing changes; `qa:bots:live` for live-account resolution
+  changes (owner-gated, live cloud).
+- `npm run teach` / `teach:test` / `teach:regression` / `teach:cleanup` - Teach Bot live-app learning
+  harness; full command reference in `docs/COMMANDS.md`.
+- `npm run proof:local` / `proof:full` - `tsc --noEmit` + `vitest run` / + `next build`.
+- `npm run dev` - manual run (http://localhost:3000, mock backend default).
+
+## Coverage map (by area, verified 2026-07-29)
+
+File counts are `.test.ts`/`.test.tsx`/`.test.mjs`/`.spec.ts` files found via `Glob`, not test-case
+counts (`describe`/`it` counts run far higher per file).
+
+| Area | Representative files | Gate command | Notes / honest gaps |
+|---|---|---|---|
+| Ledger / counting core | `src/services/inventory.test.ts`, `inventory.replay.test.ts`, `src/stores/ledgerInvariants.store.test.ts`, `unknownEnqueue.store.test.ts`, `mergeUnion.store.test.ts`, `markWrongTransfer.store.test.ts`, `provenanceTier.store.test.ts`, `goldenClasses.store.test.ts`, `countAlways.store.test.ts`, `dedupCreate.store.test.ts` | `npm run test:ledger` | Well covered; this is the most heavily tested area in the repo (103 files under `src/stores/`, most touching counting/scan-event paths). |
+| Resolver / trust / identity | `src/services/resolver.test.ts`, `resolverTier.test.ts`, `codeTypeDetector.test.ts`, `aliasMatcher.test.ts`, `multiCodeResolution.test.ts`, `productMismatchGuard.test.ts`, `src/services/catalog/identityMerge` tests, `brandFamilies.test.ts`, `src/stores/crossIdentifier.store.test.ts`, `identityMerge.store.test.ts` | `npx vitest run src/services/resolver.test.ts src/services/aliasMatcher.test.ts` | Solid; deterministic-only `known` and conflict routing are directly asserted. |
+| Decode pipeline + evidence | `src/server/decode/pipeline.test.ts`, `src/services/ai/evidenceVerifier.test.ts`, `crossCheckEngine.test.ts`, `decode.countable.test.ts`, `decodeBudget.test.ts`, `decodeCache.test.ts`, `fallbackRunner.test.ts`, `src/services/catalog/prefixFirewall.test.ts`, `evidenceScoring.test.ts`, `catalogAutoVerify.test.ts`, plus `src/server/upc/` (ladder, GoUpcProvider, ladderTimeout, freeRungSteering, paidWorkPossible, storage, importBoundary) | `npx vitest run src/server/decode/pipeline.test.ts` (or the full `unit` project) | Broad (157 files under `src/services/`, 41 under `src/server/`). GAP: no test file directly exercises `app/api/ai-lookup/route.ts`'s live-provider call construction beyond the route-level mocked tests (`route.test.ts`, `route.a2.test.ts`, `route.d4.test.ts`, `route.masterAppend.test.ts`, `route.chargeSymmetry.test.ts`, `route.legacyChargePair.test.ts`, `route.rateLimitFailOpen.test.ts` - these DO exist and are solid, correcting an earlier assumption of a gap here). |
+| Sync / idempotency / Firestore rules | `src/services/db/firebase/*.rules.test.ts` (15 files: repositories, audit, businessDataLoader, csvImport, tenantIsolation, rolePermissions, sessionPersistence, markWrongTransfer, firebaseSyncTarget, plus `firebaseSyncSafety.test.ts`, `firestoreIndexes.test.ts`, `provisioning.emulator.test.ts`, `storeMappers.test.ts`, `apiRouteImportGraph.test.ts`, `cloudCatalogResolution.test.ts`) | `npm run test:firebase` | Good coverage of the Phase 2 Firebase foundation (tenancy, rules, idempotent sync target) that the old TESTING.md never mentioned - this fills the "Phases 2-6 not appended" gap for backend/sync. |
+| Universal import / reconcile | `src/services/csvImport.test.ts`, `csvImport.trustGate.test.ts`, `importSchema.test.ts`, `src/services/import/importFixtureBattery.test.ts`, `importPerf.test.ts`, `universalImport.stageB.test.ts`, `universalImportPreview.test.ts`, `src/services/reconcile/` (reconcileReport, countedByUid, importFuzzyMatcher, normalizedEditDistance, shopwareCsvAdapter, identityMatcher), `src/stores/universalImport.store.test.ts`, `universalImportGtin.store.test.ts`, E2E `e2e/reconcile.spec.ts`, `e2e/phase4-universal-import.spec.ts`, `e2e/phase4-fuzzy-reconcile.spec.ts` | `npx vitest run src/services/reconcile src/services/csvImport.test.ts` | Well covered for a Phase 3/4 area the old doc predates entirely. |
+| UI components / stores | 31 files under `src/components/**/*.test.tsx` (ScannerInput, LiveScanFeed, FinalCountTable, NeedsReviewTable, UniversalImportPanel, ReconcilePanel, CatalogReviewTable, AuthGuard, BusinessContextGate, etc.), 103 files under `src/stores/**/*.test.ts` (scanStore split across many focused `scanStore.*.test.ts` files rather than one monolith test file) | `npx vitest run` (dom project) | Deep; the store test files mirror the "grep for symbols" guidance in CLAUDE.md - each store test targets one behavior/bug class rather than the whole file. |
+| E2E - mock (port 3100) | 57 files under `e2e/**/*.spec.ts` (scan, resolver, decode, cleanup, auto-verify, auto-decode, trust-gate-law, ledger-markwrong, csv/reconcile phase3-4, camera-scan, a11y, history, variance-report, batch-approve, goupc-ladder, gpt-ladder-burst, etc.) | `npm run test:e2e` | Broad; `IS_E2E=1` forces the AI route to mock-only per `src/eval/playwrightConfigSafety.test.ts`. |
+| E2E - Firebase (port 3200) | `e2e/firebase-phase2/firebase-flow.spec.ts` | `npm run test:e2e:firebase` | Thin - only one spec file exercises the real Firebase E2E config; most Firebase proof lives in the emulator rules suite (`test:firebase`) rather than Playwright. |
+| E2E - human bots (port 3300) | `e2e/human-bots/scenarios/` (13 files: role-security-leak, export-leak, data-integrity, manager-workflow, platformOwner-tire-resolution, ux-no-training, customer-settings-plain, customer-review-persistence, customer-readable-controls, customer-clean-names, partnumber-display, performance-smoke), `e2e/human-bots/cloud/poisoned-live-account.spec.ts`, fixtures in `e2e/human-bots/fixtures/known-codes.ts` | `npm run qa:bots:*` / `npm run qa:bots:live` (cloud, owner-gated) | This is the human-bot proof gate CLAUDE.md requires before handoff for customer-facing changes; confirmed present and mapped to `docs/QA_BOTS.md`/`docs/AGENT_BOT_ROLES.md` roles. |
+| E2E - Teach Bot | `e2e/teach/` harness (`teach.mjs`, `cleanup.mjs`, `bugReport.mjs`, `pdfReport.mjs`) + `node --test "e2e/teach/**/*.test.mjs"` | `npm run teach`, `teach:test`, `teach:regression`, `teach:cleanup` | Self-learning live-app tester per PROJECT_MEMORY (`teach-bot-harness.md`); this is the coverage the old TESTING.md flagged as "never appended" - it exists but as a harness, not a fixed assertion suite, so treat its output (bug reports) as the proof artifact rather than pass/fail counts. |
+| Key-safety / import-boundary guards | `src/services/keySafety.test.ts`, `src/server/upc/importBoundary.test.ts`, `src/server/tire-knowledge/importBoundary.test.ts`, `src/services/firebaseAdmin/serviceAccount.test.ts`, `src/services/db/firebase/apiRouteImportGraph.test.ts` | `npx vitest run` (unit project) | Present and enforced at test-collection time (these are static/import-shape assertions, not runtime behavior tests). |
+| Auth / accounts (Phase 2) | `src/lib/auth.google.test.ts`, `auth.memberships.test.ts`, `auth.password.test.ts`, `auth.provisioning.test.ts`, `decodeAuth.test.ts`, `src/services/auth/authMode.test.ts`, `authBypass.test.ts`, `src/components/AuthGuard.authmode.test.tsx`, `BusinessContextGate.*.test.tsx`, `src/app/login/login.reset.test.tsx`, `e2e/p2-accounts.spec.ts` | `npx vitest run src/lib src/services/auth` | Present; this is Phase 2 coverage the old doc predates. |
+| Scripts / tooling | 32 files under `scripts/**/*.test.mjs` (dt-harvest lib, kkm-catalog, tire-db-repair, release-sentinel, dev-environment, deploy-preview, validate-agents, corpusRules) | `node --test scripts/**/*.test.mjs` (per-script; some run via vitest `unit` project, some via `node --test` - see `vitest.config.ts` exclude list for which is which) | Mixed harness; `vitest.config.ts` explicitly excludes several `scripts/kkm-catalog` and `scripts/tire-db-repair` files from the vitest glob because they're `node:test` suites, not vitest - do not assume `npm run test` covers them. |
+| Golden baseline / corpus drift | `src/eval/goldenBaseline.test.ts`, `envGate.test.ts`, `eval.test.ts`, `playwrightConfigSafety.test.ts`, `src/server/tire-knowledge/corpusDrift.test.ts`, `corpusIntegrity.test.ts` | `npm run test:golden`, `npm run test:corpus-drift` | Present; protects the owner-loved 100/100 baseline and corpus integrity against silent drift. |
+
+Known gaps (stated plainly, not invented coverage):
+- Teach Bot harness produces bug reports, not a fixed pass/fail regression suite - treat its coverage
+  as exploratory, not a gate.
+- E2E Firebase config (port 3200) has only one spec file; Firebase behavioral proof is concentrated in
+  the emulator rules suite (`test:firebase`), not Playwright.
+- `scripts/` test execution is split between vitest and bare `node --test`; running only `npm run test`
+  silently skips the `node --test` subset (see `vitest.config.ts` exclude list) - this is intentional
+  but easy to misread as full coverage.
+
+## Historical sections below (dated, not re-verified as current)
 
 ## Current state (2026-07-12)
 - Unit suite green at each reviewed commit on the branch; tsc + eslint clean. Known flake:

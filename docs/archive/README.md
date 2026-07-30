@@ -3,10 +3,12 @@
 Point-in-time documents preserved for history. They describe the project as it was WHEN WRITTEN
 and are NOT kept current. Several reference the removed Supabase foundation or superseded decode
 designs. For current truth read the root docs: `README.md`, `CLAUDE.md`, `PROGRESS.md`,
-`DECISIONS.md`, `TESTING.md`, `docs/CURRENT_CONTEXT.md`.
+`DECISIONS.md`, `TESTING.md` (`docs/CURRENT_CONTEXT.md` is retired — see
+`CURRENT_CONTEXT-2026-07-12.md` below; current truth is `PROGRESS.md` + `REPO_HEALTH.md`).
 
 | File | What it was | Era |
 |---|---|---|
+| `CURRENT_CONTEXT-2026-07-12.md` | Retired working-memory snapshot (branches, ladder state, pending decisions as of 2026-07-12) | 2026-07 |
 | `FINAL_REPORT.md` | V1 build final report (5 phases, first 80 tests) | 2026-06 |
 | `RESOLVER_AUDIT.md` | Root-cause audit of the AI-auto-accept identity poisoning bug | 2026-06 |
 | `LIVE_DECODE_DIAGNOSIS.md` | Live decode failure diagnosis (grounding/web-search era) | 2026-06 |

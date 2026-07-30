@@ -3,19 +3,35 @@
 import { useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useReconcileStore } from "@/stores/reconcileStore";
-import { parseShopwareCsv } from "@/services/reconcile/shopwareCsvAdapter";
+import { parseShopwareCsv, parseShopwareUnitCosts } from "@/services/reconcile/shopwareCsvAdapter";
+import { mapUniversalSheetToAdapterResult, extractUniversalUnitCosts } from "@/services/reconcile/universalAdapter";
+import { computeDollarVariance } from "@/services/reconcile/dollarVariance";
 import { buildReconcileReport, reconcileReportCsv, type ReconcileBucket, type ReconcileLine } from "@/services/reconcile/reconcileReport";
 import type { MatchResult } from "@/services/reconcile/identityMatcher";
+import type { AdapterResult } from "@/services/reconcile/types";
 import { deriveCountedByUid } from "@/services/reconcile/countedByUid";
 import { resolveRawScan } from "@/services/resolver";
 import { cleanScanCode } from "@/services/scanCleaner";
 import { downloadCsv } from "@/services/exportFormats";
 import { getSession } from "@/lib/auth";
 import { isLiveAuth } from "@/services/auth/authMode";
+import { readUniversalFile } from "@/services/universalFileReader";
+import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
 
-// Reconcile panel (Task 7): upload a Shop-Ware CSV export, match it against the local tire corpus
-// server-side, and compare the expected quantities with what THIS session counted. Its own page,
-// far from the scan flow (scanner flow untouched).
+// Reconcile panel (Task 7, de-branded + universal intake M3/H1): upload an inventory export (CSV,
+// TSV, or Excel), match it against the local tire corpus server-side, and compare the expected
+// quantities with what THIS session counted. Its own page, far from the scan flow (scanner flow
+// untouched).
+//
+// Intake (M3/H1): a Shop-Ware-style CSV runs through the fast, well-tested parseShopwareCsv path
+// first (unchanged). Anything else - TSV, XLSX, XLS, or a CSV whose columns Shop-Ware's own
+// synonyms cannot place - falls back to the SAME readUniversalFile + inferColumnMapping stack
+// Universal Import uses (read-only reuse; see universalAdapter.ts for the reconcile-shaped mapper).
+//
+// Dollar variance (M3/H1): an opt-in "include unit cost" checkbox captures a per-SKU cost column
+// LOCALLY ONLY (reconcileStore's separate `unitCosts` field, never part of `session.adapter`, so it
+// structurally cannot reach the /api/reconcile/match request body below - see the guard test in
+// ReconcilePanel.test.tsx). When priced, the report shows a "$X variance across N SKUs" headline.
 //
 // AM-R6 (Resolver Trust law): a reconcile match NEVER writes an alias by itself. Matched rows with
 // a corpus barcode appear in the "Confirm barcode links" list below; clicking Confirm routes
@@ -35,7 +51,7 @@ const BUCKET_ORDER: ReconcileBucket[] = [
 ];
 
 const BUCKET_LABELS: Record<ReconcileBucket, string> = {
-  variance: "Variances (your count differs from Shop-Ware)",
+  variance: "Variances (your count differs from the imported file)",
   agreement: "Matches in agreement",
   expected_not_counted: "Expected but not counted in this session (out of scope, not shrinkage)",
   ambiguous: "Ambiguous (needs review)",
@@ -59,6 +75,7 @@ export function ReconcilePanel() {
   const session = useReconcileStore((s) => s.session);
   const matches = useReconcileStore((s) => s.matches);
   const report = useReconcileStore((s) => s.report);
+  const unitCosts = useReconcileStore((s) => s.unitCosts);
   const hydrated = useReconcileStore((s) => s._hasHydrated);
   const startSession = useReconcileStore((s) => s.startSession);
   const setResults = useReconcileStore((s) => s.setResults);
@@ -80,28 +97,57 @@ export function ReconcilePanel() {
   const [importError, setImportError] = useState("");
   const [matchError, setMatchError] = useState("");
   const [running, setRunning] = useState(false);
+  const [includeUnitCost, setIncludeUnitCost] = useState(false);
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    let text: string;
     try {
-      text = await file.text();
-    } catch {
-      setImportError("Could not read this file. Try choosing it again.");
-      return;
+      const isCsv = file.name.trim().toLowerCase().endsWith(".csv");
+      let adapterResult: AdapterResult | null = null;
+      let unitCostsFromFile: Record<string, number> = {};
+
+      if (isCsv) {
+        // Fast path (unchanged): a Shop-Ware-style CSV export whose columns Shop-Ware's own
+        // synonyms recognize goes through the existing, well-tested parser directly.
+        const text = await file.text();
+        const fast = parseShopwareCsv(text);
+        if (fast.rows.length > 0 || fast.uomReview.length > 0) {
+          adapterResult = fast;
+          if (includeUnitCost) unitCostsFromFile = parseShopwareUnitCosts(text);
+        }
+      }
+
+      if (!adapterResult) {
+        // Universal fallback (M3/H1): TSV, XLSX, XLS, or any CSV Shop-Ware's synonyms could not
+        // place. Reuses the SAME parse + column-mapping intelligence Universal Import uses.
+        const sheet = await readUniversalFile(file);
+        const inference = inferColumnMapping([sheet.headers, ...sheet.rows]);
+        const validation = validateManualMapping(sheet.headers, inference.mapping);
+        if (!validation.ok) {
+          setImportError(
+            `Nothing was imported: ${validation.errors.join(" ")} Seen headers: ${sheet.headers.join(", ") || "(none)"}.`,
+          );
+          return;
+        }
+        adapterResult = mapUniversalSheetToAdapterResult(sheet, inference.mapping);
+        if (includeUnitCost) unitCostsFromFile = extractUniversalUnitCosts(sheet, inference.mapping);
+      }
+
+      if (adapterResult.rows.length === 0 && adapterResult.uomReview.length === 0) {
+        const reason = adapterResult.unparseable[0]?.reason ?? "no usable rows found";
+        setImportError(`Nothing was imported: ${reason}`);
+        return; // app state unchanged on a bad file
+      }
+      setImportError("");
+      setMatchError("");
+      startSession(adapterResult, file.name, unitCostsFromFile); // AM-R9: REPLACES any prior session
+    } catch (cause) {
+      setImportError((cause instanceof Error && cause.message) || "Could not read this file. Try choosing it again.");
+    } finally {
+      // Allow re-selecting the same file to re-import.
+      e.target.value = "";
     }
-    const result = parseShopwareCsv(text);
-    if (result.rows.length === 0 && result.uomReview.length === 0) {
-      const reason = result.unparseable[0]?.reason ?? "no usable rows found";
-      setImportError(`Nothing was imported: ${reason}`);
-      return; // app state unchanged on a bad file
-    }
-    setImportError("");
-    setMatchError("");
-    startSession(result, file.name); // AM-R9: REPLACES any prior session
-    // Allow re-selecting the same file to re-import.
-    e.target.value = "";
   }
 
   async function onRunCompare() {
@@ -162,6 +208,8 @@ export function ReconcilePanel() {
     return [{ link, cleanBarcode, alreadyLinked, target }];
   });
 
+  const dollarVariance = report ? computeDollarVariance(report, unitCosts) : null;
+
   if (!hydrated) {
     return <p className="p-4 text-base text-zinc-600">Loading saved reconcile session...</p>;
   }
@@ -169,21 +217,30 @@ export function ReconcilePanel() {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg border border-zinc-200 bg-white p-4">
-        <h1 className="text-lg font-semibold text-zinc-900">Reconcile with Shop-Ware</h1>
+        <h1 className="text-lg font-semibold text-zinc-900">Reconcile your inventory export</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Upload a Shop-Ware inventory export (CSV). The app matches each row against the tire
-          catalog and compares the expected quantities with what you counted in this session.
+          Upload an inventory export (CSV, TSV, or Excel). The app matches each row against the
+          tire catalog and compares the expected quantities with what you counted in this session.
           Importing a new file replaces the previous one.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <input
             type="file"
-            accept=".csv,text/csv"
-            aria-label="Shop-Ware CSV file"
+            accept=".csv,.tsv,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            aria-label="Inventory export file"
             data-testid="reconcile-file"
             onChange={(e) => void onFileChosen(e)}
             className="text-sm"
           />
+          <label className="flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              data-testid="reconcile-include-cost"
+              checked={includeUnitCost}
+              onChange={(e) => setIncludeUnitCost(e.target.checked)}
+            />
+            Include unit cost from this file for dollar variance (stored on this device only, never sent to the server)
+          </label>
           {session && (
             <button
               type="button"
@@ -217,7 +274,7 @@ export function ReconcilePanel() {
 
       {!session && (
         <p data-testid="reconcile-empty-state" className="rounded-lg border border-zinc-200 bg-white px-4 py-6 text-base text-zinc-600">
-          No file imported yet. Choose a Shop-Ware CSV export above to compare expected inventory
+          No file imported yet. Choose an inventory export above to compare expected inventory
           with what you counted.
         </p>
       )}
@@ -241,6 +298,12 @@ export function ReconcilePanel() {
               Export CSV
             </button>
           </div>
+
+          {dollarVariance && dollarVariance.skuCount > 0 && (
+            <p data-testid="reconcile-dollar-variance" className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 text-base font-semibold text-zinc-900">
+              ${dollarVariance.totalDollarVariance.toFixed(2)} variance across {dollarVariance.skuCount} SKUs
+            </p>
+          )}
 
           {report.assumptions.length > 0 && (
             <p data-testid="reconcile-assumptions" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
@@ -320,7 +383,7 @@ function BucketSection({ bucket, label, lines }: { bucket: ReconcileBucket; labe
               <th scope="col" className="px-3 py-2">Brand</th>
               <th scope="col" className="px-3 py-2">Model</th>
               <th scope="col" className="px-3 py-2">Size</th>
-              <th scope="col" className="px-3 py-2">Shop-Ware qty</th>
+              <th scope="col" className="px-3 py-2">Expected qty</th>
               <th scope="col" className="px-3 py-2">Counted qty</th>
               <th scope="col" className="px-3 py-2">Delta</th>
               <th scope="col" className="px-3 py-2">Why</th>

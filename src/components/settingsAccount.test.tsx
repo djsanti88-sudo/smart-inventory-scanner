@@ -19,6 +19,7 @@ const storeState = {
   verifyOwnerPin: vi.fn(),
   prepareSignOut,
   resetForSignOut,
+  pendingCount: () => 0,
 };
 vi.mock("@/stores/scanStore", () => ({
   useScanStore: Object.assign(

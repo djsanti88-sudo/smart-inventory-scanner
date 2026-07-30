@@ -77,6 +77,19 @@ describe("logServerEvent", () => {
     expect(parsed.email).toBeUndefined();
   });
 
+  it("honors an explicit severity:'error' override even when status is below 500 (silent-failure fix)", () => {
+    // A 200-status health-degraded event must still page/alert as an error, not a routine warn.
+    logServerEvent({ route: "/api/health", event: "degraded", status: 200, severity: "error" });
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("honors an explicit severity:'warn' override even when status is 500+ (symmetry, no surprises)", () => {
+    logServerEvent({ route: "/api/resolve-scan", event: "handled_failure", status: 500, severity: "warn" });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
   it("omits optional keys entirely when not provided", () => {
     logServerEvent({ route: "/api/import-mapping", event: "auth_reject" });
     const line = warnSpy.mock.calls[0][0] as string;

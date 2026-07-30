@@ -153,3 +153,52 @@ describe("ScannerInput status line reset to Ready", () => {
     }
   });
 });
+
+describe("ScannerInput every-status feedback panel (TOP-LEVEL LAW: every scan counts and shows it)", () => {
+  function eventWith(status: ScanEvent["status"], quantityAfterScan: number): ScanEvent {
+    return { ...fakeEvent("CODE1"), status, quantityAfterScan };
+  }
+
+  it.each([
+    ["known", 4],
+    ["unknown", 7],
+    ["needs_review", 3],
+    ["resolved", 9],
+    ["ignored", 2],
+    ["conflict", 5],
+  ] as const)(
+    "renders the full-weight counted panel with the running quantity for status '%s'",
+    async (status, qty) => {
+      const ev = eventWith(status, qty);
+      const onScan = vi.fn(() => ev);
+      render(<ScannerInput onScan={onScan} submitMode="enter" />);
+      const input = screen.getByTestId("scanner-input");
+
+      fireEvent.change(input, { target: { value: "CODE1" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      // Every outcome renders the shared full-weight panel testid (not the generic amber fallback).
+      const panel = screen.getByTestId("scan-counted");
+      expect(panel).toBeTruthy();
+      // The running quantity must be visible for EVERY status, not just "known".
+      expect(panel.textContent).toContain(String(qty));
+
+      if (status === "known") {
+        // known keeps the pre-existing testid too, so any existing known-scan test stays green.
+        expect(screen.getByTestId("scan-success")).toBeTruthy();
+      }
+    },
+  );
+
+  it("still shows the pre-existing 'scan-success' testid and 'Added.' heading for a known scan (regression guard)", () => {
+    const ev = eventWith("known", 1);
+    const onScan = vi.fn(() => ev);
+    render(<ScannerInput onScan={onScan} submitMode="enter" />);
+    const input = screen.getByTestId("scanner-input");
+    fireEvent.change(input, { target: { value: "CODE1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.getByTestId("scan-success")).toBeTruthy();
+    expect(screen.getByText("Added.")).toBeTruthy();
+  });
+});

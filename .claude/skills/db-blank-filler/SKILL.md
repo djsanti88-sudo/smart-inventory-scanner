@@ -246,3 +246,5 @@ this machine. `<WORK>` paths containing spaces are safe (all scripts here are in
 array, never a shell string, so no manual quoting workaround is needed beyond normal shell
 quoting of the path itself). All script files in this skill use LF line endings; do not let an
 editor or `core.autocrlf` convert them to CRLF.
+
+Promoted 2026-07-29: twin rule -> docs/GS1_COUNTRY_REFERENCE.md; TEXT-always -> CLAUDE.md; MPN order -> DECISIONS.md; data-class test law -> docs/PLAN_EXECUTION.md.

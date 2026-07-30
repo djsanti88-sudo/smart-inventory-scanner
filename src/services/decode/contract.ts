@@ -3,7 +3,7 @@
 // changes none - it names the existing shapes so the subsystem is swappable and testable as a unit. The
 // runtime pieces are re-exported from ./index.ts (a barrel over the existing src/services/ai/* modules).
 //
-// The pipeline already works exactly like this today (see docs/decode/ARCHITECTURE.md); this contract just
+// The pipeline already works exactly like this today (see docs/DECODER_ARCHITECTURE.md); this contract just
 // gives it one front door:
 //
 //   DecodeRequest  --(providers + enrich + verify + cross-check + decide)-->  DecodeResult

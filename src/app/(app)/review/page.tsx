@@ -7,7 +7,7 @@ import { SyncStatusBar } from "@/components/SyncStatusBar";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 // Build 3: the review screen gains a "Suggested" tab for batch-approving the Suggested pile
-// (docs/superpowers/specs/2026-07-05-batch-approve-design.md). "All" is the original single-row
+// (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md). "All" is the original single-row
 // Needs Review table, unchanged. Tab state is local UI only - no store/approval semantics here.
 export default function ReviewPage() {
   const [tab, setTab] = useState<"all" | "suggested">("all");

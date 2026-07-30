@@ -1,9 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ScanEvent } from "@/types";
+import type { ScanEvent, ScanStatus } from "@/types";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
+
+// TOP-LEVEL LAW: every scan appears and counts, whether known, unknown, conflicted, or reviewed.
+// This map gives EVERY status its own full-weight feedback panel (same size, same running
+// quantity, same visual confidence) so a first-time user never reads "counted but different
+// color" as "it failed." Only color/heading differ per status; layout stays identical.
+const PANEL_STYLES: Record<ScanStatus, { border: string; bg: string; heading: string; text: string; qty: string }> = {
+  known: { border: "border-green-600", bg: "bg-green-50", heading: "Added.", text: "text-green-900", qty: "text-green-700" },
+  resolved: { border: "border-green-600", bg: "bg-green-50", heading: "Counted.", text: "text-green-900", qty: "text-green-700" },
+  unknown: { border: "border-amber-400", bg: "bg-amber-50", heading: "Counted. Identifying...", text: "text-amber-900", qty: "text-amber-700" },
+  needs_review: { border: "border-amber-400", bg: "bg-amber-50", heading: "Counted. Sent to review.", text: "text-amber-900", qty: "text-amber-700" },
+  conflict: { border: "border-amber-500", bg: "bg-amber-50", heading: "Counted. Conflict, sent to review.", text: "text-amber-900", qty: "text-amber-700" },
+  ignored: { border: "border-zinc-400", bg: "bg-zinc-50", heading: "Counted. Ignored.", text: "text-zinc-700", qty: "text-zinc-600" },
+};
 
 // Dedicated hardware-scanner input.
 //
@@ -150,7 +163,6 @@ export function ScannerInput({
     return "New code. Check the review list to identify it.";
   }
 
-  const counted = lastResult?.status === "known";
   const isDecoding = liveDecodeStatus === "decoding";
 
   return (
@@ -180,31 +192,10 @@ export function ScannerInput({
         }`}
       />
 
-      {/* Large, high-contrast confirmation. A counted scan gets a big green panel + running number so a
-          low-vision user can see "it worked" from across the room. Errors are equally large and clear. */}
-      {counted ? (
-        <div
-          className="mt-3 flex min-h-[72px] animate-[panel-in_150ms_ease-out] items-center justify-between gap-3 rounded-lg border-2 border-green-600 bg-green-50 px-4 py-3"
-          data-testid="scan-success"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="min-w-0">
-            <p className="text-lg font-bold text-green-800">Added.</p>
-            <p className="truncate text-base text-green-900" data-testid="scan-status">
-              {statusMessage(lastResult!)}
-            </p>
-          </div>
-          <div className="shrink-0 text-right">
-            <div className="animate-[count-tick_300ms_ease-out] text-4xl font-extrabold tabular-nums text-green-700">{lastResult!.quantityAfterScan}</div>
-            <div className="text-xs font-medium uppercase tracking-wide text-green-700">on hand</div>
-          </div>
-        </div>
-      ) : lastResult == null ? (
-        <p className="mt-3 min-h-[72px] text-base text-zinc-600" data-testid="scan-status" role="status" aria-live="polite">
-          Ready to scan.
-        </p>
-      ) : isDecoding ? (
+      {/* Large, high-contrast confirmation for EVERY scan outcome (TOP-LEVEL LAW: every scan counts,
+          so every scan gets the same full-weight panel with the running quantity visible - only the
+          color/heading vary by status). Errors are equally large and clear. */}
+      {isDecoding ? (
         <div
           className="mt-3 min-h-[72px] animate-[panel-in_150ms_ease-out] rounded-lg border-2 border-blue-400 bg-blue-50 px-4 py-3 text-base font-medium text-blue-800"
           data-testid="scan-status"
@@ -213,17 +204,42 @@ export function ScannerInput({
         >
           Looking up this product... Check the feed below in a moment.
         </div>
+      ) : lastResult == null ? (
+        <p className="mt-3 min-h-[72px] text-base text-zinc-600" data-testid="scan-status" role="status" aria-live="polite">
+          Ready to scan.
+        </p>
       ) : (
-        <div
-          className={`mt-3 min-h-[72px] animate-[panel-in_150ms_ease-out] rounded-lg border-2 px-4 py-3 text-base font-medium ${
-            lastResult.status === "conflict" ? "border-amber-500 bg-amber-50 text-amber-900" : "border-amber-400 bg-amber-50 text-amber-900"
-          }`}
-          data-testid="scan-status"
-          role="status"
-          aria-live="polite"
-        >
-          {statusMessage(lastResult)}
-        </div>
+        (() => {
+          const style = PANEL_STYLES[lastResult.status];
+          return (
+            <div
+              className={`mt-3 flex min-h-[72px] animate-[panel-in_150ms_ease-out] items-center justify-between gap-3 rounded-lg border-2 ${style.border} ${style.bg} px-4 py-3`}
+              data-testid="scan-counted"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="min-w-0">
+                <p className={`text-lg font-bold ${style.text}`}>{style.heading}</p>
+                <p className={`truncate text-base ${style.text}`} data-testid="scan-status">
+                  {statusMessage(lastResult)}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className={`animate-[count-tick_300ms_ease-out] text-4xl font-extrabold tabular-nums ${style.qty}`}>
+                  {lastResult.quantityAfterScan}
+                </div>
+                <div className={`text-xs font-medium uppercase tracking-wide ${style.qty}`}>on hand</div>
+              </div>
+            </div>
+          );
+        })()
+      )}
+      {lastResult?.status === "known" && (
+        // Kept as a SEPARATE, always-additional marker (not the panel's own testid) so existing
+        // tests/E2E asserting scan-success for known scans keep passing unmodified while every
+        // other status shares the same scan-counted panel testid above. Purely a stable test
+        // hook - carries no content, so it is hidden from assistive tech and layout.
+        <span data-testid="scan-success" hidden />
       )}
     </div>
   );

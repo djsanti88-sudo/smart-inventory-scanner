@@ -598,6 +598,15 @@ export interface AiStatus {
   /** Task 8: always false. Gemini fields above (geminiEnabled/geminiConfigured/geminiModel) stay for
    *  Settings + refreshAiStatus's gate, but Gemini is permanently out of decode (enrichment only). */
   geminiUsedForDecode?: boolean;
+  /** Spec 2 (M1): SERVER kill switch (AI_LOOKUP_KILL_SWITCH env var). Distinct from `emergencyStop`
+   *  above, which is a CLIENT preference the shop owner toggles locally - this one reflects a server
+   *  operator's total-stop that the shop owner cannot turn off themselves. */
+  killSwitchOn: boolean;
+  /** Silent-failure fix: true when the most recent refreshAiStatus() could not confirm the server's
+   *  kill-switch state (fetch threw, or the GET response was not ok). `killSwitchOn` keeps its
+   *  last-known value in that case - it is never silently reset to a false "off" - and the UI must
+   *  treat this as "unknown/stale", not as confirmation that AI lookup is fine. */
+  killSwitchStatusUnknown?: boolean;
 }
 
 /** Which approved corroboration path produced a "verified" decode (for honest reporting). */

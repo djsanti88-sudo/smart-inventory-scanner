@@ -3,7 +3,7 @@
 // This barrel RE-EXPORTS the existing pipeline (src/services/ai/*) under one module so the decode
 // subsystem can be imported, reasoned about, and swapped as a unit. NOTHING is moved and NO behavior
 // changes - existing imports keep working; this is purely an additional, documented entry point. See
-// docs/decode/ARCHITECTURE.md for how the pieces fit, and ./contract.ts for the DecodeRequest/DecodeResult
+// docs/DECODER_ARCHITECTURE.md for how the pieces fit, and ./contract.ts for the DecodeRequest/DecodeResult
 // contract + the Provider port.
 
 // ---- Contract (types only) ----

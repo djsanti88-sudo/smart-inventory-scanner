@@ -8,26 +8,53 @@ const mocks = vi.hoisted(() => ({
   verifyIdToken: vi.fn(),
   docExists: true,
   updateCalls: [] as Array<{ path: string; payload: Record<string, unknown> }>,
+  setCalls: [] as Array<{ path: string; payload: Record<string, unknown>; opts?: Record<string, unknown> }>,
   queriedPaths: [] as string[],
   checkRateLimit: vi.fn(),
 }));
 
 vi.mock("@/lib/firebaseAdmin", () => ({
   getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }),
-  getAdminDb: () => ({
-    collection: (path: string) => ({
-      doc: (id: string) => {
-        const fullPath = `${path}/${id}`;
-        mocks.queriedPaths.push(fullPath);
+  getAdminDb: () => {
+    function makeDoc(path: string) {
+      mocks.queriedPaths.push(path);
+      return {
+        __path: path,
+        get: async () => ({ exists: mocks.docExists }),
+        update: async (payload: Record<string, unknown>) => {
+          mocks.updateCalls.push({ path, payload });
+        },
+        set: async (payload: Record<string, unknown>, opts?: Record<string, unknown>) => {
+          mocks.setCalls.push({ path, payload, opts });
+        },
+        collection: (subName: string) => ({
+          doc: (subId: string) => makeDoc(`${path}/${subName}/${subId}`),
+        }),
+      };
+    }
+    return {
+      collection: (path: string) => ({
+        doc: (id: string) => makeDoc(`${path}/${id}`),
+      }),
+      batch: () => {
+        const ops: Array<{ kind: "update" | "set"; path: string; payload: Record<string, unknown>; opts?: Record<string, unknown> }> = [];
         return {
-          get: async () => ({ exists: mocks.docExists }),
-          update: async (payload: Record<string, unknown>) => {
-            mocks.updateCalls.push({ path: fullPath, payload });
+          update: (ref: { __path: string }, payload: Record<string, unknown>) => {
+            ops.push({ kind: "update", path: ref.__path, payload });
+          },
+          set: (ref: { __path: string }, payload: Record<string, unknown>, opts?: Record<string, unknown>) => {
+            ops.push({ kind: "set", path: ref.__path, payload, opts });
+          },
+          commit: async () => {
+            for (const op of ops) {
+              if (op.kind === "update") mocks.updateCalls.push({ path: op.path, payload: op.payload });
+              else mocks.setCalls.push({ path: op.path, payload: op.payload, opts: op.opts });
+            }
           },
         };
       },
-    }),
-  }),
+    };
+  },
 }));
 
 vi.mock("@/server/upc/storage", () => ({
@@ -72,6 +99,7 @@ beforeEach(() => {
   mocks.checkRateLimit.mockReset().mockResolvedValue({ allowed: true, retryAfterMs: 0 });
   mocks.docExists = true;
   mocks.updateCalls = [];
+  mocks.setCalls = [];
   mocks.queriedPaths = [];
   vi.stubEnv("PLATFORM_OWNER_UIDS", "owner-uid");
   vi.stubEnv("PLATFORM_OWNER_EMAILS", "");
@@ -157,7 +185,7 @@ describe("POST /api/catalog-review/[id] not found", () => {
 });
 
 describe("POST /api/catalog-review/[id] approve mutation shape", () => {
-  it("sets verificationStatus verified, provenanceTier human_verified, verifiedBy, and appends auditLog", async () => {
+  it("sets verificationStatus verified, provenanceTier human_verified, verifiedBy on the PUBLIC parent doc, and writes auditLog to the LOCKED moderation subcollection doc (never the parent)", async () => {
     const response = await POST(actionRequest(VALID_BODY), ctx("gtin_1"));
     expect(response.status).toBe(200);
     const payload = await response.json();
@@ -169,8 +197,15 @@ describe("POST /api/catalog-review/[id] approve mutation shape", () => {
     expect(call.payload.verificationStatus).toBe("verified");
     expect(call.payload.provenanceTier).toBe("human_verified");
     expect(call.payload.verifiedBy).toBe("owner@example.com");
-    expect(call.payload.auditLog).toMatchObject({ __op: "arrayUnion" });
-    const auditValues = (call.payload.auditLog as { values: Array<{ action: string; by: string }> }).values;
+    // M1 spec 1: auditLog must NEVER be part of the public parent doc's update payload.
+    expect(call.payload).not.toHaveProperty("auditLog");
+
+    expect(mocks.setCalls).toHaveLength(1);
+    const modCall = mocks.setCalls[0];
+    expect(modCall.path).toBe("catalogEntries/gtin_1/moderation/log");
+    expect(modCall.opts).toMatchObject({ merge: true });
+    expect(modCall.payload.auditLog).toMatchObject({ __op: "arrayUnion" });
+    const auditValues = (modCall.payload.auditLog as { values: Array<{ action: string; by: string }> }).values;
     expect(auditValues[0].action).toBe("approve");
     expect(auditValues[0].by).toBe("owner@example.com");
   });
@@ -184,7 +219,7 @@ describe("POST /api/catalog-review/[id] approve mutation shape", () => {
 });
 
 describe("POST /api/catalog-review/[id] reject mutation shape", () => {
-  it("sets verificationStatus rejected, increments timesRejected, and appends auditLog", async () => {
+  it("sets verificationStatus rejected, increments timesRejected on the PUBLIC parent doc, and writes auditLog to the LOCKED moderation subcollection doc (never the parent)", async () => {
     const response = await POST(actionRequest({ idToken: "t", action: "reject" }), ctx("gtin_1"));
     expect(response.status).toBe(200);
     const payload = await response.json();
@@ -194,9 +229,15 @@ describe("POST /api/catalog-review/[id] reject mutation shape", () => {
     const call = mocks.updateCalls[0];
     expect(call.payload.verificationStatus).toBe("rejected");
     expect(call.payload.timesRejected).toMatchObject({ __op: "increment", n: 1 });
-    const auditValues = (call.payload.auditLog as { values: Array<{ action: string }> }).values;
-    expect(auditValues[0].action).toBe("reject");
+    // M1 spec 1: auditLog must NEVER be part of the public parent doc's update payload.
+    expect(call.payload).not.toHaveProperty("auditLog");
     // Reject never sets provenanceTier/verifiedBy (those are approve-only fields).
     expect(call.payload.provenanceTier).toBeUndefined();
+
+    expect(mocks.setCalls).toHaveLength(1);
+    const modCall = mocks.setCalls[0];
+    expect(modCall.path).toBe("catalogEntries/gtin_1/moderation/log");
+    const auditValues = (modCall.payload.auditLog as { values: Array<{ action: string }> }).values;
+    expect(auditValues[0].action).toBe("reject");
   });
 });

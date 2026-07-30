@@ -935,6 +935,35 @@ describe("/api/ai-lookup wallet protection (route-level smoke; no live AI)", () 
     });
   });
 
+  // Spec 2 (M1): the GET status endpoint (polled by Settings) must report the SERVER kill switch
+  // (AI_LOOKUP_KILL_SWITCH) so a shop owner can see "the server has this locked down" instead of a
+  // silently-healthy-looking Settings screen while the POST handler 503s every lookup.
+  describe("GET status: killSwitchOn visibility (Spec 2)", () => {
+    const mkGet = () => new Request("http://localhost/api/ai-lookup", { headers: { "x-forwarded-for": "6.6.6.6" } });
+
+    it("reports killSwitchOn: true when AI_LOOKUP_KILL_SWITCH=1", async () => {
+      process.env.AI_LOOKUP_KILL_SWITCH = "1";
+      const res = await GET(mkGet());
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.killSwitchOn).toBe(true);
+    });
+
+    it("reports killSwitchOn: false when the env var is unset", async () => {
+      delete process.env.AI_LOOKUP_KILL_SWITCH;
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.killSwitchOn).toBe(false);
+    });
+
+    it("reports killSwitchOn: true when AI_LOOKUP_KILL_SWITCH=true", async () => {
+      process.env.AI_LOOKUP_KILL_SWITCH = "true";
+      const res = await GET(mkGet());
+      const json = await res.json();
+      expect(json.killSwitchOn).toBe(true);
+    });
+  });
+
   // --- Task T8b: Plan D's non-verified floor/suggestion must NOT be terminal for public barcodes ----
   // CONFIRMED BUG (live proof T19 + code read): Plan D's generic "Unidentified item" floor was returned
   // immediately for every public barcode, so the spec-v6 ladder (Go-UPC -> Fetch V2 -> GPT-5.5) was

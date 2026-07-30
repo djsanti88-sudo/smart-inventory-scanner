@@ -6,7 +6,7 @@ import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { safeStructuredFieldsFor } from "@/services/polish/structuredFields";
 import type { UnknownCodeReview } from "@/types";
 
-// Build 3 (docs/superpowers/specs/2026-07-05-batch-approve-design.md): batch-approve screen for the
+// Build 3 (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md): batch-approve screen for the
 // Suggested pile. Trust rules do NOT change here - approving a row runs through the exact same
 // resolveUnknown path as the single-row "Approve suggestion" button (see scanStore.batchApprove and
 // NeedsReviewTable's "Approve suggestion"); a human still approves every suggestion, one click at a

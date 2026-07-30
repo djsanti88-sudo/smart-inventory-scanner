@@ -192,3 +192,12 @@ testing/artifacts/*
 outputs/
 .codex/environments/
 .claude/worktrees/
+
+# Docs consolidation (2026-07-29): tire-knowledge pipeline task/run reports and export
+# manifests are generated output, never source; untracked via git rm --cached, files stay
+# on disk. mine-report.md / siblings-report.md are designed committed generator outputs
+# and are NOT covered by this pattern (different directory).
+data/tire-knowledge/scripts/tests/task-*-report.md
+data/tire-knowledge/run-log.md
+data/tire-knowledge/exports/**/MANIFEST.md
+.pytest_cache/

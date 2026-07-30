@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
-// Task 17 (docs/superpowers/plans/2026-07-08-decode-ladder-goupc.md): E2E proof of the Go-UPC decode
+// Task 17 (docs/archive/superpowers/plans/2026-07-08-decode-ladder-goupc.md): E2E proof of the Go-UPC decode
 // rung's user-visible behavior. All provider traffic is mocked via page.route on /api/ai-lookup (the
 // Playwright webServer runs IS_E2E=1, and E2E mode never calls a live rung anyway - see
 // src/app/api/ai-lookup/route.ts runGoUpc/runFetchV2 e2eMode() short-circuits). This spec proves the

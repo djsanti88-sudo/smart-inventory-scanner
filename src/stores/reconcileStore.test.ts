@@ -148,3 +148,41 @@ describe("reconcileStore - clearLocalCache (the Clear local cache wipe)", () => 
     expect(window.localStorage.getItem(RECONCILE_PERSIST_KEY)).toBeNull();
   });
 });
+
+// M3/H1: optional, LOCALLY-stored unit-cost map for the opt-in dollar-variance headline. It is a
+// SEPARATE field from `session.adapter` on purpose (never part of the object sent to
+// /api/reconcile/match) - see the outbound-payload guard test in ReconcilePanel.test.tsx.
+describe("reconcileStore - unitCosts (opt-in, LOCAL-ONLY dollar variance)", () => {
+  it("defaults to an empty map when startSession is called without unit costs", () => {
+    useReconcileStore.getState().startSession(adapter(1, "a"), "no-cost.csv");
+    expect(useReconcileStore.getState().unitCosts).toEqual({});
+  });
+
+  it("stores a passed-in unit cost map", () => {
+    useReconcileStore.getState().startSession(adapter(1, "a"), "priced.csv", { "a-pn-0": 12.5 });
+    expect(useReconcileStore.getState().unitCosts).toEqual({ "a-pn-0": 12.5 });
+  });
+
+  it("re-import REPLACES the prior unit cost map (never merges stale costs onto a new file)", () => {
+    useReconcileStore.getState().startSession(adapter(1, "a"), "first.csv", { "a-pn-0": 10 });
+    useReconcileStore.getState().startSession(adapter(1, "b"), "second.csv");
+    expect(useReconcileStore.getState().unitCosts).toEqual({});
+  });
+
+  it("clearLocalCache resets unitCosts", () => {
+    useReconcileStore.getState().startSession(adapter(1, "a"), "priced.csv", { "a-pn-0": 12.5 });
+    useReconcileStore.getState().clearLocalCache();
+    expect(useReconcileStore.getState().unitCosts).toEqual({});
+  });
+
+  it("persists unitCosts to the same localStorage key (local-only, never sent anywhere by the store)", async () => {
+    useReconcileStore.getState().startSession(adapter(1, "a"), "priced.csv", { "a-pn-0": 12.5 });
+    const rawPersisted = window.localStorage.getItem(RECONCILE_PERSIST_KEY);
+    expect(rawPersisted).toContain("12.5");
+
+    useReconcileStore.setState({ session: null, matches: null, report: null, unitCosts: {} });
+    window.localStorage.setItem(RECONCILE_PERSIST_KEY, rawPersisted!);
+    await useReconcileStore.persist.rehydrate();
+    expect(useReconcileStore.getState().unitCosts).toEqual({ "a-pn-0": 12.5 });
+  });
+});

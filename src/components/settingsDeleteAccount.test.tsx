@@ -17,6 +17,7 @@ const storeState = {
   setEmergencyStop: vi.fn(),
   catalog: [] as unknown[],
   verifyOwnerPin: (p: string) => verifyOwnerPin(p),
+  pendingCount: () => 0,
 };
 vi.mock("@/stores/scanStore", () => ({
   useScanStore: (sel: (s: typeof storeState) => unknown) => sel(storeState),

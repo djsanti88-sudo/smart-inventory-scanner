@@ -1,0 +1,893 @@
+{
+  "shopKey": "quickfix-auto",
+  "consumedBy": "NOT YET WIRED - drivers/quickfix-auto.mjs currently generates its own seeded error pattern at runtime (see notes above); this table is the design-doc-compliant reference for a future revision",
+  "rates": {
+    "typoRate": 0.08,
+    "doubleScanRate": 0.1,
+    "interruptRate": 0.03
+  },
+  "itemCount": 150,
+  "days": [
+    {
+      "dayIndex": 1,
+      "seed": 20260826,
+      "typoInjections": [
+        {
+          "itemIndex": 12,
+          "code": "111100000125",
+          "typoType": "extra-digit",
+          "typoCode": "11110000125"
+        },
+        {
+          "itemIndex": 13,
+          "code": "111100000132",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000132"
+        },
+        {
+          "itemIndex": 48,
+          "code": "111100000484",
+          "typoType": "extra-digit",
+          "typoCode": "1111000000484"
+        },
+        {
+          "itemIndex": 60,
+          "code": "111100000606",
+          "typoType": "extra-digit",
+          "typoCode": "11110000606"
+        },
+        {
+          "itemIndex": 68,
+          "code": "111100000682",
+          "typoType": "extra-digit",
+          "typoCode": "11100000682"
+        },
+        {
+          "itemIndex": 82,
+          "code": "111100000828",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000008828"
+        },
+        {
+          "itemIndex": 94,
+          "code": "111100000941",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000941"
+        },
+        {
+          "itemIndex": 96,
+          "code": "111100000965",
+          "typoType": "extra-digit",
+          "typoCode": "1111100000965"
+        },
+        {
+          "itemIndex": 104,
+          "code": "111100001047",
+          "typoType": "dropped-digit",
+          "typoCode": "11110001047"
+        },
+        {
+          "itemIndex": 110,
+          "code": "111100001108",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000001108"
+        },
+        {
+          "itemIndex": 118,
+          "code": "111100001184",
+          "typoType": "dropped-digit",
+          "typoCode": "11100001184"
+        },
+        {
+          "itemIndex": 125,
+          "code": "111100001252",
+          "typoType": "dropped-digit",
+          "typoCode": "1111100001252"
+        },
+        {
+          "itemIndex": 149,
+          "code": "111100001498",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000001498"
+        }
+      ],
+      "doubleScans": [
+        {
+          "itemIndex": 3,
+          "code": "111100000033"
+        },
+        {
+          "itemIndex": 5,
+          "code": "111100000057"
+        },
+        {
+          "itemIndex": 19,
+          "code": "111100000194"
+        },
+        {
+          "itemIndex": 21,
+          "code": "111100000217"
+        },
+        {
+          "itemIndex": 33,
+          "code": "111100000330"
+        },
+        {
+          "itemIndex": 34,
+          "code": "111100000347"
+        },
+        {
+          "itemIndex": 42,
+          "code": "111100000422"
+        },
+        {
+          "itemIndex": 63,
+          "code": "111100000637"
+        },
+        {
+          "itemIndex": 83,
+          "code": "111100000835"
+        },
+        {
+          "itemIndex": 85,
+          "code": "111100000859"
+        },
+        {
+          "itemIndex": 98,
+          "code": "111100000989"
+        },
+        {
+          "itemIndex": 103,
+          "code": "111100001030"
+        },
+        {
+          "itemIndex": 129,
+          "code": "111100001290"
+        },
+        {
+          "itemIndex": 131,
+          "code": "111100001313"
+        },
+        {
+          "itemIndex": 132,
+          "code": "111100001320"
+        },
+        {
+          "itemIndex": 139,
+          "code": "111100001399"
+        }
+      ],
+      "interrupts": [
+        {
+          "afterItemIndex": 7,
+          "code": "111100000071",
+          "action": "navigate-away",
+          "resumeDelayMs": 792
+        },
+        {
+          "afterItemIndex": 9,
+          "code": "111100000095",
+          "action": "navigate-away",
+          "resumeDelayMs": 605
+        }
+      ],
+      "counts": {
+        "typo": 13,
+        "doubleScan": 16,
+        "interrupt": 2
+      }
+    },
+    {
+      "dayIndex": 2,
+      "seed": 20260923,
+      "typoInjections": [
+        {
+          "itemIndex": 1,
+          "code": "111100000019",
+          "typoType": "extra-digit",
+          "typoCode": "1111000000019"
+        },
+        {
+          "itemIndex": 64,
+          "code": "111100000644",
+          "typoType": "extra-digit",
+          "typoCode": "11110000644"
+        },
+        {
+          "itemIndex": 74,
+          "code": "111100000743",
+          "typoType": "extra-digit",
+          "typoCode": "1111100000743"
+        },
+        {
+          "itemIndex": 79,
+          "code": "111100000798",
+          "typoType": "extra-digit",
+          "typoCode": "11100000798"
+        },
+        {
+          "itemIndex": 91,
+          "code": "111100000910",
+          "typoType": "extra-digit",
+          "typoCode": "11100000910"
+        },
+        {
+          "itemIndex": 118,
+          "code": "111100001184",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000184"
+        },
+        {
+          "itemIndex": 130,
+          "code": "111100001306",
+          "typoType": "extra-digit",
+          "typoCode": "11100001306"
+        },
+        {
+          "itemIndex": 131,
+          "code": "111100001313",
+          "typoType": "dropped-digit",
+          "typoCode": "11110001313"
+        },
+        {
+          "itemIndex": 142,
+          "code": "111100001429",
+          "typoType": "dropped-digit",
+          "typoCode": "11100001429"
+        },
+        {
+          "itemIndex": 145,
+          "code": "111100001450",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000011450"
+        }
+      ],
+      "doubleScans": [
+        {
+          "itemIndex": 24,
+          "code": "111100000248"
+        },
+        {
+          "itemIndex": 28,
+          "code": "111100000286"
+        },
+        {
+          "itemIndex": 31,
+          "code": "111100000316"
+        },
+        {
+          "itemIndex": 48,
+          "code": "111100000484"
+        },
+        {
+          "itemIndex": 53,
+          "code": "111100000538"
+        },
+        {
+          "itemIndex": 60,
+          "code": "111100000606"
+        },
+        {
+          "itemIndex": 61,
+          "code": "111100000613"
+        },
+        {
+          "itemIndex": 62,
+          "code": "111100000620"
+        },
+        {
+          "itemIndex": 69,
+          "code": "111100000699"
+        },
+        {
+          "itemIndex": 70,
+          "code": "111100000705"
+        },
+        {
+          "itemIndex": 75,
+          "code": "111100000750"
+        },
+        {
+          "itemIndex": 83,
+          "code": "111100000835"
+        },
+        {
+          "itemIndex": 90,
+          "code": "111100000903"
+        },
+        {
+          "itemIndex": 103,
+          "code": "111100001030"
+        },
+        {
+          "itemIndex": 110,
+          "code": "111100001108"
+        },
+        {
+          "itemIndex": 112,
+          "code": "111100001122"
+        },
+        {
+          "itemIndex": 113,
+          "code": "111100001139"
+        },
+        {
+          "itemIndex": 137,
+          "code": "111100001375"
+        }
+      ],
+      "interrupts": [
+        {
+          "afterItemIndex": 38,
+          "code": "111100000385",
+          "action": "navigate-away",
+          "resumeDelayMs": 302
+        },
+        {
+          "afterItemIndex": 132,
+          "code": "111100001320",
+          "action": "reload",
+          "resumeDelayMs": 322
+        },
+        {
+          "afterItemIndex": 138,
+          "code": "111100001382",
+          "action": "reload",
+          "resumeDelayMs": 648
+        },
+        {
+          "afterItemIndex": 149,
+          "code": "111100001498",
+          "action": "navigate-away",
+          "resumeDelayMs": 230
+        }
+      ],
+      "counts": {
+        "typo": 10,
+        "doubleScan": 18,
+        "interrupt": 4
+      }
+    },
+    {
+      "dayIndex": 3,
+      "seed": 20261020,
+      "typoInjections": [
+        {
+          "itemIndex": 8,
+          "code": "111100000088",
+          "typoType": "extra-digit",
+          "typoCode": "1111000000088"
+        },
+        {
+          "itemIndex": 13,
+          "code": "111100000132",
+          "typoType": "extra-digit",
+          "typoCode": "1111000000132"
+        },
+        {
+          "itemIndex": 15,
+          "code": "111100000156",
+          "typoType": "extra-digit",
+          "typoCode": "1111000000156"
+        },
+        {
+          "itemIndex": 22,
+          "code": "111100000224",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000224"
+        },
+        {
+          "itemIndex": 44,
+          "code": "111100000446",
+          "typoType": "extra-digit",
+          "typoCode": "1111100000446"
+        },
+        {
+          "itemIndex": 53,
+          "code": "111100000538",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000000538"
+        },
+        {
+          "itemIndex": 65,
+          "code": "111100000651",
+          "typoType": "extra-digit",
+          "typoCode": "11100000651"
+        },
+        {
+          "itemIndex": 67,
+          "code": "111100000675",
+          "typoType": "extra-digit",
+          "typoCode": "1111100000675"
+        },
+        {
+          "itemIndex": 79,
+          "code": "111100000798",
+          "typoType": "dropped-digit",
+          "typoCode": "11100000798"
+        },
+        {
+          "itemIndex": 80,
+          "code": "111100000804",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000804"
+        },
+        {
+          "itemIndex": 120,
+          "code": "111100001207",
+          "typoType": "dropped-digit",
+          "typoCode": "11100001207"
+        },
+        {
+          "itemIndex": 141,
+          "code": "111100001412",
+          "typoType": "dropped-digit",
+          "typoCode": "11100001412"
+        }
+      ],
+      "doubleScans": [
+        {
+          "itemIndex": 10,
+          "code": "111100000101"
+        },
+        {
+          "itemIndex": 25,
+          "code": "111100000255"
+        },
+        {
+          "itemIndex": 26,
+          "code": "111100000262"
+        },
+        {
+          "itemIndex": 27,
+          "code": "111100000279"
+        },
+        {
+          "itemIndex": 32,
+          "code": "111100000323"
+        },
+        {
+          "itemIndex": 36,
+          "code": "111100000361"
+        },
+        {
+          "itemIndex": 48,
+          "code": "111100000484"
+        },
+        {
+          "itemIndex": 50,
+          "code": "111100000507"
+        },
+        {
+          "itemIndex": 72,
+          "code": "111100000729"
+        },
+        {
+          "itemIndex": 83,
+          "code": "111100000835"
+        },
+        {
+          "itemIndex": 88,
+          "code": "111100000880"
+        },
+        {
+          "itemIndex": 113,
+          "code": "111100001139"
+        },
+        {
+          "itemIndex": 136,
+          "code": "111100001368"
+        },
+        {
+          "itemIndex": 139,
+          "code": "111100001399"
+        },
+        {
+          "itemIndex": 144,
+          "code": "111100001443"
+        }
+      ],
+      "interrupts": [
+        {
+          "afterItemIndex": 42,
+          "code": "111100000422",
+          "action": "navigate-away",
+          "resumeDelayMs": 769
+        },
+        {
+          "afterItemIndex": 87,
+          "code": "111100000873",
+          "action": "navigate-away",
+          "resumeDelayMs": 928
+        },
+        {
+          "afterItemIndex": 134,
+          "code": "111100001344",
+          "action": "reload",
+          "resumeDelayMs": 504
+        }
+      ],
+      "counts": {
+        "typo": 12,
+        "doubleScan": 15,
+        "interrupt": 3
+      }
+    },
+    {
+      "dayIndex": 4,
+      "seed": 20261117,
+      "typoInjections": [
+        {
+          "itemIndex": 3,
+          "code": "111100000033",
+          "typoType": "extra-digit",
+          "typoCode": "1111100000033"
+        },
+        {
+          "itemIndex": 7,
+          "code": "111100000071",
+          "typoType": "dropped-digit",
+          "typoCode": "1111100000071"
+        },
+        {
+          "itemIndex": 8,
+          "code": "111100000088",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000000088"
+        },
+        {
+          "itemIndex": 11,
+          "code": "111100000118",
+          "typoType": "extra-digit",
+          "typoCode": "11100000118"
+        },
+        {
+          "itemIndex": 16,
+          "code": "111100000163",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000000163"
+        },
+        {
+          "itemIndex": 42,
+          "code": "111100000422",
+          "typoType": "extra-digit",
+          "typoCode": "11110000422"
+        },
+        {
+          "itemIndex": 60,
+          "code": "111100000606",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000006"
+        },
+        {
+          "itemIndex": 61,
+          "code": "111100000613",
+          "typoType": "extra-digit",
+          "typoCode": "11110000613"
+        },
+        {
+          "itemIndex": 64,
+          "code": "111100000644",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000000644"
+        },
+        {
+          "itemIndex": 85,
+          "code": "111100000859",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000059"
+        },
+        {
+          "itemIndex": 92,
+          "code": "111100000927",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000927"
+        },
+        {
+          "itemIndex": 109,
+          "code": "111100001092",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000010092"
+        },
+        {
+          "itemIndex": 122,
+          "code": "111100001221",
+          "typoType": "dropped-digit",
+          "typoCode": "11110001221"
+        },
+        {
+          "itemIndex": 134,
+          "code": "111100001344",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000001344"
+        },
+        {
+          "itemIndex": 137,
+          "code": "111100001375",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000175"
+        }
+      ],
+      "doubleScans": [
+        {
+          "itemIndex": 1,
+          "code": "111100000019"
+        },
+        {
+          "itemIndex": 4,
+          "code": "111100000040"
+        },
+        {
+          "itemIndex": 15,
+          "code": "111100000156"
+        },
+        {
+          "itemIndex": 23,
+          "code": "111100000231"
+        },
+        {
+          "itemIndex": 30,
+          "code": "111100000309"
+        },
+        {
+          "itemIndex": 31,
+          "code": "111100000316"
+        },
+        {
+          "itemIndex": 32,
+          "code": "111100000323"
+        },
+        {
+          "itemIndex": 45,
+          "code": "111100000453"
+        },
+        {
+          "itemIndex": 54,
+          "code": "111100000545"
+        },
+        {
+          "itemIndex": 81,
+          "code": "111100000811"
+        },
+        {
+          "itemIndex": 94,
+          "code": "111100000941"
+        },
+        {
+          "itemIndex": 103,
+          "code": "111100001030"
+        },
+        {
+          "itemIndex": 105,
+          "code": "111100001054"
+        },
+        {
+          "itemIndex": 110,
+          "code": "111100001108"
+        },
+        {
+          "itemIndex": 124,
+          "code": "111100001245"
+        },
+        {
+          "itemIndex": 126,
+          "code": "111100001269"
+        },
+        {
+          "itemIndex": 136,
+          "code": "111100001368"
+        }
+      ],
+      "interrupts": [
+        {
+          "afterItemIndex": 63,
+          "code": "111100000637",
+          "action": "reload",
+          "resumeDelayMs": 340
+        },
+        {
+          "afterItemIndex": 90,
+          "code": "111100000903",
+          "action": "navigate-away",
+          "resumeDelayMs": 269
+        },
+        {
+          "afterItemIndex": 113,
+          "code": "111100001139",
+          "action": "navigate-away",
+          "resumeDelayMs": 328
+        }
+      ],
+      "counts": {
+        "typo": 15,
+        "doubleScan": 17,
+        "interrupt": 3
+      }
+    },
+    {
+      "dayIndex": 5,
+      "seed": 20261214,
+      "typoInjections": [
+        {
+          "itemIndex": 10,
+          "code": "111100000101",
+          "typoType": "extra-digit",
+          "typoCode": "11110000101"
+        },
+        {
+          "itemIndex": 22,
+          "code": "111100000224",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000224"
+        },
+        {
+          "itemIndex": 33,
+          "code": "111100000330",
+          "typoType": "dropped-digit",
+          "typoCode": "1111100000330"
+        },
+        {
+          "itemIndex": 35,
+          "code": "111100000354",
+          "typoType": "dropped-digit",
+          "typoCode": "11100000354"
+        },
+        {
+          "itemIndex": 48,
+          "code": "111100000484",
+          "typoType": "extra-digit",
+          "typoCode": "1111000000484"
+        },
+        {
+          "itemIndex": 50,
+          "code": "111100000507",
+          "typoType": "extra-digit",
+          "typoCode": "11110000507"
+        },
+        {
+          "itemIndex": 66,
+          "code": "111100000668",
+          "typoType": "dropped-digit",
+          "typoCode": "1111000000668"
+        },
+        {
+          "itemIndex": 81,
+          "code": "111100000811",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000011"
+        },
+        {
+          "itemIndex": 82,
+          "code": "111100000828",
+          "typoType": "extra-digit",
+          "typoCode": "11110000828"
+        },
+        {
+          "itemIndex": 90,
+          "code": "111100000903",
+          "typoType": "extra-digit",
+          "typoCode": "11110000003"
+        },
+        {
+          "itemIndex": 101,
+          "code": "111100001016",
+          "typoType": "extra-digit",
+          "typoCode": "1111000001016"
+        },
+        {
+          "itemIndex": 144,
+          "code": "111100001443",
+          "typoType": "dropped-digit",
+          "typoCode": "11110000143"
+        },
+        {
+          "itemIndex": 149,
+          "code": "111100001498",
+          "typoType": "extra-digit",
+          "typoCode": "1111100001498"
+        }
+      ],
+      "doubleScans": [
+        {
+          "itemIndex": 7,
+          "code": "111100000071"
+        },
+        {
+          "itemIndex": 11,
+          "code": "111100000118"
+        },
+        {
+          "itemIndex": 15,
+          "code": "111100000156"
+        },
+        {
+          "itemIndex": 16,
+          "code": "111100000163"
+        },
+        {
+          "itemIndex": 26,
+          "code": "111100000262"
+        },
+        {
+          "itemIndex": 39,
+          "code": "111100000392"
+        },
+        {
+          "itemIndex": 56,
+          "code": "111100000569"
+        },
+        {
+          "itemIndex": 59,
+          "code": "111100000590"
+        },
+        {
+          "itemIndex": 80,
+          "code": "111100000804"
+        },
+        {
+          "itemIndex": 85,
+          "code": "111100000859"
+        },
+        {
+          "itemIndex": 93,
+          "code": "111100000934"
+        },
+        {
+          "itemIndex": 94,
+          "code": "111100000941"
+        },
+        {
+          "itemIndex": 95,
+          "code": "111100000958"
+        },
+        {
+          "itemIndex": 113,
+          "code": "111100001139"
+        },
+        {
+          "itemIndex": 124,
+          "code": "111100001245"
+        },
+        {
+          "itemIndex": 128,
+          "code": "111100001283"
+        },
+        {
+          "itemIndex": 131,
+          "code": "111100001313"
+        }
+      ],
+      "interrupts": [
+        {
+          "afterItemIndex": 34,
+          "code": "111100000347",
+          "action": "reload",
+          "resumeDelayMs": 766
+        },
+        {
+          "afterItemIndex": 46,
+          "code": "111100000460",
+          "action": "reload",
+          "resumeDelayMs": 223
+        },
+        {
+          "afterItemIndex": 87,
+          "code": "111100000873",
+          "action": "navigate-away",
+          "resumeDelayMs": 519
+        },
+        {
+          "afterItemIndex": 136,
+          "code": "111100001368",
+          "action": "navigate-away",
+          "resumeDelayMs": 213
+        }
+      ],
+      "counts": {
+        "typo": 13,
+        "doubleScan": 17,
+        "interrupt": 4
+      }
+    }
+  ]
+}

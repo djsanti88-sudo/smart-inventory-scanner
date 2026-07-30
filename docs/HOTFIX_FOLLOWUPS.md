@@ -1,3 +1,6 @@
+[STALE — snapshot of 2026-06-15; several items since done. Current truth: PROGRESS.md /
+DEPLOY_TRUTH.md / REPO_HEALTH.md. Needs a refresh pass.]
+
 # Hotfix follow-ups (deferred per "tires first, then add the rest to TODOs")
 
 The full amendment (platform/customer security foundation) is intentionally DEFERRED until the tire

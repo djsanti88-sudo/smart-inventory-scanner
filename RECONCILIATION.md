@@ -80,3 +80,50 @@ doctrine and the owner's current instructions.
 - **Open questions / blockers:** push/deploy/T9-backfill/harvest-schedule remain owner decisions
   (PROGRESS.md "Pending owner decisions").
 - **Marker:** docs reconciliation complete 2026-07-12.
+
+## 2026-07-29 - Docs consolidation wave (chore/docs-consolidation, agent B7)
+
+- **Trigger:** owner-ordered multi-agent docs consolidation to replace stale-banner band-aids across
+  the doc set with verified current content, following the 2026-07-29 `docs(m0)` living-docs merge
+  (commit `685f6282`) and the product-readiness master-plan audit.
+- **Files inspected:** `CLAUDE.md`, `AGENTS.md`, the global doctrine
+  (`ENGINEERING_DOCTRINE.md`/`AUTO_ROUTER_DOCTRINE.md`/`PROJECT_BRAIN_DOCTRINE.md`/
+  `BIG_PLAN_EXECUTION_DOCTRINE.md`), `GUARDRAILS.md`, `docs/README.md`, `docs/DEPLOY_TRUTH.md`,
+  `docs/RECOVERY.md`, `REPO_HEALTH.md`, `PROGRESS.md`, `docs/GO_LIVE_CHECKLIST.md`, `docs/BACKLOG.md`,
+  `docs/superpowers/plans/2026-07-29-product-readiness-master-plan.md`, plus git history for the
+  `docs(m0)` merge commit and the deletions of `docs/decode/`, `CHANGELOG.md`, and
+  `docs/CURRENT_CONTEXT.md`.
+- **Instruction files found:** `GUARDRAILS.md` (new tiny always-loaded standing-invariant anchor,
+  covering counting/identity, safety/secrets, decode discipline, and planning); `docs/README.md`'s
+  L0-L4 doc hierarchy table (Global doctrine / Root canonical / Topic docs / Work artifacts /
+  Skill-agent-hook local) with an explicit promotion law (an L4 citation of a rule CLAUDE.md doesn't
+  actually contain is a hierarchy defect, fix by promoting up); `docs/superpowers/plans/` newest-dated
+  file as the phase-source-of-truth pointer (currently the 2026-07-29 product-readiness master plan
+  for prioritization, still `2026-07-19-master-plan.md` for the completed 6-phase register).
+- **Conflicts found:** none new for this wave's scope. `docs/GO_LIVE_CHECKLIST.md` and
+  `docs/BACKLOG.md` both carried stale-banner placeholders from 2026-07-27/2026-07-12 pointing at
+  `PROGRESS.md`/`DEPLOY_TRUTH.md`/`REPO_HEALTH.md` as current truth rather than stating that truth
+  directly - resolved by rewriting both against those sources rather than leaving the redirect.
+- **Rules adopted:** `GUARDRAILS.md` as the always-loaded anchor for standing invariants (counting law,
+  safety/secrets, decode discipline, planning discipline), each line pointing at its full L1/L2 home;
+  the L0-L4 doc hierarchy and promotion law in `docs/README.md` as the standing rule for where a new
+  durable fact belongs; the newest-dated file in `docs/superpowers/plans/` as the phase/priority
+  pointer, with the 2026-07-29 product-readiness master plan now the priority ordering for backlog
+  work (`docs/BACKLOG.md` updated to point at it as primary, itself demoted to secondary hygiene
+  punch-list).
+- **Rules overridden / retired:** `docs/CURRENT_CONTEXT.md` and root `CHANGELOG.md` as standalone
+  files - both retired/merged in the `docs(m0)` commit (`685f6282`, 2026-07-29): CHANGELOG frozen
+  verbatim to `docs/archive/CHANGELOG_v1-v2.md`, CURRENT_CONTEXT's poison-guard hazard carried forward
+  into `PROGRESS.md` + `RISK_REGISTER.md` rather than kept as a separate snapshot file. The QA trio
+  (`docs/QA_BOTS.md`, `docs/REVISION_GATE.md`, `docs/AGENT_BOT_ROLES.md`) as three independently
+  canonical standalone docs - same commit merged them into `docs/QA_BOTS.md` as the single canonical
+  source, with the other two retained as thinner pointers rather than parallel sources of truth.
+  `docs/decode/` as a doc location - deleted in commit `1b53cca5` (superseded by
+  `docs/DECODER_ARCHITECTURE.md`, which is the sole canonical decode-pipeline doc per `CLAUDE.md`).
+- **Unresolved conflicts:** none found in this agent's owned scope
+  (`docs/GO_LIVE_CHECKLIST.md`, `docs/BACKLOG.md`, `RECONCILIATION.md`). Two pre-existing, tracked
+  code-round items remain open per `REPO_HEALTH.md` (not reconciliation conflicts, just pending
+  fixes): `src/eval/eval.test.ts` still writes to the deleted `docs/decode/eval-baseline.md` path
+  (try/catch-wrapped, harmless), and `src/services/decode/{index.ts,contract.ts,README.md}` comments
+  still cite the deleted `docs/decode/ARCHITECTURE.md` instead of `docs/DECODER_ARCHITECTURE.md`.
+- **Marker:** docs-consolidation wave-2 (agent B7) reconciliation complete 2026-07-29.

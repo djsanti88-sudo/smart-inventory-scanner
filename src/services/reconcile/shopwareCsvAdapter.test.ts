@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parseShopwareCsv } from "@/services/reconcile/shopwareCsvAdapter";
+import { parseShopwareCsv, parseShopwareUnitCosts } from "@/services/reconcile/shopwareCsvAdapter";
 
 // Task 4 (AM-R3): Shop-Ware CSV adapter. Pure, deterministic, never throws on bad input. Uploaded
 // CSV content is UNTRUSTED data (semantic firewall) - it is parsed as text, never as instructions.
@@ -143,5 +143,24 @@ describe("parseShopwareCsv", () => {
     expect(result.rows[0].model).toBe("'@model");
     expect(result.rows[0].raw.notes).toHaveLength(500);
     expect(result.rows[0].raw.cost).toBeUndefined();
+  });
+});
+
+describe("parseShopwareUnitCosts (opt-in, LOCAL-ONLY dollar variance - Task M3/H1)", () => {
+  it("extracts a per-part-number unit cost map from the fixture's cost column", () => {
+    const unitCosts = parseShopwareUnitCosts(fixtureText);
+    expect(unitCosts["MICH-XT2-21555R17"]).toBe(85);
+    expect(unitCosts["GY-EAG-22545R18"]).toBeUndefined(); // fixture leaves cost blank for this row
+  });
+
+  it("returns an empty map when no cost column is present", () => {
+    const text = "part_number,brand,model,size,qty_on_hand\nABC-1,Acme,Model,1x1,5\n";
+    expect(parseShopwareUnitCosts(text)).toEqual({});
+  });
+
+  it("never throws on empty or malformed input", () => {
+    expect(() => parseShopwareUnitCosts("")).not.toThrow();
+    expect(parseShopwareUnitCosts("")).toEqual({});
+    expect(() => parseShopwareUnitCosts("not,a,real\nheader\nfile")).not.toThrow();
   });
 });

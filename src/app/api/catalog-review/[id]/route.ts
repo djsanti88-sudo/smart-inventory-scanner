@@ -134,6 +134,11 @@ export async function POST(
   try {
     const db = getAdminDb();
     const ref = db.collection(COLLECTIONS.catalogEntries).doc(entryId);
+    // Moderation trail (auditLog): free-text-adjacent reviewer identity. The parent doc is
+    // intentionally public-read (sanitized catalog fields only) - Firestore rules cannot field-filter
+    // a `get`, so auditLog must never land there. It lives in this locked subcollection doc instead
+    // (firestore.rules: catalogEntries/{id}/moderation/{docId} - allow read, write: if false).
+    const modRef = ref.collection("moderation").doc("log");
 
     const snap = await ref.get();
     if (!snap.exists) {
@@ -146,24 +151,30 @@ export async function POST(
       by: verifiedBy,
     };
 
+    // Both docs change together per action; a WriteBatch keeps them atomic without needing a full
+    // transaction (neither write depends on reading the other doc first).
+    const batch = db.batch();
+
     if (action === "approve") {
-      await ref.update({
+      batch.update(ref, {
         verificationStatus: "verified",
         provenanceTier: "human_verified",
         verifiedBy,
         updatedAt: now,
-        auditLog: FieldValue.arrayUnion(auditEntry),
       });
+      batch.set(modRef, { auditLog: FieldValue.arrayUnion(auditEntry) }, { merge: true });
+      await batch.commit();
       logServerEvent({ route: "/api/catalog-review/[id]", event: "approved", status: 200 });
       return json({ ok: true, id: entryId, verificationStatus: "verified" });
     }
 
-    await ref.update({
+    batch.update(ref, {
       verificationStatus: "rejected",
       timesRejected: FieldValue.increment(1),
       updatedAt: now,
-      auditLog: FieldValue.arrayUnion(auditEntry),
     });
+    batch.set(modRef, { auditLog: FieldValue.arrayUnion(auditEntry) }, { merge: true });
+    await batch.commit();
     logServerEvent({ route: "/api/catalog-review/[id]", event: "rejected", status: 200 });
     return json({ ok: true, id: entryId, verificationStatus: "rejected" });
   } catch (error) {

@@ -213,3 +213,54 @@ export function parseShopwareCsv(fileText: string): AdapterResult {
 
   return { rows, uomReview, unparseable, assumptions };
 }
+
+/** Cost-like column synonyms recognized ONLY for the opt-in, LOCAL-ONLY dollar variance headline
+ *  (Task M3/H1) - never for the main adapter's `rows`/`raw`, which keep excluding these columns
+ *  entirely (priceCostColumns above). Deliberately narrower than priceCostColumns: "retail"/"msrp"
+ *  are a selling price, not reliably a per-unit COST figure, so they are not auto-captured here. */
+const UNIT_COST_COLUMNS = ["unit_cost", "unit cost", "cost_each", "cost each", "cost"] as const;
+
+/**
+ * Opt-in, LOCAL-ONLY per-part-number unit cost extraction from a Shop-Ware-style CSV export.
+ * Returns externalId (part number, matching the main adapter's row keys) -> unit cost. Never
+ * throws (same contract as parseShopwareCsv). Callers MUST keep this map out of any object sent to
+ * /api/reconcile/match - see reconcileStore's separate `unitCosts` field and the outbound-payload
+ * guard test in ReconcilePanel.test.tsx.
+ */
+export function parseShopwareUnitCosts(fileText: string): Record<string, number> {
+  const unitCosts: Record<string, number> = {};
+  if (!fileText || !fileText.trim()) return unitCosts;
+
+  let records: Record<string, string>[];
+  let headers: string[] = [];
+  try {
+    records = parseCsvSync(fileText, {
+      columns: (header: string[]) => {
+        headers = header.map((h) => sanitizeCell(h).toLowerCase().replace(/\s+/g, "_"));
+        return headers;
+      },
+      skip_empty_lines: true,
+      relax_column_count: true,
+      relax_quotes: true,
+      trim: true,
+      bom: true,
+    }) as Record<string, string>[];
+  } catch {
+    return unitCosts;
+  }
+
+  const partNumberKey = findHeaderKey(headers, SHOPWARE_COLUMN_MAP.partNumber);
+  const costKey = findHeaderKey(headers, UNIT_COST_COLUMNS);
+  if (!partNumberKey || !costKey) return unitCosts;
+
+  for (const record of records) {
+    const partNumber = sanitizeCell(String(record[partNumberKey] ?? "")).trim();
+    if (!partNumber || Object.prototype.hasOwnProperty.call(unitCosts, partNumber)) continue;
+    const cleaned = String(record[costKey] ?? "").replace(/[$,]/g, "").trim();
+    if (cleaned === "") continue;
+    const n = Number(cleaned);
+    if (Number.isFinite(n)) unitCosts[partNumber] = n;
+  }
+
+  return unitCosts;
+}

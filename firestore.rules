@@ -476,6 +476,14 @@ service cloud.firestore {
     match /catalogEntries/{id} {
       allow read: if true;
       allow write: if false;
+
+      // Moderation trail (disputedBy/auditLog): contains raw businessId + free-text reasons.
+      // NEVER public. Server (Admin SDK) writes only; no client read path exists or should exist.
+      // Firestore rules cannot field-filter a `get` on the parent doc above, so these sensitive
+      // fields must live in this locked subcollection instead of on the public parent doc.
+      match /moderation/{docId} {
+        allow read, write: if false;
+      }
     }
 
     // ----- SEPARATE retail catalog (Open Food Facts + enrichment): same PUBLIC-read, server-only-write
@@ -483,6 +491,12 @@ service cloud.firestore {
     match /retailCatalogEntries/{id} {
       allow read: if true;
       allow write: if false;
+
+      // Same latent-risk closure as catalogEntries/moderation above - no dispute path targets this
+      // collection today, but the shape (public parent doc) is identical, so close it now too.
+      match /moderation/{docId} {
+        allow read, write: if false;
+      }
     }
 
     // default deny
