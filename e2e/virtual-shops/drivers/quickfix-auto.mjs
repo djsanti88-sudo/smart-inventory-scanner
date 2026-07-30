@@ -247,6 +247,21 @@ async function scanInterrupted(page, code, action, resumeDelayMs, runningTotal, 
   // - the buffer must not leak into the next scan.
   const partial = code.slice(0, Math.max(1, Math.floor(code.length / 2)));
   await typePartialCode(page, partial);
+  // Neutralize the race between the ScannerInput debounce fallback (80ms) and
+  // Playwright's own navigation-initiation latency: an independent JS
+  // round trip (e.g. page.evaluate to blank the value) can itself take
+  // longer than 80ms under load, so it can still lose the race against the
+  // timer armed by the LAST keystroke of typePartialCode above. Clearing via
+  // real Backspace keystrokes instead keeps the clear on the SAME event
+  // pipeline as the typing that armed the timer: each Backspace re-arms
+  // ScannerInput's debounce for another 80ms (handleKeyDown's non-Enter
+  // branch), so by the time this loop returns, the DOM value is guaranteed
+  // "" and any debounce that later fires mid-navigation hits submit()'s own
+  // `raw.trim().length === 0` guard and no-ops - deterministic regardless of
+  // CDP/system timing, no reliance on out-running a timer via a separate
+  // async call.
+  const interruptInput = page.getByTestId("scanner-input");
+  for (let index = 0; index < partial.length; index += 1) await interruptInput.press("Backspace");
   if (action === "navigate-away") {
     await page.goto(`${target}/products`, { waitUntil: "domcontentloaded" });
     await delay(resumeDelayMs);
@@ -262,6 +277,17 @@ async function scanInterrupted(page, code, action, resumeDelayMs, runningTotal, 
     await delay(resumeDelayMs);
   }
   await page.getByTestId("scanner-input").waitFor({ timeout: 30_000 });
+  // Wait for React hydration (window.__scanStore existing), same guard
+  // loginAndReachScan uses on first load. The scanner-input DOM node can be
+  // present (server-rendered) before React has attached its onKeyDown
+  // handler, especially once scanFeed/localStorage has grown large by later
+  // simulated days (more state to rehydrate on mount) - typing/Enter into an
+  // unhydrated input is silently swallowed (no handler yet), losing the
+  // resumed scan entirely. The "reload" branch already had an incidental
+  // safety margin from its post-action `delay(resumeDelayMs)`; navigate-away
+  // had no such margin after landing back on /scan, so this waits explicitly
+  // instead of relying on delay placement.
+  await page.waitForFunction(() => Boolean(window.__scanStore));
   await scanCode(page, code);
   runningTotal.value += 1;
   const state = await readScanState(page);
