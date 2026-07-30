@@ -12,6 +12,41 @@
 
 Current status = the checkpoints below (newest first) + `REPO_HEALTH.md` for repo/branch sync truth.
 
+## Checkpoint 2026-07-29: $150/mo product-readiness master plan + docs-consolidation executed (~19 agents, 4 waves); virtual-shops harness proven live
+
+Two plans landed tonight, both on `chore/docs-consolidation`:
+`docs/superpowers/plans/2026-07-29-product-readiness-master-plan.md` (Fable-scored 94/100,
+targets a $150/mo-worthy product) and `docs/superpowers/plans/2026-07-29-docs-consolidation-and-repo-health.md`
+(the doc-hygiene half of it), run as 4 parallel waves with roughly 19 agents. Commits
+`8266b440..HEAD` on this branch (see `df323ecd`..`1999ff14` in `git log`).
+
+- **Docs (M0 lane):** `docs/README.md` added as the doc index; `GUARDRAILS.md` added and now
+  auto-loads; `REPO_HEALTH.md` added as the single repo/branch sync-truth doc (44 local branches
+  inventoried, categorized, nothing deleted without owner approval). 60 historical
+  plans/specs/reports archived under `docs/archive/` with an INDEX + citation updates. Living docs
+  (PROGRESS/DECISIONS/TESTING/ARCHITECTURE-adjacent) merged and contradiction-fixed; 5 orphaned
+  facts found and promoted into the right living doc instead of staying stranded. `CLAUDE.md` went
+  through the attack-panel protocol and slimmed 265 -> 232 lines. Superseded tracked docs deleted;
+  some generated reports untracked.
+- **Legal + pricing (lane1):** AI-drafted legal docs added under `docs/legal/` with
+  review-pending banners (not owner-approved, not published) + pricing-tier research, both explicitly
+  drafts pending owner sign-off, not shipped product changes.
+- **Virtual shops (lane3):** a new virtual-shops E2E harness (`e2e/virtual-shops/`) with fixtures,
+  configs, and 4 shop driver scripts, wired to real driver-fixture contracts. Proven live against
+  the actual app: the Rincon shop run scanned 30 codes and counted 30, holding the TOP-LEVEL "every
+  scan counts" law with zero app defects found. Other shop runs are still in flight (see Open below).
+- **Proof gates:** all green this session - `tsc` 0 errors, `npm run test:ledger` 45/45,
+  full Vitest suite 3645 passed.
+
+**Open / parked (owner-gated or unfinished, none silently dropped):**
+- Push/PR for `chore/docs-consolidation` and `audit-fixes` - owner-gated, not pushed.
+- `.tmp/`-style backup cleanup noted but not executed this session.
+- Firestore restore drill (backup/PITR recovery proof) still never run - unverified per `REPO_HEALTH.md`.
+- F-01/F-07 Firestore rules/indexes redeploy still pending, owner-gated.
+- Uptime monitor still not wired up.
+- `npm audit` findings noted, not yet triaged/fixed.
+- Remaining virtual-shops driver runs (beyond Rincon) still in flight as of this checkpoint.
+
 ## 2026-07-26 Stabilization Phase 2: BLOCKED by Preview environment safety
 
 Local Phase 1 stabilization is committed as `91bd1dc4be065aa2a2e8aea382c556e7161a7985` on
