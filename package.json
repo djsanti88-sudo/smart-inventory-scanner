@@ -15,6 +15,8 @@
     "dev:prod": "node scripts/dev.mjs --prod",
     "demo:local": "node scripts/local-demo.mjs",
     "demo:provision": "node scripts/provision-worktree.mjs",
+    "demo:manifest": "node scripts/tire-demo-proof/generate-manifest.mjs",
+    "demo:proof:summary": "node scripts/tire-demo-proof/summarize.mjs",
     "build": "next build",
     "build:knowledge-db": "node --max-old-space-size=4096 scripts/build-knowledge-db.mjs",
     "start": "next start",
