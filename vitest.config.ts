@@ -33,13 +33,21 @@ export default defineConfig({
           include: ["src/services/**/*.test.ts", "src/eval/**/*.test.ts", "src/server/**/*.test.ts", "src/app/**/*.test.ts", "src/lib/**/*.test.ts", "scripts/**/*.test.mjs"],
           // src/services/camera touches window.BarcodeDetector and HTMLVideoElement, which need a DOM -
           // excluded here and picked up by the "dom" project below instead.
-          // scripts/kkm-catalog and scripts/tire-db-repair/*.test.mjs are node:test suites run via
-          // `node --test`, not vitest - vitest's glob would otherwise collect them and fail with
+          // These scripts are node:test suites run via `node --test`, not vitest.
+          // Vitest's broad scripts glob would otherwise collect them and fail with
           // "No test suite found".
           exclude: [
             "src/services/camera/**",
             "scripts/kkm-catalog/**/*.test.mjs",
+            "scripts/local-demo.test.mjs",
+            "scripts/local-demo-egress-guard.test.mjs",
+            "scripts/local-demo-environment.test.mjs",
+            "scripts/local-demo-preflight.test.mjs",
+            "scripts/local-demo-sampler.test.mjs",
             "scripts/refresh-tire-meta.test.mjs",
+            "scripts/tire-demo-proof/generate-manifest.test.mjs",
+            "scripts/tire-demo-proof/summarize.test.mjs",
+            "scripts/tire-demo-proof/validate-result.test.mjs",
             "scripts/tire-db-repair/03_part_number_aliases.test.mjs",
             "scripts/tire-db-repair/09_promote_preflight.test.mjs",
             "scripts/tire-db-repair/10_promote_execute.test.mjs",

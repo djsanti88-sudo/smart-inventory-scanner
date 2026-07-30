@@ -9,7 +9,26 @@ const SESSION = "local-proof-session";
 function batch() {
   const rows = Array.from({ length: 100 }, (_, index) => ({
     barcode: `code-${index + 1}`,
+    barcodeType: "upc",
     canonicalProductUid: `canonical-${index + 1}`,
+    brand: "Test Brand",
+    model: "Test Model",
+    size: "225/65R17",
+    loadIndex: "102",
+    speedRating: "H",
+    manufacturerPartNumber: `mpn-${index + 1}`,
+    type: "passenger",
+    season: "all-season",
+    sourceCount: 2,
+    confidence: "verified",
+    currentStatus: "active_retail",
+    usableFor: "auto_count_candidate",
+    fieldCompletenessScore: 100,
+    angle: "coverage",
+    stratum: "trusted",
+    ordinal: index + 1,
+    batch: 1,
+    agent: 1,
   }));
   const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
   return {
@@ -117,17 +136,18 @@ describe("buildLocalDemoLedgerProof", () => {
 
     const validation = validateBatchResult(input.batch, {
       observations: input.batch.rows.map((row, index) => ({
-        barcode: row.barcode,
-        canonicalProductUid: row.canonicalProductUid,
+        ...row,
         eventId: `event-${index + 1}`,
         matchedProductId: `product-${index + 1}`,
         feedVisible: true,
         status: "verified",
+        rawStatus: "Verified (app-confirmed)",
         latencyMs: index,
         consoleErrors: [],
         nonLocalRequests: [],
       })),
       serverEgressAttempts: [],
+      runtimeSessionNonce: "d".repeat(32),
       ledgerProof: proof,
     });
     expect(validation.passed).toBe(true);
