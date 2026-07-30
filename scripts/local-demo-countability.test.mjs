@@ -83,3 +83,12 @@ test("provider display identity uses the deterministic normalized size and prese
   assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("2356017")).displaySize, "235/60R17");
   assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("13/70R16")).displaySize, "13/70R16");
 });
+
+test("provider display identity reuses the trusted-corpus projector for Boss compact forms", () => {
+  assert.equal(
+    reconstructLocalDemoProviderIdentity({ ...trustedRow("35125020"), model: "35x12 50r20lt Trail model" }).displaySize,
+    "35X12.50R20",
+  );
+  assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("29575225")).displaySize, "295/75R22.5");
+  assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("35125020")).displaySize, "35125020");
+});

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { hasCountableTireIdentity } from "../src/services/ai/tireSpecs.ts";
 import { prettifyBrand, prettifyProductName } from "../src/services/format/productDisplay.ts";
 import { resolveRawScan } from "../src/services/resolver.ts";
-import { normalizeTireSize } from "../src/services/tire/tireSizeNormalizer.ts";
+import { normalizeTrustedCorpusTireSize } from "../src/services/tire/tireSizeNormalizer.ts";
 import { isTrustedLocalDemoTireRow } from "../src/server/tire-knowledge/localDemoTrust.mjs";
 import { DEMO_BUSINESS_ID, getSeed } from "../src/seed/seedData.ts";
 
@@ -18,7 +18,11 @@ function text(value: unknown) {
 
 /** Rebuild the display and identity text used by TireKnowledgeProvider.toResult. */
 export function reconstructLocalDemoProviderIdentity(row: LocalDemoRow) {
-  const displaySize = normalizeTireSize(text(row.size))?.split(" ")[0] ?? text(row.size);
+  const displaySize = normalizeTrustedCorpusTireSize({
+    size: text(row.size),
+    rawSizeText: text(row.raw_size_text),
+    model: text(row.model),
+  }) ?? text(row.size);
   const loadSpeed = [text(row.load_index), text(row.speed_rating)].filter(Boolean).join("");
   const specs = [displaySize, loadSpeed].filter(Boolean).join(" ");
   const brand = prettifyBrand(text(row.brand));
