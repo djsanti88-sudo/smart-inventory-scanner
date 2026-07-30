@@ -1,0 +1,112 @@
+{
+  "shopKey": "legacy-tires",
+  "spreadsheetFile": "e2e/virtual-shops/fixtures/legacy-tires-level5.csv",
+  "spreadsheetFormat": "csv",
+  "spreadsheetLevel": 5,
+  "spreadsheetNotes": "Blank leading title row, junk column, typo'd brand/model; partNumber/barcode stay exact.",
+  "uglinessFeaturesPresent": [
+    "blank title row before headers",
+    "blank row before headers",
+    "renamed/shuffled column headers (PN/Make/Product/Junk Column/Tire Size/QOH/UPC/Item Name)",
+    "junk column with no mapped field",
+    "typo'd brand/model text (deterministic vowel-drop transform)",
+    "missing part numbers (2 of 8 products)",
+    "missing barcodes (3 of 8 products, mixed formats)",
+    "one exact-duplicate data row appended after generation"
+  ],
+  "duplicateRowAssumption": "Ground truth below assumes the importer collapses an exact-duplicate row to the SAME quantity as the original (never drops the row, never sums it again) - the common/sane import behavior. If the app instead sums duplicate-row quantities, the last product's bookQuantity here would be off by its own quantity and this ground truth needs re-deriving; flagged for wave-3 to verify against the real import path before treating this fixture as gospel.",
+  "bookCountSource": "shopwareQuantities from e2e/teach/sheets.mjs buildReconcilePlan({ equal: false }) - matches the imported spreadsheet quantities above",
+  "physicalCountSource": "scanPlan.times from the same buildReconcilePlan() call - the exact sequence a wave-3 driver should scan to reproduce this ground truth",
+  "perProduct": [
+    {
+      "key": "28816861",
+      "name": "Falken Sincera ST80 A/S",
+      "partNumber": "28816861",
+      "barcode": "848983012906",
+      "bookQuantity": 6,
+      "physicalQuantity": 7,
+      "unitsDelta": 1,
+      "unitPrice": 118,
+      "dollarDelta": 118
+    },
+    {
+      "key": "90000002732",
+      "name": "Cooper Evolution Tour",
+      "partNumber": "90000002732",
+      "barcode": "",
+      "bookQuantity": 4,
+      "physicalQuantity": 4,
+      "unitsDelta": 0,
+      "unitPrice": 104.5,
+      "dollarDelta": 0
+    },
+    {
+      "key": "44953",
+      "name": "Michelin Defender",
+      "partNumber": "44953",
+      "barcode": "",
+      "bookQuantity": 8,
+      "physicalQuantity": 8,
+      "unitsDelta": 0,
+      "unitPrice": 168.75,
+      "dollarDelta": 0
+    },
+    {
+      "key": "741089123456",
+      "name": "Goodyear Assurance WeatherReady",
+      "partNumber": "",
+      "barcode": "741089123456",
+      "bookQuantity": 5,
+      "physicalQuantity": 5,
+      "unitsDelta": 0,
+      "unitPrice": 189.99,
+      "dollarDelta": 0
+    },
+    {
+      "key": "BFG-KO2-31105",
+      "name": "BFGoodrich All-Terrain T/A KO2",
+      "partNumber": "BFG-KO2-31105",
+      "barcode": "790011223344",
+      "bookQuantity": 10,
+      "physicalQuantity": 10,
+      "unitsDelta": 0,
+      "unitPrice": 245,
+      "dollarDelta": 0
+    },
+    {
+      "key": "90000029683",
+      "name": "Cooper Discoverer AT3 4S",
+      "partNumber": "90000029683",
+      "barcode": "",
+      "bookQuantity": 3,
+      "physicalQuantity": 3,
+      "unitsDelta": 0,
+      "unitPrice": 210,
+      "dollarDelta": 0
+    },
+    {
+      "key": "52121",
+      "name": "Continental TrueContact Tour",
+      "partNumber": "52121",
+      "barcode": "683345667788",
+      "bookQuantity": 7,
+      "physicalQuantity": 7,
+      "unitsDelta": 0,
+      "unitPrice": 132.4,
+      "dollarDelta": 0
+    },
+    {
+      "key": "General AltiMAX RT43",
+      "name": "General AltiMAX RT43",
+      "partNumber": "",
+      "barcode": "",
+      "bookQuantity": 9,
+      "physicalQuantity": 0,
+      "unitsDelta": -9,
+      "unitPrice": 99.99,
+      "dollarDelta": -899.91
+    }
+  ],
+  "totalDollarVariance": -781.91,
+  "narrative": "We found $781.91 of inventory the spreadsheet overcounted (missing stock)."
+}

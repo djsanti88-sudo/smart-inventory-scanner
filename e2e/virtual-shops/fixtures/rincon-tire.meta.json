@@ -1,0 +1,302 @@
+{
+  "shopKey": "rincon-tire",
+  "generatedFrom": "src/server/knowledge.generated.db (offline read-only SQL, better-sqlite3)",
+  "sourcePattern": "scripts/seed-tires-from-corpus.ts (row-shaping only; this generator never writes to Firestore)",
+  "targetRows": 800,
+  "actualRows": 800,
+  "sizeMergeGroupCount": 25,
+  "sizeMergeGroups": [
+    {
+      "groupKey": "accelera::alpha",
+      "brand": "accelera",
+      "model": "alpha",
+      "codes": [
+        "8997020611298",
+        "8997020614015",
+        "8994234021363",
+        "8997020613131"
+      ]
+    },
+    {
+      "groupKey": "accelera::epsilon a t",
+      "brand": "accelera",
+      "model": "epsilon a t",
+      "codes": [
+        "8994234021684",
+        "8994234021691",
+        "8994234021707",
+        "8994234021714",
+        "8994234021721",
+        "8994234021738",
+        "8994234021745",
+        "8994234021752"
+      ]
+    },
+    {
+      "groupKey": "accelera::epsilon h t",
+      "brand": "accelera",
+      "model": "epsilon h t",
+      "codes": [
+        "8994234021776",
+        "8994234021783",
+        "8994234021790",
+        "8994234021806"
+      ]
+    },
+    {
+      "groupKey": "accelera::gamma",
+      "brand": "accelera",
+      "model": "gamma",
+      "codes": [
+        "8997020611359",
+        "8997020611151",
+        "8997020611366"
+      ]
+    },
+    {
+      "groupKey": "accelera::omikron c t",
+      "brand": "accelera",
+      "model": "omikron c t",
+      "codes": [
+        "8994234022148",
+        "8994234022513",
+        "8994234022032",
+        "8994234022315"
+      ]
+    },
+    {
+      "groupKey": "accelera::phi npm",
+      "brand": "accelera",
+      "model": "phi npm",
+      "codes": [
+        "8994234021035",
+        "8997020617412",
+        "8997020617436",
+        "8994234021042"
+      ]
+    },
+    {
+      "groupKey": "accelera::ultra 3",
+      "brand": "accelera",
+      "model": "ultra 3",
+      "codes": [
+        "8997020614268",
+        "8997020614251",
+        "8997020614275"
+      ]
+    },
+    {
+      "groupKey": "achilles::desert hawk a p",
+      "brand": "achilles",
+      "model": "desert hawk a p",
+      "codes": [
+        "8994731000960",
+        "8994731013601",
+        "8994731013595",
+        "8994731000977",
+        "8994731000984",
+        "8994731013618",
+        "8994731013687"
+      ]
+    },
+    {
+      "groupKey": "achilles::desert hawk uhp high performance",
+      "brand": "achilles",
+      "model": "desert hawk uhp high performance",
+      "codes": [
+        "8994731004678",
+        "8994731009314",
+        "8994731001493"
+      ]
+    },
+    {
+      "groupKey": "achilles::platinum 7",
+      "brand": "achilles",
+      "model": "platinum 7",
+      "codes": [
+        "8994731000243",
+        "8994731004227",
+        "8994731000274",
+        "8994731000281"
+      ]
+    },
+    {
+      "groupKey": "advance::gl285t series",
+      "brand": "advance",
+      "model": "gl285t series",
+      "codes": [
+        "8936206926023",
+        "8938539571932",
+        "8938539571956",
+        "8936206921462",
+        "8936206921592",
+        "8938539571048"
+      ]
+    },
+    {
+      "groupKey": "advance::gl689a series",
+      "brand": "advance",
+      "model": "gl689a series",
+      "codes": [
+        "8936206921585",
+        "8938539571895",
+        "8938539571918"
+      ]
+    },
+    {
+      "groupKey": "advanta::of 4 advanta hpz 01",
+      "brand": "advanta",
+      "model": "of 4 advanta hpz 01",
+      "codes": [
+        "461356523177",
+        "461372424984",
+        "461316786598",
+        "461223242842",
+        "461004162932",
+        "461257993178"
+      ]
+    },
+    {
+      "groupKey": "american road star::ars1000",
+      "brand": "american road star",
+      "model": "ars1000",
+      "codes": [
+        "841623138790",
+        "841623138806",
+        "841623138813",
+        "841623138820",
+        "841623138837",
+        "841623138714",
+        "841623138721"
+      ]
+    },
+    {
+      "groupKey": "american road star::ars5000",
+      "brand": "american road star",
+      "model": "ars5000",
+      "codes": [
+        "841623146962",
+        "841623146986",
+        "841623147013",
+        "841623146979"
+      ]
+    },
+    {
+      "groupKey": "american road star::ars6000",
+      "brand": "american road star",
+      "model": "ars6000",
+      "codes": [
+        "841623147020",
+        "841623147037",
+        "841623147044"
+      ]
+    },
+    {
+      "groupKey": "americus::freight pro msr",
+      "brand": "americus",
+      "model": "freight pro msr",
+      "codes": [
+        "840500902226",
+        "840500902240",
+        "840500902196"
+      ]
+    },
+    {
+      "groupKey": "americus::freight pro osd",
+      "brand": "americus",
+      "model": "freight pro osd",
+      "codes": [
+        "840500902288",
+        "840500902295",
+        "840500902301",
+        "840500902318"
+      ]
+    },
+    {
+      "groupKey": "americus::os3000",
+      "brand": "americus",
+      "model": "os3000",
+      "codes": [
+        "040232422003",
+        "040232421976",
+        "040232282300"
+      ]
+    },
+    {
+      "groupKey": "americus::ps2000",
+      "brand": "americus",
+      "model": "ps2000",
+      "codes": [
+        "040232421884",
+        "040232356605",
+        "040232421945",
+        "040232421914",
+        "040232662683"
+      ]
+    },
+    {
+      "groupKey": "americus::rs2000",
+      "brand": "americus",
+      "model": "rs2000",
+      "codes": [
+        "040232402654",
+        "040232402678",
+        "040232402661",
+        "040232662690"
+      ]
+    },
+    {
+      "groupKey": "americus::st radial",
+      "brand": "americus",
+      "model": "st radial",
+      "codes": [
+        "040232277542",
+        "040232278365",
+        "040232278372",
+        "040232278389"
+      ]
+    },
+    {
+      "groupKey": "amp::cm2f terrain attack m t",
+      "brand": "amp",
+      "model": "cm2f terrain attack m t",
+      "codes": [
+        "729419150167",
+        "729419130886",
+        "729419150174",
+        "729419130879",
+        "729419150204",
+        "729419150099",
+        "729419159986"
+      ]
+    },
+    {
+      "groupKey": "amp::mud terrain attack m t a",
+      "brand": "amp",
+      "model": "mud terrain attack m t a",
+      "codes": [
+        "729419094539",
+        "729419094546",
+        "729419094560"
+      ]
+    },
+    {
+      "groupKey": "antares::comfort a5",
+      "brand": "antares",
+      "model": "comfort a5",
+      "codes": [
+        "849849029441",
+        "849849029809",
+        "849849030003",
+        "849849029564",
+        "849849029267",
+        "849849029700",
+        "849849029724",
+        "849849030485"
+      ]
+    }
+  ],
+  "unknownCodeCount": 10,
+  "deterministic": true,
+  "notes": "known[] mixes deliberate same-model/different-size groups (sizeMergeGroupMember: true, grouped by groupKey) with single-size fill rows, all ordered by deterministic SQL ORDER BY (no LIMIT-with-RANDOM). Re-running this script against an unchanged corpus DB reproduces the same fixture byte-for-byte."
+}
