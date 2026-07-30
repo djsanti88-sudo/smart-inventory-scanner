@@ -7,6 +7,8 @@ import { accessLevelServer } from "@/services/security/roleAccess";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -86,6 +88,7 @@ function bearerToken(request: NextRequest): string {
 }
 
 export async function GET(request: NextRequest) {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   const ip = ipFromRequest(request);
   try {
     const rl = await checkRateLimit(ip, {

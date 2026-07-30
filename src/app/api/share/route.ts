@@ -11,6 +11,8 @@ import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -47,6 +49,7 @@ function json(body: unknown, status = 200): NextResponse {
 // isAuthBypassEnabled gate, which is false in production before any flag is read (a stray IS_E2E in
 // production can never open this).
 export async function POST(request: NextRequest) {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declaredLength) && declaredLength > MAX_SHARE_SNAPSHOT_BYTES) {
     logServerEvent({ route: "/api/share", event: "mint_failed", reasonCode: "snapshot_too_large", status: 413 });

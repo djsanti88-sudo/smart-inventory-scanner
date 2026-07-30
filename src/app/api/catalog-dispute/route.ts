@@ -9,6 +9,8 @@ import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import { disputeCatalogEntry } from "@/server/catalog/catalogDispute";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoNoContentResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -71,6 +73,7 @@ function stringField(value: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
+  if (isLocalDemo()) return localDemoNoContentResponse();
   const ip = ipFromRequest(request);
   try {
     const rl = await checkRateLimit(ip, {

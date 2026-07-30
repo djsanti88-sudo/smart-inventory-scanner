@@ -2,6 +2,8 @@ import { FieldValue } from "firebase-admin/firestore";
 import type { UserRecord } from "firebase-admin/auth";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId, type Role } from "@/services/db/types";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -116,6 +118,7 @@ async function authUserForEmail(email: string, name: string, password?: string) 
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   let body: unknown;
   try {
     body = await request.json();

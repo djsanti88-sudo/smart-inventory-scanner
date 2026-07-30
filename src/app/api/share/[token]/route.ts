@@ -4,6 +4,8 @@ import {
   resolveShareToken,
 } from "@/server/share/shareTokenStore";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -20,6 +22,7 @@ export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ token: string }> },
 ) {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   const { token } = await context.params;
   const payload = await resolveShareToken(token);
   if (!payload) {

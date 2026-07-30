@@ -3,6 +3,8 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoNoContentResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -34,6 +36,7 @@ function serverFields(event: TelemetryEvent): { reasonCode: string; status: numb
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (isLocalDemo()) return localDemoNoContentResponse();
   const declaredLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_TELEMETRY_BODY_BYTES) {
     return json({ error: "Telemetry payload is too large." }, 413);

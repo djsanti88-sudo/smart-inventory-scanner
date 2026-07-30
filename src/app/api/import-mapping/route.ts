@@ -12,6 +12,8 @@ import {
   putImportMappingMemory,
 } from "@/server/importMappingMemory";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 const MAX_MAPPING_BODY_BYTES = 32 * 1024;
@@ -76,6 +78,7 @@ async function authorize(businessId: string, idToken: string): Promise<NextRespo
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   const searchParams = new URL(request.url).searchParams;
   const businessId = text(searchParams.get("businessId"));
   const sourceSignature = text(searchParams.get("sourceSignature"));
@@ -90,6 +93,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > MAX_MAPPING_BODY_BYTES) {
     return json({ error: "Import mapping must be 32KB or smaller." }, 413);

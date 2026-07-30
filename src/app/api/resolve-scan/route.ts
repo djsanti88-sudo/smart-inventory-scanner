@@ -7,6 +7,8 @@ import { resolveScanForRole } from "@/services/security/resolveScanServer";
 import { toStoreProduct, toStoreAlias } from "@/services/db/firebase/storeMappers";
 import type { Product, Alias } from "@/types";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 // Sec-5: PROTECTED server-side customer scan resolution.
 //
@@ -32,6 +34,7 @@ interface ResolveScanBody {
 }
 
 export async function POST(request: Request) {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   let body: ResolveScanBody;
   try {
     body = await request.json();

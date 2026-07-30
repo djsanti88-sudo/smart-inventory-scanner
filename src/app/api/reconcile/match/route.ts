@@ -21,6 +21,8 @@ import { tirePartNumberVariants } from "@/services/catalog/tirePartNumber";
 import { lookupRetailBarcodeAsync } from "@/server/retail-knowledge/retailKnowledgeIndex";
 import type { PreviewMatchResult } from "@/services/universalImportPreview";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 // Preview result = a MatchResult optionally enriched with the exact retail-corpus hit for a non-tire
 // row (the "identified from the 4M-product catalog" badge). Shared with universalImportPreview.ts,
@@ -155,6 +157,7 @@ function isValidRow(v: unknown): v is ExpectedInventoryRow {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
     return json({ error: "Reconcile request must be 512KB or smaller." }, 413);

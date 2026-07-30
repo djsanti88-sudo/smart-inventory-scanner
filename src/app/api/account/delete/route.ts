@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
 import { isLiveAuth } from "@/services/auth/authMode";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -63,6 +65,7 @@ async function deleteBusinessMembers(businessId: string): Promise<number> {
 }
 
 export async function POST(request: NextRequest) {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   let body: DeleteRequestBody;
   try {
     const parsed = (await request.json()) as unknown;

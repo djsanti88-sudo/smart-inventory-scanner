@@ -8,6 +8,8 @@ import { isAuthBypassEnabled } from "@/services/auth/authBypass";
 import { intEnv, checkRateLimit } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
 import { logServerEvent } from "@/server/log";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -90,6 +92,7 @@ async function exportCollection(
 }
 
 export async function POST(request: NextRequest) {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   let body: ExportRequestBody;
   try {
     const parsed = (await request.json()) as unknown;

@@ -6,6 +6,8 @@ import { detectCodeType } from "@/services/codeTypeDetector";
 import { prefixFloorNameFull } from "@/server/catalog/prefixIndexServer";
 import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
 import { ladderStorage } from "@/server/upc/storage";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoNullResponse } from "@/server/localDemoHttp";
 
 // F5 bundle-surgery (wave 2, 2026-07-20): the DERIVED-tier prefix->brand map (2.3MB, generated from
 // our 4M-row retail/tire corpus) must never reach the client bundle (see
@@ -27,6 +29,7 @@ const CODE_SHAPE = /^\d{8,14}$/;
 const MAX_REQUEST_BYTES = 2 * 1024;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  if (isLocalDemo()) return localDemoNullResponse();
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
     return json({ error: "Prefix lookup request must be 2KB or smaller." }, 413);

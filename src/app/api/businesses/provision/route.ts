@@ -7,6 +7,8 @@ import type {
   ProvisionRequest,
   ProvisionResponse,
 } from "@/services/auth/provisioningTypes";
+import { isLocalDemo } from "@/server/localDemo";
+import { localDemoUnavailableResponse } from "@/server/localDemoHttp";
 
 export const runtime = "nodejs";
 
@@ -67,6 +69,7 @@ function json(body: ProvisionResponse, status: number): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (isLocalDemo()) return localDemoUnavailableResponse();
   const token = bearerToken(request);
   if (!token) return json({ status: "failed", reason: "not_authenticated" }, 401);
 
