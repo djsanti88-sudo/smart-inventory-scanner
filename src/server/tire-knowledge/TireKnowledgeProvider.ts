@@ -54,12 +54,16 @@ function barcodeField(row: TireKnowledgeRow): { upc: string; ean: string; gtin: 
   }
 }
 
-function toResult(row: TireKnowledgeRow): AiLookupResult {
+function toResult(row: TireKnowledgeRow, includeTrustedModel = false): AiLookupResult {
   const specs = [row.size, [row.load_index, row.speed_rating].filter(Boolean).join("")].filter(Boolean).join(" ").trim();
   // DISPLAY-ONLY prettify: the corpus stores model slugs ("wrangler_workhorse_at") and lowercase
   // brands. Prettify here (new decode result construction), never rewrite the stored corpus row.
   const brand = prettifyBrand(row.brand);
-  const model = prettifyProductName(row.model);
+  const modelDisplay = row.model_display?.trim();
+  const model = modelDisplay || prettifyProductName(row.model);
+  // Structured model is source data, never the display prettifier. The local corpus audit confirms
+  // a raw-model fallback for rows without model_display is still byte-faithful to the manifest.
+  const trustedStructuredModel = modelDisplay || row.model.trim();
   const name = [brand, model, specs].filter(Boolean).join(" ").trim();
   const { upc, ean, gtin } = barcodeField(row);
   return {
@@ -81,6 +85,7 @@ function toResult(row: TireKnowledgeRow): AiLookupResult {
     // so a customer decode response can never leak the global corpus's sources.
     sourceUrls: [],
     verifiedFacts: [`Trusted tire knowledge base: exact ${row.barcode_type || "barcode"} ${row.barcode}`],
+    ...(includeTrustedModel && trustedStructuredModel ? { trustedStructuredModel } : {}),
   };
 }
 
@@ -97,7 +102,7 @@ function verifiedEvidence(code: string): EvidenceResult {
 export async function resolveExactBarcode(code: string): Promise<CorpusDecodeResult | null> {
   const row = await lookupByExactBarcode(code);
   if (!row) return null;
-  const result = toResult(row);
+  const result = toResult(row, true);
   const confidence = result.confidence;
   const decision: DecodeDecision = {
     status: "verified",
@@ -115,7 +120,7 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
 export async function resolveExactBarcodeLocal(code: string): Promise<CorpusDecodeResult | null> {
   const row = await lookupByExactBarcodeLocal(code);
   if (!row || !isTrustedLocalDemoTireRow(row)) return null;
-  const result = toResult(row);
+  const result = toResult(row, true);
   const decision: DecodeDecision = {
     status: "verified", confidence: CONF[row.confidence] ?? 0.92,
     reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",

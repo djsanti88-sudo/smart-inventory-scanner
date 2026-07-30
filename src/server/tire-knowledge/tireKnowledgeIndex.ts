@@ -18,6 +18,7 @@ export interface TireKnowledgeRow {
   canonical_product_uid: string;
   brand: string; brand_normalized: string;
   model: string; model_normalized: string;
+  model_display?: string;
   size: string; raw_size_text: string;
   load_index: string; speed_rating: string; load_range: string;
   type: string; season: string;
@@ -195,6 +196,7 @@ function rowFromTurso(row: Record<string, unknown>): TireKnowledgeRow {
     brand_normalized: (row.brand_normalized as string) ?? "",
     model: (row.model as string) ?? "",
     model_normalized: (row.model_normalized as string) ?? "",
+    model_display: typeof row.model_display === "string" ? row.model_display : undefined,
     size: (row.size as string) ?? "",
     raw_size_text: (row.raw_size_text as string) ?? "",
     load_index: (row.load_index as string) ?? "",

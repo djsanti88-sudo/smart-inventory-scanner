@@ -30,6 +30,7 @@ const CORPUS_ROW = {
   brand_normalized: "hankook",
   model: "Dynapro",
   model_normalized: "dynapro",
+  model_display: "Dynapro AT2 Xtreme",
   size: "265/70R17",
   raw_size_text: "P265/70R17",
   load_index: "113",
@@ -67,6 +68,7 @@ describe("resolveExactPartNumber - confidence tiers (RC4)", () => {
     expect(result!.decision.status).toBe("suggested");
     expect(result!.decision.confidence).toBe(0.85);
     expect(result!.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
+    expect(result!.results[0].trustedStructuredModel).toBeUndefined();
   });
 
   it("distributor-affix PN match (e.g. KH2265992): confidence 0.8, status suggested, exactCodeEvidenceVerifiedByApp false", async () => {
@@ -138,6 +140,7 @@ const KUMHO_ROW_REAL_CONVENTION = {
   brand_normalized: "kumho",
   model: "crugen_hp71",
   model_normalized: "crugen hp71",
+  model_display: "Crugen HP71",
   size: "245/60R18",
   raw_size_text: "245/60R18",
   load_index: "105",
@@ -183,6 +186,36 @@ describe("toResult barcode_type convention mismatch (real corpus uses upc/ean/gt
     expect(decoded.upc).toBe("848983006257");
     expect(decoded.ean).toBe("");
     expect(decoded.gtin).toBe("");
+    expect(decoded.productName).toContain("Crugen HP71");
+    expect(decoded.trustedStructuredModel).toBe("Crugen HP71");
+  });
+
+  it("uses model_display for the customer name and exact corpus-only structured model", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      model: "SU318_H_T",
+      model_display: "SU318 H T",
+    });
+
+    const result = await resolveExactBarcode("848983006257");
+
+    expect(result!.results[0]).toMatchObject({
+      productName: expect.stringContaining("SU318 H T"),
+      trustedStructuredModel: "SU318 H T",
+    });
+  });
+
+  it("uses the exact trimmed raw model when model_display is blank", async () => {
+    mockLookupByExactBarcode.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      model: "SU318_H_T",
+      model_display: "   ",
+    });
+
+    const result = await resolveExactBarcode("848983006257");
+
+    expect(result!.results[0].productName).toContain("SU318 H T");
+    expect(result!.results[0].trustedStructuredModel).toBe("SU318_H_T");
   });
 
   it("barcode_type 'gtin14' (real convention) carries into result.gtin AND result.primaryBarcode", async () => {

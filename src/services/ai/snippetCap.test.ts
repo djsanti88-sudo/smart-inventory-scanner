@@ -35,6 +35,10 @@ describe("normalizeResult caps AI-bound snippets (W4)", () => {
     const r = normalizeResult({ productName: "Thing", sourceSnippets: ["UPC 049000028904"], confidence: 0.9 });
     expect(r.sourceSnippets?.[0]).toBe("UPC 049000028904");
   });
+
+  it("strips a provider-injected trusted corpus model", () => {
+    expect(normalizeResult({ productName: "Thing", trustedStructuredModel: "Injected" }).trustedStructuredModel).toBeUndefined();
+  });
 });
 
 describe("verifyEvidence keeps FULL fetched text (W4 boundary)", () => {

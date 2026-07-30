@@ -44,6 +44,10 @@ describe("isLlmEligible", () => {
     expect(isLlmEligible(product({ id: "p2", structuredBy: "human", structuredConfidence: 0.1 }))).toBe(false);
   });
 
+  it("is NOT eligible when structuredBy is trusted_corpus, regardless of confidence", () => {
+    expect(isLlmEligible(product({ id: "p-corpus", structuredBy: "trusted_corpus", structuredConfidence: 0.1 }))).toBe(false);
+  });
+
   it("is NOT eligible when confidence is at or above the threshold", () => {
     expect(
       isLlmEligible(

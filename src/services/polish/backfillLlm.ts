@@ -26,7 +26,7 @@ export const LLM_ELIGIBLE_CONFIDENCE_THRESHOLD = 0.6;
  *    as structuredFieldsFor's own guard - never overwrite a human decision).
  */
 export function isLlmEligible(product: Product): boolean {
-  if (product.structuredBy === "human") return false;
+  if (product.structuredBy === "human" || product.structuredBy === "trusted_corpus") return false;
   if (typeof product.structuredConfidence !== "number") return false;
   return product.structuredConfidence < LLM_ELIGIBLE_CONFIDENCE_THRESHOLD;
 }

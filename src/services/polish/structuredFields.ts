@@ -34,7 +34,7 @@ export function structuredFieldsFor(
   brand: string,
   previousStructuredBy?: Product["structuredBy"],
 ): Partial<StructuredFieldsPatch> {
-  if (previousStructuredBy === "human") return {};
+  if (previousStructuredBy === "human" || previousStructuredBy === "trusted_corpus") return {};
   const s = structureProduct(name, brand || undefined);
   return {
     structuredBrand: s.brand || undefined,

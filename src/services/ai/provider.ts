@@ -73,6 +73,9 @@ export function normalizeResult(raw: Partial<AiLookupResult> | null | undefined)
     // the real app-computed value AFTER normalizeResult, and decideDecode's internet_two_source_size path
     // trusts only that. This makes the "app-computed only" invariant structural, not positional.
     sizeAgreement: undefined,
+    // App-owned corpus provenance: external/provider JSON cannot claim it. The deterministic corpus
+    // provider attaches it after this normalization boundary.
+    trustedStructuredModel: undefined,
     confidence,
     // The 0.85 rule: anything below is forced to human review regardless of provider claim.
     needsHumanReview: confidence < 0.85 ? true : Boolean(raw.needsHumanReview),

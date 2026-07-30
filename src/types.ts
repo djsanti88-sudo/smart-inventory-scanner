@@ -137,7 +137,7 @@ export interface Product {
   sizeTag?: string; // glued-digits tire size ("2657017") or weight/count/volume tag; "" / undefined = none
   // Who last produced the structured fields above. "human" is a PERMANENT lock: automatic
   // re-structuring (hot path AND the offline backfill) must skip a row stamped "human".
-  structuredBy?: "deterministic" | "llm" | "human";
+  structuredBy?: "deterministic" | "llm" | "trusted_corpus" | "human";
   // The structurer's own confidence (0..1) in the split above. Stamped by structuredFieldsFor
   // whenever it runs (deterministic pass); identifies rows eligible for the LLM backfill fallback
   // (confidence < 0.6, see src/services/polish/backfillLlm.ts). Undefined for a row never structured.
@@ -481,6 +481,8 @@ export interface ResolverResult {
 /** Structured AI lookup result (also the JSON contract the AI provider must return). */
 export interface AiLookupResult {
   productName: string;
+  /** App-owned corpus-only model hint. Provider JSON is stripped at normalization. */
+  trustedStructuredModel?: string;
   brand: string;
   category: string;
   specsShort: string;

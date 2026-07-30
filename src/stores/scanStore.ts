@@ -130,6 +130,33 @@ function localDemoCanonicalProductUidFrom(data: unknown): string | undefined {
   return typeof uid === "string" && LOCAL_DEMO_CANONICAL_PRODUCT_UID.test(uid) ? uid : undefined;
 }
 
+const MAX_TRUSTED_STRUCTURED_MODEL_CHARS = 160;
+
+/** Accept this internal marker only from the exact, no-AI barcode corpus response shape. */
+function trustedStructuredModelFrom(data: unknown): string | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const response = data as {
+    mode?: unknown; providerNames?: unknown;
+    decision?: { status?: unknown; exactCodeEvidenceVerifiedByApp?: unknown };
+    debug?: { corroborationPath?: unknown; aiCalled?: unknown };
+    results?: Array<{ trustedStructuredModel?: unknown }>;
+  };
+  const model = response.results?.[0]?.trustedStructuredModel;
+  if (
+    response.mode !== "decode" || !Array.isArray(response.providerNames) || response.providerNames.length !== 1 ||
+    (response.providerNames[0] !== "tire-corpus" && response.providerNames[0] !== "local-tire-corpus") ||
+    response.decision?.status !== "verified" || response.decision.exactCodeEvidenceVerifiedByApp !== true ||
+    response.debug?.corroborationPath !== "corpus_exact_barcode" || response.debug?.aiCalled !== false ||
+    typeof model !== "string" || !model.trim() || model.trim().length > MAX_TRUSTED_STRUCTURED_MODEL_CHARS
+  ) return undefined;
+  return model.trim();
+}
+
+function trustedCorpusModelPatch(model: string | undefined, existing?: Product): Partial<Product> {
+  if (!model || existing?.structuredBy === "human" || (existing && existing.provisional !== true)) return {};
+  return { structuredModel: model, structuredBy: "trusted_corpus" };
+}
+
 /** Result summary of a CSV product import (shown in the UI). */
 export interface CsvImportSummary {
   rowsParsed: number;
@@ -1271,6 +1298,9 @@ function idForReview(r: UnknownCodeReview): string {
 export function buildScanInitializer(deps: ScanStoreDeps) {
   const { db, idFactory, now } = deps;
   const cloudBackend = deps.cloudBackend ?? false;
+  // Never store this app-owned, exact-barcode corpus hint in Zustand or a review payload. It dies with
+  // this store instance and is keyed to precisely one review until that review is resolved.
+  const trustedCorpusModelsByReviewId = new Map<string, string>();
 
   return (
     set: (partial: Partial<ScanState> | ((s: ScanState) => Partial<ScanState>)) => void,
@@ -1533,6 +1563,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // finalCounts linger when no session restores, so a context switch must REPLACE all four or
           // the previous tenant's rows bleed through (two users OR one user with two businesses).
           const cleared = emptyTenantState();
+          trustedCorpusModelsByReviewId.clear();
           set({
             businessId,
             userId,
@@ -1747,6 +1778,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           if (persistApi) persistApi.setOptions({ name: persistKeyForUid(null) });
         }
         const cleared = emptyTenantState();
+        trustedCorpusModelsByReviewId.clear();
         set({
           businessId: DEMO_BUSINESS_ID,
           userId: null,
@@ -1878,6 +1910,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           syncedScanEventIds: [],
           lastSyncError: null,
         });
+        trustedCorpusModelsByReviewId.clear();
         // Persist the session through the SAME durable queue as scans/counts (never blocks the UI).
         // Distinct idempotency key per lifecycle state ("active") so finishSession's write still applies.
         enqueueAndSync([
@@ -2013,6 +2046,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             scanFeed: [],
             needsReviewQueue: [],
           });
+          trustedCorpusModelsByReviewId.clear();
           emitAudit({ entityType: "CountSession", entityId: session.id, action: "session_reopened", metadata: {} });
           return true;
         }
@@ -2035,6 +2069,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           appliedIdempotencyKeys: c.appliedIdempotencyKeys,
         }));
         set({ currentSession: session, sessionId: session.id, finalCounts, scanFeed: [], needsReviewQueue: [] });
+        trustedCorpusModelsByReviewId.clear();
         emitAudit({ entityType: "CountSession", entityId: session.id, action: "session_reopened", metadata: {} });
         return true;
       },
@@ -2120,6 +2155,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           needsReviewQueue: [],
           lastSyncError: null,
         });
+        trustedCorpusModelsByReviewId.clear();
         enqueueAndSync([
           makeQueueItem({
             idFactory,
@@ -3351,6 +3387,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // to ~70s, which dropped the browser connection -> "Failed to fetch") and the token spend. One
           // call only; a miss is shown fast with its honest reason and is briefly miss-cached server-side
           // so an immediate re-scan does not re-pay.
+          // A retry must not leave an earlier exact-corpus model authorized if this request fails. Only a
+          // completed eligible response below may re-establish this per-review, in-memory marker.
+          trustedCorpusModelsByReviewId.delete(reviewId);
           let data: Awaited<ReturnType<typeof decodeOnce>>;
           try {
             data = await decodeOnce();
@@ -3372,6 +3411,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
           const decision = data.decision;
           const localDemoCanonicalProductUid = localDemoCanonicalProductUidFrom(data);
+          const trustedStructuredModel = trustedStructuredModelFrom(data);
+          trustedCorpusModelsByReviewId.delete(reviewId);
+          if (trustedStructuredModel) trustedCorpusModelsByReviewId.set(reviewId, trustedStructuredModel);
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
           // Phase 10: for a tire scan, parse the messy decode into structured columns (size -> specs,
@@ -4031,6 +4073,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                     : r,
                 ),
               }));
+              trustedCorpusModelsByReviewId.delete(reviewId);
             }
 
             // Tasks 5+6: CLIENT-ORCHESTRATED BACKGROUND VERIFY. The fast hot path (mode:"decode") did
@@ -4943,6 +4986,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             ),
           });
           get().recordFeedback("product_rejected", { code: review.cleanCode });
+          trustedCorpusModelsByReviewId.delete(reviewId);
           emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "alias_rejected", metadata: { code: review.cleanCode } });
           return;
         }
@@ -4956,6 +5000,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // guess is minted UNVERIFIED, its alias is left UNAPPROVED, no verified catalog entry is written,
         // and it is NOT counted - so a future scan never resolves deterministically to a wrong product.
         let weakGuessProduct = false;
+        const trustedStructuredModel = trustedCorpusModelsByReviewId.get(reviewId);
         // PHASE 2: set true when this resolution is CONFIRMING an existing PROVISIONAL count (the reused
         // product was provisional). The provisional was already counted, so the approval must NOT re-count
         // (no double-count) - it only upgrades the product to verified + adds the approved alias.
@@ -5221,6 +5266,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                   // inside structuredFieldsFor never overwrites a row already stamped "human". Uses
                   // the safe wrapper: a structurer throw must never break this scan flow (Task 4 review fix).
                   Object.assign(updates, safeStructuredFieldsFor(updates.name ?? p.name, updates.brand ?? p.brand, p.structuredBy));
+                  if (p.id === provOrphanId) Object.assign(updates, trustedCorpusModelPatch(trustedStructuredModel, p));
                   // safeStructuredFieldsFor may return its own structuredModel guess (name-only
                   // structurer); prefer OUR still-empty fill above when the structurer found nothing.
                   if (!updates.structuredModel && enriched.structuredModel && !p.structuredModel) {
@@ -5282,6 +5328,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               // Task 4: structure the upgraded identity (deterministic only, never LLM on the hot
               // path). Guarded against clobbering a prior "human" stamp.
               ...safeStructuredFieldsFor(np.name ?? orphan.name, orphanEnriched.brand, orphan.structuredBy),
+              ...trustedCorpusModelPatch(trustedStructuredModel, orphan),
             };
             if (!upgraded.structuredModel && orphanEnriched.structuredModel) {
               upgraded.structuredModel = orphanEnriched.structuredModel;
@@ -5339,6 +5386,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               updatedBy: "human",
               // Task 4: fresh mint - always deterministic-structure (no prior stamp to protect).
               ...safeStructuredFieldsFor(mintedName, mintedBrand),
+              ...trustedCorpusModelPatch(trustedStructuredModel),
             };
             if (!newProduct.structuredModel && mintEnriched.structuredModel) {
               newProduct.structuredModel = mintEnriched.structuredModel;
@@ -5457,6 +5505,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
 
         set({ products, aliases, needsReviewQueue, scanFeed, lastMismatchWarning: null, lastAliasConflicts: null, lastCategoryWarning: null });
+        trustedCorpusModelsByReviewId.delete(reviewId);
 
         // TASK 3: transfer the merged placeholder's count onto the resolved product and re-point its feed
         // row, then remove its count row. This preserves the scanned quantity (scan N = count N) while
@@ -6730,14 +6779,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       getProduct: (id) => (id ? get().products.find((p) => p.id === id) : undefined),
 
       clearSession: () =>
-        set({
-          scanFeed: [],
-          finalCounts: [],
-          needsReviewQueue: [],
-          pendingSyncQueue: [],
-          syncedScanEventIds: [],
-          lastSyncError: null,
-        }),
+        {
+          trustedCorpusModelsByReviewId.clear();
+          set({
+            scanFeed: [],
+            finalCounts: [],
+            needsReviewQueue: [],
+            pendingSyncQueue: [],
+            syncedScanEventIds: [],
+            lastSyncError: null,
+          });
+        },
 
       clearLocalCache: () => {
         // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
@@ -6771,6 +6823,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           shopOverrides: [],
           feedbackEvents: [],
         };
+        trustedCorpusModelsByReviewId.clear();
         if (cloudBackend) {
           // Cloud: empty the local catalog; products/aliases re-load from Firestore on reload. No reseed.
           set({ ...common, products: [], aliases: [] });

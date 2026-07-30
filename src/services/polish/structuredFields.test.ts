@@ -21,6 +21,10 @@ describe("structuredFieldsFor", () => {
     expect(patch).toEqual({});
   });
 
+  it("does not overwrite a trusted corpus model with deterministic parsing", () => {
+    expect(structuredFieldsFor("Cooper Discoverer AT3 265/70R17", "Cooper", "trusted_corpus")).toEqual({});
+  });
+
   it("re-structures freely when the previous stamp was deterministic or unset", () => {
     expect(structuredFieldsFor("Michelin Defender 225/65R17", "Michelin", "deterministic").structuredBy).toBe(
       "deterministic",
