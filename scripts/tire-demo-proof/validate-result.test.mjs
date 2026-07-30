@@ -13,6 +13,50 @@ function good() {
   return { observations: expectedRows.map((row, index) => ({ ...row, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, manifestSha256, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, canonicalIdentityMismatchCount:0, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [] };
 }
 test("accepts an exact hash-bound 100-event proof and uses nearest-rank percentiles", () => { const result = validateBatchResult(batch, good()); assert.equal(result.passed, true); assert.equal(result.countedQuantity, 100); assert.equal(result.p95Ms, 94); });
+test("rejects case- and whitespace-changed canonical UIDs across every proof identity boundary", () => {
+  for (const [name, mutate, rule] of [
+    ["observation vs manifest case", (value) => { value.observations[0].canonicalProductUid = "UID-0"; }, "canonicalProductUid"],
+    ["observation vs manifest whitespace", (value) => { value.observations[0].canonicalProductUid = " uid-0 "; }, "canonicalProductUid"],
+    ["ledger event vs manifest case", (value) => { value.ledgerProof.events[0].canonicalProductUid = "UID-0"; }, "ledger_event_identity"],
+    ["ledger event vs manifest whitespace", (value) => { value.ledgerProof.events[0].canonicalProductUid = " uid-0 "; }, "ledger_event_identity"],
+    ["observation vs ledger case", (value) => { value.ledgerProof.events[0].canonicalProductUid = "UID-0"; }, "observation_ledger_link"],
+    ["observation vs ledger whitespace", (value) => { value.ledgerProof.events[0].canonicalProductUid = " uid-0 "; }, "observation_ledger_link"],
+  ]) {
+    const value = good();
+    mutate(value);
+    const validation = validateBatchResult(batch, value);
+    assert.equal(validation.passed, false, name);
+    assert.ok(validation.failures.some((failure) => failure.rule === rule), name);
+  }
+});
+test("rejects case- and whitespace-changed opaque product IDs at the observation-ledger boundary", () => {
+  for (const [name, changedProductId] of [["case", "Product-0"], ["whitespace", " product-0 "]]) {
+    const value = good();
+    value.ledgerProof.events[0].matchedProductId = changedProductId;
+    value.ledgerProof.finalCounts[0].productId = changedProductId;
+    const validation = validateBatchResult(batch, value);
+    assert.equal(validation.passed, false, name);
+    assert.ok(validation.failures.some((failure) => failure.rule === "observation_ledger_link"), name);
+  }
+});
+test("rejects case- and whitespace-changed cleaned barcodes at every manifest-ledger boundary", () => {
+  for (const [name, mutate, rule] of [
+    ["observation case", (value) => { value.observations[0].barcode = "CODE-0"; }, "missing_barcode"],
+    ["observation whitespace", (value) => { value.observations[0].barcode = " code-0 "; }, "missing_barcode"],
+    ["ledger expected case", (value) => { value.ledgerProof.expected.barcodes[0] = "CODE-0"; }, "ledger_expected_barcodes"],
+    ["ledger expected whitespace", (value) => { value.ledgerProof.expected.barcodes[0] = " code-0 "; }, "ledger_expected_barcodes"],
+    ["ledger event case", (value) => { value.ledgerProof.events[0].cleanCode = "CODE-0"; }, "ledger_event_identity"],
+    ["ledger event whitespace", (value) => { value.ledgerProof.events[0].cleanCode = " code-0 "; }, "ledger_event_identity"],
+    ["observation-ledger case", (value) => { value.ledgerProof.events[0].cleanCode = "CODE-0"; }, "observation_ledger_link"],
+    ["observation-ledger whitespace", (value) => { value.ledgerProof.events[0].cleanCode = " code-0 "; }, "observation_ledger_link"],
+  ]) {
+    const value = good();
+    mutate(value);
+    const validation = validateBatchResult(batch, value);
+    assert.equal(validation.passed, false, name);
+    assert.ok(validation.failures.some((failure) => failure.rule === rule), name);
+  }
+});
 test("rejects observation, identity, feed, proof, count, console, and egress violations", () => {
   for (const mutate of [
     (x) => x.observations.pop(), (x) => { x.observations[0].brand = "Wrong"; }, (x) => { x.observations[0].feedVisible = false; },

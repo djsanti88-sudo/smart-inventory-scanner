@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 function norm(value) { return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase(); }
 function hash(value) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
-function same(left, right) { return norm(left) === norm(right); }
+function sameDisplay(left, right) { return norm(left) === norm(right); }
+function sameCanonicalProductUid(left, right) { return left === right; }
 function percentile(values, percentage) { if (!values.length) return 0; const sorted = [...values].sort((a, b) => a - b); return sorted[Math.ceil((percentage / 100) * sorted.length) - 1]; }
 function fail(failures, barcode, rule, expected, observed) { failures.push({ barcode, rule, expected, observed }); }
 function stable(value) { return JSON.stringify(value); }
@@ -16,7 +17,7 @@ export function validateBatchResult(batch, result, anchor) {
   const byBarcode = new Map();
   const observationEventIds = new Set();
   for (const observation of observations) {
-    const key = norm(observation.barcode); if (byBarcode.has(key)) fail(failures, observation.barcode, "duplicate_barcode", "unique", observation.barcode); else byBarcode.set(key, observation);
+    const key = observation.barcode; if (byBarcode.has(key)) fail(failures, observation.barcode, "duplicate_barcode", "unique", observation.barcode); else byBarcode.set(key, observation);
     if (!observation.feedVisible) fail(failures, observation.barcode, "feed_visible", true, observation.feedVisible);
     if (!String(observation.eventId ?? "").trim() || observationEventIds.has(observation.eventId)) fail(failures, observation.barcode, "event_id", "unique non-blank", observation.eventId); observationEventIds.add(observation.eventId);
     if (!String(observation.matchedProductId ?? "").trim()) fail(failures, observation.barcode, "matched_product_id", "non-blank", observation.matchedProductId);
@@ -24,14 +25,14 @@ export function validateBatchResult(batch, result, anchor) {
     if (!Array.isArray(observation.nonLocalRequests) || observation.nonLocalRequests.length) fail(failures, observation.barcode, "nonlocal_requests", [], observation.nonLocalRequests);
   }
   for (const row of expected) {
-    const observation = byBarcode.get(norm(row.barcode));
+    const observation = byBarcode.get(row.barcode);
     if (!observation) { fail(failures, row.barcode, "missing_barcode", row.barcode, undefined); continue; }
     for (const [key, expectedValue] of [["canonicalProductUid", row.canonicalProductUid], ["brand", row.brand], ["model", row.model], ["size", row.size]]) {
-      if (String(expectedValue ?? "").trim() && !same(observation[key], expectedValue)) fail(failures, row.barcode, key, expectedValue, observation[key]);
+      if (String(expectedValue ?? "").trim() && !(key === "canonicalProductUid" ? sameCanonicalProductUid(observation[key], expectedValue) : sameDisplay(observation[key], expectedValue))) fail(failures, row.barcode, key, expectedValue, observation[key]);
     }
     if (norm(observation.status) !== "verified") fail(failures, row.barcode, "verified_status", "verified", observation.status);
   }
-  for (const [key, observation] of byBarcode) if (!expected.some((row) => norm(row.barcode) === key)) fail(failures, observation.barcode, "extra_barcode", "locked batch barcode", observation.barcode);
+  for (const [key, observation] of byBarcode) if (!expected.some((row) => row.barcode === key)) fail(failures, observation.barcode, "extra_barcode", "locked batch barcode", observation.barcode);
   if (!Array.isArray(result?.serverEgressAttempts) || result.serverEgressAttempts.length) fail(failures, "", "server_egress", [], result?.serverEgressAttempts);
   const proof = result?.ledgerProof;
   const assertionKeys = ["allExpectedBarcodesSeenExactlyOnce", "unexpectedBarcodeCount", "duplicateEventIdCount", "missingEventIdCount", "unmatchedEventCount", "canonicalIdentityMismatchCount", "finalEqualsReplay", "countEventIdsEqualReplayEventIds", "everyCountEventIdExistsInFeed", "expectedQuantity", "finalQuantity", "replayedQuantity", "noDrops", "noDuplicates", "passed"];
@@ -44,23 +45,23 @@ export function validateBatchResult(batch, result, anchor) {
   if (typeof proof?.sessionId !== "string" || !proof.sessionId || Number.isNaN(Date.parse(proof?.generatedAt))) fail(failures, "", "ledger_metadata", "sessionId + ISO generatedAt", proof);
   const events = Array.isArray(proof?.events) ? proof.events : [];
   if (proof?.schemaVersion !== 1 || events.length !== 100 || proof?.expected?.rows !== 100 || proof?.assertions?.passed !== true) fail(failures, "", "ledger_shape", "100 passing events", events.length);
-  const lockedBarcodes = expected.map((row) => norm(row.barcode)).sort();
-  const proofBarcodes = Array.isArray(proof?.expected?.barcodes) ? proof.expected.barcodes.map(norm).sort() : [];
+  const lockedBarcodes = expected.map((row) => row.barcode).sort();
+  const proofBarcodes = Array.isArray(proof?.expected?.barcodes) ? [...proof.expected.barcodes].sort() : [];
   if (proofBarcodes.join("|") !== lockedBarcodes.join("|")) fail(failures, "", "ledger_expected_barcodes", lockedBarcodes, proofBarcodes);
   const eventIds = new Set(); const eventById = new Map(); let duplicateEventIdCount = 0; let missingEventIdCount = 0; let unmatchedEventCount = 0;
   const eventBarcodes = [];
   const eventKeys = ["eventId", "cleanCode", "matchedProductId", "canonicalProductUid", "quantityDelta", "quantityAfterScan", "status"];
-  for (const event of events) { const keys = event && typeof event === "object" ? Object.keys(event) : []; const eventSchemaValid = Boolean(event) && typeof event.eventId === "string" && typeof event.cleanCode === "string" && typeof event.matchedProductId === "string" && typeof event.canonicalProductUid === "string" && typeof event.quantityDelta === "number" && Number.isFinite(event.quantityAfterScan) && typeof event.status === "string" && (!Object.hasOwn(event, "decodeStatus") || typeof event.decodeStatus === "string") && keys.every((key) => eventKeys.includes(key) || key === "decodeStatus") && eventKeys.every((key) => Object.hasOwn(event, key)); if (!eventSchemaValid) fail(failures, event?.cleanCode ?? "", "ledger_event_schema", "exact required event fields with optional string decodeStatus", event); const locked = expected.find((row) => same(row.barcode, event?.cleanCode)); if (!event?.eventId) missingEventIdCount += 1; else if (eventIds.has(event.eventId)) duplicateEventIdCount += 1; if (!event?.eventId || eventIds.has(event.eventId)) fail(failures, event?.cleanCode ?? "", "ledger_event_id", "unique non-blank", event?.eventId); eventIds.add(event?.eventId); eventById.set(event?.eventId, event); eventBarcodes.push(norm(event?.cleanCode)); if (!event?.matchedProductId) { unmatchedEventCount += 1; fail(failures, event?.cleanCode ?? "", "ledger_matched_product", "non-blank", event?.matchedProductId); } if (!locked || !same(event?.canonicalProductUid, locked.canonicalProductUid) || norm(event?.status) !== "verified" || event?.quantityDelta !== 1) fail(failures, event?.cleanCode ?? "", "ledger_event_identity", "locked verified +1", event); }
+  for (const event of events) { const keys = event && typeof event === "object" ? Object.keys(event) : []; const eventSchemaValid = Boolean(event) && typeof event.eventId === "string" && typeof event.cleanCode === "string" && typeof event.matchedProductId === "string" && typeof event.canonicalProductUid === "string" && typeof event.quantityDelta === "number" && Number.isFinite(event.quantityAfterScan) && typeof event.status === "string" && (!Object.hasOwn(event, "decodeStatus") || typeof event.decodeStatus === "string") && keys.every((key) => eventKeys.includes(key) || key === "decodeStatus") && eventKeys.every((key) => Object.hasOwn(event, key)); if (!eventSchemaValid) fail(failures, event?.cleanCode ?? "", "ledger_event_schema", "exact required event fields with optional string decodeStatus", event); const locked = expected.find((row) => row.barcode === event?.cleanCode); if (!event?.eventId) missingEventIdCount += 1; else if (eventIds.has(event.eventId)) duplicateEventIdCount += 1; if (!event?.eventId || eventIds.has(event.eventId)) fail(failures, event?.cleanCode ?? "", "ledger_event_id", "unique non-blank", event?.eventId); eventIds.add(event?.eventId); eventById.set(event?.eventId, event); eventBarcodes.push(event?.cleanCode); if (!event?.matchedProductId) { unmatchedEventCount += 1; fail(failures, event?.cleanCode ?? "", "ledger_matched_product", "non-blank", event?.matchedProductId); } if (!locked || !sameCanonicalProductUid(event?.canonicalProductUid, locked.canonicalProductUid) || norm(event?.status) !== "verified" || event?.quantityDelta !== 1) fail(failures, event?.cleanCode ?? "", "ledger_event_identity", "locked verified +1", event); }
   const canonicalIdentityMismatchCount = events.filter((event) => {
-    const locked = expected.find((row) => same(row.barcode, event?.cleanCode));
-    return !locked || !same(event?.canonicalProductUid, locked.canonicalProductUid);
+    const locked = expected.find((row) => row.barcode === event?.cleanCode);
+    return !locked || !sameCanonicalProductUid(event?.canonicalProductUid, locked.canonicalProductUid);
   }).length;
   if (eventBarcodes.sort().join("|") !== lockedBarcodes.join("|")) fail(failures, "", "ledger_event_barcodes", lockedBarcodes, eventBarcodes);
-  for (const observation of observations) { const event = eventById.get(observation.eventId); if (!event || !same(event.cleanCode, observation.barcode) || !same(event.matchedProductId, observation.matchedProductId) || !same(event.canonicalProductUid, observation.canonicalProductUid)) fail(failures, observation.barcode, "observation_ledger_link", "exact event/product/canonical link", event); }
+  for (const observation of observations) { const event = eventById.get(observation.eventId); if (!event || event.cleanCode !== observation.barcode || event.matchedProductId !== observation.matchedProductId || !sameCanonicalProductUid(event.canonicalProductUid, observation.canonicalProductUid)) fail(failures, observation.barcode, "observation_ledger_link", "exact event/product/canonical link", event); }
   const countLists = [proof?.finalCounts, proof?.replayedCounts];
   const memberships = countLists.map((counts) => (Array.isArray(counts) ? counts : []).flatMap((count) => count.scanEventIds ?? []));
   for (const ids of memberships) for (const id of ids) if (!eventById.has(id)) fail(failures, "", "count_event_in_feed", "feed event", id);
-  if (new Set(memberships[0]).size !== memberships[0].length || new Set(memberships[1]).size !== memberships[1].length || new Set(memberships[0]).size !== 100 || !same([...new Set(memberships[0])].sort().join("|"), [...new Set(memberships[1])].sort().join("|"))) fail(failures, "", "count_event_membership", "same 100 unique events", { final: memberships[0].length, replay: memberships[1].length });
+  if (new Set(memberships[0]).size !== memberships[0].length || new Set(memberships[1]).size !== memberships[1].length || new Set(memberships[0]).size !== 100 || stable([...new Set(memberships[0])].sort()) !== stable([...new Set(memberships[1])].sort())) fail(failures, "", "count_event_membership", "same 100 unique events", { final: memberships[0].length, replay: memberships[1].length });
   if (stable(proof?.finalCounts) !== stable(proof?.replayedCounts)) fail(failures, "", "final_replay_counts", "identical", "different");
   for (const counts of countLists) for (const count of Array.isArray(counts) ? counts : []) { if (Number(count.quantity) !== new Set(count.scanEventIds ?? []).size) fail(failures, "", "count_quantity_membership", "quantity equals unique event ids", count); for (const id of count.scanEventIds ?? []) if (eventById.get(id)?.matchedProductId !== count.productId) fail(failures, "", "count_product_membership", count.productId, eventById.get(id)?.matchedProductId); }
   const countedQuantity = (Array.isArray(proof?.finalCounts) ? proof.finalCounts : []).reduce((sum, count) => sum + Number(count.quantity || 0), 0);
