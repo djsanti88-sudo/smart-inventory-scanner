@@ -14,6 +14,8 @@ const CASES: Array<[string, string | null]> = [
   // --- separator-free / space-separated shorthand ---
   ["225 60 18", "225/60R18"],
   ["2256018", "225/60R18"],
+  ["2856020", "285/60R20"],
+  ["2356017", "235/60R17"],
   // --- flotation / commercial ---
   ["35X12.50R20", "35X12.50R20"],
   ["11R22.5", "11R22.5"],
@@ -47,6 +49,14 @@ const CASES: Array<[string, string | null]> = [
   ["12345", null],
   ["1234567", null], // 7 digits but 123/45/67 -> rim 67 out of range -> not a size
   ["9999999", null], // width 999 out of range
+  ["3095015", null], // compact 30x9.50R15 flotation, not a 309 mm metric width
+  ["3512520", null], // compact 35x12.50R20 flotation, not a 351 mm metric width
+  ["3312522", null], // compact 33x12.50R22 flotation, not a 331 mm metric width
+  ["10/75R15.3", null], // agricultural size must not be truncated to 75R15.3
+  ["12/80R15.3", null], // agricultural size must not be truncated to 80R15.3
+  ["1050/50R32", null], // a metric match must not start inside a longer numeric token
+  ["SKU225/60R18", null], // a metric match must not start inside an alphanumeric identifier
+  ["12/11R22.5", null], // a commercial match must not start after a slash
 
   // --- Bug 2 (owner mandate 2026-07-21, 310-row review): a bicycle "NN X N.NNN" dimension is NOT a
   // tire flotation size and must never be fabricated into one. Live-observed: Kenda bike tire

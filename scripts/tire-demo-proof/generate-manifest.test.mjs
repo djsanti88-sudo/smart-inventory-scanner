@@ -34,7 +34,7 @@ function barcode(index, ean = false) {
   return `${body}${checkDigit(body)}`;
 }
 
-function fixtureDatabase({ forceSize } = {}) {
+function fixtureDatabase({ forceSize, standardSize = "225/65R17" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "local-demo-manifest-"));
   const path = join(root, "knowledge.db");
   const db = new Database(path);
@@ -46,7 +46,7 @@ function fixtureDatabase({ forceSize } = {}) {
   const insert = db.prepare(`INSERT INTO tires VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const add = (index, patch = {}) => insert.run(
     patch.barcode ?? barcode(index, patch.barcode_type === "ean"), patch.barcode_type ?? "upc", `TIRE_${index}`,
-    "Brand", `Model ${index}`, "", forceSize ?? patch.size ?? "225/65R17", "102", "H", patch.mpn ?? "", "passenger",
+    "Brand", `Model ${index}`, "", forceSize ?? patch.size ?? standardSize, "102", "H", patch.mpn ?? "", "passenger",
     patch.season ?? "all season", patch.sourceCount ?? 2, patch.confidence ?? "verified_2src", "active_retail",
     "auto_count_candidate", patch.completeness ?? 90,
   );
@@ -120,6 +120,51 @@ test("generator writes verified immutable batches before atomically activating t
   assert.equal(pointer.databaseSha256, dbHash);
   assert.equal(pointer.manifestSha256, result.manifest.manifestSha256);
   assert.equal(pointer.runDirectory.includes(".."), false);
+});
+
+test("generator locks provider display size while anchoring the raw database bytes", () => {
+  const compact = fixtureDatabase({ standardSize: "2856020" });
+  const canonical = fixtureDatabase({ standardSize: "285/60R20" });
+  const compactHash = createHash("sha256").update(readFileSync(compact.path)).digest("hex");
+  const canonicalHash = createHash("sha256").update(readFileSync(canonical.path)).digest("hex");
+  const compactResult = generateLocalDemoManifest({
+    databasePath: compact.path,
+    reportsRoot: join(compact.root, "reports", "local-tire-demo"),
+    gitSha: "abc123def456",
+    generatedAt: "2026-07-29T00:00:00.000Z",
+  });
+  const canonicalResult = generateLocalDemoManifest({
+    databasePath: canonical.path,
+    reportsRoot: join(canonical.root, "reports", "local-tire-demo"),
+    gitSha: "abc123def456",
+    generatedAt: "2026-07-29T00:00:00.000Z",
+  });
+  const source = sourceRows(compact.path).find((row) => row.size === "2856020");
+  const projected = compactResult.manifest.rows.find((row) => row.barcode === source?.barcode);
+  assert.ok(source);
+  assert.ok(projected);
+  assert.equal(projected.size, "285/60R20");
+  assert.equal(projected.barcode, source.barcode);
+  assert.equal(projected.canonicalProductUid, source.canonical_product_uid);
+  assert.equal(compactResult.manifest.databaseSha256, compactHash);
+  assert.equal(canonicalResult.manifest.databaseSha256, canonicalHash);
+  assert.notEqual(compactHash, canonicalHash);
+  assert.notEqual(compactResult.pointer.runDirectory, canonicalResult.pointer.runDirectory);
+});
+
+test("validator rejects a rehashed different valid display size", () => {
+  const fixture = fixtureDatabase();
+  const result = generateLocalDemoManifest({
+    databasePath: fixture.path,
+    reportsRoot: join(fixture.root, "reports", "local-tire-demo"),
+    gitSha: "abc123def456",
+    generatedAt: "2026-07-29T00:00:00.000Z",
+  });
+  const { manifest, batches } = corruptedResult(result, 2700, (row) => { row.size = "285/60R20"; });
+  assert.throws(
+    () => validateManifest(manifest, batches, { sourceRows: sourceRows(fixture.path) }),
+    /deterministic|sample|source/i,
+  );
 });
 
 test("validator rejects recomputed-hash duplicate barcode corruption", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { isCountableLocalDemoRow } from "./local-demo-countability.ts";
+import { isCountableLocalDemoRow, reconstructLocalDemoProviderIdentity } from "./local-demo-countability.ts";
 
 function checkDigit(body) {
   let sum = 0;
@@ -32,4 +32,11 @@ test("local demo countability uses the production identity gate", () => {
   assert.equal(isCountableLocalDemoRow(trustedRow("LT33X12.50R15")), true);
   assert.equal(isCountableLocalDemoRow(trustedRow("33125020")), false);
   assert.equal(isCountableLocalDemoRow(trustedRow("13/70R16")), false);
+});
+
+test("provider display identity uses the deterministic normalized size and preserves an unsupported raw size", () => {
+  assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("2856020")).displaySize, "285/60R20");
+  assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("LT33/12.50R15")).displaySize, "LT33X12.50R15");
+  assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("2356017")).displaySize, "235/60R17");
+  assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("13/70R16")).displaySize, "13/70R16");
 });

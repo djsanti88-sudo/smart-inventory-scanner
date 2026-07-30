@@ -53,7 +53,7 @@ function loadCountability() {
   return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 }
 
-const { countableLocalDemoRowIndexes } = await loadCountability();
+const { countableLocalDemoRowIndexes, projectLocalDemoProviderRow } = await loadCountability();
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -213,8 +213,9 @@ export function validateManifest(manifest, batches, { sourceRows } = {}) {
   }
   assertCertifiedRows(manifest.rows);
   for (const [index, batch] of batches.entries()) verifyBatch(batch, manifest, index);
-  assertSemanticStrata(manifest.rows, sourceRows);
-  assertExactDeterministicSample(manifest.rows, sourceRows);
+  const projectedSourceRows = projectSourceRows(sourceRows);
+  assertSemanticStrata(manifest.rows, projectedSourceRows);
+  assertExactDeterministicSample(manifest.rows, projectedSourceRows);
 }
 
 function databaseRows(databasePath) {
@@ -235,7 +236,12 @@ function countableSourceRows(rows) {
   if (!Array.isArray(indexes) || !indexes.every((index) => Number.isSafeInteger(index) && index >= 0 && index < rows.length)) {
     throw new Error("Local demo countability helper returned invalid row indexes.");
   }
-  return indexes.map((index) => rows[index]);
+  return indexes.map((index) => projectLocalDemoProviderRow(rows[index]));
+}
+
+function projectSourceRows(rows) {
+  if (!Array.isArray(rows)) throw new Error("Local tire manifest validation requires the eligible source pool.");
+  return rows.map((row) => projectLocalDemoProviderRow(row));
 }
 
 export function generateLocalDemoManifest({

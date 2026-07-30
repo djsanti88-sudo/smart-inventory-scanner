@@ -303,6 +303,28 @@ describe("resolveExactBarcodeLocal", () => {
     expect(hasCountableTireIdentity(result!.results[0])).toBe(true);
   });
 
+  it.each([
+    "3095015",
+    "10/75R15.3",
+    "1050/50R32",
+  ])("preserves the raw corpus size when %s cannot be normalized safely", async (size) => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      barcode: "0840139634284",
+      size,
+      raw_size_text: size,
+      load_index: "",
+      speed_rating: "",
+      source_count: 3,
+    });
+
+    const result = await resolveExactBarcodeLocal("0840139634284");
+
+    expect(result).not.toBeNull();
+    expect(result!.results[0].specsShort).toBe(size);
+    expect(result!.results[0].productName).toContain(size);
+  });
+
   it("does not duplicate load and speed when the corpus size already includes them", async () => {
     mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
       ...KUMHO_ROW_REAL_CONVENTION,

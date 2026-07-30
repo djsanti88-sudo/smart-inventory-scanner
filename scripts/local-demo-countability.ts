@@ -11,20 +11,30 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+/** Rebuild the display and identity text used by TireKnowledgeProvider.toResult. */
+export function reconstructLocalDemoProviderIdentity(row: LocalDemoRow) {
+  const displaySize = normalizeTireSize(text(row.size))?.split(" ")[0] ?? text(row.size);
+  const loadSpeed = [text(row.load_index), text(row.speed_rating)].filter(Boolean).join("");
+  const specs = [displaySize, loadSpeed].filter(Boolean).join(" ");
+  const brand = prettifyBrand(text(row.brand));
+  const model = prettifyProductName(text(row.model_display) || text(row.model));
+  const productName = [brand, model, specs].filter(Boolean).join(" ");
+  return { displaySize, specs, brand, model, productName };
+}
+
+export function projectLocalDemoProviderRow(row: LocalDemoRow): LocalDemoRow {
+  return { ...row, size: reconstructLocalDemoProviderIdentity(row).displaySize };
+}
+
 /**
- * Rebuild only the identity text used by TireKnowledgeProvider.toResult, then
- * ask the production countability gate. This deliberately does not add a
- * manifest-only parser or accept a size the scanner itself would reject.
+ * Ask the production countability gate against the exact provider display
+ * identity. This deliberately does not add a manifest-only parser or accept a
+ * size the scanner itself would reject.
  */
 export function isCountableLocalDemoRow(row: LocalDemoRow): boolean {
   if (!isTrustedLocalDemoTireRow(row)) return false;
 
-  const size = normalizeTireSize(text(row.size))?.split(" ")[0] ?? text(row.size);
-  const loadSpeed = [text(row.load_index), text(row.speed_rating)].filter(Boolean).join("");
-  const specs = [size, loadSpeed].filter(Boolean).join(" ");
-  const brand = prettifyBrand(text(row.brand));
-  const model = prettifyProductName(text(row.model_display) || text(row.model));
-  const productName = [brand, model, specs].filter(Boolean).join(" ");
+  const { specs, brand, productName } = reconstructLocalDemoProviderIdentity(row);
 
   return hasCountableTireIdentity({ productName, brand, category: "Tire", specsShort: specs });
 }

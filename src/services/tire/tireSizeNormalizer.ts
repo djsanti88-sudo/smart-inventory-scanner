@@ -13,7 +13,7 @@ export type TireSizeMatch = {
 };
 
 // Metric / P-metric / LT / ST: P225/65ZR18, 225/60R18, LT285/55R20, 295/75R22.5 (decimal rim ok).
-const METRIC = /(?:(?<![A-Z0-9])(P|LT|ST)\s*)?(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*(\d{2}(?:\.\d)?)/i;
+const METRIC = /(?<![A-Z0-9])(?:(P|LT|ST)\s*)?(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*(\d{2}(?:\.\d)?)/i;
 // Flotation: 35X12.50R20 (the middle is a decimal; construction letter optional). A construction
 // prefix (LT/P/ST) is only consumed when directly attached to the flotation number
 // ("LT33X12.50R20"). A separated token ("... model LT 35X12.50R20") is ambiguous and must
@@ -35,7 +35,7 @@ const PREFIX_SLASH_FLOTATION = /(?<![A-Z0-9])(P|LT|ST)(\d{2})\s*\/\s*(\d{1,2}\.\
 const okFlotationDiameter = (d: number) => d >= 22 && d <= 44;
 const okFlotationWidth = (w: number) => w >= 4 && w <= 18;
 // Commercial without an aspect slash: 11R22.5 (decimal rim required to avoid false positives).
-const COMMERCIAL = /(\d{2,3})\s*(ZR|R)\s*(\d{2}\.\d)/i;
+const COMMERCIAL = /(?<![A-Z0-9/])(\d{2,3})\s*(ZR|R)\s*(\d{2}\.\d)/i;
 // Space-separated shorthand: "225 60 18".
 const SPACED = /\b(\d{3})\s+(\d{2})\s+(\d{2})\b/;
 // Space-separated shorthand with an explicit R before the rim: "205 50 R17".
@@ -117,7 +117,7 @@ export function matchTireSize(input: string | null | undefined): TireSizeMatch |
   if (m) {
     const d = m[1];
     const [w, a, r] = [d.slice(0, 3), d.slice(3, 5), d.slice(5, 7)];
-    if (okWidth(Number(w)) && okAspect(Number(a)) && okRim(Number(r))) {
+    if (okWidth(Number(w)) && Number(w) % 5 === 0 && okAspect(Number(a)) && okRim(Number(r))) {
       return { canonical: `${w}/${a}R${r}`, raw: m[0] };
     }
   }
