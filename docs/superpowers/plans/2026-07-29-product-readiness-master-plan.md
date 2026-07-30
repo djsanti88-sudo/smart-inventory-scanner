@@ -91,8 +91,8 @@ Detail lives in `docs/superpowers/plans/2026-07-29-docs-consolidation-and-repo-h
 | Resolve + flip production to `live` auth; complete remaining `GO_LIVE_CHECKLIST.md` steps; verify isolation with 2 real accounts + `test:firebase:cloud-smoke` | L | H | Yes |
 | **Billing v1 (customers 1–5): Stripe Payment Link + manual access gating by businessId** — zero code, ships this week | S | H | Yes (Stripe acct exists) |
 | Billing v2 (DEFERRED until manual stops scaling): Stripe Checkout + subscription + webhook plan-gating | L | H | Yes — do NOT build pre-revenue |
-| Per-tenant usage/cost metering + plan-tier caps on the paid decode ladder (today capped only globally) — required before customer #2 to avoid silent AI-cost loss | M | H | No |
-| Self-serve signup polish + rewrite `workspace_failed` recovery UX + member-management UI | M | H | Depends on auth flip |
+| ~~Per-tenant usage/cost metering~~ **CORRECTED 2026-07-29 (H2 scout): per-account daily-cap metering is ALREADY BUILT and wired** (`src/services/security/aiSpendGuard.ts`, `perAccountDailyKey`/`chargePerAccountDailySlot`, distinct namespace per `businessId`). The real M2 gap is **plan-tier differentiation of that cap** (today one global default limit, not tier-scoped) **+ owner/customer-facing usage visibility** (no UI surfaces the per-account count/cap today), not building metering from scratch. See `docs/superpowers/specs/2026-07-29-m2-engineering-specs.md`. | S/M | H | No |
+| Self-serve signup polish + rewrite `workspace_failed` recovery UX + member-management UI. **NOTE 2026-07-29: partially built already** (workspace_failed retry path and a member UI exist in some form per H2's scout); this item is polish/completion, not greenfield. Live-auth is verified (see §3, "Production auth mode = LIVE"), so the signup-spec dependency this item used to block on is resolved. See `docs/superpowers/specs/2026-07-29-m2-engineering-specs.md`. | M | H | Depends on auth flip |
 
 ### Milestone 3 — Win the sale (value + trust)
 | Item | Effort | ROI | Owner-gated? |
@@ -124,7 +124,7 @@ Detail lives in `docs/superpowers/plans/2026-07-29-docs-consolidation-and-repo-h
 
 ## 6. Risks
 - **Prod mode ambiguity** (Milestone 0 unknown) — until resolved, we don't know if we're protecting live customer data or a demo. Resolve before anything else.
-- **Unmetered per-tenant AI cost + no billing** — onboarding a paying customer before metering can lose money silently on every account.
+- ~~Unmetered per-tenant AI cost~~ **CORRECTED 2026-07-29: per-account metering already exists** (`aiSpendGuard.ts`); the live risk is no plan-tier caps + no usage visibility (see M2 correction, §4) + no billing. Onboarding a paying customer before tier caps/billing exist can still lose money silently.
 - **Editing load-bearing files while pre-existing `audit-fixes` code changes sit uncommitted** — keep Milestone-0 commits doc-only; never entangle.
 - **Legal blockers are cheap to fix, catastrophic to skip** — do not charge a customer before ToS/Privacy/DPA + ODbL are handled.
 
@@ -143,7 +143,7 @@ Detail lives in `docs/superpowers/plans/2026-07-29-docs-consolidation-and-repo-h
 
 - **M0:** `GUARDRAILS.md` exists and auto-loads every session; `REPO_HEALTH.md` live; exactly one docs index; the prod-mode and FIREBASE_SETUP/DEPLOY_TRUTH contradictions resolved in-doc.
 - **M1:** Firestore PITR + delete-protection ON and a restore drill executed + recorded; "Clear local cache" cannot silently destroy un-synced scans; error tracking + alerting fire on kill_switch/cap_blocked/breaker/5xx; `/api/health` + external uptime monitor live; public `catalogEntries` no longer exposes raw businessId/dispute text.
-- **M2:** prod auth mode confirmed; if selling, `AUTH_MODE=live` with tenant isolation proven by two real accounts + `test:firebase:cloud-smoke`; Stripe billing live and access gated by plan per businessId; per-tenant paid-decode cost metered and capped.
+- **M2:** prod auth mode confirmed; if selling, `AUTH_MODE=live` with tenant isolation proven by two real accounts + `test:firebase:cloud-smoke`; Stripe billing live and access gated by plan per businessId; per-tenant paid-decode cost metered and capped (**metering itself already exists**; the remaining acceptance bar is plan-tier caps + visible usage, per the 2026-07-29 correction above).
 - **M3:** reconciliation accepts CSV/TSV/XLSX from any POS, de-branded, optional dollar variance; the counted-quantity panel fires on **every** scan outcome, not only `known`; `unitCost` role-gated from `counter`/`viewer`.
 - **M4:** AI-drafted ToS + Privacy + DPA published with "professional review pending" banner; ODbL attribution in place + a tracked `RISK_REGISTER.md` entry; US geo-fence live; Firecrawl commercial-use confirmed; sub-processors disclosed. (Paid legal review, sales-tax nexus, trademark = parked, revenue-gated.)
 - **Per item:** the relevant gate passes (`test:ledger` for counting, `test:firebase` for rules/tenancy, `qa:bots:*` for customer-facing flows) and a browser/proof artifact exists for UI changes. No "done" claim without a run + output.

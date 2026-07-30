@@ -133,3 +133,8 @@ worktrees are unchanged apart from the 11 removed above.
   once the branch is deleted (`git worktree remove`), propose-only, no action taken.
 - `src/eval/eval.test.ts` still writes its mock-eval table to the deleted `docs/decode/eval-baseline.md` path (try/catch-wrapped, harmless, but will resurrect the file untracked) - retarget the output path in a code round.
 - `src/services/decode/{index.ts,contract.ts,README.md}` comments cite the deleted `docs/decode/ARCHITECTURE.md` - repoint to `docs/DECODER_ARCHITECTURE.md` in a code round.
+- health `/api/health` rate-limit key from `x-forwarded-for` is client-spoofable; each allowed hit does a real Firestore+Turso read (low cost, follow-up hardening) - L3 minor.
+- `computeDollarVariance` drops reconcile lines whose `unitCost` is keyed by name-only identity (not partNumber) from the dollar total - documented degradation, revisit.
+- scan feedback panel omits running quantity during `isDecoding` ("Looking up...") - cosmetic.
+- `npm audit`: next 16.2.12 applied (7 CVEs closed); remaining majors need planned upgrades - sharp, exceljs (downgrade suggested - do NOT take blindly), firebase-admin storage chain (unused, grep-confirmed). See `docs/superpowers/reports/2026-07-29-npm-audit-triage.md`.
+- backfill `--execute` against PRODUCTION is owner-gated and not yet run - legacy docs may still carry `disputedBy`/`auditLog` on public parents until it runs.
