@@ -1,5 +1,6 @@
 import "server-only";
 
+import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebaseAdmin";
 import { canonicalGtin } from "@/services/upc/gtin";
 import { COLLECTIONS, type CatalogEntry as DbCatalogEntry } from "@/services/db/types";
@@ -165,24 +166,62 @@ export async function appendMasterCatalogEntry(
         // very next strong ladder decode of the same code either. Unlike "rejected" (fully skipped),
         // the fresh decode result IS useful evidence, so it lands as a "pending" re-candidate for the
         // reviewing human instead of being discarded - but verificationStatus is demoted from the
-        // entry's own "verified" to "pending" and the dispute history (disputeCount/disputedBy/
-        // auditLog) is preserved untouched so the reviewer sees both the fresh evidence and the
-        // dispute trail together.
+        // entry's own "verified" to "pending" and the dispute history (disputeCount) is preserved
+        // untouched so the reviewer sees both the fresh evidence and the dispute trail together.
+        //
+        // M1 deep-review fix (RE-LEAK): disputedBy/auditLog carry raw businessId + free-text reasons
+        // and must NEVER land on the public catalogEntries parent doc (commit f416404e moved
+        // catalogDispute.ts's writes into the locked catalogEntries/{id}/moderation/log subcollection
+        // for exactly this reason - see catalogModeration.rules.test.ts). This remerge path used to
+        // spread existing.disputedBy/auditLog straight back onto the parent, re-opening that leak.
+        // If a pre-split ("legacy") doc still carries those fields directly, migrate them into the
+        // moderation subcollection HERE (same transaction) and strip them off the parent instead.
         if (existing?.verificationStatus === "disputed") {
           const { id: _id, ...rest } = entry;
           void _id;
-          tx.set(
-            ref,
-            {
-              ...rest,
-              verificationStatus: "pending",
-              updatedAt: new Date().toISOString(),
-              ...(existing.disputeCount !== undefined ? { disputeCount: existing.disputeCount } : {}),
-              ...(existing.disputedBy !== undefined ? { disputedBy: existing.disputedBy } : {}),
-              ...(existing.auditLog !== undefined ? { auditLog: existing.auditLog } : {}),
-            },
-            { merge: true },
-          );
+          const now = new Date().toISOString();
+          const legacyDisputedBy = existing.disputedBy;
+          const legacyAuditLog = existing.auditLog;
+          const hasLegacyModerationFields = legacyDisputedBy !== undefined || legacyAuditLog !== undefined;
+
+          const parentUpdate: Record<string, unknown> = {
+            ...rest,
+            verificationStatus: "pending",
+            updatedAt: now,
+            ...(existing.disputeCount !== undefined ? { disputeCount: existing.disputeCount } : {}),
+          };
+
+          if (hasLegacyModerationFields) {
+            const modRef = ref.collection("moderation").doc("log");
+            const modSnap = await tx.get(modRef);
+            const modData = (modSnap.exists ? modSnap.data() : undefined) as
+              | { disputedBy?: Array<{ businessId?: string }>; auditLog?: unknown[] }
+              | undefined;
+            const existingModDisputedBy = Array.isArray(modData?.disputedBy) ? modData!.disputedBy : [];
+            const existingModAuditLog = Array.isArray(modData?.auditLog) ? modData!.auditLog : [];
+            const legacyDisputedByArr = (Array.isArray(legacyDisputedBy) ? legacyDisputedBy : []) as Array<{
+              businessId?: string;
+            }>;
+            const legacyAuditLogArr = Array.isArray(legacyAuditLog) ? legacyAuditLog : [];
+
+            // Merge (never clobber): keep the moderation doc's own entries as-is, fold in any legacy
+            // businessId not already recorded there so the same business is never double-counted.
+            const knownBusinessIds = new Set(existingModDisputedBy.map((d) => d?.businessId));
+            const mergedDisputedBy = [
+              ...existingModDisputedBy,
+              ...legacyDisputedByArr.filter((d) => !knownBusinessIds.has(d?.businessId)),
+            ];
+            const mergedAuditLog = [...legacyAuditLogArr, ...existingModAuditLog];
+
+            tx.set(modRef, { disputedBy: mergedDisputedBy, auditLog: mergedAuditLog }, { merge: true });
+
+            // Strip the legacy fields off the PARENT explicitly - merge:true alone leaves pre-existing
+            // fields untouched unless they are named in the payload with a delete sentinel.
+            parentUpdate.disputedBy = FieldValue.delete();
+            parentUpdate.auditLog = FieldValue.delete();
+          }
+
+          tx.set(ref, parentUpdate, { merge: true });
           return "written" as const;
         }
       }

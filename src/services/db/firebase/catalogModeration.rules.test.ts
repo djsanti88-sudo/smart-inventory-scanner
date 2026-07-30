@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, type Firestore } from "firebase/firestore";
+import { doc, getDoc, getDocs, setDoc, collection, collectionGroup, type Firestore } from "firebase/firestore";
 import { readFileSync } from "node:fs";
 
 // M1 spec 1 (catalogEntries public-read leak): disputedBy/auditLog carry raw businessId + free-text
@@ -76,6 +76,33 @@ describe.skipIf(!ready)("catalogEntries moderation subcollection is locked (emul
     await expect(
       setDoc(doc(stranger, "catalogEntries", ENTRY_ID, "moderation", "log"), { disputedBy: [] }),
     ).rejects.toBeTruthy();
+  });
+
+  // Deep-review fix 4 (proof-gap closure): the direct-doc-read/write cases above prove `get`/`set`
+  // are denied, but Firestore rules evaluate `list` and `collectionGroup` queries as a SEPARATE
+  // request type - a rule that only guards `get` would leave a query-based path open. The rules file
+  // has no `match /{path=**}/moderation/{docId}` wildcard granting collectionGroup access, and the
+  // catch-all `match /{document=**} { allow read, write: if false; }` denies anything unmatched, so
+  // both an anonymous client's collectionGroup("moderation") query and a direct list on the
+  // subcollection must fail closed the same way the single-doc reads do.
+  it("an unauthenticated client CANNOT collectionGroup-query across every moderation subcollection", async () => {
+    const anon = env.unauthenticatedContext().firestore() as unknown as Firestore;
+    await expect(getDocs(collectionGroup(anon, "moderation"))).rejects.toBeTruthy();
+  });
+
+  it("an authenticated, unrelated-business client CANNOT collectionGroup-query across every moderation subcollection either", async () => {
+    const stranger = env.authenticatedContext("stranger-uid").firestore() as unknown as Firestore;
+    await expect(getDocs(collectionGroup(stranger, "moderation"))).rejects.toBeTruthy();
+  });
+
+  it("an unauthenticated client CANNOT list (getDocs) the moderation subcollection directly", async () => {
+    const anon = env.unauthenticatedContext().firestore() as unknown as Firestore;
+    await expect(getDocs(collection(anon, "catalogEntries", ENTRY_ID, "moderation"))).rejects.toBeTruthy();
+  });
+
+  it("an authenticated, unrelated-business client CANNOT list (getDocs) the moderation subcollection directly either", async () => {
+    const stranger = env.authenticatedContext("stranger-uid").firestore() as unknown as Firestore;
+    await expect(getDocs(collection(stranger, "catalogEntries", ENTRY_ID, "moderation"))).rejects.toBeTruthy();
   });
 
   it("retailCatalogEntries carries the identical locked moderation shape", async () => {

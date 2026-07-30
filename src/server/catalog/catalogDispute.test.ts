@@ -138,6 +138,41 @@ describe("disputeCatalogEntry", () => {
     expect(mocks.deletePersistedDecode).not.toHaveBeenCalled();
   });
 
+  // M1 deep-review fix 3 (distinct-business threshold): the "3 distinct businesses" demotion
+  // (HUMAN_VERIFIED_THRESHOLD) and the plain dedup below it both count on `alreadyDisputedByThisBusiness`
+  // never mistaking a business for "new" just because it already disputed once. That dedup MUST be
+  // sourced solely from the locked moderation subcollection doc (modData.disputedBy) - never from
+  // whatever the public parent doc happens to carry, including a STALE/legacy disputedBy field left
+  // over from before commit f416404e split the two apart (or not yet purged by the masterAppend.ts
+  // migration / scripts/backfill-catalog-moderation.mjs). If the dedup ever fell back to reading the
+  // parent's own disputedBy, a business already recorded in moderation but "missing" from a stale/
+  // empty parent field could be double-counted toward the threshold on a second dispute.
+  it("distinct-business dedup is sourced ONLY from the moderation subcollection - a business already recorded there counts once even when the parent doc's own (stale) disputedBy field disagrees", async () => {
+    const existing = {
+      verificationStatus: "disputed",
+      provenanceTier: "ladder_verified_strong",
+      disputeCount: 1,
+      // Stale/legacy parent field that disagrees with moderation (empty, as if never migrated) - must
+      // be completely ignored by the dedup and count logic.
+      disputedBy: [],
+    };
+    const modData = { disputedBy: [{ businessId: "biz-a", at: "2026-07-20T00:00:00.000Z" }], auditLog: [] };
+    const { tx, updateCalls, setCalls } = makeMockTx(existing, true, modData, true);
+    const db = makeMockDb(tx, true, existing);
+    const result = await disputeCatalogEntry({ canonical: "00012345678905", businessId: "biz-a" }, { db });
+    // biz-a is already recorded in the moderation doc - a second dispute from biz-a must be deduped
+    // (counts once), regardless of the parent's own stale disputedBy field showing no record of it.
+    expect(result).toEqual({ ok: true, disputeCount: 1, changed: false });
+    if (updateCalls.length > 0) {
+      expect(updateCalls[0].data.disputeCount).toBeUndefined();
+    }
+    if (setCalls.length > 0) {
+      const modPayload = setCalls[0].data.disputedBy as Array<{ businessId: string }>;
+      // Still exactly one entry for biz-a (a timestamp refresh, never a duplicate append).
+      expect(modPayload.filter((d) => d.businessId === "biz-a")).toHaveLength(1);
+    }
+  });
+
   it("a different businessId on the same doc increments disputeCount to 2 (moderation doc gains the new business)", async () => {
     const existing = { verificationStatus: "disputed", provenanceTier: "ladder_verified_strong", disputeCount: 1 };
     const modData = { disputedBy: [{ businessId: "biz-a", at: "2026-07-20T00:00:00.000Z" }], auditLog: [] };
