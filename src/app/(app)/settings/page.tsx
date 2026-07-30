@@ -11,6 +11,7 @@ import { CleanupRecommendations } from "@/components/CleanupRecommendations";
 import { OwnerPinSettings } from "@/components/OwnerPinSettings";
 import { GptLadderPanel } from "@/components/GptLadderPanel";
 import { GeminiStatusRow } from "@/components/GeminiStatusRow";
+import { KillSwitchBanner } from "@/components/KillSwitchBanner";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import { getSession, onAuthChange } from "@/lib/auth";
 import { runSignOutFlow, wipeAndSignOut } from "@/services/auth/signOutFlow";
@@ -20,6 +21,9 @@ export default function SettingsPage() {
   const update = useScanStore((s) => s.updateSettings);
   const businessId = useScanStore((s) => s.businessId);
   const clearLocalCache = useScanStore((s) => s.clearLocalCache);
+  // Spec 3 (M1, clear-cache guard): reuse the store's existing pendingCount() selector rather than
+  // re-deriving pendingSyncQueue.length inline.
+  const pendingCount = useScanStore((s) => s.pendingCount());
   const aiStatus = useScanStore((s) => s.aiStatus);
   const refreshAiStatus = useScanStore((s) => s.refreshAiStatus);
   const setEmergencyStop = useScanStore((s) => s.setEmergencyStop);
@@ -71,12 +75,17 @@ export default function SettingsPage() {
   }
 
   function handleClearCache() {
-    const ok =
-      typeof window === "undefined" ||
-      window.confirm(
-        "Clear LOCAL browser cache? This wipes this browser's scan session, pending sync, and local " +
-          "cached data only. Your cloud data is NOT deleted.",
-      );
+    // Spec 3 (M1, clear-cache guard): a generic confirm reads the same whether nothing is at risk or
+    // real unsynced work is about to vanish. With pending scans, force a harder-worded confirm that
+    // NAMES the exact count so the warning cannot be ignored on autopilot.
+    const message =
+      pendingCount > 0
+        ? `You have ${pendingCount} scan${pendingCount === 1 ? "" : "s"} not yet synced to the ` +
+          `cloud. Clearing local cache will PERMANENTLY DISCARD ${pendingCount === 1 ? "it" : "them"} ` +
+          `if they have not synced. Continue?`
+        : "Clear LOCAL browser cache? This wipes this browser's scan session and local cached data. " +
+          "Your cloud data is NOT deleted.";
+    const ok = typeof window === "undefined" || window.confirm(message);
     if (!ok) return;
     if (requiresOwnerPin("clearCache", hasPin)) {
       setPinPrompt(true);
@@ -286,6 +295,7 @@ export default function SettingsPage() {
         <Row label="Last failure reason">
           <span className="text-sm text-zinc-600" data-testid="last-failure">{aiStatus.lastFailureReason || "none"}</span>
         </Row>
+        <KillSwitchBanner killSwitchOn={aiStatus.killSwitchOn} />
         <Toggle
           label="Emergency stop (pause all AI calls)"
           checked={aiStatus.emergencyStop}

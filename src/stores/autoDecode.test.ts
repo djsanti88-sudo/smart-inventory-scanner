@@ -237,6 +237,31 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect(store.getState().aiStatus.gptLadder).toEqual({ spentTodayUsd: 1, capUsd: 3, callsToday: 2, enabled: true });
   });
 
+  // Spec 2 (M1, kill-switch visibility): refreshAiStatus must adopt the GET response's killSwitchOn
+  // field so Settings can warn when the SERVER (not the client emergencyStop toggle) has disabled AI.
+  it("refreshAiStatus (Spec 2) adopts killSwitchOn: true from the GET response", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [], killSwitchOn: true });
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    expect(store.getState().aiStatus.killSwitchOn).toBe(true);
+  });
+
+  it("refreshAiStatus (Spec 2) defaults killSwitchOn to false when the GET response omits it", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, killSwitchOn: true } }));
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [] });
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    expect(store.getState().aiStatus.killSwitchOn).toBe(false);
+  });
+
   it("a KNOWN (approved) scan never calls AI", () => {
     const store = aggressiveStore();
     const { spy, restore } = stub(VERIFIED);

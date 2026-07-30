@@ -174,6 +174,10 @@ export async function GET(request: Request) {
   // (readDailyUsed never increments), so this GET never inflates the counter it is reporting on.
   const dailyLimit = intEnv(process.env.AI_LOOKUP_DAILY_LIMIT, 2000);
   const dailyUsed = await readDailyUsed(await ladderStorage());
+  // Spec 2 (M1, kill-switch visibility): the POST handler already 503s every request when the SERVER
+  // kill switch is on (line ~234 below); this GET status endpoint must say so too, or Settings looks
+  // healthy (missingKeys empty, liveEnabled true) while every scan silently fails to decode.
+  const killSwitch = killSwitchOn();
   return Response.json({
     liveEnabled: process.env.ENABLE_LIVE_AI_LOOKUP !== "false",
     autoDecodeOnScan: process.env.ENABLE_AUTO_DECODE_ON_SCAN !== "false",
@@ -220,6 +224,10 @@ export async function GET(request: Request) {
     // itself never calls Gemini; it is corpus -> Go-UPC -> Fetch V2 -> GPT only.
     decodeLadder: ["corpus", "go_upc", "fetch_v2", "gpt"],
     geminiUsedForDecode: false,
+    // Spec 2 (M1): SERVER-side emergency stop (AI_LOOKUP_KILL_SWITCH env var). Distinct from the
+    // client-side `emergencyStop` preference in aiStatus - this one the shop owner cannot toggle
+    // themselves, so Settings must show it as a separate, clearly-labeled condition.
+    killSwitchOn: killSwitch,
   });
 }
 

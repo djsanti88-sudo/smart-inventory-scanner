@@ -243,6 +243,7 @@ const DEFAULT_AI_STATUS: AiStatus = {
   lastAttemptAt: null,
   lastProvider: "",
   lastFailureReason: "",
+  killSwitchOn: false,
 };
 
 /**
@@ -2846,6 +2847,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // ladder order and confirm Gemini is never called during decode.
                 decodeLadder: Array.isArray(d.decodeLadder) ? d.decodeLadder : s.aiStatus.decodeLadder,
                 geminiUsedForDecode: Boolean(d.geminiUsedForDecode),
+                // Spec 2 (M1): server-authoritative, same as every other flag in this block - a stale
+                // client value must never mask a live server kill switch, and an omitted field (older/
+                // mocked GET response) correctly defaults to false (not on).
+                killSwitchOn: Boolean(d.killSwitchOn),
                 gptLadder:
                   d.gptLadder && typeof d.gptLadder === "object"
                     ? {
