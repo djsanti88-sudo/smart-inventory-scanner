@@ -29,9 +29,31 @@ beforeEach(() => {
   ensureWorkspace.mockReset();
   replace.mockReset();
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 describe("login page reset + google", () => {
+  it("shows an auth-free local-demo entry point without auth controls or calls", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+
+    render(<LoginPage />);
+
+    expect(screen.getByRole("heading", { name: "Local tire demo" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open scanner" })).toHaveAttribute("href", "/scan");
+    expect(screen.queryByTestId("login-email")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("login-password")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("login-button")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("login-google")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("forgot-password")).not.toBeInTheDocument();
+    expect(sendResetEmail).not.toHaveBeenCalled();
+    expect(signInWithGoogle).not.toHaveBeenCalled();
+    expect(signUp).not.toHaveBeenCalled();
+    expect(signInWithPassword).not.toHaveBeenCalled();
+    expect(ensureWorkspace).not.toHaveBeenCalled();
+  });
+
   it("shows a confirmation notice after requesting a reset", async () => {
     sendResetEmail.mockResolvedValue({ error: null });
     render(<LoginPage />);

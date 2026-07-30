@@ -18,6 +18,21 @@ import { useScanStore } from "@/stores/scanStore";
 // admin/counter role) and can create a new business (becoming its admin via the hardened RPC). This is
 // the foundation; Phase 2 wires the selected business into the live scan/count workflow.
 export default function BusinessPage() {
+  if (process.env.NEXT_PUBLIC_LOCAL_DEMO === "1") {
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <h1 className="text-xl font-semibold text-zinc-900">Business management is unavailable in the local demo.</h1>
+        <a href="/scan" className="mt-4 inline-block font-semibold text-blue-700 hover:underline">
+          Go to scan
+        </a>
+      </main>
+    );
+  }
+
+  return <BusinessManagementPage />;
+}
+
+function BusinessManagementPage() {
   const router = useRouter();
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [name, setName] = useState("");

@@ -9,9 +9,15 @@ export function ImageHoverPreview({ imageUrl, alt }: { imageUrl: string; alt: st
   const [hovering, setHovering] = useState(false);
   const [open, setOpen] = useState(false);
   const [broken, setBroken] = useState(false);
+  const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
+  const isLocalImagePath = /^\/(?![\\/])/.test(imageUrl);
 
   if (!imageUrl) {
     return <span className="text-sm text-zinc-700">No image yet</span>;
+  }
+
+  if (isLocalDemo && !isLocalImagePath) {
+    return <span className="text-sm text-zinc-700">Image unavailable in local demo</span>;
   }
 
   return (

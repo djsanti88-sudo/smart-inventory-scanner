@@ -17,6 +17,7 @@ import type { AuthFlowResult } from "@/services/auth/provisioningTypes";
 // to /scan so existing Playwright specs keep working without a live auth backend.
 export default function LoginPage() {
   const router = useRouter();
+  const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
   const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -86,6 +87,25 @@ export default function LoginPage() {
     const result = await ensureWorkspace();
     setBusy(false);
     handleAuthResult(result);
+  }
+
+  if (isLocalDemo) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
+        <section className="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-zinc-900">Local tire demo</h1>
+          <p className="mt-1 text-base text-zinc-600">
+            This local demo does not use sign-in, account creation, password reset, or Google.
+          </p>
+          <a
+            href="/scan"
+            className="mt-5 inline-flex min-h-[48px] w-full items-center justify-center rounded-lg bg-blue-600 px-4 text-base font-semibold text-white hover:bg-blue-700"
+          >
+            Open scanner
+          </a>
+        </section>
+      </main>
+    );
   }
 
   return (
