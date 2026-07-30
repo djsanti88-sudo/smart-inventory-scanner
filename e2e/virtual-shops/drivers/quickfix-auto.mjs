@@ -252,8 +252,14 @@ async function scanInterrupted(page, code, action, resumeDelayMs, runningTotal, 
     await delay(resumeDelayMs);
     await page.goto(`${target}/scan`, { waitUntil: "domcontentloaded" });
   } else {
-    await delay(resumeDelayMs);
+    // Reload immediately, before the ScannerInput debounce fallback
+    // (debounceMs=80) can auto-submit the pending partial buffer as its own
+    // scan; delay AFTER reload to simulate recovery time, matching the
+    // navigate-away branch's ordering. Waiting resumeDelayMs (200-1000ms,
+    // always > 80ms) before reloading let the debounce fire first and
+    // silently submit an extra scan, undercounting runningTotal below.
     await page.reload({ waitUntil: "domcontentloaded" });
+    await delay(resumeDelayMs);
   }
   await page.getByTestId("scanner-input").waitFor({ timeout: 30_000 });
   await scanCode(page, code);

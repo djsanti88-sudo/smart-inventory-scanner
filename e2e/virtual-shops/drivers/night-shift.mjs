@@ -6,13 +6,21 @@
 // Flow (real UI, mock backend only), repeated per day in
 // fixtures/night-shift-scan-sequence.json (checked-in, deterministic,
 // phased structure - see e2e/virtual-shops/README.md):
-//   1. Go offline (Playwright `context.setOffline(true)`, real network
-//      blocking - the same mechanism e2e/stress-drive.mjs uses) and scan the
+//   1. Go offline via the app's own online/offline switch
+//      (window.__scanStore setOnline(false) - the same mechanism the app's
+//      own unit tests and the dev "Go offline" toggle use) and scan the
 //      day's fixture burst plus two dedicated unknown codes (not part of the
 //      fixture; added here for TOP-LEVEL LAW identity-gate coverage, same as
 //      the other virtual shops). Per the TOP-LEVEL LAW every scan must still
 //      appear in the feed and count immediately, even though sync is failing
-//      behind the scenes.
+//      behind the scenes. NOT Playwright's real network-layer
+//      `context.setOffline()` (what e2e/stress-drive.mjs uses for a single
+//      scan): the mock backend's sync path never issues a real fetch and
+//      gates entirely on the store's own `online` flag
+//      (`scanStore.syncPending`: `if (!state.online && !force) return`), so
+//      cutting real network has zero effect on it - and it would also make
+//      step 2's reload impossible (no service worker exists to serve the app
+//      shell with zero network).
 //   2. Refresh the page mid-session, still offline, and prove the scan feed
 //      survives the reload (persisted state, not just in-memory Zustand
 //      state).
@@ -289,7 +297,7 @@ async function main() {
       const scanPlan = [...(offlinePhase?.scans ?? []), ...unknownCodes];
 
       // --- Phase 1: offline scan burst. Every scan must still appear and count.
-      await context.setOffline(true);
+      await page.evaluate(() => window.__scanStore.getState().setOnline(false));
       const feedBeforeDay = (await readFeedLength(page)) ?? 0;
       const midpoint = Math.ceil(scanPlan.length / 2);
       for (const code of scanPlan.slice(0, midpoint)) {
@@ -307,11 +315,16 @@ async function main() {
       await page.screenshot({ path: offlineShot, fullPage: true });
       report.screenshots.push(artifactPath(offlineShot));
 
-      // --- Phase 2: mid-session refresh, still offline. Feed must survive.
+      // --- Phase 2: mid-session refresh, still offline (app-level). Feed must survive.
       const feedLengthBeforeRefresh = await readFeedLength(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.getByTestId("scanner-input").waitFor({ timeout: 30_000 });
       await page.waitForFunction(() => Boolean(window.__scanStore));
+      // `online` is intentionally not part of the persisted state
+      // (scanPersist.ts), so a fresh load always resets it to the default
+      // (true) - re-apply offline to keep testing "still offline after the
+      // refresh" per the design doc.
+      await page.evaluate(() => window.__scanStore.getState().setOnline(false));
       const feedLengthAfterRefresh = await readFeedLength(page);
       dayReport.feedSurvivedRefresh =
         feedLengthAfterRefresh !== null && feedLengthAfterRefresh === feedLengthBeforeRefresh;
@@ -329,7 +342,10 @@ async function main() {
       await page.waitForFunction((n) => window.__scanStore.getState().scanFeed.length >= n, feedBeforeDay + scanPlan.length);
 
       // --- Phase 3: reconnect and trigger a retry storm on the pending queue.
-      await context.setOffline(false);
+      // setOnline(true) also fires an immediate syncPending(true) internally
+      // (scanStore.ts); the retry-storm loop below still exercises the
+      // "Try saving again" button/idempotency path on top of that.
+      await page.evaluate(() => window.__scanStore.getState().setOnline(true));
       const retryClicks = retryPhase?.retryCount ?? RETRY_STORM_CLICKS_DEFAULT;
       const drainResult = await drainPendingQueue(page, { attempts: retryClicks, delayMs: 500 });
       dayReport.queueDrained = drainResult.drained;
