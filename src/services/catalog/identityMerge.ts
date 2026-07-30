@@ -17,6 +17,7 @@
 
 import { canonicalGtin } from "@/services/upc/gtin";
 import { tireSizeToken } from "@/services/ai/tireSpecs";
+import { normalizeTireSize } from "@/services/tire/tireSizeNormalizer";
 
 /** Product-identity fields identity-merge reads. Both a stored Product and a decoded suggestion satisfy it. */
 export interface IdentityCandidate {
@@ -31,6 +32,7 @@ export interface IdentityCandidate {
   /** Size usually lives here, NOT in the name (corpus names are slugs like "wrangler_steadfast_ht"). */
   specsShort?: string | null;
   specsFull?: string | null;
+  primarySku?: string | null;
 }
 
 export interface DecodedIdentity {
@@ -42,6 +44,7 @@ export interface DecodedIdentity {
   productName?: string | null;
   specsShort?: string | null;
   specsFull?: string | null;
+  primarySku?: string | null;
 }
 
 export type IdentityMergeResult =
@@ -194,11 +197,23 @@ function nameOf(c: IdentityCandidate | DecodedIdentity): string {
   return (c.name ?? c.productName ?? "").toString();
 }
 
+/** A nonblank primary SKU/MPN distinguishes otherwise identical tire listings. This deliberately
+ * recognizes equality only; MPNs are not used to auto-link because they are not globally unique. */
+function primarySkuOf(c: IdentityCandidate | DecodedIdentity): string {
+  return (c.primarySku ?? "").trim().toLowerCase();
+}
+
 /** Canonical tire size for a candidate, parsed from its name AND its specs fields (corpus product
  *  names are slugs with no size - the size lives in specsShort/specsFull). "" when none found. */
 function sizeOf(c: (IdentityCandidate | DecodedIdentity) & { specsShort?: string | null; specsFull?: string | null }): string {
   const text = [nameOf(c), c.specsShort ?? "", c.specsFull ?? ""].join(" ");
-  return tireSizeToken({ productName: text, brand: c.brand ?? undefined });
+  // Use the one authoritative normalizer shared by result construction and structured tire fields.
+  // Its flotation grammar accepts widths such as 12.50; the old tireSpecs-only parser did not,
+  // which made two distinct same-model flotation tires look size-less and trigger a fuzzy hold.
+  // The normalizer is authoritative for metric and fractional flotation forms. Its deliberate
+  // no-guess boundary excludes agricultural dash forms, which tireSpecs recognizes only in a tire
+  // context; retain that proven parser as the fallback so distinct ag sizes cannot auto/fuzzy merge.
+  return normalizeTireSize(text)?.split(" ")[0] ?? tireSizeToken({ productName: text, category: "Tire" });
 }
 
 /** First canonical GTIN found among a candidate's identity codes (gtin/upc/ean/primaryBarcode), or null. */
@@ -220,6 +235,7 @@ function canonicalOf(c: { gtin?: string | null; upc?: string | null; ean?: strin
 export function findIdentityMerge(existing: IdentityCandidate[], decoded: DecodedIdentity): IdentityMergeResult {
   const decodedCanon = canonicalOf(decoded);
   const decodedTireSize = sizeOf(decoded);
+  const decodedPrimarySku = primarySkuOf(decoded);
   const decodedBrand = normBrand(decoded.brand);
   const decodedTokens = nameTokens(nameOf(decoded));
 
@@ -250,6 +266,10 @@ export function findIdentityMerge(existing: IdentityCandidate[], decoded: Decode
       // link at all. Without this, a same-brand burst collapses every additional size of a model into
       // Needs Review ("Unidentified item"), which is exactly the 59/100 defect proven on the preview.
       if (bothHaveTireSize && !tireSizeAgrees) continue;
+      // A pair of distinct nonblank authoritative part numbers is positive evidence these are
+      // different variants. It may block a fuzzy suggestion, but never creates an auto-link.
+      const existingPrimarySku = primarySkuOf(p);
+      if (decodedPrimarySku && existingPrimarySku && decodedPrimarySku !== existingPrimarySku) continue;
       const existingTokens = nameTokens(nameOf(p));
       const sim = jaccard(decodedTokens, existingTokens);
       const plusDiff = plusGenerationDiff(decodedTokens, existingTokens);

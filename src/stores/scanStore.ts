@@ -5144,6 +5144,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
               gtin: np.gtin ?? null,
               upc: np.upc ?? null,
               ean: np.ean ?? null,
+              primarySku: np.primarySku ?? null,
               brand: np.brand ?? null,
               name: np.name ?? null,
               specsShort: np.specsShort ?? null,

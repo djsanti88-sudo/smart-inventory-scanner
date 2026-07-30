@@ -96,6 +96,11 @@ describe("buildLocalDemoLedgerProof", () => {
       missingEventIdCount: 0,
       unmatchedEventCount: 0,
       canonicalIdentityMismatchCount: 0,
+      distinctExpectedCanonicalProductUidCount: 100,
+      distinctMatchedProductIdCount: 100,
+      distinctFinalCountProductIdCount: 100,
+      distinctReplayedCountProductIdCount: 100,
+      canonicalProductMatchedProductBijection: true,
       finalEqualsReplay: true,
       countEventIdsEqualReplayEventIds: true,
       everyCountEventIdExistsInFeed: true,
@@ -143,6 +148,50 @@ describe("buildLocalDemoLedgerProof", () => {
       expect(proof.assertions.passed).toBe(false);
     }
     expect(buildLocalDemoLedgerProof({ ...input, scanFeed: wrongUid }).events[0]?.canonicalProductUid).toBe("canonical-2");
+  });
+
+  it("fails when two distinct canonical products collapse onto one matched product and count row", () => {
+    const input = validInput();
+    const scanFeed = input.scanFeed.map((row, index) =>
+      index === 1
+        ? { ...row, matchedProductId: "product-1", quantityAfterScan: 2 }
+        : row,
+    );
+    const finalCounts = input.finalCounts
+      .filter((_, index) => index !== 1)
+      .map((row, index) =>
+        index === 0
+          ? { ...row, quantity: 2, scanEventIds: ["event-1", "event-2"] }
+          : row,
+      );
+
+    const proof = buildLocalDemoLedgerProof({ ...input, scanFeed, finalCounts });
+
+    expect(proof.assertions.finalEqualsReplay).toBe(true);
+    expect(proof.assertions.finalQuantity).toBe(100);
+    expect(proof.assertions.canonicalProductMatchedProductBijection).toBe(false);
+    expect(proof.assertions.distinctMatchedProductIdCount).toBe(99);
+    expect(proof.assertions.distinctFinalCountProductIdCount).toBe(99);
+    expect(proof.assertions.passed).toBe(false);
+  });
+
+  it("fails when one canonical product fans out to multiple matched products", () => {
+    const input = validInput();
+    input.batch.rows[1] = {
+      ...input.batch.rows[1],
+      canonicalProductUid: input.batch.rows[0].canonicalProductUid,
+    };
+    const scanFeed = input.scanFeed.map((row, index) =>
+      index === 1
+        ? { ...row, localDemoCanonicalProductUid: "canonical-1" }
+        : row,
+    );
+
+    const proof = buildLocalDemoLedgerProof({ ...input, scanFeed });
+
+    expect(proof.assertions.canonicalIdentityMismatchCount).toBe(0);
+    expect(proof.assertions.canonicalProductMatchedProductBijection).toBe(false);
+    expect(proof.assertions.passed).toBe(false);
   });
 
   it("fails closed for missing, extra, duplicate, unmatched, and malformed event facts", () => {

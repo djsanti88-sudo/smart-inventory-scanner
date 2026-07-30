@@ -123,6 +123,54 @@ describe("size-aware fuzzy merge (2026-07-10 same-model-different-size collapse)
     expect(r).toEqual({ kind: "suggest_link", productId: "p1" });
   });
 
+  it("same brand, model, and size with distinct authoritative part numbers do not suggest-link", () => {
+    const r = findIdentityMerge(
+      [{ id: "p-mpn-a", brand: "toyo", name: "open_country_a_t_iii", specsShort: "255/70R16 115T", primarySku: "356160" }],
+      { brand: "toyo", name: "open_country_a_t_iii", specsShort: "255/70R16 115T", primarySku: "356170" },
+    );
+    expect(r).toEqual({ kind: "none" });
+  });
+
+  it("same brand, model, size, and authoritative part number still suggest-links", () => {
+    const r = findIdentityMerge(
+      [{ id: "p-mpn-same", brand: "toyo", name: "open_country_a_t_iii", specsShort: "255/70R16 115T", primarySku: " 356160 " }],
+      { brand: "toyo", name: "open_country_a_t_iii", specsShort: "255/70R16 115T", primarySku: "356160" },
+    );
+    expect(r).toEqual({ kind: "suggest_link", productId: "p-mpn-same" });
+  });
+
+  it("different two-decimal flotation sizes do not suggest-link", () => {
+    const r = findIdentityMerge(
+      [{ id: "p-float", brand: "falken", name: "wildpeak_r_t01", specsShort: "38X13.50R20 128R" }],
+      { brand: "falken", name: "wildpeak_r_t01", specsShort: "35X11.50R18 117R" },
+    );
+    expect(r).toEqual({ kind: "none" });
+  });
+
+  it("different LT slash-flotation sizes do not suggest-link", () => {
+    const r = findIdentityMerge(
+      [{ id: "p-lt-float", brand: "toyo", name: "open_country_a_t_iii", specsShort: "LT37/12.50R22 127Q" }],
+      { brand: "toyo", name: "open_country_a_t_iii", specsShort: "LT35/12.50R20 124R" },
+    );
+    expect(r).toEqual({ kind: "none" });
+  });
+
+  it("different agricultural dash sizes do not suggest-link", () => {
+    const r = findIdentityMerge(
+      [{ id: "p-ag", brand: "bkt", name: "agrimax", specsShort: "6.00-19" }],
+      { brand: "bkt", name: "agrimax", specsShort: "14.5-20" },
+    );
+    expect(r).toEqual({ kind: "none" });
+  });
+
+  it("same GTIN with different agricultural dash sizes suggests instead of auto-linking", () => {
+    const r = findIdentityMerge(
+      [{ id: "p-ag-gtin", brand: "bkt", name: "agrimax", specsShort: "6.00-19", gtin: "036000291452" }],
+      { brand: "bkt", name: "agrimax", specsShort: "14.5-20", gtin: "0036000291452" },
+    );
+    expect(r).toEqual({ kind: "suggest_link", productId: "p-ag-gtin" });
+  });
+
   it("size known on only ONE side -> unchanged: suggest_link (cannot prove distinct)", () => {
     const r = findIdentityMerge([existingSteadfast], {
       brand: "goodyear",

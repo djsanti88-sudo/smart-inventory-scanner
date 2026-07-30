@@ -130,6 +130,46 @@ describe("scanStore identity-merge on decode apply", () => {
     expect(review.suggestedLinkProductId).toBeUndefined();
   });
 
+  it("same-model same-size with distinct primary SKUs mints a NEW product instead of a suggest_link review", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+
+    store.getState().processScan("777777777775");
+    const rSeed = store.getState().needsReviewQueue.find((r) => r.cleanCode === "777777777775" && r.status === "open")!.id;
+    store.getState().resolveUnknown(rSeed, "create_new", {
+      applyToCount: true,
+      origin: "ai",
+      newProduct: {
+        name: "open_country_a_t_iii",
+        brand: "toyo",
+        category: "Tire",
+        specsShort: "255/70R16 115T",
+        primaryBarcode: "777777777775",
+        primarySku: "356160",
+      },
+    });
+
+    const SCANNED_CODE = "888888888886";
+    store.getState().processScan(SCANNED_CODE);
+    const r2 = store.getState().needsReviewQueue.find((r) => r.cleanCode === SCANNED_CODE && r.status === "open")!.id;
+    store.getState().resolveUnknown(r2, "create_new", {
+      applyToCount: true,
+      origin: "ai",
+      newProduct: {
+        name: "open_country_a_t_iii",
+        brand: "toyo",
+        category: "Tire",
+        specsShort: "255/70R16 115T",
+        primarySku: "356170",
+      },
+    });
+
+    const st = store.getState();
+    const review = st.needsReviewQueue.find((r) => r.cleanCode === SCANNED_CODE)!;
+    expect(review.status, "distinct exact variants resolve normally").toBe("resolved");
+    expect(review.suggestedLinkProductId).toBeUndefined();
+    expect(st.products.filter((p) => p.name === "open_country_a_t_iii" && !p.provisional)).toHaveLength(2);
+  });
+
   it("same-model SAME-size still becomes a suggest_link review (dedup protection intact)", () => {
     const store = createTestScanStore({ db: new MockDb() });
 

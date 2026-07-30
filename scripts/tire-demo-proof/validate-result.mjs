@@ -8,6 +8,19 @@ function sameCanonicalProductUid(left, right) { return left === right; }
 function percentile(values, percentage) { if (!values.length) return 0; const sorted = [...values].sort((a, b) => a - b); return sorted[Math.ceil((percentage / 100) * sorted.length) - 1]; }
 function fail(failures, barcode, rule, expected, observed) { failures.push({ barcode, rule, expected, observed }); }
 function stable(value) { return JSON.stringify(value); }
+function hasCanonicalProductBijection(pairs) {
+  const canonicalToProduct = new Map();
+  const productToCanonical = new Map();
+  for (const { canonicalProductUid, matchedProductId } of pairs) {
+    if (!canonicalProductUid || !matchedProductId) return false;
+    const mappedProduct = canonicalToProduct.get(canonicalProductUid);
+    const mappedCanonical = productToCanonical.get(matchedProductId);
+    if ((mappedProduct && mappedProduct !== matchedProductId) || (mappedCanonical && mappedCanonical !== canonicalProductUid)) return false;
+    canonicalToProduct.set(canonicalProductUid, matchedProductId);
+    productToCanonical.set(matchedProductId, canonicalProductUid);
+  }
+  return true;
+}
 
 export function validateBatchResult(batch, result, anchor) {
   const failures = [];
@@ -37,7 +50,7 @@ export function validateBatchResult(batch, result, anchor) {
   for (const [key, observation] of byBarcode) if (!expected.some((row) => row.barcode === key)) fail(failures, observation.barcode, "extra_barcode", "locked batch barcode", observation.barcode);
   if (!Array.isArray(result?.serverEgressAttempts) || result.serverEgressAttempts.length) fail(failures, "", "server_egress", [], result?.serverEgressAttempts);
   const proof = result?.ledgerProof;
-  const assertionKeys = ["allExpectedBarcodesSeenExactlyOnce", "unexpectedBarcodeCount", "duplicateEventIdCount", "missingEventIdCount", "unmatchedEventCount", "canonicalIdentityMismatchCount", "finalEqualsReplay", "countEventIdsEqualReplayEventIds", "everyCountEventIdExistsInFeed", "expectedQuantity", "finalQuantity", "replayedQuantity", "noDrops", "noDuplicates", "passed"];
+  const assertionKeys = ["allExpectedBarcodesSeenExactlyOnce", "unexpectedBarcodeCount", "duplicateEventIdCount", "missingEventIdCount", "unmatchedEventCount", "canonicalIdentityMismatchCount", "distinctExpectedCanonicalProductUidCount", "distinctMatchedProductIdCount", "distinctFinalCountProductIdCount", "distinctReplayedCountProductIdCount", "canonicalProductMatchedProductBijection", "finalEqualsReplay", "countEventIdsEqualReplayEventIds", "everyCountEventIdExistsInFeed", "expectedQuantity", "finalQuantity", "replayedQuantity", "noDrops", "noDuplicates", "passed"];
   if (!proof?.assertions || Object.keys(proof.assertions).length !== assertionKeys.length || assertionKeys.some((key) => !Object.hasOwn(proof.assertions, key))) fail(failures, "", "ledger_assertions_schema", assertionKeys, proof?.assertions);
   const manifest = proof?.manifest;
   const batchManifestKeys = ["schemaVersion", "gitSha", "databaseSha256", "seed", "batch", "batchSha256", "expectedBarcodesSha256", "expectedCanonicalProductUidsSha256"];
@@ -58,9 +71,38 @@ export function validateBatchResult(batch, result, anchor) {
     const locked = expected.find((row) => row.barcode === event?.cleanCode);
     return !locked || !sameCanonicalProductUid(event?.canonicalProductUid, locked.canonicalProductUid);
   }).length;
+  const distinctExpectedCanonicalProductUidCount = new Set(expected.map((row) => row.canonicalProductUid).filter(Boolean)).size;
+  const distinctMatchedProductIdCount = new Set(events.map((event) => event?.matchedProductId).filter(Boolean)).size;
+  const canonicalProductMatchedProductBijection = hasCanonicalProductBijection(
+    events.map((event) => ({
+      canonicalProductUid: event?.canonicalProductUid,
+      matchedProductId: event?.matchedProductId,
+    })),
+  );
   if (eventBarcodes.sort().join("|") !== lockedBarcodes.join("|")) fail(failures, "", "ledger_event_barcodes", lockedBarcodes, eventBarcodes);
   for (const observation of observations) { const event = eventById.get(observation.eventId); if (!event || event.cleanCode !== observation.barcode || event.matchedProductId !== observation.matchedProductId || !sameCanonicalProductUid(event.canonicalProductUid, observation.canonicalProductUid)) fail(failures, observation.barcode, "observation_ledger_link", "exact event/product/canonical link", event); }
   const countLists = [proof?.finalCounts, proof?.replayedCounts];
+  const distinctFinalCountProductIdCount = new Set(
+    (Array.isArray(proof?.finalCounts) ? proof.finalCounts : []).map((count) => count.productId).filter(Boolean),
+  ).size;
+  const distinctReplayedCountProductIdCount = new Set(
+    (Array.isArray(proof?.replayedCounts) ? proof.replayedCounts : []).map((count) => count.productId).filter(Boolean),
+  ).size;
+  if (
+    distinctExpectedCanonicalProductUidCount !== expected.length ||
+    distinctMatchedProductIdCount !== expected.length ||
+    distinctFinalCountProductIdCount !== expected.length ||
+    distinctReplayedCountProductIdCount !== expected.length ||
+    !canonicalProductMatchedProductBijection
+  ) {
+    fail(failures, "", "canonical_product_bijection", `${expected.length} one-to-one canonical and matched product IDs`, {
+      distinctExpectedCanonicalProductUidCount,
+      distinctMatchedProductIdCount,
+      distinctFinalCountProductIdCount,
+      distinctReplayedCountProductIdCount,
+      canonicalProductMatchedProductBijection,
+    });
+  }
   const memberships = countLists.map((counts) => (Array.isArray(counts) ? counts : []).flatMap((count) => count.scanEventIds ?? []));
   for (const ids of memberships) for (const id of ids) if (!eventById.has(id)) fail(failures, "", "count_event_in_feed", "feed event", id);
   if (new Set(memberships[0]).size !== memberships[0].length || new Set(memberships[1]).size !== memberships[1].length || new Set(memberships[0]).size !== 100 || stable([...new Set(memberships[0])].sort()) !== stable([...new Set(memberships[1])].sort())) fail(failures, "", "count_event_membership", "same 100 unique events", { final: memberships[0].length, replay: memberships[1].length });
@@ -89,6 +131,11 @@ export function validateBatchResult(batch, result, anchor) {
     missingEventIdCount,
     unmatchedEventCount,
     canonicalIdentityMismatchCount,
+    distinctExpectedCanonicalProductUidCount,
+    distinctMatchedProductIdCount,
+    distinctFinalCountProductIdCount,
+    distinctReplayedCountProductIdCount,
+    canonicalProductMatchedProductBijection,
     finalEqualsReplay,
     countEventIdsEqualReplayEventIds: sameCountEventIdSets,
     everyCountEventIdExistsInFeed,
@@ -97,7 +144,7 @@ export function validateBatchResult(batch, result, anchor) {
     replayedQuantity,
     noDrops,
     noDuplicates,
-    passed: allExpectedBarcodesSeenExactlyOnce && unexpectedBarcodeCount === 0 && duplicateEventIdCount === 0 && missingEventIdCount === 0 && unmatchedEventCount === 0 && canonicalIdentityMismatchCount === 0 && finalEqualsReplay && sameCountEventIdSets && everyCountEventIdExistsInFeed && expected.length === countedQuantity && countedQuantity === replayedQuantity && noDrops && noDuplicates,
+    passed: allExpectedBarcodesSeenExactlyOnce && unexpectedBarcodeCount === 0 && duplicateEventIdCount === 0 && missingEventIdCount === 0 && unmatchedEventCount === 0 && canonicalIdentityMismatchCount === 0 && distinctExpectedCanonicalProductUidCount === expected.length && distinctMatchedProductIdCount === expected.length && distinctFinalCountProductIdCount === expected.length && distinctReplayedCountProductIdCount === expected.length && canonicalProductMatchedProductBijection && finalEqualsReplay && sameCountEventIdSets && everyCountEventIdExistsInFeed && expected.length === countedQuantity && countedQuantity === replayedQuantity && noDrops && noDuplicates,
   };
   for (const [key, computed] of Object.entries(expectedAssertions)) if (proof?.assertions?.[key] !== computed) fail(failures, "", "ledger_assertion_value", { key, computed }, proof?.assertions?.[key]);
   const latencies = observations.map((row) => Number(row.latencyMs));

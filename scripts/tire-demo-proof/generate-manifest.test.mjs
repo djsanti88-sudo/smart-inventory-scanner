@@ -34,7 +34,7 @@ function barcode(index, ean = false) {
   return `${body}${checkDigit(body)}`;
 }
 
-function fixtureDatabase() {
+function fixtureDatabase({ forceSize } = {}) {
   const root = mkdtempSync(join(tmpdir(), "local-demo-manifest-"));
   const path = join(root, "knowledge.db");
   const db = new Database(path);
@@ -46,23 +46,38 @@ function fixtureDatabase() {
   const insert = db.prepare(`INSERT INTO tires VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const add = (index, patch = {}) => insert.run(
     patch.barcode ?? barcode(index, patch.barcode_type === "ean"), patch.barcode_type ?? "upc", `TIRE_${index}`,
-    "Brand", `Model ${index}`, "", patch.size ?? "225/65R17", "102", "H", patch.mpn ?? "", "passenger",
+    "Brand", `Model ${index}`, "", forceSize ?? patch.size ?? "225/65R17", "102", "H", patch.mpn ?? "", "passenger",
     patch.season ?? "all season", patch.sourceCount ?? 2, patch.confidence ?? "verified_2src", "active_retail",
     "auto_count_candidate", patch.completeness ?? 90,
   );
-  for (let index = 0; index < 250; index += 1) add(index, { mpn: `REP-${Math.floor(index / 2)}` });
-  for (let index = 250; index < 300; index += 1) add(index, { mpn: `UNIQUE-${index}` });
-  for (let index = 300; index < 600; index += 1) add(index, { season: "winter" });
-  for (let index = 600; index < 900; index += 1) add(index, { size: "LT265/70R17" });
-  for (let index = 900; index < 1200; index += 1) add(index, { sourceCount: 5 });
-  for (let index = 1200; index < 1500; index += 1) add(index, { confidence: "verified_1src_strong" });
-  for (let index = 1500; index < 1800; index += 1) add(index, { completeness: 70 });
-  for (let index = 1800; index < 2100; index += 1) add(index, { sourceCount: 3 });
-  for (let index = 2100; index < 2400; index += 1) add(index, { barcode_type: "ean" });
-  for (let index = 2400; index < 3000; index += 1) add(index);
+  db.transaction(() => {
+    for (let index = 0; index < 250; index += 1) add(index, { mpn: `REP-${Math.floor(index / 2)}` });
+    for (let index = 250; index < 300; index += 1) add(index, { mpn: `UNIQUE-${index}` });
+    for (let index = 300; index < 600; index += 1) add(index, { season: "winter" });
+    for (let index = 600; index < 900; index += 1) add(index, { size: "LT265/70R17" });
+    for (let index = 900; index < 1200; index += 1) add(index, { sourceCount: 5 });
+    for (let index = 1200; index < 1500; index += 1) add(index, { confidence: "verified_1src_strong" });
+    for (let index = 1500; index < 1800; index += 1) add(index, { completeness: 70 });
+    for (let index = 1800; index < 2100; index += 1) add(index, { sourceCount: 3 });
+    for (let index = 2100; index < 2400; index += 1) add(index, { barcode_type: "ean" });
+    for (let index = 2400; index < 3000; index += 1) add(index);
+  })();
   db.close();
   return { root, path };
 }
+
+test("generator refuses a trusted pool that does not pass production countability", () => {
+  const fixture = fixtureDatabase({ forceSize: "33125020" });
+  assert.throws(
+    () => generateLocalDemoManifest({
+      databasePath: fixture.path,
+      reportsRoot: join(fixture.root, "reports", "local-tire-demo"),
+      gitSha: "abc123def456",
+      generatedAt: "2026-07-29T00:00:00.000Z",
+    }),
+    /stratum|eligible|requires/i,
+  );
+});
 
 function sourceRows(path) {
   const db = new Database(path, { readonly: true });

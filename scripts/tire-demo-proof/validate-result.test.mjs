@@ -10,7 +10,7 @@ const batch = { schemaVersion: 1, seed: "scanbin-local-tire-demo-v1", gitSha: "a
 function good() {
   const events = expectedRows.map((row, index) => ({ eventId: `event-${index}`, cleanCode: row.barcode, matchedProductId: `product-${index}`, canonicalProductUid: row.canonicalProductUid, quantityDelta: 1, quantityAfterScan: 1, status: "verified" }));
   const counts = events.map((event) => ({ productId: event.matchedProductId, quantity: 1, scanEventIds: [event.eventId] }));
-  return { observations: expectedRows.map((row, index) => ({ ...row, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, manifestSha256, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, canonicalIdentityMismatchCount:0, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [] };
+  return { observations: expectedRows.map((row, index) => ({ ...row, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, manifestSha256, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, canonicalIdentityMismatchCount:0, distinctExpectedCanonicalProductUidCount:100, distinctMatchedProductIdCount:100, distinctFinalCountProductIdCount:100, distinctReplayedCountProductIdCount:100, canonicalProductMatchedProductBijection:true, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [] };
 }
 test("accepts an exact hash-bound 100-event proof and uses nearest-rank percentiles", () => { const result = validateBatchResult(batch, good()); assert.equal(result.passed, true); assert.equal(result.countedQuantity, 100); assert.equal(result.p95Ms, 94); });
 test("accepts model display variants that differ only by case or explicit delimiters", () => {
@@ -67,6 +67,47 @@ test("rejects case- and whitespace-changed opaque product IDs at the observation
     assert.ok(validation.failures.some((failure) => failure.rule === "observation_ledger_link"), name);
   }
 });
+
+test("rejects two distinct canonical products collapsed onto one matched product and count row", () => {
+  const value = good();
+  value.observations[1].matchedProductId = "product-0";
+  value.ledgerProof.events[1].matchedProductId = "product-0";
+  value.ledgerProof.events[1].quantityAfterScan = 2;
+  value.ledgerProof.finalCounts[0] = {
+    productId: "product-0",
+    quantity: 2,
+    scanEventIds: ["event-0", "event-1"],
+  };
+  value.ledgerProof.finalCounts.splice(1, 1);
+  value.ledgerProof.replayedCounts = structuredClone(value.ledgerProof.finalCounts);
+
+  const validation = validateBatchResult(batch, value);
+
+  assert.equal(validation.passed, false);
+  assert.ok(validation.failures.some((failure) => failure.rule === "canonical_product_bijection"));
+});
+
+test("rejects one canonical product fanned out to multiple matched products", () => {
+  const locked = structuredClone(batch);
+  locked.rows[1].canonicalProductUid = locked.rows[0].canonicalProductUid;
+  locked.batchSha256 = digest(locked.rows);
+  locked.expectedBarcodesSha256 = digest(locked.rows.map((row) => row.barcode));
+  locked.expectedCanonicalProductUidsSha256 = digest(locked.rows.map((row) => row.canonicalProductUid));
+  const value = good();
+  value.observations[1].canonicalProductUid = "uid-0";
+  value.ledgerProof.events[1].canonicalProductUid = "uid-0";
+  Object.assign(value.ledgerProof.manifest, {
+    batchSha256: locked.batchSha256,
+    expectedBarcodesSha256: locked.expectedBarcodesSha256,
+    expectedCanonicalProductUidsSha256: locked.expectedCanonicalProductUidsSha256,
+  });
+
+  const validation = validateBatchResult(locked, value);
+
+  assert.equal(validation.passed, false);
+  assert.ok(validation.failures.some((failure) => failure.rule === "canonical_product_bijection"));
+});
+
 test("rejects case- and whitespace-changed cleaned barcodes at every manifest-ledger boundary", () => {
   for (const [name, mutate, rule] of [
     ["observation case", (value) => { value.observations[0].barcode = "CODE-0"; }, "missing_barcode"],
@@ -165,6 +206,11 @@ test("rejects every ledger assertion that disagrees with the independently recom
     missingEventIdCount: 0,
     unmatchedEventCount: 0,
     canonicalIdentityMismatchCount: 0,
+    distinctExpectedCanonicalProductUidCount: 100,
+    distinctMatchedProductIdCount: 100,
+    distinctFinalCountProductIdCount: 100,
+    distinctReplayedCountProductIdCount: 100,
+    canonicalProductMatchedProductBijection: true,
     finalEqualsReplay: true,
     countEventIdsEqualReplayEventIds: true,
     everyCountEventIdExistsInFeed: true,

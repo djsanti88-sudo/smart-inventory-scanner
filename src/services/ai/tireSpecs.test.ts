@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { isTireContext, hasRequiredTireSpecs, hasTireSize, inferTireBrandFromName } from "@/services/ai/tireSpecs";
+import {
+  isTireContext,
+  hasRequiredTireSpecs,
+  hasTireSize,
+  hasCountableTireIdentity,
+  inferTireBrandFromName,
+} from "@/services/ai/tireSpecs";
 import type { AiLookupResult } from "@/types";
 
 const r = (over: Partial<AiLookupResult>): AiLookupResult => ({
@@ -27,6 +33,67 @@ describe("tireSpecs (Phase 7)", () => {
   it("accepts a commercial/flotation size on its own", () => {
     expect(hasTireSize(r({ specsShort: "11R22.5" }))).toBe(true);
     expect(hasRequiredTireSpecs(r({ productName: "Commercial drive 11R22.5" }))).toBe(true);
+  });
+
+  it("counts the exact trusted Fortune flotation identity with a two-decimal width", () => {
+    const identity = r({
+      productName: "Fortune Tormenta M/T FSR310 33X12.50R20",
+      brand: "Fortune",
+      category: "Tire",
+      specsShort: "33X12.50R20",
+      primaryBarcode: "840139632594",
+      upc: "840139632594",
+    });
+
+    expect(hasTireSize(identity)).toBe(true);
+    expect(hasRequiredTireSpecs(identity)).toBe(true);
+    expect(hasCountableTireIdentity(identity)).toBe(true);
+  });
+
+  it("accepts bounded two-decimal X and prefixed slash flotation sizes", () => {
+    expect(hasTireSize(r({ productName: "Cooper Discoverer 35X12.50R20" }))).toBe(true);
+    expect(hasTireSize(r({ productName: "Cooper Discoverer LT37/12.50R22" }))).toBe(true);
+  });
+
+  it("accepts only bounded directly-prefixed X flotation sizes", () => {
+    for (const size of [
+      "LT33X12.50R15",
+      "LT31X10.50R15",
+      "LT33X12.50R18",
+      "LT37X13.50R20",
+      "LT33X12.50R17",
+      "LT38X13.50R24",
+      "P35X12.50R20",
+      "ST31X10.50R15",
+    ]) {
+      const identity = r({ productName: `Trusted Tire Model ${size}` });
+      expect(hasTireSize(identity), size).toBe(true);
+      expect(hasRequiredTireSpecs(identity), size).toBe(true);
+      expect(hasCountableTireIdentity(identity), size).toBe(true);
+    }
+
+    for (const unsafe of [
+      "Trusted Tire Model LT 33X12.50R15",
+      "Trusted Tire Model ALT33X12.50R15",
+      "Trusted Tire Model LT21X12.50R15",
+      "Trusted Tire Model LT45X12.50R15",
+      "Trusted Tire Model LT33X3.50R15",
+      "Trusted Tire Model LT33X19.50R15",
+      "Trusted Tire Model LT33X12.50R07",
+      "Trusted Tire Model LT33X12.50R31",
+      "Trusted Tire Model LT33X12.50R15ABC",
+      "Trusted Tire Model LT33X12.50R15/99",
+      "Storage bin LT33 X 12.50 X 15",
+    ]) {
+      expect(hasTireSize(r({ productName: unsafe, category: "Hardware" })), unsafe).toBe(false);
+    }
+  });
+
+  it("rejects embedded and dimension-like flotation lookalikes", () => {
+    expect(hasTireSize(r({ productName: "Widget A33X12.50R20" }))).toBe(false);
+    expect(hasTireSize(r({ productName: "Widget 33X12.50R20ABC" }))).toBe(false);
+    expect(hasTireSize(r({ productName: "Storage bin 33 X 12.50 X 20", category: "Hardware" }))).toBe(false);
+    expect(isTireContext(r({ productName: "Storage bin 33 X 12.50 X 20", category: "Hardware" }))).toBe(false);
   });
 });
 

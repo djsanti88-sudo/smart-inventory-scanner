@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { buildSync } from "esbuild";
 import { assertLocalDemoDatabase } from "../local-demo-preflight.mjs";
 import {
   LOCAL_DEMO_AGENT_COUNT,
@@ -36,6 +37,23 @@ const BATCH_KEYS = [
   "rowCount", "batchSha256", "expectedBarcodesSha256",
   "expectedCanonicalProductUidsSha256", "rows",
 ];
+
+function loadCountability() {
+  const helper = resolve(ROOT, "scripts", "local-demo-countability.ts");
+  const result = buildSync({
+    entryPoints: [helper],
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: "node20",
+    write: false,
+  });
+  const source = result.outputFiles?.[0]?.text;
+  if (!source) throw new Error("Unable to bundle the local demo countability helper.");
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+}
+
+const { countableLocalDemoRowIndexes } = await loadCountability();
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -212,6 +230,14 @@ function databaseRows(databasePath) {
   }
 }
 
+function countableSourceRows(rows) {
+  const indexes = countableLocalDemoRowIndexes(rows);
+  if (!Array.isArray(indexes) || !indexes.every((index) => Number.isSafeInteger(index) && index >= 0 && index < rows.length)) {
+    throw new Error("Local demo countability helper returned invalid row indexes.");
+  }
+  return indexes.map((index) => rows[index]);
+}
+
 export function generateLocalDemoManifest({
   databasePath = DEFAULT_DATABASE_PATH,
   reportsRoot = DEFAULT_REPORTS_ROOT,
@@ -225,7 +251,7 @@ export function generateLocalDemoManifest({
   if (databaseInfo.databasePath !== resolvedDatabase) throw new Error("Local tire database preflight path mismatch.");
   const revision = requiredGitSha(gitSha);
   const root = resolve(reportsRoot);
-  const sourceRows = databaseRows(resolvedDatabase);
+  const sourceRows = countableSourceRows(databaseRows(resolvedDatabase));
   const rows = sampleTireRows(sourceRows, { seed });
   if (seed !== LOCAL_DEMO_SAMPLE_SEED) throw new Error("Local tire manifest requires the fixed certification seed.");
   if (!/^[a-f0-9]{64}$/i.test(databaseInfo.databaseSha256) || !Number.isFinite(Date.parse(generatedAt))) {

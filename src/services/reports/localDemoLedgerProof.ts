@@ -44,6 +44,11 @@ export type LocalDemoLedgerProof = {
     missingEventIdCount: number;
     unmatchedEventCount: number;
     canonicalIdentityMismatchCount: number;
+    distinctExpectedCanonicalProductUidCount: number;
+    distinctMatchedProductIdCount: number;
+    distinctFinalCountProductIdCount: number;
+    distinctReplayedCountProductIdCount: number;
+    canonicalProductMatchedProductBijection: boolean;
     finalEqualsReplay: boolean;
     countEventIdsEqualReplayEventIds: boolean;
     everyCountEventIdExistsInFeed: boolean;
@@ -97,6 +102,27 @@ function sumQuantity(counts: CountShape[]): number {
 
 function duplicateCount(values: string[]): number {
   return values.length - new Set(values).size;
+}
+
+function hasCanonicalProductBijection(
+  pairs: Array<{ canonicalProductUid: string | null | undefined; matchedProductId: string | null | undefined }>,
+): boolean {
+  const canonicalToProduct = new Map<string, string>();
+  const productToCanonical = new Map<string, string>();
+  for (const pair of pairs) {
+    const canonicalProductUid = pair.canonicalProductUid ?? "";
+    const matchedProductId = pair.matchedProductId ?? "";
+    if (!canonicalProductUid || !matchedProductId) return false;
+    const mappedProduct = canonicalToProduct.get(canonicalProductUid);
+    const mappedCanonical = productToCanonical.get(matchedProductId);
+    if (
+      (mappedProduct && mappedProduct !== matchedProductId) ||
+      (mappedCanonical && mappedCanonical !== canonicalProductUid)
+    ) return false;
+    canonicalToProduct.set(canonicalProductUid, matchedProductId);
+    productToCanonical.set(matchedProductId, canonicalProductUid);
+  }
+  return true;
 }
 
 /**
@@ -153,12 +179,26 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
       !lockedCanonicalUid ||
       event.localDemoCanonicalProductUid !== lockedCanonicalUid;
   }).length;
+  const distinctExpectedCanonicalProductUidCount = new Set(
+    expectedRows.map((row) => row.canonicalProductUid).filter(Boolean),
+  ).size;
+  const distinctMatchedProductIdCount = new Set(
+    sessionEvents.map((event) => event.matchedProductId).filter((value): value is string => Boolean(value)),
+  ).size;
+  const canonicalProductMatchedProductBijection = hasCanonicalProductBijection(
+    sessionEvents.map((event) => ({
+      canonicalProductUid: event.localDemoCanonicalProductUid,
+      matchedProductId: event.matchedProductId,
+    })),
+  );
   const everyEventIsOneFiniteScan = sessionEvents.every((event) =>
     event.quantityDelta === 1 && Number.isFinite(event.quantityAfterScan),
   );
 
   const finalCounts = stableCounts(input.finalCounts.filter((count) => count.sessionId === input.sessionId));
   const replayedCounts = stableCounts(replayLedgerCounts(sessionEvents, input.sessionId));
+  const distinctFinalCountProductIdCount = new Set(finalCounts.map((count) => count.productId)).size;
+  const distinctReplayedCountProductIdCount = new Set(replayedCounts.map((count) => count.productId)).size;
   const finalQuantity = sumQuantity(finalCounts);
   const replayedQuantity = sumQuantity(replayedCounts);
   const finalEqualsReplay = countMembershipEqual(finalCounts, replayedCounts, true);
@@ -172,6 +212,11 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
   const passed = allExpectedBarcodesSeenExactlyOnce && unexpectedBarcodeCount === 0 &&
     duplicateEventIdCount === 0 && missingEventIdCount === 0 && unmatchedEventCount === 0 &&
     canonicalIdentityMismatchCount === 0 &&
+    distinctExpectedCanonicalProductUidCount === expectedRows.length &&
+    distinctMatchedProductIdCount === expectedRows.length &&
+    distinctFinalCountProductIdCount === expectedRows.length &&
+    distinctReplayedCountProductIdCount === expectedRows.length &&
+    canonicalProductMatchedProductBijection &&
     finalEqualsReplay && countEventIdsEqualReplayEventIds && everyCountEventIdExistsInFeed &&
     everyEventIsOneFiniteScan && noDrops && noDuplicates;
 
@@ -201,6 +246,11 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
       missingEventIdCount,
       unmatchedEventCount,
       canonicalIdentityMismatchCount,
+      distinctExpectedCanonicalProductUidCount,
+      distinctMatchedProductIdCount,
+      distinctFinalCountProductIdCount,
+      distinctReplayedCountProductIdCount,
+      canonicalProductMatchedProductBijection,
       finalEqualsReplay,
       countEventIdsEqualReplayEventIds,
       everyCountEventIdExistsInFeed,
