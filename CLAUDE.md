@@ -44,97 +44,76 @@ vanish from the feed or the totals is a defect, full stop.
 - Zustand 5 + persist (localStorage) for optimistic scan state
 - Vitest (projects: `unit` = node for pure services, `dom` = jsdom for components/stores); Playwright E2E
 - Turso/libsql + local better-sqlite3 for the tire/retail corpus, decode cache, and ladder usage
-- Firebase Auth/Firestore backend IS wired (`FirebaseSyncTarget` + the scanStore cloud drain) behind
-  opt-in modes (`dev:emulator`/`dev:prod`) and emulator-proven (`test:firebase`, `qa:bots:live`).
-  Master plan Phase 2 COMPLETES it (accounts, tenancy derivation, two-DB model); it does not greenfield.
-  Mock is the default backend everywhere, including plain `npm run dev`; production stays mock until
-  the go-live gate.
+- Firebase Auth/Firestore backend IS wired behind opt-in modes (`dev:emulator`/`dev:prod`), emulator-
+  proven (`test:firebase`, `qa:bots:live`). Mock is the DEFAULT backend locally (incl. `npm run dev`);
+  PRODUCTION runs LIVE auth + real Firebase (verified 2026-07-29 from the prod bundle + live Admin API;
+  see `docs/DEPLOY_TRUTH.md`). Full stack + tenancy map: `docs/ARCHITECTURE.md`.
 
 ## Commands (core - full verified reference incl. paid-script warnings: `docs/COMMANDS.md`)
 
 | Command | Notes |
 |---|---|
-| `npm run dev` | Mode-switching launcher (`scripts/dev.mjs`): MOCK backend default, port 3000 |
-| `npm run dev:emulator` / `dev:prod` | Emulator backend / REAL cloud writes (owner opt-in only) |
+| `npm run dev` / `dev:emulator` / `dev:prod` | Mock (default, port 3000) / emulator / REAL cloud writes (owner opt-in only) |
 | `npm run build` / `lint` | Production build / ESLint flat config |
-| `npm run test` | All Vitest projects once |
-| `npx vitest run <file>` | One test file; add `-t "name"` for one test |
+| `npm run test` / `npx vitest run <file> -t "name"` | All Vitest projects once / one test |
 | `npm run test:e2e` | Mock Playwright E2E, port 3100; once per machine: `npx playwright install chromium` |
 | `npm run test:ledger` | Crown invariant suite - run for ANY counting/ledger change |
 | `npm run test:golden` | Golden baseline gate (offline, owner-loved 100/100 slice) |
 | `npm run test:firebase` | Firestore emulator rules + repository suite |
-| `npm run qa:revision` | Full handoff gate: tsc + lint + build + e2e + firebase + bots |
-| `npm run qa:bots[:tire\|:security\|:ux\|:data\|...]` | Human-bot browser proof, port 3300 |
+| `npm run qa:revision` / `qa:bots[:tire\|:security\|...]` | Full handoff gate / human-bot browser proof (port 3300) |
 | `npm run proof:local` / `proof:full` | tsc + unit tests / + production build |
-| `npm run teach` / `teach:test` / `teach:regression` / `teach:cleanup` | Teach Bot live-app learning harness (see docs/COMMANDS.md) |
 
-Ports: dev 3000, mock e2e 3100, firebase e2e 3200, qa bots 3300.
-PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `intel:*`, `harvest:*`,
-`qa:bots:live`, cloud-smoke, god-account scripts) are owner-gated - check `docs/COMMANDS.md` first.
+Ports: dev 3000, mock e2e 3100, firebase e2e 3200, qa bots 3300. PAID/LIVE scripts (`benchmark`,
+`live-decode-smoke`, `eval-decode --live`, `intel:*`, `harvest:*`, `qa:bots:live`, cloud-smoke,
+god-account, `teach:regression`) are owner-gated - check `docs/COMMANDS.md` first. `npm run teach:test`
+is a plain local `node:test` suite (runs today, not gated); only live-app-driving teach commands
+(`teach:regression` and other live runs) fall under the owner gate.
 
-## Architecture at a Glance (full map + 14 verified traps: `docs/ARCHITECTURE.md`)
-- Scan flow: `components/ScannerInput.tsx` (uncontrolled DOM input) -> `services/scanCleaner.ts` ->
-  `services/resolver.ts` (deterministic only) -> `stores/scanStore.ts` `processScan` ->
-  `services/inventory.ts` (`applyScanEventOnce` = the count ledger) -> pendingSyncQueue ->
-  mockDb or Firestore behind `services/db/syncTarget.ts`.
+## Architecture at a Glance (full map + 14 verified traps: `docs/ARCHITECTURE.md`; decode wiring §3)
+- Scan flow: `ScannerInput.tsx` -> `scanCleaner.ts` -> `resolver.ts` (deterministic only) -> `scanStore.ts`
+  `processScan` -> `inventory.ts` (`applyScanEventOnce` = the count ledger) -> pendingSyncQueue -> mockDb
+  or Firestore behind `services/db/syncTarget.ts`.
 - Unknown scans: `ensureProvisionalCount` runs synchronously BEFORE any decode/network. That ordering
   IS the enforcement of the TOP-LEVEL LAW; there is no named guard function. Decode is enrichment only.
-- The REAL decode orchestrator is `src/server/decode/pipeline.ts` (`runDecodePipeline`), fronted by
+- Real decode orchestrator: `src/server/decode/pipeline.ts` (`runDecodePipeline`), fronted by
   `app/api/ai-lookup/route.ts`. `services/ai/decodeOrchestrator.ts` is DEPRECATED (types only).
-- The ledger core is NOT in a file named "ledger": pure math in `services/inventory.ts`, wiring in
-  scanStore `processScan`/`markWrong`, proof in `npm run test:ledger`. `markWrong` is a quantity
-  TRANSFER (repointed ScanEvents onto a fresh provisional), never a delete.
-- `stores/scanStore.ts` is a ~6,500-line monolith: grep for symbols, don't browse.
-- Two DB layers coexist on purpose: better-sqlite3 (knowledge corpus) and Turso/libsql (decode cache
-  + ladder usage). `server/upc/*` is server-only (static import-boundary test); `services/upc/*` is
-  the client-safe half.
+- Ledger core is pure math in `services/inventory.ts`; `markWrong` is a quantity TRANSFER (repointed
+  ScanEvents onto a fresh provisional), never a delete. `stores/scanStore.ts` is a ~6,500-line monolith:
+  grep for symbols, don't browse.
+- Two DB layers on purpose: better-sqlite3 (knowledge corpus) + Turso/libsql (decode cache + ladder
+  usage). `server/upc/*` is server-only (import-boundary test); `services/upc/*` is client-safe.
 
 ## Brain Routing (deterministic first)
-- Plain code for: scanner input, buffering, cleaning, alias matching, counting, CSV, login, DB
-  updates, session state, optimistic state, sync queue, retry, idempotency. AI never does inventory math.
-- Paid AI (mock locally; the paid rungs of the ladder) ONLY for unknown-code lookup/enrichment, and
-  only after the free corpus/cache rungs miss. AI is NEVER called for a known match.
+- Plain code for: scanner input, buffering, cleaning, alias matching, counting, CSV, login, DB updates,
+  session/optimistic state, sync queue, retry, idempotency. AI never does inventory math.
+- Paid AI (mock locally) ONLY for unknown-code lookup/enrichment, after the free corpus/cache rungs
+  miss. AI is NEVER called for a known match.
 
-## Decode Ladder + Evidence Rules (live AI decode)
-- LADDER BASELINE v2 (owner-approved 2026-07-08): decode is a COST-ORDERED LADDER; the FIRST settled
-  rung (verified OR suggestion) STOPS it - never pay for a rung when an earlier one answered. True
-  order in `server/decode/pipeline.ts`: free stages (L1 cache -> tire corpus -> retail corpus ->
-  learned tier -> L2 Turso cache -> upcitemdb -> openfoodfacts) -> lazy daily-cap gate -> paid rungs
-  (`goupc`, GTIN-gated -> `fetchv2` -> `gpt`). Every rung records its honest reason; all rungs miss
-  -> Needs Review with honest reasons.
-- GEMINI IS PERMANENTLY OUT OF DECODE (grounding bills every executed search, no cap control; L11).
-  `GEMINI_DECODE_DISABLED = true` in pipeline.ts; Gemini survives only in legacy lookup / correction re-check.
-- The daily AI cap (default 2000, `AI_LOOKUP_DAILY_LIMIT`) charges ONLY paid rungs, exactly once per
-  genuine compute, INSIDE the paid path via `chargeDailySlot` (L12: never charge two paths of one
-  request). Free/corpus/cache hits never burn a slot. `checkAndIncrementDaily` is the LEGACY
-  lookup-mode gate - do not add callers.
-- Evidence: a provider may CLAIM `exactCodeEvidence`; ONLY `EvidenceVerifier`
-  (`services/ai/evidenceVerifier.ts`) output decides truth. Strength: none < url_only < snippet <
-  grounding_chunk < fetched_source; url_only verifies only on a trusted-host allowlist.
-  `CrossCheckEngine` compares two providers structurally -> agree | conflict | single_provider | weak.
-- `decideDecode` (`services/ai/decode.ts`) returns "verified" only for a PUBLIC barcode (never
-  X00/FNSKU/vendor/internal) with strong app-verified evidence (single provider or two agreeing),
-  non-empty identity, confidence >= 0.8. Provider disagreement = conflict.
-- Brand sanity: `prefixBrandConflict` (`services/catalog/brandPrefixGeneral.ts`) is ADVISORY when
-  app-verified evidence is STRONG; it still blocks weak-evidence verify paths (decode.ts:
-  `prefixBlocks = conflict && !strong`). The evidence-weighted `services/catalog/prefixFirewall.ts`
-  is the hard block, and strong app-verified exact-code evidence can clear it. `brandFamilies.ts` keeps corporate siblings
-  (Michelin/BFGoodrich/Uniroyal-NA, Continental/General, Goodyear/Cooper) from false-conflicting.
-- Auto-count: a Verified AI Decode auto-counts by default (`autoAddDecodedProducts` defaults true in
-  scanStore) when status verified + app-verified exact code + confidence >= 0.8 + (tires) full specs
-  + no firewall conflict, on a public-barcode shape. High-trust suggestions (>= 0.8 or app-verified
-  exact code) auto-apply to the counted row; lower confidence shows "(suggested)" and stays
-  review-first (owner decisions 2026-07-09).
-- Identity merge is SIZE-AWARE (`services/catalog/identityMerge.ts`): sizes live in product specs
-  fields (corpus names are slugs); same-model-DIFFERENT-SIZE decodes mint distinct products.
-- Auto decode gate: an unknown scan auto-runs live decode only when settings.aiLookupEnabled +
-  server-reported keys + autoDecodeOnScan + liveEnabled + online + not emergency-stopped + under cap
-  + breaker closed; otherwise Needs Review with the explicit reason. NEVER silently skip live decode
-  while showing "AI lookup: On"; cap/429 blocks surface their honest reason, never a generic
-  "Unidentified item".
-- TEST SAFETY: automated tests NEVER call live providers. Unit tests mock engines/fetch; E2E mocks
-  `/api/ai-lookup` via `page.route`; the Playwright webServer sets `IS_E2E=1`, which forces the route
-  mock-only. Manual live testing only per `MANUAL_LIVE_TEST.md`.
+## Decode Ladder + Evidence Rules (rung order, strengths, firewall detail: `docs/DECODER_ARCHITECTURE.md`; wiring §3)
+- COST-ORDERED LADDER (baseline v2, owner-approved 2026-07-08): the FIRST settled rung (verified OR
+  suggestion) STOPS it - never pay for a rung when an earlier one answered. True order in `pipeline.ts`:
+  free stages (L1 cache -> tire corpus -> retail corpus -> learned tier -> L2 Turso cache -> upcitemdb
+  -> openfoodfacts) -> lazy daily-cap gate -> paid rungs (goupc, GTIN-gated -> fetchv2 -> gpt); all
+  rungs miss -> Needs Review with honest reasons.
+- GEMINI IS PERMANENTLY OUT OF DECODE (grounding bills every executed search, no cap control; L11):
+  `GEMINI_DECODE_DISABLED = true` in pipeline.ts; survives only in legacy lookup / correction re-check.
+- Daily AI cap (default 2000, `AI_LOOKUP_DAILY_LIMIT`) charges ONLY paid rungs, exactly once per genuine
+  compute, via `chargeDailySlot` (L12: never charge two paths of one request). Free/corpus/cache hits
+  never burn a slot. `checkAndIncrementDaily` is the LEGACY lookup-mode gate - do not add callers.
+- Evidence truth is decided ONLY by the app (`evidenceVerifier.ts`, `crossCheckEngine.ts`,
+  `prefixFirewall.ts` hard block + advisory brand-sanity, `identityMerge.ts` size-aware), NEVER a
+  provider self-claim. `decideDecode` (`services/ai/decode.ts`) returns "verified" only for a PUBLIC
+  barcode (never X00/FNSKU/vendor/internal) with strong app-verified exact-code evidence, non-empty
+  identity, confidence >= 0.8; disagreement = conflict. Verified auto-counts (public-barcode shape,
+  tires need full specs); high-trust suggestions (>= 0.8 or app-verified exact code) auto-apply, lower
+  shows "(suggested)" review-first.
+- Auto decode runs only when aiLookupEnabled + server keys + autoDecodeOnScan + liveEnabled + online +
+  not emergency-stopped + under cap + breaker closed; else Needs Review with the explicit reason. NEVER
+  silently skip live decode while showing "AI lookup: On"; cap/429 surfaces its honest reason, never a
+  generic "Unidentified item".
+- TEST SAFETY: automated tests NEVER call live providers (unit mocks engines/fetch; E2E mocks
+  `/api/ai-lookup`; webServer sets `IS_E2E=1` forcing mock-only). Manual live testing only per
+  `MANUAL_LIVE_TEST.md`.
 
 ## Resolver Trust Rules (CRITICAL - product identity accuracy)
 - Wrong product identity is FAILURE. Unknown is ACCEPTABLE. Prefer Needs Review over a wrong guess.
@@ -177,19 +156,17 @@ PAID/LIVE scripts (`benchmark`, `live-decode-smoke`, `eval-decode --live`, `inte
   cost/price/margin patterns. Only technical product fields reach AI.
 - API keys are env vars read SERVER-SIDE ONLY (the /api/ai-lookup route). Client code must never
   read `process.env.*_API_KEY` - enforced by `src/services/keySafety.test.ts`. Secrets live in
-  gitignored `.env.local`; a local `.env.example` (names only) exists but is UNTRACKED (`.gitignore`
-  covers all `.env*`), so a fresh clone won't have it - var names: `docs/COMMANDS.md`. AI providers
+  gitignored `.env.local` (all `.env*` gitignored; var names in `docs/COMMANDS.md`). AI providers
   default to mock. Never commit secrets.
 
 ## No-Deploy Rule & Forbidden Actions (require explicit approval, even mid-plan)
-Previews now happen ONLY through GitHub: opening a PR against `master` gets an automatic Vercel
-preview. Production is mid-cutover: branch protection on `master` is live, and PR #21 removed
-`vercel.json`'s Git auto-deploy block for `master`, but that alone does not make deploys fire - the
-Vercel dashboard Git connection (Production Branch = `master`) is still a pending owner action, so a
-merged PR does NOT yet auto-deploy to production. Production still ships via the owner-only
-manual/CLI path until the owner completes that dashboard step (`docs/DEPLOY_TRUTH.md` has the full
-state). Local `vercel deploy` and
-`vercel deploy --prod` remain forbidden without explicit owner approval in the moment either way.
+Deploy is owner-gated. A merged PR does NOT yet auto-deploy to production (the Vercel dashboard Git
+connection is still a pending owner action); production ships via the owner-only manual/CLI path. Local
+`vercel deploy` and `vercel deploy --prod` remain forbidden without explicit owner approval in the
+moment. Production promote/rollback/alias and raw `vercel deploy --prod` are hard-blocked at the tool
+layer by `.claude/hookify.vercel-prod-gate.local.md`, not just this written rule - a blocked command
+needs the owner's explicit in-conversation approval, it cannot be argued around. Full deploy mechanics
+(GitHub-Vercel integration, PR previews, protected-master deploys, env vars, rollback): `docs/DEPLOY_TRUTH.md`.
 Also gated: git push; paid/live API calls; production DB or credentials; deleting/overwriting real
 data; sending business data to third-party APIs; connecting to real business systems; live payments;
 publishing; importing into a live inventory platform; sending emails/messages.
@@ -197,24 +174,15 @@ publishing; importing into a live inventory platform; sending emails/messages.
 **Approved without approval:** local code edits, local tests, local seed data, mock AI provider,
 screenshots, CSV export proof, local mock auth/DB, docs, local sync/retry/idempotency proof.
 
-**Emergency fallback only:** `node scripts/deploy-preview.mjs` (preview-only, never `--prod`) is
-demoted to a documented emergency path for when GitHub-driven previews are unavailable (e.g. Vercel
-Git integration itself is down) - it requires explicit owner authorization in the moment, the same
-as any other deploy action, and is not a routine substitute for opening a PR.
+**Emergency fallback only:** `node scripts/deploy-preview.mjs` (preview-only, never `--prod`) requires
+explicit owner authorization in the moment, the same as any other deploy action, and is not a routine
+substitute for opening a PR.
 
-Deploy mechanics (GitHub-Vercel Git integration, PR previews, protected-master production deploys,
-what env vars live where, rollback) are canonically documented in `docs/DEPLOY_TRUTH.md` - read it
-before reasoning about deploy at all. Production promote/rollback/alias commands and raw
-`vercel deploy --prod` are hard-blocked at the tool layer by
-`.claude/hookify.vercel-prod-gate.local.md`, not just this written rule - do not assume a blocked
-command can be argued around; it needs the owner's explicit in-conversation approval.
-
-## Human Bot Proof Gate
+## Human Bot Proof Gate (personas + how-to-run + pre-handoff checklist: `docs/QA_BOTS.md`)
 Human-bot proof + safe security-leak checks are REQUIRED before handoff for scanner, inventory, role,
-export, catalog, alias, product-resolution, and customer-facing changes. Unit tests are NOT
-sufficient. See `docs/QA_BOTS.md` (personas + how-to-run + pre-handoff gate, merged 2026-07-29); run the
-relevant `npm run qa:bots:*` (or `qa:revision`); live-account resolution changes also need
-`qa:bots:live`. Playwright writes proof screenshots to `e2e/proof/`. Do not claim a resolution or
+export, catalog, alias, product-resolution, and customer-facing changes; unit tests are NOT sufficient.
+Run the relevant `npm run qa:bots:*` (or `qa:revision`); live-account resolution changes also need
+`qa:bots:live` (Playwright writes proof screenshots to `e2e/proof/`). Do not claim a resolution or
 data-protection fix works unless a browser bot proved it through the real UI with a screenshot.
 
 ## Conventions

@@ -1,8 +1,9 @@
-# CLAUDE.md deep slim-down — PROPOSAL ONLY (do not apply without owner review)
+# CLAUDE.md deep slim-down — APPLIED 2026-07-29 after attack-panel fixes (B8a findings 1-3 corrected)
 
-Date: 2026-07-29 · Branch: `chore/docs-consolidation` · Agent: Wave-2 B5
-Docs plan reference: §8b.3 ("most powerful, safest way possible"). This file is a **proposal**;
-CLAUDE.md itself is NOT modified by this agent.
+Date: 2026-07-29 · Branch: `chore/docs-consolidation` · Agent: Wave-2 B5 (proposal), B9 (corrective apply)
+Docs plan reference: §8b.3 ("most powerful, safest way possible"). B8a adversarial review approved
+this proposal except three findings (persistence rule dropped; teach-command gating overbroad; free-rung
+order under-specified); B9 patched the replacement text below for all three and applied it to CLAUDE.md.
 
 **Hard constraint honored: ZERO rule loss. No law, gate, or owner order was deleted or weakened.**
 Every removal is a compression of duplicated *explanatory prose / enumerated detail* whose canonical
@@ -196,7 +197,9 @@ vanish from the feed or the totals is a defect, full stop.
 
 Ports: dev 3000, mock e2e 3100, firebase e2e 3200, qa bots 3300. PAID/LIVE scripts (`benchmark`,
 `live-decode-smoke`, `eval-decode --live`, `intel:*`, `harvest:*`, `qa:bots:live`, cloud-smoke,
-god-account, `teach*`) are owner-gated - check `docs/COMMANDS.md` first.
+god-account, `teach:regression`) are owner-gated - check `docs/COMMANDS.md` first. `npm run teach:test`
+is a plain local `node:test` suite (runs today, not gated); only live-app-driving teach commands
+(`teach:regression` and other live runs) fall under the owner gate.
 
 ## Architecture at a Glance (full map + 14 verified traps: `docs/ARCHITECTURE.md`; decode wiring §3)
 - Scan flow: `ScannerInput.tsx` -> `scanCleaner.ts` -> `resolver.ts` (deterministic only) -> `scanStore.ts`
@@ -220,9 +223,10 @@ god-account, `teach*`) are owner-gated - check `docs/COMMANDS.md` first.
 
 ## Decode Ladder + Evidence Rules (rung order, strengths, firewall detail: `docs/DECODER_ARCHITECTURE.md`; wiring §3)
 - COST-ORDERED LADDER (baseline v2, owner-approved 2026-07-08): the FIRST settled rung (verified OR
-  suggestion) STOPS it - never pay for a rung when an earlier one answered. `pipeline.ts` runs free
-  stages (caches + tire/retail/learned corpus + upcitemdb/openfoodfacts) -> lazy daily-cap gate -> paid
-  rungs (`goupc` GTIN-gated -> `fetchv2` -> `gpt`); all rungs miss -> Needs Review with honest reasons.
+  suggestion) STOPS it - never pay for a rung when an earlier one answered. True order in `pipeline.ts`:
+  free stages (L1 cache -> tire corpus -> retail corpus -> learned tier -> L2 Turso cache -> upcitemdb
+  -> openfoodfacts) -> lazy daily-cap gate -> paid rungs (goupc, GTIN-gated -> fetchv2 -> gpt); all
+  rungs miss -> Needs Review with honest reasons.
 - GEMINI IS PERMANENTLY OUT OF DECODE (grounding bills every executed search, no cap control; L11):
   `GEMINI_DECODE_DISABLED = true` in pipeline.ts; survives only in legacy lookup / correction re-check.
 - Daily AI cap (default 2000, `AI_LOOKUP_DAILY_LIMIT`) charges ONLY paid rungs, exactly once per genuine
@@ -266,9 +270,9 @@ god-account, `teach*`) are owner-gated - check `docs/COMMANDS.md` first.
   exactly; never call AI or matching mid-typing.
 
 ## Optimistic State, Offline, Idempotent Sync
-- Known scans update Zustand immediately; the UI never waits on a server round-trip. scanFeed,
-  finalCounts, needsReviewQueue, pendingSyncQueue, and synced ids survive refresh (localStorage;
-  IndexedDB is the documented next upgrade).
+- Known scans update Zustand immediately; the UI never waits on a server round-trip. Persist AFTER
+  the user sees feedback. scanFeed, finalCounts, needsReviewQueue, pendingSyncQueue, and synced ids
+  survive refresh (localStorage; IndexedDB is the documented next upgrade).
 - Scans work offline; failed sync marks items "pending" ("Saved locally, not synced yet") and retries
   on reconnect + via a visible Retry button. Never lose a completed scan to a network failure; never
   block scanning on the backend.
