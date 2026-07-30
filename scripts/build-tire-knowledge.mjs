@@ -104,7 +104,7 @@ function main() {
     fail(`Snapshot missing required columns: ${missingCols.join(", ")}`, { source_snapshot_path: snap.path, source_file_hash, headers });
   }
 
-  const barcodeIndex = {}; const partNumberIndex = {}; const identityIndex = {};
+  const barcodeIndex = {}; const partNumberIndex = {}; const ambiguousPartNumberKeys = new Set(); const identityIndex = {};
   const skipReasons = {}; let trusted = 0; let skipped = 0;
   const skip = (why) => { skipReasons[why] = (skipReasons[why] ?? 0) + 1; skipped++; };
 
@@ -128,7 +128,16 @@ function main() {
     if (barcodeIndex[barcode] && barcodeIndex[barcode].canonical_product_uid !== row.canonical_product_uid) { skip("barcode_conflict"); continue; }
     barcodeIndex[barcode] = row;
     trusted++;
-    if (row.manufacturer_part_number) { const pk = normPart(row.manufacturer_part_number); if (pk && !partNumberIndex[pk]) partNumberIndex[pk] = row.canonical_product_uid; }
+    if (row.manufacturer_part_number) {
+      const pk = normPart(row.manufacturer_part_number);
+      if (pk && !ambiguousPartNumberKeys.has(pk)) {
+        if (!partNumberIndex[pk]) partNumberIndex[pk] = row.canonical_product_uid;
+        else if (partNumberIndex[pk] !== row.canonical_product_uid) {
+          delete partNumberIndex[pk];
+          ambiguousPartNumberKeys.add(pk);
+        }
+      }
+    }
     const ik = `${row.brand_normalized}|${row.model_normalized}|${norm(row.size)}|${row.load_index}|${row.speed_rating}`;
     if (!identityIndex[ik]) identityIndex[ik] = row.canonical_product_uid;
   }
@@ -140,11 +149,12 @@ function main() {
     source_snapshot_label: snap.label, harvester_snapshot_used: !snap.seed,
     source_file_hash, source_row_count: records.length, trusted_rows_ingested: trusted,
     barcode_index_count: Object.keys(barcodeIndex).length, part_number_index_count: Object.keys(partNumberIndex).length,
+    ambiguous_part_number_count: ambiguousPartNumberKeys.size,
     identity_index_count: Object.keys(identityIndex).length, size_alias_count: 0, brand_alias_count: 0, model_alias_count: 0,
     skipped_row_count: skipped, skip_reasons: skipReasons, generator_version: GENERATOR_VERSION, next_version: "16.2.9",
     ...gitInfo(),
   };
-  const index = { schema_version: SCHEMA_VERSION, generated_at, barcodeIndex, partNumberIndex, identityIndex };
+  const index = { schema_version: SCHEMA_VERSION, generated_at, barcodeIndex, partNumberIndex, ambiguousPartNumberKeys: [...ambiguousPartNumberKeys].sort(), identityIndex };
 
   const tmpJson = OUT_JSON + ".tmp"; const tmpMeta = OUT_META + ".tmp";
   writeFileSync(tmpJson, JSON.stringify(index)); writeFileSync(tmpMeta, JSON.stringify(meta, null, 2) + "\n");
@@ -155,6 +165,7 @@ function main() {
     status: "success", source_snapshot_path: meta.source_snapshot_path, source_file_hash, generated_at,
     harvester_snapshot_used: meta.harvester_snapshot_used, snapshot_label: snap.label,
     trusted_rows_ingested: trusted, barcode_index_count: meta.barcode_index_count, part_number_index_count: meta.part_number_index_count,
+    ambiguous_part_number_count: meta.ambiguous_part_number_count,
     identity_index_count: meta.identity_index_count, alias_count: 0, schema_version: SCHEMA_VERSION,
     skipped_row_count: skipped, skip_reasons: skipReasons,
   });

@@ -10,7 +10,7 @@ vi.mock("@/server/knowledgeDb", () => ({
   __resetKnowledgeDbForTests: () => {},
 }));
 
-import { lookupByExactBarcode, __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { lookupByExactBarcode, lookupByExactPartNumber, __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { __resetKnowledgeDbForTests } from "@/server/knowledgeDb";
 
 // A barcode confirmed present in the committed barcodeIndex (see tireKnowledge.generated.json).
@@ -24,6 +24,16 @@ describe("tire index resolves from the committed JSON when SQLite is unavailable
     expect(row).not.toBeNull();
     expect(row!.barcode ?? KNOWN_TIRE_BARCODE).toBeTruthy();
     expect(row!.brand).toBeTruthy(); // a real row, not a stub
+  });
+
+  it("fails closed for part numbers when the committed JSON lacks ambiguity metadata, while barcode lookup remains available", async () => {
+    // The stale JSON records only one owner for this MPN, but the real DB has two distinct
+    // canonical products. Without collision metadata, a single-valued partNumberIndex cannot
+    // prove uniqueness and must not manufacture a suggested identity.
+    expect(await lookupByExactPartNumber("90000027117")).toBeNull();
+
+    const barcodeRow = await lookupByExactBarcode(KNOWN_TIRE_BARCODE);
+    expect(barcodeRow).not.toBeNull();
   });
 
   it("misses a code that is not in the corpus", async () => {

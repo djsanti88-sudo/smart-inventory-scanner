@@ -23,6 +23,7 @@ vi.mock("@/server/retail-knowledge/retailKnowledgeIndex", () => ({
 }));
 
 import {
+  lookupByExactBarcode,
   lookupByExactPartNumber,
   __resetTireKnowledgeCacheForTests,
 } from "@/server/tire-knowledge/tireKnowledgeIndex";
@@ -143,6 +144,28 @@ describe("lookupByExactPartNumber - part-number ALIAS table fallback (Task A4, r
     });
   });
 
+  it("ambiguous canonical manufacturer part number returns null instead of selecting the first product", async () => {
+    db = buildRealDb({
+      tires: [
+        { barcode: "029142800007", canonical_product_uid: "TIRE_PN_A", manufacturer_part_number: "DUP-100" },
+        { barcode: "029142800008", canonical_product_uid: "TIRE_PN_B", manufacturer_part_number: "dup 100" },
+      ],
+    });
+    mockGetKnowledgeDb.mockReturnValue(db);
+
+    await expect(lookupByExactPartNumber("DUP100")).resolves.toBeNull();
+  });
+
+  it("a unique canonical manufacturer part number remains suggested and its barcode stays exact", async () => {
+    db = buildRealDb({
+      tires: [{ barcode: "029142800009", canonical_product_uid: "TIRE_PN_UNIQUE", manufacturer_part_number: "UNIQUE-100" }],
+    });
+    mockGetKnowledgeDb.mockReturnValue(db);
+
+    await expect(lookupByExactPartNumber("unique 100")).resolves.toMatchObject({ canonical_product_uid: "TIRE_PN_UNIQUE" });
+    await expect(lookupByExactBarcode("029142800009")).resolves.toMatchObject({ canonical_product_uid: "TIRE_PN_UNIQUE" });
+  });
+
   it("a part number with no canonical hit and no alias hit returns null", () => {
     db = buildRealDb({
       tires: [{ barcode: "029142800004", canonical_product_uid: "TIRE_EEE", manufacturer_part_number: "111222" }],
@@ -195,7 +218,7 @@ describe("lookupByExactPartNumber - part-number ALIAS table fallback (Task A4, r
 // fake-client style.
 // -------------------------------------------------------------------------------------------
 function fakeTursoClient(options: {
-  partNumberToUid?: Record<string, string>;
+  partNumberToUid?: Record<string, string | string[]>;
   aliasKeyToUids?: Record<string, string[]>;
   tiresByUid?: Record<string, Record<string, unknown>>;
 }) {
@@ -211,8 +234,9 @@ function fakeTursoClient(options: {
       }
       if (sql.includes("FROM tire_part_numbers")) {
         const [key] = args as [string];
-        const uid = options.partNumberToUid?.[key];
-        return { rows: uid ? [{ canonical_product_uid: uid }] : [] };
+        const mapped = options.partNumberToUid?.[key];
+        const uids = Array.isArray(mapped) ? mapped : mapped ? [mapped] : [];
+        return { rows: uids.map((canonical_product_uid) => ({ canonical_product_uid })) };
       }
       if (sql.includes("FROM tires WHERE canonical_product_uid")) {
         const [uid] = args as [string];
@@ -282,6 +306,16 @@ describe("lookupByExactPartNumber - part-number ALIAS table fallback (Task A4, T
 
     const row = await lookupByExactPartNumber("AMBIGTURSO");
     expect(row).toBeNull();
+  });
+
+  it("ambiguous canonical manufacturer part number on Turso returns null instead of selecting the first product", async () => {
+    const client = fakeTursoClient({
+      partNumberToUid: { DUPTURSO: ["TIRE_TURSO_1", "TIRE_TURSO_2"] },
+      tiresByUid: { TIRE_TURSO_1: TIRE_ROW },
+    });
+    mockGetRetailTursoClient.mockResolvedValue(client);
+
+    await expect(lookupByExactPartNumber("DUPTURSO")).resolves.toBeNull();
   });
 
   it("canonical tire_part_numbers hit on Turso wins outright; alias table never queried", async () => {

@@ -47,6 +47,8 @@ const TIRE_JSON_PATH = join(process.cwd(), "src", "server", "tire-knowledge", "t
 interface TireJsonIndex {
   barcodeIndex: Record<string, TireKnowledgeRow>;
   partNumberIndex: Record<string, string>;
+  /** Normalized MPNs owned by more than one canonical product. These are terminal misses. */
+  ambiguousPartNumberKeys?: string[];
 }
 let _jsonIndex: TireJsonIndex | null | "missing" = null;
 let _uidToRow: Map<string, TireKnowledgeRow> | null = null;
@@ -58,7 +60,13 @@ function getJsonIndex(): TireJsonIndex | null {
   if (_jsonIndex) return _jsonIndex;
   try {
     const parsed = JSON.parse(readFileSync(TIRE_JSON_PATH, "utf8")) as TireJsonIndex;
-    _jsonIndex = { barcodeIndex: parsed.barcodeIndex ?? {}, partNumberIndex: parsed.partNumberIndex ?? {} };
+    _jsonIndex = {
+      barcodeIndex: parsed.barcodeIndex ?? {},
+      partNumberIndex: parsed.partNumberIndex ?? {},
+      ambiguousPartNumberKeys: Array.isArray(parsed.ambiguousPartNumberKeys)
+        ? parsed.ambiguousPartNumberKeys
+        : undefined,
+    };
     _uidToRow = new Map();
     for (const row of Object.values(_jsonIndex.barcodeIndex)) _uidToRow.set(row.canonical_product_uid, row);
     return _jsonIndex;
@@ -97,7 +105,7 @@ function getStmtPartNumber() {
     // uppercased), but the stored column is RAW - without this a hyphenated/spaced PN silently
     // misses on SQLite while Turso/JSON (both normalized) hit.
     _stmtPartNumber = db.prepare(
-      "SELECT * FROM tires WHERE UPPER(REPLACE(REPLACE(manufacturer_part_number, ' ', ''), '-', '')) = ? LIMIT 1",
+      "SELECT * FROM tires WHERE UPPER(REPLACE(REPLACE(manufacturer_part_number, ' ', ''), '-', '')) = ?",
     );
     return _stmtPartNumber;
   } catch { return null; }
@@ -221,27 +229,28 @@ async function lookupBarcodeTurso(key: string): Promise<TireKnowledgeRow | null>
 }
 
 /** Turso part-number lookup: two-step (normalized_part_number -> canonical_product_uid -> tires row).
- *  Fail-safe: any error returns null, never throws. */
-async function lookupPartNumberTurso(key: string): Promise<TireKnowledgeRow | null> {
+ *  A normalized MPN with multiple distinct canonical products is terminally ambiguous. */
+async function lookupPartNumberTurso(key: string): Promise<{ row: TireKnowledgeRow | null; ambiguous: boolean }> {
   try {
     const client = await getTireTursoClient();
-    if (!client) return null;
+    if (!client) return { row: null, ambiguous: false };
     const partResult = await client.execute({
-      sql: "SELECT canonical_product_uid FROM tire_part_numbers WHERE normalized_part_number = ?",
+      sql: "SELECT DISTINCT canonical_product_uid FROM tire_part_numbers WHERE normalized_part_number = ?",
       args: [key],
     });
-    if (partResult.rows.length === 0) return null;
+    if (partResult.rows.length === 0) return { row: null, ambiguous: false };
+    if (partResult.rows.length !== 1) return { row: null, ambiguous: true };
     const uid = partResult.rows[0].canonical_product_uid as string;
-    if (!uid) return null;
+    if (!uid) return { row: null, ambiguous: false };
     const tireResult = await client.execute({
       sql: "SELECT * FROM tires WHERE canonical_product_uid = ? LIMIT 1",
       args: [uid],
     });
-    if (tireResult.rows.length === 0) return null;
-    return rowFromTurso(tireResult.rows[0]);
+    if (tireResult.rows.length === 0) return { row: null, ambiguous: false };
+    return { row: rowFromTurso(tireResult.rows[0]), ambiguous: false };
   } catch (e) {
     console.warn("[tire-knowledge] Turso part-number lookup failed:", (e as Error).message);
-    return null;
+    return { row: null, ambiguous: false };
   }
 }
 
@@ -294,15 +303,8 @@ export async function lookupByExactBarcodeLocal(code: string): Promise<TireKnowl
  * to strip a leading/trailing distributor affix down to the numeric core - it is reused here so the
  * scan-path lookup benefits from the exact same primitive the reconcile matcher already trusts.
  *
- * SAFETY: candidate keys are tried IN ORDER and the function returns on the FIRST hit, per backend.
- * Because each individual tried key maps to at most one canonical product by construction (this is
- * an EXACT keyed lookup, never a fan-out join), there is no scenario where two DIFFERENT candidate
- * keys could both hit and disagree without the earlier (higher-trust, unaffixed) key already having
- * returned first. If the affix-core key were ambiguous across products, that risk lives in the
- * CALLER's confidence tier (TireKnowledgeProvider.resolveExactPartNumber grades a core-key hit lower
- * than a raw-key hit) and in the reconcile matcher's separate multi-hit ambiguity check
- * (lookupAllByPartNumber / matchExpectedRow) - this single-row EXACT lookup intentionally stays
- * simple and stops at the first backend+key that answers.
+ * SAFETY: each candidate must resolve to exactly one distinct canonical product. A collision is a
+ * terminal null (Needs Review), never a first-row guess or a fallback to a lower-trust variant.
  */
 export async function lookupByExactPartNumber(partNumber: string): Promise<TireKnowledgeRow | null> {
   const primary = normPartKey(partNumber);
@@ -316,8 +318,9 @@ export async function lookupByExactPartNumber(partNumber: string): Promise<TireK
   const stmt = getStmtPartNumber();
   if (stmt) {
     for (const key of candidates) {
-      const row = (stmt.get(key) as TireKnowledgeRow | undefined) ?? null;
-      if (row) return row;
+      const result = lookupCanonicalPartNumberSqlite(stmt, key);
+      if (result.ambiguous) return null;
+      if (result.row) return result.row;
     }
     // Task A4: tire_part_numbers/tires miss on every candidate key -> fall back to the
     // distributor/boss part-number ALIAS table before giving up on this backend.
@@ -329,8 +332,9 @@ export async function lookupByExactPartNumber(partNumber: string): Promise<TireK
   }
 
   for (const key of candidates) {
-    const tursoRow = await lookupPartNumberTurso(key);
-    if (tursoRow) return tursoRow;
+    const result = await lookupPartNumberTurso(key);
+    if (result.ambiguous) return null;
+    if (result.row) return result.row;
   }
   // Task A4: same alias fallback on the Turso path, tried only after every candidate key has
   // missed the canonical tire_part_numbers two-step lookup above.
@@ -341,12 +345,31 @@ export async function lookupByExactPartNumber(partNumber: string): Promise<TireK
 
   const idx = getJsonIndex();
   if (!idx) return null;
+  // A legacy single-valued index cannot prove that its chosen UID is the only owner. Until the
+  // generator has emitted explicit collision metadata, JSON part-number resolution fails closed.
+  if (!idx.ambiguousPartNumberKeys) return null;
   for (const key of candidates) {
+    if (idx.ambiguousPartNumberKeys?.includes(key)) return null;
     const uid = idx.partNumberIndex[key];
     const row = uid && _uidToRow ? (_uidToRow.get(uid) ?? null) : null;
     if (row) return row;
   }
   return null;
+}
+
+/** SQLite canonical MPN lookup with the same distinct-product ambiguity contract as Turso. */
+function lookupCanonicalPartNumberSqlite(
+  stmt: { all: (key: string) => unknown[] },
+  key: string,
+): { row: TireKnowledgeRow | null; ambiguous: boolean } {
+  try {
+    const rows = stmt.all(key) as TireKnowledgeRow[];
+    const products = new Set(rows.map((row) => row.canonical_product_uid).filter(Boolean));
+    if (products.size !== 1) return { row: null, ambiguous: products.size > 1 };
+    return { row: rows.find((row) => row.canonical_product_uid === [...products][0]) ?? null, ambiguous: false };
+  } catch {
+    return { row: null, ambiguous: false };
+  }
 }
 
 /** Task A4: SQLite part-number ALIAS fallback (tire_product_part_number_aliases), tried only after
@@ -449,7 +472,8 @@ export async function lookupAllByPartNumber(normalizedPn: string): Promise<TireK
   const tursoRows = await lookupAllPartNumberTurso(key);
   if (tursoRows.length > 0) return tursoRows;
   const idx = getJsonIndex();
-  if (!idx) return [];
+  if (!idx?.ambiguousPartNumberKeys) return [];
+  if (idx.ambiguousPartNumberKeys.includes(key)) return [];
   const uid = idx.partNumberIndex[key];
   const row = uid && _uidToRow ? _uidToRow.get(uid) : undefined;
   return row ? [row] : [];

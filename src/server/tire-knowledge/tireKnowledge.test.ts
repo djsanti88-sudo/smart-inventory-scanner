@@ -33,8 +33,9 @@ describe("tireKnowledgeIndex - exact lookup", () => {
     expect(await lookupByExactBarcode("745125495781")).toBeNull();
   });
 
-  it("exact part-number lookup resolves the row", async () => {
-    expect((await lookupByExactPartNumber("90000027117"))?.brand).toBe("cooper");
+  it("ambiguous part-number lookup fails closed while a unique part number resolves", async () => {
+    expect(await lookupByExactPartNumber("90000027117")).toBeNull();
+    expect((await lookupByExactPartNumber("160085014"))?.brand).toBe("cooper");
     expect(await lookupByExactPartNumber("NOT-A-PART")).toBeNull();
   });
 
@@ -82,8 +83,10 @@ describe("TireKnowledgeProvider - decode result + safety", () => {
     expect(await resolveExactBarcode("745125495781")).toBeNull();
   });
 
-  it("part number -> SUGGESTED (Needs Review), never silently auto-counts", async () => {
-    const r = await resolveExactPartNumber("90000027117");
+  it("ambiguous part number stays unresolved while a unique part number is SUGGESTED", async () => {
+    expect(await resolveExactPartNumber("90000027117")).toBeNull();
+
+    const r = await resolveExactPartNumber("160085014");
     expect(r!.decision.status).toBe("suggested");
     expect(r!.decision.exactCodeEvidenceVerifiedByApp).toBe(false);
   });

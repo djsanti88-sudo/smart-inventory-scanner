@@ -213,16 +213,24 @@ function mergeIntoBarcodeIndex(barcodeIndex, harvestedRows, prefixMap, sameBrand
 
 function rebuildSecondaryIndexes(corpus) {
   const partNumberIndex = {};
+  const ambiguousPartNumberKeys = new Set();
   const identityIndex = {};
   for (const row of Object.values(corpus.barcodeIndex)) {
     if (row.manufacturer_part_number) {
       const pk = normPart(row.manufacturer_part_number);
-      if (pk && !partNumberIndex[pk]) partNumberIndex[pk] = row.canonical_product_uid;
+      if (pk && !ambiguousPartNumberKeys.has(pk)) {
+        if (!partNumberIndex[pk]) partNumberIndex[pk] = row.canonical_product_uid;
+        else if (partNumberIndex[pk] !== row.canonical_product_uid) {
+          delete partNumberIndex[pk];
+          ambiguousPartNumberKeys.add(pk);
+        }
+      }
     }
     const ik = `${row.brand_normalized}|${row.model_normalized}|${normText(row.size)}|${row.load_index}|${row.speed_rating}`;
     if (!identityIndex[ik]) identityIndex[ik] = row.canonical_product_uid;
   }
   corpus.partNumberIndex = partNumberIndex;
+  corpus.ambiguousPartNumberKeys = [...ambiguousPartNumberKeys].sort();
   corpus.identityIndex = identityIndex;
 }
 
