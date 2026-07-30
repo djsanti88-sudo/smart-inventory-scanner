@@ -11,7 +11,7 @@ contract. Existing imports are untouched and all tests stay green.
 - **`index.ts`** — barrel re-exporting the pipeline: `runDecode`, `decideDecode`, `crossCheck`,
   `verifyEvidence`, the providers, `enrichWithPageFetch`, cache/budget/fallback helpers.
 
-## How a decode flows (see `docs/decode/ARCHITECTURE.md` for the cited deep dive)
+## How a decode flows (see `docs/DECODER_ARCHITECTURE.md` for the cited deep dive)
 
 ```
 DecodeRequest
