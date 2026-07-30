@@ -27,6 +27,7 @@ export function minimizeSpeedInsightEvent(
 }
 
 export function SpeedInsightsTelemetry() {
+  if (process.env.NEXT_PUBLIC_LOCAL_DEMO === "1") return null;
   return (
     <SpeedInsights
       sampleRate={0.1}

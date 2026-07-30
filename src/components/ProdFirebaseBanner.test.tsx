@@ -11,6 +11,15 @@ afterEach(() => {
 });
 
 describe("ProdFirebaseBanner (dev-only guardrail)", () => {
+  it("renders the persistent green local-demo boundary before any Firebase warning", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    vi.stubEnv("NEXT_PUBLIC_FIREBASE_BACKEND", "1");
+    render(<ProdFirebaseBanner />);
+    expect(screen.getByTestId("local-demo-banner")).toHaveTextContent("LOCAL TIRE DEMO");
+    expect(screen.getByTestId("local-demo-banner")).toHaveTextContent("External lookup off");
+    expect(screen.queryByTestId("prod-firebase-banner")).toBeNull();
+  });
+
   it("does NOT render on a real production deployment, even with real Firebase", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("NEXT_PUBLIC_FIREBASE_BACKEND", "1");

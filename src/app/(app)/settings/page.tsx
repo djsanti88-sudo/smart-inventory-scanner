@@ -17,6 +17,7 @@ import { getSession, onAuthChange } from "@/lib/auth";
 import { runSignOutFlow, wipeAndSignOut } from "@/services/auth/signOutFlow";
 
 export default function SettingsPage() {
+  const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
   const settings = useScanStore((s) => s.settings);
   const update = useScanStore((s) => s.updateSettings);
   const businessId = useScanStore((s) => s.businessId);
@@ -35,18 +36,20 @@ export default function SettingsPage() {
   // fetch failure on the mount-time call self-heals instead of leaving stale AI/kill-switch status
   // for the whole session. Interval is cleared on unmount so it never leaks past this page.
   useEffect(() => {
+    if (isLocalDemo) return;
     void refreshAiStatus();
     const intervalId = setInterval(() => {
       void refreshAiStatus();
     }, 60_000);
     return () => clearInterval(intervalId);
-  }, [refreshAiStatus]);
+  }, [isLocalDemo, refreshAiStatus]);
 
   const verifiedCatalogCount = catalog.filter((e) => e.verificationStatus === "verified").length;
   const pendingCatalogCount = catalog.filter((e) => e.verificationStatus === "pending").length;
 
   const [user, setUser] = useState<User | null>(null);
   useEffect(() => {
+    if (isLocalDemo) return;
     let active = true;
     getSession().then((s) => {
       if (active) setUser(s);
@@ -58,7 +61,7 @@ export default function SettingsPage() {
       active = false;
       unsub();
     };
-  }, []);
+  }, [isLocalDemo]);
 
   const [cacheMsg, setCacheMsg] = useState("");
   const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
@@ -502,7 +505,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <div className="mt-6 border-t border-red-100 pt-4">
+        {!isLocalDemo && <div className="mt-6 border-t border-red-100 pt-4">
           <h3 className="mb-1 text-sm font-semibold text-red-700">Delete account and all data</h3>
           <p className="mb-3 text-xs text-zinc-500">
             Export your data first. Deletion is permanent. This removes every product, count,
@@ -563,7 +566,7 @@ export default function SettingsPage() {
               )}
             </div>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );

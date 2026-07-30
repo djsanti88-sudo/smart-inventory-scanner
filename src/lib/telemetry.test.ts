@@ -1,7 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { postTelemetry } from "./telemetry";
 
 describe("postTelemetry", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("does not send telemetry in the air-gapped local demo", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await postTelemetry("client_error", "no egress");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockRestore();
+  });
+
   it("posts only an allowed event and bounded detail without surfacing fetch failures", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("offline"));
 

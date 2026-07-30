@@ -5,6 +5,9 @@ const MAX_DETAIL_LENGTH = 200;
 
 /** Best-effort browser telemetry. This deliberately swallows failures to avoid error-reporting loops. */
 export async function postTelemetry(event: ClientTelemetryEvent, detail?: string): Promise<void> {
+  // The manager-facing local tire demo is deliberately air-gapped: its proof must not create
+  // analytics traffic or depend on any remote endpoint.
+  if (process.env.NEXT_PUBLIC_LOCAL_DEMO === "1") return;
   if (!ALLOWED_EVENTS.has(event)) return;
   const body = {
     event,

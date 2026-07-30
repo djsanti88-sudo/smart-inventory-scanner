@@ -17,6 +17,15 @@ async function token(): Promise<string | undefined> {
 export function UniversalImportPanelContainer() {
   const businessId = useScanStore((state) => state.businessId);
   const applyUniversalImport = useScanStore((state) => state.applyUniversalImport);
+  const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
+
+  if (isLocalDemo) {
+    return (
+      <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" data-testid="local-demo-import-unavailable">
+        Import is unavailable in the certified local tire demo.
+      </section>
+    );
+  }
 
   async function loadMapping(sourceSignature: string): Promise<ColumnMapping | null> {
     // No businessId yet (e.g. a fresh signup with no business membership resolved/selected): there is

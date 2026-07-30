@@ -98,6 +98,8 @@ import { backfillProducts } from "@/services/polish/backfillProducts";
 import type { AiStatus } from "@/types";
 import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary } from "@/services/importSchema";
 
+const isLocalDemo = () => process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
+
 /** Result summary of a CSV product import (shown in the UI). */
 export interface CsvImportSummary {
   rowsParsed: number;
@@ -2735,7 +2737,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // not auto-accepted. AI is never called for a known/approved scan or a verified catalog hit.
           // Option 1 wiring: if the cloud dep is present and we're online, try the global catalog first;
           // cloudCatalogResolve falls through to AI internally on a miss / firewall conflict.
-          if (deps.lookupGlobalCatalog && get().online) {
+          if (!isLocalDemo() && deps.lookupGlobalCatalog && get().online) {
             // FIX 5: swallow a rejection here (e.g. a dev-assert throw from the GC1 hard invariant)
             // so it never becomes an unhandled promise rejection - siblings already do this (line ~1138).
             void get().cloudCatalogResolve(review.id, codes).catch(() => {});
@@ -3020,6 +3022,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       cloudCatalogResolve: async (reviewId, codes) => {
+        if (isLocalDemo()) return;
         if (!deps.lookupGlobalCatalog) return;
         let entry: CatalogEntry | null = null;
         try {
@@ -4376,6 +4379,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       enrichPrefixFloorLabel: (code, productId) => {
+        if (isLocalDemo()) return;
         // Fire-and-forget: never awaited by any caller, never blocks/delays the row that already
         // appeared + counted synchronously. Deferred a tick so any SYNCHRONOUS same-call resolution
         // (catalog-first hit, deterministic alias, a decode landing in the same stack) renames the row
@@ -6492,7 +6496,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (reviewId) {
           emitAudit({ entityType: "UnknownCodeReview", entityId: reviewId, action: "needs_review_reopened", metadata: { code, fromProduct: productId } });
           // 5. Stronger Gemini Pro correction recheck (cost-guarded; never auto-saves or counts).
-          await get().correctionRecheck(reviewId, { reason: opts?.reason });
+          if (!isLocalDemo()) await get().correctionRecheck(reviewId, { reason: opts?.reason });
         }
         // 6. Catalog revocation round (design §2.3): report the wrong identity to the shared master
         // catalog so other shops stop replaying it. Best-effort and NON-BLOCKING - mirrors how
@@ -6501,7 +6505,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // this call lands, times out, the user has no session, or the server is unreachable. Never
         // awaited into the return path; every failure mode is swallowed here on purpose (matches the
         // project's "never block scanning/correction on the backend" rule for the sync queue).
-        if (code) {
+        if (!isLocalDemo() && code) {
           void (async () => {
             try {
               const user = await getSession();
@@ -6526,6 +6530,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       correctionRecheck: async (reviewId, opts) => {
+        if (isLocalDemo()) return;
         const review = get().needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
         // Cost guard: one Pro recheck per marked-wrong code unless the user explicitly retries.

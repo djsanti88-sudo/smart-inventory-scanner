@@ -77,9 +77,19 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("Boss Report sharing", () => {
+  it("hides sharing in the local tire demo and creates no share request", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    const fetchMock = mockSuccessfulShare();
+    render(<BossReportPage />);
+
+    expect(screen.queryByTestId("share-report")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("posts the current non-empty report snapshot and business id", async () => {
     const fetchMock = mockSuccessfulShare();
     render(<BossReportPage />);

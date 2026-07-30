@@ -6,6 +6,18 @@
 // because in production using real Firebase IS the intended behavior. The safe `npm run dev` (mock) and
 // `npm run dev:emulator` never trigger it. Env is read at render time so it is testable.
 export function ProdFirebaseBanner() {
+  if (process.env.NEXT_PUBLIC_LOCAL_DEMO === "1") {
+    return (
+      <div
+        data-testid="local-demo-banner"
+        role="status"
+        className="sticky top-0 z-50 flex flex-wrap items-center justify-center gap-2 bg-emerald-700 px-4 py-2 text-center text-sm font-semibold text-white"
+      >
+        <span>LOCAL TIRE DEMO</span>
+        <span className="font-normal opacity-95">External lookup off. Tire corpus only; cloud sync, AI lookup, and telemetry are off.</span>
+      </div>
+    );
+  }
   const isDev = process.env.NODE_ENV !== "production"; // false on any real Vercel deployment
   const backend = process.env.NEXT_PUBLIC_FIREBASE_BACKEND === "1";
   const emulator = process.env.NEXT_PUBLIC_FIREBASE_USE_EMULATOR === "1";

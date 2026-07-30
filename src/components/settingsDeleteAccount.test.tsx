@@ -58,9 +58,19 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("Danger zone: delete account gate", () => {
+  it("hides account deletion and does not fetch in the local tire demo", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    getSession.mockResolvedValue({ email: "owner@example.com", getIdToken });
+    render(<SettingsPage />);
+
+    expect(screen.queryByTestId("delete-account")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("the delete button is disabled and shows a sign-in note when signed out", async () => {
     getSession.mockResolvedValue(null);
     render(<SettingsPage />);

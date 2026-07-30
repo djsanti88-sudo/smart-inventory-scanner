@@ -7,6 +7,7 @@ import { buildBossReport } from "@/services/reports/bossReport";
 import { useScanStore } from "@/stores/scanStore";
 
 export default function BossReportPage() {
+  const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
   const products = useScanStore((state) => state.products);
   const finalCounts = useScanStore((state) => state.finalCounts);
   const scanFeed = useScanStore((state) => state.scanFeed);
@@ -37,6 +38,7 @@ export default function BossReportPage() {
   const report = buildCurrentReport();
 
   async function handleShare() {
+    if (isLocalDemo) return;
     setSharing(true);
     setShareError(null);
 
@@ -122,15 +124,17 @@ export default function BossReportPage() {
           >
             Print
           </button>
-          <button
-            type="button"
-            data-testid="share-report"
-            disabled={sharing || !session}
-            onClick={() => void handleShare()}
-            className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 text-base font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {sharing ? "Creating link..." : "Get shareable link"}
-          </button>
+          {!isLocalDemo && (
+            <button
+              type="button"
+              data-testid="share-report"
+              disabled={sharing || !session}
+              onClick={() => void handleShare()}
+              className="inline-flex min-h-[44px] items-center rounded-lg bg-blue-600 px-4 text-base font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {sharing ? "Creating link..." : "Get shareable link"}
+            </button>
+          )}
         </div>
       </div>
 

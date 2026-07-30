@@ -71,6 +71,17 @@ beforeEach(() => {
 });
 
 describe("UniversalImportPanelContainer - empty businessId (fresh signup, no membership yet)", () => {
+  it("renders the local-demo unavailable state without any request", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<UniversalImportPanelContainer />);
+
+    expect(screen.getByTestId("local-demo-import-unavailable")).toHaveTextContent("Import is unavailable in the certified local tire demo.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not fetch /api/import-mapping and does not throw when businessId is empty", async () => {
     // Reproduces the prod 403: a fresh account has no selected/derived businessId yet, but the
     // container used to fire GET /api/import-mapping?businessId= (empty) regardless, and the

@@ -43,9 +43,31 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = originalFetch;
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("markWrong fires a fire-and-forget /api/catalog-dispute report", () => {
+  it("keeps the count transfer local without a correction or dispute request in local demo mode", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    const calls: string[] = [];
+    globalThis.fetch = vi.fn((url: string | URL | Request) => {
+      calls.push(typeof url === "string" ? url : url.toString());
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }) as unknown as typeof fetch;
+
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: false });
+    const code = "049000006346";
+    const productId = seedKnown(store, code);
+    store.getState().processScan(code);
+
+    await store.getState().markWrong(productId, { reason: "test" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.getState().finalCounts.reduce((total, count) => total + count.quantity, 0)).toBe(1);
+    expect(calls.filter((url) => url.includes("/api/ai-lookup") || url.includes("/api/catalog-dispute"))).toEqual([]);
+  });
+
   it("calls fetch('/api/catalog-dispute') exactly once with the scanned code and businessId in the body", async () => {
     const calls: Array<{ url: string; body: string }> = [];
     globalThis.fetch = vi.fn((url: string | URL | Request, init?: RequestInit) => {

@@ -11,13 +11,15 @@ export function Nav() {
   const pathname = usePathname();
   const router = useRouter();
   const openReviews = useScanStore((s) => s.needsReviewQueue.filter((r) => r.status === "open").length);
+  const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
 
   const links = [
     { href: "/scan", label: "Scan" },
     { href: "/history", label: "History" },
     { href: "/products", label: "Products" },
     { href: "/review", label: "Review", badge: openReviews },
-    { href: "/reconcile", label: "Reconcile" },
+    { href: "/report", label: "Report" },
+    ...(isLocalDemo ? [] : [{ href: "/reconcile", label: "Reconcile" }]),
     { href: "/settings", label: "Settings" },
   ];
 
