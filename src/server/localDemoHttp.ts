@@ -58,7 +58,7 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 export function isLoopbackRequest(request: NextRequest): boolean {
-  const { hostname, port, protocol } = request.nextUrl;
+  const { hostname, protocol } = request.nextUrl;
   if (!isLoopbackHostname(hostname)) return false;
   const hostHeader = request.headers.get("host");
   if (!hostHeader) return true;
@@ -70,8 +70,6 @@ export function isLoopbackRequest(request: NextRequest): boolean {
       hostUrl.pathname === "/" &&
       !hostUrl.search &&
       !hostUrl.hash &&
-      hostUrl.hostname === hostname &&
-      hostUrl.port === port &&
       isLoopbackHostname(hostUrl.hostname)
     );
   } catch {

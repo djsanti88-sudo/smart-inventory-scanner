@@ -31,17 +31,18 @@ describe("local demo route-level guards", () => {
   it.each([
     ["http://b01.localhost:3400/api/local-demo/manifest/01", "b01.localhost:3400"],
     ["http://BATCH-30.localhost:3400/api/local-demo/status", "batch-30.localhost:3400"],
-  ])("allows a matching standards-based localhost subdomain (%s)", (url, host) => {
+    ["http://127.0.0.1:3400/api/local-demo/manifest/01", "b01.localhost:3400"],
+    ["http://localhost:3400/api/local-demo/status", "127.0.0.1:3500"],
+  ])("allows independently loopback URL and Host authorities (%s via %s)", (url, host) => {
     expect(isLoopbackRequest(new NextRequest(url, { headers: { host } }))).toBe(true);
   });
 
   it.each([
     ["http://evil-localhost.com:3400/api/local-demo/status", "evil-localhost.com:3400"],
     ["http://localhost.evil.com:3400/api/local-demo/status", "localhost.evil.com:3400"],
-    ["http://b01.localhost:3400/api/local-demo/status", "localhost:3400"],
-    ["http://b01.localhost:3400/api/local-demo/status", "b01.localhost:3500"],
+    ["http://b01.localhost:3400/api/local-demo/status", "192.0.2.10:3400"],
     ["http://b01.localhost:3400/api/local-demo/status", "evil.com@b01.localhost:3400"],
-  ])("rejects non-loopback or mismatched evidence authorities (%s via %s)", (url, host) => {
+  ])("rejects non-loopback or spoofed evidence authorities (%s via %s)", (url, host) => {
     expect(isLoopbackRequest(new NextRequest(url, { headers: { host } }))).toBe(false);
   });
 
