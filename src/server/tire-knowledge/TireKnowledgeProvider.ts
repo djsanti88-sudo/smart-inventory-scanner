@@ -1,7 +1,8 @@
 import "server-only";
 import type { AiLookupResult, DecodeDecision, EvidenceResult } from "@/types";
 import { emptyResult } from "@/services/ai/provider";
-import { lookupByExactBarcode, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { lookupByExactBarcode, lookupByExactBarcodeLocal, lookupByExactPartNumber, type TireKnowledgeRow } from "@/server/tire-knowledge/tireKnowledgeIndex";
+import { isTrustedLocalDemoTireRow } from "@/server/tire-knowledge/localDemoTrust.mjs";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
 
@@ -18,6 +19,7 @@ export interface CorpusDecodeResult {
   evidences: EvidenceResult[];
   providerNames: string[];
   path: "corpus_exact_barcode" | "corpus_exact_part_number";
+  canonicalProductUid?: string;
 }
 
 // verified_2src is the strongest tier (independent two-source). verified_1src_strong is strong single
@@ -107,6 +109,21 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
     corroborationPath: "corpus_exact_barcode",
   };
   return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["tire-corpus"], path: "corpus_exact_barcode" };
+}
+
+/** Local-demo corpus resolution deliberately accepts only the conservative SQLite evidence tier. */
+export async function resolveExactBarcodeLocal(code: string): Promise<CorpusDecodeResult | null> {
+  const row = await lookupByExactBarcodeLocal(code);
+  if (!row || !isTrustedLocalDemoTireRow(row)) return null;
+  const result = toResult(row);
+  const decision: DecodeDecision = {
+    status: "verified", confidence: CONF[row.confidence] ?? 0.92,
+    reason: "Verified from the trusted tire knowledge base (exact barcode). No AI lookup needed.",
+    evidenceStrength: "fetched_source", exactCodeEvidenceVerifiedByApp: true,
+    crossCheck: { decision: "single_provider", confidence: CONF[row.confidence] ?? 0.92, reason: "Trusted corpus exact barcode.", brandSimilarity: 1, nameSimilarity: 1, contradictions: [] },
+    corroborationPath: "corpus_exact_barcode",
+  };
+  return { decision, results: [result], evidences: [verifiedEvidence(row.barcode)], providerNames: ["local-tire-corpus"], path: "corpus_exact_barcode", canonicalProductUid: row.canonical_product_uid };
 }
 
 // RC4 (owner-ratified, pilot PN recall): "if only the distributor affix differs and the digits are

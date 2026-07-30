@@ -50,6 +50,30 @@ import { clearDecodeCache } from "@/services/ai/decodeCache";
 import { __resetForTest as __resetDecodeCacheStoreForTest } from "@/server/decodeCacheStore";
 import { canonicalGtin } from "@/services/upc/gtin";
 
+describe("/api/ai-lookup local demo isolation", () => {
+  const original = process.env.SCANBIN_LOCAL_DEMO;
+  afterEach(() => {
+    if (original === undefined) delete process.env.SCANBIN_LOCAL_DEMO;
+    else process.env.SCANBIN_LOCAL_DEMO = original;
+  });
+
+  it("serves GET status before ladder storage", async () => {
+    process.env.SCANBIN_LOCAL_DEMO = "1";
+    const storageSpy = vi.spyOn(await import("@/server/upc/storage"), "ladderStorage");
+    const body = await (await GET(new Request("http://localhost/api/ai-lookup"))).json();
+    expect(body).toMatchObject({ localDemo: true, externalDecodeEnabled: false, decodeLadder: ["local_tire_corpus"] });
+    expect(storageSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy lookup before ladder storage", async () => {
+    process.env.SCANBIN_LOCAL_DEMO = "1";
+    const storageSpy = vi.spyOn(await import("@/server/upc/storage"), "ladderStorage");
+    const response = await POST(makeRequest({ mode: "lookup", rawCode: "012345678905" }));
+    expect(response.status).toBe(409);
+    expect(storageSpy).not.toHaveBeenCalled();
+  });
+});
+
 // v2 daily cap (Task 1): the counter now lives in ladderStorage() (mocked above to a per-process tmp
 // dir), not the old AI_LOOKUP_COUNTER_FILE. Reads today's usage through the SAME storage the route
 // itself reads/writes, so these assertions prove the real atomic counter, not a parallel one.

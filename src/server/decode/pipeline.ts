@@ -10,7 +10,8 @@ import { verifyCodeOnPage } from "@/services/ai/verifyCodeOnPage";
 import { resolveUnknownFast } from "@/services/ai/parallelResolve";
 import { decodeReasonCode, REASON_TEXT, sanitizeCustomerReason, allMissReasonCode, MISS_REASON_TEXT } from "@/services/ai/decodeFallback";
 import { withDecodeCache, getDecodeCache } from "@/services/ai/decodeCache";
-import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { resolveExactBarcode, resolveExactBarcodeLocal, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { isLocalDemo } from "@/server/localDemo";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { prefixBrandConflict } from "@/services/catalog/brandPrefixGeneral";
 import { lookupPrefixFull as lookupPrefix, candidateKnownPrefixesFull as candidateKnownPrefixes, prefixFloorNameFull as prefixFloorName } from "@/server/catalog/prefixIndexServer";
@@ -140,14 +141,23 @@ function corpusPayload(
     providerNames: corpus.providerNames,
     results: corpus.results,
     evidences: corpus.evidences,
-    providerStatuses: [{ provider: "tire-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
+    providerStatuses: [{ provider: corpus.providerNames[0] ?? "tire-corpus", status: "ok" as const, latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: true, identityFound: true }],
     decision: corpus.decision,
     reasonCode: "ok",
     reasonText: "",
     timedOut: false,
-    debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false },
+    debug: { providersAttempted: corpus.providerNames, evidenceStrengths: corpus.evidences.map((e) => e.strength), sourceCounts: [0], corroborationPath: corpus.path, aiCalled: false, pageFetched: false, cached: false, ...(isLocalDemo() && corpus.canonicalProductUid ? { canonicalProductUid: corpus.canonicalProductUid } : {}) },
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
   };
+}
+
+function localDemoMissPayload(rawCodeSanitized: string, cleanCodeSanitized: string): DecodePayload {
+  return { mode: "decode", providerNames: ["local-tire-corpus"], results: [], evidences: [],
+    providerStatuses: [{ provider: "local-tire-corpus", status: "skipped", latencyMs: 0, sourceUrlsReturned: 0, exactCodeFound: false, identityFound: false, errorCode: "local_demo_corpus_miss" }],
+    decision: { status: "needs_review", confidence: 0, reason: "No exact match was found in the local tire database.", evidenceStrength: "none", exactCodeEvidenceVerifiedByApp: false, crossCheck: { decision: "single_provider", confidence: 0, reason: "Local tire corpus miss.", brandSimilarity: 0, nameSimilarity: 0, contradictions: [] } },
+    reasonCode: "no_result", reasonText: "No exact match was found in the local tire database.", timedOut: false,
+    debug: { providersAttempted: ["local-tire-corpus"], evidenceStrengths: [], sourceCounts: [], corroborationPath: "local_demo_corpus_miss", ladderPath: "none", ladderReasons: [{ rung: "local-tire-corpus", reason: "exact local tire match not found" }], aiCalled: false, pageFetched: false, cached: false },
+    sanitizedInput: { rawCodeSanitized, cleanCodeSanitized } };
 }
 
 // Task 21 (owner-ratified 2026-07-15): PURE payload assembly for a learned-products tier hit. Mirrors
@@ -568,7 +578,7 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
     reasons: Array<{ rung: string; reason: string }>;
     sourceTier: string | null;
   }): void => {
-    if (e2eMode()) return;
+    if (e2eMode() || isLocalDemo()) return;
     void (async () => {
       try {
         const store = await ladderStorage();
@@ -591,6 +601,13 @@ export async function runDecodePipeline(req: DecodePipelineRequest): Promise<Dec
   // helper above be declared before `cacheKey` exists without restructuring the function.
   function cacheKeyForOutcomeLedger(): string {
     return canonicalGtin(code) ?? code;
+  }
+
+  // This must precede every normal corpus/cache/retail/learned/master/ladder seam.
+  if (isLocalDemo()) {
+    const corpus = await resolveExactBarcodeLocal(code);
+    if (corpus) return { kind: "computed", payload: corpusPayload(corpus, rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
+    return { kind: "computed", payload: localDemoMissPayload(rawCodeSanitized, cleanCodeSanitized), cached: false, paidComputeCharged: false };
   }
 
   // Z3 (owner pay-once rule 2026-07-14): ALL cache identities are canonical so two zero-padding

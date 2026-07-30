@@ -15,6 +15,7 @@ import { ladderStorage } from "@/server/upc/storage";
 // route keeps only HTTP concerns: request parsing, the abuse/mock-mode guards, response shaping, the
 // legacy 'lookup' back-compat path, and the GET status endpoint. e2eMode is shared from the pipeline.
 import { runDecodePipeline, e2eMode } from "@/server/decode/pipeline";
+import { isLocalDemo } from "@/server/localDemo";
 import { clampDecodeBudgetMs } from "@/services/ai/decodeBudget";
 import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
 import { COLLECTIONS, memberDocId } from "@/services/db/types";
@@ -85,6 +86,7 @@ function maybeAppendMasterCatalogEntry(payloadLike: {
   decision?: { status?: string; exactCodeEvidenceVerifiedByApp?: boolean; confidence?: number };
   results?: Array<{ productName?: string; brand?: string; category?: string }>;
 }, fallbackCode: string, codeType: string): void {
+  if (isLocalDemo()) return;
   // FIX 3 (review MEDIUM, sync-throw): the ENTIRE body runs inside try/catch, not just the async
   // appendMasterCatalogEntry().catch() tail - a synchronous throw in buildMasterCatalogEntry (a plain
   // function call, never awaited) would otherwise propagate straight into the POST handler and break
@@ -123,6 +125,7 @@ function maybeAppendMasterCatalogEntry(payloadLike: {
 // GET reports which keys/flags are configured. NO secrets are returned (booleans + names only),
 // so the client can decide whether to auto-decode and show exactly which keys are missing.
 export async function GET(request: Request) {
+  if (isLocalDemo()) return Response.json({ liveEnabled: false, autoDecodeOnScan: true, freeDecodeAvailable: true, localDemo: true, externalDecodeEnabled: false, openWebFallback: false, pageFetchAndRead: false, premiumFallback: false, missingKeys: [], e2e: false, decodeLadder: ["local_tire_corpus"], geminiUsedForDecode: false, daily: { used: 0, limit: 0 }, gptLadder: { spentTodayUsd: 0, capUsd: 0, callsToday: 0, enabled: false }, goUpc: { configured: false, used: 0, limit: 0, unlimited: false, warn: false } });
   // Lightweight per-IP rate limit so the public status endpoint cannot be scraped or flooded unthrottled.
   // It returns only booleans + model names (no secrets), but an unbounded GET is still a cheap DoS / config-
   // scrape vector. Generous default for legit client polling; SEPARATE bucket from POST (GET: prefix) so the
@@ -232,6 +235,20 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // Local demo never enters legacy lookup/deep/auth/rate-limit storage paths.
+  if (isLocalDemo()) {
+    let localBody: { rawCode?: string; cleanCode?: string; mode?: string; confidenceThreshold?: number; forceRetry?: boolean; budgetMs?: number };
+    try { localBody = await request.json(); } catch { return Response.json({ error: "Invalid JSON body" }, { status: 400 }); }
+    if (localBody.mode !== "decode" && localBody.mode !== "decode-deep") {
+      return Response.json({ error: "Only local tire decode is available in local demo.", reasonCode: "local_demo_decode_only" }, { status: 409 });
+    }
+    const rawCodeSanitized = sanitizeForAiLookup(localBody.rawCode ?? "").clean;
+    const cleanCodeSanitized = sanitizeForAiLookup(localBody.cleanCode ?? "").clean;
+    const code = cleanCodeSanitized || rawCodeSanitized;
+    const outcome = await runDecodePipeline({ code, codeType: detectCodeType(code), rawCodeSanitized, cleanCodeSanitized, threshold: clampConfidenceThreshold(localBody.confidenceThreshold), allowNonPublicAutoCount: false, forceRetry: localBody.forceRetry === true, budgetMs: typeof localBody.budgetMs === "number" ? clampDecodeBudgetMs(localBody.budgetMs) : undefined });
+    if (outcome.kind !== "computed") return Response.json({ error: "Local demo decode did not settle.", reasonCode: "local_demo_unavailable" }, { status: 503 });
+    return Response.json({ ...outcome.payload, debug: { ...outcome.payload.debug, cached: false } });
+  }
   // Server-side abuse + spend guard (auth DEFERRED by owner). Bounds bill-drain without login:
   // kill switch (503) and per-IP rate limit (429) here; the hard daily cap is checked at the decode
   // path below. Each control makes ZERO provider calls when it blocks. Local-first state; a deployed

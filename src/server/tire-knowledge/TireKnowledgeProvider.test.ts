@@ -11,16 +11,18 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const mockLookupByExactPartNumber = vi.fn();
 const mockLookupByExactBarcode = vi.fn();
+const mockLookupByExactBarcodeLocal = vi.fn();
 vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/tire-knowledge/tireKnowledgeIndex")>();
   return {
     ...actual,
     lookupByExactPartNumber: (pn: string) => mockLookupByExactPartNumber(pn),
     lookupByExactBarcode: (code: string) => mockLookupByExactBarcode(code),
+    lookupByExactBarcodeLocal: (code: string) => mockLookupByExactBarcodeLocal(code),
   };
 });
 
-import { resolveExactPartNumber, resolveExactBarcode } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { resolveExactPartNumber, resolveExactBarcode, resolveExactBarcodeLocal } from "@/server/tire-knowledge/TireKnowledgeProvider";
 
 const CORPUS_ROW = {
   canonical_product_uid: "uid-1",
@@ -231,5 +233,20 @@ describe("toResult barcode_type convention mismatch (real corpus uses upc/ean/gt
 
     expect(result).not.toBeNull();
     expect(result!.results[0].primaryBarcode).toBe("8808956277338");
+  });
+});
+
+describe("resolveExactBarcodeLocal", () => {
+  it("accepts only the conservative local SQLite row and exposes its canonical id", async () => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "848983006257", barcode_type: "upc", source_count: 2 });
+    const result = await resolveExactBarcodeLocal("848983006257");
+    expect(result).toMatchObject({ providerNames: ["local-tire-corpus"], canonicalProductUid: KUMHO_ROW_REAL_CONVENTION.canonical_product_uid, decision: { status: "verified" } });
+  });
+
+  it("fails closed for source-one and GTIN-14 rows", async () => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "848983006257", barcode_type: "upc", source_count: 1 });
+    await expect(resolveExactBarcodeLocal("848983006257")).resolves.toBeNull();
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "10012345678902", barcode_type: "gtin14", source_count: 2 });
+    await expect(resolveExactBarcodeLocal("10012345678902")).resolves.toBeNull();
   });
 });

@@ -272,6 +272,19 @@ export async function lookupByExactBarcode(code: string): Promise<TireKnowledgeR
   return null;
 }
 
+/** Local-demo exact lookup: SQLite only.  Never falls back to Turso or generated JSON. */
+export async function lookupByExactBarcodeLocal(code: string): Promise<TireKnowledgeRow | null> {
+  const key = normBarcodeKey(code);
+  if (!key) return null;
+  const stmt = getStmtBarcode();
+  if (!stmt) throw new Error("Local SQLite tire database is unavailable.");
+  for (const candidate of lookupCandidates(key)) {
+    const row = (stmt.get(candidate) as TireKnowledgeRow | undefined) ?? null;
+    if (row) return row;
+  }
+  return null;
+}
+
 /**
  * EXACT trusted manufacturer-part-number lookup. Same SQLite -> Turso -> JSON order as barcode
  * lookup, but tries an ORDERED candidate key list per backend before moving to the next backend:
