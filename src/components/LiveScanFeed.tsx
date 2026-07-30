@@ -28,6 +28,7 @@ export function LiveScanFeed() {
   const approveSuggestion = useScanStore((s) => s.approveSuggestion);
   const declineSuggestion = useScanStore((s) => s.declineSuggestion);
   const isPlatform = useIsPlatformOwner();
+  const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
   // platformOwner-only. Customer columns: Time, Barcode, Brand, Product, Size, SKU, Qty, Status, Reason,
@@ -119,7 +120,14 @@ export function LiveScanFeed() {
                     "",
                 );
                 return (
-                  <tr key={e.id} className="animate-[row-appear_200ms_ease-out] border-t border-zinc-100 hover:bg-zinc-50">
+                  <tr
+                    key={e.id}
+                    className="animate-[row-appear_200ms_ease-out] border-t border-zinc-100 hover:bg-zinc-50"
+                    data-testid={isLocalDemo ? `local-demo-event-${e.id}` : undefined}
+                    data-local-demo-event-id={isLocalDemo ? e.id : undefined}
+                    data-local-demo-matched-product-id={isLocalDemo ? e.matchedProductId ?? "" : undefined}
+                    data-local-demo-canonical-product-uid={isLocalDemo ? e.localDemoCanonicalProductUid : undefined}
+                  >
                     <td className="px-4 py-3 text-sm text-zinc-600">
                       {e.createdAt ? new Date(e.createdAt).toLocaleTimeString() : "-"}
                     </td>

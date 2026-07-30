@@ -191,6 +191,9 @@ export interface ScanEvent {
   // have a DecodeDecision in scope; full threading is deferred to P6. Display only, never gates
   // counting or identity.
   provenance?: "app_verified" | "ai_self_report" | "db_self_report";
+  // Local-demo-only proof provenance. This is copied from a strictly validated local tire-corpus
+  // decode response; it is never used to resolve a product, approve an alias, or change a count.
+  localDemoCanonicalProductUid?: string;
   // Task 9 (owner-ratified 2026-07-14, decode-anything): true when an app-verified exact-code decode
   // counted even though its product domain is off the business scan context (e.g. hot sauce in a tire
   // shop). The category firewall was CLEARED by verification, not skipped - the row still shows an

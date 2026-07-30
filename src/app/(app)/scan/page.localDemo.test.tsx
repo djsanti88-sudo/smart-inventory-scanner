@@ -1,0 +1,76 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  searchParams: new URLSearchParams(),
+  suspendSearchParams: false,
+  pendingSearchParams: new Promise<never>(() => {}),
+  storeState: {
+    processScan: vi.fn(), products: [], aliases: [], businessId: "local-demo", startSession: vi.fn(),
+    finishSession: vi.fn(), clearSession: vi.fn(), currentSession: null, settings: {
+      scannerSubmitMode: "enter", scannerDebounceMs: 0, aiLookupEnabled: false, dailyLookupCount: 0, dailyLookupLimit: 0,
+    },
+    aiStatus: { geminiConfigured: false, openaiConfigured: false, autoDecodeOnScan: false, liveEnabled: false, emergencyStop: false },
+    refreshAiStatus: vi.fn(), updateSettings: vi.fn(), lastCategoryWarning: null, clearCategoryWarning: vi.fn(),
+    location: "", setLocation: vi.fn(), recentLocations: [], ensureAutoSession: vi.fn(), businessContextReady: true,
+    businessDataLoaded: true, scanFeed: [], firstScanAt: null,
+  } as Record<string, unknown>,
+}));
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => {
+    if (mocks.suspendSearchParams) throw mocks.pendingSearchParams;
+    return mocks.searchParams;
+  },
+}));
+vi.mock("@/stores/scanStore", () => ({ useScanStore: (selector: (state: Record<string, unknown>) => unknown) => selector(mocks.storeState) }));
+vi.mock("@/services/security/useAccessLevel", () => ({ useIsPlatformOwner: () => false }));
+vi.mock("@/services/resolver", () => ({ resolveRawScan: () => ({ resolverStatus: "unknown" }) }));
+vi.mock("@/services/moatStats", () => ({ computeMoatStats: () => ({ identified: 0, total: 0 }) }));
+vi.mock("@/components/ScannerInput", () => ({ ScannerInput: () => <div /> }));
+vi.mock("@/components/CameraScanButton", () => ({ CameraScanButton: () => <div /> }));
+vi.mock("@/components/LiveScanFeed", () => ({ LiveScanFeed: () => <div /> }));
+vi.mock("@/components/FinalCountTable", () => ({ FinalCountTable: () => <div /> }));
+vi.mock("@/components/SyncStatusBar", () => ({ SyncStatusBar: () => <div /> }));
+vi.mock("@/components/ExportMenu", () => ({ ExportMenu: () => <div /> }));
+vi.mock("@/components/VarianceReport", () => ({ VarianceReport: () => <div /> }));
+vi.mock("@/components/SessionLockControl", () => ({ SessionLockControl: () => <div /> }));
+vi.mock("@/components/SessionsList", () => ({ SessionsList: () => <div /> }));
+vi.mock("@/components/BusinessContextGate", () => ({ BusinessContextGate: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
+
+import ScanPage from "./page";
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+  mocks.searchParams = new URLSearchParams();
+  mocks.suspendSearchParams = false;
+});
+
+describe("ScanPage local demo proof batch", () => {
+  it("shows a scanner loading boundary while search params suspend during prerendering", () => {
+    mocks.suspendSearchParams = true;
+
+    render(<ScanPage />);
+
+    expect(screen.getByTestId("scan-page-loading")).toHaveTextContent("Loading scanner");
+  });
+
+  it("shows the canonical proof batch marker for an active local demo proof run", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    mocks.searchParams = new URLSearchParams("proofBatch=01");
+
+    render(<ScanPage />);
+
+    expect(screen.getByTestId("local-demo-proof-batch")).toHaveTextContent("01");
+  });
+
+  it.each(["1", "00", "31", "01x", ""]) ("does not show a marker for non-canonical batch %j", (proofBatch) => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    mocks.searchParams = new URLSearchParams({ proofBatch });
+
+    render(<ScanPage />);
+
+    expect(screen.queryByTestId("local-demo-proof-batch")).toBeNull();
+  });
+});

@@ -34,12 +34,13 @@ export function validateBatchResult(batch, result, anchor) {
   for (const [key, observation] of byBarcode) if (!expected.some((row) => norm(row.barcode) === key)) fail(failures, observation.barcode, "extra_barcode", "locked batch barcode", observation.barcode);
   if (!Array.isArray(result?.serverEgressAttempts) || result.serverEgressAttempts.length) fail(failures, "", "server_egress", [], result?.serverEgressAttempts);
   const proof = result?.ledgerProof;
-  const assertionKeys = ["allExpectedBarcodesSeenExactlyOnce", "unexpectedBarcodeCount", "duplicateEventIdCount", "missingEventIdCount", "unmatchedEventCount", "finalEqualsReplay", "countEventIdsEqualReplayEventIds", "everyCountEventIdExistsInFeed", "expectedQuantity", "finalQuantity", "replayedQuantity", "noDrops", "noDuplicates", "passed"];
+  const assertionKeys = ["allExpectedBarcodesSeenExactlyOnce", "unexpectedBarcodeCount", "duplicateEventIdCount", "missingEventIdCount", "unmatchedEventCount", "canonicalIdentityMismatchCount", "finalEqualsReplay", "countEventIdsEqualReplayEventIds", "everyCountEventIdExistsInFeed", "expectedQuantity", "finalQuantity", "replayedQuantity", "noDrops", "noDuplicates", "passed"];
   if (!proof?.assertions || Object.keys(proof.assertions).length !== assertionKeys.length || assertionKeys.some((key) => !Object.hasOwn(proof.assertions, key))) fail(failures, "", "ledger_assertions_schema", assertionKeys, proof?.assertions);
   const manifest = proof?.manifest;
-  const manifestKeys = ["schemaVersion", "gitSha", "databaseSha256", "seed", "batch", "batchSha256", "expectedBarcodesSha256", "expectedCanonicalProductUidsSha256"];
-  if (!manifest || Object.keys(manifest).length !== manifestKeys.length || manifestKeys.some((key) => manifest?.[key] !== batch?.[key])) fail(failures, "", "manifest_binding", batch, manifest);
-  if (anchor && (batch?.batch !== anchor.batch || manifest?.batch !== anchor.batch || batch?.gitSha !== anchor.manifest?.gitSha || batch?.databaseSha256 !== anchor.manifest?.databaseSha256 || batch?.seed !== anchor.manifest?.seed)) fail(failures, "", "run_manifest_anchor", "positionally bound manifest batch", { batch: batch?.batch, ledgerBatch: manifest?.batch, anchor });
+  const batchManifestKeys = ["schemaVersion", "gitSha", "databaseSha256", "seed", "batch", "batchSha256", "expectedBarcodesSha256", "expectedCanonicalProductUidsSha256"];
+  const manifestKeys = [...batchManifestKeys, "manifestSha256"];
+  if (!manifest || Object.keys(manifest).length !== manifestKeys.length || manifestKeys.some((key) => !Object.hasOwn(manifest, key)) || batchManifestKeys.some((key) => manifest?.[key] !== batch?.[key]) || typeof manifest?.manifestSha256 !== "string" || !/^[a-f0-9]{64}$/.test(manifest.manifestSha256)) fail(failures, "", "manifest_binding", batch, manifest);
+  if (anchor && (batch?.batch !== anchor.batch || manifest?.batch !== anchor.batch || batch?.gitSha !== anchor.manifest?.gitSha || batch?.databaseSha256 !== anchor.manifest?.databaseSha256 || batch?.seed !== anchor.manifest?.seed || manifest?.manifestSha256 !== anchor.manifest?.manifestSha256)) fail(failures, "", "run_manifest_anchor", "positionally bound manifest batch", { batch: batch?.batch, ledgerBatch: manifest?.batch, anchor });
   if (typeof proof?.sessionId !== "string" || !proof.sessionId || Number.isNaN(Date.parse(proof?.generatedAt))) fail(failures, "", "ledger_metadata", "sessionId + ISO generatedAt", proof);
   const events = Array.isArray(proof?.events) ? proof.events : [];
   if (proof?.schemaVersion !== 1 || events.length !== 100 || proof?.expected?.rows !== 100 || proof?.assertions?.passed !== true) fail(failures, "", "ledger_shape", "100 passing events", events.length);
@@ -50,6 +51,10 @@ export function validateBatchResult(batch, result, anchor) {
   const eventBarcodes = [];
   const eventKeys = ["eventId", "cleanCode", "matchedProductId", "canonicalProductUid", "quantityDelta", "quantityAfterScan", "status"];
   for (const event of events) { const keys = event && typeof event === "object" ? Object.keys(event) : []; const eventSchemaValid = Boolean(event) && typeof event.eventId === "string" && typeof event.cleanCode === "string" && typeof event.matchedProductId === "string" && typeof event.canonicalProductUid === "string" && typeof event.quantityDelta === "number" && Number.isFinite(event.quantityAfterScan) && typeof event.status === "string" && (!Object.hasOwn(event, "decodeStatus") || typeof event.decodeStatus === "string") && keys.every((key) => eventKeys.includes(key) || key === "decodeStatus") && eventKeys.every((key) => Object.hasOwn(event, key)); if (!eventSchemaValid) fail(failures, event?.cleanCode ?? "", "ledger_event_schema", "exact required event fields with optional string decodeStatus", event); const locked = expected.find((row) => same(row.barcode, event?.cleanCode)); if (!event?.eventId) missingEventIdCount += 1; else if (eventIds.has(event.eventId)) duplicateEventIdCount += 1; if (!event?.eventId || eventIds.has(event.eventId)) fail(failures, event?.cleanCode ?? "", "ledger_event_id", "unique non-blank", event?.eventId); eventIds.add(event?.eventId); eventById.set(event?.eventId, event); eventBarcodes.push(norm(event?.cleanCode)); if (!event?.matchedProductId) { unmatchedEventCount += 1; fail(failures, event?.cleanCode ?? "", "ledger_matched_product", "non-blank", event?.matchedProductId); } if (!locked || !same(event?.canonicalProductUid, locked.canonicalProductUid) || norm(event?.status) !== "verified" || event?.quantityDelta !== 1) fail(failures, event?.cleanCode ?? "", "ledger_event_identity", "locked verified +1", event); }
+  const canonicalIdentityMismatchCount = events.filter((event) => {
+    const locked = expected.find((row) => same(row.barcode, event?.cleanCode));
+    return !locked || !same(event?.canonicalProductUid, locked.canonicalProductUid);
+  }).length;
   if (eventBarcodes.sort().join("|") !== lockedBarcodes.join("|")) fail(failures, "", "ledger_event_barcodes", lockedBarcodes, eventBarcodes);
   for (const observation of observations) { const event = eventById.get(observation.eventId); if (!event || !same(event.cleanCode, observation.barcode) || !same(event.matchedProductId, observation.matchedProductId) || !same(event.canonicalProductUid, observation.canonicalProductUid)) fail(failures, observation.barcode, "observation_ledger_link", "exact event/product/canonical link", event); }
   const countLists = [proof?.finalCounts, proof?.replayedCounts];
@@ -80,6 +85,7 @@ export function validateBatchResult(batch, result, anchor) {
     duplicateEventIdCount,
     missingEventIdCount,
     unmatchedEventCount,
+    canonicalIdentityMismatchCount,
     finalEqualsReplay,
     countEventIdsEqualReplayEventIds: sameCountEventIdSets,
     everyCountEventIdExistsInFeed,
@@ -88,7 +94,7 @@ export function validateBatchResult(batch, result, anchor) {
     replayedQuantity,
     noDrops,
     noDuplicates,
-    passed: allExpectedBarcodesSeenExactlyOnce && unexpectedBarcodeCount === 0 && duplicateEventIdCount === 0 && missingEventIdCount === 0 && unmatchedEventCount === 0 && finalEqualsReplay && sameCountEventIdSets && everyCountEventIdExistsInFeed && expected.length === countedQuantity && countedQuantity === replayedQuantity && noDrops && noDuplicates,
+    passed: allExpectedBarcodesSeenExactlyOnce && unexpectedBarcodeCount === 0 && duplicateEventIdCount === 0 && missingEventIdCount === 0 && unmatchedEventCount === 0 && canonicalIdentityMismatchCount === 0 && finalEqualsReplay && sameCountEventIdSets && everyCountEventIdExistsInFeed && expected.length === countedQuantity && countedQuantity === replayedQuantity && noDrops && noDuplicates,
   };
   for (const [key, computed] of Object.entries(expectedAssertions)) if (proof?.assertions?.[key] !== computed) fail(failures, "", "ledger_assertion_value", { key, computed }, proof?.assertions?.[key]);
   const latencies = observations.map((row) => Number(row.latencyMs));

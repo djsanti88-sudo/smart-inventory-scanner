@@ -76,6 +76,46 @@ afterEach(() => {
   cleanup();
   useScanStore.setState({ scanFeed: [], needsReviewQueue: [], products: [], finalCounts: [] });
   mockIsPlatformOwner = false;
+  delete process.env.NEXT_PUBLIC_LOCAL_DEMO;
+});
+
+describe("LiveScanFeed - local demo proof selectors", () => {
+  it("adds the event, matched-product, and direct canonical-UID selectors to each row in local-demo mode", () => {
+    process.env.NEXT_PUBLIC_LOCAL_DEMO = "1";
+    const event = {
+      ...baseEvent("758823190407", "TIRE_5BAC923891027924DEE7"),
+      localDemoCanonicalProductUid: "tire-canonical-uid",
+    };
+    const unmatchedEvent = { ...event, id: "ev2", matchedProductId: null, localDemoCanonicalProductUid: undefined };
+    useScanStore.setState({ scanFeed: [event, unmatchedEvent], needsReviewQueue: [], products: [], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    const row = screen.getByTestId("local-demo-event-ev1");
+    expect(row).toHaveAttribute("data-local-demo-event-id", "ev1");
+    expect(row).toHaveAttribute("data-local-demo-matched-product-id", "TIRE_5BAC923891027924DEE7");
+    expect(row).toHaveAttribute("data-local-demo-canonical-product-uid", "tire-canonical-uid");
+    const unmatchedRow = screen.getByTestId("local-demo-event-ev2");
+    expect(unmatchedRow).toHaveAttribute("data-local-demo-event-id", "ev2");
+    expect(unmatchedRow).toHaveAttribute("data-local-demo-matched-product-id", "");
+    expect(unmatchedRow).not.toHaveAttribute("data-local-demo-canonical-product-uid");
+  });
+
+  it("does not expose local-demo proof selectors outside local-demo mode", () => {
+    const event = {
+      ...baseEvent("758823190407", "TIRE_5BAC923891027924DEE7"),
+      localDemoCanonicalProductUid: "tire-canonical-uid",
+    };
+    useScanStore.setState({ scanFeed: [event], needsReviewQueue: [], products: [], finalCounts: [] });
+
+    render(<LiveScanFeed />);
+
+    expect(screen.queryByTestId("local-demo-event-ev1")).not.toBeInTheDocument();
+    const row = screen.getByTestId("feed-barcode-ev1").closest("tr");
+    expect(row).not.toHaveAttribute("data-local-demo-event-id");
+    expect(row).not.toHaveAttribute("data-local-demo-matched-product-id");
+    expect(row).not.toHaveAttribute("data-local-demo-canonical-product-uid");
+  });
 });
 
 describe("LiveScanFeed - suggested identity over provisional placeholder (Task 3)", () => {

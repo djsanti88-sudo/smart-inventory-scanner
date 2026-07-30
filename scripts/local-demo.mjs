@@ -64,7 +64,7 @@ export function buildLocalDemoLaunchPlan({
   return {
     port,
     ledgerPath: validatedLedgerPath,
-    build: { args: ["next", "build"], env: { ...environment } },
+    build: { args: ["next", "build", "--webpack"], env: { ...environment } },
     start: {
       args: ["next", "start", "-H", "127.0.0.1", "-p", String(port)],
       env: { ...environment },

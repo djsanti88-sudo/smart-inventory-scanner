@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { ScannerInput } from "@/components/ScannerInput";
@@ -17,7 +18,8 @@ import { planScanBatch } from "./planScan";
 import { resolveRawScan } from "@/services/resolver";
 import { computeMoatStats } from "@/services/moatStats";
 
-export default function ScanPage() {
+function ScanPageContent() {
+  const searchParams = useSearchParams();
   const processScan = useScanStore((s) => s.processScan);
   const products = useScanStore((s) => s.products);
   const aliases = useScanStore((s) => s.aliases);
@@ -42,6 +44,10 @@ export default function ScanPage() {
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const scanFeed = useScanStore((s) => s.scanFeed);
   const firstScanAt = useScanStore((s) => s.firstScanAt);
+  const proofBatch = searchParams?.get("proofBatch") ?? null;
+  const localDemoProofBatch = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1" && proofBatch && /^(?:0[1-9]|[12][0-9]|30)$/.test(proofBatch)
+    ? proofBatch
+    : null;
 
   // BULK SCAN: paste/type several codes separated by spaces or newlines and each becomes its OWN row
   // (one processScan per code). A single hardware-scanned barcode contains no whitespace, so normal
@@ -106,6 +112,14 @@ export default function ScanPage() {
       <h1 className="sr-only">Scan</h1>
       <BusinessContextGate>
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
+        {localDemoProofBatch && (
+          <p
+            data-testid="local-demo-proof-batch"
+            className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900"
+          >
+            Local demo proof batch {localDemoProofBatch}
+          </p>
+        )}
         {SHOW_CATEGORY && categoryWarning && (
           <div
             data-testid="category-warning"
@@ -276,5 +290,21 @@ export default function ScanPage() {
       <VarianceReport />
       </BusinessContextGate>
     </div>
+  );
+}
+
+export default function ScanPage() {
+  return (
+    <Suspense
+      fallback={(
+        <div className="mx-auto max-w-7xl p-4" data-testid="scan-page-loading">
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 text-base text-zinc-700">
+            Loading scanner...
+          </div>
+        </div>
+      )}
+    >
+      <ScanPageContent />
+    </Suspense>
   );
 }

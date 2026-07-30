@@ -1,10 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { runSignOutFlow } from "@/services/auth/signOutFlow";
 import { isLiveAuth } from "@/services/auth/authMode";
+
+function navLinkClass(active: boolean): string {
+  return `relative inline-flex min-h-[44px] items-center rounded-lg px-3 text-base font-medium ${
+    active ? "bg-blue-50 text-blue-700" : "text-zinc-700 hover:bg-zinc-50"
+  }`;
+}
+
+function ReportLink({ active, isLocalDemo }: { active: boolean; isLocalDemo: boolean }) {
+  const searchParams = useSearchParams();
+  const proofBatch = searchParams?.get("proofBatch") ?? null;
+  const href = isLocalDemo && proofBatch && /^(?:0[1-9]|[12][0-9]|30)$/.test(proofBatch)
+    ? `/report?proofBatch=${proofBatch}`
+    : "/report";
+
+  return <Link href={href} className={navLinkClass(active)}>Report</Link>;
+}
 
 // App navigation. Shows an open-review count badge so unknown codes are obvious but not disruptive.
 export function Nav() {
@@ -34,13 +51,21 @@ export function Nav() {
         </span>
         {links.map((l) => {
           const active = pathname === l.href;
+          if (l.href === "/report") {
+            return (
+              <Suspense
+                key={l.href}
+                fallback={<Link href="/report" className={navLinkClass(active)}>Report</Link>}
+              >
+                <ReportLink active={active} isLocalDemo={isLocalDemo} />
+              </Suspense>
+            );
+          }
           return (
             <Link
               key={l.href}
               href={l.href}
-              className={`relative inline-flex min-h-[44px] items-center rounded-lg px-3 text-base font-medium ${
-                active ? "bg-blue-50 text-blue-700" : "text-zinc-700 hover:bg-zinc-50"
-              }`}
+              className={navLinkClass(active)}
             >
               {l.label}
               {typeof l.badge === "number" && l.badge > 0 && (

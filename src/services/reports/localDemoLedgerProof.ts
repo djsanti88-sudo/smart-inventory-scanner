@@ -10,6 +10,7 @@ export type LocalDemoLockedBatch = {
   schemaVersion: 1;
   gitSha: string;
   databaseSha256: string;
+  manifestSha256: string;
   seed: string;
   batch: number;
   batchSha256: string;
@@ -42,6 +43,7 @@ export type LocalDemoLedgerProof = {
     duplicateEventIdCount: number;
     missingEventIdCount: number;
     unmatchedEventCount: number;
+    canonicalIdentityMismatchCount: number;
     finalEqualsReplay: boolean;
     countEventIdsEqualReplayEventIds: boolean;
     everyCountEventIdExistsInFeed: boolean;
@@ -106,12 +108,12 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
   const expectedRows = input.batch.rows;
   const expectedBarcodes = expectedRows.map((row) => row.barcode);
   const expectedCounts = new Map<string, number>();
-  const canonicalByBarcode = new Map<string, string>();
+  const lockedCanonicalUidByBarcode = new Map<string, string>();
   const duplicateManifestBarcode = new Set<string>();
   for (const row of expectedRows) {
     expectedCounts.set(row.barcode, (expectedCounts.get(row.barcode) ?? 0) + 1);
-    if (canonicalByBarcode.has(row.barcode)) duplicateManifestBarcode.add(row.barcode);
-    else canonicalByBarcode.set(row.barcode, row.canonicalProductUid);
+    if (lockedCanonicalUidByBarcode.has(row.barcode)) duplicateManifestBarcode.add(row.barcode);
+    else lockedCanonicalUidByBarcode.set(row.barcode, row.canonicalProductUid);
   }
 
   const sessionEvents = input.scanFeed
@@ -127,9 +129,7 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
     eventId: event.id,
     cleanCode: event.cleanCode,
     matchedProductId: event.matchedProductId,
-    canonicalProductUid: duplicateManifestBarcode.has(event.cleanCode)
-      ? null
-      : (canonicalByBarcode.get(event.cleanCode) ?? null),
+    canonicalProductUid: event.localDemoCanonicalProductUid ?? null,
     quantityDelta: event.quantityDelta,
     quantityAfterScan: event.quantityAfterScan,
     // The batch validator's ledger contract is terminal verification, while ScanEvent.status
@@ -147,6 +147,12 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
   const missingEventIdCount = eventIds.filter((eventId) => !eventId).length;
   const duplicateEventIdCount = duplicateCount(eventIds.filter(Boolean));
   const unmatchedEventCount = sessionEvents.filter((event) => !event.matchedProductId).length;
+  const canonicalIdentityMismatchCount = sessionEvents.filter((event) => {
+    const lockedCanonicalUid = lockedCanonicalUidByBarcode.get(event.cleanCode);
+    return duplicateManifestBarcode.has(event.cleanCode) ||
+      !lockedCanonicalUid ||
+      event.localDemoCanonicalProductUid !== lockedCanonicalUid;
+  }).length;
   const everyEventIsOneFiniteScan = sessionEvents.every((event) =>
     event.quantityDelta === 1 && Number.isFinite(event.quantityAfterScan),
   );
@@ -165,6 +171,7 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
     everyEventIsOneFiniteScan && sessionEvents.length === 100 && finalQuantity === 100 && replayedQuantity === 100;
   const passed = allExpectedBarcodesSeenExactlyOnce && unexpectedBarcodeCount === 0 &&
     duplicateEventIdCount === 0 && missingEventIdCount === 0 && unmatchedEventCount === 0 &&
+    canonicalIdentityMismatchCount === 0 &&
     finalEqualsReplay && countEventIdsEqualReplayEventIds && everyCountEventIdExistsInFeed &&
     everyEventIsOneFiniteScan && noDrops && noDuplicates;
 
@@ -174,6 +181,7 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
       schemaVersion: input.batch.schemaVersion,
       gitSha: input.batch.gitSha,
       databaseSha256: input.batch.databaseSha256,
+      manifestSha256: input.batch.manifestSha256,
       seed: input.batch.seed,
       batch: input.batch.batch,
       batchSha256: input.batch.batchSha256,
@@ -192,6 +200,7 @@ export function buildLocalDemoLedgerProof(input: LocalDemoLedgerProofInput): Loc
       duplicateEventIdCount,
       missingEventIdCount,
       unmatchedEventCount,
+      canonicalIdentityMismatchCount,
       finalEqualsReplay,
       countEventIdsEqualReplayEventIds,
       everyCountEventIdExistsInFeed,

@@ -100,6 +100,36 @@ import type { ImportPreviewRow, ImportReviewContext, UniversalImportApplySummary
 
 const isLocalDemo = () => process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
 
+const LOCAL_DEMO_CANONICAL_PRODUCT_UID = /^TIRE_[A-F0-9]{20}$/;
+
+/**
+ * Local manager-demo proof IDs are deliberately accepted only from the one offline corpus response
+ * shape. They remain display/proof provenance, never an identity or count input.
+ */
+function localDemoCanonicalProductUidFrom(data: unknown): string | undefined {
+  if (!isLocalDemo() || !data || typeof data !== "object") return undefined;
+  const response = data as {
+    mode?: unknown;
+    providerNames?: unknown;
+    decision?: { status?: unknown; exactCodeEvidenceVerifiedByApp?: unknown };
+    debug?: { canonicalProductUid?: unknown; corroborationPath?: unknown; aiCalled?: unknown };
+  };
+  if (
+    response.mode !== "decode" ||
+    !Array.isArray(response.providerNames) ||
+    response.providerNames.length !== 1 ||
+    response.providerNames[0] !== "local-tire-corpus" ||
+    response.decision?.status !== "verified" ||
+    response.decision.exactCodeEvidenceVerifiedByApp !== true ||
+    (response.debug?.corroborationPath !== "corpus_exact_barcode" && response.debug?.corroborationPath !== "corpus_exact_part_number") ||
+    response.debug?.aiCalled !== false
+  ) {
+    return undefined;
+  }
+  const uid = response.debug?.canonicalProductUid;
+  return typeof uid === "string" && LOCAL_DEMO_CANONICAL_PRODUCT_UID.test(uid) ? uid : undefined;
+}
+
 /** Result summary of a CSV product import (shown in the UI). */
 export interface CsvImportSummary {
   rowsParsed: number;
@@ -263,12 +293,12 @@ function evaluateAutoDecode(p: {
   now: number;
 }): { allowed: boolean; reason: string } {
   if (!p.aiEnabled) return { allowed: false, reason: "AI lookup is off. Turn it on in Settings to auto-decode." };
-  if (!p.status.liveEnabled)
+  const freeDecodeAvailable = p.status.freeDecodeAvailable === true;
+  if (!p.status.liveEnabled && !freeDecodeAvailable)
     return { allowed: false, reason: "Live AI lookup is disabled on the server (ENABLE_LIVE_AI_LOOKUP=false)." };
   if (!p.status.autoDecodeOnScan) return { allowed: false, reason: "Auto decode on scan is disabled." };
   if (p.status.emergencyStop) return { allowed: false, reason: "Emergency stop is active. AI calls are paused." };
   if (!p.online) return { allowed: false, reason: "Offline. Saved locally; AI was not called." };
-  const freeDecodeAvailable = p.status.freeDecodeAvailable === true;
   // When the server advertises free/local decode rungs (tire corpus, retail corpus, caches), do not
   // client-block solely on paid-provider keys or a spent cap: the server will answer $0 hits before
   // applying paid-rung gates. Older/mocked status payloads omit this flag, so they keep the legacy
@@ -2846,6 +2876,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 openaiEnabled: Boolean(d.openaiEnabled),
                 geminiConfigured: Boolean(d.geminiConfigured),
                 openaiConfigured: Boolean(d.openaiConfigured),
+                freeDecodeAvailable: Boolean(d.freeDecodeAvailable),
                 premiumFallback: Boolean(d.premiumFallback),
                 mode: typeof d.mode === "string" ? d.mode : s.aiStatus.mode,
                 dailyLimit: typeof d.dailyLimit === "number" ? d.dailyLimit : s.aiStatus.dailyLimit,
@@ -3340,6 +3371,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             data = { ...data, reasonText: sanitizeCustomerReason(data.reasonText, { status: data.decision?.status }) };
           }
           const decision = data.decision;
+          const localDemoCanonicalProductUid = localDemoCanonicalProductUidFrom(data);
           const results: AiLookupResult[] = data.results ?? [];
           const best = results[0] ?? null;
           // Phase 10: for a tire scan, parse the messy decode into structured columns (size -> specs,
@@ -3457,6 +3489,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 : (decision?.status ?? "needs_review")) as ScanEvent["decodeStatus"];
               return {
                 ...e,
+                ...(localDemoCanonicalProductUid ? { localDemoCanonicalProductUid } : {}),
                 decodeStatus: displayedBadge,
                 // P5 Task 5: honest provenance signal for the badge (display only). A raw "verified"
                 // decision is displayed as "suggested" above (displayedBadge), so app_verified here

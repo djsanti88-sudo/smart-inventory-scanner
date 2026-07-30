@@ -3,6 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 const mocks = vi.hoisted(() => ({
   storeState: {} as Record<string, unknown>,
+  searchParams: new URLSearchParams(),
+  suspendSearchParams: false,
+  pendingSearchParams: new Promise<never>(() => {}),
   isLiveAuth: vi.fn(),
   getSession: vi.fn(),
 }));
@@ -18,6 +21,19 @@ vi.mock("@/services/auth/authMode", () => ({
 
 vi.mock("@/lib/auth", () => ({
   getSession: () => mocks.getSession(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => {
+    if (mocks.suspendSearchParams) throw mocks.pendingSearchParams;
+    return mocks.searchParams;
+  },
+}));
+
+vi.mock("@/components/LocalDemoLedgerProof", () => ({
+  LocalDemoLedgerProof: ({ proofBatch }: { proofBatch: string }) => (
+    <output data-testid="local-demo-ledger-proof-mount">{proofBatch}</output>
+  ),
 }));
 
 import BossReportPage from "./page";
@@ -78,9 +94,37 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  mocks.searchParams = new URLSearchParams();
+  mocks.suspendSearchParams = false;
 });
 
 describe("Boss Report sharing", () => {
+  it("shows a report loading boundary while search params suspend during prerendering", () => {
+    mocks.suspendSearchParams = true;
+
+    render(<BossReportPage />);
+
+    expect(screen.getByTestId("report-page-loading")).toHaveTextContent("Loading report");
+  });
+
+  it("mounts the local demo ledger proof for a canonical batch", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    mocks.searchParams = new URLSearchParams("proofBatch=30");
+
+    render(<BossReportPage />);
+
+    expect(screen.getByTestId("local-demo-ledger-proof-mount")).toHaveTextContent("30");
+  });
+
+  it.each([null, "1", "00", "31", "01x", ""]) ("does not mount a local proof for invalid batch %j", (proofBatch) => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    mocks.searchParams = proofBatch === null ? new URLSearchParams() : new URLSearchParams({ proofBatch });
+
+    render(<BossReportPage />);
+
+    expect(screen.queryByTestId("local-demo-ledger-proof-mount")).toBeNull();
+  });
+
   it("hides sharing in the local tire demo and creates no share request", () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
     const fetchMock = mockSuccessfulShare();

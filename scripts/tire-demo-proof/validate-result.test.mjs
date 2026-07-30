@@ -5,11 +5,12 @@ import { validateBatchResult } from "./validate-result.mjs";
 
 const hash = "a".repeat(64); const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const expectedRows = Array.from({ length: 100 }, (_, index) => ({ barcode: `code-${index}`, canonicalProductUid: `uid-${index}`, brand: "Brand", model: "Model", size: "225/65R17" }));
+const manifestSha256 = "b".repeat(64);
 const batch = { schemaVersion: 1, seed: "scanbin-local-tire-demo-v1", gitSha: "abc", databaseSha256: hash, batch: 1, batchSha256: digest(expectedRows), expectedBarcodesSha256: digest(expectedRows.map((row) => row.barcode)), expectedCanonicalProductUidsSha256: digest(expectedRows.map((row) => row.canonicalProductUid)), rows: expectedRows };
 function good() {
   const events = expectedRows.map((row, index) => ({ eventId: `event-${index}`, cleanCode: row.barcode, matchedProductId: `product-${index}`, canonicalProductUid: row.canonicalProductUid, quantityDelta: 1, quantityAfterScan: 1, status: "verified" }));
   const counts = events.map((event) => ({ productId: event.matchedProductId, quantity: 1, scanEventIds: [event.eventId] }));
-  return { observations: expectedRows.map((row, index) => ({ ...row, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [] };
+  return { observations: expectedRows.map((row, index) => ({ ...row, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, manifestSha256, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, canonicalIdentityMismatchCount:0, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [] };
 }
 test("accepts an exact hash-bound 100-event proof and uses nearest-rank percentiles", () => { const result = validateBatchResult(batch, good()); assert.equal(result.passed, true); assert.equal(result.countedQuantity, 100); assert.equal(result.p95Ms, 94); });
 test("rejects observation, identity, feed, proof, count, console, and egress violations", () => {
@@ -28,6 +29,36 @@ test("rejects a tampered locked batch hash", () => {
   const validation = validateBatchResult(locked, good());
   assert.equal(validation.passed, false);
   assert.ok(validation.failures.some((failure) => failure.rule === "locked_batch_hashes"));
+});
+
+test("rejects a missing or malformed proof manifest hash", () => {
+  for (const mutate of [
+    (value) => { delete value.ledgerProof.manifest.manifestSha256; },
+    (value) => { value.ledgerProof.manifest.manifestSha256 = "not-a-sha256"; },
+  ]) {
+    const value = good();
+    mutate(value);
+    const validation = validateBatchResult(batch, value);
+    assert.equal(validation.passed, false);
+    assert.ok(validation.failures.some((failure) => failure.rule === "manifest_binding"));
+  }
+});
+
+test("rejects a proof manifest hash that mismatches the run anchor", () => {
+  const value = good();
+  value.ledgerProof.manifest.manifestSha256 = "0".repeat(64);
+  const anchor = {
+    batch: 1,
+    manifest: {
+      gitSha: batch.gitSha,
+      databaseSha256: batch.databaseSha256,
+      manifestSha256,
+      seed: batch.seed,
+    },
+  };
+  const validation = validateBatchResult(batch, value, anchor);
+  assert.equal(validation.passed, false);
+  assert.ok(validation.failures.some((failure) => failure.rule === "run_manifest_anchor"));
 });
 
 test("rejects an incomplete ledger assertion schema", () => {
@@ -61,6 +92,7 @@ test("rejects every ledger assertion that disagrees with the independently recom
     duplicateEventIdCount: 0,
     missingEventIdCount: 0,
     unmatchedEventCount: 0,
+    canonicalIdentityMismatchCount: 0,
     finalEqualsReplay: true,
     countEventIdsEqualReplayEventIds: true,
     everyCountEventIdExistsInFeed: true,

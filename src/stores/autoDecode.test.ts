@@ -37,6 +37,16 @@ function failStub() {
   return { spy, restore: () => (globalThis.fetch = original) };
 }
 
+function statusThenDecodeStub(status: object, decode: object) {
+  const original = globalThis.fetch;
+  const spy = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => ({
+    ok: true,
+    json: async () => init?.method === "GET" ? status : decode,
+  })) as unknown as typeof fetch;
+  globalThis.fetch = spy;
+  return { spy, restore: () => (globalThis.fetch = original) };
+}
+
 function aggressiveStore() {
   const store = createTestScanStore({ db: new MockDb() });
   store.getState().setAiStatus({ geminiConfigured: true, openaiConfigured: true, missingKeys: [] });
@@ -148,6 +158,71 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect(spy).toHaveBeenCalled();
     const call = (spy as unknown as { mock: { calls: [string, { body: string }][] } }).mock.calls[0];
     expect(JSON.parse(call[1].body).mode).toBe("decode");
+  });
+
+  it("runs a local corpus decode after status says free is available even though live lookup is disabled", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    const localStatus = {
+      liveEnabled: false,
+      autoDecodeOnScan: true,
+      geminiConfigured: false,
+      openaiConfigured: false,
+      freeDecodeAvailable: true,
+      decodeLadder: ["local_tire_corpus"],
+      dailyLimit: 0,
+      missingKeys: [],
+    };
+    const { spy, restore } = statusThenDecodeStub(localStatus, VERIFIED);
+    try {
+      await store.getState().refreshAiStatus();
+      expect(store.getState().aiStatus).toMatchObject({
+        liveEnabled: false,
+        freeDecodeAvailable: true,
+        decodeLadder: ["local_tire_corpus"],
+      });
+
+      store.getState().processScan("878106003504");
+      await vi.waitFor(() => expect(lastReview(store).decodeStatus).toBe("verified"));
+    } finally {
+      restore();
+    }
+
+    const calls = (spy as unknown as { mock: { calls: [string, RequestInit | undefined][] } }).mock.calls;
+    const decodeCalls = calls.filter(([, init]) => init?.method === "POST");
+    expect(decodeCalls).toHaveLength(1);
+    expect(JSON.parse(decodeCalls[0][1]!.body as string).mode).toBe("decode");
+    expect(store.getState().scanFeed[0]?.decodeStatus).toBe("verified");
+    expect(store.getState().finalCounts).toHaveLength(1);
+    expect(store.getState().finalCounts[0]?.quantity).toBe(1);
+  });
+
+  it("keeps a normal live-disabled status blocked when free decode is unavailable", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    store.getState().setAiStatus({ liveEnabled: false, freeDecodeAvailable: false, geminiConfigured: true });
+    const { spy, restore } = stub(VERIFIED);
+    try {
+      store.getState().processScan("878106003504");
+    } finally {
+      restore();
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect(lastReview(store).decodeStatus).toBe("needs_review");
+  });
+
+  it("does not decode an invalid-checksum scan even when a local free corpus is available", () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.getState().updateSettings({ aiLookupEnabled: true });
+    store.getState().setAiStatus({ liveEnabled: false, freeDecodeAvailable: true, geminiConfigured: false, openaiConfigured: false });
+    const { spy, restore } = stub(VERIFIED);
+    try {
+      store.getState().processScan("878106003505");
+    } finally {
+      restore();
+    }
+    expect(spy).not.toHaveBeenCalled();
+    expect(lastReview(store).decodeStatus).toBe("needs_review");
   });
 
   it("keeps the legacy no-key client block when a stale/mocked server status does not advertise free rungs", () => {

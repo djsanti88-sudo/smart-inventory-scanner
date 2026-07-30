@@ -3,10 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
-import {
-  computeLocalDemoBatchHashes,
-  createLocalDemoManifestHandler,
-} from "./route";
+import { createLocalDemoManifestHandler } from "./manifestHandler";
+import { computeLocalDemoBatchHashes } from "@/server/localDemoArtifacts";
 import { computeLocalDemoManifestHash } from "@/server/localDemoArtifacts";
 
 const original = process.env.SCANBIN_LOCAL_DEMO;

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
-import { createLocalDemoStatusHandler } from "./route";
+import { createLocalDemoStatusHandler } from "./statusHandler";
 
 const original = process.env.SCANBIN_LOCAL_DEMO;
 

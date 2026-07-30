@@ -16,6 +16,7 @@ function batch() {
     schemaVersion: 1 as const,
     gitSha: "a".repeat(40),
     databaseSha256: "b".repeat(64),
+    manifestSha256: "c".repeat(64),
     seed: "scanbin-local-tire-demo-v1",
     batch: 1,
     batchSha256: digest(rows),
@@ -48,6 +49,7 @@ function event(index: number, patch: Partial<ScanEvent> = {}): ScanEvent {
     syncStatus: "synced",
     syncError: null,
     idempotencyKey: `key-${index + 1}`,
+    localDemoCanonicalProductUid: `canonical-${index + 1}`,
     ...patch,
   };
 }
@@ -82,7 +84,7 @@ function validInput() {
 }
 
 describe("buildLocalDemoLedgerProof", () => {
-  it("rebuilds a stable, passing 100-event proof and maps canonical IDs only from the locked batch", () => {
+  it("rebuilds a stable, passing 100-event proof from direct event canonical IDs", () => {
     const input = validInput();
     const proof = buildLocalDemoLedgerProof({ ...input, scanFeed: [...input.scanFeed].reverse() });
 
@@ -93,6 +95,7 @@ describe("buildLocalDemoLedgerProof", () => {
       duplicateEventIdCount: 0,
       missingEventIdCount: 0,
       unmatchedEventCount: 0,
+      canonicalIdentityMismatchCount: 0,
       finalEqualsReplay: true,
       countEventIdsEqualReplayEventIds: true,
       everyCountEventIdExistsInFeed: true,
@@ -103,6 +106,7 @@ describe("buildLocalDemoLedgerProof", () => {
       noDuplicates: true,
     });
     expect(proof.events[0]).toMatchObject({ eventId: "event-1", canonicalProductUid: "canonical-1" });
+    expect(proof.manifest.manifestSha256).toBe(input.batch.manifestSha256);
     expect(proof.events[0]?.status).toBe("verified");
     expect(proof.events.map((row) => row.eventId)).toEqual(Array.from({ length: 100 }, (_, index) => `event-${index + 1}`));
 
@@ -122,6 +126,23 @@ describe("buildLocalDemoLedgerProof", () => {
       ledgerProof: proof,
     });
     expect(validation.passed).toBe(true);
+  });
+
+  it("fails closed when an event canonical UID is missing or differs from its locked barcode UID", () => {
+    const input = validInput();
+    const missingUid = input.scanFeed.map((row, index) =>
+      index === 0 ? { ...row, localDemoCanonicalProductUid: undefined } : row,
+    );
+    const wrongUid = input.scanFeed.map((row, index) =>
+      index === 0 ? { ...row, localDemoCanonicalProductUid: "canonical-2" } : row,
+    );
+
+    for (const scanFeed of [missingUid, wrongUid]) {
+      const proof = buildLocalDemoLedgerProof({ ...input, scanFeed });
+      expect(proof.assertions.canonicalIdentityMismatchCount).toBe(1);
+      expect(proof.assertions.passed).toBe(false);
+    }
+    expect(buildLocalDemoLedgerProof({ ...input, scanFeed: wrongUid }).events[0]?.canonicalProductUid).toBe("canonical-2");
   });
 
   it("fails closed for missing, extra, duplicate, unmatched, and malformed event facts", () => {

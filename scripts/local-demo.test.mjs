@@ -27,7 +27,7 @@ test("launcher pins a fresh build and loopback-only production server with one i
     baseEnvironment: { OPENAI_API_KEY: "secret" },
     ledgerPath: resolve("reports/local-tire-demo/runtime/test-ledger.jsonl"),
   });
-  assert.deepEqual(plan.build.args, ["next", "build"]);
+  assert.deepEqual(plan.build.args, ["next", "build", "--webpack"]);
   assert.deepEqual(plan.start.args, ["next", "start", "-H", "127.0.0.1", "-p", "3456"]);
   assert.equal(plan.build.env.OPENAI_API_KEY, "");
   assert.equal(plan.start.env.OPENAI_API_KEY, "");

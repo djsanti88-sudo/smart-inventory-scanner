@@ -1,13 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { buildBossReport } from "@/services/reports/bossReport";
 import { useScanStore } from "@/stores/scanStore";
+import { LocalDemoLedgerProof } from "@/components/LocalDemoLedgerProof";
 
-export default function BossReportPage() {
+function BossReportContent() {
   const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
+  const searchParams = useSearchParams();
+  const proofBatch = searchParams?.get("proofBatch") ?? null;
+  const localDemoProofBatch = isLocalDemo && proofBatch && /^(?:0[1-9]|[12][0-9]|30)$/.test(proofBatch)
+    ? proofBatch
+    : null;
   const products = useScanStore((state) => state.products);
   const finalCounts = useScanStore((state) => state.finalCounts);
   const scanFeed = useScanStore((state) => state.scanFeed);
@@ -138,6 +145,8 @@ export default function BossReportPage() {
         </div>
       </div>
 
+      {localDemoProofBatch && <LocalDemoLedgerProof proofBatch={localDemoProofBatch} />}
+
       {shareError && (
         <p className="boss-report-screen-only text-sm text-red-600" data-testid="share-error">
           {shareError}
@@ -210,5 +219,21 @@ export default function BossReportPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function BossReportPage() {
+  return (
+    <Suspense
+      fallback={(
+        <div className="mx-auto max-w-3xl p-4" data-testid="report-page-loading">
+          <div className="rounded-lg border border-zinc-200 bg-white p-6 text-base text-zinc-700">
+            Loading report...
+          </div>
+        </div>
+      )}
+    >
+      <BossReportContent />
+    </Suspense>
   );
 }
