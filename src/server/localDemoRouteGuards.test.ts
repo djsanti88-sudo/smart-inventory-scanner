@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import {
+  isLoopbackRequest,
   localDemoNoContentResponse,
   localDemoNullResponse,
   localDemoUnavailableResponse,
@@ -26,6 +28,23 @@ const guardedHandlers = [
 ] as const;
 
 describe("local demo route-level guards", () => {
+  it.each([
+    ["http://b01.localhost:3400/api/local-demo/manifest/01", "b01.localhost:3400"],
+    ["http://BATCH-30.localhost:3400/api/local-demo/status", "batch-30.localhost:3400"],
+  ])("allows a matching standards-based localhost subdomain (%s)", (url, host) => {
+    expect(isLoopbackRequest(new NextRequest(url, { headers: { host } }))).toBe(true);
+  });
+
+  it.each([
+    ["http://evil-localhost.com:3400/api/local-demo/status", "evil-localhost.com:3400"],
+    ["http://localhost.evil.com:3400/api/local-demo/status", "localhost.evil.com:3400"],
+    ["http://b01.localhost:3400/api/local-demo/status", "localhost:3400"],
+    ["http://b01.localhost:3400/api/local-demo/status", "b01.localhost:3500"],
+    ["http://b01.localhost:3400/api/local-demo/status", "evil.com@b01.localhost:3400"],
+  ])("rejects non-loopback or mismatched evidence authorities (%s via %s)", (url, host) => {
+    expect(isLoopbackRequest(new NextRequest(url, { headers: { host } }))).toBe(false);
+  });
+
   it.each(guardedHandlers)(
     "%s %s checks demo mode as its first executable statement",
     (path, method, responseHelper) => {

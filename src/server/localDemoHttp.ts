@@ -48,17 +48,32 @@ export function localDemoNullResponse(): NextResponse {
 
 function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (normalized === "localhost" || normalized === "::1") return true;
+  if (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+localhost$/.test(normalized)
+  ) return true;
   const match = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(normalized);
   return Boolean(match?.slice(1).every((octet) => Number(octet) <= 255));
 }
 
 export function isLoopbackRequest(request: NextRequest): boolean {
-  if (!isLoopbackHostname(request.nextUrl.hostname)) return false;
+  const { hostname, port, protocol } = request.nextUrl;
+  if (!isLoopbackHostname(hostname)) return false;
   const hostHeader = request.headers.get("host");
   if (!hostHeader) return true;
   try {
-    return isLoopbackHostname(new URL(`http://${hostHeader}`).hostname);
+    const hostUrl = new URL(`${protocol}//${hostHeader}`);
+    return (
+      !hostUrl.username &&
+      !hostUrl.password &&
+      hostUrl.pathname === "/" &&
+      !hostUrl.search &&
+      !hostUrl.hash &&
+      hostUrl.hostname === hostname &&
+      hostUrl.port === port &&
+      isLoopbackHostname(hostUrl.hostname)
+    );
   } catch {
     return false;
   }
