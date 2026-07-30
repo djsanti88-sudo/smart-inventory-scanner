@@ -2,10 +2,15 @@ import { readFileSync } from "node:fs";
 
 import { hasCountableTireIdentity } from "../src/services/ai/tireSpecs.ts";
 import { prettifyBrand, prettifyProductName } from "../src/services/format/productDisplay.ts";
+import { resolveRawScan } from "../src/services/resolver.ts";
 import { normalizeTireSize } from "../src/services/tire/tireSizeNormalizer.ts";
 import { isTrustedLocalDemoTireRow } from "../src/server/tire-knowledge/localDemoTrust.mjs";
+import { DEMO_BUSINESS_ID, getSeed } from "../src/seed/seedData.ts";
 
 type LocalDemoRow = Record<string, unknown>;
+
+const builtInSeed = getSeed();
+type LocalDemoSeed = typeof builtInSeed;
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -26,13 +31,30 @@ export function projectLocalDemoProviderRow(row: LocalDemoRow): LocalDemoRow {
   return { ...row, size: reconstructLocalDemoProviderIdentity(row).displaySize };
 }
 
+export function resolvesKnownAgainstLocalDemoSeed(
+  row: LocalDemoRow,
+  seed: LocalDemoSeed = builtInSeed,
+): boolean {
+  const resolution = resolveRawScan(
+    text(row.barcode),
+    seed.products,
+    seed.aliases,
+    DEMO_BUSINESS_ID,
+  );
+  return resolution.resolverStatus === "known";
+}
+
 /**
  * Ask the production countability gate against the exact provider display
  * identity. This deliberately does not add a manifest-only parser or accept a
  * size the scanner itself would reject.
  */
-export function isCountableLocalDemoRow(row: LocalDemoRow): boolean {
+export function isCountableLocalDemoRow(row: LocalDemoRow, seed: LocalDemoSeed = builtInSeed): boolean {
   if (!isTrustedLocalDemoTireRow(row)) return false;
+  // The local store resolves its built-in seed before the tire corpus. Only a
+  // definitive seed Known result shadows this row; a conflict is not proof of
+  // either seed identity and must remain eligible for corpus certification.
+  if (resolvesKnownAgainstLocalDemoSeed(row, seed)) return false;
 
   const { specs, brand, productName } = reconstructLocalDemoProviderIdentity(row);
 

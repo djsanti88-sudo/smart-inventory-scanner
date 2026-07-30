@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { isCountableLocalDemoRow, reconstructLocalDemoProviderIdentity } from "./local-demo-countability.ts";
+import {
+  isCountableLocalDemoRow,
+  reconstructLocalDemoProviderIdentity,
+  resolvesKnownAgainstLocalDemoSeed,
+} from "./local-demo-countability.ts";
 
 function checkDigit(body) {
   let sum = 0;
@@ -27,11 +31,50 @@ function trustedRow(size) {
   };
 }
 
+function seededCollisionRow() {
+  return {
+    ...trustedRow("215/70R15"),
+    barcode: "848983012906",
+    canonical_product_uid: "TIRE_COLLIDES_WITH_BUILT_IN_SEED",
+  };
+}
+
+function rowWithBarcode(barcode) {
+  return {
+    ...trustedRow("215/70R15"),
+    barcode,
+    canonical_product_uid: `TIRE_${barcode}`,
+  };
+}
+
 test("local demo countability uses the production identity gate", () => {
   assert.equal(isCountableLocalDemoRow(trustedRow("225/65R17")), true);
   assert.equal(isCountableLocalDemoRow(trustedRow("LT33X12.50R15")), true);
   assert.equal(isCountableLocalDemoRow(trustedRow("33125020")), false);
   assert.equal(isCountableLocalDemoRow(trustedRow("13/70R16")), false);
+});
+
+test("local demo countability excludes only known built-in seed resolutions before the tire corpus", () => {
+  assert.equal(resolvesKnownAgainstLocalDemoSeed(seededCollisionRow()), true);
+  assert.equal(isCountableLocalDemoRow(seededCollisionRow()), false);
+  assert.equal(resolvesKnownAgainstLocalDemoSeed(rowWithBarcode("0848983012906")), true);
+  assert.equal(isCountableLocalDemoRow(rowWithBarcode("0848983012906")), false);
+  assert.equal(resolvesKnownAgainstLocalDemoSeed(rowWithBarcode("6419440485331")), true);
+  assert.equal(isCountableLocalDemoRow(rowWithBarcode("6419440485331")), false);
+  assert.equal(isCountableLocalDemoRow(trustedRow("215/70R15")), true);
+});
+
+test("a synthetic built-in seed conflict remains a countable corpus candidate", () => {
+  const row = trustedRow("215/70R15");
+  const conflictSeed = {
+    products: [
+      { id: "seed-a", businessId: "demo-business", name: "Seed A", verified: true, primaryBarcode: row.barcode, primarySku: "", gtin: "", upc: "", ean: "", vendorCodes: [] },
+      { id: "seed-b", businessId: "demo-business", name: "Seed B", verified: true, primaryBarcode: "", primarySku: "", gtin: row.barcode, upc: "", ean: "", vendorCodes: [] },
+    ],
+    aliases: [],
+  };
+  assert.equal(resolvesKnownAgainstLocalDemoSeed(row, conflictSeed), false);
+  assert.equal(isCountableLocalDemoRow(row, conflictSeed), true);
 });
 
 test("provider display identity uses the deterministic normalized size and preserves an unsupported raw size", () => {

@@ -34,7 +34,7 @@ function barcode(index, ean = false) {
   return `${body}${checkDigit(body)}`;
 }
 
-function fixtureDatabase({ forceSize, standardSize = "225/65R17" } = {}) {
+function fixtureDatabase({ forceSize, standardSize = "225/65R17", seedCollision = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "local-demo-manifest-"));
   const path = join(root, "knowledge.db");
   const db = new Database(path);
@@ -51,7 +51,10 @@ function fixtureDatabase({ forceSize, standardSize = "225/65R17" } = {}) {
     "auto_count_candidate", patch.completeness ?? 90,
   );
   db.transaction(() => {
-    for (let index = 0; index < 250; index += 1) add(index, { mpn: `REP-${Math.floor(index / 2)}` });
+    for (let index = 0; index < 250; index += 1) add(index, {
+      mpn: `REP-${Math.floor(index / 2)}`,
+      ...(seedCollision && index === 0 ? { barcode: "848983012906" } : {}),
+    });
     for (let index = 250; index < 300; index += 1) add(index, { mpn: `UNIQUE-${index}` });
     for (let index = 300; index < 600; index += 1) add(index, { season: "winter" });
     for (let index = 600; index < 900; index += 1) add(index, { size: "LT265/70R17" });
@@ -68,6 +71,19 @@ function fixtureDatabase({ forceSize, standardSize = "225/65R17" } = {}) {
 
 test("generator refuses a trusted pool that does not pass production countability", () => {
   const fixture = fixtureDatabase({ forceSize: "33125020" });
+  assert.throws(
+    () => generateLocalDemoManifest({
+      databasePath: fixture.path,
+      reportsRoot: join(fixture.root, "reports", "local-tire-demo"),
+      gitSha: "abc123def456",
+      generatedAt: "2026-07-29T00:00:00.000Z",
+    }),
+    /stratum|eligible|requires/i,
+  );
+});
+
+test("generator refuses a 3,000-row pool when a built-in seed resolver shadows one corpus barcode", () => {
+  const fixture = fixtureDatabase({ seedCollision: true });
   assert.throws(
     () => generateLocalDemoManifest({
       databasePath: fixture.path,
