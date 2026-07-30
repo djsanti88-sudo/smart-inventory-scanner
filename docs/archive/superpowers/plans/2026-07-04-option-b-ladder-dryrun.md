@@ -15,7 +15,7 @@
 - Automated tests NEVER call live providers (mock `fetchImpl` / canned AI responses); live calls happen only in the explicitly authorized Task 9 run.
 - API keys read from `.env.local` (strip surrounding quotes!) or system env; never printed, never committed.
 - Probe scripts are throwaway: `scripts/tmp-*` naming; fixture + results JSON are keepers.
-- Spec: `docs/superpowers/specs/2026-07-04-option-b-ladder-dry-run-design.md` (group sizes, gates, code-type rules live there and are copied into tasks below).
+- Spec: `docs/archive/superpowers/specs/2026-07-04-option-b-ladder-dry-run-design.md` (group sizes, gates, code-type rules live there and are copied into tasks below).
 - Prompt v2 (verbatim, used for BOTH providers):
   `Identify the product for barcode {CODE}. Search the web. Return JSON only: {"brand":"","productName":"","specs":"","gtin":"","confidence":0.0,"exactCodeFound":false,"basis":"","sourceUrls":[]}. If you find this exact code in a real page, set exactCodeFound true and confidence to match the evidence. If you cannot, STILL return your single best guess from partial matches, barcode prefix ownership, or similar listings - set exactCodeFound false, confidence 0.4 or less, and say why in basis. Keep it brief. Never leave productName empty if you have any plausible guess.`
 

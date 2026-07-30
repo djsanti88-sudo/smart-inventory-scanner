@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-// Tire corpus on Turso (docs/superpowers/specs/2026-07-09-tire-corpus-on-turso.md section 3).
+// Tire corpus on Turso (docs/archive/superpowers/specs/2026-07-09-tire-corpus-on-turso.md section 3).
 // When local SQLite is unavailable (the Vercel case), tireKnowledgeIndex queries Turso instead of
 // falling straight to the in-memory JSON. Mirrors src/server/upc/storage.test.ts's mock style:
 // an in-memory fake Turso client, NEVER a live connection.

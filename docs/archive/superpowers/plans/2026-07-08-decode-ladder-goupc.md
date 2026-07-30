@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the owner-approved decode ladder (spec v6+: `docs/superpowers/specs/2026-07-08-go-upc-decode-rung-design.md`) — local corpora -> Go-UPC -> Fetch V2 -> GPT-5.5 — with count-first durability, identity-merge, raw archive, hard caps, and staged live proof graded by lower-tier models.
+**Goal:** Build the owner-approved decode ladder (spec v6+: `docs/archive/superpowers/specs/2026-07-08-go-upc-decode-rung-design.md`) — local corpora -> Go-UPC -> Fetch V2 -> GPT-5.5 — with count-first durability, identity-merge, raw archive, hard caps, and staged live proof graded by lower-tier models.
 
 **Architecture:** Deterministic-first waterfall. Every scan persists BEFORE decode (HARD RULE 0). Free local corpora (76K tires + 4M retail) answer first; Go-UPC (paid quota, deterministic, exact hits auto-count) answers GTIN misses; Fetch V2.3+ (web evidence engine) and finally GPT-5.5 (optimized prompt, spend-gated) handle only the hard tail. Everything paid is archived raw with provenance.
 

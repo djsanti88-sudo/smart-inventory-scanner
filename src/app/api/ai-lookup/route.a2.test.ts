@@ -1,7 +1,7 @@
 // @vitest-environment node
 //
 // P6 Task A2 (GC-A, law-critical): the tenant-starvation cap-reorder fix. Failing-first proof for the
-// starvation case described in docs/superpowers/plans/2026-07-20-phase6-sell-ready.md GC-A: with the
+// starvation case described in docs/archive/superpowers/plans/2026-07-20-phase6-sell-ready.md GC-A: with the
 // GLOBAL counter already drained (>= AI_LOOKUP_DAILY_LIMIT) and an authed tenant's OWN account usage at
 // 0, that tenant must SUCCEED on both the legacy 'lookup' path and the decode path (pre-fix: both 429).
 // Anonymous traffic (no authedBusinessId) still hits the plain global cap exactly as before. An

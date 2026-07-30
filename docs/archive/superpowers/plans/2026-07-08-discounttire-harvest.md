@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Harvest Discount Tire's full catalog into the private tire corpus using local Playwright (Firecrawl's job, $0/page), with poison guards, provenance, resumable batches, and a weekly lower-tier-agent top-up. Spec: `docs/superpowers/specs/2026-07-08-discounttire-harvest-design.md`.
+**Goal:** Harvest Discount Tire's full catalog into the private tire corpus using local Playwright (Firecrawl's job, $0/page), with poison guards, provenance, resumable batches, and a weekly lower-tier-agent top-up. Spec: `docs/archive/superpowers/specs/2026-07-08-discounttire-harvest-design.md`.
 
 **Architecture:** sitemap discovery -> Playwright renderer (polite, block-rate telemetry, hard stop) -> deterministic JSON-LD parser -> poison guard (check digit + prefix firewall + no cross-source overwrite) -> corpus merge + DB rebuild -> weekly scheduled top-up.
 

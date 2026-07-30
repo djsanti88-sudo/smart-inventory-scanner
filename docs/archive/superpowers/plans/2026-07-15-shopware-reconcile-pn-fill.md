@@ -4,7 +4,7 @@
 
 **Goal:** Recover 2,627 free part numbers into the tire corpus, import a Shop-Ware inventory export, and produce an honest variance report (screen + CSV) that never reports uncounted items as shrinkage.
 
-**Architecture:** Phase 1 is pure-node scripts work (backfill lib + merge enrichment) against `tireKnowledge.generated.json`. Phase 2/3 are pure services under `src/services/reconcile/` (adapter -> matcher -> report), wired by one server route for corpus lookups and one client page/store. Controlling document: `docs/superpowers/specs/2026-07-15-shopware-reconcile-pn-fill-design.md` (v2, amendments AM-R1..R10 SUPERSEDE original text).
+**Architecture:** Phase 1 is pure-node scripts work (backfill lib + merge enrichment) against `tireKnowledge.generated.json`. Phase 2/3 are pure services under `src/services/reconcile/` (adapter -> matcher -> report), wired by one server route for corpus lookups and one client page/store. Controlling document: `docs/archive/superpowers/specs/2026-07-15-shopware-reconcile-pn-fill-design.md` (v2, amendments AM-R1..R10 SUPERSEDE original text).
 
 **Tech Stack:** Node ESM scripts (.mjs), TypeScript pure services, Vitest (node project), Zustand persist, Next.js App Router route + page, Playwright E2E.
 

@@ -967,7 +967,7 @@ docs/REVISION_GATE.md. Unit tests are NOT sufficient for handoff on these surfac
 **Files:**
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-07-15-barcode-trust-gate-design.md` (mark Phase 1 shipped in Status), `PROGRESS.md`, `TESTING.md`
+- Modify: `docs/archive/superpowers/specs/2026-07-15-barcode-trust-gate-design.md` (mark Phase 1 shipped in Status), `PROGRESS.md`, `TESTING.md`
 
 - [ ] **Step 1: Full unit suite**
 
@@ -990,7 +990,7 @@ Update PROGRESS.md (phase entry), TESTING.md (the new test files + the drift-gua
 - [ ] **Step 5: Commit**
 
 ```bash
-git commit -m "docs(trust-gate): phase 1 shipped - progress + testing notes" -- PROGRESS.md TESTING.md docs/superpowers/specs/2026-07-15-barcode-trust-gate-design.md
+git commit -m "docs(trust-gate): phase 1 shipped - progress + testing notes" -- PROGRESS.md TESTING.md docs/archive/superpowers/specs/2026-07-15-barcode-trust-gate-design.md
 ```
 
 ---

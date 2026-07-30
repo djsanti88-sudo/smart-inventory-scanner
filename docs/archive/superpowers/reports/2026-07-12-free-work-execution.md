@@ -149,7 +149,7 @@ Owner-authorized 2026-07-12: push `feat/decode-ladder-goupc` to origin, PUSH ONL
 no PR, no push to master, no `vercel` commands were run.
 
 ### Step 1: commit stragglers
-- Command: `git add docs/BACKLOG.md docs/superpowers/plans/2026-07-09-decode-ux-fixes.md docs/superpowers/plans/2026-07-10-size-merge-brand-family-fix.md docs/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md`
+- Command: `git add docs/BACKLOG.md docs/archive/superpowers/plans/2026-07-09-decode-ux-fixes.md docs/archive/superpowers/plans/2026-07-10-size-merge-brand-family-fix.md docs/archive/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md`
   then `git add docs/superpowers/reports/` (this execution report + task reports directory,
   untracked) then `git commit`.
 - `.superpowers/` was checked with `git check-ignore -v .superpowers/sdd/task-3-report.md` ->
@@ -160,10 +160,10 @@ no PR, no push to master, no `vercel` commands were run.
   (not part of the four named files or the reports directory).
 - Result: commit `4f0762739d46a0e295765d2e55030ef6accf7914` "docs: backlog + retained plan docs
   (2026-07-12 audit)" - 5 files changed, 1493 insertions(+): `docs/BACKLOG.md`,
-  `docs/superpowers/plans/2026-07-09-decode-ux-fixes.md`,
-  `docs/superpowers/plans/2026-07-10-size-merge-brand-family-fix.md`,
-  `docs/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md`,
-  `docs/superpowers/reports/2026-07-12-free-work-execution.md`.
+  `docs/archive/superpowers/plans/2026-07-09-decode-ux-fixes.md`,
+  `docs/archive/superpowers/plans/2026-07-10-size-merge-brand-family-fix.md`,
+  `docs/archive/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md`,
+  `docs/archive/superpowers/reports/2026-07-12-free-work-execution.md`.
 - Exit code: 0
 
 ### Step 2: safety tags on every local branch tip
@@ -234,13 +234,13 @@ archive-only policy. No files deleted. No push performed.
   covers `reports/` directory.
 
 ### Step 3: append Task 1.1 section to shared execution report
-- File: `docs/superpowers/reports/2026-07-12-free-work-execution.md` (already tracked, modified in this task).
+- File: `docs/archive/superpowers/reports/2026-07-12-free-work-execution.md` (already tracked, modified in this task).
 - Added this section to document the task execution and exact commands run.
 - No separate commit for the report edit; it will be included in the main commit.
 
 ### Step 4: commit
 - Command: `git commit -m "chore(repo): untrack reports/ (gitignored QA artifacts, files kept on disk)" --end-with-co-author`
-- Files staged: `.superpowers/sdd/task-1.1-report.md` (new report file) + `docs/superpowers/reports/2026-07-12-free-work-execution.md` (modified execution report).
+- Files staged: `.superpowers/sdd/task-1.1-report.md` (new report file) + `docs/archive/superpowers/reports/2026-07-12-free-work-execution.md` (modified execution report).
 - Commit message includes: standard chore prefix, description of the action, reason, and exact co-author trailer.
 - Exit code: 0
 
@@ -512,7 +512,7 @@ no production code path) and its documentation caveats. The real auto-count gate
 - Command: `grep -rn autoAcceptVerifiedDecodes` (full repo, then scoped to `src/`).
 - Full-repo hits (8 files): `CLAUDE.md:106`, `DECISIONS.md:71`, `docs/DECODER_ARCHITECTURE.md:46`,
   `TESTING.md:154`, `src/types.ts:353`, `docs/BACKLOG.md:58`, `src/stores/scanStore.ts:367`,
-  `docs/archive/PROGRESS_HISTORY_2026-06.md:317,351`, `docs/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md` (this task's own spec), `e2e/fixtures.ts:33`.
+  `docs/archive/PROGRESS_HISTORY_2026-06.md:317,351`, `docs/archive/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md` (this task's own spec), `e2e/fixtures.ts:33`.
 - Scoped `src/` grep: only 2 hits - `src/types.ts:353` (type declaration) and
   `src/stores/scanStore.ts:367` (default literal). No other production code reads or branches on
   the field. This matches the audit finding exactly; safe to proceed (no STOP condition hit).
@@ -563,7 +563,7 @@ no production code path) and its documentation caveats. The real auto-count gate
   `geminiProvider.ts` cleanup items in the same original bullet.
 - `docs/archive/PROGRESS_HISTORY_2026-06.md` deliberately left untouched - it is a dated historical
   log of what was true in June 2026; rewriting it would falsify the archive record.
-- The plan doc `docs/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md` (this
+- The plan doc `docs/archive/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md` (this
   task's own spec) also left untouched - it is the task definition, not living documentation.
 
 ### Gate results

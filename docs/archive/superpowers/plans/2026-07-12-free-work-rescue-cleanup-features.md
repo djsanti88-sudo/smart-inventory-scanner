@@ -93,7 +93,7 @@ git commit -m "fix(git): restore .gitattributes - LFS rule for retail corpus + L
 - [ ] **Step 1:** `npx playwright install chromium` (idempotent), then run in order:
   `npm run proof:full` (tsc + vitest + next build), `npm run test:e2e`, `npm run qa:bots`.
 - [ ] **Step 2:** Record pass/fail counts + exit codes verbatim into the execution report
-  scratch file `docs/superpowers/reports/2026-07-12-free-work-execution.md` (create it, header
+  scratch file `docs/archive/superpowers/reports/2026-07-12-free-work-execution.md` (create it, header
   "Execution Report - free-work plan", one section per task from now on).
   Known flake: `cloudDrainRace.store.test.ts` fails only under full parallel load - rerun it
   isolated (`npx vitest run src/stores/cloudDrainRace.store.test.ts`) before calling it a failure.
@@ -110,9 +110,9 @@ git commit -m "fix(git): restore .gitattributes - LFS rule for retail corpus + L
 - [ ] **Step 1:** Commit the untracked keepers:
 
 ```bash
-git add docs/BACKLOG.md docs/superpowers/plans/2026-07-09-decode-ux-fixes.md \
-  docs/superpowers/plans/2026-07-10-size-merge-brand-family-fix.md \
-  docs/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md
+git add docs/BACKLOG.md docs/archive/superpowers/plans/2026-07-09-decode-ux-fixes.md \
+  docs/archive/superpowers/plans/2026-07-10-size-merge-brand-family-fix.md \
+  docs/archive/superpowers/plans/2026-07-12-free-work-rescue-cleanup-features.md
 git commit -m "docs: backlog + retained plan docs (2026-07-12 audit)"
 ```
 
@@ -407,7 +407,7 @@ existing versions do.
 - [ ] Opus subagent reviews the full phase diff (`git diff <phase0-start>..HEAD --stat` + reading
   the ladder/store/gate changes) against: Resolver Trust Rules, scanner-workflow rules, test
   safety, archive-only compliance, no em/en dashes in new UI copy. Findings fixed or logged.
-- [ ] Finalize `docs/superpowers/reports/2026-07-12-free-work-execution.md` using the doctrine
+- [ ] Finalize `docs/archive/superpowers/reports/2026-07-12-free-work-execution.md` using the doctrine
   full-report format: per-task terminal proof (command/result/exit code), files changed, tests
   added, proof artifacts (screenshot paths), acceptance results, proof types
   (mocked/live/manual/automated), git status, known limitations, next recommended step, and a

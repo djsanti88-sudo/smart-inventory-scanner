@@ -87,7 +87,7 @@ test("aggressive auto-decode on scan (all mocked)", async ({ page }) => {
   expect(postHits).toBeGreaterThan(0); // AI WAS called automatically
 
   // Suggested (weak url_only evidence) -> EVIDENCE GATE blocks a VERIFIED auto-add, but the
-  // "scan N = count N" invariant (Plan A/Plan C, see docs/superpowers/plans/2026-07-01-plan-c-verified-suggested.md
+  // "scan N = count N" invariant (Plan A/Plan C, see docs/archive/superpowers/plans/2026-07-01-plan-c-verified-suggested.md
   // and the DECODE-EVERYTHING provisional-count block in scanStore.ts) still provisionally counts the
   // scan as an unverified row. owner-ratified 2026-07-14: suggestions bypass Needs Review (Task 9b) -
   // the suggestion now sits as a PENDING inline tag on the row / the Suggested tab (checked below).

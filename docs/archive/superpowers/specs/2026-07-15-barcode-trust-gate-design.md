@@ -8,7 +8,7 @@ Amendments AM-1..AM-12 below SUPERSEDE any conflicting text above them; AM-11 su
 synthesized-detector-as-block wherever earlier text (including AM-6..AM-8) says otherwise. Owner
 decisions ratified 2026-07-15: next-physical-scan counting (AM-2), grandfather-with-later-audit (AM-5),
 two-phase build (AM-6). PHASE 1 SHIPPED 2026-07-15 on feat/barcode-trust-gate (51462ca..90f2ce1+,
-plan docs/superpowers/plans/2026-07-15-barcode-trust-gate-phase1.md): gate + 4 wiring points +
+plan docs/archive/superpowers/plans/2026-07-15-barcode-trust-gate-phase1.md): gate + 4 wiring points +
 AM-2 pins + multi-angle verification (adversarial fuzz, browser law proof, test audit, qa bots).
 
 ## Motivation

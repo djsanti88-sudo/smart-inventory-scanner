@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Route } from "./fixtures";
 
-// Task 10 (docs/superpowers/plans/2026-07-09-decode-ux-fixes.md, Step 2): browser proof for the
+// Task 10 (docs/archive/superpowers/plans/2026-07-09-decode-ux-fixes.md, Step 2): browser proof for the
 // suggested-decode UX end to end. A mocked decode response with confidence 0.92 (>= 0.8) and
 // decision.status "suggested" must:
 //   1. Show the suggested identity on the scan feed (not the "Unidentified item" placeholder).

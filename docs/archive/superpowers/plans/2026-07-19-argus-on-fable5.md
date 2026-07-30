@@ -7,7 +7,7 @@
 > Automation & Cost x7) folded in. Changelog at the bottom.
 
 **Goal:** Extend the verified `tools/fable5/` local-first review engine into the full Argus review
-engine approved in `docs/superpowers/specs/2026-07-19-argus-review-engine-design.md`: proof-audited
+engine approved in `docs/archive/superpowers/specs/2026-07-19-argus-review-engine-design.md`: proof-audited
 plans, docs staleness, risk-tiered AI angles with adversarial verification, measured business
 personas, preview stress testing, hook-wired handoff, and a self-improving findings ledger.
 Day 1 ships the MVP (Tasks 0.5-6); Day 2 tasks (7-12) are fully specified so any orchestrator
@@ -175,7 +175,7 @@ artifact".
 
 - [ ] Failing tests (good passes; missing-proof blocks, naming criterion + dead ref)
 - [ ] Implement; wire into `review_plan` + `render_plan_markdown`
-- [ ] Unit green; live: `python -m tools.fable5 review-plan docs/superpowers/plans/2026-07-19-argus-on-fable5.md`
+- [ ] Unit green; live: `python -m tools.fable5 review-plan docs/archive/superpowers/plans/2026-07-19-argus-on-fable5.md`
 - [ ] Commit `feat(fable5): plan proof audit`
 
 ### Task 2: Docs staleness collector
