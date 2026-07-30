@@ -42,6 +42,22 @@ describe("countable tire identity (brand+size+model)", () => {
     }
   });
 
+  it("recognizes canonical one-digit flotation widths without accepting boundary lookalikes", () => {
+    const canonical = { productName: "Falken Wildpeak 30X9.50R15", brand: "Falken" };
+    expect(hasTireSize(canonical)).toBe(true);
+    expect(tireSizeToken(canonical)).toBe("30X9.50R15");
+    expect(hasCountableTireIdentity(canonical)).toBe(true);
+
+    for (const productName of [
+      "Falken Wildpeak 30X0.50R15",
+      "Falken Wildpeak 30X19.50R15",
+      "Falken Wildpeak 30X9.50R151",
+      "Part AX9.50R15",
+    ]) {
+      expect(hasTireSize({ productName }), productName).toBe(false);
+    }
+  });
+
   it("recognizes agricultural and implement dash sizes without consuming the model", () => {
     const cases = [
       ["BKT TR 135 6.00-19", "135"],
