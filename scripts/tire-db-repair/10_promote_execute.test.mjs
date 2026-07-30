@@ -1293,6 +1293,38 @@ test("OPEN-1/Critical#1: promote's PRE-SWAP verify gate catches an unapproved dr
   cleanupScratch();
 });
 
+test("provenance preservation: verify FAILS when a stale 82-row staging package omits live provenance IDs", async () => {
+  freshScratch();
+  fixture = await seedFakeLiveDb();
+
+  // Build staging first, then add the 82 live-only provenance IDs and take the bound backup.
+  // This precisely models a stale repair package: it is internally complete (all its expected
+  // rows are present), but it predates 82 provenance records already present in live Turso.
+  assert.equal(runCli(["backup"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+  assert.equal(runCli(["stage"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+  const client = createClient({ url: dbUrl });
+  await client.execute(`CREATE TABLE provenance (
+    id INTEGER PRIMARY KEY, product_id TEXT, barcode TEXT, source_name TEXT, source_ref TEXT,
+    sheet TEXT, row TEXT, batch_id TEXT, imported_at TEXT, evidence_level TEXT,
+    license_note TEXT, content_hash TEXT
+  )`);
+  for (let id = 900001; id <= 900082; id++) {
+    await client.execute({
+      sql: "INSERT INTO provenance (id, source_name) VALUES (?, ?)",
+      args: [id, "live-only-fixture"],
+    });
+  }
+  client.close();
+  assert.equal(runCli(["backup"], { PROMOTE_CONFIRM: "YES" }).code, 0);
+
+  const verifyRes = runCli(["verify"], { PROMOTE_CONFIRM: "YES" });
+  assert.equal(verifyRes.code, 1, "verify must reject a stale staging package that drops live provenance IDs");
+  assert.match(verifyRes.stdout, /FAIL P_live_provenance_ids_preserved: 82 missing/);
+  assert.match(verifyRes.stdout, /900001/);
+  assert.match(verifyRes.stdout, /GATE FAILURE/);
+  cleanupScratch();
+});
+
 test("OPEN-1: the real checked-in APPROVED_PN_KEY_DROPS.csv contains exactly the 17 owner-approved keys", () => {
   const realPath = join(
     REPO_ROOT, "backups", "claude-tire-db-handoff-2026-07-28", "repair-2026-07-28", "APPROVED_PN_KEY_DROPS.csv"

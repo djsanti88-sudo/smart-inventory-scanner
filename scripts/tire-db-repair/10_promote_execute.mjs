@@ -1127,6 +1127,27 @@ async function runVerifyGates(client) {
     return { pass: result.pass, detail: result.detail };
   });
 
+  await gate("P_live_provenance_ids_preserved", async () => {
+    // Provenance is a first-promotion table, so an absent live table is valid. Once it exists,
+    // however, a staged replacement may never silently discard a live provenance record: a stale
+    // repair package can have internally exact staging counts while still predating live rows.
+    const existing = await existingTableNames(client, ["provenance"]);
+    if (!existing.has("provenance")) {
+      return { pass: true, detail: "live provenance table absent (first promotion); no IDs to preserve" };
+    }
+    const liveRes = await client.execute("SELECT id FROM provenance");
+    const liveIds = liveRes.rows.map((r) => String(r.id));
+    const stagingRes = await client.execute("SELECT id FROM staging_provenance");
+    const stagingIds = new Set(stagingRes.rows.map((r) => String(r.id)));
+    const missing = liveIds.filter((id) => !stagingIds.has(id));
+    return {
+      pass: missing.length === 0,
+      detail: missing.length === 0
+        ? `all ${liveIds.length} live provenance IDs present`
+        : `${missing.length} missing: ${missing.slice(0, 10).join(", ")}`,
+    };
+  });
+
   await gate("H_operational_tables_untouched", async () => {
     // Informational: confirm none of the staging load created/renamed any operational table.
     const res = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
@@ -1155,6 +1176,7 @@ async function cmdVerify({ dryRun, manifestArg, expectedManifestSha256 }) {
     console.log("  Gate F: orphan staging_tire_product_part_number_aliases rows (expect 0) - DRY-RUN: not evaluated");
     console.log("  Gate G: every live tires.barcode present in staging_tires (expect 0 missing) - DRY-RUN: not evaluated");
     console.log("  Gate PN: every live tire_part_numbers key present in staging_tire_part_numbers, or explicitly listed in APPROVED_PN_KEY_DROPS.csv (unapproved missing = FAIL) - DRY-RUN: not evaluated");
+    console.log("  Gate P: every live provenance.id present in staging_provenance once live provenance exists (expect 0 missing) - DRY-RUN: not evaluated");
     console.log("  Gate H: operational tables untouched (SELECT COUNT(*) unchanged vs backup manifest, informational) - DRY-RUN: not evaluated");
     console.log("[dry-run] verify: DRY-RUN COMPLETE - no gate was evaluated, no PASS/FAIL verdict was reached. Run without --dry-run to actually verify.");
     return { passed: null, gates: [], dryRun: true };
