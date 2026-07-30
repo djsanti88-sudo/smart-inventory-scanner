@@ -6,7 +6,7 @@ import { FIXTURES } from "@/eval/fixtures";
 
 // Runnable MOCK eval (no live AI). Prints the baseline table to the console AND asserts the safety
 // invariant. Run it directly with:  npx vitest run src/eval/eval.test.ts
-// (the printed "BASELINE" block is the decode baseline used by docs/decode/IMPROVEMENT_PLAN.md).
+// (the printed "BASELINE" block is a generated artifact, archived in docs/archive if needed).
 
 describe("decode eval harness (mock baseline)", () => {
   const report = runEval();
