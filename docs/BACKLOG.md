@@ -1,3 +1,6 @@
+[STALE — snapshot of 2026-07-12; several items since done. Current truth: PROGRESS.md /
+DEPLOY_TRUTH.md / REPO_HEALTH.md. Needs a refresh pass.]
+
 # Backlog (current-state, 2026-07-12)
 
 Supersedes the 2026-07-06 Cowork handoff plan. That plan was re-grounded against the repo on
@@ -68,7 +71,7 @@ ENGINEERING_DOCTRINE.md. Nothing here is approved to run yet; the owner picks it
 ## TIER 3 - product gates (owner decisions)
 
 - [ ] **Role gating P0**: every authenticated user can currently see raw codes/aliases
-      (docs/CURRENT_CONTEXT.md section 4). Biggest product-trust gap for multi-tenant SaaS.
+      (docs/archive/CURRENT_CONTEXT-2026-07-12.md section 4). Biggest product-trust gap for multi-tenant SaaS.
 - [ ] **Production promotion** (go-live checklist: sign-off + prod env keys + vercel promote).
 - [ ] **T9 paid backfill** of the 16 missing tire codes (owner-gated script 83d3d62).
 - [ ] **Weekly DT-harvest schedule** + harvest-branch merge decision.

@@ -1,7 +1,9 @@
 # GS1 Country / Region Reference (v1.0.0)
 
 Implemented in `src/services/gs1Prefixes.ts`. Used ONLY as a non-authoritative hint to help the AI
-lookup search. It is never product identity.
+lookup search. It is never product identity. This doc's scope also covers deterministic GTIN FORM
+derivation (UPC-A/EAN-13 twin forms, below) - a separate, unrelated concern from the country/region
+hint: form derivation is pure math on the code's own digits, never a guess about origin or brand.
 
 ## Disclaimer (mandated, shown in the AI prompt)
 > GS1 numbering authority region only - not country of manufacture, not brand, and not product identity.
@@ -55,6 +57,27 @@ reliably decode to a specific brand, and the supplied dataset was machine-genera
 contained stray non-data text). Mapping a prefix to a brand would be fabricated identity, which
 violates the project rule "prefer Needs Review over a wrong guess." Product identity comes only from
 verified evidence plus human approval, never from a prefix lookup.
+
+## Deriving UPC-A/EAN-13 twin forms
+
+Deterministic derivation of a code's other public GTIN form, used by the tire-corpus twin-column
+backfill (`.claude/skills/db-blank-filler/SKILL.md`, "twin - barcode twin COLUMN completion" stage).
+Quoted verbatim from that skill's rule:
+
+> - 13-digit starting with `0` -> `barcode_upc` = drop leading zero, `barcode_ean13` = itself.
+> - 12-digit -> `barcode_upc` = itself, `barcode_ean13` = `'0' + itself`.
+> - 13-digit NOT starting with `0` (69x China codes, etc.) -> `barcode_ean13` = itself,
+>   `barcode_upc` = NULL. NEVER fabricate a UPC-A form that does not exist.
+> - 8/14-digit or any non-12/13-digit shape -> both NULL.
+
+This is pure re-derivation from the code's own digits (never an external lookup or a guess), and it is
+idempotent - re-running it never changes an already-correct pair. It never overwrites the `barcode`
+primary-key column itself, only the two derived twin columns.
+
+The runtime contract test for this rule at the scan-resolution layer (proving a tire's EAN-13 scan and
+its UPC-A twin scan resolve to ONE product with quantity 2, never two products) is
+`src/stores/eanUpcTwinDedup.store.test.ts` - see the `db-blank-filler` skill's "RUNTIME CONTRACT STAGE"
+section for the full contract-test policy.
 
 ## Trust boundaries (recap)
 - The GS1 hint is a hint, not identity truth.

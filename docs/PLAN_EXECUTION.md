@@ -34,8 +34,8 @@
 
 ## Step 2 - Draft
 
-- The orchestrator drafts the plan (use `PLAN_TEMPLATE.md`; brainstorming skill first for creative
-  work). Plans live in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`.
+- The orchestrator drafts the plan (use the template in the Appendix below; brainstorming skill
+  first for creative work). Plans live in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`.
 - The draft must contain: goal + criteria + proof methods, phases with per-phase gates, files likely
   touched, commands to run, risk gates, cost estimate (tokens and any paid-API WORST CASE per the
   Paid API Cost Truth Rule), and rollback story.
@@ -111,3 +111,52 @@ Every plan (and every phase report along the way) ends with:
 Deploy, git push, paid/live API calls, production DB or credentials, deleting/overwriting real data,
 sending emails/messages, publishing - all require explicit owner approval, every time, even
 mid-plan. A plan approval is NOT a deploy approval.
+
+## Process essentials (plugin-independent)
+
+This section makes the process above work with zero plugins installed - it distills what the
+`superpowers` skills normally provide, so the method survives without them.
+
+**TDD, failing-test-first.** For any bugfix or feature: (1) write a regression/feature test that
+targets the exact requirement or bug; (2) run it and watch it FAIL for the right reason (if it
+passes before the fix, the test is weak or wrong); (3) implement the smallest change that satisfies
+it; (4) run it again and watch it PASS; (5) never weaken, skip, or delete a test to force green -
+fix the cause instead.
+
+**Plan attack panel.** Before a plan reaches the owner, independent reviewers attack it from
+different angles (Feasibility, Risk, Simplicity, plus a rotating specialist - see Step 3 above);
+Codex participates as one of the independent reviewers when available. Findings are adjudicated
+(accept, reject with reason, or patch the plan) and the plan is revised. Only after the attack loop
+reports zero blocking objections (max 3 rounds) does execution begin - an unattacked plan is not
+approved, and an unattacked mid-plan pivot is forbidden (see Step 6).
+
+**Wave execution model.** Independent, disjoint-file tasks run in parallel sub-agent pools rather
+than one at a time. As agents in a wave finish, refill the pool with the next ready task until all
+work is done. Serialize ONLY true file conflicts or hard dependencies between tasks - everything
+else runs concurrently. Default most tasks to lower-tier/cheaper models; escalate to a higher-tier
+model only for genuinely hard reasoning, security-critical code, or adjudicating conflicting review
+findings.
+
+## Appendix: Plan template
+
+Use this structure for EVERY plan in this project. The goal: a plan that is **self-contained** -
+a person or another AI can read it cold (without the codebase) and give useful feedback. Always put
+the Problem / Context first so it can be pasted into another AI for review.
+
+Copy the sections below into `docs/superpowers/plans/<date>-<slug>.md` for each new plan.
+
+1. **Problem / Context** (write this so a stranger AI understands it with zero prior context) - what
+   the app is (one or two sentences); what is broken or missing, in plain language; the concrete
+   symptoms (with real numbers / observed behavior); why it matters / the goal in one sentence.
+2. **Current behavior** - how the relevant part works today, step by step.
+3. **Goals / Success criteria** (measurable) - bullet list of "done means ..." with numbers where
+   possible (latency, pass/fail, etc.).
+4. **Constraints / non-negotiables** - what must NOT break; rules to honor; safety/cost limits.
+5. **Proposed changes** (the actual plan) - grouped work items (A, B, C...); each item: what + why,
+   briefly.
+6. **Files to touch** - specific paths; note new files.
+7. **Testing strategy** (multiple angles - required before delivery) - unit (mocked),
+   integration/E2E (mocked), and live verification across DIFFERENT inputs; state how success is
+   measured for each.
+8. **Risks / trade-offs** - honest list, with mitigations.
+9. **Out of scope** - what this plan deliberately does not do.

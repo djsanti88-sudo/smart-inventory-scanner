@@ -168,8 +168,9 @@ Preview deployments use `smart-inventory-preview`, a Firebase project separate f
 `smart-inventory-scanner-app` production. Preview carries its own browser Firebase configuration,
 explicit `FIREBASE_PROJECT_ID`, and Preview-scoped Admin credential so authentication, Firestore,
 sessions, and tenant-isolation can be tested without touching production users or inventory. This
-supersedes the earlier mock/no-login-by-design Preview state; see `FIREBASE_SETUP.md` for the
-corresponding policy note.
+supersedes the earlier mock/no-login-by-design Preview state described in historical commit messages
+and `DECISIONS.md`'s 2026-07-22 deployment-model entry; this file (not `FIREBASE_SETUP.md`) is the
+authoritative current statement of Preview policy.
 
 **Owner-ratified policy (2026-07-27): paid AI keys REMAIN in Preview.** `scripts/env-manifest.json`
 requires `GO_UPC_API_KEY` and `OPENAI_API_KEY` in the `preview` environment (same as production) so

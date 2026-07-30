@@ -4,6 +4,14 @@
 > The full 2026-06 phase log is archived verbatim in `docs/archive/PROGRESS_HISTORY_2026-06.md`.
 > Last updated: 2026-07-28.
 
+## Standing hazards
+
+- `benchmark-tire-db-automation` - PARKED, do NOT delete or merge (merging deletes 152k lines incl.
+  the poison guard); keep the idle pipeline for later. (Carried verbatim from the retired
+  `docs/CURRENT_CONTEXT.md`; see `docs/archive/CURRENT_CONTEXT-2026-07-12.md`.)
+
+Current status = the checkpoints below (newest first) + `REPO_HEALTH.md` for repo/branch sync truth.
+
 ## 2026-07-26 Stabilization Phase 2: BLOCKED by Preview environment safety
 
 Local Phase 1 stabilization is committed as `91bd1dc4be065aa2a2e8aea382c556e7161a7985` on
@@ -71,7 +79,7 @@ the 2026-07-20 P5/P5b/P6 checkpoint:
 
 ## 2026-07-20 Phase 4 Stage A: Universal Import (ship gate COMPLETE, merge owner-gated)
 
-Branch `feat/decode-ladder-goupc`. Plan: `docs/superpowers/plans/2026-07-20-phase4-universal-import.md`
+Branch `feat/decode-ladder-goupc`. Plan: `docs/archive/superpowers/plans/2026-07-20-phase4-universal-import.md`
 (11 tasks). Commits `0e050ab..23e3465` (Task 1-11 range; the orchestrator fills the final range once
 Task 11's proof artifacts are committed). Full Task 11 report: `.superpowers/sdd/p4-task-11-report.md`.
 
@@ -133,8 +141,8 @@ No production source was edited for Task 11 (proof-only: fixtures, unit tests, e
 ## 2026-07-15 barcode trust gate Phase 1 (COMPLETE, merge owner-gated)
 
 Branch `feat/barcode-trust-gate` (12 commits off fix/westlake-prefix-recovery). Spec:
-`docs/superpowers/specs/2026-07-15-barcode-trust-gate-design.md` (v3, AM-1..AM-12). Plan:
-`docs/superpowers/plans/2026-07-15-barcode-trust-gate-phase1.md`. Subagent-driven TDD, per-task
+`docs/archive/superpowers/specs/2026-07-15-barcode-trust-gate-design.md` (v3, AM-1..AM-12). Plan:
+`docs/archive/superpowers/plans/2026-07-15-barcode-trust-gate-phase1.md`. Subagent-driven TDD, per-task
 reviews, Opus final whole-branch review: READY TO MERGE (0 Critical/Important).
 
 - TOP-LEVEL LAW recorded (owner order): every scanned code appears on the feed AND counts
@@ -157,7 +165,7 @@ reviews, Opus final whole-branch review: READY TO MERGE (0 Critical/Important).
 ## 2026-07-12 free-work plan (COMPLETE)
 
 All four phases executed subagent-driven and reviewed (two Opus gates + Opus final
-whole-branch review: READY). Full detail: `docs/superpowers/reports/2026-07-12-free-work-execution.md`.
+whole-branch review: READY). Full detail: `docs/archive/superpowers/reports/2026-07-12-free-work-execution.md`.
 
 - Phase 0 rescue: `.gitattributes` LFS landmine fixed; branch pushed to origin for the first
   time (`git ls-remote` verified) with 20 `bkp/2026-07-12/*` safety tags; 391MB LFS uploaded.
@@ -255,7 +263,7 @@ whole-branch review: READY). Full detail: `docs/superpowers/reports/2026-07-12-f
 - Wrong product identity is FAILURE; Unknown is ACCEPTABLE.
 
 ## 2026-07-15 - Recall + Hardening Round SHIPPED (17 commits, f583ddd..9226f3d)
-Plan: docs/superpowers/plans/2026-07-15-recall-hardening-round.md (owner-ratified, 3-angle reviewed).
+Plan: docs/archive/superpowers/plans/2026-07-15-recall-hardening-round.md (owner-ratified, 3-angle reviewed).
 Shipped: Z4+G2+G1 GPT rung upgrades; A3 misread gate; A4 outcome ledger; A6 conservative tire steering;
 L2 total ladder deadline + client abort + budgetMs threading (the 36-70s freeze fix); L3 in-flight
 coalescing; L6 keyless-never-charges; ASIN /dp/ door + keyless pattern-URL reachability; anti-enumeration
@@ -424,10 +432,10 @@ Final Phase 1 proof (2026-07-26):
   a production approval. Phase 2 preview proof starts from that committed SHA.
 
 Detailed report:
-`docs/superpowers/reports/2026-07-26-inventory-stabilization-phase1.md`.
+`docs/archive/superpowers/reports/2026-07-26-inventory-stabilization-phase1.md`.
 
 ## Checkpoint 2026-07-27: GitHub-truth repo health effort
-Plan: `docs/superpowers/plans/2026-07-27-github-truth-repo-health.md` (Opus-authored, Codex+Argus
+Plan: `docs/archive/superpowers/plans/2026-07-27-github-truth-repo-health.md` (Opus-authored, Codex+Argus
 reviewed). Goal: certify `master` as source of truth, rescue valuable unmerged work into PRs, clean up
 stale branches, and cut deploys over from local Vercel CLI to GitHub-driven (PR previews + gated
 production).

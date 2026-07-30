@@ -1,3 +1,5 @@
+[RETIRED 2026-07-29 — was stale; see PROGRESS.md + REPO_HEALTH.md]
+
 # Current Context (working memory)
 
 _Last updated: 2026-07-12. Keep this current as facts change. The 2026-06 Track-1/QA-army context

@@ -354,3 +354,16 @@ Why each choice was made. Newest decisions at the bottom of each section.
   owner completes that dashboard step, merges to `master` still deploy nothing by itself and production
   continues to ship via the manual/CLI path. Once the dashboard step is done, merge to `master` becomes
   the production trigger. See `docs/DEPLOY_TRUTH.md` for the full current state.
+
+## MPN part-number web research CANCELLED (standing owner order, 2026-07-28)
+- **Decision:** live web research for tire manufacturer part numbers (MPN) is CANCELLED as a standing
+  order. The boss workbook (manually curated, human-sourced) is the only ongoing source of MPN data
+  for the tire corpus. The 82 pilot MPN fills already applied via the earlier web-research pass are
+  kept as-is (evidence-backed, live) - this decision is not retroactive.
+- **Scope:** no MPN enrichment (Codex batch research, Firecrawl fallback, or any other live-lookup
+  pass targeting part numbers) may run without the owner explicitly re-authorizing it in that specific
+  conversation. This is stricter than the general owner-gated-paid-API rule: even proposing a "small"
+  MPN pilot is out of scope until re-authorized.
+- **Source:** captured operationally in the `db-blank-filler` skill
+  (`.claude/skills/db-blank-filler/SKILL.md`, "MPN backlog policy" section), promoted here as the
+  durable decision record so it survives skill-file edits.

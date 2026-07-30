@@ -4,23 +4,34 @@ Status: **OWNER-GATED / OPEN.** Nothing in this document has been run against pr
 prepared runbook the owner executes; agents and automation must never run the mutating commands below
 without the owner's explicit in-the-moment approval (see `CLAUDE.md` "No-Deploy Rule").
 
-## 1. Current production state (verified live, read-only, 2026-07-29)
+## 1. Current production state (verified live, read-only, 2026-07-29 - updated same day)
 
 Read directly from the live `(default)` database in project `smart-inventory-scanner-app` via the
-Firebase MCP `firestore_get_database` call (no write performed):
+Firebase MCP `firestore_get_database` call (no write performed).
 
-| Setting | Live value |
+**Update (2026-07-29, later same day):** a second live Admin API read confirms PITR and delete
+protection are now **VERIFIED ENABLED** (7-day continuous change history retention):
+
+| Setting | Live value (2026-07-29, verified enabled) |
 |---|---|
-| `pointInTimeRecoveryEnablement` | `POINT_IN_TIME_RECOVERY_DISABLED` |
-| `deleteProtectionState` | `DELETE_PROTECTION_DISABLED` |
-| `versionRetentionPeriod` | `3600s` (1 hour default change history) |
-| `freeTier` | `true` |
+| `pointInTimeRecoveryEnablement` | `POINT_IN_TIME_RECOVERY_ENABLED` |
+| `deleteProtectionState` | `DELETE_PROTECTION_ENABLED` |
+| `versionRetentionPeriod` | `604800s` (7-day continuous change history, PITR default) |
+| `freeTier` | `true` (unchanged; confirm current Firestore pricing before assuming this stays true under PITR billing) |
 | `databaseEdition` | `STANDARD` |
 | `locationId` | `nam5` |
 
-Plain language: today, a mistaken `gcloud firestore databases delete`, a bad migration, or a bug that
-mass-deletes/corrupts documents has **no way back beyond the last hour** of change history, and the
-database itself can be deleted with no confirmation gate. This is the F-08 finding.
+Original (now-superseded) reading, kept for history: `pointInTimeRecoveryEnablement` was
+`POINT_IN_TIME_RECOVERY_DISABLED`, `deleteProtectionState` was `DELETE_PROTECTION_DISABLED`, and
+`versionRetentionPeriod` was `3600s` (1-hour default change history) - i.e. Section 2 below was
+executed by the owner between the two reads.
+
+Plain language: as of the 2026-07-29 update, PITR and delete protection are both live in production -
+a mistaken `gcloud firestore databases delete`, a bad migration, or a bug that mass-deletes/corrupts
+documents now has a 7-day window to restore from, and the database itself cannot be deleted without
+first disabling delete protection. **The restore drill (Section 3) has NOT yet been run** - enabling
+PITR proves the setting is on, not that a restore actually works end to end. F-08 stays open until a
+drill passes and is recorded here.
 
 Separately (F-01 / F-07), the same live read confirmed the **rules and indexes gap**: the deployed
 Firestore rules are an older, less-hardened ruleset (missing the owner-role-escalation guard that the
@@ -150,10 +161,12 @@ effect, one command instead of two.)
 
 ## 5. Finding closure status
 
-- **F-08** (PITR / delete protection): stays **OPEN / OWNER-GATED** until the owner completes Section 2
-  and records a passing restore drill (Section 3) here.
-- **F-01 / F-07** (hardened rules + missing indexes deployed): stays **OPEN / OWNER-GATED** until the
-  owner runs Section 4's deploy commands and the post-deploy verification in Section 4 passes.
+- **F-08** (PITR / delete protection): Section 2 is now DONE - PITR and delete protection are verified
+  ENABLED in production as of 2026-07-29 (see Section 1 update). Still stays **OPEN** because the
+  restore drill (Section 3) has not yet been run and recorded; F-08 closes only once a passing drill is
+  logged here.
+- **F-01 / F-07** (hardened rules + missing indexes deployed): UNCHANGED, stays **OPEN / OWNER-GATED**
+  until the owner runs Section 4's deploy commands and the post-deploy verification in Section 4 passes.
 
 No agent may mark either finding CODE-CLOSED. Only the owner completing the live action, followed by the
 integrator confirming the post-deploy verification, closes them.

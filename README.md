@@ -26,45 +26,10 @@ npm install
 npm run dev        # http://localhost:3000 (tests pin port 3100)
 ```
 
-## Commands
+## Documentation
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Dev server |
-| `npm run build` | Production build |
-| `npm run lint` | ESLint |
-| `npm run test` | All Vitest unit suites (always run from this directory) |
-| `npm run test:e2e` | Playwright E2E (first time: `npx playwright install chromium`) |
-| `npm run qa:bots:*` | Human-bot browser proof suites (see `docs/QA_BOTS.md`) |
-| `npm run emulators` | Firebase Auth + Firestore emulators |
-| `npm run test:firebase` | Tenant-isolation + repository proof against the emulator |
+Full documentation map and doc hierarchy: `docs/README.md`.
 
-## Documentation map
+## Safety model
 
-| Doc | Purpose |
-|---|---|
-| `CLAUDE.md` | Project rules: decode ladder, resolver trust, scanner buffer, safety gates, tech stack |
-| `docs/ARCHITECTURE.md` | Full verified architecture map with 14 verified traps |
-| `docs/COMMANDS.md` | Every script + port + env var name, with PAID/LIVE warnings |
-| `docs/PLAN_EXECUTION.md` | How plans are created, attacked, executed, and proven done |
-| `docs/DECODER_ARCHITECTURE.md` | Canonical decode-pipeline architecture and decision history |
-| `docs/QA_BOTS.md` / `docs/REVISION_GATE.md` / `docs/AGENT_BOT_ROLES.md` | Human-bot proof gate |
-| `docs/superpowers/plans/2026-07-19-master-plan.md` | Owner-approved 6-phase plan (phase source of truth) |
-| `PROGRESS.md` | Live status checkpoint (current phase, pending owner decisions) |
-| `DECISIONS.md` | Technical decisions and why |
-| `TESTING.md` | Test commands, coverage map, acceptance checklist |
-| `LESSONS_LEARNED.md` | Hard-won permanent lessons |
-| `RISK_REGISTER.md` | Known risks + mitigations |
-| `FIREBASE_SETUP.md` / `FIREBASE_SECURITY.md` | Backend foundation + multi-tenant security model |
-| `MANUAL_LIVE_TEST.md` | Owner-gated manual live decode checklist |
-| `docs/superpowers/plans/` | Dated implementation plans |
-| `docs/archive/` | Historical point-in-time reports (not kept current) |
-
-## Safety model (short version)
-
-- Deterministic-first: known codes resolve instantly with NO AI. AI is only for unknown codes,
-  behind a daily cap that charges paid rungs only.
-- Wrong product identity is FAILURE; Unknown is ACCEPTABLE. AI results are suggestions unless the
-  app itself verifies exact-code evidence.
-- API keys are server-side only. Automated tests never call live providers.
-- Deploy, push, paid/live API calls, and real-data writes are owner-gated.
+Project rules, safety gates, and standing owner orders: `CLAUDE.md`.

@@ -5,6 +5,11 @@ truth; AI only suggests; counting happens only through human approval or the app
 gate. Quick map for a new session or developer. (v1.0.0 described the concurrent two-provider
 orchestrator; v2 replaced it with the cost-ordered ladder below. Sections 3-9 carry over.)
 
+**Doc boundary:** `docs/ARCHITECTURE.md` section 3 owns file/line wiring (what imports what, where a
+symbol lives); THIS doc owns behavioral semantics (what the ladder decides, in what order, and why);
+`CLAUDE.md` holds only the at-a-glance summary and links here for detail. If the three ever disagree,
+fix the stale one rather than trusting it.
+
 ## 1. Deterministic-first resolution
 - Known scans are instant and deterministic. The resolver (`src/services/resolver.ts`) returns `known`
   ONLY from an APPROVED alias (`alias.approved === true`) or a VERIFIED product (`product.verified`).
@@ -12,7 +17,15 @@ orchestrator; v2 replaced it with the cost-ordered ladder below. Sections 3-9 ca
   scans increment quantity, never create duplicate product rows.
 - Unknown / vendor-label / conflicting codes route to the Needs Review queue, never a guess.
 
-## 2. Decode ladder (unknown codes only) - `src/server/upc/ladder.ts`
+## 2. Decode ladder (unknown codes only) - `src/server/decode/pipeline.ts` orchestrates, `src/server/upc/ladder.ts` drives rungs
+- The REAL decode orchestrator is `runDecodePipeline` in `src/server/decode/pipeline.ts` (fronted by
+  `app/api/ai-lookup/route.ts`): it owns the overall stage sequence, deadlines, daily-cap gating, and
+  which rung SET runs next. `src/server/upc/ladder.ts`'s `runLadder` is the RUNG DRIVER it calls
+  repeatedly - once per stage (free rungs, then Go-UPC-only, then FetchV2, then GPT) - to walk a given
+  list of rungs and stop at the first settled one. Do not treat `ladder.ts` as the top-level
+  orchestrator: it has no knowledge of the free/paid staging or the daily cap; that logic lives in
+  `pipeline.ts`. `src/services/ai/decodeOrchestrator.ts` is a different, DEPRECATED module (types only)
+  and must not be extended.
 - An unknown code walks ORDERED RUNGS, cheapest first; the FIRST settled rung (verified OR a
   suggestion) STOPS the ladder, so a later rung is never paid for when an earlier one answered:
   0. Local tire corpus / decode cache (Turso + local SQLite) - free, ~143ms.

@@ -1,5 +1,8 @@
 # Testing and Proof
 
+[PARTIALLY STALE — coverage below current through 2026-07-12; Phases 2-6 + teach-bot coverage not yet
+appended. Commands verified; coverage map needs a refresh pass.]
+
 _Last updated 2026-07-12 (branch `feat/decode-ladder-goupc`); commands section spot-checked against
 package.json 2026-07-22 (branch `feat/teach-bot`) - still accurate, teach-bot harness commands added
 to docs/COMMANDS.md instead of duplicated here. Sections below accumulate newest-last; older sections

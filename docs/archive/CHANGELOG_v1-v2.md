@@ -1,3 +1,6 @@
+[FROZEN 2026-07-29] Historical changelog (v1-v2, decode pipeline era). Current history lives in
+PROGRESS.md + DECISIONS.md.
+
 # Changelog
 
 Notable changes to the Smart Inventory Scanner decode pipeline, grouped by the Architecture Version

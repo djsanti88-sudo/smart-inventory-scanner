@@ -1,3 +1,6 @@
+[STALE — snapshot of 2026-07-27; several items since done. Current truth: PROGRESS.md /
+DEPLOY_TRUTH.md / REPO_HEALTH.md. Needs a refresh pass.]
+
 # Production go-live checklist (Firebase live auth + real cloud data)
 
 > Every step below is against the REAL production Firebase project `smart-inventory-scanner-app`
@@ -37,6 +40,8 @@ the list:
 Missing, must be added before go-live:
 - `NEXT_PUBLIC_AUTH_MODE=live` (turns on the login wall and membership-derived `businessId`; see
   `src/services/auth/authMode.ts`). Without this the app stays in open-demo `mock` mode in production.
+  **Verified LIVE in production 2026-07-29** - this var is confirmed set and active; the item below
+  it (service-account JSON) should still be checked independently before treating this section as done.
 - `FIREBASE_SERVICE_ACCOUNT_JSON` (raw service-account JSON as the env var value). **[OWNER-GATED]**
   the owner generates this key in the Firebase console (Project Settings > Service Accounts > Generate
   new private key) and pastes the JSON directly into the Vercel env var - it is never committed or
