@@ -20,6 +20,29 @@ const qtyFor = (store: ReturnType<typeof createTestScanStore>, productId: string
   store.getState().finalCounts.find((c) => c.productId === productId)?.quantity ?? 0;
 
 describe("scanStore - canonical-GTIN dedup across leading-zero variants", () => {
+  it("does not use a shared part number to link a checksum-valid EAN-8 scan to an existing product", () => {
+    // 96385074 is GS1's valid EAN-8 example. It is eight digits, but that does not make it a
+    // numeric part-number scan: the decoded part number belongs to a distinct barcode identity.
+    const store = createTestScanStore({ db: new MockDb() });
+    const existing = store.getState().products.find((p) => p.id === "prod-coke")!;
+    store.setState((s) => ({
+      products: s.products.map((p) => p.id === existing.id ? { ...p, primarySku: "SHARED-MPN" } : p),
+    }));
+
+    store.getState().processScan("96385074");
+    const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === "96385074" && r.status === "open")!;
+    store.getState().resolveUnknown(review.id, "create_new", {
+      applyToCount: true,
+      origin: "human",
+      newProduct: { name: "Distinct EAN-8 item", primarySku: "SHARED-MPN" },
+    });
+
+    const scannedRow = store.getState().scanFeed.find((event) => event.cleanCode === "96385074")!;
+    expect(scannedRow.matchedProductId).not.toBe(existing.id);
+    expect(qtyFor(store, existing.id)).toBe(0);
+    expect(qtyFor(store, scannedRow.matchedProductId!)).toBe(1);
+  });
+
   it("ensureProvisionalCount: scanning the zero-padded variant of an already-counted code reuses the same product", () => {
     const store = createTestScanStore({ db: new MockDb() });
 
@@ -64,46 +87,108 @@ describe("scanStore - canonical-GTIN dedup across leading-zero variants", () => 
     // product and a duplicate mint on its zero-padded GTIN variant - exactly the gap this test targets.
     const store = createTestScanStore({ db: new MockDb() });
 
-    // First scan: an evidence-less AI suggestion (no brand/gtin/upc/ean/sourceUrls) that the human/auto
-    // path accepts verbatim - isWeakGuess() keeps the minted product provisional + unverified, but it IS
-    // counted (owner rule: scan N = count N).
-    store.getState().processScan("VENDORCODE-XYZ-1");
-    const review1 = store.getState().needsReviewQueue.find((r) => r.cleanCode === "VENDORCODE-XYZ-1" && r.status === "open")!;
+    // Model a persisted orphan directly: its alias and verified flag have been stripped while its count
+    // survives. That deliberately rules out both resolver aliases and processScan's provisional bridge.
+    store.getState().processScan("ORPHAN-SEED-1");
+    const seedReview = store.getState().needsReviewQueue.find((r) => r.cleanCode === "ORPHAN-SEED-1" && r.status === "open")!;
+    const p1 = seedReview.provisionalProductId!;
     store.setState((s) => ({
-      needsReviewQueue: s.needsReviewQueue.map((r) =>
-        r.id === review1.id ? { ...r, hasSuggestion: true, suggestedProductName: "Fortune ClimaFlex 4S FSR402" } : r,
-      ),
+      products: s.products.map((p) => p.id === p1 ? {
+        ...p,
+        name: "Counted provisional orphan",
+        primaryBarcode: "ORPHAN-SEED-1",
+        primarySku: "",
+        gtin: "848983027580",
+        upc: "",
+        ean: "",
+        aliases: [],
+        provisional: true,
+        verified: false,
+      } : p),
+      aliases: s.aliases.filter((a) => a.productId !== p1),
     }));
-    store.getState().resolveUnknown(review1.id, "create_new", {
-      applyToCount: true,
-      origin: "ai",
-      newProduct: { name: "Fortune ClimaFlex 4S FSR402", gtin: "848983027580" },
-    });
-    const firstRows = store.getState().products.filter((p) => qtyFor(store, p.id) > 0);
-    expect(firstRows.length).toBe(1);
-    const p1 = firstRows[0];
-    expect(p1.provisional, "the evidence-less guess stays provisional (poison guard)").toBe(true);
-    expect(p1.verified, "the evidence-less guess stays unverified (poison guard)").toBe(false);
-    expect(p1.gtin).toBe("848983027580");
+    expect(qtyFor(store, p1)).toBe(1);
+    expect(store.getState().products.find((p) => p.id === p1)?.aliases).toEqual([]);
 
-    // A second, DIFFERENT scanned code decodes to the zero-padded variant of the SAME GTIN, with the
-    // same evidence-less suggestion shape (still not enough to auto-verify).
-    store.getState().processScan("VENDORCODE-XYZ-2");
-    const review2 = store.getState().needsReviewQueue.find((r) => r.cleanCode === "VENDORCODE-XYZ-2" && r.status === "open")!;
+    // A different physical scan creates its own provisional placeholder before resolution. The only
+    // legitimate way to reuse p1 is the orphaned-count identifier comparison below resolveUnknown.
+    store.getState().processScan("FRESH-OTHER-2");
+    const review2 = store.getState().needsReviewQueue.find((r) => r.cleanCode === "FRESH-OTHER-2" && r.status === "open")!;
+    expect(review2.provisionalProductId).not.toBe(p1);
+    expect(qtyFor(store, review2.provisionalProductId!)).toBe(1);
     store.setState((s) => ({
       needsReviewQueue: s.needsReviewQueue.map((r) =>
-        r.id === review2.id ? { ...r, hasSuggestion: true, suggestedProductName: "Fortune ClimaFlex 4S FSR402" } : r,
+        r.id === review2.id ? { ...r, hasSuggestion: true, suggestedProductName: "Different opaque decode" } : r,
       ),
     }));
     store.getState().resolveUnknown(review2.id, "create_new", {
       applyToCount: true,
       origin: "ai",
-      newProduct: { name: "Fortune ClimaFlex 4S FSR402", gtin: "00848983027580" },
+      newProduct: { name: "Different opaque decode", gtin: "00848983027580" },
     });
 
     const countedRows = store.getState().products.filter((p) => qtyFor(store, p.id) > 0);
     expect(countedRows.length, "the zero-padded-GTIN decode reuses the existing provisional product, no duplicate row").toBe(1);
-    expect(countedRows[0].id).toBe(p1.id);
-    expect(qtyFor(store, p1.id), "quantity aggregates (1 + 1 = 2)").toBe(2);
+    expect(countedRows[0].id).toBe(p1);
+    expect(qtyFor(store, p1), "quantity aggregates (1 + 1 = 2)").toBe(2);
+    expect(store.getState().finalCounts.find((c) => c.productId === p1)?.scanEventIds).toHaveLength(2);
+    expect(store.getState().scanFeed.filter((e) => e.matchedProductId === p1)).toHaveLength(2);
+  });
+
+  it("resolveUnknown orphaned-count dedup keeps case-pack GTINs and leading-zero MPNs distinct", () => {
+    const resolveAgainstOrphan = (params: {
+      existingGtin?: string;
+      existingSku?: string;
+      decodedGtin?: string;
+      decodedSku?: string;
+      freshCode: string;
+    }) => {
+      const store = createTestScanStore({ db: new MockDb() });
+      store.getState().processScan("ORPHAN-SEED-1");
+      const seed = store.getState().needsReviewQueue.find((r) => r.cleanCode === "ORPHAN-SEED-1" && r.status === "open")!;
+      const orphanId = seed.provisionalProductId!;
+      store.setState((s) => ({
+        products: s.products.map((p) => p.id === orphanId ? {
+          ...p,
+          name: "Counted provisional orphan",
+          primaryBarcode: "ORPHAN-SEED-1",
+          primarySku: params.existingSku ?? "",
+          gtin: params.existingGtin ?? "",
+          upc: "",
+          ean: "",
+          aliases: [],
+          provisional: true,
+          verified: false,
+        } : p),
+        aliases: s.aliases.filter((a) => a.productId !== orphanId),
+      }));
+      store.getState().processScan(params.freshCode);
+      const review = store.getState().needsReviewQueue.find((r) => r.cleanCode === params.freshCode && r.status === "open")!;
+      store.setState((s) => ({
+        needsReviewQueue: s.needsReviewQueue.map((r) =>
+          r.id === review.id ? { ...r, hasSuggestion: true, suggestedProductName: "Different opaque decode" } : r,
+        ),
+      }));
+      store.getState().resolveUnknown(review.id, "create_new", {
+        applyToCount: true,
+        origin: "ai",
+        newProduct: { name: "Different opaque decode", gtin: params.decodedGtin, primarySku: params.decodedSku },
+      });
+      return store.getState().products.filter((p) => qtyFor(store, p.id) > 0);
+    };
+
+    // Indicator digit 1 identifies a GTIN-14 case pack, not a zero-padded unit GTIN.
+    expect(resolveAgainstOrphan({
+      existingGtin: "10848983027587",
+      decodedGtin: "00848983027580",
+      freshCode: "FRESH-OTHER-2",
+    })).toHaveLength(2);
+
+    // A five-digit MPN is not GTIN-shaped, so its leading zero remains identity-significant.
+    expect(resolveAgainstOrphan({
+      existingSku: "0012345",
+      decodedSku: "12345",
+      freshCode: "98765",
+    })).toHaveLength(2);
   });
 });

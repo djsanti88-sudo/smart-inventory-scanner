@@ -24,7 +24,7 @@ import { detectCodeType, codeTypeToAliasType } from "@/services/codeTypeDetector
 import { resolveScan } from "@/services/resolver";
 import { isLikelyMisreadGtin } from "@/services/upc/misread";
 import { gradeBarcode } from "@/services/upc/barcodeTrust";
-import { canonicalGtin } from "@/services/upc/gtin";
+import { canonicalGtin, isValidCheckDigit } from "@/services/upc/gtin";
 import { clampDecodeBudgetMs, DECODE_BUDGET_DEFAULT_MS } from "@/services/ai/decodeBudget";
 import { hashPin, verifyPin, isValidPinFormat } from "@/services/security/pinLock";
 import { resolveScanToProductTiered } from "@/services/aliasMatcher";
@@ -5019,8 +5019,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // (the 235x "Manstel rivet kit" bug). Before minting a product, look for an existing one this
           // identity already belongs to, using the SAME deterministic matcher the resolver uses (approved
           // alias OR verified product identifier) so dedup never drifts from resolve.
+          // A decoded primarySku is a model/part-number field, not evidence that a GTIN scan owns that
+          // part number. Some tire models deliberately share one MPN across distinct sizes. Letting it
+          // join a barcode scan's deterministic identifier list links that later GTIN to an earlier size
+          // before findIdentityMerge can apply its size-aware safeguard. Preserve it only when the clerk
+          // physically scanned a SKU/part number; barcode scans use barcode/GTIN-family identifiers.
+          const scannedCodeType = detectCodeType(review.cleanCode);
+          // Valid EAN-8 has the same shape as a numeric SKU in the lightweight code-type hint, but it
+          // is a barcode identity. Its decoded primarySku must not dedup-link a distinct product.
+          const scannedIsValidEan8 = /^\d{8}$/.test(review.cleanCode) && isValidCheckDigit(review.cleanCode);
+          const scannedIsPartNumber =
+            (scannedCodeType === "numeric_sku" || scannedCodeType === "alpha_sku") && !scannedIsValidEan8;
           const identityCodes = [...new Set(
-            [review.cleanCode, np.primaryBarcode, np.gtin, np.upc, np.ean, np.primarySku]
+            [review.cleanCode, np.primaryBarcode, np.gtin, np.upc, np.ean, ...(scannedIsPartNumber ? [np.primarySku] : [])]
               .map((c) => (c ?? "").trim())
               .filter(Boolean),
           )];
@@ -5056,7 +5067,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // ~scanStore.ts:5282) - canonicalGtin strips leading zeros then re-pads to 14 digits for any
           // GTIN-shaped code; a non-GTIN-shaped code (e.g. a part number) falls through unchanged, so a
           // part number's leading zeros still carry meaning and are never canonicalized away.
-          const canon = (c: string): string => c; // TEMP: verify RED
+          const canon = (c: string): string => canonicalGtin(c) ?? c;
           const identityCodesCanonical = identityCodes.map(canon);
           const countedProductIds = new Set(state.finalCounts.map((c) => c.productId));
           for (const p of state.products) {
