@@ -3,8 +3,16 @@
 // their own "sis-scan-<uid>" key so two users on one browser never share persisted state.
 
 const LEGACY_KEY = "sis-scan-v1";
+const LOCAL_DEMO_KEY = "sis-local-demo-scan-v1";
+
+function isLocalDemoPersistence(): boolean {
+  return process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
+}
 
 export function persistKeyForUid(uid: string | null): string {
+  // The local demo shares a browser with normal shop sessions. It must never hydrate, overwrite,
+  // or offer to adopt their global/uid-namespaced state, so the demo has one separate namespace.
+  if (isLocalDemoPersistence()) return LOCAL_DEMO_KEY;
   return uid ? `sis-scan-${uid}` : LEGACY_KEY;
 }
 
@@ -17,6 +25,7 @@ export function persistKeyForUid(uid: string | null): string {
  * parsed, still counts as present (we never suppress the banner for something we could not inspect).
  */
 export function hasLegacyBlob(storage: Storage): boolean {
+  if (isLocalDemoPersistence()) return false;
   const raw = storage.getItem(LEGACY_KEY);
   if (raw === null) return false;
   let parsed: unknown;
@@ -44,6 +53,7 @@ export function hasLegacyBlob(storage: Storage): boolean {
  * scanStoreMigrate runs normally on the copied key at next hydration.
  */
 export function migrateLegacyBlobOnce(uid: string, storage: Storage): void {
+  if (isLocalDemoPersistence()) return;
   const targetKey = persistKeyForUid(uid);
   if (targetKey === LEGACY_KEY) return;
   if (storage.getItem(targetKey)) return; // already adopted: leave everything as-is

@@ -6800,7 +6800,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         if (!cloudBackend) db.reset();
         if (typeof window !== "undefined" && window.localStorage) {
           try {
-            window.localStorage.removeItem("sis-scan-v1");
+            // Use the active namespace rather than the normal-shop legacy key. In local demo mode
+            // this is deliberately sis-local-demo-scan-v1, so clearing the demo cannot erase a
+            // shop session that happens to share this browser.
+            window.localStorage.removeItem(persistKeyForUid(get().userId));
             window.localStorage.removeItem("sis-mockdb-v1");
           } catch {
             // ignore
@@ -7298,7 +7301,9 @@ const appDeps: ScanStoreDeps = {
     : undefined,
   idFactory: () => crypto.randomUUID(),
   now: () => new Date().toISOString(),
-  persistName: "sis-scan-v1",
+  // Resolve before Zustand is created: skipHydration means callers control when hydration occurs,
+  // but the target key itself must already be isolated before any rehydrate/write can happen.
+  persistName: persistKeyForUid(null),
 };
 
 // v3 hotfix: earlier versions could persist AI-auto-accepted (poisoned) products/aliases.
@@ -7416,7 +7421,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
 
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
-    name: "sis-scan-v1",
+    name: persistKeyForUid(null),
     // Task 2 (owner-reported live bug, 2026-07-20): v9 -> v10 bump so every existing install runs
     // the identity-field backfill (enrichProductIdentity fill-if-empty, see backfillProducts.ts)
     // exactly once on next load - a legacy row's blank brand/category/specsShort/specsFull gets

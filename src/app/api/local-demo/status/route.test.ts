@@ -32,6 +32,7 @@ describe("GET /api/local-demo/status", () => {
         runtimeRoot,
         ledgerPath: ledger,
         preflight: () => ({ databaseSha256: "a".repeat(64) }),
+        runtimeSessionNonce: () => "b".repeat(48),
       });
       const response = await handler(new NextRequest("http://127.0.0.1:3400/api/local-demo/status"));
       expect(response.status).toBe(200);
@@ -40,6 +41,7 @@ describe("GET /api/local-demo/status", () => {
         localDemo: true,
         externalDecodeEnabled: false,
         databaseSha256: "a".repeat(64),
+        runtimeSessionNonce: "b".repeat(48),
         egress: {
           blockedAttemptCount: 1,
           attempts: [{
@@ -101,6 +103,26 @@ describe("GET /api/local-demo/status", () => {
         preflight: () => ({ databaseSha256: "c".repeat(64) }),
       });
       expect((await malformed(new NextRequest("http://localhost/api/local-demo/status"))).status).toBe(500);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when the launcher runtime-session nonce is absent or malformed", async () => {
+    process.env.SCANBIN_LOCAL_DEMO = "1";
+    const root = mkdtempSync(join(tmpdir(), "scanbin-status-nonce-"));
+    try {
+      const runtimeRoot = join(root, "runtime");
+      mkdirSync(runtimeRoot);
+      const ledger = join(runtimeRoot, "ledger.jsonl");
+      writeFileSync(ledger, "");
+      const handler = createLocalDemoStatusHandler({
+        runtimeRoot,
+        ledgerPath: ledger,
+        preflight: () => ({ databaseSha256: "d".repeat(64) }),
+        runtimeSessionNonce: () => undefined,
+      });
+      expect((await handler(new NextRequest("http://localhost/api/local-demo/status"))).status).toBe(500);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

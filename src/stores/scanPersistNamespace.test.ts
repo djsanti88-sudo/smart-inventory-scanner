@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { persistKeyForUid, hasLegacyBlob, migrateLegacyBlobOnce } from "./scanPersistNamespace";
 
 class MemStorage {
@@ -8,12 +8,23 @@ class MemStorage {
   removeItem(k: string) { this.m.delete(k); }
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("persistKeyForUid", () => {
   it("keeps the legacy global key for anon/mock (null uid)", () => {
     expect(persistKeyForUid(null)).toBe("sis-scan-v1");
   });
   it("namespaces by uid for a signed-in user", () => {
     expect(persistKeyForUid("abc123")).toBe("sis-scan-abc123");
+  });
+
+  it("uses a dedicated local-demo key for every identity", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+
+    expect(persistKeyForUid(null)).toBe("sis-local-demo-scan-v1");
+    expect(persistKeyForUid("abc123")).toBe("sis-local-demo-scan-v1");
   });
 });
 
@@ -47,6 +58,15 @@ describe("hasLegacyBlob", () => {
     s.setItem("sis-scan-v1", "{not valid json");
     expect(hasLegacyBlob(s as unknown as Storage)).toBe(true);
   });
+
+  it("does not inspect the normal legacy key in local-demo mode", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    const s = new MemStorage();
+    s.setItem("sis-scan-v1", JSON.stringify({ state: { scanFeed: [{ id: "normal-shop-row" }] } }));
+
+    expect(hasLegacyBlob(s as unknown as Storage)).toBe(false);
+    expect(s.getItem("sis-scan-v1")).toContain("normal-shop-row");
+  });
 });
 
 describe("migrateLegacyBlobOnce", () => {
@@ -77,5 +97,16 @@ describe("migrateLegacyBlobOnce", () => {
   it("is a no-op when there is no legacy blob", () => {
     migrateLegacyBlobOnce("abc123", s as unknown as Storage);
     expect(s.getItem("sis-scan-abc123")).toBeNull();
+  });
+
+  it("does not adopt or consume a normal-shop blob in local-demo mode", () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
+    const normalShopBlob = JSON.stringify({ state: { scanFeed: [{ id: "normal-shop-row" }] }, version: 7 });
+    s.setItem("sis-scan-v1", normalShopBlob);
+
+    migrateLegacyBlobOnce("abc123", s as unknown as Storage);
+
+    expect(s.getItem("sis-scan-v1")).toBe(normalShopBlob);
+    expect(s.getItem("sis-local-demo-scan-v1")).toBeNull();
   });
 });

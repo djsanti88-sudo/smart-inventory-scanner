@@ -9,4 +9,5 @@ export const GET = createLocalDemoStatusHandler({
   ledgerPath: () => process.env.SCANBIN_LOCAL_DEMO_EGRESS_LEDGER ??
     resolve("reports/local-tire-demo/runtime/egress.jsonl"),
   preflight: getLocalDemoDatabasePreflight,
+  runtimeSessionNonce: () => process.env.SCANBIN_LOCAL_DEMO_RUNTIME_SESSION_NONCE,
 });

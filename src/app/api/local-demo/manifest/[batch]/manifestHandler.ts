@@ -23,6 +23,8 @@ type PreflightResult = { databaseSha256: string };
 type ManifestOptions = {
   reportsRoot: string;
   preflight: () => PreflightResult;
+  expectedGitSha?: () => string | undefined;
+  expectedDatabaseSha256?: () => string | undefined;
 };
 type RouteContext = { params: Promise<{ batch: string }> };
 
@@ -80,6 +82,12 @@ export function createLocalDemoManifestHandler(options: ManifestOptions) {
       if (!isRecord(manifest) || !hasExactKeys(manifest, MANIFEST_KEYS) || manifest.schemaVersion !== 1 || manifest.gitSha !== active.gitSha || manifest.databaseSha256 !== active.databaseSha256 || manifest.manifestSha256 !== active.manifestSha256 || typeof manifest.seed !== "string" || manifest.seed.length < 1 || manifest.seed.length > 200 || manifest.generatedAt !== active.generatedAt || manifest.total !== 3_000 || manifest.batchSize !== 100 || manifest.batchCount !== 30 || manifest.agentCount !== 10 || !Array.isArray(manifest.rows) || manifest.rows.length !== 3_000 || !manifest.rows.every((row, index) => isRow(row, Math.floor(index / 100) + 1)) || !hasExactLocalDemoManifestAllocation(manifest.rows as LocalDemoBatchRow[]) || computeLocalDemoManifestHash(manifest) !== active.manifestSha256) throw new Error("Invalid active manifest");
       const preflight = options.preflight();
       if (!isSha256(preflight.databaseSha256) || preflight.databaseSha256 !== active.databaseSha256) throw new Error("Stale database");
+      const expectedGitSha = options.expectedGitSha?.();
+      const expectedDatabaseSha256 = options.expectedDatabaseSha256?.();
+      if (
+        (options.expectedGitSha !== undefined && (!/^[a-f0-9]{40}$/i.test(String(expectedGitSha)) || active.gitSha !== expectedGitSha)) ||
+        (options.expectedDatabaseSha256 !== undefined && (!isSha256(expectedDatabaseSha256) || active.databaseSha256 !== expectedDatabaseSha256))
+      ) throw new Error("Stale runtime manifest");
       const payload = readContainedJson(options.reportsRoot, resolve(runDirectory, "batches", `batch-${batchText}.json`), 2 * 1024 * 1024);
       if (!isRecord(payload) || !hasExactKeys(payload, BATCH_KEYS) || payload.schemaVersion !== 1 || payload.gitSha !== active.gitSha || payload.databaseSha256 !== active.databaseSha256 || typeof payload.seed !== "string" || payload.seed.length < 1 || payload.seed.length > 200 || payload.batch !== batch || payload.agent !== Math.floor((batch - 1) / 3) + 1 || payload.rowCount !== 100 || !isSha256(payload.batchSha256) || !isSha256(payload.expectedBarcodesSha256) || !isSha256(payload.expectedCanonicalProductUidsSha256) || !Array.isArray(payload.rows) || payload.rows.length !== 100 || !payload.rows.every((row) => isRow(row, batch))) throw new Error("Invalid batch payload");
       const rows = payload.rows as LocalDemoBatchRow[];

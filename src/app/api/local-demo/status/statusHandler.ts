@@ -18,6 +18,7 @@ type StatusOptions = {
   runtimeRoot: string;
   ledgerPath: string | (() => string);
   preflight: () => PreflightResult;
+  runtimeSessionNonce?: () => string | undefined;
 };
 
 const LEDGER_KEYS = [
@@ -58,6 +59,10 @@ export function createLocalDemoStatusHandler(options: StatusOptions) {
     try {
       const preflight = options.preflight();
       if (!isSha256(preflight.databaseSha256)) throw new Error("Invalid database hash");
+      const runtimeSessionNonce = options.runtimeSessionNonce?.();
+      if (options.runtimeSessionNonce !== undefined && !/^[a-f0-9]{32,}$/i.test(String(runtimeSessionNonce))) {
+        throw new Error("Invalid runtime session nonce");
+      }
       const ledgerPath = typeof options.ledgerPath === "function"
         ? options.ledgerPath()
         : options.ledgerPath;
@@ -72,6 +77,7 @@ export function createLocalDemoStatusHandler(options: StatusOptions) {
         localDemo: true,
         externalDecodeEnabled: false,
         databaseSha256: preflight.databaseSha256,
+        ...(runtimeSessionNonce === undefined ? {} : { runtimeSessionNonce }),
         egress: {
           blockedAttemptCount: attempts.length,
           attempts,

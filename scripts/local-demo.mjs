@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createConnection } from "node:net";
 import { networkInterfaces } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { buildLocalDemoEnvironment } from "./local-demo-environment.mjs";
 import { assertLocalDemoDatabase } from "./local-demo-preflight.mjs";
 
@@ -47,10 +48,71 @@ function validateLedgerPath(ledgerPath) {
   return resolvedPath;
 }
 
+const ACTIVE_RUN_KEYS = ["schemaVersion", "runDirectory", "gitSha", "databaseSha256", "manifestSha256", "generatedAt"];
+
+function hasExactKeys(value, keys) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function realPathWithin(rootPath, candidatePath, label) {
+  const root = realpathSync(rootPath);
+  const candidate = realpathSync(candidatePath);
+  const pathFromRoot = relative(root, candidate);
+  if (!pathFromRoot || pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
+    throw new Error(`Local demo ${label} escaped its evidence root.`);
+  }
+  return candidate;
+}
+
+function readActiveRun(reportsRoot) {
+  const canonicalReportsRoot = realpathSync(reportsRoot);
+  const activePath = realPathWithin(canonicalReportsRoot, resolve(canonicalReportsRoot, "active-run.json"), "active manifest pointer");
+  const active = JSON.parse(readFileSync(activePath, "utf8"));
+  if (!hasExactKeys(active, ACTIVE_RUN_KEYS) || active.schemaVersion !== 1 ||
+    typeof active.runDirectory !== "string" ||
+    !/^[a-f0-9]{40}$/i.test(active.gitSha) ||
+    !/^[a-f0-9]{64}$/i.test(active.databaseSha256) ||
+    !/^[a-f0-9]{64}$/i.test(active.manifestSha256) ||
+    typeof active.generatedAt !== "string" || !Number.isFinite(Date.parse(active.generatedAt))) {
+    throw new Error("Local demo requires a valid active manifest run.");
+  }
+  const runPath = realPathWithin(canonicalReportsRoot, resolve(canonicalReportsRoot, active.runDirectory), "active manifest run");
+  return { active, runPath, reportsRoot: canonicalReportsRoot };
+}
+
+export function writeLocalDemoRuntimeSession({ reportsRoot = resolve(ROOT, "reports/local-tire-demo"), ledgerPath, gitSha, databaseSha256 }) {
+  const { active, runPath, reportsRoot: resolvedReportsRoot } = readActiveRun(reportsRoot);
+  const runtimeRoot = realPathWithin(resolvedReportsRoot, resolve(resolvedReportsRoot, "runtime"), "runtime root");
+  const resolvedLedgerPath = realPathWithin(runtimeRoot, resolve(ledgerPath), "runtime ledger");
+  if (active.gitSha !== gitSha || active.databaseSha256 !== databaseSha256) {
+    throw new Error("Local demo active manifest is stale for the current revision or database.");
+  }
+  if (readFileSync(resolvedLedgerPath, "utf8") !== "") {
+    throw new Error("Local demo runtime ledger must be empty when its session is anchored.");
+  }
+  const sessionPath = resolve(runPath, "runtime-session.json");
+  const session = {
+    schemaVersion: 1,
+    gitSha,
+    databaseSha256,
+    manifestSha256: active.manifestSha256,
+    runDirectory: active.runDirectory,
+    ledgerPath: resolvedLedgerPath,
+    nonce: randomBytes(24).toString("hex"),
+    startedAt: new Date().toISOString(),
+  };
+  writeFileSync(sessionPath, JSON.stringify(session), { encoding: "utf8", flag: "wx" });
+  return { sessionPath, nonce: session.nonce };
+}
+
 export function buildLocalDemoLaunchPlan({
   argv = [],
   baseEnvironment = process.env,
   ledgerPath = resolve(RUNTIME_ROOT, `egress-${Date.now()}-${process.pid}.jsonl`),
+  gitSha,
+  databaseSha256,
+  runtimeSessionNonce,
 } = {}) {
   const { port } = parseLocalDemoArgs(argv);
   const safeEnvironment = buildLocalDemoEnvironment(baseEnvironment);
@@ -61,6 +123,9 @@ export function buildLocalDemoLaunchPlan({
     NODE_OPTIONS: requiredGuard,
     SCANBIN_LOCAL_DEMO_EGRESS_LEDGER: validatedLedgerPath,
   };
+  if (gitSha !== undefined) environment.SCANBIN_LOCAL_DEMO_GIT_SHA = String(gitSha);
+  if (databaseSha256 !== undefined) environment.SCANBIN_LOCAL_DEMO_DATABASE_SHA256 = String(databaseSha256);
+  if (runtimeSessionNonce !== undefined) environment.SCANBIN_LOCAL_DEMO_RUNTIME_SESSION_NONCE = String(runtimeSessionNonce);
   return {
     port,
     ledgerPath: validatedLedgerPath,
@@ -152,9 +217,25 @@ export async function runLocalDemo(argv = process.argv.slice(2)) {
     throw error;
   }
 
-  const plan = buildLocalDemoLaunchPlan({ argv });
+  const gitSha = spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" });
+  if (gitSha.status !== 0 || !/^[a-f0-9]{40}$/i.test(gitSha.stdout.trim())) {
+    throw new Error("Local demo requires an exact current Git HEAD revision.");
+  }
+  const plan = buildLocalDemoLaunchPlan({
+    argv,
+    gitSha: gitSha.stdout.trim(),
+    databaseSha256: preflight.databaseSha256,
+  });
   mkdirSync(dirname(plan.ledgerPath), { recursive: true });
+  realPathWithin(resolve(ROOT, "reports/local-tire-demo"), dirname(plan.ledgerPath), "runtime directory");
   writeFileSync(plan.ledgerPath, "", { encoding: "utf8", flag: "wx" });
+  const runtimeSession = writeLocalDemoRuntimeSession({
+    ledgerPath: plan.ledgerPath,
+    gitSha: gitSha.stdout.trim(),
+    databaseSha256: preflight.databaseSha256,
+  });
+  plan.build.env.SCANBIN_LOCAL_DEMO_RUNTIME_SESSION_NONCE = runtimeSession.nonce;
+  plan.start.env.SCANBIN_LOCAL_DEMO_RUNTIME_SESSION_NONCE = runtimeSession.nonce;
 
   const build = runNext(plan.build.args, plan.build.env);
   const buildCode = await waitForExit(build);

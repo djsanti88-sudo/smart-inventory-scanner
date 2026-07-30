@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -33,6 +34,70 @@ test("launcher pins a fresh build and loopback-only production server with one i
   assert.equal(plan.start.env.OPENAI_API_KEY, "");
   assert.equal(plan.build.env.SCANBIN_LOCAL_DEMO_EGRESS_LEDGER, plan.start.env.SCANBIN_LOCAL_DEMO_EGRESS_LEDGER);
   assert.match(plan.start.env.NODE_OPTIONS, /local-demo-egress-guard\.cjs/);
+});
+
+test("launcher binds both build and server to the exact manifest revision and database", () => {
+  const gitSha = "a".repeat(40);
+  const databaseSha256 = "b".repeat(64);
+  const runtimeSessionNonce = "c".repeat(48);
+  const plan = launcher.buildLocalDemoLaunchPlan({
+    gitSha,
+    databaseSha256,
+    runtimeSessionNonce,
+    ledgerPath: resolve("reports/local-tire-demo/runtime/revision-binding-ledger.jsonl"),
+  });
+  for (const environment of [plan.build.env, plan.start.env]) {
+    assert.equal(environment.SCANBIN_LOCAL_DEMO_GIT_SHA, gitSha);
+    assert.equal(environment.SCANBIN_LOCAL_DEMO_DATABASE_SHA256, databaseSha256);
+    assert.equal(environment.SCANBIN_LOCAL_DEMO_RUNTIME_SESSION_NONCE, runtimeSessionNonce);
+  }
+});
+
+test("launcher writes a fresh runtime session bound to its active manifest and ledger", () => {
+  const reportsRoot = mkdtempSync(join(tmpdir(), "scanbin-runtime-session-"));
+  try {
+    const gitSha = "a".repeat(40);
+    const databaseSha256 = "b".repeat(64);
+    const manifestSha256 = "c".repeat(64);
+    const runDirectory = "run-1";
+    const run = join(reportsRoot, runDirectory);
+    const runtime = join(reportsRoot, "runtime");
+    mkdirSync(run, { recursive: true });
+    mkdirSync(runtime, { recursive: true });
+    writeFileSync(join(reportsRoot, "active-run.json"), JSON.stringify({
+      schemaVersion: 1, runDirectory, gitSha, databaseSha256, manifestSha256,
+      generatedAt: "2026-07-30T00:00:00.000Z",
+    }));
+    const escapedRoot = mkdtempSync(join(tmpdir(), "scanbin-runtime-escape-"));
+    const escapedLedger = join(escapedRoot, "ledger.jsonl");
+    writeFileSync(escapedLedger, "");
+    const escapedLink = join(runtime, "escaped");
+    symlinkSync(escapedRoot, escapedLink, "junction");
+    assert.throws(() => launcher.writeLocalDemoRuntimeSession({
+      reportsRoot, ledgerPath: join(escapedLink, "ledger.jsonl"), gitSha, databaseSha256,
+    }), /escaped/i);
+    rmSync(escapedRoot, { recursive: true, force: true });
+    const ledgerPath = join(runtime, "egress-test.jsonl");
+    writeFileSync(ledgerPath, "");
+    const runtimeSession = launcher.writeLocalDemoRuntimeSession({
+      reportsRoot, ledgerPath, gitSha, databaseSha256,
+    });
+    const anchorPath = runtimeSession.sessionPath;
+    assert.equal(anchorPath, join(run, "runtime-session.json"));
+    const anchor = JSON.parse(readFileSync(anchorPath, "utf8"));
+    assert.deepEqual(Object.keys(anchor).sort(), [
+      "databaseSha256", "gitSha", "ledgerPath", "manifestSha256", "nonce",
+      "runDirectory", "schemaVersion", "startedAt",
+    ]);
+    assert.equal(anchor.gitSha, gitSha);
+    assert.equal(anchor.databaseSha256, databaseSha256);
+    assert.equal(anchor.manifestSha256, manifestSha256);
+    assert.equal(anchor.ledgerPath, ledgerPath);
+    assert.match(anchor.nonce, /^[a-f0-9]{32,}$/);
+    assert.equal(runtimeSession.nonce, anchor.nonce);
+  } finally {
+    rmSync(reportsRoot, { recursive: true, force: true });
+  }
 });
 
 test("launcher discards a hostile inherited NODE_OPTIONS preload", () => {

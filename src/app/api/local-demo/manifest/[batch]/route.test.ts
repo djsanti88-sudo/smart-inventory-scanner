@@ -67,7 +67,7 @@ describe("GET /api/local-demo/manifest/[batch]", () => {
       const manifest: Record<string, unknown> = {
         schemaVersion: 1,
         seed: "scanbin-local-tire-demo-v1",
-        gitSha: "deadbeef",
+        gitSha: "d".repeat(40),
         databaseSha256: "d".repeat(64),
         generatedAt: "2026-07-29T00:00:00.000Z",
         total: 3_000,
@@ -81,7 +81,7 @@ describe("GET /api/local-demo/manifest/[batch]", () => {
       const active = {
         schemaVersion: 1,
         runDirectory: "run-1",
-        gitSha: "deadbeef",
+        gitSha: "d".repeat(40),
         databaseSha256: "d".repeat(64),
         manifestSha256: manifest.manifestSha256,
         generatedAt: "2026-07-29T00:00:00.000Z",
@@ -100,9 +100,12 @@ describe("GET /api/local-demo/manifest/[batch]", () => {
         rows: batchRows,
       }));
       let currentDatabaseSha256 = active.databaseSha256 as string;
+      let currentGitSha = active.gitSha as string;
       const handler = createLocalDemoManifestHandler({
         reportsRoot,
         preflight: () => ({ databaseSha256: currentDatabaseSha256 }),
+        expectedGitSha: () => currentGitSha,
+        expectedDatabaseSha256: () => currentDatabaseSha256,
       });
       const response = await handler(
         new NextRequest("http://localhost/api/local-demo/manifest/01"),
@@ -120,6 +123,14 @@ describe("GET /api/local-demo/manifest/[batch]", () => {
         { params: Promise.resolve({ batch: "01" }) },
       );
       expect(staleResponse.status).toBe(500);
+
+      currentDatabaseSha256 = active.databaseSha256 as string;
+      currentGitSha = "e".repeat(40);
+      const staleRevisionResponse = await handler(
+        new NextRequest("http://localhost/api/local-demo/manifest/01"),
+        { params: Promise.resolve({ batch: "01" }) },
+      );
+      expect(staleRevisionResponse.status).toBe(500);
     } finally {
       rmSync(reportsRoot, { recursive: true, force: true });
     }

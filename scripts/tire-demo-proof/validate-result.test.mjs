@@ -6,11 +6,12 @@ import { validateBatchResult } from "./validate-result.mjs";
 const hash = "a".repeat(64); const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const expectedRows = Array.from({ length: 100 }, (_, index) => ({ barcode: `code-${index}`, canonicalProductUid: `uid-${index}`, brand: "Brand", model: "Model", size: "225/65R17" }));
 const manifestSha256 = "b".repeat(64);
+const runtimeSessionNonce = "c".repeat(32);
 const batch = { schemaVersion: 1, seed: "scanbin-local-tire-demo-v1", gitSha: "abc", databaseSha256: hash, batch: 1, batchSha256: digest(expectedRows), expectedBarcodesSha256: digest(expectedRows.map((row) => row.barcode)), expectedCanonicalProductUidsSha256: digest(expectedRows.map((row) => row.canonicalProductUid)), rows: expectedRows };
 function good() {
   const events = expectedRows.map((row, index) => ({ eventId: `event-${index}`, cleanCode: row.barcode, matchedProductId: `product-${index}`, canonicalProductUid: row.canonicalProductUid, quantityDelta: 1, quantityAfterScan: 1, status: "verified" }));
   const counts = events.map((event) => ({ productId: event.matchedProductId, quantity: 1, scanEventIds: [event.eventId] }));
-  return { observations: expectedRows.map((row, index) => ({ ...row, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, manifestSha256, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, canonicalIdentityMismatchCount:0, distinctExpectedCanonicalProductUidCount:100, distinctMatchedProductIdCount:100, distinctFinalCountProductIdCount:100, distinctReplayedCountProductIdCount:100, canonicalProductMatchedProductBijection:true, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [] };
+  return { observations: expectedRows.map((row, index) => ({ ...row, barcodeType: "upc", loadIndex: "", speedRating: "", manufacturerPartNumber: "", type: "", season: "", sourceCount: 1, confidence: "verified", currentStatus: "active_retail", usableFor: "auto_count_candidate", fieldCompletenessScore: 100, angle: "test", stratum: "test", ordinal: index + 1, batch: 1, agent: 1, eventId: `event-${index}`, matchedProductId: `product-${index}`, feedVisible: true, status: "verified", rawStatus: "Verified (app-confirmed)", latencyMs: index, consoleErrors: [], nonLocalRequests: [] })), ledgerProof: { schemaVersion: 1, sessionId: "session", generatedAt: "2026-07-29T00:00:00.000Z", manifest: { schemaVersion: 1, gitSha: "abc", databaseSha256: hash, manifestSha256, seed: batch.seed, batch: 1, batchSha256: batch.batchSha256, expectedBarcodesSha256: batch.expectedBarcodesSha256, expectedCanonicalProductUidsSha256: batch.expectedCanonicalProductUidsSha256 }, expected: { rows: 100, barcodes: expectedRows.map((row) => row.barcode) }, events, finalCounts: counts, replayedCounts: counts, assertions: { allExpectedBarcodesSeenExactlyOnce:true, unexpectedBarcodeCount:0, duplicateEventIdCount:0, missingEventIdCount:0, unmatchedEventCount:0, canonicalIdentityMismatchCount:0, distinctExpectedCanonicalProductUidCount:100, distinctMatchedProductIdCount:100, distinctFinalCountProductIdCount:100, distinctReplayedCountProductIdCount:100, canonicalProductMatchedProductBijection:true, finalEqualsReplay:true, countEventIdsEqualReplayEventIds:true, everyCountEventIdExistsInFeed:true, expectedQuantity:100, finalQuantity:100, replayedQuantity:100, noDrops:true, noDuplicates:true, passed:true } }, serverEgressAttempts: [], runtimeSessionNonce };
 }
 test("accepts an exact hash-bound 100-event proof and uses nearest-rank percentiles", () => { const result = validateBatchResult(batch, good()); assert.equal(result.passed, true); assert.equal(result.countedQuantity, 100); assert.equal(result.p95Ms, 94); });
 test("accepts model display variants that differ only by case or explicit delimiters", () => {
@@ -196,6 +197,37 @@ test("rejects ledger events with missing, extraneous, and mistyped fields", () =
     assert.equal(validation.passed, false);
     assert.ok(validation.failures.some((failure) => failure.rule === "ledger_event_schema"));
   }
+});
+
+test("rejects native JSON coercions and malformed or extra count rows", () => {
+  const mutations = [
+    (value) => { value.observations[0].latencyMs = "0"; },
+    (value) => { value.observations[0].feedVisible = "true"; },
+    (value) => { value.ledgerProof.expected.rows = "100"; },
+    (value) => { value.ledgerProof.finalCounts[0].quantity = "1"; },
+    (value) => { value.ledgerProof.finalCounts[0].scanEventIds = "event-0"; },
+    (value) => { value.ledgerProof.finalCounts[0].unexpected = true; },
+  ];
+  for (const mutate of mutations) {
+    const value = good();
+    mutate(value);
+    assert.equal(validateBatchResult(batch, value).passed, false);
+  }
+});
+
+test("rejects missing, malformed, or anchor-mismatched runtime session nonces", () => {
+  for (const mutate of [
+    (value) => { delete value.runtimeSessionNonce; },
+    (value) => { value.runtimeSessionNonce = "not-hex"; },
+  ]) {
+    const value = good();
+    mutate(value);
+    assert.equal(validateBatchResult(batch, value).passed, false);
+  }
+  const value = good();
+  const validation = validateBatchResult(batch, value, { batch: 1, manifest: { gitSha: batch.gitSha, databaseSha256: batch.databaseSha256, manifestSha256, seed: batch.seed }, runtimeSessionNonce: "d".repeat(32) });
+  assert.equal(validation.passed, false);
+  assert.ok(validation.failures.some((failure) => failure.rule === "runtime_session_nonce"));
 });
 
 test("rejects every ledger assertion that disagrees with the independently recomputed proof", () => {
