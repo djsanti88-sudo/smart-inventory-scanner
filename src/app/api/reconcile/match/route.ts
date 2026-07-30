@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { getAdminAuth, getAdminDb } from "@/lib/firebaseAdmin";
+import { isLiveAuth } from "@/services/auth/authMode";
+import { isAuthBypassEnabled } from "@/services/auth/authBypass";
+import { COLLECTIONS, memberDocId } from "@/services/db/types";
+import { checkRateLimit, intEnv } from "@/services/security/aiSpendGuard";
+import { ladderStorage } from "@/server/upc/storage";
 import {
   matchExpectedRow,
   type CorpusCandidate,
@@ -34,7 +40,85 @@ import { logServerEvent } from "@/server/log";
 export const runtime = "nodejs";
 
 /** Hard row cap: reconcile feeds are shop catalogs (thousands), not unbounded uploads. */
-const MAX_ROWS = 20000;
+const MAX_ROWS = 5_000;
+const MAX_REQUEST_BYTES = 512 * 1024;
+
+function json(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function authConfigurationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /credential|GOOGLE_APPLICATION_CREDENTIALS|default credentials|service account|ENOENT/i.test(message);
+}
+
+async function authorize(businessId: string, idToken: string): Promise<NextResponse | { uid: string | null }> {
+  if (isAuthBypassEnabled() || !isLiveAuth()) return { uid: null };
+  if (!idToken) return json({ error: "Sign in required." }, 401);
+  let uid: string;
+  try {
+    uid = (await getAdminAuth().verifyIdToken(idToken)).uid;
+  } catch (error) {
+    if (authConfigurationError(error)) return json({ error: "Server auth is not configured." }, 503);
+    return json({ error: "Invalid or expired sign-in." }, 401);
+  }
+  try {
+    const member = await getAdminDb()
+      .doc(`${COLLECTIONS.businessMembers}/${memberDocId(businessId, uid)}`)
+      .get();
+    return member.exists ? { uid } : json({ error: "Not a member of this business." }, 403);
+  } catch (error) {
+    if (authConfigurationError(error)) return json({ error: "Server auth is not configured." }, 503);
+    return json({ error: "Could not verify business membership." }, 503);
+  }
+}
+
+function responseRow(row: ExpectedInventoryRow): Omit<ExpectedInventoryRow, "raw"> {
+  const { externalId, partNumbers, brand, model, sizeText, specs, barcode, name, category, qty } = row;
+  return { externalId, partNumbers, brand, model, sizeText, specs, barcode, name, category, qty };
+}
+
+function responseMatch(match: PreviewMatchResult): PreviewMatchResult {
+  const candidate = match.candidate && {
+    uid: match.candidate.uid,
+    brand: match.candidate.brand,
+    name: match.candidate.name,
+    sizeToken: match.candidate.sizeToken,
+    partNumber: match.candidate.partNumber,
+    barcode: match.candidate.barcode,
+  };
+  const candidates = match.candidates?.map((item) => ({
+    uid: item.uid,
+    brand: item.brand,
+    name: item.name,
+    sizeToken: item.sizeToken,
+    partNumber: item.partNumber,
+    barcode: item.barcode,
+  }));
+  return {
+    row: responseRow(match.row),
+    status: match.status,
+    reason: match.reason,
+    ...(candidate ? { candidate } : {}),
+    ...(match.confidence !== undefined ? { confidence: match.confidence } : {}),
+    ...(match.matchBasis ? { matchBasis: match.matchBasis } : {}),
+    ...(candidates ? { candidates } : {}),
+    ...(match.linkageSuggestion ? { linkageSuggestion: { barcode: match.linkageSuggestion.barcode, partNumber: match.linkageSuggestion.partNumber } } : {}),
+    ...(match.viaAffixCore !== undefined ? { viaAffixCore: match.viaAffixCore } : {}),
+    ...(match.retailCatalogMatch ? {
+      retailCatalogMatch: {
+        productName: match.retailCatalogMatch.productName,
+        brand: match.retailCatalogMatch.brand,
+        category: match.retailCatalogMatch.category,
+        barcode: match.retailCatalogMatch.barcode,
+      },
+    } : {}),
+  } as PreviewMatchResult;
+}
 
 /** Mirror of the matcher's rowSizeToken: size from sizeText, falling back to specs/model text. */
 function rowSizeToken(row: ExpectedInventoryRow): string {
@@ -71,28 +155,66 @@ function isValidRow(v: unknown): v is ExpectedInventoryRow {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "invalid_json", status: 400 });
-    return NextResponse.json({ error: "Body must be valid JSON." }, { status: 400 });
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
+    return json({ error: "Reconcile request must be 512KB or smaller." }, 413);
   }
 
-  const rows = (body as { rows?: unknown } | null)?.rows;
+  let body: unknown;
+  try {
+    const raw = await request.text();
+    if (new TextEncoder().encode(raw).byteLength > MAX_REQUEST_BYTES) {
+      return json({ error: "Reconcile request must be 512KB or smaller." }, 413);
+    }
+    body = JSON.parse(raw) as unknown;
+  } catch {
+    logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "invalid_json", status: 400 });
+    return json({ error: "Body must be valid JSON." }, 400);
+  }
+
+  const parsed = body as { rows?: unknown; businessId?: unknown; idToken?: unknown } | null;
+  const businessId = text(parsed?.businessId);
+  const authorization = await authorize(businessId, text(parsed?.idToken));
+  if (authorization instanceof NextResponse) return authorization;
+
+  // Live buckets use server-verified identities. Auth-bypass/mock mode shares one fixed bucket:
+  // mock callers have no verified identity, so their supplied businessId must never shape durable
+  // limiter state or permit unlimited 5,000-row requests.
+  const rateLimitKey = authorization.uid
+    ? `RECONCILE:${businessId}:${authorization.uid}`
+    : "RECONCILE:mock";
+  try {
+    const rate = await checkRateLimit(rateLimitKey, {
+      limit: intEnv(process.env.RECONCILE_MATCH_RATE_LIMIT, 30),
+      windowMs: intEnv(process.env.RECONCILE_MATCH_RATE_WINDOW_MS, 60_000),
+      storage: await ladderStorage(),
+      failClosedOnStorageError: true,
+    });
+    if (!rate.allowed) {
+      return NextResponse.json({ error: "Too many reconcile requests. Slow down and try again.", retryAfterMs: rate.retryAfterMs }, {
+        status: 429,
+        headers: { "Cache-Control": "no-store", "Retry-After": String(Math.ceil(rate.retryAfterMs / 1000)) },
+      });
+    }
+  } catch {
+    logServerEvent({ route: "/api/reconcile/match", event: "rate_limit_unavailable", reasonCode: "storage_error", status: 503 });
+    return json({ error: "Rate limiting is temporarily unavailable. Try again shortly." }, 503);
+  }
+
+  const rows = parsed?.rows;
   if (!Array.isArray(rows)) {
     logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "missing_rows", status: 400 });
-    return NextResponse.json({ error: "Body must be { rows: [...] }." }, { status: 400 });
+    return json({ error: "Body must be { rows: [...] }." }, 400);
   }
   if (rows.length > MAX_ROWS) {
     logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "too_many_rows", status: 400 });
-    return NextResponse.json({ error: `Too many rows (max ${MAX_ROWS}).` }, { status: 400 });
+    return json({ error: `Too many rows (max ${MAX_ROWS}).` }, 413);
   }
   if (!rows.every(isValidRow)) {
     logServerEvent({ route: "/api/reconcile/match", event: "error", reasonCode: "invalid_row_shape", status: 400 });
-    return NextResponse.json(
+    return json(
       { error: "Each row needs externalId (string), partNumbers (string array), and qty (number)." },
-      { status: 400 },
+      400,
     );
   }
 
@@ -127,5 +249,5 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   }
 
-  return NextResponse.json({ matches });
+  return json({ matches: matches.map(responseMatch) });
 }

@@ -156,6 +156,22 @@ describe("aiSpendGuard", () => {
       expect(r.allowed).toBe(true); // fails OPEN, not closed
     });
 
+    it("propagates a storage increment failure when the caller requires fail-closed limiting", async () => {
+      const brokenStorage = {
+        async get() { return null; },
+        async set() {},
+        async increment(): Promise<number> { throw new Error("storage unavailable"); },
+      };
+
+      await expect(checkRateLimit("export:owner", {
+        limit: 1,
+        windowMs: 1_000,
+        now: 100,
+        storage: brokenStorage,
+        failClosedOnStorageError: true,
+      })).rejects.toThrow("storage unavailable");
+    });
+
     it("window start rolls over to a NEW key at the boundary (durable window rollover)", async () => {
       const s = memStorage();
       const ip = "3.3.3.3";

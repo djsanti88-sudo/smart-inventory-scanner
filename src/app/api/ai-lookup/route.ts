@@ -528,7 +528,7 @@ export async function POST(request: Request) {
       // NEVER fires the master-append hook here (GC7/review F4): no decision was ever settled.
       logServerEvent({
         route: "/api/ai-lookup",
-        event: "cap_blocked",
+        event: "daily_cap_exhausted",
         reasonCode: "daily_cap",
         businessId: authedBusinessId ?? undefined,
         status: 429,
@@ -586,4 +586,3 @@ export async function POST(request: Request) {
     sanitizedInput: { rawCodeSanitized, cleanCodeSanitized },
   });
 }
-

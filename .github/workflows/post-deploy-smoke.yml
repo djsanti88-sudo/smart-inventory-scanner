@@ -1,0 +1,33 @@
+name: Post-deploy smoke
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-deploy-smoke-${{ github.event.deployment.id }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: post-deploy-smoke
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment_status.environment_url, 'https://') &&
+      endsWith(github.event.deployment_status.environment_url, '.vercel.app')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # deployment_status runs at the deployed SHA, so the fingerprint contract and
+          # the deployment being checked cannot drift apart.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Run read-only deployment fingerprint
+        env:
+          DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url }}
+        run: node scripts/smoke-fingerprint.mjs "$DEPLOYMENT_URL"

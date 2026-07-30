@@ -337,12 +337,24 @@ class StopHookCliTests(unittest.TestCase):
         subprocess.run(["git", "add", "."], cwd=root, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
 
-    def _run_stop_hook(self, root: Path, payload: dict) -> subprocess.CompletedProcess:
+    def _run_stop_hook(
+        self, root: Path, payload: dict, *, dry_run: bool = False
+    ) -> subprocess.CompletedProcess:
         import os
 
         env = dict(os.environ)
+        command = [
+            sys.executable,
+            "-m",
+            "tools.fable5.hook_support",
+            "stop-hook",
+            "--repo",
+            str(root),
+        ]
+        if dry_run:
+            command.append("--dry-run")
         return subprocess.run(
-            [sys.executable, "-m", "tools.fable5.hook_support", "stop-hook", "--repo", str(root)],
+            command,
             input=json.dumps(payload),
             check=False,
             capture_output=True,
@@ -399,6 +411,31 @@ class StopHookCliTests(unittest.TestCase):
             self.assertTrue(pending_path.is_file())
             data = json.loads(pending_path.read_text(encoding="utf-8"))
             self.assertIn("https://my-preview-abc.vercel.app", data["urls"])
+
+    def test_dry_run_leaves_no_hook_state_or_later_suppression(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._init_repo(root)
+            plan_path = root / "docs" / "superpowers" / "plans" / "plan.md"
+            plan_path.write_text("- [x] Ship phase 1\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            transcript_path = root / "transcript.jsonl"
+            transcript_path.write_text(
+                "deployed to https://my-preview-abc.vercel.app for testing\n",
+                encoding="utf-8",
+            )
+            payload = {"transcript_path": str(transcript_path)}
+
+            dry_run = self._run_stop_hook(root, payload, dry_run=True)
+
+            self.assertEqual(dry_run.returncode, 0)
+            self.assertIn("FIRE", dry_run.stdout)
+            self.assertFalse((root / ".fable5").exists())
+
+            real_run = self._run_stop_hook(root, payload)
+
+            self.assertEqual(real_run.returncode, 0)
+            self.assertIn("FIRE", real_run.stdout)
 
     def test_missing_transcript_path_does_not_crash(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

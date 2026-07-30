@@ -39,6 +39,7 @@ export default defineConfig({
           exclude: [
             "src/services/camera/**",
             "scripts/kkm-catalog/**/*.test.mjs",
+            "scripts/refresh-tire-meta.test.mjs",
             "scripts/tire-db-repair/03_part_number_aliases.test.mjs",
             "scripts/tire-db-repair/09_promote_preflight.test.mjs",
             "scripts/tire-db-repair/10_promote_execute.test.mjs",

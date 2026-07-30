@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(awk -F',' 'NR>1 && $10!=\"\" {count++} END {print \"Rows with barcodes:\", count}' \"C:/Users/djsan/inventory/data/tire-knowledge/tire_corpus_flat.csv\")",
-      "Bash(node:*)",
+      "Bash(node scripts/*)",
+      "Bash(node e2e/teach/*)",
+      "Bash(node --test *)",
+      "Bash(node --max-old-space-size=* scripts/*)",
       "Bash(grep:*)",
       "Bash(npx vitest:*)",
       "Bash(python3 -c \"import sys,json;d=json.loads\\(sys.stdin.readline\\(\\)\\);print\\(json.dumps\\({k:d[k] for k in list\\(d.keys\\(\\)\\)[:8]},indent=2\\)\\)\")",
@@ -14,7 +17,11 @@
       "Bash(git merge:*)",
       "Bash(git worktree:*)",
       "Bash(git stash:*)",
-      "Bash(npx vercel:*)",
+      "Bash(npx vercel ls*)",
+      "Bash(npx vercel inspect*)",
+      "Bash(npx vercel env ls*)",
+      "Bash(npx vercel logs*)",
+      "Bash(npx vercel deploy)",
       "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code} from %{url}\" https://inventory-eight-ashen.vercel.app/)",
       "Bash(curl -s -m 10 -o /dev/null -w \"HTTP %{http_code}\" https://smart-inventory-scanner.vercel.app/)"
     ]

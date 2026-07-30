@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
+
+const { postTelemetry } = vi.hoisted(() => ({ postTelemetry: vi.fn() }));
+vi.mock("@/lib/telemetry", () => ({ postTelemetry }));
+
 import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 
@@ -19,6 +23,23 @@ function openReview(store: ReturnType<typeof aiOnStore>, code: string) {
 }
 
 describe("decodeOnce 429 handling (daily cap vs real rate limit)", () => {
+  it("emits one sanitized telemetry event when repeated failures open the circuit breaker", async () => {
+    const store = aiOnStore();
+    const review = openReview(store, "086699998537");
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response("server error", { status: 500 })) as unknown as typeof fetch;
+
+    try {
+      for (let i = 0; i < 12; i++) await store.getState().liveDecode(review.id);
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    expect(store.getState().breaker.state).toBe("open");
+    expect(postTelemetry).toHaveBeenCalledTimes(1);
+    expect(postTelemetry).toHaveBeenCalledWith("breaker_open", "decode_failure_threshold_reached");
+  });
+
   it("daily_cap 429: no retry, honest reason, exactly one fetch call", async () => {
     const store = aiOnStore();
     const review = openReview(store, "086699998538");

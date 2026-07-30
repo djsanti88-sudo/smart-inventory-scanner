@@ -14,6 +14,11 @@ import { useScanStore } from "@/stores/scanStore";
 import type { ColumnMapping } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
 
+const getSession = vi.fn();
+vi.mock("@/lib/auth", () => ({
+  getSession: (...args: unknown[]) => getSession(...args),
+}));
+
 // Real CSV content (the container has no readFile override, so it runs the real
 // readUniversalFile -> inferColumnMapping chain; recognizable headers are required to reach
 // loadMapping with a real sourceSignature).
@@ -56,6 +61,8 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
+  getSession.mockReset().mockResolvedValue({ getIdToken: vi.fn().mockResolvedValue("firebase-token") });
   useScanStore.setState({
     businessId: "biz-test",
     products: [] as Product[],
@@ -95,6 +102,20 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
 });
 
 describe("UniversalImportPanelContainer - loadMapping", () => {
+  it("sends businessId and Firebase token to the reconcile match route in live auth mode", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
+    const fetchMock = stubFetch({ ok: true, status: 200, body: { mapping: REMEMBERED_MAPPING } });
+
+    render(<UniversalImportPanelContainer />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), {
+      target: { files: [new File([CSV], "boss.csv")] },
+    });
+
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/reconcile/match"))).toBe(true));
+    const call = fetchMock.mock.calls.find((item) => String(item[0]).includes("/api/reconcile/match"));
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ businessId: "biz-test", idToken: "firebase-token" });
+  });
+
   it("GET returns 200 with { mapping: null } -> resolves null and falls through to column inference (no throw)", async () => {
     const fetchMock = stubFetch({ ok: true, status: 200, body: { mapping: null } });
 

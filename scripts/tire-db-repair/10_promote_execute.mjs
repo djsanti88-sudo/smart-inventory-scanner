@@ -24,9 +24,9 @@
 //
 // Usage:
 //   node scripts/tire-db-repair/10_promote_execute.mjs backup  [--dry-run]
-//   node scripts/tire-db-repair/10_promote_execute.mjs stage   [--dry-run]
-//   node scripts/tire-db-repair/10_promote_execute.mjs verify  [--dry-run]
-//   node scripts/tire-db-repair/10_promote_execute.mjs promote [--dry-run]
+//   node scripts/tire-db-repair/10_promote_execute.mjs stage   [--dry-run] [--manifest <path>] --expected-manifest-sha256 <sha256>
+//   node scripts/tire-db-repair/10_promote_execute.mjs verify  [--dry-run] [--manifest <path>] --expected-manifest-sha256 <sha256>
+//   node scripts/tire-db-repair/10_promote_execute.mjs promote [--dry-run] [--manifest <path>] --expected-manifest-sha256 <sha256>
 //   node scripts/tire-db-repair/10_promote_execute.mjs rollback [--dry-run]
 //
 // Env overrides (used by the proof harness to point at a local fake-live DB instead of real
@@ -40,6 +40,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from "node:fs";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -59,6 +60,9 @@ const NEW_TABLES = [
   { staging: "staging_canonical_tire_products", live: "canonical_tire_products" },
   { staging: "staging_provenance", live: "provenance" },
 ];
+// The atomic swap publishes these five tables.  LIVE_TABLES remains the original two-table
+// rename set below; every backup/manifest/drift read must use this complete set instead.
+const SWAPPED_TABLES = [...LIVE_TABLES, ...NEW_TABLES.map(({ live }) => live)];
 const OPERATIONAL_TABLES = [
   "decode_cache", "decode_archive", "decode_outcomes", "goupc_miss_cache", "goupc_usage",
   "ladder_kv", "learned_products", "retail", "sqlite_sequence",
@@ -187,7 +191,7 @@ function extractTableNames(statement) {
 // rejected as fail-closed noise - this script's own postSwapIndexStatements()/rollback index
 // recreation legitimately emit DROP INDEX IF EXISTS <name>; statements with no ON <table> clause.
 const NO_TABLE_STATEMENT_PATTERNS = [
-  /^PRAGMA\s+\w+/i,
+  /^PRAGMA\s+integrity_check\s*;?\s*$/i,
   /^BEGIN\b/i,
   /^COMMIT\b/i,
   /^ROLLBACK\b/i,
@@ -210,11 +214,21 @@ function isBlankOrCommentOnly(statement) {
 /** True iff `statement` is one of the small set of statement shapes that legitimately reference NO
  *  table at all (schema-introspection-free control statements). This is an explicit, enumerated
  *  allowlist - NOT a catch-all - so a statement outside both this list and extractTableNames' output
- *  is rejected rather than silently passed (panel finding I3: fail CLOSED, not fail OPEN). */
+ *  is rejected rather than silently passed (panel finding I3: fail CLOSED, not fail OPEN). The only
+ *  permitted PRAGMA is read-only integrity_check; mutable connection/schema PRAGMAs are refused. */
 function isAllowedNoTableStatement(statement) {
   const trimmed = statement.trim();
   if (isBlankOrCommentOnly(trimmed)) return true;
   return NO_TABLE_STATEMENT_PATTERNS.some((re) => re.test(trimmed));
+}
+
+function isPragmaStatement(statement) {
+  return /^\s*PRAGMA\b/i.test(statement);
+}
+
+function isSchemaTableWrite(statement, names) {
+  return names.has("sqlite_master") &&
+    /^\s*(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM|CREATE\s+(?:VIRTUAL\s+)?TABLE|DROP\s+TABLE|ALTER\s+TABLE)\s+["'`]?sqlite_master\b/i.test(statement);
 }
 
 /** Scan a batch of statements and throw a clear, actionable error the FIRST time any statement
@@ -233,6 +247,13 @@ function assertAllowedTables(statements, label) {
     const names = extractTableNames(stmt);
     if (names.size === 0) {
       if (isAllowedNoTableStatement(stmt)) continue;
+      if (isPragmaStatement(stmt)) {
+        throw new Error(
+          `${label}: REFUSING to execute - only the read-only PRAGMA integrity_check is allowed; ` +
+          `state-changing PRAGMAs (including writable_schema and foreign_keys settings) are unsafe. ` +
+          `Offending statement: ${stmt}`
+        );
+      }
       throw new Error(
         `${label}: REFUSING to execute - statement did not match any recognized table-bearing SQL shape ` +
           `AND is not one of the explicitly allowed no-table statements (PRAGMA, BEGIN/COMMIT/ROLLBACK, ` +
@@ -240,6 +261,12 @@ function assertAllowedTables(statements, label) {
           `shape is refused rather than silently permitted, so a construct this scanner does not understand ` +
           `can never bypass operational-table isolation. ` +
           `Offending statement: ${stmt.length > 300 ? stmt.slice(0, 300) + " ... [truncated]" : stmt}`
+      );
+    }
+    if (isSchemaTableWrite(stmt, names)) {
+      throw new Error(
+        `${label}: REFUSING to execute - sqlite_master is read-only for this promotion; schema-table writes ` +
+        `can alter database metadata outside the reviewed table swap. Offending statement: ${stmt}`
       );
     }
     for (const name of names) {
@@ -291,6 +318,28 @@ function countValueTuples(sqlText) {
     if (/^\s{2}\(/.test(line)) count++;
   }
   return count;
+}
+
+function expectedCountsFromStagingFiles() {
+  const expectedCounts = {};
+  for (const fname of STAGING_FILES_ORDER) {
+    const fpath = join(STAGING_DIR, fname);
+    if (!existsSync(fpath)) throw new Error(`Missing staging SQL file: ${rel(fpath)}`);
+    expectedCounts[STAGING_FILE_TO_TABLE[fname]] = countValueTuples(readFileSync(fpath, "utf8"));
+  }
+  return expectedCounts;
+}
+
+function hashArtifactContent(content) {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function hashFileOrMissing(path) {
+  return existsSync(path) ? hashArtifactContent(readFileSync(path, "utf8")) : "MISSING";
+}
+
+function expectedCountsManifestContent(expectedCounts) {
+  return JSON.stringify({ expectedCounts }, null, 2);
 }
 
 function timestamp() {
@@ -350,7 +399,17 @@ function requireConfirmOrExit(dryRun) {
 function parseArgs(argv) {
   const subcommand = argv[2];
   const dryRun = argv.includes("--dry-run");
-  return { subcommand, dryRun };
+  const valueAfter = (flag) => {
+    const index = argv.indexOf(flag);
+    return index >= 0 ? argv[index + 1] : undefined;
+  };
+  return {
+    subcommand,
+    dryRun,
+    ts: valueAfter("--ts"),
+    manifestArg: valueAfter("--manifest"),
+    expectedManifestSha256: valueAfter("--expected-manifest-sha256"),
+  };
 }
 
 // -------------------------------------------------------------------------------------------
@@ -441,11 +500,27 @@ function hashStagingContent() {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** Read live COUNT(*) for every LIVE_TABLES member. Used both to write the run-manifest (backup)
+/** Return the subset of requested tables that exists right now.  First promotion deliberately has
+ * no live alias/canonical/provenance table; absence is data, not an error or an empty table. */
+async function existingTableNames(client, tables = SWAPPED_TABLES) {
+  const placeholders = tables.map(() => "?").join(", ");
+  const res = await client.execute({
+    sql: `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`,
+    args: tables,
+  });
+  return new Set(res.rows.map((row) => String(row.name)));
+}
+
+/** Read live COUNT(*) for every swapped table. Used both to write the run-manifest (backup)
  *  and to re-check live state against it (stage/verify/promote), so the same shape is reused. */
 async function readLiveCounts(client) {
   const counts = {};
-  for (const table of LIVE_TABLES) {
+  const existing = await existingTableNames(client);
+  for (const table of SWAPPED_TABLES) {
+    if (!existing.has(table)) {
+      counts[table] = "ABSENT";
+      continue;
+    }
     const res = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
     counts[table] = Number(res.rows[0].c);
   }
@@ -453,13 +528,8 @@ async function readLiveCounts(client) {
 }
 
 // -------------------------------------------------------------------------------------------
-// Panel finding (Important #2): the drift gate above (readLiveCounts/assertLiveUnchangedSinceManifest)
-// compares ONLY COUNT(*). An UPDATE to an existing row, or a DELETE+INSERT that nets to the same row
-// count, is completely invisible to that check and would be silently overwritten by the promote
-// swap. This content fingerprint closes that gap: for each LIVE_TABLES member it computes a single
-// aggregate hash (a SQLite-side SUM of a per-row hash expression - an aggregate query, never a
-// row-by-row loop in JS) over the primary key AND the mutable columns that matter to correctness,
-// so an update to an existing row's data changes the fingerprint even though COUNT(*) does not move.
+// A count-only drift gate misses same-count edits. SQLite/libSQL exposes no collision-resistant
+// row hash, so the fingerprint streams rows in primary-key order into Node SHA-256 instead.
 // -------------------------------------------------------------------------------------------
 const FINGERPRINT_COLUMNS = {
   // Primary key first (barcode/normalized_part_number), then the columns whose mutation would
@@ -471,44 +541,79 @@ const FINGERPRINT_COLUMNS = {
     "manufacturer_part_number", "confidence", "current_status",
   ],
   tire_part_numbers: ["normalized_part_number", "canonical_product_uid"],
+  tire_product_part_number_aliases: [
+    "canonical_product_id", "normalized_part_number", "display_part_number", "source", "trust_color",
+    "confidence_score", "is_unambiguous",
+  ],
+  canonical_tire_products: [
+    "canonical_product_id", "brand", "model", "size", "load_index", "speed_rating", "load_range",
+    "type", "season", "alias_count", "canonicalization_confidence", "canonicalization_reason",
+  ],
+  provenance: [
+    "id", "product_id", "barcode", "source_name", "source_ref", "sheet", "row", "batch_id",
+    "imported_at", "evidence_level", "license_note", "content_hash",
+  ],
 };
 
-/** Build the SQL fragment used by readLiveContentFingerprint to fingerprint one table's rows in a
- *  single aggregate query (no row-by-row JS work, no SQLite hash builtin required). Each row's
- *  fingerprinted columns are concatenated (NULL coalesced to a sentinel so NULL vs '' stays
- *  distinguishable) into one delimited text value, then two independent aggregates are computed over
- *  it: SUM(length(...)) and SUM(unicode(...) * (length(...)+1)). Combining both aggregates makes an
- *  in-place content mutation (an UPDATE, or a DELETE+INSERT that preserves row count) overwhelmingly
- *  likely to change at least one of them, even in the unlikely case a pure length-only sum happened
- *  to cancel out across rows. This is a drift DETECTOR for an operator-controlled CLI workflow
- *  (matching the non-cryptographic scope already stated for hashStagingContent()), not a
- *  cryptographic integrity boundary. */
-function buildRowHashExpr(columns) {
-  const concatExpr = columns
-    .map((c) => `COALESCE(${c}, '__NULL__')`)
-    .join(` || '|' || `);
-  return (
-    `SUM(length(${concatExpr})) || ':' || ` +
-    `SUM(unicode(${concatExpr}) * (length(${concatExpr}) + 1))`
-  );
+const FINGERPRINT_PRIMARY_KEYS = {
+  tires: ["barcode"],
+  tire_part_numbers: ["normalized_part_number"],
+  tire_product_part_number_aliases: ["canonical_product_id", "normalized_part_number"],
+  canonical_tire_products: ["canonical_product_id"],
+  provenance: ["id"],
+};
+
+/** Injective typed, byte-length-prefixed field encoding. Values which look alike in delimiter
+ * concatenation (NULL/"", "a|b"/two fields, UTF-16 vs UTF-8 lengths) cannot collide here. */
+function updateTypedValue(hash, value) {
+  if (value === null || value === undefined) return hash.update("N:0:");
+  let tag;
+  let bytes;
+  if (typeof value === "string") { tag = "S"; bytes = Buffer.from(value, "utf8"); }
+  else if (typeof value === "number") { tag = "D"; bytes = Buffer.from(String(value), "utf8"); }
+  else if (typeof value === "bigint") { tag = "I"; bytes = Buffer.from(value.toString(), "utf8"); }
+  else if (typeof value === "boolean") { tag = "B"; bytes = Buffer.from(value ? "1" : "0", "utf8"); }
+  else if (value instanceof Uint8Array) { tag = "X"; bytes = Buffer.from(value); }
+  else if (value instanceof Date) { tag = "T"; bytes = Buffer.from(value.toISOString(), "utf8"); }
+  else { throw new Error(`Unsupported fingerprint value type: ${typeof value}`); }
+  hash.update(`${tag}:${bytes.length}:`);
+  hash.update(bytes);
 }
 
-/** Compute a content fingerprint for every LIVE_TABLES member: a single aggregate query per table
- *  (never row-by-row in JS) combining SUM(length(...)) and SUM(unicode(...) * (length+1)) over every
- *  fingerprinted column concatenated per row. Two aggregates are combined (not just one SUM) so that
- *  a row-content swap between two rows of equal total length is still very likely to change at least
- *  one of the two sums (the unicode()-weighted sum is sensitive to leading-character changes that a
- *  pure length sum would miss). Returns { table: "sumLen:sumUnicode" } strings, directly comparable. */
+function keysetPredicate(keys) {
+  return keys.map((key, i) => `${keys.slice(0, i).map((prior) => `${prior} = ?`).join(" AND ")}${i ? " AND " : ""}${key} > ?`).join(" OR ");
+}
+
+/** PK-ordered, keyset-paginated streaming SHA-256 for every swapped table. */
 async function readLiveContentFingerprint(client) {
   const fingerprint = {};
-  for (const table of LIVE_TABLES) {
+  const existing = await existingTableNames(client);
+  for (const table of SWAPPED_TABLES) {
+    if (!existing.has(table)) {
+      fingerprint[table] = "ABSENT";
+      continue;
+    }
     const columns = FINGERPRINT_COLUMNS[table];
-    const hashExpr = buildRowHashExpr(columns);
-    const res = await client.execute(`SELECT ${hashExpr} AS fp FROM ${table}`);
-    const value = res.rows[0]?.fp;
-    // An empty table's SUM() returns NULL in SQLite; normalize to an explicit sentinel so "empty"
-    // has a stable, comparable fingerprint value rather than the string "null" leaking through.
-    fingerprint[table] = value === null || value === undefined ? "EMPTY:0" : String(value);
+    const keys = FINGERPRINT_PRIMARY_KEYS[table];
+    const hash = createHash("sha256");
+    hash.update(`table:${table};columns:${columns.join(",")};`);
+    let lastKey = null;
+    while (true) {
+      const res = lastKey === null
+        ? await client.execute(`SELECT ${columns.join(", ")} FROM ${table} ORDER BY ${keys.join(", ")} LIMIT 1000`)
+        : await client.execute({
+          sql: `SELECT ${columns.join(", ")} FROM ${table} WHERE ${keysetPredicate(keys)} ORDER BY ${keys.join(", ")} LIMIT 1000`,
+          args: keys.flatMap((_, i) => [...lastKey.slice(0, i), lastKey[i]]),
+        });
+      if (res.rows.length === 0) break;
+      for (const row of res.rows) {
+        hash.update(`R:${columns.length}:`);
+        for (const column of columns) updateTypedValue(hash, row[column]);
+      }
+      lastKey = keys.map((key) => res.rows[res.rows.length - 1][key]);
+      if (res.rows.length < 1000) break;
+    }
+    fingerprint[table] = hash.digest("hex");
   }
   return fingerprint;
 }
@@ -533,9 +638,10 @@ function resolveManifestPath(manifestArg) {
   return findLatestManifestPath();
 }
 
-/** Load and validate a run-manifest, throwing a clear error if the path is missing or unreadable.
- *  Used by stage/verify/promote to bind to the backup that must precede them. */
-function loadRunManifest(manifestPath, subcommandLabel) {
+/** Load a run-manifest only when its byte-level SHA-256 matches an operator-supplied value that
+ *  was recorded outside the mutable backup/staging directory. This makes the backup manifest an
+ *  integrity boundary: editing it to match edited source-artifact hashes cannot authorize a run. */
+function loadRunManifest(manifestPath, subcommandLabel, expectedManifestSha256) {
   if (!manifestPath || !existsSync(manifestPath)) {
     throw new Error(
       `${subcommandLabel}: REFUSING to run - no run-manifest found (looked for ${manifestPath ? rel(manifestPath) : "any backup under " + rel(BACKUP_ROOT)}). ` +
@@ -544,9 +650,24 @@ function loadRunManifest(manifestPath, subcommandLabel) {
         `write that lands between backup and ${subcommandLabel} is caught, not silently lost (panel finding C3).`
     );
   }
+  if (!/^[a-fA-F0-9]{64}$/.test(expectedManifestSha256 ?? "")) {
+    throw new Error(
+      `${subcommandLabel}: REFUSING to run - --expected-manifest-sha256 <64-hex SHA-256> is required. ` +
+        `Record the digest printed by backup outside the backup/staging directory and pass it unchanged.`
+    );
+  }
   try {
-    return JSON.parse(readFileSync(manifestPath, "utf8"));
+    const manifestBytes = readFileSync(manifestPath);
+    const actualManifestSha256 = createHash("sha256").update(manifestBytes).digest("hex");
+    if (actualManifestSha256 !== expectedManifestSha256.toLowerCase()) {
+      throw new Error(
+        `manifest SHA-256 ${actualManifestSha256} does not match independently supplied expected digest ` +
+          `${expectedManifestSha256.toLowerCase()}; the manifest may have changed since backup.`
+      );
+    }
+    return JSON.parse(manifestBytes.toString("utf8"));
   } catch (e) {
+    if (String(e.message).includes("manifest SHA-256")) throw e;
     throw new Error(`${subcommandLabel}: REFUSING to run - could not parse manifest at ${rel(manifestPath)}: ${e.message}`);
   }
 }
@@ -571,7 +692,7 @@ async function assertLiveUnchangedSinceManifest(client, manifest, subcommandLabe
   }
   const currentCounts = await readLiveCounts(client);
   const drifted = [];
-  for (const table of LIVE_TABLES) {
+  for (const table of SWAPPED_TABLES) {
     if (currentCounts[table] !== manifest.liveCounts[table]) {
       drifted.push(`${table}: backup saw ${manifest.liveCounts[table]}, now ${currentCounts[table]}`);
     }
@@ -588,7 +709,7 @@ async function assertLiveUnchangedSinceManifest(client, manifest, subcommandLabe
   if (manifest.liveContentFingerprint) {
     const currentFingerprint = await readLiveContentFingerprint(client);
     const contentDrifted = [];
-    for (const table of LIVE_TABLES) {
+    for (const table of SWAPPED_TABLES) {
       if (currentFingerprint[table] !== manifest.liveContentFingerprint[table]) {
         contentDrifted.push(table);
       }
@@ -621,6 +742,35 @@ function assertStagingContentUnchangedSinceManifest(manifest, subcommandLabel) {
   }
 }
 
+/** Bind every non-SQL input that changes the verify/promotion decision to the backup manifest.
+ *  The hash values are recorded during backup, before stage creates its count artifact.  This
+ *  prevents a later edit to the expected-count file or approved-drop decision from silently
+ *  changing what verify/promote accept for the same run. */
+function assertSourceArtifactsBoundToManifest(manifest, subcommandLabel) {
+  if (!manifest.stageExpectedCountsHash || !manifest.approvedDropsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - bound run-manifest lacks required stage-count/approved-drops hashes; run backup again.`);
+  }
+  const expectedHash = hashArtifactContent(expectedCountsManifestContent(expectedCountsFromStagingFiles()));
+  if (expectedHash !== manifest.stageExpectedCountsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - staging SQL-derived expected counts no longer match the hash bound in the run-manifest; run backup again.`);
+  }
+  const approvedDropsHash = hashFileOrMissing(APPROVED_DROPS_PATH);
+  if (approvedDropsHash !== manifest.approvedDropsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - approved-drops artifact hash does not match the bound run-manifest; its approval decision changed since backup.`);
+  }
+}
+
+function assertStageCountArtifactBoundToManifest(manifest, subcommandLabel) {
+  if (!manifest.stageExpectedCountsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - bound run-manifest lacks the stage_expected_counts.json hash; run backup and stage again.`);
+  }
+  const manifestPath = join(STAGING_DIR, MANIFEST_FILE_NAME);
+  const actualHash = hashFileOrMissing(manifestPath);
+  if (actualHash !== manifest.stageExpectedCountsHash) {
+    throw new Error(`${subcommandLabel}: REFUSING to run - stage_expected_counts.json hash does not match the bound run-manifest; re-run backup and stage.`);
+  }
+}
+
 async function cmdBackup({ dryRun }) {
   const ts = timestamp();
   const outDir = join(BACKUP_ROOT, ts);
@@ -628,7 +778,7 @@ async function cmdBackup({ dryRun }) {
   if (dryRun) {
     console.log(`[dry-run] backup: would create ${rel(outDir)}/`);
     console.log(`[dry-run] backup: would dump CREATE TABLE + CREATE INDEX DDL for each table to ${rel(join(outDir, "schema.sql"))}`);
-    for (const table of LIVE_TABLES) {
+    for (const table of SWAPPED_TABLES) {
       console.log(`[dry-run] backup: would run keyset-paginated "SELECT * FROM ${table} WHERE <pk> > ? ORDER BY <pk> LIMIT 1000",`);
       console.log(`[dry-run] backup:   writing to ${rel(join(outDir, `${table}.jsonl`))}`);
       console.log(`[dry-run] backup:   then re-COUNT(*) after the dump and compare to the pre-dump COUNT(*) (race detection)`);
@@ -648,7 +798,10 @@ async function cmdBackup({ dryRun }) {
   const liveCounts = await readLiveCounts(client);
   const liveContentFingerprint = await readLiveContentFingerprint(client);
   const stagingContentHash = hashStagingContent();
-  const manifest = { timestamp: ts, tables: {}, liveCounts, liveContentFingerprint, stagingContentHash };
+  const stageExpectedCounts = expectedCountsFromStagingFiles();
+  const stageExpectedCountsHash = hashArtifactContent(expectedCountsManifestContent(stageExpectedCounts));
+  const approvedDropsHash = hashFileOrMissing(APPROVED_DROPS_PATH);
+  const manifest = { timestamp: ts, tables: {}, liveCounts, liveContentFingerprint, stagingContentHash, stageExpectedCountsHash, approvedDropsHash };
 
   // Schema DDL dump (Antigravity panel Important #5): JSONL row-data alone cannot rebuild a table
   // with its indexes/constraints. Capture the CREATE TABLE + CREATE INDEX statements for exactly
@@ -659,7 +812,7 @@ async function cmdBackup({ dryRun }) {
   // tables' schema here would blur that scope without adding restore value (operational tables are
   // never touched by this promotion at all, per OPERATIONAL_TABLES).
   const schemaRes = await client.execute(
-    `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','index') AND tbl_name IN (${LIVE_TABLES.map((t) => `'${t}'`).join(",")}) ORDER BY type DESC, name`
+    `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table','index') AND tbl_name IN (${SWAPPED_TABLES.map((t) => `'${t}'`).join(",")}) ORDER BY type DESC, name`
   );
   const schemaStatements = schemaRes.rows
     .filter((r) => r.sql) // auto-indexes (PK-backed) have a NULL sql and need no separate statement
@@ -667,7 +820,7 @@ async function cmdBackup({ dryRun }) {
   const schemaPath = join(outDir, "schema.sql");
   writeFileSync(
     schemaPath,
-    `-- Schema DDL for LIVE_TABLES (${LIVE_TABLES.join(", ")}) captured at backup time (${ts}).\n` +
+    `-- Schema DDL for swapped tables (${SWAPPED_TABLES.join(", ")}) captured at backup time (${ts}).\n` +
       `-- Restore order: CREATE TABLE statements first, then load each table's .jsonl, then CREATE\n` +
       `-- INDEX statements.\n\n` +
       schemaStatements.join("\n") + (schemaStatements.length ? "\n" : ""),
@@ -677,9 +830,15 @@ async function cmdBackup({ dryRun }) {
   console.log(`backup: wrote schema DDL (${schemaStatements.length} statements) to ${rel(schemaPath)}`);
 
   const BATCH = 1000;
-  for (const table of LIVE_TABLES) {
+  const existing = await existingTableNames(client);
+  for (const table of SWAPPED_TABLES) {
+    if (!existing.has(table)) {
+      manifest.tables[table] = { state: "ABSENT", rowCount: "ABSENT", file: null, consistent: true };
+      console.log(`backup: ${table} is ABSENT (first-promotion additive table)`);
+      continue;
+    }
     console.log(`backup: dumping ${table}...`);
-    const pk = table === "tires" ? "barcode" : "normalized_part_number";
+    const pk = FINGERPRINT_PRIMARY_KEYS[table];
     const preCountRes = await client.execute(`SELECT COUNT(*) AS c FROM ${table}`);
     const preCount = Number(preCountRes.rows[0].c);
     const filePath = join(outDir, `${table}.jsonl`);
@@ -695,17 +854,19 @@ async function cmdBackup({ dryRun }) {
     // boundary held open across pages, so true point-in-time consistency requires promote to run in
     // a quiescent window (documented below); the count-consistency check catches any drift.
     let lastKey = null;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const res = lastKey === null
-        ? await client.execute(`SELECT * FROM ${table} ORDER BY ${pk} LIMIT ${BATCH}`)
-        : await client.execute({ sql: `SELECT * FROM ${table} WHERE ${pk} > ? ORDER BY ${pk} LIMIT ${BATCH}`, args: [lastKey] });
+        ? await client.execute(`SELECT * FROM ${table} ORDER BY ${pk.join(", ")} LIMIT ${BATCH}`)
+        : await client.execute({
+          sql: `SELECT * FROM ${table} WHERE ${keysetPredicate(pk)} ORDER BY ${pk.join(", ")} LIMIT ${BATCH}`,
+          args: pk.flatMap((_, i) => [...lastKey.slice(0, i), lastKey[i]]),
+        });
       if (res.rows.length === 0) break;
       for (const row of res.rows) {
         lines.push(JSON.stringify(row));
         written++;
       }
-      lastKey = res.rows[res.rows.length - 1][pk];
+      lastKey = pk.map((key) => res.rows[res.rows.length - 1][key]);
       if (res.rows.length < BATCH) break;
     }
     writeFileSync(filePath, lines.join("\n") + (lines.length ? "\n" : ""), "utf8");
@@ -733,8 +894,11 @@ async function cmdBackup({ dryRun }) {
 
   const manifestPath = join(outDir, "manifest.json");
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  const manifestSha256 = createHash("sha256").update(readFileSync(manifestPath)).digest("hex");
   console.log(`backup: wrote manifest to ${rel(manifestPath)}`);
-  return { outDir, manifest };
+  console.log(`backup: manifest SHA-256: ${manifestSha256}`);
+  console.log(`backup: record this digest outside ${rel(outDir)} and pass --expected-manifest-sha256 ${manifestSha256} to stage, verify, and promote.`);
+  return { outDir, manifest, manifestSha256 };
 }
 
 // =============================================================================================
@@ -751,7 +915,7 @@ function stagingTableNamesInScope() {
   ];
 }
 
-async function cmdStage({ dryRun, manifestArg }) {
+async function cmdStage({ dryRun, manifestArg, expectedManifestSha256 }) {
   requireConfirmOrExit(dryRun);
 
   const dropStatements = stagingTableNamesInScope().map((t) => `DROP TABLE IF EXISTS ${t};`);
@@ -787,10 +951,11 @@ async function cmdStage({ dryRun, manifestArg }) {
   // multi-step backup->stage->verify->promote workflow's implicit ordering an ENFORCED invariant
   // instead of an assumption - a live write landing between steps is now DETECTED, not silently lost.
   const manifestPath = resolveManifestPath(manifestArg);
-  const runManifest = loadRunManifest(manifestPath, "stage");
+  const runManifest = loadRunManifest(manifestPath, "stage", expectedManifestSha256);
   const client = await makeClient();
   await assertLiveUnchangedSinceManifest(client, runManifest, "stage");
   assertStagingContentUnchangedSinceManifest(runManifest, "stage");
+  assertSourceArtifactsBoundToManifest(runManifest, "stage");
   console.log(`stage: bound to run-manifest ${rel(manifestPath)} - live counts and staging content confirmed unchanged since backup.`);
 
   // Panel finding I3: hard-enforce operational-table isolation on every statement about to run,
@@ -822,7 +987,7 @@ async function cmdStage({ dryRun, manifestArg }) {
   // survives process restarts between `stage` and `verify`.
   mkdirSync(STAGING_DIR, { recursive: true });
   const expectedCountsManifestPath = join(STAGING_DIR, MANIFEST_FILE_NAME);
-  writeFileSync(expectedCountsManifestPath, JSON.stringify({ generatedAt: new Date().toISOString(), expectedCounts }, null, 2), "utf8");
+  writeFileSync(expectedCountsManifestPath, expectedCountsManifestContent(expectedCounts), "utf8");
   console.log(`stage: wrote expected-count manifest to ${rel(expectedCountsManifestPath)}`);
 
   console.log("stage: complete. Only staging_* tables were written.");
@@ -962,6 +1127,27 @@ async function runVerifyGates(client) {
     return { pass: result.pass, detail: result.detail };
   });
 
+  await gate("P_live_provenance_ids_preserved", async () => {
+    // Provenance is a first-promotion table, so an absent live table is valid. Once it exists,
+    // however, a staged replacement may never silently discard a live provenance record: a stale
+    // repair package can have internally exact staging counts while still predating live rows.
+    const existing = await existingTableNames(client, ["provenance"]);
+    if (!existing.has("provenance")) {
+      return { pass: true, detail: "live provenance table absent (first promotion); no IDs to preserve" };
+    }
+    const liveRes = await client.execute("SELECT id FROM provenance");
+    const liveIds = liveRes.rows.map((r) => String(r.id));
+    const stagingRes = await client.execute("SELECT id FROM staging_provenance");
+    const stagingIds = new Set(stagingRes.rows.map((r) => String(r.id)));
+    const missing = liveIds.filter((id) => !stagingIds.has(id));
+    return {
+      pass: missing.length === 0,
+      detail: missing.length === 0
+        ? `all ${liveIds.length} live provenance IDs present`
+        : `${missing.length} missing: ${missing.slice(0, 10).join(", ")}`,
+    };
+  });
+
   await gate("H_operational_tables_untouched", async () => {
     // Informational: confirm none of the staging load created/renamed any operational table.
     const res = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
@@ -974,7 +1160,7 @@ async function runVerifyGates(client) {
   return { passed, gates };
 }
 
-async function cmdVerify({ dryRun, manifestArg }) {
+async function cmdVerify({ dryRun, manifestArg, expectedManifestSha256 }) {
   if (dryRun) {
     // Codex panel finding M1: dry-run previously returned { passed: true }, which reads as a real
     // PASS to any caller/script that checks `.passed` - but NOTHING was evaluated; dry-run only
@@ -990,19 +1176,21 @@ async function cmdVerify({ dryRun, manifestArg }) {
     console.log("  Gate F: orphan staging_tire_product_part_number_aliases rows (expect 0) - DRY-RUN: not evaluated");
     console.log("  Gate G: every live tires.barcode present in staging_tires (expect 0 missing) - DRY-RUN: not evaluated");
     console.log("  Gate PN: every live tire_part_numbers key present in staging_tire_part_numbers, or explicitly listed in APPROVED_PN_KEY_DROPS.csv (unapproved missing = FAIL) - DRY-RUN: not evaluated");
+    console.log("  Gate P: every live provenance.id present in staging_provenance once live provenance exists (expect 0 missing) - DRY-RUN: not evaluated");
     console.log("  Gate H: operational tables untouched (SELECT COUNT(*) unchanged vs backup manifest, informational) - DRY-RUN: not evaluated");
     console.log("[dry-run] verify: DRY-RUN COMPLETE - no gate was evaluated, no PASS/FAIL verdict was reached. Run without --dry-run to actually verify.");
     return { passed: null, gates: [], dryRun: true };
   }
 
-  const client = await makeClient();
-
   // Panel finding C3: re-check this run is still bound to the same live/staging state the backup
   // captured, before spending time on the gates below.
   const runManifestPath = resolveManifestPath(manifestArg);
-  const runManifest = loadRunManifest(runManifestPath, "verify");
+  const runManifest = loadRunManifest(runManifestPath, "verify", expectedManifestSha256);
+  const client = await makeClient();
   await assertLiveUnchangedSinceManifest(client, runManifest, "verify");
   assertStagingContentUnchangedSinceManifest(runManifest, "verify");
+  assertSourceArtifactsBoundToManifest(runManifest, "verify");
+  assertStageCountArtifactBoundToManifest(runManifest, "verify");
   console.log(`verify: bound to run-manifest ${rel(runManifestPath)} - live counts and staging content confirmed unchanged since backup.`);
 
   const { passed, gates } = await runVerifyGates(client);
@@ -1223,9 +1411,12 @@ async function runPostSwapSmokeTest(client, ts, preSwapStagedCounts = null) {
 // second live write against the just-promoted tables), but nothing forces the operator to accept a
 // bad swap.
 // =============================================================================================
-async function cmdPromote({ dryRun, manifestArg }) {
+async function cmdPromote({ dryRun, manifestArg, expectedManifestSha256 }) {
   requireConfirmOrExit(dryRun);
   const ts = timestamp();
+  if (!dryRun) {
+    console.log("promote: OPERATOR GATE - keep all other Turso writers paused through acceptance or rollback; see scripts/tire-db-repair/TURSO_PROMOTION_RUNBOOK.md.");
+  }
 
   const baseRenameStatements = [
     `ALTER TABLE tires RENAME TO tires_old_${ts};`,
@@ -1251,16 +1442,17 @@ async function cmdPromote({ dryRun, manifestArg }) {
     return { ts, statements: baseRenameStatements };
   }
 
-  const client = await makeClient();
-
   // Panel finding C3: re-check this run is still bound to the same live/staging state the backup
   // captured. This is the LAST gate before the irreversible-in-practice swap executes, so it is
   // checked here even though stage() and verify() already checked it earlier in the pipeline - a
   // write could still land in the window between verify and promote.
   const runManifestPath = resolveManifestPath(manifestArg);
-  const runManifest = loadRunManifest(runManifestPath, "promote");
+  const runManifest = loadRunManifest(runManifestPath, "promote", expectedManifestSha256);
+  const client = await makeClient();
   await assertLiveUnchangedSinceManifest(client, runManifest, "promote");
   assertStagingContentUnchangedSinceManifest(runManifest, "promote");
+  assertSourceArtifactsBoundToManifest(runManifest, "promote");
+  assertStageCountArtifactBoundToManifest(runManifest, "promote");
   console.log(`promote: bound to run-manifest ${rel(runManifestPath)} - live counts and staging content confirmed unchanged since backup.`);
 
   // Critical finding #1(a): promote must NEVER trust a prior, separate `verify` invocation - staging
@@ -1371,6 +1563,9 @@ async function cmdPromote({ dryRun, manifestArg }) {
 // =============================================================================================
 async function cmdRollback({ dryRun, ts: tsArg }) {
   requireConfirmOrExit(dryRun);
+  if (!dryRun) {
+    console.log("rollback: OPERATOR GATE - keep all other Turso writers paused through failed-table delta recovery; see scripts/tire-db-repair/TURSO_PROMOTION_RUNBOOK.md.");
+  }
 
   // Panel finding I2: resolve the timestamp with explicit precedence so a caller who exported
   // PROMOTE_TS (expecting symmetry with the promote invocation) never silently falls through to
@@ -1420,7 +1615,7 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
     for (const s of baseStatements) console.log(`  ${s}`);
     for (const { live } of NEW_TABLES) {
       console.log(`  [conditional] IF ${live}_old_${ts} exists (second-promote rollback): ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts}; then ALTER TABLE ${live}_old_${ts} RENAME TO ${live};`);
-      console.log(`  [conditional] ELSE (first-promote rollback): DROP TABLE IF EXISTS ${live};`);
+      console.log(`  [conditional] ELSE (first-promote rollback): ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts};`);
     }
     console.log("  [conditional] then DROP INDEX IF EXISTS + CREATE INDEX for every restored table's secondary indexes");
     return { ts, statements: baseStatements };
@@ -1430,7 +1625,8 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
   // for this ts (i.e. the promotion being rolled back was a SECOND promote that renamed a prior
   // generation aside), restore that generation exactly like tires/tire_part_numbers: current live
   // -> `_failed_promotion_<ts>`, `_old_<ts>` -> live. If it does not exist (first-promote
-  // rollback), the original behavior stands: DROP the live table (there was no prior generation).
+  // rollback), preserve the current additive table under `_failed_promotion_<ts>` instead of
+  // dropping it. It may contain post-swap writes that must be explicitly reconciled.
   if (!client) client = await makeClient();
   const existingRes = await client.execute("SELECT name FROM sqlite_master WHERE type='table'");
   const existingNames = new Set(existingRes.rows.map((r) => String(r.name)));
@@ -1443,7 +1639,7 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
       newTableStatements.push(`ALTER TABLE ${live}_old_${ts} RENAME TO ${live};`);
       restoredNewTables.push(live);
     } else {
-      newTableStatements.push(`DROP TABLE IF EXISTS ${live};`);
+      newTableStatements.push(`ALTER TABLE ${live} RENAME TO ${live}_failed_promotion_${ts};`);
     }
   }
 
@@ -1471,26 +1667,22 @@ async function cmdRollback({ dryRun, ts: tsArg }) {
 // main
 // =============================================================================================
 async function main() {
-  const { subcommand, dryRun } = parseArgs(process.argv);
-  const tsFlagIdx = process.argv.indexOf("--ts");
-  const ts = tsFlagIdx >= 0 ? process.argv[tsFlagIdx + 1] : undefined;
-  const manifestFlagIdx = process.argv.indexOf("--manifest");
-  const manifestArg = manifestFlagIdx >= 0 ? process.argv[manifestFlagIdx + 1] : undefined;
+  const { subcommand, dryRun, ts, manifestArg, expectedManifestSha256 } = parseArgs(process.argv);
 
   switch (subcommand) {
     case "backup":
       await cmdBackup({ dryRun });
       break;
     case "stage":
-      await cmdStage({ dryRun, manifestArg });
+      await cmdStage({ dryRun, manifestArg, expectedManifestSha256 });
       break;
     case "verify": {
-      const { passed } = await cmdVerify({ dryRun, manifestArg });
+      const { passed } = await cmdVerify({ dryRun, manifestArg, expectedManifestSha256 });
       if (!dryRun && !passed) process.exit(1);
       break;
     }
     case "promote": {
-      const result = await cmdPromote({ dryRun, manifestArg });
+      const result = await cmdPromote({ dryRun, manifestArg, expectedManifestSha256 });
       if (!dryRun && result?.failed) process.exit(1);
       break;
     }
@@ -1499,7 +1691,7 @@ async function main() {
       break;
     default:
       console.error(
-        "Usage: node scripts/tire-db-repair/10_promote_execute.mjs <backup|stage|verify|promote|rollback> [--dry-run] [--ts <timestamp>] [--manifest <path>]"
+        "Usage: node scripts/tire-db-repair/10_promote_execute.mjs <backup|stage|verify|promote|rollback> [--dry-run] [--ts <timestamp>] [--manifest <path>] [--expected-manifest-sha256 <64-hex>]"
       );
       process.exit(2);
   }
