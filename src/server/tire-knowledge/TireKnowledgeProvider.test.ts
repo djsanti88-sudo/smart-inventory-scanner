@@ -303,6 +303,45 @@ describe("resolveExactBarcodeLocal", () => {
     expect(hasCountableTireIdentity(result!.results[0])).toBe(true);
   });
 
+  it("normalizes a compact trusted-corpus commercial size without accepting it as a generic input size", async () => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      barcode: "0840139634284",
+      model: "Regional steer",
+      size: "29575225",
+      raw_size_text: "29575225",
+      load_index: "",
+      speed_rating: "",
+      source_count: 3,
+    });
+
+    const result = await resolveExactBarcodeLocal("0840139634284");
+
+    expect(result).not.toBeNull();
+    expect(result!.results[0].specsShort).toBe("295/75R22.5");
+    expect(result!.results[0].productName).toContain("295/75R22.5");
+    expect(hasCountableTireIdentity(result!.results[0])).toBe(true);
+  });
+
+  it("uses a trusted row's explicit split-decimal flotation signal before its compact size tag", async () => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      barcode: "0840139634284",
+      model: "35x12 50r20lt Trail model",
+      size: "35125020",
+      raw_size_text: "35125020",
+      load_index: "",
+      speed_rating: "",
+      source_count: 3,
+    });
+
+    const result = await resolveExactBarcodeLocal("0840139634284");
+
+    expect(result).not.toBeNull();
+    expect(result!.results[0].specsShort).toBe("35X12.50R20");
+    expect(hasCountableTireIdentity(result!.results[0])).toBe(true);
+  });
+
   it.each([
     "3095015",
     "10/75R15.3",

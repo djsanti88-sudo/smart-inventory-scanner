@@ -24,7 +24,7 @@ const METRIC = /(?<![A-Z0-9])(?:(P|LT|ST)\s*)?(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*
 // "decimal rim required to avoid false positives" for the same reason). Without it, a bicycle "NN X
 // N.NNN" dimension like "16 X 2.125" false-matched by splitting the decimal mid-digit ("2.1" width +
 // "25" rim, fabricating "16X2.1R25") - there is no separator there at all for this to require.
-const FLOTATION = /(?:(?<![A-Z0-9])(P|LT|ST))?(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
+const FLOTATION = /(?:(?<![A-Z0-9])(P|LT|ST))?(\d{2})\s*X\s*(\d{1,2}(?:\.\d{1,2}|\s+\d{1,2}))\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
 // A few confirmed light-truck listings write the flotation separator as a slash rather than X
 // ("LT37/12.50R22"). This variant is deliberately stricter than ordinary flotation: its LT/P/ST
 // prefix must be directly attached, otherwise "37/12.50R22" is ambiguous with a ratio/part number.
@@ -89,9 +89,10 @@ export function matchTireSize(input: string | null | undefined): TireSizeMatch |
   }
 
   m = FLOTATION.exec(s);
-  if (m && okFlotationDiameter(Number(m[2])) && okFlotationWidth(Number(m[3])) && okRim(Number(m[5]))) {
+  const flotationWidth = m?.[3]?.replace(/\s+/g, ".");
+  if (m && flotationWidth && okFlotationDiameter(Number(m[2])) && okFlotationWidth(Number(flotationWidth)) && okRim(Number(m[5]))) {
     const prefix = (m[1] ?? "").toUpperCase();
-    return withLoadSpeed(`${prefix}${m[2]}X${m[3]}R${m[5]}`, s, m[0]);
+    return withLoadSpeed(`${prefix}${m[2]}X${flotationWidth}R${m[5]}`, s, m[0]);
   }
 
   m = PREFIX_SLASH_FLOTATION.exec(s);
@@ -128,6 +129,30 @@ export function matchTireSize(input: string | null | undefined): TireSizeMatch |
 /** Canonical tire size, or null when no confident size is found. */
 export function normalizeTireSize(input: string | null | undefined): string | null {
   return matchTireSize(input)?.canonical ?? null;
+}
+
+export type TrustedCorpusSizeText = {
+  size?: string | null;
+  rawSizeText?: string | null;
+  model?: string | null;
+};
+
+/**
+ * Normalize a trusted corpus row's display size without widening the generic scanner-input parser.
+ * A compact flotation tag is accepted only when the same exact row carries an explicit, parseable
+ * flotation spelling; a compact commercial tag is accepted only when its decimal-rim grammar is unique.
+ */
+export function normalizeTrustedCorpusTireSize(row: TrustedCorpusSizeText): string | null {
+  const size = row.size ?? "";
+  const direct = normalizeTireSize(size) ?? normalizeTireSize(row.rawSizeText) ?? normalizeTireSize(row.model);
+  if (direct) return direct.split(" ")[0];
+
+  if (!/^\d{8}$/.test(size)) return null;
+  const width = Number(size.slice(0, 3));
+  const aspect = Number(size.slice(3, 5));
+  const rimTenths = Number(size.slice(5));
+  if (width < 125 || width > 500 || aspect < 20 || aspect > 95 || rimTenths < 85 || rimTenths > 305 || rimTenths % 10 !== 5) return null;
+  return `${width}/${aspect}R${(rimTenths / 10).toFixed(1)}`;
 }
 
 /**

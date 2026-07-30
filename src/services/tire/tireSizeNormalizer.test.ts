@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeTireSize, matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
+import { normalizeTireSize, normalizeTrustedCorpusTireSize, matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { parseTireIdentity } from "@/services/catalog/tireListingNormalizer";
 
 // TEST-FIRST table: every common tire-size shape -> ONE canonical string. Unknown -> null (never guess).
@@ -18,6 +18,12 @@ const CASES: Array<[string, string | null]> = [
   ["2356017", "235/60R17"],
   // --- flotation / commercial ---
   ["35X12.50R20", "35X12.50R20"],
+  // Boss exact-corpus titles sometimes split the decimal flotation width with a space.
+  // The explicit X + R construction and plausibility bounds make this unambiguous.
+  ["31x10 50r15lt", "31X10.50R15"],
+  ["30x9 50r15lt", "30X9.50R15"],
+  ["37x13 50r22lt", "37X13.50R22"],
+  ["33x12 5r22lt", "33X12.5R22"],
   ["11R22.5", "11R22.5"],
   ["295/75R22.5", "295/75R22.5"],
   // --- dual load index ---
@@ -67,6 +73,8 @@ const CASES: Array<[string, string | null]> = [
   ["16 X 2.125", null],
   ["K50 16 X 2.125", null],
   ["700 X 23C", null], // road-bike tire dimension, not a flotation size
+  ["31x10 50", null], // decimal-width shorthand still requires an explicit rim construction
+  ["31x10 50r99", null], // impossible rim
   ["37/12.50R22", null], // slash flotation requires an attached LT/P/ST construction prefix
   ["LT16/2.125R25", null], // directly attached but implausible flotation dimensions
   ["LT 37/12.50R22", null], // separated prefix must not be promoted to a trusted size
@@ -78,6 +86,21 @@ const CASES: Array<[string, string | null]> = [
 describe("normalizeTireSize", () => {
   it.each(CASES)("normalizes %j -> %j", (input, expected) => {
     expect(normalizeTireSize(input)).toBe(expected);
+  });
+});
+
+describe("normalizeTrustedCorpusTireSize", () => {
+  it("uses exact-row model evidence to disambiguate a compact flotation tag", () => {
+    expect(normalizeTrustedCorpusTireSize({
+      size: "35125020",
+      rawSizeText: "35125020",
+      model: "35x12 50r20lt Trail model",
+    })).toBe("35X12.50R20");
+  });
+
+  it("decodes only unambiguous compact decimal-rim commercial sizes", () => {
+    expect(normalizeTrustedCorpusTireSize({ size: "29575225" })).toBe("295/75R22.5");
+    expect(normalizeTrustedCorpusTireSize({ size: "35125020" })).toBeNull();
   });
 });
 
