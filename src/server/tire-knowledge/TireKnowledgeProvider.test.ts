@@ -294,6 +294,31 @@ describe("resolveExactBarcodeLocal", () => {
     await expect(resolveExactBarcodeLocal("10012345678902")).resolves.toBeNull();
   });
 
+  it.each([
+    ["8935341201460", "TIRE_68FAA4E35FDBAD43F790", "4120146", "Blackhawk", "255/50R20"],
+    ["8935341201521", "TIRE_1FA2DBB5139B81DBB6AE", "4120152", "Blackhawk", "225/55R18"],
+    ["8935341201668", "TIRE_68997FE49D8595B9DCFE", "4120166", "Blackhawk", "235/60R17"],
+    ["8859305540856", "TIRE_87E088822962EF0503C6", "40856", "Arisun", "285/45R22"],
+  ])("verifies the frozen Boss exact-evidence row %s despite its ordinary review-only tier", async (barcode, uid, mpn, brand, size) => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      barcode,
+      canonical_product_uid: uid,
+      manufacturer_part_number: mpn,
+      brand,
+      size,
+      raw_size_text: size,
+      barcode_type: "ean",
+      confidence: "chatgpt_review_only",
+      source_count: 1,
+    });
+
+    await expect(resolveExactBarcodeLocal(barcode)).resolves.toMatchObject({
+      canonicalProductUid: uid,
+      decision: { status: "verified", exactCodeEvidenceVerifiedByApp: true },
+    });
+  });
+
   it("normalizes a compact trusted-corpus metric size in its countable result fields", async () => {
     mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
       ...KUMHO_ROW_REAL_CONVENTION,

@@ -6,6 +6,7 @@ import { isTrustedLocalDemoTireRow } from "@/server/tire-knowledge/localDemoTrus
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
 import { normalizeTrustedCorpusTireSize } from "@/services/tire/tireSizeNormalizer";
+import { matchesBossExactEvidenceLedger } from "@/server/tire-knowledge/bossExactEvidenceLedger";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
@@ -129,7 +130,7 @@ export async function resolveExactBarcode(code: string): Promise<CorpusDecodeRes
 /** Local-demo corpus resolution deliberately accepts only the conservative SQLite evidence tier. */
 export async function resolveExactBarcodeLocal(code: string): Promise<CorpusDecodeResult | null> {
   const row = await lookupByExactBarcodeLocal(code);
-  if (!row || !isTrustedLocalDemoTireRow(row, row.localDemoTwinSelected === true)) return null;
+  if (!row || (!isTrustedLocalDemoTireRow(row, row.localDemoTwinSelected === true) && !matchesBossExactEvidenceLedger(row))) return null;
   const result = toResult(row, true);
   const decision: DecodeDecision = {
     status: "verified", confidence: CONF[row.confidence] ?? 0.92,
