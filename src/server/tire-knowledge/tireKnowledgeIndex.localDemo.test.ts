@@ -91,6 +91,19 @@ describe("lookupByExactBarcodeLocal", () => {
     await expect(lookupByExactBarcodeLocal("191563023534")).resolves.toBeNull();
   });
 
+  it.each([
+    ["invalid raw checksum", { barcode: "191563023535" }, { barcode: "0191563023535" }],
+    ["invalid companion checksum", {}, { barcode: "0191563023535" }],
+    ["valid but non-padding barcode", {}, { barcode: "0840139632891" }],
+    ["empty canonical uid", { canonical_product_uid: "" }, { canonical_product_uid: "" }],
+  ])("fails closed for a %s twin pair", async (_label, rawPatch, companionPatch) => {
+    const raw = demoRow({ barcode: "191563023534", canonical_product_uid: "TIRE_SHARED", manufacturer_part_number: "15506", ...rawPatch });
+    const companion = demoRow({ barcode: "0191563023534", canonical_product_uid: "TIRE_SHARED", barcode_type: "ean", manufacturer_part_number: "NX15506", confidence: "process_verified_green", usable_for: "auto_count_candidate", source_count: 0, ...companionPatch });
+    const expectedCompanionLookupKey = raw.barcode.length === 12 ? `0${raw.barcode}` : "0191563023534";
+    mocks.getKnowledgeDb.mockReturnValue({ prepare: vi.fn(() => ({ get: (code: string) => code === raw.barcode ? raw : code === expectedCompanionLookupKey ? companion : undefined })) });
+    await expect(lookupByExactBarcodeLocal(raw.barcode)).resolves.toBe(raw);
+  });
+
   it("uses only SQLite for an exact hit and miss", async () => {
     const get = vi.fn((code: string) => code === row.barcode ? row : undefined);
     mocks.getKnowledgeDb.mockReturnValue({ prepare: vi.fn(() => ({ get })) });

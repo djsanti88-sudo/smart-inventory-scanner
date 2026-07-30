@@ -37,3 +37,9 @@ Result: passed. `git diff --check` passed.
 Fail-closed coverage includes different/empty UID, incompatible MPN, review/non-green/inactive/missing-model/missing-size companions, GTIN-14, raw trusted precedence, and raw-absent trusted/weak candidate behavior. The `tirePartNumberVariants` intersection occurs only after same-UID equality; numeric core never crosses a UID boundary.
 
 Concern: the companion source counts in the real corpus are 0/1, so this intentionally narrow, in-memory selected-twin marker is necessary. It must not be reused outside the verified local exact-twin path.
+
+## Fix round 1: checksum and identity negative coverage
+
+Added fail-closed regressions for an invalid raw checksum, invalid companion checksum, valid-length but non-leading-zero-equivalent pair, and empty UID. All four passed immediately because the existing implementation already has explicit checks for checksum validity, stripped-code equality, and non-empty equal UID; these are coverage additions, not evidence of a production gap.
+
+`npx.cmd vitest run src/server/tire-knowledge/tireKnowledgeIndex.localDemo.test.ts` passed (25 tests), as did focused ESLint and `git diff --check`.
