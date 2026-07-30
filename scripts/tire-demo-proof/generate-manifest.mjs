@@ -231,7 +231,7 @@ function databaseRows(databasePath) {
   }
 }
 
-function countableSourceRows(rows) {
+export function countableSourceRows(rows) {
   const indexes = countableLocalDemoRowIndexes(rows);
   if (!Array.isArray(indexes) || !indexes.every((index) => Number.isSafeInteger(index) && index >= 0 && index < rows.length)) {
     throw new Error("Local demo countability helper returned invalid row indexes.");

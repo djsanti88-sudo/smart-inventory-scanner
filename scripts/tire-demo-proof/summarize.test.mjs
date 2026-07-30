@@ -3,13 +3,35 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { summarizeDirectory, summarizeResults } from "./summarize.mjs";
+import * as summarizeModule from "./summarize.mjs";
+const { summarizeDirectory, summarizeResults } = summarizeModule;
 import { createHash } from "node:crypto";
 const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function fixture(batchNumber) { const rows = Array.from({ length: 100 }, (_, i) => ({ barcode:`${batchNumber}-${i}`, barcodeType:"upc", canonicalProductUid:`u-${batchNumber}-${i}`, brand:"B", model:"M", size:"S", loadIndex:"", speedRating:"", manufacturerPartNumber:"", type:"", season:"", sourceCount:1, confidence:"verified", currentStatus:"active_retail", usableFor:"auto_count_candidate", fieldCompletenessScore:100, angle:"test", stratum:"test", ordinal:(batchNumber - 1) * 100 + i + 1, batch:batchNumber, agent:Math.ceil(batchNumber / 3) })); const batch={schemaVersion:1,seed:"s",gitSha:"abcdef1",databaseSha256:"a".repeat(64),batch:batchNumber,agent:Math.ceil(batchNumber / 3),rowCount:100,rows}; batch.batchSha256=digest(rows); batch.expectedBarcodesSha256=digest(rows.map(r=>r.barcode)); batch.expectedCanonicalProductUidsSha256=digest(rows.map(r=>r.canonicalProductUid)); const events=rows.map((r)=>({eventId:`e-${r.barcode}`,cleanCode:r.barcode,matchedProductId:`p-${r.barcode}`,canonicalProductUid:r.canonicalProductUid,quantityDelta:1,quantityAfterScan:1,status:"verified"})); const counts=events.map(e=>({productId:e.matchedProductId,quantity:1,scanEventIds:[e.eventId]})); return {batch,result:{observations:rows.map((r,i)=>({...r,eventId:`e-${r.barcode}`,matchedProductId:`p-${r.barcode}`,feedVisible:true,status:"verified",rawStatus:"Verified (app-confirmed)",latencyMs:(batchNumber-1)*100+i,consoleErrors:[],nonLocalRequests:[]})),serverEgressAttempts:[],runtimeSessionNonce:"c".repeat(32),ledgerProof:{schemaVersion:1,sessionId:"s",generatedAt:"2026-07-29T00:00:00.000Z",manifest:{schemaVersion:1,gitSha:"abcdef1",databaseSha256:"a".repeat(64),manifestSha256:"b".repeat(64),seed:"s",batch:batchNumber,batchSha256:batch.batchSha256,expectedBarcodesSha256:batch.expectedBarcodesSha256,expectedCanonicalProductUidsSha256:batch.expectedCanonicalProductUidsSha256},expected:{rows:100,barcodes:rows.map(r=>r.barcode)},events,finalCounts:counts,replayedCounts:counts,assertions:{allExpectedBarcodesSeenExactlyOnce:true,unexpectedBarcodeCount:0,duplicateEventIdCount:0,missingEventIdCount:0,unmatchedEventCount:0,canonicalIdentityMismatchCount:0,distinctExpectedCanonicalProductUidCount:100,distinctMatchedProductIdCount:100,distinctFinalCountProductIdCount:100,distinctReplayedCountProductIdCount:100,canonicalProductMatchedProductBijection:true,finalEqualsReplay:true,countEventIdsEqualReplayEventIds:true,everyCountEventIdExistsInFeed:true,expectedQuantity:100,finalQuantity:100,replayedQuantity:100,noDrops:true,noDuplicates:true,passed:true}}}}; }
 test("summary refuses green without exactly 30 passing batches", () => { assert.throws(() => summarizeResults([]), /exactly 30/i); });
 test("summary rejects duplicate internal batch numbers before accepting a 30-batch result", () => { const entries = Array.from({ length: 30 }, (_, index) => ({ batch: { batch: index ? 1 : 1 }, result: {} })); assert.throws(() => summarizeResults(entries), /batch numbers/i); });
 test("summary aggregates all 3000 raw observations with nearest-rank percentiles and zero safety metrics", () => { const summary=summarizeResults(Array.from({length:30},(_,i)=>fixture(i+1))); assert.equal(summary.total,3000); assert.equal(summary.countedQuantity,3000); assert.equal(summary.p50Ms,1499); assert.equal(summary.p95Ms,2849); assert.equal(summary.p99Ms,2969); assert.equal(summary.nonLocalRequestCount,0); assert.equal(summary.serverEgressAttemptCount,0); });
+
+test("current-run verification applies the same seed-shadow countability filter as manifest generation", () => {
+  assert.equal(typeof summarizeModule.prepareCurrentSourceRows, "function");
+  const base = {
+    barcode_type: "upc",
+    brand: "brand",
+    model: "trail_model",
+    model_display: "",
+    size: "215/70R15",
+    load_index: "102",
+    speed_rating: "H",
+    current_status: "active_retail",
+    usable_for: "auto_count_candidate",
+    source_count: 2,
+  };
+  const rows = summarizeModule.prepareCurrentSourceRows([
+    { ...base, barcode: "848983012906", canonical_product_uid: "TIRE_SEED_SHADOW" },
+    { ...base, barcode: "700000000009", canonical_product_uid: "TIRE_COUNTABLE" },
+  ]);
+  assert.deepEqual(rows.map((row) => row.canonical_product_uid), ["TIRE_COUNTABLE"]);
+});
 
 function writeRun(entries) {
   const parent = mkdtempSync(join(tmpdir(), "scanbin-proof-parent-"));

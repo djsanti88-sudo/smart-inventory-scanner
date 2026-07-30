@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { validateBatchResult } from "./validate-result.mjs";
-import { validateManifest } from "./generate-manifest.mjs";
+import { countableSourceRows, validateManifest } from "./generate-manifest.mjs";
 import { assertLocalDemoDatabase } from "../local-demo-preflight.mjs";
 
 const MANIFEST_KEYS = ["schemaVersion", "seed", "gitSha", "databaseSha256", "generatedAt", "total", "batchSize", "batchCount", "agentCount", "manifestSha256", "rows"];
@@ -34,13 +34,17 @@ function databaseRows(databasePath) {
   } finally { db.close(); }
 }
 
+export function prepareCurrentSourceRows(rows) {
+  return countableSourceRows(rows);
+}
+
 function defaultVerifyCurrentRun(manifest, batches) {
   const currentGitSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim().toLowerCase();
   if (manifest.gitSha !== currentGitSha) throwInvalid("manifest git SHA does not equal current git HEAD");
   const databasePath = resolve("src/server/knowledge.generated.db");
   const database = assertLocalDemoDatabase(databasePath);
   if (manifest.databaseSha256 !== database.databaseSha256) throwInvalid("manifest database SHA does not equal the current local database");
-  validateManifest(manifest, batches, { sourceRows: databaseRows(databasePath) });
+  validateManifest(manifest, batches, { sourceRows: prepareCurrentSourceRows(databaseRows(databasePath)) });
 }
 
 function isStrictEgressEntry(value) {
