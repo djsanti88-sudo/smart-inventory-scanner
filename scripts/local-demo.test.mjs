@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer, createConnection } from "node:net";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 import * as launcher from "./local-demo.mjs";
 
@@ -59,6 +68,132 @@ test("launcher refuses malformed or non-empty build egress ledgers", () => {
     writeFileSync(ledger, `${JSON.stringify({ pid: 1, host: "example.com" })}\n`);
     assert.throws(() => launcher.assertEmptyEgressLedger(ledger), /blocked.*during.*build/i);
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function reservePort() {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const server = createServer();
+    server.once("error", rejectPromise);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close((error) => error ? rejectPromise(error) : resolvePromise(port));
+    });
+  });
+}
+
+function connectOnce(host, port) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const socket = createConnection({ host, port });
+    socket.setTimeout(1000);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolvePromise();
+    });
+    const reject = (error) => {
+      socket.destroy();
+      rejectPromise(error);
+    };
+    socket.once("error", reject);
+    socket.once("timeout", () => reject(new Error(`Timed out connecting to ${host}:${port}`)));
+  });
+}
+
+async function waitForLoopback(port, child, output, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`Next production server exited before readiness.\n${output()}`);
+    }
+    try {
+      await connectOnce("127.0.0.1", port);
+      return;
+    } catch {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    }
+  }
+  throw new Error(`Next production server did not become ready.\n${output()}`);
+}
+
+async function stopChild(child) {
+  if (child.exitCode !== null) return;
+  child.kill();
+  await new Promise((resolvePromise, rejectPromise) => {
+    const timeout = setTimeout(
+      () => rejectPromise(new Error("Next production server did not terminate cleanly.")),
+      10_000,
+    );
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolvePromise();
+    });
+  });
+}
+
+test("actual guarded Next production server is loopback-only and records blocked worker egress", async () => {
+  const fixture = resolve("scripts/fixtures/local-demo-next");
+  assert.equal(existsSync(fixture), true, "Task 1 Next production fixture is required");
+  const directory = mkdtempSync(join(tmpdir(), "scanbin-next-production-"));
+  const appDirectory = join(directory, "app");
+  const ledger = join(directory, "egress.jsonl");
+  let server;
+  try {
+    cpSync(fixture, appDirectory, { recursive: true });
+    symlinkSync(resolve("node_modules"), join(appDirectory, "node_modules"), "junction");
+    writeFileSync(ledger, "");
+    const port = await reservePort();
+    const plan = launcher.buildLocalDemoLaunchPlan({
+      argv: ["--port", String(port)],
+      ledgerPath: resolve("reports/local-tire-demo/runtime/next-integration-ledger.jsonl"),
+    });
+    const environment = {
+      ...plan.build.env,
+      SCANBIN_LOCAL_DEMO_EGRESS_LEDGER: ledger,
+      NEXT_TELEMETRY_DISABLED: "1",
+    };
+    const nextBin = resolve("node_modules/next/dist/bin/next");
+    const build = spawnSync(process.execPath, [nextBin, "build", "--webpack"], {
+      cwd: appDirectory,
+      encoding: "utf8",
+      env: environment,
+      timeout: 120_000,
+    });
+    assert.equal(build.status, 0, `${build.stdout}\n${build.stderr}`);
+    assert.equal(readFileSync(ledger, "utf8"), "");
+
+    let serverOutput = "";
+    server = spawn(process.execPath, [nextBin, "start", "-H", "127.0.0.1", "-p", String(port)], {
+      cwd: appDirectory,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    server.stdout.on("data", (chunk) => { serverOutput += chunk; });
+    server.stderr.on("data", (chunk) => { serverOutput += chunk; });
+    await waitForLoopback(port, server, () => serverOutput);
+
+    const response = await fetch(`http://127.0.0.1:${port}/api/canary`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      blocked: true,
+      code: "LOCAL_DEMO_EGRESS_BLOCKED",
+    });
+
+    const externalAddress = Object.values(networkInterfaces()).flat()
+      .find((address) => address && address.family === "IPv4" && !address.internal)?.address;
+    assert.ok(externalAddress, "A machine non-loopback IPv4 address is required for binding proof");
+    await assert.rejects(connectOnce(externalAddress, port));
+
+    const entries = readFileSync(ledger, "utf8").trim().split(/\r?\n/).map(JSON.parse);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].host, "example.com");
+    assert.equal(entries[0].path, "/task-1-canary");
+    assert.notEqual(entries[0].pid, process.pid);
+  } finally {
+    if (server) await stopChild(server);
     rmSync(directory, { recursive: true, force: true });
   }
 });
