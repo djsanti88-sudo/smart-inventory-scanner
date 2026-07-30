@@ -31,8 +31,15 @@ export default function SettingsPage() {
   // AI/provider + catalog-internals sections are platformOwner-only (customer-facing UI must not expose them).
   const isPlatform = useIsPlatformOwner();
 
+  // Silent-failure fix (review of 92e9c32c, fix 3b): poll refreshAiStatus() every 60s so a transient
+  // fetch failure on the mount-time call self-heals instead of leaving stale AI/kill-switch status
+  // for the whole session. Interval is cleared on unmount so it never leaks past this page.
   useEffect(() => {
     void refreshAiStatus();
+    const intervalId = setInterval(() => {
+      void refreshAiStatus();
+    }, 60_000);
+    return () => clearInterval(intervalId);
   }, [refreshAiStatus]);
 
   const verifiedCatalogCount = catalog.filter((e) => e.verificationStatus === "verified").length;
@@ -295,7 +302,7 @@ export default function SettingsPage() {
         <Row label="Last failure reason">
           <span className="text-sm text-zinc-600" data-testid="last-failure">{aiStatus.lastFailureReason || "none"}</span>
         </Row>
-        <KillSwitchBanner killSwitchOn={aiStatus.killSwitchOn} />
+        <KillSwitchBanner killSwitchOn={aiStatus.killSwitchOn} statusUnknown={aiStatus.killSwitchStatusUnknown} />
         <Toggle
           label="Emergency stop (pause all AI calls)"
           checked={aiStatus.emergencyStop}

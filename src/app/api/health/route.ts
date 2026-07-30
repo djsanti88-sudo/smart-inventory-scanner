@@ -20,6 +20,24 @@ function json(body: unknown, init: number | ResponseInit): NextResponse {
   return NextResponse.json(body, { ...resolved, headers: { ...resolved.headers, "Cache-Control": "no-store" } });
 }
 
+// Any run of 20+ token characters (alnum/-/_) is treated as secret-shaped and redacted outright -
+// long enough that ordinary English/error words never hit it, but auth tokens, API keys, and JWTs
+// reliably do. Credentials embedded in a URL (scheme://user:pass@host) are stripped first so the
+// generic redaction below never needs to parse URL structure.
+const SECRET_LIKE_TOKEN = /[A-Za-z0-9_-]{20,}/g;
+
+/**
+ * Bind a caught health-check error into a short, sanitized, human-readable detail string so an
+ * on-call engineer can tell a config problem (bad credential, missing env var) apart from a
+ * transient outage (ECONNREFUSED, ETIMEDOUT) from the log line alone - without ever leaking a
+ * secret value. Never throws; always returns a string (log.ts truncates further to 200 chars).
+ */
+function sanitizeHealthError(err: unknown): string {
+  const raw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const noCreds = raw.replace(/:\/\/[^\s/]+@/g, "://[redacted]@");
+  return noCreds.replace(SECRET_LIKE_TOKEN, "[redacted]");
+}
+
 /** Race a promise against a short timeout. Rejects (never hangs) if the timeout wins. */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -45,10 +63,19 @@ async function checkFirestore(): Promise<boolean> {
     const { COLLECTIONS } = await import("@/services/db/types");
     await withTimeout(getAdminDb().collection(COLLECTIONS.catalogEntries).limit(1).get(), timeoutMs);
     return true;
-  } catch {
-    // Never leak the underlying error (connection string, credential detail) to the caller -
-    // this is an untrusted, unauthenticated endpoint. Server-side log only.
-    logServerEvent({ route: "/api/health", event: "firestore_unreachable", reasonCode: "firestore_error", status: 200 });
+  } catch (err) {
+    // Never leak the underlying error (connection string, credential detail) to the HTTP caller -
+    // this is an untrusted, unauthenticated endpoint. The bound, sanitized detail goes server-side
+    // log only, at ERROR severity: this failure always flips the overall `ok` to false, so it must
+    // never quietly log as a routine warn just because the HTTP response itself stays 200.
+    logServerEvent({
+      route: "/api/health",
+      event: "firestore_unreachable",
+      reasonCode: "firestore_error",
+      status: 200,
+      severity: "error",
+      detail: sanitizeHealthError(err),
+    });
     return false;
   }
 }
@@ -61,8 +88,15 @@ async function checkTurso(): Promise<boolean> {
     const storage = await withTimeout(ladderStorage(), timeoutMs);
     await withTimeout(storage.get("__health_check__"), timeoutMs);
     return true;
-  } catch {
-    logServerEvent({ route: "/api/health", event: "turso_unreachable", reasonCode: "turso_error", status: 200 });
+  } catch (err) {
+    logServerEvent({
+      route: "/api/health",
+      event: "turso_unreachable",
+      reasonCode: "turso_error",
+      status: 200,
+      severity: "error",
+      detail: sanitizeHealthError(err),
+    });
     return false;
   }
 }

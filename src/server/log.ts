@@ -24,6 +24,11 @@ export interface LogEvent {
   businessId?: string;
   status?: number;
   detail?: string;
+  /** Explicit level override (silent-failure fix). Without this, level is derived from `status`
+   *  (>=500 -> console.error, else console.warn) - but some events (e.g. a 200 health response
+   *  that is honestly ok:false) must page as an error even though the HTTP status itself must
+   *  stay a benign 200 for uptime monitors. Set this to force the level regardless of `status`. */
+  severity?: "error" | "warn";
 }
 
 function truncate(value: string, max: number): string {
@@ -49,7 +54,8 @@ export function logServerEvent(input: LogEvent): void {
   if (input.detail !== undefined) line.detail = truncate(input.detail, MAX_DETAIL_LENGTH);
 
   const payload = JSON.stringify(line);
-  if (typeof input.status === "number" && input.status >= 500) {
+  const level = input.severity ?? (typeof input.status === "number" && input.status >= 500 ? "error" : "warn");
+  if (level === "error") {
     console.error(payload);
   } else {
     console.warn(payload);

@@ -262,6 +262,46 @@ describe("Aggressive auto-decode on scan (mocked, no live tokens)", () => {
     expect(store.getState().aiStatus.killSwitchOn).toBe(false);
   });
 
+  // Silent-failure fix (review of 92e9c32c): a single per-mount refreshAiStatus fetch failure must
+  // never leave the banner silently reporting "off" while the SERVER kill switch is actually on -
+  // it must surface a distinct unknown/stale state instead of defaulting to a false "off".
+  it("refreshAiStatus marks killSwitchStatusUnknown: true on a fetch throw, without clobbering the last-known killSwitchOn", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, killSwitchOn: true, killSwitchStatusUnknown: false } }));
+    const { restore } = failStub();
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    expect(store.getState().aiStatus.killSwitchStatusUnknown).toBe(true);
+    expect(store.getState().aiStatus.killSwitchOn).toBe(true); // last known value preserved, not reset to false
+  });
+
+  it("refreshAiStatus marks killSwitchStatusUnknown: true when the GET response is not ok (e.g. 500/503)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch;
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(store.getState().aiStatus.killSwitchStatusUnknown).toBe(true);
+  });
+
+  it("refreshAiStatus clears killSwitchStatusUnknown on the next successful refresh (self-heal)", async () => {
+    const store = createTestScanStore({ db: new MockDb() });
+    store.setState((s) => ({ aiStatus: { ...s.aiStatus, killSwitchStatusUnknown: true } }));
+    const { restore } = stub({ liveEnabled: true, autoDecodeOnScan: true, geminiConfigured: true, openaiConfigured: true, dailyLimit: 200, missingKeys: [], killSwitchOn: false });
+    try {
+      await store.getState().refreshAiStatus();
+    } finally {
+      restore();
+    }
+    expect(store.getState().aiStatus.killSwitchStatusUnknown).toBe(false);
+  });
+
   it("a KNOWN (approved) scan never calls AI", () => {
     const store = aggressiveStore();
     const { spy, restore } = stub(VERIFIED);

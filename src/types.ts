@@ -602,6 +602,11 @@ export interface AiStatus {
    *  above, which is a CLIENT preference the shop owner toggles locally - this one reflects a server
    *  operator's total-stop that the shop owner cannot turn off themselves. */
   killSwitchOn: boolean;
+  /** Silent-failure fix: true when the most recent refreshAiStatus() could not confirm the server's
+   *  kill-switch state (fetch threw, or the GET response was not ok). `killSwitchOn` keeps its
+   *  last-known value in that case - it is never silently reset to a false "off" - and the UI must
+   *  treat this as "unknown/stale", not as confirmation that AI lookup is fine. */
+  killSwitchStatusUnknown?: boolean;
 }
 
 /** Which approved corroboration path produced a "verified" decode (for honest reporting). */

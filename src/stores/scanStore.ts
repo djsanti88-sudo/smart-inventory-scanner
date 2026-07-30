@@ -244,6 +244,7 @@ const DEFAULT_AI_STATUS: AiStatus = {
   lastProvider: "",
   lastFailureReason: "",
   killSwitchOn: false,
+  killSwitchStatusUnknown: false,
 };
 
 /**
@@ -2825,7 +2826,12 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Ask the server which keys/flags are configured (no secrets are returned).
         try {
           const res = await fetch("/api/ai-lookup", { method: "GET" });
-          if (!res.ok) return;
+          if (!res.ok) {
+            // Silent-failure fix: a failed refresh must never be indistinguishable from a confirmed
+            // "kill switch off" - mark the status unknown/stale rather than leaving a false "off".
+            set((s) => ({ aiStatus: { ...s.aiStatus, killSwitchStatusUnknown: true } }));
+            return;
+          }
           const d = await res.json();
           set((s) => {
             const keyConfigured = Boolean(d.geminiConfigured) || Boolean(d.openaiConfigured);
@@ -2851,6 +2857,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
                 // client value must never mask a live server kill switch, and an omitted field (older/
                 // mocked GET response) correctly defaults to false (not on).
                 killSwitchOn: Boolean(d.killSwitchOn),
+                // A successful refresh always confirms fresh truth - clear any prior unknown/stale flag.
+                killSwitchStatusUnknown: false,
                 gptLadder:
                   d.gptLadder && typeof d.gptLadder === "object"
                     ? {
@@ -2874,7 +2882,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             };
           });
         } catch {
-          // leave existing status; auto-decode simply won't fire without confirmed keys
+          // Leave existing status; auto-decode simply won't fire without confirmed keys. But do not
+          // leave killSwitchOn silently reading as a confirmed false "off" - a transient network
+          // failure must surface as unknown/stale, not as reassurance that the kill switch is off.
+          set((s) => ({ aiStatus: { ...s.aiStatus, killSwitchStatusUnknown: true } }));
         }
       },
 

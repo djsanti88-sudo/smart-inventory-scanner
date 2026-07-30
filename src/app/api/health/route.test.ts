@@ -141,6 +141,50 @@ describe("GET /api/health", () => {
     expect(mocks.tursoGet).not.toHaveBeenCalled();
   });
 
+  it("binds the Firestore error and logs a sanitized detail at ERROR severity (ok:false), never the raw secret-bearing message", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      mocks.firestoreGet.mockRejectedValue(
+        new Error("Firebase: Invalid credential at libsql://user:sk-secret-token-value-1234567890@bad.example.com")
+      );
+      const { GET } = await import("./route");
+      await GET(new Request("http://x/api/health"));
+
+      const call = errorSpy.mock.calls.find((c) => String(c[0]).includes("firestore_unreachable"));
+      expect(call).toBeTruthy(); // must escalate to error, not warn, since it flips ok:false
+      const parsed = JSON.parse(call![0] as string);
+      expect(parsed.detail).toContain("Invalid credential"); // enough for on-call to distinguish cause
+      expect(parsed.detail).not.toContain("sk-secret-token-value-1234567890"); // never leak the secret
+      expect(parsed.detail).not.toContain("user:sk-secret-token-value-1234567890@");
+      // no warn-level emission of this same event
+      expect(warnSpy.mock.calls.find((c) => String(c[0]).includes("firestore_unreachable"))).toBeUndefined();
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("binds the Turso error and logs a sanitized detail at ERROR severity (ok:false), never the raw secret-bearing message", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      mocks.tursoGet.mockRejectedValue(new Error("connect ETIMEDOUT to libsql://user:auth-token-super-secret-abcdef@host.example.com"));
+      const { GET } = await import("./route");
+      await GET(new Request("http://x/api/health"));
+
+      const call = errorSpy.mock.calls.find((c) => String(c[0]).includes("turso_unreachable"));
+      expect(call).toBeTruthy();
+      const parsed = JSON.parse(call![0] as string);
+      expect(parsed.detail).toContain("ETIMEDOUT");
+      expect(parsed.detail).not.toContain("auth-token-super-secret-abcdef");
+      expect(warnSpy.mock.calls.find((c) => String(c[0]).includes("turso_unreachable"))).toBeUndefined();
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
   it("responds well under 2 seconds even when a dependency hangs", async () => {
     process.env.HEALTH_TURSO_TIMEOUT_MS = "50";
     process.env.HEALTH_FIRESTORE_TIMEOUT_MS = "50";

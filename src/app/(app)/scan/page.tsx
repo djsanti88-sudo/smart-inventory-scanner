@@ -64,8 +64,16 @@ export default function ScanPage() {
   };
 
   // Learn which provider keys are configured (server-side) so unknown scans can auto-decode.
+  // Silent-failure fix (review of 92e9c32c, fix 3b): the mount-time call above is a single attempt -
+  // if it fails transiently, stale AI/kill-switch status would otherwise persist for the whole
+  // session. A lightweight 60s poll lets a transient failure self-heal without user action; the
+  // interval is cleared on unmount so it never leaks past this page.
   useEffect(() => {
     void refreshAiStatus();
+    const intervalId = setInterval(() => {
+      void refreshAiStatus();
+    }, 60_000);
+    return () => clearInterval(intervalId);
   }, [refreshAiStatus]);
 
   useEffect(() => {
