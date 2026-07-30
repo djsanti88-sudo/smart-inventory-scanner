@@ -5,7 +5,7 @@
 //   1. /api/ai-lookup capability JSON matches scripts/smoke-expected.json (missingKeys empty,
 //      goUpc.configured, daily.limit, decodeLadder order, geminiUsedForDecode false).
 //   2. Route fingerprint: /scan (200|307), /history 200, /catalog-review 200, /reconcile 200,
-//      /sessions 307 because redirects are intentionally inspected without following them.
+//      /sessions 200 after following its index redirect to the rendered page.
 //   3. Vercel's "Deployment has failed" masquerade page: a failed-build deployment can still answer
 //      200 while serving Vercel's own error HTML instead of the app. Checked on /scan's body.
 //
@@ -37,7 +37,7 @@ const ROUTE_FINGERPRINT = [
   { path: "/history", expectedStatuses: [200] },
   { path: "/catalog-review", expectedStatuses: [200] },
   { path: "/reconcile", expectedStatuses: [200] },
-  { path: "/sessions", expectedStatuses: [307] },
+  { path: "/sessions", expectedStatuses: [200] },
 ];
 
 export function isAllowedDeploymentUrl(value) {
@@ -73,11 +73,11 @@ function loadExpected() {
   }
 }
 
-async function getJson(url, timeoutMs = 15000) {
+async function getJson(url, timeoutMs = 15000, redirect = "manual") {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { method: "GET", signal: controller.signal, redirect: "manual" });
+    const res = await fetch(url, { method: "GET", signal: controller.signal, redirect });
     const text = await res.text();
     let json = null;
     try {
@@ -92,7 +92,7 @@ async function getJson(url, timeoutMs = 15000) {
 }
 
 async function getText(url, timeoutMs = 15000) {
-  return getJson(url, timeoutMs);
+  return getJson(url, timeoutMs, "follow");
 }
 
 function diffValue(label, expected, actual, mismatches) {
@@ -212,7 +212,7 @@ async function main() {
 
   console.log(`SMOKE FINGERPRINT PASSED against ${baseUrl}`);
   console.log("  - /api/ai-lookup capability JSON matches smoke-expected.json");
-  console.log("  - route fingerprint matches (200/307/404 as expected)");
+  console.log("  - route fingerprint matches expected rendered-route statuses");
   console.log("  - no Vercel failed-deploy masquerade detected on /scan");
   process.exit(0);
 }

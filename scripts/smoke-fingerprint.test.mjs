@@ -4,13 +4,15 @@ import { describe, expect, it } from "vitest";
 import { isAllowedDeploymentUrl } from "./smoke-fingerprint.mjs";
 
 const scriptPath = path.resolve(process.cwd(), "scripts/smoke-fingerprint.mjs");
+const workflowPath = path.resolve(process.cwd(), ".github/workflows/post-deploy-smoke.yml");
 
 describe("smoke fingerprint route contract", () => {
-  it("expects the sessions index redirect without following it", () => {
+  it("follows the sessions index redirect to its rendered page", () => {
     const source = readFileSync(scriptPath, "utf8");
 
-    expect(source).toContain('{ path: "/sessions", expectedStatuses: [307] }');
-    expect(source).toContain('redirect: "manual"');
+    expect(source).toContain('{ path: "/sessions", expectedStatuses: [200] }');
+    expect(source).toContain('return getJson(url, timeoutMs, "follow");');
+    expect(source).toContain('redirect = "manual"');
     expect(source).not.toContain("intentional /sessions 404");
   });
 
@@ -21,5 +23,15 @@ describe("smoke fingerprint route contract", () => {
     expect(isAllowedDeploymentUrl("https://unrelated-project.vercel.app")).toBe(false);
     expect(isAllowedDeploymentUrl("https://inventory-bfkqewgfk-sharpenly.vercel.app.evil.example")).toBe(false);
     expect(isAllowedDeploymentUrl("http://inventory-lovat-six.vercel.app")).toBe(false);
+  });
+});
+
+describe("post-deploy smoke workflow contract", () => {
+  it("checks out the deployment SHA without persisting repository credentials", () => {
+    const workflow = readFileSync(workflowPath, "utf8");
+
+    expect(workflow).toContain("ref: ${{ github.sha }}");
+    expect(workflow).toContain("persist-credentials: false");
+    expect(workflow).not.toContain("github.event.repository.default_branch");
   });
 });
