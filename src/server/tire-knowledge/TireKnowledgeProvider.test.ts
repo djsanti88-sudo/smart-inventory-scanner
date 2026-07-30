@@ -23,6 +23,7 @@ vi.mock("@/server/tire-knowledge/tireKnowledgeIndex", async (importOriginal) => 
 });
 
 import { resolveExactPartNumber, resolveExactBarcode, resolveExactBarcodeLocal } from "@/server/tire-knowledge/TireKnowledgeProvider";
+import { hasCountableTireIdentity } from "@/services/ai/tireSpecs";
 
 const CORPUS_ROW = {
   canonical_product_uid: "uid-1",
@@ -281,5 +282,38 @@ describe("resolveExactBarcodeLocal", () => {
     await expect(resolveExactBarcodeLocal("848983006257")).resolves.toBeNull();
     mockLookupByExactBarcodeLocal.mockResolvedValueOnce({ ...KUMHO_ROW_REAL_CONVENTION, barcode: "10012345678902", barcode_type: "gtin14", source_count: 2 });
     await expect(resolveExactBarcodeLocal("10012345678902")).resolves.toBeNull();
+  });
+
+  it("normalizes a compact trusted-corpus metric size in its countable result fields", async () => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      barcode: "0840139634284",
+      size: "2856020",
+      raw_size_text: "2856020",
+      load_index: "",
+      speed_rating: "",
+      source_count: 3,
+    });
+
+    const result = await resolveExactBarcodeLocal("0840139634284");
+
+    expect(result).not.toBeNull();
+    expect(result!.results[0].specsShort).toBe("285/60R20");
+    expect(result!.results[0].productName).toContain("285/60R20");
+    expect(hasCountableTireIdentity(result!.results[0])).toBe(true);
+  });
+
+  it("does not duplicate load and speed when the corpus size already includes them", async () => {
+    mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
+      ...KUMHO_ROW_REAL_CONVENTION,
+      size: "285/60R20 120S",
+      load_index: "120",
+      speed_rating: "S",
+      source_count: 3,
+    });
+
+    const result = await resolveExactBarcodeLocal("0840139634284");
+
+    expect(result!.results[0].specsShort).toBe("285/60R20 120S");
   });
 });

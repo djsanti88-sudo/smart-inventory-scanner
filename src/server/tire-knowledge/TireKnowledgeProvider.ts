@@ -5,6 +5,7 @@ import { lookupByExactBarcode, lookupByExactBarcodeLocal, lookupByExactPartNumbe
 import { isTrustedLocalDemoTireRow } from "@/server/tire-knowledge/localDemoTrust.mjs";
 import { prettifyBrand, prettifyProductName } from "@/services/format/productDisplay";
 import { basePartNumberKey } from "@/services/catalog/tirePartNumber";
+import { normalizeTireSize } from "@/services/tire/tireSizeNormalizer";
 
 // SERVER-ONLY deterministic tire-knowledge provider. It turns an EXACT trusted-corpus hit into a decode
 // result WITHOUT any AI call or page fetch. It runs in the /api/ai-lookup route BEFORE the AI providers and
@@ -55,7 +56,11 @@ function barcodeField(row: TireKnowledgeRow): { upc: string; ean: string; gtin: 
 }
 
 function toResult(row: TireKnowledgeRow, includeTrustedModel = false): AiLookupResult {
-  const specs = [row.size, [row.load_index, row.speed_rating].filter(Boolean).join("")].filter(Boolean).join(" ").trim();
+  // The trusted corpus sometimes stores a compact metric size (e.g. "2856020").  Normalize only
+  // the display/result seam with the shared, range-guarded parser so the downstream countable-tire
+  // identity check sees the same canonical size without changing corpus identity or trust decisions.
+  const size = normalizeTireSize(row.size)?.split(" ")[0] ?? row.size;
+  const specs = [size, [row.load_index, row.speed_rating].filter(Boolean).join("")].filter(Boolean).join(" ").trim();
   // DISPLAY-ONLY prettify: the corpus stores model slugs ("wrangler_workhorse_at") and lowercase
   // brands. Prettify here (new decode result construction), never rewrite the stored corpus row.
   const brand = prettifyBrand(row.brand);
