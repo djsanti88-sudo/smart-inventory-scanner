@@ -86,7 +86,7 @@ test("provider display identity uses the deterministic normalized size and prese
 
 test("provider display identity reuses the trusted-corpus projector for Boss compact forms", () => {
   assert.equal(
-    reconstructLocalDemoProviderIdentity({ ...trustedRow("35125020"), model: "35x12 50r20lt Trail model" }).displaySize,
+    reconstructLocalDemoProviderIdentity({ ...trustedRow("35125020"), model: "trail_model", model_display: "35x12 50r20lt Trail model" }).displaySize,
     "35X12.50R20",
   );
   assert.equal(reconstructLocalDemoProviderIdentity(trustedRow("29575225")).displaySize, "295/75R22.5");

@@ -323,11 +323,12 @@ describe("resolveExactBarcodeLocal", () => {
     expect(hasCountableTireIdentity(result!.results[0])).toBe(true);
   });
 
-  it("uses a trusted row's explicit split-decimal flotation signal before its compact size tag", async () => {
+  it("uses a trusted row's explicit model-display split-decimal flotation signal before its compact size tag", async () => {
     mockLookupByExactBarcodeLocal.mockResolvedValueOnce({
       ...KUMHO_ROW_REAL_CONVENTION,
       barcode: "0840139634284",
-      model: "35x12 50r20lt Trail model",
+      model: "trail_model",
+      model_display: "35x12 50r20lt Trail model",
       size: "35125020",
       raw_size_text: "35125020",
       load_index: "",

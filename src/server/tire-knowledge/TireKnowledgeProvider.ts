@@ -63,6 +63,7 @@ function toResult(row: TireKnowledgeRow, includeTrustedModel = false): AiLookupR
     size: row.size,
     rawSizeText: row.raw_size_text,
     model: row.model,
+    modelDisplay: row.model_display,
   }) ?? row.size;
   const specs = [size, [row.load_index, row.speed_rating].filter(Boolean).join("")].filter(Boolean).join(" ").trim();
   // DISPLAY-ONLY prettify: the corpus stores model slugs ("wrangler_workhorse_at") and lowercase

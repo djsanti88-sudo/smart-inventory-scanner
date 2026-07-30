@@ -24,7 +24,7 @@ const METRIC = /(?<![A-Z0-9])(?:(P|LT|ST)\s*)?(\d{3})\s*\/\s*(\d{2})\s*(ZR|R)\s*
 // "decimal rim required to avoid false positives" for the same reason). Without it, a bicycle "NN X
 // N.NNN" dimension like "16 X 2.125" false-matched by splitting the decimal mid-digit ("2.1" width +
 // "25" rim, fabricating "16X2.1R25") - there is no separator there at all for this to require.
-const FLOTATION = /(?:(?<![A-Z0-9])(P|LT|ST))?(\d{2})\s*X\s*(\d{1,2}(?:\.\d{1,2}|\s+\d{1,2}))\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
+const FLOTATION = /(?:(?<![A-Z0-9])(P|LT|ST))?(\d{2})\s*X\s*(\d{1,2}\.\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)/i;
 // A few confirmed light-truck listings write the flotation separator as a slash rather than X
 // ("LT37/12.50R22"). This variant is deliberately stricter than ordinary flotation: its LT/P/ST
 // prefix must be directly attached, otherwise "37/12.50R22" is ambiguous with a ratio/part number.
@@ -135,7 +135,26 @@ export type TrustedCorpusSizeText = {
   size?: string | null;
   rawSizeText?: string | null;
   model?: string | null;
+  modelDisplay?: string | null;
 };
+
+const TRUSTED_SPLIT_FLOTATION = /(?<![A-Z0-9])(?:(P|LT|ST))?(\d{2})\s*X\s*(\d{1,2})\s+(\d{1,2})\s*(ZR|R|-)\s*(\d{2}(?:\.\d)?)(?:LT|P|ST)?(?![A-Z0-9/])/i;
+const TRUSTED_COMPACT_COMMERCIAL_SIZES = new Map([
+  ["21575175", "215/75R17.5"], ["22570195", "225/70R19.5"], ["23575175", "235/75R17.5"],
+  ["24570175", "245/70R17.5"], ["24570195", "245/70R19.5"], ["24575225", "245/75R22.5"],
+  ["25570225", "255/70R22.5"], ["26570195", "265/70R19.5"], ["27570225", "275/70R22.5"],
+  ["28575245", "285/75R24.5"], ["29575225", "295/75R22.5"], ["31580225", "315/80R22.5"],
+  ["38565225", "385/65R22.5"], ["42565225", "425/65R22.5"], ["44550225", "445/50R22.5"],
+  ["44565225", "445/65R22.5"],
+]);
+
+function normalizeTrustedSplitFlotation(input: string | null | undefined): string | null {
+  const m = TRUSTED_SPLIT_FLOTATION.exec(input ?? "");
+  if (!m) return null;
+  const width = Number(`${m[3]}.${m[4]}`);
+  if (!okFlotationDiameter(Number(m[2])) || !okFlotationWidth(width) || !okRim(Number(m[6]))) return null;
+  return `${(m[1] ?? "").toUpperCase()}${m[2]}X${m[3]}.${m[4]}R${m[6]}`;
+}
 
 /**
  * Normalize a trusted corpus row's display size without widening the generic scanner-input parser.
@@ -144,15 +163,13 @@ export type TrustedCorpusSizeText = {
  */
 export function normalizeTrustedCorpusTireSize(row: TrustedCorpusSizeText): string | null {
   const size = row.size ?? "";
-  const direct = normalizeTireSize(size) ?? normalizeTireSize(row.rawSizeText) ?? normalizeTireSize(row.model);
+  const direct = normalizeTireSize(size) ?? normalizeTireSize(row.rawSizeText) ?? normalizeTireSize(row.model) ?? normalizeTireSize(row.modelDisplay);
   if (direct) return direct.split(" ")[0];
-
-  if (!/^\d{8}$/.test(size)) return null;
-  const width = Number(size.slice(0, 3));
-  const aspect = Number(size.slice(3, 5));
-  const rimTenths = Number(size.slice(5));
-  if (width < 125 || width > 500 || aspect < 20 || aspect > 95 || rimTenths < 85 || rimTenths > 305 || rimTenths % 10 !== 5) return null;
-  return `${width}/${aspect}R${(rimTenths / 10).toFixed(1)}`;
+  return normalizeTrustedSplitFlotation(row.modelDisplay)
+    ?? normalizeTrustedSplitFlotation(row.rawSizeText)
+    ?? normalizeTrustedSplitFlotation(row.model)
+    ?? TRUSTED_COMPACT_COMMERCIAL_SIZES.get(size)
+    ?? null;
 }
 
 /**

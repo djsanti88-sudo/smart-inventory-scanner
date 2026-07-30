@@ -22,6 +22,7 @@ export function reconstructLocalDemoProviderIdentity(row: LocalDemoRow) {
     size: text(row.size),
     rawSizeText: text(row.raw_size_text),
     model: text(row.model),
+    modelDisplay: text(row.model_display),
   }) ?? text(row.size);
   const loadSpeed = [text(row.load_index), text(row.speed_rating)].filter(Boolean).join("");
   const specs = [displaySize, loadSpeed].filter(Boolean).join(" ");

@@ -18,12 +18,6 @@ const CASES: Array<[string, string | null]> = [
   ["2356017", "235/60R17"],
   // --- flotation / commercial ---
   ["35X12.50R20", "35X12.50R20"],
-  // Boss exact-corpus titles sometimes split the decimal flotation width with a space.
-  // The explicit X + R construction and plausibility bounds make this unambiguous.
-  ["31x10 50r15lt", "31X10.50R15"],
-  ["30x9 50r15lt", "30X9.50R15"],
-  ["37x13 50r22lt", "37X13.50R22"],
-  ["33x12 5r22lt", "33X12.5R22"],
   ["11R22.5", "11R22.5"],
   ["295/75R22.5", "295/75R22.5"],
   // --- dual load index ---
@@ -75,6 +69,7 @@ const CASES: Array<[string, string | null]> = [
   ["700 X 23C", null], // road-bike tire dimension, not a flotation size
   ["31x10 50", null], // decimal-width shorthand still requires an explicit rim construction
   ["31x10 50r99", null], // impossible rim
+  ["31x10 50r15lt", null], // split decimal notation is trusted-corpus-only
   ["37/12.50R22", null], // slash flotation requires an attached LT/P/ST construction prefix
   ["LT16/2.125R25", null], // directly attached but implausible flotation dimensions
   ["LT 37/12.50R22", null], // separated prefix must not be promoted to a trusted size
@@ -90,17 +85,37 @@ describe("normalizeTireSize", () => {
 });
 
 describe("normalizeTrustedCorpusTireSize", () => {
-  it("uses exact-row model evidence to disambiguate a compact flotation tag", () => {
+  it("uses exact-row model-display evidence to disambiguate a compact flotation tag", () => {
     expect(normalizeTrustedCorpusTireSize({
       size: "35125020",
       rawSizeText: "35125020",
-      model: "35x12 50r20lt Trail model",
+      model: "trail_model",
+      modelDisplay: "35x12 50r20lt Trail model",
     })).toBe("35X12.50R20");
   });
 
   it("decodes only unambiguous compact decimal-rim commercial sizes", () => {
     expect(normalizeTrustedCorpusTireSize({ size: "29575225" })).toBe("295/75R22.5");
     expect(normalizeTrustedCorpusTireSize({ size: "35125020" })).toBeNull();
+  });
+
+  it.each([
+    ["21575175", "215/75R17.5"], ["22570195", "225/70R19.5"], ["23575175", "235/75R17.5"],
+    ["24570175", "245/70R17.5"], ["24570195", "245/70R19.5"], ["24575225", "245/75R22.5"],
+    ["25570225", "255/70R22.5"], ["26570195", "265/70R19.5"], ["27570225", "275/70R22.5"],
+    ["28575245", "285/75R24.5"], ["29575225", "295/75R22.5"], ["31580225", "315/80R22.5"],
+    ["38565225", "385/65R22.5"], ["42565225", "425/65R22.5"], ["44550225", "445/50R22.5"],
+    ["44565225", "445/65R22.5"],
+  ])("normalizes the observed trusted compact-commercial size %s", (size, expected) => {
+    expect(normalizeTrustedCorpusTireSize({ size })).toBe(expected);
+  });
+
+  it.each([
+    "35x12 50r201 Trail model",
+    "35x12 50r20ABC Trail model",
+    "35x12 50r20/1 Trail model",
+  ])("rejects a split-decimal token with a nonterminal rim: %s", (modelDisplay) => {
+    expect(normalizeTrustedCorpusTireSize({ size: "35125020", modelDisplay })).toBeNull();
   });
 });
 
