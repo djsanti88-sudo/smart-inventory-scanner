@@ -46,6 +46,34 @@ const PERSIST_POINTER_KEY = "__scanPersistPointer";
 const TOMBSTONE_SUFFIX = "::scanbin-cleared-v1";
 const RECOVERY_SUFFIX = "::scanbin-recovery-v1";
 const PERSIST_FALLBACK_KEY = "__scanPersistFallback";
+const PERSIST_RECOVERY_KEY = "__scanPersistRecovery";
+
+type RecoveryCandidate = { payload: string; supersedesTombstone: string | null };
+
+function createOperationToken(): string {
+  try {
+    if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  } catch { /* fall through to a non-ordering random identity */ }
+  return `clear-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function encodeRecoveryCandidate(candidate: RecoveryCandidate): string {
+  return JSON.stringify({ [PERSIST_RECOVERY_KEY]: 1, ...candidate });
+}
+
+function decodeRecoveryCandidate(value: string | null): RecoveryCandidate | null {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (parsed[PERSIST_RECOVERY_KEY] === 1 && typeof parsed.payload === "string") {
+      return {
+        payload: parsed.payload,
+        supersedesTombstone: typeof parsed.supersedesTombstone === "string" ? parsed.supersedesTombstone : null,
+      };
+    }
+  } catch { /* pre-envelope candidates were stored as raw payload strings */ }
+  return { payload: value, supersedesTombstone: null };
+}
 
 function encodeAuthoritativePersistFallback(payload: string): string {
   return JSON.stringify({ [PERSIST_FALLBACK_KEY]: 1, payload });
@@ -88,7 +116,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const reportAvailable = () => options.onStatusChange?.("available");
   const queuedByKey = new Map<string, Promise<void>>();
   const pendingWrites = new Map<string, { serialize: () => string; token: number; resolvers: Array<() => void>; scheduled: boolean }>();
-  const tombstones = new Set<string>();
+  const tombstones = new Map<string, string>();
   const legacySnapshotsCleaned = new Set<string>();
   const legacyMarkersEnsured = new Set<string>();
   // Each clear moves a key to a new generation. A write captures the generation it was created in,
@@ -168,48 +196,61 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
   const recoveryKey = (name: string) => `${name}${RECOVERY_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
-  const hasTombstone = async (name: string) => {
-    if (tombstones.has(name) || legacyGet(tombstoneKey(name)) === "1") {
-      tombstones.add(name);
-      return true;
+  const getTombstoneToken = async (name: string): Promise<string | null> => {
+    const remembered = tombstones.get(name);
+    if (remembered) return remembered;
+    const local = legacyGet(tombstoneKey(name));
+    if (local !== null) {
+      tombstones.set(name, local);
+      return local;
     }
-    if (!options.database) return false;
+    if (!options.database) return null;
     try {
-      const found = await options.database.get(tombstoneKey(name)) === "1";
-      if (found) tombstones.add(name);
-      return found;
+      const durable = await options.database.get(tombstoneKey(name));
+      if (durable !== null) tombstones.set(name, durable);
+      return durable;
     } catch {
       reportDegraded();
-      return false;
+      return null;
     }
   };
-  const writeTombstone = (name: string): boolean => { tombstones.add(name); return legacySet(tombstoneKey(name), "1"); };
-  const persistTombstone = async (name: string): Promise<boolean> => {
+  const writeTombstone = (name: string, operationToken: string): boolean => {
+    tombstones.set(name, operationToken);
+    return legacySet(tombstoneKey(name), operationToken);
+  };
+  const persistTombstone = async (name: string, operationToken: string): Promise<boolean> => {
     if (!options.database) {
       reportDegraded();
       return false;
     }
     try {
-      await options.database.set(tombstoneKey(name), "1");
+      await options.database.set(tombstoneKey(name), operationToken);
       reportAvailable(); return true;
     } catch {
       reportDegraded(); return false;
     }
   };
-  const clearTombstone = async (name: string, token: number) => {
-    if (generationFor(name) !== token) return;
+  const clearTombstone = async (name: string, generation: number, operationToken: string | null): Promise<boolean> => {
+    if (generationFor(name) !== generation) return false;
+    if (operationToken === null) return true;
     if (options.database) {
       try {
-        await options.database.remove(tombstoneKey(name));
+        const durable = await options.database.get(tombstoneKey(name));
+        if (durable !== null && durable !== operationToken) return false;
+        if (durable === operationToken) await options.database.remove(tombstoneKey(name));
         reportAvailable();
       } catch {
         reportDegraded();
-        return;
+        return false;
       }
     }
-    if (generationFor(name) !== token) return;
+    if (generationFor(name) !== generation) return false;
+    const local = legacyRead(tombstoneKey(name));
+    if (!local.available) return false;
+    if (local.value !== null && local.value !== operationToken) return false;
+    if (local.value === operationToken && !legacyRemove(tombstoneKey(name))) return false;
     tombstones.delete(name);
-    legacyRemove(tombstoneKey(name));
+    return true;
   };
 
   const retireAuthoritativeLocalFallback = (name: string): boolean => {
@@ -239,14 +280,39 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
     const hadFallback = getAuthoritativePersistFallback(legacyGet(name)) !== null;
+    const tombstoneToken = await getTombstoneToken(name);
+    let existingRecovery = false;
     let recoveryWritten = false;
-    if (hadFallback && !legacySet(name, encodeAuthoritativePersistFallback(value))) {
-      if (!options.database) {
-        reportDegraded();
-        return;
-      }
+    if (options.database) {
       try {
-        await options.database.set(recoveryKey(name), value);
+        existingRecovery = await options.database.get(recoveryKey(name)) !== null;
+      } catch {
+        // An unknown candidate cannot be allowed to survive and outrank a newer main write. Replace
+        // it journal-first; if that also fails, keep the current in-memory state and retry later.
+        try {
+          await options.database.set(
+            recoveryKey(name),
+            encodeRecoveryCandidate({ payload: value, supersedesTombstone: tombstoneToken }),
+          );
+          existingRecovery = true;
+          recoveryWritten = true;
+          reportAvailable();
+        } catch {
+          reportDegraded();
+          return;
+        }
+      }
+    }
+    const localFallbackUpdated = !hadFallback || legacySet(name, encodeAuthoritativePersistFallback(value));
+    const needsRecovery = existingRecovery || tombstoneToken !== null || !localFallbackUpdated;
+    if (needsRecovery && !existingRecovery) {
+      if (!options.database) { reportDegraded(); return; }
+      try {
+        await options.database.set(
+          recoveryKey(name),
+          encodeRecoveryCandidate({ payload: value, supersedesTombstone: tombstoneToken }),
+        );
+        existingRecovery = true;
         recoveryWritten = true;
         reportAvailable();
       } catch {
@@ -254,14 +320,12 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         return;
       }
     }
-    // A post-clear write must supersede any candidate whose deletion was interrupted by the clear.
-    if (tombstones.has(name) && !recoveryWritten) {
-      if (!options.database) {
-        reportDegraded();
-        return;
-      }
+    if (existingRecovery && !recoveryWritten) {
       try {
-        await options.database.set(recoveryKey(name), value);
+        await options.database!.set(
+          recoveryKey(name),
+          encodeRecoveryCandidate({ payload: value, supersedesTombstone: tombstoneToken }),
+        );
         recoveryWritten = true;
         reportAvailable();
       } catch {
@@ -280,8 +344,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       const localRetired = recoveryWritten
         ? retireAuthoritativeLocalFallback(name)
         : (removeLegacySnapshotOnce(name), true);
-      await clearTombstone(name, token);
-      if (recoveryWritten && localRetired && options.database) {
+      const tombstoneCleared = await clearTombstone(name, token, tombstoneToken);
+      if (recoveryWritten && localRetired && tombstoneCleared && options.database) {
         try {
           await options.database.remove(recoveryKey(name));
           reportAvailable();
@@ -332,43 +396,54 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     getItem: (name) => {
       flushWrite(name);
       return enqueue(name, async () => {
-      if (await hasTombstone(name)) {
+      const tombstoneToken = await getTombstoneToken(name);
+      let recovery: RecoveryCandidate | null = null;
+      let recoveryReadable = true;
+      if (options.database) {
+        try {
+          recovery = decodeRecoveryCandidate(await options.database.get(recoveryKey(name)));
+        } catch {
+          recoveryReadable = false;
+          reportDegraded();
+        }
+      }
+      if (tombstoneToken !== null && !recoveryReadable) return null;
+      const recoverySupersedesClear = recovery !== null
+        && recovery.supersedesTombstone === tombstoneToken
+        && tombstoneToken !== null;
+      if (tombstoneToken !== null && !recoverySupersedesClear) {
         if (options.database) {
           try {
             await options.database.remove(name);
             await options.database.remove(recoveryKey(name));
+            reportAvailable();
           } catch { reportDegraded(); }
         }
         legacyRemove(name);
         return null;
       }
-      const localValue = legacyGet(name);
-      if (options.database) {
-        let recovery: string | null = null;
+      if (recovery !== null) {
+        if (!options.database) return recovery.payload;
         try {
-          recovery = await options.database.get(recoveryKey(name));
+          await options.database.set(name, recovery.payload);
+          reportAvailable();
         } catch {
           reportDegraded();
+          return recovery.payload;
         }
-        if (recovery !== null) {
+        const localRetired = retireAuthoritativeLocalFallback(name);
+        const tombstoneCleared = await clearTombstone(name, generationFor(name), tombstoneToken);
+        if (localRetired && tombstoneCleared) {
           try {
-            await options.database.set(name, recovery);
+            await options.database.remove(recoveryKey(name));
             reportAvailable();
           } catch {
             reportDegraded();
-            return recovery;
           }
-          if (retireAuthoritativeLocalFallback(name)) {
-            try {
-              await options.database.remove(recoveryKey(name));
-              reportAvailable();
-            } catch {
-              reportDegraded();
-            }
-          }
-          return recovery;
         }
+        return recovery.payload;
       }
+      const localValue = legacyGet(name);
       const authoritativeFallback = getAuthoritativePersistFallback(localValue);
       if (authoritativeFallback !== null) {
         if (options.database) {
@@ -417,9 +492,10 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       generationByKey.set(name, generationFor(name) + 1);
       legacyMarkersEnsured.delete(name);
       legacySnapshotsCleaned.delete(name);
-      const localTombstone = writeTombstone(name);
+      const operationToken = createOperationToken();
+      const localTombstone = writeTombstone(name, operationToken);
       return enqueue(name, async () => {
-      const durableTombstone = await persistTombstone(name);
+      const durableTombstone = await persistTombstone(name, operationToken);
       if (options.database) {
         try {
           await options.database.remove(name);

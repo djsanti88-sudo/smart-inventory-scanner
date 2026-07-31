@@ -69,6 +69,7 @@ class SnapshotDeleteFailsDb extends Db {
 class SelectiveRecoveryDb extends Db {
   failMainWrite = false;
   failCandidateRemove = false;
+  failTombstoneRemove = false;
 
   override async set(key: string, value: string): Promise<void> {
     if (this.failMainWrite && key === "sis-scan-owner") throw new Error("main write interrupted");
@@ -78,6 +79,9 @@ class SelectiveRecoveryDb extends Db {
   override async remove(key: string): Promise<void> {
     if (this.failCandidateRemove && key === "sis-scan-owner::scanbin-recovery-v1") {
       throw new Error("candidate cleanup interrupted");
+    }
+    if (this.failTombstoneRemove && key === "sis-scan-owner::scanbin-cleared-v1") {
+      throw new Error("tombstone cleanup interrupted");
     }
     await super.remove(key);
   }
@@ -373,12 +377,71 @@ describe("active async persistence adapter", () => {
     storageBlocked = true;
 
     await storage.setItem("sis-scan-owner", "newest cleanup-interrupted snapshot");
-    expect(await db.get("sis-scan-owner::scanbin-recovery-v1")).toBe("newest cleanup-interrupted snapshot");
+    expect(JSON.parse((await db.get("sis-scan-owner::scanbin-recovery-v1")) ?? "null")).toMatchObject({
+      payload: "newest cleanup-interrupted snapshot",
+    });
     const clearResult = await storage.removeItem("sis-scan-owner");
     expect(clearResult).toMatchObject({ cleared: true, authority: "durable" });
 
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBeNull();
+  });
+  it("rewrites a retained recovery candidate before a later ordinary main write", async () => {
+    const db = new SelectiveRecoveryDb();
+    await db.set("sis-scan-owner", "original durable snapshot");
+    const values = new Map<string, string>();
+    let storageBlocked = false;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (storageBlocked) throw new DOMException("quota full", "QuotaExceededError");
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        if (storageBlocked) throw new DOMException("storage interrupted", "InvalidStateError");
+        values.delete(key);
+      },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    db.failMainWrite = true;
+    await storage.setItem("sis-scan-owner", "older fallback snapshot");
+    db.failMainWrite = false;
+    db.failCandidateRemove = true;
+    storageBlocked = true;
+    await storage.setItem("sis-scan-owner", "first recovery snapshot");
+
+    storageBlocked = false;
+    await storage.setItem("sis-scan-owner", "later ordinary snapshot");
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("later ordinary snapshot");
+  });
+  it("rehydrates a post-clear candidate when exact tombstone retirement is interrupted", async () => {
+    const db = new SelectiveRecoveryDb();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await storage.setItem("sis-scan-owner", "before clear");
+    await storage.removeItem("sis-scan-owner");
+    db.failTombstoneRemove = true;
+
+    await storage.setItem("sis-scan-owner", "counted after clear");
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("counted after clear");
+  });
+  it("rehydrates a token-matched post-clear candidate when interrupted before the main write", async () => {
+    const db = new SelectiveRecoveryDb();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await storage.setItem("sis-scan-owner", "before clear");
+    await storage.removeItem("sis-scan-owner");
+    db.failMainWrite = true;
+
+    await storage.setItem("sis-scan-owner", "journaled after clear");
+    db.failMainWrite = false;
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("journaled after clear");
   });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;
