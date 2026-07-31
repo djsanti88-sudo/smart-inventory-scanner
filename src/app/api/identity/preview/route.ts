@@ -3,6 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { isLiveAuth } from "@/services/auth/authMode";
 import type { CreateIdentityPreviewInput } from "@/services/identity/preview";
+import { authorizeLocalIdentityPreview, createComposedIdentityPreview } from "@/server/identity/previewComposition";
 
 const MAX_REQUEST_BYTES = 512 * 1024;
 
@@ -23,7 +24,8 @@ export function isLocalIdentityPreviewEnabled(): boolean {
 
 export function createIdentityPreviewRoute(dependencies: {
   enabled: () => boolean;
-  createPreview: (input: CreateIdentityPreviewInput) => Promise<unknown>;
+  authorize?: (request: Request, businessId: string) => Promise<{ actorId: string; role: "owner" | "admin" | "counter" | "viewer" } | undefined>;
+  createPreview: (input: CreateIdentityPreviewInput, actor?: { actorId: string; role: "owner" | "admin" | "counter" | "viewer" }) => Promise<unknown>;
 }): (request: Request) => Promise<NextResponse> {
   return async (request) => {
     if (!dependencies.enabled()) return json({ error: "Identity preview is unavailable." }, 404);
@@ -36,7 +38,11 @@ export function createIdentityPreviewRoute(dependencies: {
       body = JSON.parse(raw) as unknown;
     } catch { return json({ error: "Body must be valid JSON." }, 400); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Body must be an identity preview request." }, 400);
-    try { return json(await dependencies.createPreview(body as CreateIdentityPreviewInput), 200); }
+    const input = body as CreateIdentityPreviewInput;
+    if (!Array.isArray(input.rows) || input.rows.length > 5_000 || typeof input.rows[0]?.businessId !== "string") return json({ error: "Identity preview request was invalid." }, 400);
+    const actor = dependencies.authorize ? await dependencies.authorize(request, input.rows[0].businessId) : undefined;
+    if (dependencies.authorize && !actor) return json({ error: "Sign in with business access is required." }, 403);
+    try { return json(await dependencies.createPreview(input, actor), 200); }
     catch (error) {
       const code = error instanceof Error ? error.message : "identity_preview_unavailable";
       return json({ error: code === "local_snapshot_unavailable" || code === "local_preview_signing_key_unavailable" ? "Identity preview is temporarily unavailable." : "Identity preview request was invalid." }, 400);
@@ -48,8 +54,9 @@ export function createIdentityPreviewRoute(dependencies: {
 // silently reading a cache, initializing a provider, or falling back to an external catalog.
 export const POST = createIdentityPreviewRoute({
   enabled: isLocalIdentityPreviewEnabled,
-  async createPreview() {
-    loadLocalPreviewSigningKey();
-    throw new Error("local_snapshot_unavailable");
+  authorize: authorizeLocalIdentityPreview,
+  async createPreview(input, actor) {
+    if (!actor) throw new Error("identity_preview_unauthorized");
+    return createComposedIdentityPreview(input, actor);
   },
 });

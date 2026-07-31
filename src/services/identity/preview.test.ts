@@ -19,7 +19,7 @@ const source: IdentityCandidateSource = {
 const create = async (overrides: Partial<Parameters<typeof createIdentityPreview>[0]> = {}) => {
   const baseline: Parameters<typeof createIdentityPreview>[0] = {
     rows: [row()], orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN", quantity: "Qty" } }],
-    sourceFileHashes: ["file-a"], importerVersion: "v1", issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-08-01T00:00:00.000Z",
+    sourceFileHashes: ["file-a"], importerVersion: "v1", issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z",
   };
   return createIdentityPreview({ ...baseline, ...overrides }, { source, signer: await createHmacPreviewSigner("local-test-key") });
 };
@@ -27,7 +27,7 @@ const create = async (overrides: Partial<Parameters<typeof createIdentityPreview
 describe("signed identity preview", () => {
   it("keeps content identity stable across file-hash and time changes while signatures bind them", async () => {
     const first = await create();
-    const changed = await create({ sourceFileHashes: ["file-b"], issuedAt: "2026-07-31T01:00:00.000Z", expiresAt: "2026-08-01T01:00:00.000Z" });
+    const changed = await create({ sourceFileHashes: ["file-b"], issuedAt: "2026-07-31T00:01:00.000Z", expiresAt: "2026-07-31T00:11:00.000Z" });
     expect(changed.preview.sanitizedContentRootHash).toBe(first.preview.sanitizedContentRootHash);
     expect(changed.preview.importId).toBe(first.preview.importId);
     expect(changed.signedPayloads).not.toEqual(first.signedPayloads);
@@ -48,7 +48,7 @@ describe("signed identity preview", () => {
     const preview = await createIdentityPreview({
       rows: [row(), row({ sourceRowNumber: 3, rawRecordFingerprint: "row-2" })],
       orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN" } }], sourceFileHashes: ["file-a"], importerVersion: "v1",
-      issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-08-01T00:00:00.000Z", maxChunkBytes: 1,
+      issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z", maxChunkBytes: 2_000,
     }, { source, signer });
     expect(preview.signedPayloads).toHaveLength(2);
     await expect(verifySignedPreviewChunks([...preview.signedPayloads].reverse(), signer)).rejects.toThrow("preview_chunks_out_of_order");
@@ -59,7 +59,20 @@ describe("signed identity preview", () => {
 
   it("rejects an otherwise valid expired signed preview", async () => {
     const preview = await create();
-    await expect(verifySignedPreviewChunks(preview.signedPayloads, await createHmacPreviewSigner("local-test-key"), "2026-08-02T00:00:00.000Z"))
+    await expect(verifySignedPreviewChunks(preview.signedPayloads, await createHmacPreviewSigner("local-test-key"), "2026-07-31T00:11:00.000Z"))
       .rejects.toThrow("preview_expired");
+  });
+
+  it("rejects a preview TTL over fifteen minutes and a future issue time", async () => {
+    await expect(create({ issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:16:00.000Z" }))
+      .rejects.toThrow("preview_ttl_invalid");
+    const preview = await create({ issuedAt: "2026-07-31T00:02:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z" });
+    await expect(verifySignedPreviewChunks(preview.signedPayloads, await createHmacPreviewSigner("local-test-key"), "2026-07-31T00:00:00.000Z"))
+      .rejects.toThrow("preview_issued_in_future");
+  });
+
+  it("rejects a single row that cannot fit into the signed chunk ceiling", async () => {
+    await expect(create({ rows: [row({ title: "x".repeat(2_000) })], maxChunkBytes: 32 }))
+      .rejects.toThrow("preview_row_too_large");
   });
 });

@@ -4,6 +4,11 @@ import type { IdentityCandidateSource, IdentityDecision, IdentityInput } from ".
 
 const manifestVersion = "identity-preview-v1";
 const maxSignedChunkBytes = 512 * 1024;
+const maxRows = 5_000;
+const maxChunks = 64;
+const maxSignedSetBytes = 32 * 1024 * 1024;
+const maxPreviewTtlMs = 15 * 60 * 1000;
+const maxFutureSkewMs = 60 * 1000;
 
 export interface PreviewSigner {
   sign(canonicalPayload: string): Promise<string>;
@@ -17,6 +22,7 @@ export interface SignedPreviewChunk {
   sanitizedContentRootHash: string;
   importId: string;
   scope: Pick<IdentityInput, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId">;
+  actorId: string;
   orderedMappings: Array<{ sheetName: string; mapping: Record<string, string> }>;
   importerVersion: string;
   sourceFileHashes: string[];
@@ -28,6 +34,7 @@ export interface SignedPreviewChunk {
 }
 
 export interface CreateIdentityPreviewInput {
+  actorId?: string;
   rows: IdentityInput[];
   orderedMappings: Array<{ sheetName: string; mapping: Record<string, string> }>;
   sourceFileHashes: string[];
@@ -115,6 +122,23 @@ function unsignedChunk(chunk: SignedPreviewChunk): Omit<SignedPreviewChunk, "sig
   return unsigned;
 }
 
+function exactTime(value: string): number | undefined {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value ? parsed : undefined;
+}
+
+function assertPreviewTimes(issuedAt: string, expiresAt: string, now?: string): void {
+  const issued = exactTime(issuedAt);
+  const expires = exactTime(expiresAt);
+  if (issued === undefined || expires === undefined || expires <= issued || expires - issued > maxPreviewTtlMs) throw new Error("preview_ttl_invalid");
+  if (now !== undefined) {
+    const clock = exactTime(now);
+    if (clock === undefined) throw new Error("preview_time_invalid");
+    if (issued > clock + maxFutureSkewMs) throw new Error("preview_issued_in_future");
+    if (expires <= clock) throw new Error("preview_expired");
+  }
+}
+
 function parseChunk(payload: string): SignedPreviewChunk {
   let parsed: unknown;
   try { parsed = JSON.parse(payload) as unknown; } catch { throw new Error("preview_chunk_invalid_json"); }
@@ -124,7 +148,7 @@ function parseChunk(payload: string): SignedPreviewChunk {
     || chunk.chunkIndex! < 0 || chunk.chunkCount! < 1 || chunk.chunkIndex! >= chunk.chunkCount!
     || typeof chunk.sanitizedContentRootHash !== "string" || typeof chunk.importId !== "string" || typeof chunk.signature !== "string"
     || !Array.isArray(chunk.rows) || !Array.isArray(chunk.decisions) || !Array.isArray(chunk.orderedMappings) || !Array.isArray(chunk.sourceFileHashes)
-    || !chunk.scope || typeof chunk.scope !== "object" || typeof chunk.issuedAt !== "string" || typeof chunk.expiresAt !== "string" || typeof chunk.importerVersion !== "string") throw new Error("preview_chunk_invalid_shape");
+    || !chunk.scope || typeof chunk.scope !== "object" || typeof chunk.actorId !== "string" || !chunk.actorId || typeof chunk.issuedAt !== "string" || typeof chunk.expiresAt !== "string" || typeof chunk.importerVersion !== "string") throw new Error("preview_chunk_invalid_shape");
   return chunk as SignedPreviewChunk;
 }
 
@@ -132,6 +156,10 @@ export async function createIdentityPreview(
   input: CreateIdentityPreviewInput,
   dependencies: CreateIdentityPreviewDependencies,
 ): Promise<{ preview: { importId: string; sanitizedContentRootHash: string; decisions: IdentityDecision[] }; signedPayloads: string[] }> {
+  if (!Array.isArray(input.rows) || input.rows.length === 0) throw new Error("preview_rows_required");
+  if (input.actorId !== undefined && (!input.actorId || input.actorId.length > 256)) throw new Error("preview_actor_invalid");
+  if (input.rows.length > maxRows) throw new Error("preview_rows_exceeded");
+  assertPreviewTimes(input.issuedAt, input.expiresAt);
   const scope = scopeFor(input.rows);
   const decisions = await decideIdentityBatch(input.rows, dependencies.source);
   const rows = input.rows.map(sanitizedRow);
@@ -146,33 +174,45 @@ export async function createIdentityPreview(
     // A full metadata-bearing chunk is measured, not merely row bytes.  A lowered test cap still
     // permits one row so integrity tests can force a multi-chunk manifest.
     const measured = new TextEncoder().encode(canonicalJson({ ...tentative, scope, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt })).byteLength;
+    if (!current && measured > cap) throw new Error("preview_row_too_large");
     if (current && measured > cap) groups.push({ rows: [rows[index]!], decisions: [decisions[index]!] });
     else if (current) groups[groups.length - 1] = tentative;
     else groups.push(tentative);
   }
-  const unsigned = groups.map((group, chunkIndex) => ({ manifestVersion, chunkIndex, chunkCount: groups.length, sanitizedContentRootHash, importId, scope, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt, ...group }));
+  if (groups.length > maxChunks) throw new Error("preview_chunks_exceeded");
+  const unsigned = groups.map((group, chunkIndex) => ({ manifestVersion, chunkIndex, chunkCount: groups.length, sanitizedContentRootHash, importId, scope, actorId: input.actorId ?? "local-test-actor", orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt, ...group }));
   const signedPayloads = await Promise.all(unsigned.map(async (chunk) => canonicalJson({ ...chunk, signature: await dependencies.signer.sign(canonicalJson(chunk)) })));
+  if (signedPayloads.some((payload) => new TextEncoder().encode(payload).byteLength > cap)
+    || signedPayloads.reduce((total, payload) => total + new TextEncoder().encode(payload).byteLength, 0) > maxSignedSetBytes) throw new Error("preview_signed_size_exceeded");
   return { preview: { importId, sanitizedContentRootHash, decisions }, signedPayloads };
 }
 
 /** Verifies the complete ordered signed manifest and recomputes its content identity without source bytes. */
 export async function verifySignedPreviewChunks(payloads: string[], signer: PreviewSigner, now = new Date().toISOString()): Promise<SignedPreviewChunk[]> {
-  if (payloads.length === 0) throw new Error("preview_chunks_incomplete");
+  if (payloads.length === 0 || payloads.length > maxChunks) throw new Error("preview_chunks_incomplete");
+  if (payloads.reduce((total, payload) => total + new TextEncoder().encode(payload).byteLength, 0) > maxSignedSetBytes) throw new Error("preview_signed_size_exceeded");
   const chunks = payloads.map(parseChunk);
   const first = chunks[0]!;
   const expectedCount = chunks[0]!.chunkCount;
   const root = chunks[0]!.sanitizedContentRootHash;
   if (chunks.some((chunk) => chunk.sanitizedContentRootHash !== root)) throw new Error("preview_chunks_mixed_root");
-  const metadata = canonicalJson({ scope: chunks[0]!.scope, orderedMappings: chunks[0]!.orderedMappings, importerVersion: chunks[0]!.importerVersion, sourceFileHashes: chunks[0]!.sourceFileHashes, issuedAt: chunks[0]!.issuedAt, expiresAt: chunks[0]!.expiresAt, importId: chunks[0]!.importId });
-  if (chunks.some((chunk) => canonicalJson({ scope: chunk.scope, orderedMappings: chunk.orderedMappings, importerVersion: chunk.importerVersion, sourceFileHashes: chunk.sourceFileHashes, issuedAt: chunk.issuedAt, expiresAt: chunk.expiresAt, importId: chunk.importId }) !== metadata)) throw new Error("preview_chunks_mixed_metadata");
+  const metadata = canonicalJson({ scope: chunks[0]!.scope, actorId: chunks[0]!.actorId, orderedMappings: chunks[0]!.orderedMappings, importerVersion: chunks[0]!.importerVersion, sourceFileHashes: chunks[0]!.sourceFileHashes, issuedAt: chunks[0]!.issuedAt, expiresAt: chunks[0]!.expiresAt, importId: chunks[0]!.importId });
+  if (chunks.some((chunk) => canonicalJson({ scope: chunk.scope, actorId: chunk.actorId, orderedMappings: chunk.orderedMappings, importerVersion: chunk.importerVersion, sourceFileHashes: chunk.sourceFileHashes, issuedAt: chunk.issuedAt, expiresAt: chunk.expiresAt, importId: chunk.importId }) !== metadata)) throw new Error("preview_chunks_mixed_metadata");
   if (chunks.length !== expectedCount || chunks.some((chunk) => chunk.chunkCount !== expectedCount)) throw new Error("preview_chunks_incomplete");
   for (let index = 0; index < chunks.length; index += 1) if (chunks[index]!.chunkIndex !== index) throw new Error("preview_chunks_out_of_order");
   for (const chunk of chunks) if (!await signer.verify(canonicalJson(unsignedChunk(chunk)), chunk.signature)) throw new Error("preview_signature_invalid");
-  const expiry = Date.parse(first.expiresAt);
-  const clock = Date.parse(now);
-  if (!Number.isFinite(expiry) || !Number.isFinite(clock)) throw new Error("preview_time_invalid");
-  if (expiry <= clock) throw new Error("preview_expired");
-  const computed = await canonicalSha256(contentProjection(chunks.flatMap((chunk) => chunk.rows), chunks.flatMap((chunk) => chunk.decisions), first, first.scope));
+  assertPreviewTimes(first.issuedAt, first.expiresAt, now);
+  const rows = chunks.flatMap((chunk) => chunk.rows);
+  const decisions = chunks.flatMap((chunk) => chunk.decisions);
+  if (rows.length === 0 || rows.length > maxRows || rows.length !== decisions.length
+    || !rows.every((row, index) => row && typeof row === "object"
+      && row.businessId === first.scope.businessId && row.sourceSystem === first.scope.sourceSystem
+      && row.sourceSignature === first.scope.sourceSignature && row.vendorId === first.scope.vendorId
+      && decisions[index]?.sourceRecordFingerprint === row.rawRecordFingerprint)) throw new Error("preview_row_decision_mismatch");
+  if (!(await Promise.all(decisions.map(async (decision) => decision.decisionFingerprint === await canonicalSha256(identityDecisionFingerprintProjection(decision))))).every(Boolean)) {
+    throw new Error("preview_decision_invalid");
+  }
+  const computed = await canonicalSha256(contentProjection(rows, decisions, first, first.scope));
   if (computed !== root) throw new Error("preview_content_root_invalid");
   return chunks;
 }
