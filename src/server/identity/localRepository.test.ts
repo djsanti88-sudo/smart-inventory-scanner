@@ -100,6 +100,18 @@ describe("local identity repository", () => {
     });
   });
 
+  it("rejects completion after the same tenant invalidates its applying run", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => 100 });
+    await startRun(repository, "shop-a", "import-a");
+    const input = { businessId: "shop-a", importId: "import-a", rowId: "row-1", idempotencyKey: "import-a:row-1", payloadFingerprint: "payload-1" };
+    const claim = await repository.claimImportOperation(input, 30);
+    if (claim.kind !== "claimed") throw new Error("expected lease claim");
+
+    await repository.transitionImportRun("shop-a", "import-a", "invalidated");
+    await expect(repository.completeImportOperation(claim.operation, claim.leaseId, { eventId: "event-1" })).rejects.toThrow(/run.*applying/i);
+    await expect(repository.failImportOperation(claim.operation, claim.leaseId, "failed_retryable", { reason: "retry" })).rejects.toThrow(/run.*applying/i);
+  });
+
   it("enforces the import-run lifecycle", async () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
     const run = await repository.createImportRun({
@@ -117,6 +129,43 @@ describe("local identity repository", () => {
     await expect(repository.transitionImportRun("shop-a", run.importId, "applying")).resolves.toMatchObject({ state: "applying" });
     await expect(repository.transitionImportRun("shop-a", run.importId, "completed")).resolves.toMatchObject({ state: "completed" });
     await expect(repository.transitionImportRun("shop-a", run.importId, "applying")).rejects.toThrow(/cannot transition/);
+  });
+
+  it("rejects a different immutable import run payload with the same tenant import ID", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const input = { importId: "import-a", businessId: "shop-a", sourceFingerprint: "source", mappingFingerprint: "mapping", previewFingerprint: "preview", actorId: "manager", engineVersion: "engine", pluginVersion: "plugin", catalogVersion: "catalog", createdAt: "now" };
+    await repository.createImportRun(input);
+    await expect(repository.createImportRun({ ...input, previewFingerprint: "tampered-preview" })).rejects.toThrow(/idempotency.*conflict/i);
+  });
+
+  it("does not overwrite a different immutable identity review with the same scoped ID", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const review = { reviewId: "review-a", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "abstain" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };
+    await repository.saveIdentityReview(review);
+    await expect(repository.saveIdentityReview({ ...review, rowId: "row-b" })).rejects.toThrow(/idempotency.*conflict/i);
+  });
+
+  it("returns every latest approved vendor-wide rule as review-only candidates", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const base = { businessId: "shop-a", sourceSystem: "vendor-feed", vendorId: "vendor-a", sourceSignature: "*", examples: ["example"], status: "approved" as const, approvedBy: "manager-a", approvedAt: "2026-07-31T00:00:00.000Z", collisionTestIds: ["collision"], version: 1 };
+    await repository.saveTransformation({ ...base, ruleKind: "strip-prefix" });
+    await repository.saveTransformation({ ...base, ruleKind: "normalize-punctuation" });
+    await repository.saveTransformation({ ...base, ruleKind: "strip-prefix", status: "revoked", version: 2 });
+
+    await expect(repository.resolveLink({ ...approvedLink, sourceSignature: "new-export" })).resolves.toMatchObject({
+      kind: "review",
+      transformations: [expect.objectContaining({ ruleKind: "normalize-punctuation", status: "approved" })],
+    });
+  });
+
+  it("returns a proposed vendor-wide rule only as a deterministic review candidate", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    await repository.saveTransformation({ businessId: "shop-a", sourceSystem: "vendor-feed", vendorId: "vendor-a", sourceSignature: "*", ruleKind: "proposed-normalization", examples: ["example"], status: "proposed", collisionTestIds: ["collision"], version: 1 });
+
+    await expect(repository.resolveLink({ ...approvedLink, sourceSignature: "new-export" })).resolves.toMatchObject({
+      kind: "review",
+      transformations: [expect.objectContaining({ ruleKind: "proposed-normalization", status: "proposed" })],
+    });
   });
 
   it("scopes same import IDs and collision-proof operation tuples by tenant", async () => {

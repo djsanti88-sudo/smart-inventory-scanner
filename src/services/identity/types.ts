@@ -212,8 +212,8 @@ export interface IdentityReview {
 }
 
 export interface AggregateLedgerPort {
-  apply(event: AggregateImportEvent, idempotencyKey: string): Promise<AggregateLedgerResult>;
-  get(idempotencyKey: string): Promise<{ event: AggregateImportEvent; idempotencyKey: string } | undefined>;
+  apply(event: AggregateImportEvent, idempotencyKey: string, operationFingerprint: string): Promise<AggregateLedgerResult>;
+  get(input: { businessId: string; idempotencyKey: string; eventFingerprint: string; operationFingerprint: string }): Promise<{ event: AggregateImportEvent; idempotencyKey: string } | undefined>;
 }
 
 export type AggregateLedgerResult =

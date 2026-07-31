@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFileAtomicLocalStorage, createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
@@ -83,5 +83,55 @@ describe("createFileAtomicLocalStorage", () => {
     await expect(createFileAtomicLocalStorage({ root: corrupt }).transaction(async () => undefined)).rejects.toThrow(
       /identity_storage_corrupt/,
     );
+  });
+
+  it("rejects a symlinked state file before reading it", async () => {
+    const root = testRoot();
+    const outside = path.resolve(storageBase, `state-outside-${randomUUID()}`);
+    ownedRoots.push(outside);
+    await mkdir(root, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await symlink(outside, path.join(root, "identity-local-storage.json"), "junction");
+
+    await expect(createFileAtomicLocalStorage({ root }).transaction(async () => undefined)).rejects.toThrow(/reparse|symlink/i);
+  });
+
+  it("creates a missing repository-local identity-import base before creating its child", async () => {
+    const fakeRepository = path.resolve(storageBase, `clean-repository-${randomUUID()}`);
+    const fakeRoot = path.join(fakeRepository, ".tmp", "identity-import", "run-a");
+    ownedRoots.push(fakeRepository);
+    await mkdir(fakeRepository, { recursive: true });
+    const cwd = process.cwd;
+    process.cwd = () => fakeRepository;
+    try {
+      const storage = createFileAtomicLocalStorage({ root: fakeRoot });
+      await storage.transaction((transaction) => transaction.set("created", true));
+      await expect(access(path.join(fakeRoot, "identity-local-storage.json"))).resolves.toBeUndefined();
+    } finally {
+      process.cwd = cwd;
+    }
+  });
+
+  it.each(["write", "rename"] as const)("cleans an incomplete temporary state file when %s fails", async (phase) => {
+    const root = testRoot();
+    const storage = createFileAtomicLocalStorage({
+      root,
+      io: phase === "write"
+        ? { writeTemp: async (temp) => { await writeFile(temp, "partial", "utf8"); throw new Error("write failed"); } }
+        : { replace: async () => { throw new Error("rename failed"); } },
+    });
+
+    await expect(storage.transaction((transaction) => transaction.set("record", true))).rejects.toThrow(`${phase} failed`);
+    await expect(readdir(root)).resolves.not.toContainEqual(expect.stringMatching(/\.tmp$/));
+  });
+
+  it("propagates a real directory sync I/O error after replacement", async () => {
+    const root = testRoot();
+    const storage = createFileAtomicLocalStorage({
+      root,
+      io: { syncDirectory: async () => { const error = new Error("disk I/O failed") as NodeJS.ErrnoException; error.code = "EIO"; throw error; } },
+    });
+
+    await expect(storage.transaction((transaction) => transaction.set("record", true))).rejects.toThrow("disk I/O failed");
   });
 });
