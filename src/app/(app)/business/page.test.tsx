@@ -1,15 +1,22 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
 import BusinessPage from "@/app/(app)/business/page";
 
 // Owner report 2026-07-22: after creating a business with a typed name, the list showed "a random
 // name that almost looks like a code string" - the raw businessId UUID was rendered instead of the
 // saved business name. The name IS stored on the businesses doc; the list must join and show it.
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+const routerReplace = vi.fn();
+const runSignOutFlow = vi.fn();
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: routerReplace }) }));
 vi.mock("@/lib/selectedBusiness", () => ({ setSelectedBusinessId: vi.fn() }));
 vi.mock("@/stores/scanStore", () => ({
   useScanStore: { getState: () => ({ prepareSignOut: vi.fn().mockResolvedValue(0), resetForSignOut: vi.fn() }) },
+}));
+vi.mock("@/services/auth/signOutFlow", () => ({
+  runSignOutFlow: (...args: unknown[]) => runSignOutFlow(...args),
 }));
 // listMemberships resolves the business name onto each Membership (server-validated join), so the
 // list renders the saved NAME directly - no separate name-fetch helper.
@@ -29,6 +36,10 @@ vi.mock("@/lib/auth", () => ({
   ]),
 }));
 
+beforeEach(() => {
+  routerReplace.mockReset();
+  runSignOutFlow.mockReset();
+});
 afterEach(() => cleanup());
 
 describe("BusinessPage - membership list shows the business NAME, not the raw id", () => {
@@ -36,5 +47,21 @@ describe("BusinessPage - membership list shows the business NAME, not the raw id
     render(<BusinessPage />);
     await waitFor(() => expect(screen.getByText("Polo's Point Tires")).toBeTruthy());
     expect(screen.queryByText("b-uuid-1234-abcd-9999")).toBeNull();
+  });
+
+  it("delegates logout to the awaited shared sign-out flow before redirecting", async () => {
+    let release: (() => void) | undefined;
+    runSignOutFlow.mockImplementation((redirect: () => void) => new Promise<void>((resolve) => {
+      release = () => { redirect(); resolve(); };
+    }));
+    render(<BusinessPage />);
+    await screen.findByText("Polo's Point Tires");
+
+    fireEvent.click(screen.getByTestId("sign-out"));
+
+    await waitFor(() => expect(runSignOutFlow).toHaveBeenCalledOnce());
+    expect(routerReplace).not.toHaveBeenCalled();
+    release?.();
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/login"));
   });
 });

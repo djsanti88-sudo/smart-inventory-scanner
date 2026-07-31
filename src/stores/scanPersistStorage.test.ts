@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
+import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getPersistedStatePresence, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
 
 class Db implements AsyncKeyValueDatabase {
   values = new Map<string, string>(); fail = false;
@@ -223,6 +223,18 @@ describe("active async persistence adapter", () => {
     db.fail = false;
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner")).resolves.toBeNull();
   });
+  it("clears only the selected UID namespace and leaves another UID snapshot durable", async () => {
+    const db = new Db();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => legacy() });
+    await storage.setItem("sis-scan-owner", "owner snapshot");
+    await storage.setItem("sis-scan-counter", "counter snapshot");
+
+    await storage.removeItem("sis-scan-owner");
+
+    const reloaded = createAsyncDurableStorage({ database: db, getLegacyStorage: () => legacy() });
+    await expect(reloaded.getItem("sis-scan-owner")).resolves.toBeNull();
+    await expect(reloaded.getItem("sis-scan-counter")).resolves.toBe("counter snapshot");
+  });
   it("keeps a clear tombstone authoritative when a pre-clear write finishes and deletion fails without localStorage", async () => {
     const db = new InFlightWriteWithFailedDeleteDb();
     const unavailableLocalStorage = () => { throw new Error("private browsing"); };
@@ -274,6 +286,21 @@ describe("active async persistence adapter", () => {
 });
 
 describe("native IndexedDB bridge", () => {
+  it("reports an inaccessible IndexedDB namespace as unavailable, never absent", async () => {
+    const failedOpen = {
+      error: new DOMException("blocked", "InvalidStateError"),
+      onupgradeneeded: null as Handler<void>,
+      onsuccess: null as Handler<void>,
+      onerror: null as Handler<void>,
+    };
+    vi.stubGlobal("indexedDB", { open: vi.fn(() => failedOpen) });
+
+    const presence = getPersistedStatePresence("sis-scan-owner");
+    failedOpen.onerror?.(new Event("error"));
+
+    await expect(presence).resolves.toBe("unavailable");
+  });
+
   it("waits for transaction completion before resolving a successful read", async () => {
     const harness = nativeDbHarness();
     vi.stubGlobal("indexedDB", harness.factory);

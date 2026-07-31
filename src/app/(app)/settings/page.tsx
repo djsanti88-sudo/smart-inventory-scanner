@@ -71,8 +71,8 @@ export default function SettingsPage() {
   const [pinErr, setPinErr] = useState("");
 
   // The pre-existing clear-cache body, verbatim (AM-R9 preserved). The PIN gate wraps AROUND it.
-  function doClear() {
-    clearLocalCache();
+  async function doClear() {
+    await clearLocalCache();
     // AM-R9: the reconcile session is browser-local session state too - the same wipe clears it.
     useReconcileStore.getState().clearLocalCache();
     setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
@@ -101,13 +101,13 @@ export default function SettingsPage() {
       setPinPrompt(true);
       return;
     }
-    doClear();
+    void doClear();
   }
 
   async function submitPin() {
     const ok = await verifyOwnerPin(pin);
     if (!ok) { setPinErr("Wrong PIN"); return; }
-    doClear();
+    await doClear();
   }
 
   // D2 (Phase 6): hard account deletion. Same owner-PIN gate pattern as clear-cache, plus a typed

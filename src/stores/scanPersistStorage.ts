@@ -306,17 +306,22 @@ export function createAsyncDurablePersistStorage<S>(options: AsyncDurablePersist
   };
 }
 
+/** Exact durable namespace probe result for a shared-browser adoption decision. */
+export type PersistedStatePresence = "found" | "absent" | "unavailable";
+
 /**
- * Conservative durable namespace probe for the sign-in adoption gate. If the browser cannot prove
- * the UID namespace is absent, treat it as occupied so one shared-browser user never adopts another
- * user's state merely because IndexedDB was briefly unavailable.
+ * Probe IndexedDB directly rather than through the fail-soft read adapter. The adapter rightly falls
+ * back to localStorage for normal hydration, but a missing fallback must never make an inaccessible
+ * durable UID namespace look absent and enable cross-account legacy adoption.
  */
-export async function hasPersistedState(name: string): Promise<boolean> {
+export async function getPersistedStatePresence(name: string): Promise<PersistedStatePresence> {
+  const database = createNativeIndexedDbDatabase();
+  if (!database) return "unavailable";
   try {
-    const storage = createIndexedDbScanPersistStorage();
-    return await storage.getItem(name) !== null;
+    if (await database.get(`${name}${TOMBSTONE_SUFFIX}`) === "1") return "absent";
+    return await database.get(name) === null ? "absent" : "found";
   } catch {
-    return true;
+    return "unavailable";
   }
 }
 

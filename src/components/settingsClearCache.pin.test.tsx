@@ -74,6 +74,25 @@ describe("clear cache PIN gate", () => {
     await waitFor(() => expect(clearLocalCache).toHaveBeenCalledOnce()); // no PIN prompt, direct clear
   });
 
+  it("waits for the durable cache clear before showing success or scheduling reload", async () => {
+    storeState.settings.ownerPinHash = "";
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const reloadCountBefore = setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1400).length;
+    let release: (() => void) | undefined;
+    clearLocalCache.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId("clear-cache"));
+    await waitFor(() => expect(clearLocalCache).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId("clear-cache-message")).toBeNull();
+    expect(setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1400)).toHaveLength(reloadCountBefore);
+
+    release?.();
+    expect(await screen.findByTestId("clear-cache-message")).toBeInTheDocument();
+    expect(setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1400)).toHaveLength(reloadCountBefore + 1);
+  });
+
   it("rejects a WRONG PIN: does NOT clear, and shows the visible 'Wrong PIN' error (F3)", async () => {
     verifyOwnerPin.mockResolvedValue(false); // owner PIN check fails
     vi.spyOn(window, "confirm").mockReturnValue(true);
