@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 
 // GUARD (Problem B regression): a server API route must NOT pull the CLIENT Firebase SDK into its bundle.
 // `/api/resolve-scan` previously crashed on Vercel because it transitively imported `firebase/firestore`
@@ -53,10 +54,20 @@ function runtimeSpecifiers(src: string): string[] {
     if (/^type\b/.test(clause.trim())) continue;
     out.push(spec);
   }
+  const dynamic = /(?:\bimport|\brequire)\s*\(\s*["']([^"']+)["']\s*\)/g;
+  while ((m = dynamic.exec(src))) out.push(m[1]!);
   return out;
 }
 
-function walk(entry: string): { file: string; spec: string; chain: string[] }[] {
+function forbiddenSpecifier(spec: string, forbidden: readonly string[]): boolean {
+  return forbidden.some((entry) => spec === entry || spec.startsWith(`${entry}/`));
+}
+
+function walk(
+  entry: string,
+  forbidden: readonly string[] = FORBIDDEN,
+  rejectNetworkPatterns = false,
+): { file: string; spec: string; chain: string[] }[] {
   const violations: { file: string; spec: string; chain: string[] }[] = [];
   const seen = new Set<string>();
   const stack: { file: string; chain: string[] }[] = [{ file: entry, chain: [entry] }];
@@ -66,12 +77,18 @@ function walk(entry: string): { file: string; spec: string; chain: string[] }[] 
     seen.add(file);
     const src = readFileSync(file, "utf8");
     for (const spec of runtimeSpecifiers(src)) {
-      if (FORBIDDEN.includes(spec)) {
+      if (forbiddenSpecifier(spec, forbidden)) {
         violations.push({ file: file.replace(ROOT, "").replace(/\\/g, "/"), spec, chain });
         continue;
       }
       const internal = resolveInternal(spec, file);
       if (internal) stack.push({ file: internal, chain: [...chain, spec] });
+    }
+    if (rejectNetworkPatterns && /\bfetch\s*\(/.test(src)) {
+      violations.push({ file: file.replace(ROOT, "").replace(/\\/g, "/"), spec: "fetch", chain });
+    }
+    if (rejectNetworkPatterns && /["'](?:\/api\/ai-lookup|https?:\/\/[^"']*ai-lookup)["']/.test(src)) {
+      violations.push({ file: file.replace(ROOT, "").replace(/\\/g, "/"), spec: "/api/ai-lookup", chain });
     }
   }
   return violations;
@@ -108,8 +125,27 @@ describe("read-only identity candidate-source import guard", () => {
   it("does not import storage, providers, decode, or AI lookup paths", () => {
     const source = resolve(ROOT, "src/server/identity/readOnlyCandidateSource.ts");
     const index = resolve(ROOT, "src/server/identity/localSnapshotIndex.ts");
-    const imported = [...runtimeSpecifiers(readFileSync(source, "utf8")), ...runtimeSpecifiers(readFileSync(index, "utf8"))];
+    const violations = [
+      ...walk(source, IDENTITY_SOURCE_FORBIDDEN, true),
+      ...walk(index, IDENTITY_SOURCE_FORBIDDEN, true),
+    ];
 
-    expect(imported.filter((specifier) => IDENTITY_SOURCE_FORBIDDEN.includes(specifier))).toEqual([]);
+    expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+  });
+
+  it("reports transitive dynamic imports, require, fetch, and AI-lookup usage with their chain", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "identity-import-graph-"));
+    try {
+      const entry = join(fixture, "entry.ts");
+      writeFileSync(entry, 'void import("./child");');
+      writeFileSync(join(fixture, "child.ts"), 'require("@libsql/client"); fetch("/api/ai-lookup");');
+
+      const violations = walk(entry, IDENTITY_SOURCE_FORBIDDEN, true);
+
+      expect(violations.map((entry) => entry.spec)).toEqual(expect.arrayContaining(["@libsql/client", "fetch", "/api/ai-lookup"]));
+      expect(violations.every((entry) => entry.chain.length >= 2)).toBe(true);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 });
