@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
@@ -112,7 +112,7 @@ export function NeedsReviewTable() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              onClick={() => setPage(Math.max(0, currentPage - 1))}
               disabled={currentPage === 0}
               className="min-h-[44px] rounded-lg border border-zinc-300 px-3 font-medium disabled:opacity-40"
             >
@@ -121,7 +121,7 @@ export function NeedsReviewTable() {
             <span aria-live="polite">Page {currentPage + 1} of {totalPages}</span>
             <button
               type="button"
-              onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
+              onClick={() => setPage(Math.min(totalPages - 1, currentPage + 1))}
               disabled={currentPage === totalPages - 1}
               className="min-h-[44px] rounded-lg border border-zinc-300 px-3 font-medium disabled:opacity-40"
             >
@@ -144,30 +144,62 @@ function ProductPicker({
   onCancel: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(-1);
   const matchingProducts = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return products
       .filter((product) => !normalizedQuery || prettifyProductName(product.name).toLocaleLowerCase().includes(normalizedQuery))
       .slice(0, 50);
   }, [products, query]);
+  const currentActiveIndex = Math.min(activeIndex, matchingProducts.length - 1);
+  const activeProduct = currentActiveIndex >= 0 ? matchingProducts[currentActiveIndex] : undefined;
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex(Math.min(matchingProducts.length - 1, currentActiveIndex + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex(Math.max(0, currentActiveIndex - 1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setActiveIndex(matchingProducts.length > 0 ? 0 : -1);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setActiveIndex(matchingProducts.length - 1);
+    } else if (event.key === "Enter" && activeProduct) {
+      event.preventDefault();
+      onChoose(activeProduct.id);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+  };
 
   return (
     <div className="flex w-64 flex-col gap-1.5 rounded-lg border border-zinc-300 bg-white p-2 shadow-sm" data-testid="product-picker">
       <input
         aria-label="Search products"
         autoFocus
+        role="combobox"
+        aria-autocomplete="list"
+        aria-controls="product-matches"
+        aria-expanded="true"
+        aria-activedescendant={activeProduct ? `product-option-${activeProduct.id}` : undefined}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={handleKeyDown}
         placeholder="Search products"
         className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
       />
-      <div role="listbox" aria-label="Product matches" className="max-h-56 overflow-y-auto">
+      <div id="product-matches" role="listbox" aria-label="Product matches" className="max-h-56 overflow-y-auto">
         {matchingProducts.map((product) => (
           <button
             key={product.id}
+            id={`product-option-${product.id}`}
             type="button"
             role="option"
-            aria-selected={false}
+            aria-selected={activeProduct?.id === product.id}
             onClick={() => onChoose(product.id)}
             className="block min-h-[44px] w-full rounded px-2 text-left text-base hover:bg-zinc-100"
           >
@@ -206,6 +238,7 @@ function ReviewRow({
   const [mode, setMode] = useState<"idle" | "create">("idle");
   const [linkId, setLinkId] = useState("");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
+  const chooseProductButtonRef = useRef<HTMLButtonElement>(null);
   const [applyToCount, setApplyToCount] = useState(true);
   const [np, setNp] = useState({ name: "", brand: "", category: "" });
 
@@ -492,24 +525,28 @@ function ReviewRow({
                 Approve suggestion
               </button>
             )}
-            {isProductPickerOpen ? (
+            <button
+              ref={chooseProductButtonRef}
+              type="button"
+              data-testid={`choose-product-${review.id}`}
+              onClick={() => setIsProductPickerOpen(true)}
+              className={btnSecondary}
+            >
+              {linkId ? `Selected: ${prettifyProductName(products.find((product) => product.id === linkId)?.name ?? "product")}` : "Choose product"}
+            </button>
+            {isProductPickerOpen && (
               <ProductPicker
                 products={products}
                 onChoose={(productId) => {
                   setLinkId(productId);
                   setIsProductPickerOpen(false);
+                  chooseProductButtonRef.current?.focus();
                 }}
-                onCancel={() => setIsProductPickerOpen(false)}
+                onCancel={() => {
+                  setIsProductPickerOpen(false);
+                  chooseProductButtonRef.current?.focus();
+                }}
               />
-            ) : (
-              <button
-                type="button"
-                data-testid={`choose-product-${review.id}`}
-                onClick={() => setIsProductPickerOpen(true)}
-                className={btnSecondary}
-              >
-                {linkId ? `Selected: ${prettifyProductName(products.find((product) => product.id === linkId)?.name ?? "product")}` : "Choose product"}
-              </button>
             )}
             <button
               type="button"

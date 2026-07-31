@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
 import { NeedsReviewTable } from "@/components/NeedsReviewTable";
 import type { UnknownCodeReview } from "@/types";
@@ -46,8 +46,65 @@ describe("NeedsReviewTable - product linking", () => {
     render(<NeedsReviewTable />);
     expect(screen.queryByRole("option", { name: "Wrangler Workhorse AT" })).toBeNull();
     fireEvent.click(screen.getByTestId("choose-product-pd1"));
-    expect(screen.getByRole("textbox", { name: "Search products" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Search products" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Wrangler Workhorse AT" })).toBeInTheDocument();
+  });
+
+  it("filters product choices, links the selected product through the existing resolution payload, and can cancel", () => {
+    const resolveUnknown = vi.fn();
+    useScanStore.setState({
+      needsReviewQueue: [review({ id: "link-1", cleanCode: "LINK-1" })],
+      products: [
+        { id: "prod-wrangler", name: "wrangler_workhorse_at" },
+        { id: "prod-other", name: "all_weather_grip" },
+      ] as unknown as import("@/types").Product[],
+      resolveUnknown,
+    });
+    render(<NeedsReviewTable />);
+
+    fireEvent.click(screen.getByTestId("choose-product-link-1"));
+    const search = screen.getByRole("combobox", { name: "Search products" });
+    fireEvent.change(search, { target: { value: "wrangler" } });
+    expect(screen.getByRole("option", { name: "Wrangler Workhorse AT" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "All Weather Grip" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("option", { name: "Wrangler Workhorse AT" }));
+    fireEvent.click(screen.getByTestId("link-existing"));
+    expect(resolveUnknown).toHaveBeenCalledWith("link-1", "link_existing", {
+      productId: "prod-wrangler",
+      applyToCount: true,
+      selectedAliasCodes: [],
+    });
+
+    fireEvent.click(screen.getByTestId("choose-product-link-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel product selection" }));
+    expect(screen.queryByTestId("product-picker")).toBeNull();
+  });
+
+  it("supports Arrow keys, Enter, and Escape with accurate active-descendant state", () => {
+    useScanStore.setState({
+      needsReviewQueue: [review({ id: "keys-1", cleanCode: "KEYS-1" })],
+      products: [
+        { id: "prod-one", name: "first_product" },
+        { id: "prod-two", name: "second_product" },
+      ] as unknown as import("@/types").Product[],
+    });
+    render(<NeedsReviewTable />);
+
+    fireEvent.click(screen.getByTestId("choose-product-keys-1"));
+    const search = screen.getByRole("combobox", { name: "Search products" });
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search).toHaveAttribute("aria-activedescendant", "product-option-prod-one");
+    expect(screen.getByRole("option", { name: "First Product" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search).toHaveAttribute("aria-activedescendant", "product-option-prod-two");
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(screen.queryByTestId("product-picker")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("choose-product-keys-1"));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search products" }), { key: "Escape" });
+    expect(screen.queryByTestId("product-picker")).toBeNull();
   });
 });
 
@@ -73,6 +130,23 @@ describe("NeedsReviewTable - review queue scaling", () => {
 
     expect(screen.getByTestId("review-row-SCALE-100")).toBeInTheDocument();
     expect(screen.getByText("100 reviews")).toBeInTheDocument();
+  });
+
+  it("normalizes the stored page after the queue shrinks so one Previous click reaches the first page", () => {
+    const reviews = Array.from({ length: 100 }, (_, index) =>
+      review({ id: `shrink-${index + 1}`, cleanCode: `SHRINK-${index + 1}` }),
+    );
+    useScanStore.setState({ needsReviewQueue: reviews });
+    render(<NeedsReviewTable />);
+
+    for (let page = 1; page < 4; page += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Next reviews" }));
+    }
+    act(() => useScanStore.setState({ needsReviewQueue: reviews.slice(0, 26) }));
+
+    expect(screen.getByTestId("review-row-SHRINK-26")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Previous reviews" }));
+    expect(screen.getByTestId("review-row-SHRINK-1")).toBeInTheDocument();
   });
 });
 
