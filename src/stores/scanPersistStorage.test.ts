@@ -130,6 +130,7 @@ class RecoverySetFailsDb extends TombstoneReadFailsDb {
   }
 }
 
+
 describe("active async persistence adapter", () => {
   it("migrates legacy bytes into durable storage", async () => {
     const db = new Db(), local = legacy(); local.values.set("sis-scan-owner", '{"version":14}');
@@ -142,6 +143,18 @@ describe("active async persistence adapter", () => {
     const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
     await Promise.all([storage.setItem("sis-scan-owner", "a"), storage.setItem("sis-scan-owner", "b")]);
     expect(set).toHaveBeenCalledTimes(1); expect(await db.get("sis-scan-owner")).toBe("b");
+  });
+  it("does not start IndexedDB evidence reads merely from scheduling a coalesced burst", async () => {
+    const db = new Db();
+    const get = vi.spyOn(db, "get");
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => legacy() });
+
+    const first = storage.setItem("sis-scan-owner", "snapshot-1");
+    const second = storage.setItem("sis-scan-owner", "snapshot-2");
+
+    expect(get).not.toHaveBeenCalled();
+    await Promise.all([first, second]);
+    expect(await db.get("sis-scan-owner")).toBe("snapshot-2");
   });
   it("defers one typed persist serialization for a burst and encodes only its latest snapshot", async () => {
     const db = new Db();
@@ -591,14 +604,31 @@ describe("active async persistence adapter", () => {
     const local = legacy();
     local.values.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 9, id: "tab-a" }));
     await db.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 9, id: "tab-b" }));
-    db.failMainWrite = true;
     const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await expect(storage.getItem("sis-scan-owner")).resolves.toBeNull();
+    db.failMainWrite = true;
 
     await storage.setItem("sis-scan-owner", "journaled conflict recovery");
     db.failMainWrite = false;
 
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("journaled conflict recovery");
+  });
+  it("suppresses a delayed pre-clear write and lets only a post-conflict write restore liveness", async () => {
+    const db = new Db();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    const delayedPreClearWrite = storage.setItem("sis-scan-owner", "snapshot scheduled before clears");
+    local.values.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 11, id: "tab-b" }));
+    await db.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 11, id: "tab-c" }));
+    await delayedPreClearWrite;
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
+    await storage.setItem("sis-scan-owner", "snapshot scheduled after conflict");
+    expect(await db.get("sis-scan-owner")).toBe("snapshot scheduled after conflict");
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("snapshot scheduled after conflict");
   });
   it("reports a clear non-authoritative when candidate ordering is unknown and deletion fails", async () => {
     const db = new CandidateReadFailsDb();

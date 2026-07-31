@@ -51,6 +51,13 @@ const PERSIST_CLEAR_KEY = "__scanPersistClear";
 
 type RecoveryCandidate = { payload: string; supersedesTombstone: string | null };
 type AuthoritativeFallback = RecoveryCandidate & { invalidatesRecovery: boolean };
+type TombstoneState = {
+  token: string | null;
+  conflict: boolean;
+  durableKnown: boolean;
+  maxVersion: number;
+  conflictFingerprint: string | null;
+};
 
 function createOperationId(): string {
   try {
@@ -158,7 +165,21 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const reportDegraded = () => options.onStatusChange?.("degraded");
   const reportAvailable = () => options.onStatusChange?.("available");
   const queuedByKey = new Map<string, Promise<void>>();
-  const pendingWrites = new Map<string, { serialize: () => string; token: number; resolvers: Array<() => void>; scheduled: boolean }>();
+  const pendingWrites = new Map<string, {
+    serialize: () => string;
+    token: number;
+    observation: TombstoneState;
+    resolvers: Array<() => void>;
+    scheduled: boolean;
+  }>();
+  const unobservedTombstoneState: TombstoneState = Object.freeze({
+    token: null,
+    conflict: false,
+    durableKnown: false,
+    maxVersion: 0,
+    conflictFingerprint: null,
+  });
+  const lastObservedTombstoneState = new Map<string, TombstoneState>();
   const tombstones = new Map<string, string>();
   const legacySnapshotsCleaned = new Set<string>();
   const legacyMarkersEnsured = new Set<string>();
@@ -251,7 +272,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
   const recoveryKey = (name: string) => `${name}${RECOVERY_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
-  const getTombstoneState = async (name: string): Promise<{ token: string | null; conflict: boolean; durableKnown: boolean; maxVersion: number }> => {
+  const getTombstoneState = async (name: string): Promise<TombstoneState> => {
     const remembered = tombstones.get(name) ?? null;
     const local = legacyGet(tombstoneKey(name));
     let durable: string | null = null;
@@ -266,10 +287,19 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       reportDegraded();
     }
     }
-    const resolved = resolveNewestClearToken([remembered, local, durable, candidateToken].filter((value): value is string => value !== null));
+    const rawTokens = [remembered, local, durable, candidateToken].filter((value): value is string => value !== null);
+    const resolved = resolveNewestClearToken(rawTokens);
     const { token } = resolved;
     if (token !== null) tombstones.set(name, token);
-    return { ...resolved, durableKnown };
+    const conflictFingerprint = resolved.conflict
+      ? rawTokens
+        .filter((raw) => parseClearToken(raw).version === resolved.maxVersion)
+        .sort()
+        .join("\n")
+      : null;
+    const state = { ...resolved, durableKnown, conflictFingerprint } satisfies TombstoneState;
+    lastObservedTombstoneState.set(name, state);
+    return state;
   };
   const writeTombstone = (name: string, operationToken: string): boolean => {
     tombstones.set(name, operationToken);
@@ -333,11 +363,17 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     return removed;
   };
 
-  const performWrite = async (name: string, value: string, token: number) => {
+  const performWrite = async (
+    name: string,
+    value: string,
+    token: number,
+    scheduledObservation: TombstoneState,
+  ) => {
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
     const existingLocalFallback = decodeAuthoritativePersistFallback(legacyGet(name));
     const hadFallback = existingLocalFallback !== null;
+    const scheduledState = scheduledObservation;
     const tombstoneState = await getTombstoneState(name);
     if (options.database && !tombstoneState.durableKnown) {
       legacySnapshotsCleaned.delete(name);
@@ -350,6 +386,14 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       return;
     }
     if (tombstoneState.conflict) {
+      const observedSameConflict = scheduledState.durableKnown
+        && scheduledState.conflict
+        && scheduledState.maxVersion === tombstoneState.maxVersion
+        && scheduledState.conflictFingerprint === tombstoneState.conflictFingerprint;
+      if (!observedSameConflict) {
+        reportDegraded();
+        return;
+      }
       if (!options.database) { reportDegraded(); return; }
       const recoveryToken = encodeClearToken(tombstoneState.maxVersion + 1);
       try {
@@ -513,7 +557,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         supersedesTombstone: tombstones.get(name) ?? legacyGet(tombstoneKey(name)),
       }));
     }
-    void enqueue(name, () => performWrite(name, value, pending.token)).then(() => pending.resolvers.forEach((resolve) => resolve()));
+    void enqueue(name, () => performWrite(name, value, pending.token, pending.observation)).then(() => pending.resolvers.forEach((resolve) => resolve()));
   };
   if (typeof window !== "undefined") {
     const flushAll = () => [...pendingWrites.keys()].forEach((name) => flushWrite(name, true));
@@ -522,8 +566,18 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   }
 
   const scheduleWrite = (name: string, serialize: () => string) => new Promise<void>((resolve) => {
-    const pending = pendingWrites.get(name) ?? { serialize, token: generationFor(name), resolvers: [], scheduled: false };
+    // Capture authority evidence at the same moment as the snapshot. A coalesced newer snapshot
+    // replaces both fields, so a delayed pre-clear payload can never borrow post-clear evidence.
+    const observation = lastObservedTombstoneState.get(name) ?? unobservedTombstoneState;
+    const pending = pendingWrites.get(name) ?? {
+      serialize,
+      token: generationFor(name),
+      observation,
+      resolvers: [],
+      scheduled: false,
+    };
     pending.serialize = serialize;
+    pending.observation = observation;
     pending.resolvers.push(resolve);
     pendingWrites.set(name, pending);
     if (!pending.scheduled) { pending.scheduled = true; queueMicrotask(() => flushWrite(name)); }
