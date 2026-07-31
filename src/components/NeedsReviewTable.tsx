@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
@@ -37,6 +37,7 @@ function DecodeBadge({ review, isPlatform }: { review: UnknownCodeReview; isPlat
 // about that code again.
 export function NeedsReviewTable() {
   const allReviews = useScanStore((s) => s.needsReviewQueue);
+  const products = useScanStore((s) => s.products);
   const isPlatform = useIsPlatformOwner();
   // Owner rule (2026-07-22, supersedes the resolved-but-unsynced carve-out of 2026-07-14): the
   // queue shows ONLY items still awaiting a human decision. A resolved item vanishes immediately -
@@ -46,6 +47,12 @@ export function NeedsReviewTable() {
   // row's inline controls + the SuggestedApprovalPanel. "ignored" is likewise a made decision
   // (the human clicked Ignore), so it leaves the queue with the resolved ones.
   const reviews = allReviews.filter((r) => r.status === "open");
+  const pageSize = 25;
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(reviews.length / pageSize));
+  const currentPage = Math.min(page, totalPages - 1);
+  const visibleReviews = reviews.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const productsById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -86,17 +93,107 @@ export function NeedsReviewTable() {
                 </td>
               </tr>
             ) : (
-              reviews.map((r) => <ReviewRow key={r.id} review={r} isPlatform={isPlatform} />)
+              visibleReviews.map((r) => (
+                <ReviewRow
+                  key={r.id}
+                  review={r}
+                  isPlatform={isPlatform}
+                  products={products}
+                  suggestedLinkProduct={r.suggestedLinkProductId ? productsById.get(r.suggestedLinkProductId) : undefined}
+                />
+              ))
             )}
           </tbody>
         </table>
       </div>
+      {reviews.length > pageSize && (
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-4 py-3 text-sm text-zinc-700">
+          <span>{reviews.length} reviews</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              disabled={currentPage === 0}
+              className="min-h-[44px] rounded-lg border border-zinc-300 px-3 font-medium disabled:opacity-40"
+            >
+              Previous reviews
+            </button>
+            <span aria-live="polite">Page {currentPage + 1} of {totalPages}</span>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
+              disabled={currentPage === totalPages - 1}
+              className="min-h-[44px] rounded-lg border border-zinc-300 px-3 font-medium disabled:opacity-40"
+            >
+              Next reviews
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatform: boolean }) {
-  const products = useScanStore((s) => s.products);
+function ProductPicker({
+  products,
+  onChoose,
+  onCancel,
+}: {
+  products: ReturnType<typeof useScanStore.getState>["products"];
+  onChoose: (productId: string) => void;
+  onCancel: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const matchingProducts = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return products
+      .filter((product) => !normalizedQuery || prettifyProductName(product.name).toLocaleLowerCase().includes(normalizedQuery))
+      .slice(0, 50);
+  }, [products, query]);
+
+  return (
+    <div className="flex w-64 flex-col gap-1.5 rounded-lg border border-zinc-300 bg-white p-2 shadow-sm" data-testid="product-picker">
+      <input
+        aria-label="Search products"
+        autoFocus
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search products"
+        className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
+      />
+      <div role="listbox" aria-label="Product matches" className="max-h-56 overflow-y-auto">
+        {matchingProducts.map((product) => (
+          <button
+            key={product.id}
+            type="button"
+            role="option"
+            aria-selected={false}
+            onClick={() => onChoose(product.id)}
+            className="block min-h-[44px] w-full rounded px-2 text-left text-base hover:bg-zinc-100"
+          >
+            {prettifyProductName(product.name)}
+          </button>
+        ))}
+        {matchingProducts.length === 0 && <p className="px-2 py-2 text-sm text-zinc-600">No matching products.</p>}
+      </div>
+      <button type="button" onClick={onCancel} className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base font-medium">
+        Cancel product selection
+      </button>
+    </div>
+  );
+}
+
+function ReviewRow({
+  review,
+  isPlatform,
+  products,
+  suggestedLinkProduct,
+}: {
+  review: UnknownCodeReview;
+  isPlatform: boolean;
+  products: ReturnType<typeof useScanStore.getState>["products"];
+  suggestedLinkProduct?: ReturnType<typeof useScanStore.getState>["products"][number];
+}) {
   const resolveUnknown = useScanStore((s) => s.resolveUnknown);
   const liveDecode = useScanStore((s) => s.liveDecode);
   const correctionRecheck = useScanStore((s) => s.correctionRecheck);
@@ -108,6 +205,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
 
   const [mode, setMode] = useState<"idle" | "create">("idle");
   const [linkId, setLinkId] = useState("");
+  const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [applyToCount, setApplyToCount] = useState(true);
   const [np, setNp] = useState({ name: "", brand: "", category: "" });
 
@@ -136,9 +234,7 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
   // ALREADY in the shop, resolveUnknown parks the candidate on suggestedLinkProductId and refuses to
   // mint a duplicate. Rendering that candidate as a one-tap "Link to <product>" is the only way the
   // operator can act on it - without it, "Approve suggestion" was a silent no-op on these rows.
-  const suggestedLinkProduct = review.suggestedLinkProductId
-    ? products.find((p) => p.id === review.suggestedLinkProductId && p.status !== "archived")
-    : undefined;
+  const activeSuggestedLinkProduct = suggestedLinkProduct?.status !== "archived" ? suggestedLinkProduct : undefined;
 
   // P4: elderly-readable controls. One PRIMARY action per row (blue filled, >=44px, text-base); everything
   // else is a same-size outline so nothing scary competes with the primary. Approve is primary when there is
@@ -343,19 +439,19 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-1">
-            {suggestedLinkProduct && (
+            {activeSuggestedLinkProduct && (
               <span className="w-full text-sm text-zinc-600" data-testid="suggest-link-note">
-                This looks like a product already in your list: {prettifyProductName(suggestedLinkProduct.name)}.
+                This looks like a product already in your list: {prettifyProductName(activeSuggestedLinkProduct.name)}.
                 Link it so it is not duplicated.
               </span>
             )}
-            {suggestedLinkProduct && (
+            {activeSuggestedLinkProduct && (
               <button
                 type="button"
                 data-testid="link-suggested"
                 onClick={() =>
                   resolveUnknown(review.id, "link_existing", {
-                    productId: suggestedLinkProduct.id,
+                    productId: activeSuggestedLinkProduct.id,
                     applyToCount,
                     selectedAliasCodes: selectedCodes,
                   })
@@ -363,10 +459,10 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 title="Connect this code to the matching product already in your list"
                 className={btnPrimary}
               >
-                Link to {prettifyProductName(suggestedLinkProduct.name)}
+                Link to {prettifyProductName(activeSuggestedLinkProduct.name)}
               </button>
             )}
-            {!suggestedLinkProduct && review.hasSuggestion && review.suggestedProductName && (
+            {!activeSuggestedLinkProduct && review.hasSuggestion && review.suggestedProductName && (
               <button
                 type="button"
                 data-testid="approve-suggestion"
@@ -396,21 +492,25 @@ function ReviewRow({ review, isPlatform }: { review: UnknownCodeReview; isPlatfo
                 Approve suggestion
               </button>
             )}
-            <select
-              aria-label="link to product"
-              value={linkId}
-              onChange={(e) => setLinkId(e.target.value)}
-              className="min-h-[44px] max-w-48 rounded-lg border border-zinc-300 px-2 text-base"
-            >
-              <option value="" disabled>
-                Select a product...
-              </option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {prettifyProductName(p.name)}
-                </option>
-              ))}
-            </select>
+            {isProductPickerOpen ? (
+              <ProductPicker
+                products={products}
+                onChoose={(productId) => {
+                  setLinkId(productId);
+                  setIsProductPickerOpen(false);
+                }}
+                onCancel={() => setIsProductPickerOpen(false)}
+              />
+            ) : (
+              <button
+                type="button"
+                data-testid={`choose-product-${review.id}`}
+                onClick={() => setIsProductPickerOpen(true)}
+                className={btnSecondary}
+              >
+                {linkId ? `Selected: ${prettifyProductName(products.find((product) => product.id === linkId)?.name ?? "product")}` : "Choose product"}
+              </button>
+            )}
             <button
               type="button"
               data-testid="link-existing"

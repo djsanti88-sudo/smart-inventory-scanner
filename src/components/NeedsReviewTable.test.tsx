@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { useScanStore } from "@/stores/scanStore";
 import { NeedsReviewTable } from "@/components/NeedsReviewTable";
 import type { UnknownCodeReview } from "@/types";
@@ -37,14 +37,42 @@ describe("NeedsReviewTable - Barcode column visible to all roles (Task 4)", () =
   });
 });
 
-describe("NeedsReviewTable - prettifies product dropdown labels (Task 5)", () => {
-  it("shows a Title Case option label for a corpus-slug product name", () => {
+describe("NeedsReviewTable - product linking", () => {
+  it("shows a searchable, prettified product picker only after the operator chooses to link", () => {
     useScanStore.setState({
       needsReviewQueue: [review({ id: "pd1", cleanCode: "086699998600", status: "open", syncStatus: "pending" })],
       products: [{ id: "prod-slug", name: "wrangler_workhorse_at" } as unknown as import("@/types").Product],
     });
     render(<NeedsReviewTable />);
+    expect(screen.queryByRole("option", { name: "Wrangler Workhorse AT" })).toBeNull();
+    fireEvent.click(screen.getByTestId("choose-product-pd1"));
+    expect(screen.getByRole("textbox", { name: "Search products" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Wrangler Workhorse AT" })).toBeInTheDocument();
+  });
+});
+
+describe("NeedsReviewTable - review queue scaling", () => {
+  it("bounds initial rendering, does not multiply catalog options by review rows, and reaches every open review", () => {
+    const reviews = Array.from({ length: 100 }, (_, index) =>
+      review({ id: `scale-${index + 1}`, cleanCode: `SCALE-${index + 1}` }),
+    );
+    const products = Array.from({ length: 12 }, (_, index) => ({
+      id: `product-${index + 1}`,
+      name: `catalog_product_${index + 1}`,
+    })) as unknown as import("@/types").Product[];
+    useScanStore.setState({ needsReviewQueue: reviews, products });
+
+    render(<NeedsReviewTable />);
+
+    expect(screen.getAllByTestId(/review-row-SCALE-/)).toHaveLength(25);
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+
+    for (let page = 1; page < 4; page += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Next reviews" }));
+    }
+
+    expect(screen.getByTestId("review-row-SCALE-100")).toBeInTheDocument();
+    expect(screen.getByText("100 reviews")).toBeInTheDocument();
   });
 });
 
