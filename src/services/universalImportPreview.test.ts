@@ -3,6 +3,7 @@ import type { UniversalSheet } from "@/services/importSchema";
 import {
   buildImportPreview,
   describeSkippedSheets,
+  identityDecisionToPreviewStatus,
   mapUniversalRows,
   MAX_IMPORT_QUANTITY,
   type PreviewMatchResult,
@@ -229,5 +230,13 @@ describe("universalImportPreview", () => {
   it("returns no warning when the sheet has no skipped sheets", () => {
     expect(describeSkippedSheets(sheet)).toBe("");
     expect(describeSkippedSheets({ ...sheet, skippedSheets: [] })).toBe("");
+  });
+
+  it("keeps only immutable automatic identity decisions eligible for the legacy exact display", () => {
+    expect(identityDecisionToPreviewStatus("automatic")).toBe("exact");
+    expect(identityDecisionToPreviewStatus("review")).toBe("review");
+    expect(identityDecisionToPreviewStatus("abstain")).toBe("review");
+    expect(identityDecisionToPreviewStatus("non_product")).toBe("review");
+    expect(identityDecisionToPreviewStatus("invalid")).toBe("reject");
   });
 });

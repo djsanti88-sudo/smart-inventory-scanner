@@ -1,5 +1,6 @@
 import type { ColumnMapping, ImportPreview, ImportPreviewRow, ImportPreviewStatus, MappedImportRow, MappingSource, RetailCatalogMatch, UniversalSheet } from "@/services/importSchema";
 import type { MatchResult } from "@/services/reconcile/identityMatcher";
+import type { IdentityDecisionKind } from "@/services/identity/types";
 
 /**
  * User-facing warning when a multi-tab workbook had more than one non-empty worksheet. Only the first
@@ -29,6 +30,16 @@ export interface MappingResult {
   rows: MappedImportRow[];
   heldForReview: ImportPreviewRow[];
   rejected: ImportPreviewRow[];
+}
+
+/**
+ * Compatibility projection for the existing UI while the local hybrid preview is feature-gated.
+ * The new engine's review/abstain/non-product buckets are never presented as auto-apply exact.
+ */
+export function identityDecisionToPreviewStatus(kind: IdentityDecisionKind): ImportPreviewStatus {
+  if (kind === "automatic") return "exact";
+  if (kind === "invalid") return "reject";
+  return "review";
 }
 
 function cell(row: string[], mapping: ColumnMapping, field: keyof ColumnMapping): string {
