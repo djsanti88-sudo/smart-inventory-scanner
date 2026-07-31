@@ -91,6 +91,25 @@ interface NamedMatrix {
   sheetOrdinal: number;
 }
 
+interface SparseCellLike {
+  value: unknown;
+}
+
+interface SparseRowLike {
+  eachCell(
+    options: { includeEmpty: boolean },
+    callback: (cell: SparseCellLike, columnNumber: number) => void,
+  ): void;
+}
+
+export interface SparseWorksheetLike {
+  name: string;
+  eachRow(
+    options: { includeEmpty: boolean },
+    callback: (row: SparseRowLike, rowNumber: number) => void,
+  ): void;
+}
+
 function assertFileSize(size: number): void {
   if (size > MAX_FILE_BYTES) throw new Error("The uploaded file exceeds the 25 MiB limit.");
 }
@@ -123,7 +142,13 @@ async function workbookMatrices(file: UploadFileLike): Promise<NamedMatrix[]> {
     throw new Error(`Could not read this XLSX workbook: ${error instanceof Error ? error.message : "unknown error"}`);
   }
   if (workbook.worksheets.length > MAX_SHEETS) throw new Error("The uploaded workbook exceeds the 64-sheet limit.");
-  const matrices = workbook.worksheets.map((worksheet, index) => {
+  return collectSparseWorksheetMatrices(workbook.worksheets);
+}
+
+/** Sparse, bounded extraction kept separate so the reader never scales with styled sheet dimensions. */
+export function collectSparseWorksheetMatrices(worksheets: readonly SparseWorksheetLike[]): NamedMatrix[] {
+  let retainedDataRows = 0;
+  const matrices = worksheets.map((worksheet, index) => {
     const matrix: string[][] = [];
     const sourceRowNumbers: number[] = [];
     worksheet.eachRow({ includeEmpty: false }, (worksheetRow, rowNumber) => {
@@ -139,6 +164,8 @@ async function workbookMatrices(file: UploadFileLike): Promise<NamedMatrix[]> {
         row[columnNumber - 1] = text;
       });
       if (!hasData(row)) return;
+      retainedDataRows += 1;
+      if (retainedDataRows > MAX_TOTAL_ROWS) throw new Error("The uploaded file exceeds the 5,000-row limit.");
       matrix.push(row);
       sourceRowNumbers.push(rowNumber);
     });

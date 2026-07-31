@@ -1,7 +1,8 @@
 // src/services/universalFileReader.test.ts
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { readUniversalFile, readUniversalWorkbook } from "@/services/universalFileReader";
+import { collectSparseWorksheetMatrices, readUniversalFile, readUniversalWorkbook } from "@/services/universalFileReader";
+import type { SparseWorksheetLike } from "@/services/universalFileReader";
 import type { UploadFileLike } from "@/services/importSchema";
 
 function textFile(name: string, content: string, size?: number): UploadFileLike {
@@ -280,6 +281,50 @@ describe("readUniversalFile", () => {
     });
     expect(sheets).toHaveLength(64);
     expect(sheets.at(-1)?.sheetOrdinal).toBe(64);
+  });
+
+  it("enforces the 5,000 retained data-row budget across workbook sheets", async () => {
+    const exactWorkbook = new ExcelJS.Workbook();
+    for (const name of ["One", "Two"]) {
+      const worksheet = exactWorkbook.addWorksheet(name);
+      for (let row = 0; row < 2_500; row += 1) worksheet.addRow([`PN-${name}-${row}`]);
+    }
+    const exactBuffer = await exactWorkbook.xlsx.writeBuffer();
+    const exactBytes = new Uint8Array(exactBuffer);
+    await expect(readUniversalWorkbook({
+      name: "exact-row-limit.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => exactBytes.buffer.slice(exactBytes.byteOffset, exactBytes.byteOffset + exactBytes.byteLength),
+    })).resolves.toHaveLength(2);
+
+    exactWorkbook.getWorksheet("Two")?.addRow(["PN-over-limit"]);
+    const oversizedBuffer = await exactWorkbook.xlsx.writeBuffer();
+    const oversizedBytes = new Uint8Array(oversizedBuffer);
+    await expect(readUniversalWorkbook({
+      name: "oversized-row-limit.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => oversizedBytes.buffer.slice(oversizedBytes.byteOffset, oversizedBytes.byteOffset + oversizedBytes.byteLength),
+    })).rejects.toThrow("The uploaded file exceeds the 5,000-row limit.");
+  });
+
+  it("stops sparse worksheet traversal at the 5,001st retained row", () => {
+    let visitedRows = 0;
+    const worksheet: SparseWorksheetLike = {
+      name: "Instrumented",
+      eachRow: (_options, callback) => {
+        for (let rowNumber = 1; rowNumber <= 5_002; rowNumber += 1) {
+          visitedRows += 1;
+          callback({
+            eachCell: (_cellOptions, cellCallback) => {
+              cellCallback({ value: `PN-${rowNumber}` }, 1);
+            },
+          }, rowNumber);
+        }
+      },
+    };
+
+    expect(() => collectSparseWorksheetMatrices([worksheet])).toThrow("The uploaded file exceeds the 5,000-row limit.");
+    expect(visitedRows).toBe(5_001);
   });
 
   it("rejects every .xls upload with safe conversion guidance", async () => {
