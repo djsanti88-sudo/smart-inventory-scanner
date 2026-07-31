@@ -350,7 +350,37 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       return;
     }
     if (tombstoneState.conflict) {
-      reportDegraded();
+      if (!options.database) { reportDegraded(); return; }
+      const recoveryToken = encodeClearToken(tombstoneState.maxVersion + 1);
+      try {
+        // The full payload is durable before either conflicting clear is reconciled. Its strictly
+        // newer generation then provides the only safe ordering point for all tabs.
+        await options.database.set(
+          recoveryKey(name),
+          encodeRecoveryCandidate({ payload: value, supersedesTombstone: recoveryToken }),
+        );
+        reportAvailable();
+      } catch {
+        reportDegraded();
+        return;
+      }
+      writeTombstone(name, recoveryToken);
+      await persistTombstone(name, recoveryToken);
+      let mainWritten = false;
+      try {
+        await options.database.set(name, value);
+        mainWritten = true;
+        reportAvailable();
+      } catch { reportDegraded(); }
+      if (!mainWritten || generationFor(name) !== token) return;
+      const localRetired = retireAuthoritativeLocalFallback(name);
+      const tombstoneCleared = await clearTombstone(name, token, recoveryToken);
+      if (localRetired && tombstoneCleared) {
+        try {
+          await options.database.remove(recoveryKey(name));
+          reportAvailable();
+        } catch { reportDegraded(); }
+      }
       return;
     }
     const tombstoneToken = tombstoneState.token;

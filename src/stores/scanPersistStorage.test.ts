@@ -568,6 +568,38 @@ describe("active async persistence adapter", () => {
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("candidate after clear 5");
   });
+  it("recovers liveness with a newer journal generation after two adapters leave conflicting clears", async () => {
+    const db = new Db();
+    const tabALocal = legacy();
+    const tabAClear = JSON.stringify({ __scanPersistClear: 1, version: 7, id: "tab-a-clear" });
+    const tabBClear = JSON.stringify({ __scanPersistClear: 1, version: 7, id: "tab-b-clear" });
+    tabALocal.values.set("sis-scan-owner::scanbin-cleared-v1", tabAClear);
+    await db.set("sis-scan-owner::scanbin-cleared-v1", tabBClear);
+    const recoveringTab = createAsyncDurableStorage({ database: db, getLegacyStorage: () => tabALocal });
+
+    await expect(recoveringTab.getItem("sis-scan-owner")).resolves.toBeNull();
+    await recoveringTab.setItem("sis-scan-owner", "complete snapshot after conflict");
+
+    const freshTab = createAsyncDurableStorage({ database: db, getLegacyStorage: () => tabALocal });
+    await expect(freshTab.getItem("sis-scan-owner")).resolves.toBe("complete snapshot after conflict");
+    await freshTab.setItem("sis-scan-owner", "future snapshot after recovery");
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => tabALocal }).getItem("sis-scan-owner"))
+      .resolves.toBe("future snapshot after recovery");
+  });
+  it("keeps the newer conflict-recovery journal authoritative when interrupted before main commit", async () => {
+    const db = new SelectiveRecoveryDb();
+    const local = legacy();
+    local.values.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 9, id: "tab-a" }));
+    await db.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 9, id: "tab-b" }));
+    db.failMainWrite = true;
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    await storage.setItem("sis-scan-owner", "journaled conflict recovery");
+    db.failMainWrite = false;
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("journaled conflict recovery");
+  });
   it("reports a clear non-authoritative when candidate ordering is unknown and deletion fails", async () => {
     const db = new CandidateReadFailsDb();
     db.failCandidateRead = false;
