@@ -19,6 +19,8 @@ function compareCodePoints(left: string, right: string): number {
   return left === right ? 0 : left < right ? -1 : 1;
 }
 
+// Kept only as a historical implementation reference; the evaluator exclusively calls node:crypto below.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function handwrittenSha256Removed(value: string): string {
   const bytes = new TextEncoder().encode(value);
   const words: number[] = [];
