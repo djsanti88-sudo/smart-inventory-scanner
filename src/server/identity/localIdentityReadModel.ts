@@ -44,7 +44,8 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
     async lookupApprovedLinks(input) { return wire.approvedLinks.filter((link) => scopeMatches(link, input)); },
     hasCurrentTarget(input) {
       const scopedLinkInput = { businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, identifiers: input.identifiers ?? [] };
-      return candidates.some((candidate) => candidate.productId === input.targetProductId && (candidate.businessScope === "master" || candidate.tenantBusinessId === input.businessId))
+      const requested = input.identifiers ?? [];
+      return candidates.some((candidate) => candidate.productId === input.targetProductId && (candidate.businessScope === "master" || candidate.tenantBusinessId === input.businessId) && requested.some((key) => candidate.identifiers.some((identifier) => identifier.type === key.type && (identifier.namespace ?? "") === (key.namespace ?? "") && identifier.normalized === key.normalized)))
         || wire.approvedLinks.some((link) => isValidApprovedLink(link, scopedLinkInput) && link.targetProductId === input.targetProductId);
     },
   };

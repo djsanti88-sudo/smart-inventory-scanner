@@ -9,9 +9,10 @@ import { createLocalRepository, type LocalIdentityRepository } from "@/server/id
 import { loadConfiguredLocalIdentityReadModel } from "@/server/identity/localIdentityReadModel";
 import type { ApplyActor } from "@/server/identity/applyService";
 import type { IdentityLink, IdentityReview, TenantIdentityProduct } from "@/services/identity/types";
+import { canonicalSha256 } from "@/services/identity/canonical";
 
 type ReviewRole = ApplyActor["role"];
-type ReviewRepository = Pick<LocalIdentityRepository, "listIdentityReviews" | "resolveIdentityReview" | "saveIdentityLink" | "createTenantProduct">;
+type ReviewRepository = Pick<LocalIdentityRepository, "listIdentityReviews"> & Partial<Pick<LocalIdentityRepository, "applyReviewAction" | "resolveIdentityReview" | "saveIdentityLink" | "createTenantProduct">>;
 type Versions = { catalogVersion: string; linkVersion: string };
 const roles: ReviewRole[] = ["owner", "admin", "counter", "viewer"];
 const root = path.join(process.cwd(), ".tmp", "identity-import", "local-apply-v1");
@@ -25,7 +26,7 @@ function actorFromEnvironment(businessId: string): ApplyActor | undefined {
 }
 async function defaultVersions(): Promise<Versions> { const model = await loadConfiguredLocalIdentityReadModel(); if (!model) throw new Error("review_configuration_unavailable"); return { catalogVersion: model.snapshot.catalogVersion, linkVersion: model.linkSnapshotHash }; }
 
-type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: () => Promise<Versions> };
+type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: () => Promise<Versions>; currentModel?: () => ReturnType<typeof loadConfiguredLocalIdentityReadModel> };
 type Action = "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
 function requestBody(value: unknown): value is { businessId: string; reviewId: string; action: Action; targetProductId?: string; name?: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -51,22 +52,31 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     if (!isManager(actor)) return json({ error: "Only owners and admins can resolve identity reviews." }, 403);
     const review = (await dependencies.repository.listIdentityReviews(scope)).find((item) => item.reviewId === body!.reviewId);
     if (!review) return json({ error: "Identity review was not found." }, 404);
-    if (body.action === "reject") return json({ review: await dependencies.repository.resolveIdentityReview(scope, review.reviewId, "rejected", actor.actorId, new Date().toISOString()) });
+    const actionId = request.headers.get("Idempotency-Key") ?? `review:${review.reviewId}:${body.action}`;
+    const apply = async (resolution: NonNullable<IdentityReview["resolution"]>, link?: IdentityLink, product?: TenantIdentityProduct) => {
+      const payloadFingerprint = await canonicalSha256({ reviewId: review.reviewId, action: body!.action, targetProductId: body!.targetProductId ?? "", name: body!.name?.trim() ?? "" });
+      if (dependencies.repository.applyReviewAction) return dependencies.repository.applyReviewAction({ businessId: scope, reviewId: review.reviewId, actionId, payloadFingerprint, resolution, resolvedBy: actor.actorId, ...(link ? { link } : {}), ...(product ? { product } : {}) });
+      if (product) await dependencies.repository.createTenantProduct?.(product); if (link) await dependencies.repository.saveIdentityLink?.(link);
+      return { review: await dependencies.repository.resolveIdentityReview!(scope, review.reviewId, resolution, actor.actorId, new Date().toISOString()), ...(link ? { link } : {}), ...(product ? { product } : {}) };
+    };
+    if (body.action === "reject") return json(await apply("rejected"));
     if (body.action === "create_tenant_product") {
       const name = body.name?.trim(); if (!name || name.length > 200) return json({ error: "A tenant product name is required." }, 400);
       const product: TenantIdentityProduct = { productId: `tenant:${randomUUID()}`, businessId: scope, name, createdBy: actor.actorId, createdAt: new Date().toISOString() };
-      await dependencies.repository.createTenantProduct(product);
-      return json({ review: await dependencies.repository.resolveIdentityReview(scope, review.reviewId, "create_product", actor.actorId, new Date().toISOString()), product });
+      const key = review.decision.normalizedKeys[0]; if (!key || !review.scope) return json({ error: "The review has no durable identifier." }, 409);
+      const versions = await dependencies.currentVersions(); const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId: product.productId, status: "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), approvedBy: actor.actorId, approvedAt: new Date().toISOString(), version: 1 };
+      return json(await apply("create_product", link, product));
     }
     const targetProductId = chosenCandidate(review, body.targetProductId);
     if (!targetProductId || !review.scope) return json({ error: "The selected candidate is not available for this review." }, 409);
     const key = review.decision.normalizedKeys[0]; if (!key) return json({ error: "The review has no durable identifier." }, 409);
+    const model = dependencies.currentModel ? await dependencies.currentModel() : undefined;
+    if (dependencies.currentModel && (!model || !model.hasCurrentTarget({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, namespace: key.namespace, source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }))) return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
     const versions = await dependencies.currentVersions();
-    const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: 1 };
-    await dependencies.repository.saveIdentityLink(link);
-    return json({ review: await dependencies.repository.resolveIdentityReview(scope, review.reviewId, body.action === "revoke_link" ? "rejected" : "confirmed", actor.actorId, new Date().toISOString()) });
+    const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: body.action === "revoke_link" ? 2 : 1 };
+    return json(await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link));
   };
 }
 
-export const GET = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: createLocalRepository(createFileAtomicLocalStorage({ root })), currentVersions: defaultVersions });
+export const GET = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: createLocalRepository(createFileAtomicLocalStorage({ root })), currentVersions: defaultVersions, currentModel: loadConfiguredLocalIdentityReadModel });
 export const POST = GET;

@@ -4,7 +4,7 @@ import { canonicalSha256 } from "@/services/identity/canonical";
 import { createAggregateImportEvent } from "@/services/identity/importLedger";
 import { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
 import type { PreviewVerificationExpectation, SignedPreviewChunk } from "@/services/identity/preview";
-import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, ImportRun, ScopedIdentifier } from "@/services/identity/types";
+import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, IdentityReview, ImportRun, ScopedIdentifier } from "@/services/identity/types";
 import type { ImportOperationClaim, LocalIdentityRepository } from "./localRepository";
 
 type Role = "owner" | "admin" | "counter" | "viewer";
@@ -23,6 +23,7 @@ type ApplyRepository = {
   transitionImportRun: (...args: Parameters<LocalIdentityRepository["transitionImportRun"]>) => Promise<unknown>;
   completeImportRun?: (...args: Parameters<LocalIdentityRepository["completeImportRun"]>) => Promise<unknown>;
   saveExpectedInventorySession?: (...args: Parameters<LocalIdentityRepository["saveExpectedInventorySession"]>) => Promise<unknown>;
+  saveIdentityReview?: (...args: Parameters<LocalIdentityRepository["saveIdentityReview"]>) => Promise<unknown>;
   claimImportOperation: (...args: Parameters<LocalIdentityRepository["claimImportOperation"]>) => Promise<unknown>;
   completeImportOperation: (...args: Parameters<LocalIdentityRepository["completeImportOperation"]>) => Promise<unknown>;
 };
@@ -113,6 +114,14 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     return stored;
   }
   if (run.state === "previewed" || run.state === "failed") await dependencies.repository.transitionImportRun(run.businessId, run.importId, "applying");
+  // Applying a signed preview is the sole point that creates durable human work.  Preview itself
+  // remains pure; the review keeps the exact signed decision/evidence snapshot for later audit.
+  if (dependencies.repository.saveIdentityReview) for (const item of preflight) {
+    if (item.decision.kind === "automatic" || item.decision.kind === "non_product") continue;
+    const reviewId = `identity-review:${await canonicalSha256({ businessId: run.businessId, importId: run.importId, rowId: item.rowId })}`;
+    const review: IdentityReview = { reviewId, businessId: run.businessId, importId: run.importId, rowId: item.rowId, decision: item.decision, scope: { sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId } };
+    await dependencies.repository.saveIdentityReview(review);
+  }
   const events = new Map<string, Awaited<ReturnType<typeof createAggregateImportEvent>>>();
   if (input.mode === "physical_count") for (const item of preflight) {
     const targetProductId = item.decision.kind === "automatic" ? item.decision.targetProductId : item.decision.kind === "review" ? item.decision.approvedProductId : undefined;
