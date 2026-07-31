@@ -9,6 +9,7 @@ import { applyIdentityImport, type ApplyActor, type ApplyIdentityImportInput, ty
 import { createLocalAggregateLedger } from "./localAggregateLedger";
 import { createLocalRepository } from "./localRepository";
 import { createLocalPreviewSigner } from "./previewSigner";
+import { loadConfiguredLocalIdentityReadModel } from "./localIdentityReadModel";
 
 export interface LocalIdentityApplyComposition {
   storage: AtomicLocalStorage; signingKey: () => string | undefined; versions: PreviewVersions; now?: () => Date;
@@ -25,10 +26,11 @@ function memberships(): Membership[] | undefined {
 }
 async function configured(): Promise<LocalIdentityApplyComposition | undefined> {
   const configuredMemberships = memberships(); if (!configuredMemberships) return undefined;
-  const catalogVersion = "local-preview-empty-catalog-v1", catalogSnapshotHash = await canonicalSha256({ catalogVersion, barcodeCandidates: [], partNumberCandidates: [] });
-  const linkVersion = "local-preview-empty-links-v1", linkSnapshotHash = await canonicalSha256({ linkVersion, catalogSnapshotHash, approvedLinks: [] });
+  const model = loadConfiguredLocalIdentityReadModel(); if (!model) return undefined;
+  const catalogVersion = model.snapshot.catalogVersion, catalogSnapshotHash = model.snapshot.catalogSnapshotHash;
+  const linkVersion = "local-snapshot-links-v1", linkSnapshotHash = await canonicalSha256({ linkVersion, catalogSnapshotHash });
   const root = path.join(process.cwd(), ".tmp", "identity-import", "local-apply-v1");
-  return { storage: createFileAtomicLocalStorage({ root }), signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async () => false, authenticate: async (_request, businessId) => { const actorId = process.env.SCANBIN_LOCAL_ACTOR_ID; if (!actorId) return undefined; const member = configuredMemberships.find((membership) => membership.actorId === actorId && membership.businessId === businessId); if (!member) throw new Error("apply_nonmember"); return member; } };
+  return { storage: createFileAtomicLocalStorage({ root }), signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async (input) => model.hasCurrentTarget({ businessId: input.businessId, sourceSystem: String(input.row.sourceSystem), sourceSignature: String(input.row.sourceSignature), vendorId: String(input.row.vendorId), targetProductId: input.targetProductId }), authenticate: async (_request, businessId) => { const actorId = process.env.SCANBIN_LOCAL_ACTOR_ID; if (!actorId) return undefined; const member = configuredMemberships.find((membership) => membership.actorId === actorId && membership.businessId === businessId); if (!member) throw new Error("apply_nonmember"); return member; } };
 }
 async function composition(): Promise<LocalIdentityApplyComposition | undefined> { return injected ?? configured(); }
 export function setLocalIdentityApplyCompositionForTest(value: LocalIdentityApplyComposition | undefined): void { injected = value; }

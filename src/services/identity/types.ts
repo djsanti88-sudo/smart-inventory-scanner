@@ -195,6 +195,14 @@ export interface ImportRun {
   result?: unknown;
 }
 
+/** Durable, non-counting expected-inventory view for a reconcile import. */
+export interface ExpectedInventorySession {
+  importId: string;
+  businessId: string;
+  sourceEvidenceSnapshot: string;
+  rows: Array<{ rowId: string; targetProductId?: string; expectedQuantity: number; currentQuantity: null; varianceQuantity: null; status: "unavailable"; correctionTargetProductId?: string }>;
+}
+
 export type ImportOperationState = "pending" | "applied" | "failed_retryable" | "failed_terminal";
 
 export interface ImportOperation {

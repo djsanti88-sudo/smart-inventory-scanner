@@ -5,6 +5,7 @@ import { createIdentityPreview, type CreateIdentityPreviewInput, type PreviewVer
 import type { LocalIdentitySnapshot } from "./localSnapshotIndex";
 import { createReadOnlyCandidateSource, type ApprovedLinkLookupInput, type ApprovedLinkLookupResult } from "./readOnlyCandidateSource";
 import { createLocalPreviewSigner } from "./previewSigner";
+import { loadConfiguredLocalIdentityReadModel } from "./localIdentityReadModel";
 
 export type IdentityPreviewRole = "owner" | "admin" | "counter" | "viewer";
 export interface IdentityPreviewActor { actorId: string; role: IdentityPreviewRole; }
@@ -44,14 +45,14 @@ function configuredMemberships(): LocalPreviewMembership[] | undefined {
 async function configuredLocalComposition(): Promise<LocalIdentityPreviewComposition | undefined> {
   const memberships = configuredMemberships();
   if (!memberships) return undefined;
-  const catalogVersion = "local-preview-empty-catalog-v1";
-  const catalogSnapshotHash = await canonicalSha256({ catalogVersion, barcodeCandidates: [], partNumberCandidates: [] });
-  const snapshot: LocalIdentitySnapshot = { catalogVersion, catalogSnapshotHash, barcodeCandidates: new Map(), partNumberCandidates: new Map() };
-  const linkVersion = "local-preview-empty-links-v1";
-  const linkSnapshotHash = await canonicalSha256({ linkVersion, catalogSnapshotHash, approvedLinks: [] });
+  const model = loadConfiguredLocalIdentityReadModel();
+  if (!model) return undefined;
+  const snapshot = model.snapshot;
+  const linkVersion = "local-snapshot-links-v1";
+  const linkSnapshotHash = await canonicalSha256({ linkVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash });
   return {
     snapshot,
-    lookupApprovedLinks: async () => [],
+    lookupApprovedLinks: model.lookupApprovedLinks,
     authenticate: async (_request, businessId) => {
       // Mock mode has no Firebase session.  The actor is nevertheless server-owned: never accept
       // an actor id from a request header, cookie, or body as proof of membership.
@@ -60,7 +61,7 @@ async function configuredLocalComposition(): Promise<LocalIdentityPreviewComposi
       return membership ? { actorId: membership.actorId, role: membership.role } : undefined;
     },
     signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY,
-    versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash },
+    versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion, linkSnapshotHash },
   };
 }
 

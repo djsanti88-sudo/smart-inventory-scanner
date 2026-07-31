@@ -50,6 +50,7 @@ describe("local signed apply composition", () => {
 
   it("returns 403 for a configured local actor without membership", async () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1"); vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", signingKey);
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify({ catalogVersion: "local-v1", catalogSnapshotHash: "a".repeat(64), barcodeCandidates: [], partNumberCandidates: [], approvedLinks: [] }));
     vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "member", businessId: "shop-a", role: "owner" }])); vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "not-a-member");
     expect((await POST(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ signedPayloads: [await token()], mode: "reconcile", corrections: [] }) }))).status).toBe(403);
   });

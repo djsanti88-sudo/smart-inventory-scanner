@@ -3,7 +3,7 @@ import "server-only";
 import { canonicalSha256 } from "@/services/identity/canonical";
 import { createAggregateImportEvent } from "@/services/identity/importLedger";
 import type { PreviewVerificationExpectation, SignedPreviewChunk } from "@/services/identity/preview";
-import type { AggregateLedgerPort, IdentityDecision, ImportRun } from "@/services/identity/types";
+import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, ImportRun } from "@/services/identity/types";
 import type { ImportOperationClaim, LocalIdentityRepository } from "./localRepository";
 
 type Role = "owner" | "admin" | "counter" | "viewer";
@@ -21,6 +21,7 @@ type ApplyRepository = {
   getImportRun?: (...args: Parameters<LocalIdentityRepository["getImportRun"]>) => Promise<ImportRun | undefined>;
   transitionImportRun: (...args: Parameters<LocalIdentityRepository["transitionImportRun"]>) => Promise<unknown>;
   completeImportRun?: (...args: Parameters<LocalIdentityRepository["completeImportRun"]>) => Promise<unknown>;
+  saveExpectedInventorySession?: (...args: Parameters<LocalIdentityRepository["saveExpectedInventorySession"]>) => Promise<unknown>;
   claimImportOperation: (...args: Parameters<LocalIdentityRepository["claimImportOperation"]>) => Promise<unknown>;
   completeImportOperation: (...args: Parameters<LocalIdentityRepository["completeImportOperation"]>) => Promise<unknown>;
 };
@@ -135,6 +136,10 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     rows.push(rowResult);
   }
   const result: ApplyResult = { importId: run.importId, mode: input.mode, countedRows: rows.filter((row) => row.status === "counted").length, countQuantity: rows.filter((row) => row.status === "counted").reduce((sum, row) => sum + (row.status === "counted" ? Number((allRows[allRowIds.indexOf(row.rowId)] as Record<string, unknown>).quantity) : 0), 0), rows, ...(input.mode === "reconcile" ? { reconciliation: { expectedRows: rows.length, expectedQuantity: rows.reduce((sum, row) => sum + row.audit.sourceQuantity, 0), currentInventoryStatus: "unavailable" as const, varianceQuantity: null } } : {}) };
+  if (input.mode === "reconcile" && dependencies.repository.saveExpectedInventorySession) {
+    const session: ExpectedInventorySession = { importId: run.importId, businessId: run.businessId, sourceEvidenceSnapshot: run.sourceFingerprint, rows: rows.map((row) => ({ rowId: row.rowId, ...(row.audit.targetProductId ? { targetProductId: row.audit.targetProductId } : {}), expectedQuantity: row.audit.sourceQuantity, currentQuantity: null, varianceQuantity: null, status: "unavailable", ...(row.audit.correctionTargetProductId ? { correctionTargetProductId: row.audit.correctionTargetProductId } : {}) })) };
+    await dependencies.repository.saveExpectedInventorySession(session);
+  }
   if (dependencies.repository.completeImportRun) await dependencies.repository.completeImportRun(run.businessId, run.importId, result);
   else await dependencies.repository.transitionImportRun(run.businessId, run.importId, "completed");
   return result;
