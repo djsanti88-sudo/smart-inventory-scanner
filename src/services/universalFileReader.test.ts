@@ -188,7 +188,7 @@ describe("readUniversalFile", () => {
     await expect(readUniversalFile(file)).resolves.toMatchObject({ rows: [["ABC-1", ""]] });
   });
 
-  it("does not count styled far-away cells toward the data width limit", async () => {
+  it("ignores styled far-away cells without allocating their physical width", async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Inventory");
     worksheet.addRow(["PN", "QOH"]);
@@ -204,7 +204,26 @@ describe("readUniversalFile", () => {
 
     const sheet = await readUniversalFile(file);
     expect(sheet.rows[0].slice(0, 2)).toEqual(["ABC-1", "7"]);
-    expect(sheet.rows[0]).toHaveLength(16_384);
+    expect(sheet.rows[0]).toHaveLength(2);
+    expect(sheet.rows[0].length).toBeLessThanOrEqual(256);
+  });
+
+  it("ignores a styled far-away row without adding it to returned source rows", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Inventory");
+    worksheet.addRow(["PN", "QOH"]);
+    worksheet.addRow(["ABC-1", 7]);
+    worksheet.getCell("A100001").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF000000" } };
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const sheet = await readUniversalFile({
+      name: "inventory.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    });
+
+    expect(sheet.rows).toEqual([["ABC-1", "7"]]);
+    expect(sheet.sourceRowNumbers).toEqual([2]);
   });
 
   it("allows exact file, sheet, column, and row limits", async () => {
@@ -224,6 +243,17 @@ describe("readUniversalFile", () => {
     await expect(readUniversalWorkbook(textFile("columns.csv", tooManyColumns))).rejects.toThrow(
       "The uploaded file exceeds the 256-column limit.",
     );
+    const xlsxColumns = new ExcelJS.Workbook();
+    const xlsxSheet = xlsxColumns.addWorksheet("Inventory");
+    xlsxSheet.getCell(1, 1).value = "PN";
+    xlsxSheet.getCell(1, 257).value = "TOO_FAR";
+    const xlsxBuffer = await xlsxColumns.xlsx.writeBuffer();
+    const xlsxBytes = new Uint8Array(xlsxBuffer);
+    await expect(readUniversalWorkbook({
+      name: "columns.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => xlsxBytes.buffer.slice(xlsxBytes.byteOffset, xlsxBytes.byteOffset + xlsxBytes.byteLength),
+    })).rejects.toThrow("The uploaded file exceeds the 256-column limit.");
     await expect(readUniversalWorkbook(textFile("rows.csv", Array.from({ length: 5_001 }, () => "PN").join("\n")))).rejects.toThrow(
       "The uploaded file exceeds the 5,000-row limit.",
     );

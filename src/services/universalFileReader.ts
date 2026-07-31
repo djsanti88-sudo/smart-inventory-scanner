@@ -86,6 +86,7 @@ function excelCellText(value: unknown): string {
 
 interface NamedMatrix {
   matrix: string[][];
+  sourceRowNumbers: number[];
   sheetName: string;
   sheetOrdinal: number;
 }
@@ -124,14 +125,24 @@ async function workbookMatrices(file: UploadFileLike): Promise<NamedMatrix[]> {
   if (workbook.worksheets.length > MAX_SHEETS) throw new Error("The uploaded workbook exceeds the 64-sheet limit.");
   const matrices = workbook.worksheets.map((worksheet, index) => {
     const matrix: string[][] = [];
-    for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+    const sourceRowNumbers: number[] = [];
+    worksheet.eachRow({ includeEmpty: false }, (worksheetRow, rowNumber) => {
       const row: string[] = [];
-      for (let columnNumber = 1; columnNumber <= worksheet.columnCount; columnNumber += 1) {
-        row.push(sanitizeCell(excelCellText(worksheet.getRow(rowNumber).getCell(columnNumber).value)));
-      }
+      worksheetRow.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
+        const text = sanitizeCell(excelCellText(cell.value));
+        if (columnNumber > MAX_COLUMNS) {
+          if (text.trim() !== "") throw new Error("The uploaded file exceeds the 256-column limit.");
+          return;
+        }
+        // An instantiated formula/error cell remains an inert empty cell at its physical position.
+        // Style-only cells are excluded by ExcelJS's sparse `includeEmpty: false` iteration.
+        row[columnNumber - 1] = text;
+      });
+      if (!hasData(row)) return;
       matrix.push(row);
-    }
-    return { matrix, sheetName: worksheet.name, sheetOrdinal: index + 1 };
+      sourceRowNumbers.push(rowNumber);
+    });
+    return { matrix, sourceRowNumbers, sheetName: worksheet.name, sheetOrdinal: index + 1 };
   });
   assertMatrixLimits(matrices.map(({ matrix }) => matrix));
   return matrices.filter(({ matrix }) => matrix.some(hasData));
@@ -143,21 +154,24 @@ function universalSheet(
   matrix: string[][],
   importedSheetName?: string,
   sheetOrdinal?: number,
+  matrixSourceRowNumbers = matrix.map((_, index) => index + 1),
 ): UniversalSheet {
   if (!matrix.some(hasData)) throw new Error("The uploaded file is empty.");
   const inference = inferColumnMapping(matrix);
+  const headerRowIndex = matrixSourceRowNumbers[inference.headerRowIndex] - 1;
   const sourceRows = matrix.slice(inference.headerRowIndex + 1);
+  const sourceRowNumbers = matrixSourceRowNumbers.slice(inference.headerRowIndex + 1);
   return {
     fileName: file.name,
     kind,
     headers: inference.headers,
     rows: sourceRows.filter(hasData),
-    headerRowIndex: inference.headerRowIndex,
+    headerRowIndex,
     sourceSignature: buildSourceSignature(inference.headers),
     importedSheetName,
     sheetOrdinal,
     sourceRowNumbers: sourceRows
-      .map((row, index) => ({ row, sourceRowNumber: inference.headerRowIndex + index + 2 }))
+      .map((row, index) => ({ row, sourceRowNumber: sourceRowNumbers[index] }))
       .filter(({ row }) => hasData(row))
       .map(({ sourceRowNumber }) => sourceRowNumber),
     skippedSheets: [],
@@ -179,7 +193,9 @@ export async function readUniversalWorkbook(file: UploadFileLike): Promise<Unive
   }
   const sheets = await workbookMatrices(file);
   if (sheets.length === 0) throw new Error("The uploaded file is empty.");
-  return sheets.map(({ matrix, sheetName, sheetOrdinal }) => universalSheet(file, kind, matrix, sheetName, sheetOrdinal));
+  return sheets.map(({ matrix, sourceRowNumbers, sheetName, sheetOrdinal }) =>
+    universalSheet(file, kind, matrix, sheetName, sheetOrdinal, sourceRowNumbers),
+  );
 }
 
 /** Legacy single-sheet seam. Multi-tab workbooks must be routed through readUniversalWorkbook. */
