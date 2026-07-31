@@ -43,6 +43,19 @@ describe("createFileAtomicLocalStorage", () => {
     expect(items.map((item) => item?.index)).toEqual(Array.from({ length: 20 }, (_, index) => index));
   });
 
+  it("serializes two adapters addressed to the same Windows directory through case aliases", async () => {
+    const root = testRoot();
+    const caseAlias = path.join(storageBase, path.basename(root).toUpperCase());
+    const first = createFileAtomicLocalStorage({ root });
+    const second = createFileAtomicLocalStorage({ root: caseAlias });
+    await Promise.all([
+      first.transaction((transaction) => transaction.set("first", true)),
+      second.transaction((transaction) => transaction.set("second", true)),
+    ]);
+
+    await expect(first.transaction(async (transaction) => [await transaction.get("first"), await transaction.get("second")])).resolves.toEqual([true, true]);
+  });
+
   it("survives reconstruction using an atomic same-directory replacement", async () => {
     const root = testRoot();
     const first = createFileAtomicLocalStorage({ root });

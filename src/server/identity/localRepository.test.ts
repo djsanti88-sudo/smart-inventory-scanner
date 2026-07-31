@@ -138,11 +138,29 @@ describe("local identity repository", () => {
     await expect(repository.createImportRun({ ...input, previewFingerprint: "tampered-preview" })).rejects.toThrow(/idempotency.*conflict/i);
   });
 
+  it("treats a changed caller creation timestamp as a safe import-run retry", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const input = { importId: "import-a", businessId: "shop-a", sourceFingerprint: "source", mappingFingerprint: "mapping", previewFingerprint: "preview", actorId: "manager", engineVersion: "engine", pluginVersion: "plugin", catalogVersion: "catalog", createdAt: "first-time" };
+    const created = await repository.createImportRun(input);
+
+    await expect(repository.createImportRun({ ...input, createdAt: "retry-time" })).resolves.toEqual(created);
+  });
+
   it("does not overwrite a different immutable identity review with the same scoped ID", async () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
     const review = { reviewId: "review-a", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "abstain" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };
     await repository.saveIdentityReview(review);
     await expect(repository.saveIdentityReview({ ...review, rowId: "row-b" })).rejects.toThrow(/idempotency.*conflict/i);
+  });
+
+  it("allows one terminal review resolution and rejects a conflicting rewrite", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const review = { reviewId: "review-a", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "abstain" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };
+    await repository.saveIdentityReview(review);
+    const resolved = await repository.resolveIdentityReview("shop-a", "review-a", "confirmed", "manager-a", "2026-07-31T00:00:00.000Z");
+
+    await expect(repository.resolveIdentityReview("shop-a", "review-a", "confirmed", "manager-a", "2026-07-31T00:00:00.000Z")).resolves.toEqual(resolved);
+    await expect(repository.resolveIdentityReview("shop-a", "review-a", "rejected", "manager-a", "2026-07-31T00:00:00.000Z")).rejects.toThrow(/terminal|conflict/i);
   });
 
   it("returns every latest approved vendor-wide rule as review-only candidates", async () => {

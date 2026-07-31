@@ -50,11 +50,11 @@ describe("local aggregate ledger", () => {
     });
   });
 
-  it("returns idempotency_conflict rather than another tenant or payload's prior result", async () => {
+  it("returns idempotency_conflict for a changed payload within one tenant", async () => {
     const ledger = createLocalAggregateLedger(createMemoryAtomicLocalStorage());
     const event = { kind: "aggregate_import" as const, eventId: "event", importId: "import", rowId: "row", businessId: "shop-a", quantity: 1, unitOfMeasure: "each" as const, sourceFileOrdinal: 0, sheetName: "Inventory", sourceRowNumber: 2 };
     await ledger.apply(event, "same-key", "operation-a");
-    await expect(ledger.apply({ ...event, businessId: "shop-b" }, "same-key", "operation-a")).resolves.toMatchObject({ kind: "idempotency_conflict" });
+    await expect(ledger.apply({ ...event, businessId: "shop-b" }, "same-key", "operation-a")).resolves.toEqual({ event: { ...event, businessId: "shop-b" }, idempotencyKey: "same-key" });
     await expect(ledger.apply({ ...event, quantity: 2 }, "same-key", "operation-a")).resolves.toMatchObject({ kind: "idempotency_conflict" });
   });
 
@@ -63,5 +63,14 @@ describe("local aggregate ledger", () => {
     const event = { kind: "aggregate_import" as const, eventId: "event", importId: "import", rowId: "row", businessId: "shop-a", quantity: 1, unitOfMeasure: "each" as const, sourceFileOrdinal: 0, sheetName: "Inventory", sourceRowNumber: 2 };
     await ledger.apply(event, "same-key", "operation-a");
     await expect(ledger.get({ businessId: "shop-b", idempotencyKey: "same-key", eventFingerprint: await canonicalSha256(event), operationFingerprint: "operation-a" })).resolves.toBeUndefined();
+  });
+
+  it("isolates same idempotency keys by the canonical tenant tuple", async () => {
+    const ledger = createLocalAggregateLedger(createMemoryAtomicLocalStorage());
+    const shopA = { kind: "aggregate_import" as const, eventId: "event-a", importId: "import", rowId: "row", businessId: "shop-a", quantity: 1, unitOfMeasure: "each" as const, sourceFileOrdinal: 0, sheetName: "Inventory", sourceRowNumber: 2 };
+    const shopB = { ...shopA, eventId: "event-b", businessId: "shop-b" };
+    await ledger.apply(shopA, "same-key", "operation-a");
+    await expect(ledger.apply(shopB, "same-key", "operation-b")).resolves.toEqual({ event: shopB, idempotencyKey: "same-key" });
+    await expect(ledger.apply({ ...shopA, quantity: 2 }, "same-key", "operation-a")).resolves.toMatchObject({ kind: "idempotency_conflict" });
   });
 });

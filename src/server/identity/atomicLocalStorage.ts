@@ -33,12 +33,12 @@ function assertConfiguredRoot(root: string): string {
 
 async function ensureDirectory(directory: string): Promise<void> {
   try { const stat = await lstat(directory); if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("identity-import path is a reparse or symlink path"); }
-  catch (error: unknown) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; await mkdir(directory); }
+  catch (error: unknown) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; try { await mkdir(directory); } catch (mkdirError: unknown) { if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError; } }
   const stat = await lstat(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("identity-import path is a reparse or symlink path");
 }
 
-async function recheckPhysicalRoot(root: string): Promise<void> {
+async function recheckPhysicalRoot(root: string): Promise<string> {
   const configuredBase = storageRoot();
   await ensureDirectory(path.dirname(configuredBase));
   await ensureDirectory(configuredBase);
@@ -49,6 +49,7 @@ async function recheckPhysicalRoot(root: string): Promise<void> {
   if (path.dirname(child).toLocaleLowerCase("en-US") !== lowerBase) throw new Error("identity-import child escaped approved base");
   const stat = await lstat(root);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("identity-import child is a reparse or symlink path");
+  return child;
 }
 
 async function assertStateFile(statePath: string): Promise<void> {
@@ -103,9 +104,9 @@ export function createMemoryAtomicLocalStorage(): AtomicLocalStorage {
 }
 
 export function createFileAtomicLocalStorage({ root, io = {} }: { root: string; io?: FileStorageHooks }): AtomicLocalStorage {
-  const safeRoot = assertConfiguredRoot(root), statePath = path.join(safeRoot, "identity-local-storage.json");
-  return { async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> { return withMutex(safeRoot, async () => { await recheckPhysicalRoot(safeRoot); const values = await readState(statePath);
+  const safeRoot = assertConfiguredRoot(root);
+  return { async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> { const canonicalRoot = await recheckPhysicalRoot(safeRoot); return withMutex(canonicalRoot, async () => { const statePath = path.join(canonicalRoot, "identity-local-storage.json"); await recheckPhysicalRoot(canonicalRoot); const values = await readState(statePath);
     const transaction = new MapTransaction(values), result = await fn(transaction);
-    if (transaction.changed) { await recheckPhysicalRoot(safeRoot); await assertStateFile(statePath); const temp = path.join(safeRoot, `identity-local-storage.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`); try { await (io.writeTemp ?? syncFile)(temp, JSON.stringify({ version: schemaVersion, values } satisfies StoredEnvelope)); await (io.replace ?? rename)(temp, statePath); await (io.syncDirectory ?? syncDirectory)(safeRoot); } catch (error) { await rm(temp, { force: true }).catch(() => undefined); throw error; } }
+    if (transaction.changed) { await recheckPhysicalRoot(canonicalRoot); await assertStateFile(statePath); const temp = path.join(canonicalRoot, `identity-local-storage.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`); try { await (io.writeTemp ?? syncFile)(temp, JSON.stringify({ version: schemaVersion, values } satisfies StoredEnvelope)); await (io.replace ?? rename)(temp, statePath); await (io.syncDirectory ?? syncDirectory)(canonicalRoot); } catch (error) { await rm(temp, { force: true }).catch(() => undefined); throw error; } }
     return result; }); } };
 }
