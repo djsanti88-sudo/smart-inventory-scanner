@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { applyIdentityImport } from "./applyService";
 import type { SignedPreviewChunk } from "@/services/identity/preview";
+import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
+import { createLocalRepository } from "./localRepository";
+import { createLocalAggregateLedger } from "./localAggregateLedger";
 
 const versions = { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
 const chunk = (): SignedPreviewChunk => ({
@@ -68,5 +71,22 @@ describe("applyIdentityImport", () => {
       ...h, source: { versions }, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const },
     })).rejects.toThrow("apply_correction_scope_invalid");
     expect(h.repository.createImportRun).not.toHaveBeenCalled();
+  });
+
+  it("allows overlapping identical physical applies to share one durable count", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    const dependencies = { repository: createLocalRepository(storage), ledger: createLocalAggregateLedger(storage), verifier: async () => [chunk()], source: { versions }, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
+    const input = { signedPayloads: ["token"], mode: "physical_count" as const, corrections: [] };
+    const settled = await Promise.allSettled([applyIdentityImport(input, dependencies), applyIdentityImport(input, dependencies)]);
+    expect(settled.filter((item) => item.status === "fulfilled")).toHaveLength(1);
+    expect(settled.filter((item) => item.status === "rejected").map((item) => item.status === "rejected" ? (item.reason as Error).message : "")).toEqual(["apply_in_progress"]);
+    await expect(applyIdentityImport(input, dependencies)).resolves.toMatchObject({ countedRows: 1, countQuantity: 7 });
+  });
+
+  it("conflicts when the same signed preview is reapplied with a changed mode", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    const dependencies = { repository: createLocalRepository(storage), ledger: createLocalAggregateLedger(storage), verifier: async () => [chunk()], source: { versions }, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
+    await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, dependencies);
+    await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "reconcile", corrections: [] }, dependencies)).rejects.toThrow("apply_idempotency_conflict");
   });
 });
