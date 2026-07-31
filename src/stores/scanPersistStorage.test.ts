@@ -87,6 +87,18 @@ class SelectiveRecoveryDb extends Db {
   }
 }
 
+class ToggleUnavailableDb extends Db {
+  unavailable = false;
+  override async get(key: string): Promise<string | null> {
+    if (this.unavailable) throw new Error("IndexedDB unavailable");
+    return super.get(key);
+  }
+  override async set(key: string, value: string): Promise<void> {
+    if (this.unavailable) throw new Error("IndexedDB unavailable");
+    await super.set(key, value);
+  }
+}
+
 describe("active async persistence adapter", () => {
   it("migrates legacy bytes into durable storage", async () => {
     const db = new Db(), local = legacy(); local.values.set("sis-scan-owner", '{"version":14}');
@@ -442,6 +454,52 @@ describe("active async persistence adapter", () => {
 
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("journaled after clear");
+  });
+  it("fails closed when local and durable tombstones diverge across consecutive clears", async () => {
+    const db = new SelectiveRecoveryDb();
+    const values = new Map<string, string>();
+    let rejectNextTombstoneOverwrite = false;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (rejectNextTombstoneOverwrite && key === "sis-scan-owner::scanbin-cleared-v1") {
+          rejectNextTombstoneOverwrite = false;
+          throw new DOMException("tombstone write interrupted", "InvalidStateError");
+        }
+        values.set(key, value);
+      },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await storage.setItem("sis-scan-owner", "before clear A");
+    await storage.removeItem("sis-scan-owner");
+    db.failTombstoneRemove = true;
+    db.failCandidateRemove = true;
+    await storage.setItem("sis-scan-owner", "candidate superseding clear A");
+    db.failTombstoneRemove = false;
+    rejectNextTombstoneOverwrite = true;
+
+    await storage.removeItem("sis-scan-owner");
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
+  });
+  it("preserves newest local fallback when recovery detection and journaling are both unavailable", async () => {
+    const db = new ToggleUnavailableDb();
+    await db.set("sis-scan-owner", "older durable snapshot");
+    await db.set("sis-scan-owner::scanbin-recovery-v1", "stale recovery candidate");
+    const local = legacy();
+    db.unavailable = true;
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    await storage.setItem("sis-scan-owner", "newest offline snapshot");
+
+    await expect(createAsyncDurableStorage({ database: null, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("newest offline snapshot");
+    db.unavailable = false;
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("newest offline snapshot");
+    expect(await db.get("sis-scan-owner")).toBe("newest offline snapshot");
   });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;
