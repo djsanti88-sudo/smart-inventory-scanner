@@ -105,6 +105,7 @@ export interface IdentityCandidateSource {
 }
 
 export interface AggregateImportEvent {
+  kind: "aggregate_import";
   eventId: string;
   importId: string;
   rowId: string;

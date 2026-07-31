@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalSha256,
   createImportIds,
   normalizeIdentifier,
   validateIdentityInput,
 } from "./canonical";
-import type { IdentityInput, ScopedIdentifier } from "./types";
+import type { AggregateImportEvent, IdentityInput, ScopedIdentifier } from "./types";
 
 const validIdentifier: ScopedIdentifier = {
   type: "vendor_sku",
@@ -46,6 +47,19 @@ const importInput = {
   importerVersion: "1",
 };
 
+const aggregateImportEvent = {
+  kind: "aggregate_import",
+  eventId: "event-1",
+  importId: "import-1",
+  rowId: "row-1",
+  businessId: "business-1",
+  quantity: 4,
+  unitOfMeasure: "each",
+  sourceFileOrdinal: 0,
+  sheetName: "Inventory",
+  sourceRowNumber: 2,
+} satisfies AggregateImportEvent;
+
 describe("identity canonical contracts", () => {
   it("rejects malformed GTIN identifiers and negative quantities", () => {
     const malformedGtin = validInput({
@@ -84,5 +98,97 @@ describe("identity canonical contracts", () => {
     });
 
     expect(withChangedProvenance.importId).toBe(baseline.importId);
+  });
+
+  it("returns validation errors instead of throwing for unknown malformed inputs", () => {
+    expect(validateIdentityInput(null)).toEqual(["input must be a plain object"]);
+    expect(validateIdentityInput({ businessId: 7 })).toEqual(
+      expect.arrayContaining([
+        "businessId is required",
+        "sourceSystem is required",
+        "identifiers must be an array",
+      ]),
+    );
+    expect(validateIdentityInput({ ...validInput(), identifiers: [null] })).toContain(
+      "identifiers[0] is malformed",
+    );
+  });
+
+  it.each([
+    ["sourceFileFingerprint", "", "sourceFileFingerprint is required"],
+    ["sourceFileOrdinal", -1, "sourceFileOrdinal must be a non-negative integer"],
+    ["sourceFileOrdinal", 1.5, "sourceFileOrdinal must be a non-negative integer"],
+    ["sheetName", " ", "sheetName is required"],
+    ["sourceRowNumber", 0, "sourceRowNumber must be a positive integer"],
+    ["sourceRowNumber", 1.5, "sourceRowNumber must be a positive integer"],
+    ["attributes", [], "attributes must be a plain object"],
+    ["rawRecordFingerprint", "", "rawRecordFingerprint is required"],
+    ["identifiers", {}, "identifiers must be an array"],
+  ] as const)("validates required row-shape field %s", (field, value, expectedError) => {
+    expect(validateIdentityInput({ ...validInput(), [field]: value })).toContain(expectedError);
+  });
+
+  it.each(["vendor_sku", "source_alias", "internal_code", "shelf_code"] as const)(
+    "requires namespace for local identifier type %s",
+    (type) => {
+      expect(
+        validateIdentityInput({
+          ...validInput(),
+          identifiers: [{ ...validIdentifier, type, namespace: undefined }],
+        }),
+      ).toContain(`identifiers[0] requires a namespace for ${type}`);
+    },
+  );
+
+  it("allows globally scoped GTIN identifiers without a namespace", () => {
+    expect(
+      validateIdentityInput({
+        ...validInput(),
+        identifiers: [
+          {
+            ...validIdentifier,
+            type: "gtin",
+            raw: "4006381333931",
+            normalized: "4006381333931",
+            namespace: undefined,
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("hashes equivalent objects identically regardless of object key order", async () => {
+    await expect(canonicalSha256({ z: 1, nested: { b: 2, a: 1 } })).resolves.toBe(
+      await canonicalSha256({ nested: { a: 1, b: 2 }, z: 1 }),
+    );
+  });
+
+  it("preserves array order in canonical hashes", async () => {
+    await expect(canonicalSha256(["first", "second"])).resolves.not.toBe(
+      await canonicalSha256(["second", "first"]),
+    );
+  });
+
+  it("hashes canonical strings as UTF-8", async () => {
+    await expect(canonicalSha256("café")).resolves.toBe(
+      "ac4f4435bd68fb8e1bb02f586889ff9bd2f4e40a82529d243425b867e929e3ae",
+    );
+  });
+
+  it.each([
+    undefined,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    BigInt(1),
+    () => undefined,
+    Symbol("unsupported"),
+    { nested: undefined },
+    ["valid", Number.NEGATIVE_INFINITY],
+  ])("rejects unsupported canonical hash input %#", async (value) => {
+    await expect(canonicalSha256(value)).rejects.toThrow("Unsupported canonical JSON value");
+  });
+
+  it("defines aggregate imports as a distinct event kind", () => {
+    expect(aggregateImportEvent.kind).toBe("aggregate_import");
   });
 });
