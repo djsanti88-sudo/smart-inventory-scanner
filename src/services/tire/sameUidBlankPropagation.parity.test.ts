@@ -13,6 +13,6 @@ describe("same-UID repair size normalizer parity", () => {
     const db = new Database(authoritative, { readonly: true, fileMustExist: true });
     const candidates = db.prepare(`SELECT DISTINCT s.size FROM tires t JOIN tires s ON s.canonical_product_uid=t.canonical_product_uid WHERE TRIM(COALESCE(t.size,''))='' AND TRIM(COALESCE(s.size,''))<>'' ORDER BY s.size`).all().map((x: { size: string }) => x.size);
     db.close();
-    for (const value of [...candidates, "not a tire", "35X12.50R17JUNK", "235/40R19XL", "265/70R17", "245/65-17"]) expect(nodeNormalize(value), value).toBe(normalizeTireSize(value));
+    for (const value of [...candidates, "not a tire", "35X12.50R17JUNK", "235/40R19XL", "265/70R17", "245/65-17", "99X12.50R20", "11R99"]) expect(nodeNormalize(value), value).toBe(normalizeTireSize(value));
   });
 });
