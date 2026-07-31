@@ -1,0 +1,15 @@
+{
+  "reportVersion": "identity-baseline-v1",
+  "manifestVersion": "identity-manifest-v1",
+  "syntheticOnly": true,
+  "promotionEligible": false,
+  "promotionBlockers": ["synthetic_only", "real_export_evidence_required"],
+  "baselineStatus": "not_a_promotion_baseline",
+  "evaluatorVersion": "identity-evaluator-v1",
+  "splitSeed": "identity-split-v1",
+  "notes": [
+    "Synthetic cases measure evaluator mechanics only.",
+    "This report cannot satisfy any promotion gate or be overridden into eligibility.",
+    "A future locked real-export suite must supply the promotion evidence."
+  ]
+}

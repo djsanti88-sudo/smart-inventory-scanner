@@ -1,0 +1,46 @@
+{
+  "manifestVersion": "identity-manifest-v1",
+  "syntheticOnly": true,
+  "promotionEligible": false,
+  "promotionBlockers": ["synthetic_only", "real_export_evidence_required"],
+  "splitSeed": "identity-split-v1",
+  "cases": [
+    {
+      "caseId": "synthetic-automatic-positive",
+      "identityGroupId": "synthetic-group-a",
+      "category": "tire",
+      "sourceSystem": "synthetic-fixture",
+      "vendorId": "synthetic-vendor",
+      "transformation": "exact-identifier",
+      "stratum": "positive",
+      "quantity": 2,
+      "truthProductId": "synthetic-product-a"
+    },
+    {
+      "caseId": "synthetic-review-miss",
+      "identityGroupId": "synthetic-group-b",
+      "category": "tire",
+      "sourceSystem": "synthetic-fixture",
+      "vendorId": "synthetic-vendor",
+      "transformation": "missing-barcode",
+      "stratum": "missing-identifier",
+      "quantity": 3,
+      "truthProductId": "synthetic-product-b"
+    },
+    {
+      "caseId": "synthetic-safe-abstain",
+      "identityGroupId": "synthetic-group-c",
+      "category": "tire",
+      "sourceSystem": "synthetic-fixture",
+      "vendorId": "synthetic-vendor",
+      "transformation": "negative",
+      "stratum": "negative",
+      "quantity": 1
+    }
+  ],
+  "expectedDecisions": [
+    { "caseId": "synthetic-automatic-positive", "kind": "automatic", "targetProductId": "synthetic-product-a", "candidateProductIds": ["synthetic-product-a"], "latencyMs": 1 },
+    { "caseId": "synthetic-review-miss", "kind": "review", "candidateProductIds": ["synthetic-wrong-product"], "latencyMs": 2 },
+    { "caseId": "synthetic-safe-abstain", "kind": "abstain", "candidateProductIds": [], "latencyMs": 3 }
+  ]
+}
