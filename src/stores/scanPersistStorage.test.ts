@@ -79,6 +79,68 @@ describe("active async persistence adapter", () => {
     await Promise.all([storage.setItem("sis-scan-owner", "a"), storage.setItem("sis-scan-owner", "b")]);
     expect(set).toHaveBeenCalledTimes(1); expect(await db.get("sis-scan-owner")).toBe("b");
   });
+  it("never retries full-snapshot localStorage writes across a healthy IndexedDB scan burst", async () => {
+    const db = new Db();
+    const fallbackSet = vi.fn(() => { throw new DOMException("quota full", "QuotaExceededError"); });
+    const fallback = { getItem: vi.fn(() => null), setItem: fallbackSet, removeItem: vi.fn() };
+    const status = vi.fn();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => fallback, onStatusChange: status });
+
+    for (let scan = 1; scan <= 101; scan += 1) {
+      await storage.setItem("sis-scan-v1", `snapshot-${scan}`);
+    }
+
+    expect(await db.get("sis-scan-v1")).toBe("snapshot-101");
+    expect(fallbackSet).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(status).not.toHaveBeenCalledWith("degraded");
+  });
+  it("writes a uid ownership marker once without copying growing durable snapshots", async () => {
+    const db = new Db();
+    const local = legacy();
+    const fallbackSet = vi.spyOn(local, "setItem");
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    await storage.setItem("sis-scan-owner", "snapshot-1");
+    await storage.setItem("sis-scan-owner", "snapshot-2");
+    await storage.setItem("sis-scan-owner", "snapshot-3");
+
+    expect(fallbackSet).toHaveBeenCalledOnce();
+    expect(fallbackSet).toHaveBeenCalledWith("sis-scan-owner", '{"__scanPersistPointer":1}');
+    expect(local.values.get("sis-scan-owner")).toBe('{"__scanPersistPointer":1}');
+    expect(await db.get("sis-scan-owner")).toBe("snapshot-3");
+  });
+  it("removes the legacy snapshot after successfully migrating its exact bytes into IndexedDB", async () => {
+    const db = new Db();
+    const local = legacy();
+    local.values.set("sis-scan-v1", '{"version":14,"state":{"scanFeed":[{"id":"scan-1"}]}}');
+    const remove = vi.spyOn(local, "removeItem");
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    await expect(storage.getItem("sis-scan-v1")).resolves.toBe('{"version":14,"state":{"scanFeed":[{"id":"scan-1"}]}}');
+
+    expect(await db.get("sis-scan-v1")).toBe('{"version":14,"state":{"scanFeed":[{"id":"scan-1"}]}}');
+    expect(remove).toHaveBeenCalledWith("sis-scan-v1");
+    expect(local.values.has("sis-scan-v1")).toBe(false);
+  });
+  it("uses localStorage as a full-snapshot fallback only while IndexedDB writes fail", async () => {
+    const db = new Db();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    db.fail = true;
+
+    await storage.setItem("sis-scan-v1", "fallback snapshot");
+
+    expect(local.values.get("sis-scan-v1")).toBe("fallback snapshot");
+    await expect(createAsyncDurableStorage({ database: null, getLegacyStorage: () => local }).getItem("sis-scan-v1")).resolves.toBe("fallback snapshot");
+
+    db.fail = false;
+    await storage.setItem("sis-scan-v1", "durable recovery");
+
+    expect(await db.get("sis-scan-v1")).toBe("durable recovery");
+    expect(local.values.has("sis-scan-v1")).toBe(false);
+  });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;
     await createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).removeItem("sis-scan-owner");

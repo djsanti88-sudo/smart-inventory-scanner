@@ -49,8 +49,9 @@ function isUidNamespace(name: string): boolean {
 
 /**
  * Async, fail-soft bridge from Zustand to durable storage. Existing localStorage values are read once
- * into IndexedDB without altering their bytes. Once a uid namespace is durable, a tiny local marker
- * preserves the existing shared-browser adoption gate without duplicating the growing scan blob.
+ * into IndexedDB without altering their bytes. After IndexedDB accepts the snapshot, the legacy copy
+ * is removed. UID namespaces retain only their tiny ownership marker; full snapshots return to
+ * localStorage only if durable persistence later fails.
  */
 export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): StateStorage {
   const reportDegraded = () => options.onStatusChange?.("degraded");
@@ -58,6 +59,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const queuedByKey = new Map<string, Promise<void>>();
   const pendingWrites = new Map<string, { value: string; token: number; resolvers: Array<() => void>; scheduled: boolean }>();
   const tombstones = new Set<string>();
+  const legacySnapshotsCleaned = new Set<string>();
+  const legacyMarkersEnsured = new Set<string>();
   // Each clear moves a key to a new generation. A write captures the generation it was created in,
   // so a pre-clear write that completes late cannot remove the newer clear tombstone.
   const generationByKey = new Map<string, number>();
@@ -100,6 +103,26 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     } catch {
       reportLegacyFailure();
     }
+  };
+  const ensureLegacyMarkerOnce = (name: string) => {
+    if (legacyMarkersEnsured.has(name)) return;
+    const marker = JSON.stringify({ [PERSIST_POINTER_KEY]: 1 });
+    if (!isDurablePointer(legacyGet(name))) {
+      legacyRemove(name);
+      try {
+        options.getLegacyStorage()?.setItem(name, marker);
+      } catch {
+        // This marker is supplemental ownership metadata, not the snapshot fallback. IndexedDB is
+        // healthy, so quota pressure must not create a warning/error loop on every persisted update.
+      }
+    }
+    legacyMarkersEnsured.add(name);
+  };
+  const removeLegacySnapshotOnce = (name: string) => {
+    if (legacySnapshotsCleaned.has(name)) return;
+    if (isUidNamespace(name)) ensureLegacyMarkerOnce(name);
+    else legacyRemove(name);
+    legacySnapshotsCleaned.add(name);
   };
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
@@ -151,8 +174,14 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     // write is deliberately ignored: it may have reached IndexedDB, but the newer tombstone wins.
     if (durableWritten && generationFor(name) === token) await clearTombstone(name, token);
     if (generationFor(name) !== token) return;
-    if (!durableWritten || name === "sis-scan-v1") legacySet(name, value);
-    else if (isUidNamespace(name)) legacySet(name, JSON.stringify({ [PERSIST_POINTER_KEY]: 1 }));
+    if (durableWritten) {
+      removeLegacySnapshotOnce(name);
+    } else {
+      // A later durable recovery must remove this fallback snapshot after IndexedDB accepts newer bytes.
+      legacySnapshotsCleaned.delete(name);
+      legacyMarkersEnsured.delete(name);
+      legacySet(name, value);
+    }
   };
   const flushWrite = (name: string) => {
     const pending = pendingWrites.get(name);
@@ -180,12 +209,14 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
           const durable = await options.database.get(name);
           if (durable !== null) {
             reportAvailable();
+            removeLegacySnapshotOnce(name);
             return durable;
           }
           const legacy = legacyGet(name);
           if (legacy !== null && !isDurablePointer(legacy)) {
             await options.database.set(name, legacy);
             reportAvailable();
+            removeLegacySnapshotOnce(name);
             return legacy;
           }
           reportAvailable();
