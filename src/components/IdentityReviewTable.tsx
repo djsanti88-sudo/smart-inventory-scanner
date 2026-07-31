@@ -1,0 +1,15 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+type Role = "owner" | "admin" | "counter" | "viewer";
+type Candidate = { productId: string; rank: number; evidence: string[]; missingFields: string[]; contradictions: string[] };
+type Review = { reviewId: string; rowId: string; decision: { kind: string; candidates: Candidate[] } };
+export function IdentityReviewTable({ businessId, actorRole }: { businessId: string; actorRole: Role }) {
+  const [reviews, setReviews] = useState<Review[]>([]), [status, setStatus] = useState("Loading identity reviews."), [page, setPage] = useState(0);
+  const canResolve = actorRole === "owner" || actorRole === "admin";
+  useEffect(() => { void fetch(`/api/identity/reviews?businessId=${encodeURIComponent(businessId)}`).then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.error ?? "Unable to load identity reviews."); setReviews(body.reviews ?? []); setStatus((body.reviews ?? []).length ? "Identity reviews loaded." : "No identity reviews need attention."); }).catch((error: unknown) => setStatus(error instanceof Error ? error.message : "Unable to load identity reviews.")); }, [businessId]);
+  const visible = reviews.slice(page * 10, page * 10 + 10);
+  async function action(reviewId: string, actionName: string, targetProductId?: string) { const response = await fetch("/api/identity/reviews", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ businessId, reviewId, action: actionName, ...(targetProductId ? { targetProductId } : {}) }) }); const body = await response.json(); if (!response.ok) { setStatus(body.error ?? "Review action failed."); return; } setReviews((current) => current.filter((review) => review.reviewId !== reviewId)); setStatus(actionName === "confirm_candidate" ? "Candidate confirmed." : "Review resolved."); }
+  return <section aria-label="Identity review queue"><p role="status" aria-live="polite" className="text-sm text-zinc-600">{status}</p><div className="overflow-x-auto"><table aria-label="Identity review queue" className="w-full text-left"><thead><tr><th>Import row</th><th>Candidate</th><th>Evidence</th><th>Action</th></tr></thead><tbody>{visible.map((review) => <tr key={review.reviewId}><td>{review.rowId}</td><td>{review.decision.candidates[0]?.productId ?? "No candidate"}</td><td>{review.decision.candidates[0]?.evidence.join(", ") ?? "No supporting evidence"}</td><td>{canResolve && review.decision.candidates[0] && <><button type="button" onClick={() => void action(review.reviewId, "confirm_candidate", review.decision.candidates[0]!.productId)}>Confirm {review.decision.candidates[0].productId}</button><button type="button" onClick={() => void action(review.reviewId, "reject")}>Reject</button></>}</td></tr>)}</tbody></table></div><button type="button" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous page</button><button type="button" disabled={(page + 1) * 10 >= reviews.length} onClick={() => setPage((value) => value + 1)}>Next page</button></section>;
+}

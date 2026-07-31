@@ -224,10 +224,13 @@ export interface IdentityReview {
   importId: string;
   rowId: string;
   decision: IdentityDecision;
+  scope?: Pick<IdentityInput, "sourceSystem" | "vendorId" | "sourceSignature">;
   resolution?: "confirmed" | "rejected" | "create_product";
   resolvedBy?: string;
   resolvedAt?: string;
 }
+
+export interface TenantIdentityProduct { productId: string; businessId: string; name: string; createdBy: string; createdAt: string; }
 
 export interface AggregateLedgerPort {
   applyOnce(event: AggregateImportEvent, idempotencyKey: string): Promise<AggregateLedgerResult>;
