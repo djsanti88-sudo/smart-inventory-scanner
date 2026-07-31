@@ -3,7 +3,7 @@ import "server-only";
 import { canonicalSha256 } from "@/services/identity/canonical";
 import { createAggregateImportEvent } from "@/services/identity/importLedger";
 import type { PreviewVerificationExpectation, SignedPreviewChunk } from "@/services/identity/preview";
-import type { AggregateLedgerPort, IdentityDecision } from "@/services/identity/types";
+import type { AggregateLedgerPort, IdentityDecision, ImportRun } from "@/services/identity/types";
 import type { ImportOperationClaim, LocalIdentityRepository } from "./localRepository";
 
 type Role = "owner" | "admin" | "counter" | "viewer";
@@ -14,7 +14,7 @@ export interface ApplyActor { actorId: string; businessId: string; role: Role; }
 export interface ApplySource { versions: PreviewVerificationExpectation["versions"]; validateCorrectionTarget?: (input: { businessId: string; targetProductId: string }) => Promise<boolean>; }
 type ApplyRepository = {
   createImportRun: (...args: Parameters<LocalIdentityRepository["createImportRun"]>) => Promise<unknown>;
-  getImportRun?: (...args: Parameters<LocalIdentityRepository["getImportRun"]>) => Promise<{ state: string } | undefined>;
+  getImportRun?: (...args: Parameters<LocalIdentityRepository["getImportRun"]>) => Promise<ImportRun | undefined>;
   transitionImportRun: (...args: Parameters<LocalIdentityRepository["transitionImportRun"]>) => Promise<unknown>;
   claimImportOperation: (...args: Parameters<LocalIdentityRepository["claimImportOperation"]>) => Promise<unknown>;
   completeImportOperation: (...args: Parameters<LocalIdentityRepository["completeImportOperation"]>) => Promise<unknown>;
@@ -56,9 +56,10 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
   const corrections = correctionMap(input.corrections, combined);
   if (dependencies.source.validateCorrectionTarget) for (const correction of corrections.values()) if (!(await dependencies.source.validateCorrectionTarget({ businessId: first.scope.businessId, targetProductId: correction.targetProductId }))) throw new Error("apply_correction_target_invalid");
   const operationFingerprint = await canonicalSha256({ previewFingerprint: first.previewFingerprint, mode: input.mode, corrections: [...corrections.values()].sort((a, b) => a.rowId.localeCompare(b.rowId)) });
-  const run = { importId: first.importId, businessId: first.scope.businessId, sourceFingerprint: first.sanitizedContentRootHash, mappingFingerprint: await canonicalSha256(first.orderedMappings), previewFingerprint: first.previewFingerprint, actorId: dependencies.actor.actorId, engineVersion: first.versions.engineVersion, pluginVersion: first.versions.pluginVersions.join(","), catalogVersion: first.versions.catalogVersion, createdAt: dependencies.clock() };
-  const existing = await dependencies.repository.getImportRun?.(run.businessId, run.importId);
-  if (!existing) await dependencies.repository.createImportRun(run);
+  const proposedRun = { importId: first.importId, businessId: first.scope.businessId, sourceFingerprint: first.sanitizedContentRootHash, mappingFingerprint: await canonicalSha256(first.orderedMappings), previewFingerprint: first.previewFingerprint, actorId: dependencies.actor.actorId, engineVersion: first.versions.engineVersion, pluginVersion: first.versions.pluginVersions.join(","), catalogVersion: first.versions.catalogVersion, createdAt: dependencies.clock() };
+  const existing = await dependencies.repository.getImportRun?.(proposedRun.businessId, proposedRun.importId);
+  if (!existing) await dependencies.repository.createImportRun(proposedRun);
+  const run = existing ?? proposedRun;
   if (!existing || existing.state === "previewed" || existing.state === "failed") await dependencies.repository.transitionImportRun(run.businessId, run.importId, "applying");
   const rows: ApplyResult["rows"] = [];
   const allRows = chunks.flatMap((chunk) => chunk.rows), allDecisions = chunks.flatMap((chunk) => chunk.decisions);
@@ -77,7 +78,9 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     if (claim.kind === "idempotency_conflict" || claim.kind === "terminal") throw new Error("apply_idempotency_conflict");
     let rowResult: ApplyResult["rows"][number] = { rowId, status: input.mode === "reconcile" ? "reconciled" : "not_counted" };
     if (input.mode === "physical_count" && (decision.kind === "automatic" || decision.kind === "review" && decision.approvedProductId)) {
-      const event = await createAggregateImportEvent({ businessId: run.businessId, importId: run.importId, rowId, sessionId: `identity-import:${run.importId}`, quantity: Number(row.quantity), sourceFileOrdinal: Number(row.sourceFileOrdinal), sheetName: String(row.sheetName), sourceRowNumber: Number(row.sourceRowNumber), createdAt: dependencies.clock(), mode: "physical_count", decision: decision.kind === "automatic" ? { kind: "automatic", targetProductId: decision.targetProductId! } : { kind: "review", approvedProductId: decision.approvedProductId! } });
+      // The run's original timestamp is part of the aggregate-event fingerprint; retries must not
+      // turn a recovered post-ledger crash into a conflicting new event.
+      const event = await createAggregateImportEvent({ businessId: run.businessId, importId: run.importId, rowId, sessionId: `identity-import:${run.importId}`, quantity: Number(row.quantity), sourceFileOrdinal: Number(row.sourceFileOrdinal), sheetName: String(row.sheetName), sourceRowNumber: Number(row.sourceRowNumber), createdAt: run.createdAt, mode: "physical_count", decision: decision.kind === "automatic" ? { kind: "automatic", targetProductId: decision.targetProductId! } : { kind: "review", approvedProductId: decision.approvedProductId! } });
       const recovered = await dependencies.ledger.findByIdempotencyKey({ businessId: run.businessId, idempotencyKey: event.idempotencyKey, expectedFingerprint: event.fingerprint });
       const stored = recovered ?? await dependencies.ledger.applyOnce(event, event.idempotencyKey);
       if (!("event" in stored)) throw new Error("apply_ledger_conflict");

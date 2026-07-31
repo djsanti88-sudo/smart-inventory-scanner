@@ -4,6 +4,7 @@ import type { SignedPreviewChunk } from "@/services/identity/preview";
 import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalRepository } from "./localRepository";
 import { createLocalAggregateLedger } from "./localAggregateLedger";
+import { canonicalSha256 } from "@/services/identity/canonical";
 
 const versions = { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
 const chunk = (): SignedPreviewChunk => ({
@@ -88,5 +89,24 @@ describe("applyIdentityImport", () => {
     const dependencies = { repository: createLocalRepository(storage), ledger: createLocalAggregateLedger(storage), verifier: async () => [chunk()], source: { versions }, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
     await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, dependencies);
     await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "reconcile", corrections: [] }, dependencies)).rejects.toThrow("apply_idempotency_conflict");
+  });
+
+  it("recovers a stored ledger result after a crash between ledger write and operation completion", async () => {
+    let now = Date.parse("2026-07-31T00:01:00.000Z"); const storage = createMemoryAtomicLocalStorage();
+    const repository = createLocalRepository(storage, { now: () => now }); const complete = repository.completeImportOperation.bind(repository); let crash = true;
+    const dependencies = { repository: { ...repository, completeImportOperation: async (...args: Parameters<typeof complete>) => { if (crash) { crash = false; throw new Error("simulated_crash"); } return complete(...args); } }, ledger: createLocalAggregateLedger(storage), verifier: async () => [chunk()], source: { versions }, clock: () => new Date(now).toISOString(), actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
+    const input = { signedPayloads: ["token"], mode: "physical_count" as const, corrections: [] };
+    await expect(applyIdentityImport(input, dependencies)).rejects.toThrow("simulated_crash");
+    now += 60_001;
+    await expect(applyIdentityImport(input, dependencies)).resolves.toMatchObject({ countedRows: 1, countQuantity: 7 });
+  });
+
+  it("does not complete or count against an invalidated import run", async () => {
+    const storage = createMemoryAtomicLocalStorage(); const repository = createLocalRepository(storage);
+    await repository.createImportRun({ importId: "import-1", businessId: "shop-a", sourceFingerprint: "root", mappingFingerprint: await canonicalSha256(chunk().orderedMappings), previewFingerprint: "preview-1", actorId: "owner-a", engineVersion: "identity-engine-v1", pluginVersion: "identity-generic-v1", catalogVersion: "catalog-v1", createdAt: "2026-07-31T00:00:00.000Z" });
+    await repository.transitionImportRun("shop-a", "import-1", "invalidated");
+    const ledger = createLocalAggregateLedger(storage); const dependencies = { repository, ledger, verifier: async () => [chunk()], source: { versions }, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
+    await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, dependencies)).rejects.toThrow(/run.*applying/i);
+    expect(await ledger.findByIdempotencyKey({ businessId: "shop-a", idempotencyKey: "missing", expectedFingerprint: "missing" })).toBeNull();
   });
 });
