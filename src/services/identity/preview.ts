@@ -23,6 +23,7 @@ export interface SignedPreviewChunk {
   importId: string;
   scope: Pick<IdentityInput, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId">;
   actorId: string;
+  versions: PreviewVersions;
   orderedMappings: Array<{ sheetName: string; mapping: Record<string, string> }>;
   importerVersion: string;
   sourceFileHashes: string[];
@@ -30,11 +31,13 @@ export interface SignedPreviewChunk {
   expiresAt: string;
   rows: Record<string, unknown>[];
   decisions: IdentityDecision[];
+  rowIds: string[];
   signature: string;
 }
 
 export interface CreateIdentityPreviewInput {
   actorId?: string;
+  versions: PreviewVersions;
   rows: IdentityInput[];
   orderedMappings: Array<{ sheetName: string; mapping: Record<string, string> }>;
   sourceFileHashes: string[];
@@ -43,6 +46,16 @@ export interface CreateIdentityPreviewInput {
   expiresAt: string;
   /** Test-only lowering is allowed; production callers always receive the 512 KiB ceiling. */
   maxChunkBytes?: number;
+}
+
+/** Stable read-model versions are content identity; actor, provenance and time are signature-only. */
+export interface PreviewVersions {
+  engineVersion: string;
+  pluginVersions: string[];
+  catalogVersion: string;
+  catalogSnapshotHash: string;
+  linkVersion: string;
+  linkSnapshotHash: string;
 }
 
 export interface CreateIdentityPreviewDependencies {
@@ -104,16 +117,29 @@ function scopeFor(rows: IdentityInput[]): SignedPreviewChunk["scope"] {
 }
 
 function contentProjection(
-  rows: Record<string, unknown>[], decisions: IdentityDecision[], input: Pick<CreateIdentityPreviewInput, "orderedMappings" | "importerVersion">, scope: SignedPreviewChunk["scope"],
+  rows: Record<string, unknown>[], decisions: IdentityDecision[], input: Pick<CreateIdentityPreviewInput, "orderedMappings" | "importerVersion" | "versions">, scope: SignedPreviewChunk["scope"],
 ): Record<string, unknown> {
   return {
     manifestVersion,
     scope,
     importerVersion: input.importerVersion,
+    versions: input.versions,
     orderedMappings: input.orderedMappings,
     rows,
     decisions: decisions.map(identityDecisionFingerprintProjection),
   };
+}
+
+function completeVersions(value: PreviewVersions, decisions: IdentityDecision[]): PreviewVersions {
+  if (!value || ![value.engineVersion, value.catalogVersion, value.catalogSnapshotHash, value.linkVersion, value.linkSnapshotHash].every((item) => typeof item === "string" && item.length > 0)
+    || !Array.isArray(value.pluginVersions) || value.pluginVersions.length === 0 || !value.pluginVersions.every((item) => typeof item === "string" && item.length > 0)) throw new Error("preview_versions_invalid");
+  const pluginVersions = [...new Set(value.pluginVersions)].sort();
+  if (pluginVersions.length !== value.pluginVersions.length || !decisions.every((decision) => decision.engineVersion === value.engineVersion && pluginVersions.includes(decision.pluginVersion) && decision.candidateSnapshotHash === value.catalogSnapshotHash)) throw new Error("preview_versions_mismatch");
+  return { ...value, pluginVersions };
+}
+
+async function createPreviewRowId(importId: string, row: Record<string, unknown>): Promise<string> {
+  return canonicalSha256({ importId, sourceFileOrdinal: row.sourceFileOrdinal, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sanitizedRow: row });
 }
 
 function unsignedChunk(chunk: SignedPreviewChunk): Omit<SignedPreviewChunk, "signature"> {
@@ -147,8 +173,8 @@ function parseChunk(payload: string): SignedPreviewChunk {
   if (chunk.manifestVersion !== manifestVersion || !Number.isSafeInteger(chunk.chunkIndex) || !Number.isSafeInteger(chunk.chunkCount)
     || chunk.chunkIndex! < 0 || chunk.chunkCount! < 1 || chunk.chunkIndex! >= chunk.chunkCount!
     || typeof chunk.sanitizedContentRootHash !== "string" || typeof chunk.importId !== "string" || typeof chunk.signature !== "string"
-    || !Array.isArray(chunk.rows) || !Array.isArray(chunk.decisions) || !Array.isArray(chunk.orderedMappings) || !Array.isArray(chunk.sourceFileHashes)
-    || !chunk.scope || typeof chunk.scope !== "object" || typeof chunk.actorId !== "string" || !chunk.actorId || typeof chunk.issuedAt !== "string" || typeof chunk.expiresAt !== "string" || typeof chunk.importerVersion !== "string") throw new Error("preview_chunk_invalid_shape");
+    || !Array.isArray(chunk.rows) || !Array.isArray(chunk.decisions) || !Array.isArray(chunk.rowIds) || !Array.isArray(chunk.orderedMappings) || !Array.isArray(chunk.sourceFileHashes)
+    || !chunk.scope || typeof chunk.scope !== "object" || typeof chunk.actorId !== "string" || !chunk.actorId || !chunk.versions || typeof chunk.versions !== "object" || typeof chunk.issuedAt !== "string" || typeof chunk.expiresAt !== "string" || typeof chunk.importerVersion !== "string") throw new Error("preview_chunk_invalid_shape");
   return chunk as SignedPreviewChunk;
 }
 
@@ -162,8 +188,10 @@ export async function createIdentityPreview(
   assertPreviewTimes(input.issuedAt, input.expiresAt);
   const scope = scopeFor(input.rows);
   const decisions = await decideIdentityBatch(input.rows, dependencies.source);
+  const versions = completeVersions(input.versions, decisions);
   const rows = input.rows.map(sanitizedRow);
-  const sanitizedContentRootHash = await canonicalSha256(contentProjection(rows, decisions, input, scope));
+  const normalizedInput = { ...input, versions };
+  const sanitizedContentRootHash = await canonicalSha256(contentProjection(rows, decisions, normalizedInput, scope));
   const { importId } = await createImportIds({ sanitizedContentRootHash, orderedMappings: input.orderedMappings, businessId: scope.businessId, sourceSystem: scope.sourceSystem, vendorId: scope.vendorId, importerVersion: input.importerVersion });
   const cap = Math.min(maxSignedChunkBytes, input.maxChunkBytes ?? maxSignedChunkBytes);
   if (!Number.isSafeInteger(cap) || cap < 1) throw new Error("preview_chunk_limit_invalid");
@@ -180,7 +208,7 @@ export async function createIdentityPreview(
     else groups.push(tentative);
   }
   if (groups.length > maxChunks) throw new Error("preview_chunks_exceeded");
-  const unsigned = groups.map((group, chunkIndex) => ({ manifestVersion, chunkIndex, chunkCount: groups.length, sanitizedContentRootHash, importId, scope, actorId: input.actorId ?? "local-test-actor", orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt, ...group }));
+  const unsigned = await Promise.all(groups.map(async (group, chunkIndex) => ({ manifestVersion, chunkIndex, chunkCount: groups.length, sanitizedContentRootHash, importId, scope, actorId: input.actorId ?? "local-test-actor", versions, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt, rowIds: await Promise.all(group.rows.map((row) => createPreviewRowId(importId, row))), ...group })));
   const signedPayloads = await Promise.all(unsigned.map(async (chunk) => canonicalJson({ ...chunk, signature: await dependencies.signer.sign(canonicalJson(chunk)) })));
   if (signedPayloads.some((payload) => new TextEncoder().encode(payload).byteLength > cap)
     || signedPayloads.reduce((total, payload) => total + new TextEncoder().encode(payload).byteLength, 0) > maxSignedSetBytes) throw new Error("preview_signed_size_exceeded");
@@ -196,14 +224,15 @@ export async function verifySignedPreviewChunks(payloads: string[], signer: Prev
   const expectedCount = chunks[0]!.chunkCount;
   const root = chunks[0]!.sanitizedContentRootHash;
   if (chunks.some((chunk) => chunk.sanitizedContentRootHash !== root)) throw new Error("preview_chunks_mixed_root");
-  const metadata = canonicalJson({ scope: chunks[0]!.scope, actorId: chunks[0]!.actorId, orderedMappings: chunks[0]!.orderedMappings, importerVersion: chunks[0]!.importerVersion, sourceFileHashes: chunks[0]!.sourceFileHashes, issuedAt: chunks[0]!.issuedAt, expiresAt: chunks[0]!.expiresAt, importId: chunks[0]!.importId });
-  if (chunks.some((chunk) => canonicalJson({ scope: chunk.scope, actorId: chunk.actorId, orderedMappings: chunk.orderedMappings, importerVersion: chunk.importerVersion, sourceFileHashes: chunk.sourceFileHashes, issuedAt: chunk.issuedAt, expiresAt: chunk.expiresAt, importId: chunk.importId }) !== metadata)) throw new Error("preview_chunks_mixed_metadata");
+  const metadata = canonicalJson({ scope: chunks[0]!.scope, actorId: chunks[0]!.actorId, versions: chunks[0]!.versions, orderedMappings: chunks[0]!.orderedMappings, importerVersion: chunks[0]!.importerVersion, sourceFileHashes: chunks[0]!.sourceFileHashes, issuedAt: chunks[0]!.issuedAt, expiresAt: chunks[0]!.expiresAt, importId: chunks[0]!.importId });
+  if (chunks.some((chunk) => canonicalJson({ scope: chunk.scope, actorId: chunk.actorId, versions: chunk.versions, orderedMappings: chunk.orderedMappings, importerVersion: chunk.importerVersion, sourceFileHashes: chunk.sourceFileHashes, issuedAt: chunk.issuedAt, expiresAt: chunk.expiresAt, importId: chunk.importId }) !== metadata)) throw new Error("preview_chunks_mixed_metadata");
   if (chunks.length !== expectedCount || chunks.some((chunk) => chunk.chunkCount !== expectedCount)) throw new Error("preview_chunks_incomplete");
   for (let index = 0; index < chunks.length; index += 1) if (chunks[index]!.chunkIndex !== index) throw new Error("preview_chunks_out_of_order");
   for (const chunk of chunks) if (!await signer.verify(canonicalJson(unsignedChunk(chunk)), chunk.signature)) throw new Error("preview_signature_invalid");
   assertPreviewTimes(first.issuedAt, first.expiresAt, now);
   const rows = chunks.flatMap((chunk) => chunk.rows);
   const decisions = chunks.flatMap((chunk) => chunk.decisions);
+  const rowIds = chunks.flatMap((chunk) => chunk.rowIds);
   if (rows.length === 0 || rows.length > maxRows || rows.length !== decisions.length
     || !rows.every((row, index) => row && typeof row === "object"
       && row.businessId === first.scope.businessId && row.sourceSystem === first.scope.sourceSystem
@@ -212,7 +241,9 @@ export async function verifySignedPreviewChunks(payloads: string[], signer: Prev
   if (!(await Promise.all(decisions.map(async (decision) => decision.decisionFingerprint === await canonicalSha256(identityDecisionFingerprintProjection(decision))))).every(Boolean)) {
     throw new Error("preview_decision_invalid");
   }
-  const computed = await canonicalSha256(contentProjection(rows, decisions, first, first.scope));
+  if (rowIds.length !== rows.length || !(await Promise.all(rows.map(async (row, index) => (await createPreviewRowId(first.importId, row)) === rowIds[index]))).every(Boolean)) throw new Error("preview_row_id_invalid");
+  const versions = completeVersions(first.versions, decisions);
+  const computed = await canonicalSha256(contentProjection(rows, decisions, { ...first, versions }, first.scope));
   if (computed !== root) throw new Error("preview_content_root_invalid");
   return chunks;
 }

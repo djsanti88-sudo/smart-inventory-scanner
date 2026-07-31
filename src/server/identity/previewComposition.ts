@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createIdentityPreview, type CreateIdentityPreviewInput } from "@/services/identity/preview";
+import { createIdentityPreview, type CreateIdentityPreviewInput, type PreviewVersions } from "@/services/identity/preview";
 import type { LocalIdentitySnapshot } from "./localSnapshotIndex";
 import { createReadOnlyCandidateSource, type ApprovedLinkLookupInput, type ApprovedLinkLookupResult } from "./readOnlyCandidateSource";
 import { createLocalPreviewSigner } from "./previewSigner";
@@ -12,6 +12,7 @@ export interface LocalIdentityPreviewComposition {
   lookupApprovedLinks(input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]>;
   authenticate(request: Request, businessId: string): Promise<IdentityPreviewActor | undefined>;
   signingKey: () => string | undefined;
+  versions: PreviewVersions;
 }
 
 let localComposition: LocalIdentityPreviewComposition | undefined;
@@ -29,5 +30,5 @@ export async function createComposedIdentityPreview(input: CreateIdentityPreview
   if (!localComposition) throw new Error("local_snapshot_unavailable");
   const source = createReadOnlyCandidateSource({ snapshot: localComposition.snapshot, lookupApprovedLinks: localComposition.lookupApprovedLinks });
   const signer = await createLocalPreviewSigner(localComposition.signingKey());
-  return createIdentityPreview({ ...input, actorId: actor.actorId }, { source, signer });
+  return createIdentityPreview({ ...input, actorId: actor.actorId, versions: localComposition.versions }, { source, signer });
 }
