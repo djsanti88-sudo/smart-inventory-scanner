@@ -22,6 +22,7 @@ export type UploadKind = "csv" | "tsv" | "xlsx" | "xls";
 export interface UploadFileLike {
   name: string;
   type?: string;
+  size?: number;
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
 }
@@ -38,10 +39,15 @@ export interface UniversalSheet {
   rows: string[][];
   headerRowIndex: number;
   sourceSignature: string;
-  // Multi-tab workbooks: only the first non-empty worksheet is imported. importedSheetName names it;
-  // skippedSheets lists any OTHER non-empty worksheets that were NOT imported (never silently dropped).
-  // Empty for delimited files and single-sheet workbooks. undefined only on legacy/synthetic sheets.
+  // Set for workbook tabs so new callers can present/select each source sheet explicitly.
+  // The legacy compatibility reader only returns this shape when exactly one non-empty sheet exists.
   importedSheetName?: string;
+  /** One-based original workbook tab position; absent for delimited source files. */
+  sheetOrdinal?: number;
+  /** One-based physical source rows corresponding to `rows`, preserving blank-row gaps. */
+  sourceRowNumbers?: number[];
+  // Retained only for existing presentation compatibility. The all-sheet reader never drops sheets,
+  // and the compatibility reader rejects multi-sheet workbooks before returning a sheet.
   skippedSheets?: SkippedSheet[];
 }
 

@@ -4,13 +4,16 @@ import { inferColumnMapping } from "@/services/columnIntelligence";
 import { sanitizeCell } from "@/services/csvImport";
 import {
   buildSourceSignature,
-  type SkippedSheet,
   type UniversalSheet,
   type UploadFileLike,
   type UploadKind,
 } from "@/services/importSchema";
 
 const DELIMITERS = [",", "\t", ";", "|"] as const;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_SHEETS = 64;
+const MAX_COLUMNS = 256;
+const MAX_TOTAL_ROWS = 5_000;
 
 export function detectDelimitedSeparator(text: string): (typeof DELIMITERS)[number] {
   const line = text.replace(/^﻿/, "").split(/\r?\n/).find((value) => value.trim() !== "") ?? "";
@@ -60,6 +63,7 @@ function excelCellText(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   if (typeof value !== "object") return String(value);
   const record = value as Record<string, unknown>;
+  if (record.formula !== undefined) return record.result === undefined ? "" : String(record.result ?? "");
   if (record.result !== undefined) return String(record.result ?? "");
   if (Array.isArray(record.richText)) {
     return record.richText
@@ -71,16 +75,29 @@ function excelCellText(value: unknown): string {
   return String(value);
 }
 
-interface WorkbookMatrix {
+interface NamedMatrix {
   matrix: string[][];
-  importedSheetName?: string;
-  skippedSheets: SkippedSheet[];
+  sheetName: string;
+  sheetOrdinal: number;
 }
 
-async function workbookMatrix(file: UploadFileLike, kind: UploadKind): Promise<WorkbookMatrix> {
+function assertFileSize(size: number): void {
+  if (size > MAX_FILE_BYTES) throw new Error("The uploaded file exceeds the 25 MiB limit.");
+}
+
+function assertMatrixLimits(matrices: string[][][]): void {
+  const totalRows = matrices.reduce((total, matrix) => total + matrix.filter(hasData).length, 0);
+  if (totalRows > MAX_TOTAL_ROWS) throw new Error("The uploaded file exceeds the 5,000-row limit.");
+  if (matrices.some((matrix) => matrix.some((row) => row.length > MAX_COLUMNS))) {
+    throw new Error("The uploaded file exceeds the 256-column limit.");
+  }
+}
+
+async function workbookMatrices(file: UploadFileLike): Promise<NamedMatrix[]> {
   const ExcelJS = (await import("exceljs")).default;
   const workbook = new ExcelJS.Workbook();
   const bytes = new Uint8Array(await file.arrayBuffer());
+  assertFileSize(bytes.byteLength);
   try {
     // exceljs@4.4.0 ships `declare interface Buffer extends ArrayBuffer {}`, which merges into the
     // ambient global Buffer type and conflicts with @types/node's generic Buffer<T> under this
@@ -90,59 +107,76 @@ async function workbookMatrix(file: UploadFileLike, kind: UploadKind): Promise<W
     // @ts-expect-error exceljs 4.4.0 Buffer typings conflict with @types/node; see comment above.
     await workbook.xlsx.load(bytes as unknown as Buffer);
   } catch (error) {
-    if (kind === "xls") {
-      throw new Error(
-        "Legacy binary .xls is not supported by installed ExcelJS 4.4.0. Save it as .xlsx or .csv.",
-      );
-    }
     throw new Error(`Could not read this XLSX workbook: ${error instanceof Error ? error.message : "unknown error"}`);
   }
-  // Only NON-EMPTY worksheets carry data. We import the FIRST one (byte-identical to the historic
-  // single-sheet behavior) and never auto-merge the rest (that could concatenate unrelated tabs).
-  // Any OTHER non-empty worksheet is a genuine data gap, so it is surfaced as a warning, never dropped
-  // silently. Empty sheets (summary/cover tabs with no rows) are not data and are not warned about.
-  const nonEmpty = workbook.worksheets.filter((candidate) => candidate.rowCount > 0);
-  const worksheet = nonEmpty[0];
-  if (!worksheet) return { matrix: [], skippedSheets: [] };
-  const skippedSheets: SkippedSheet[] = nonEmpty.slice(1).map((sheet) => ({
-    name: sheet.name,
-    rowCount: sheet.rowCount,
-  }));
-  const matrix: string[][] = [];
-  for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
-    const row: string[] = [];
-    for (let columnNumber = 1; columnNumber <= worksheet.columnCount; columnNumber += 1) {
-      row.push(sanitizeCell(excelCellText(worksheet.getRow(rowNumber).getCell(columnNumber).value)));
+  if (workbook.worksheets.length > MAX_SHEETS) throw new Error("The uploaded workbook exceeds the 64-sheet limit.");
+  const matrices = workbook.worksheets.map((worksheet, index) => {
+    const matrix: string[][] = [];
+    for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+      const row: string[] = [];
+      for (let columnNumber = 1; columnNumber <= worksheet.columnCount; columnNumber += 1) {
+        row.push(sanitizeCell(excelCellText(worksheet.getRow(rowNumber).getCell(columnNumber).value)));
+      }
+      matrix.push(row);
     }
-    matrix.push(row);
-  }
-  return { matrix, importedSheetName: worksheet.name, skippedSheets };
+    return { matrix, sheetName: worksheet.name, sheetOrdinal: index + 1 };
+  });
+  assertMatrixLimits(matrices.map(({ matrix }) => matrix));
+  return matrices.filter(({ matrix }) => matrix.some(hasData));
 }
 
-export async function readUniversalFile(file: UploadFileLike): Promise<UniversalSheet> {
-  const kind = extension(file.name);
-  let matrix: string[][];
-  let importedSheetName: string | undefined;
-  let skippedSheets: SkippedSheet[] = [];
-  if (kind === "csv" || kind === "tsv") {
-    matrix = delimitedMatrix(await file.text(), kind);
-  } else {
-    const workbook = await workbookMatrix(file, kind);
-    matrix = workbook.matrix;
-    importedSheetName = workbook.importedSheetName;
-    skippedSheets = workbook.skippedSheets;
-  }
+function universalSheet(
+  file: UploadFileLike,
+  kind: UploadKind,
+  matrix: string[][],
+  importedSheetName?: string,
+  sheetOrdinal?: number,
+): UniversalSheet {
   if (!matrix.some(hasData)) throw new Error("The uploaded file is empty.");
   const inference = inferColumnMapping(matrix);
-  const rows = matrix.slice(inference.headerRowIndex + 1).filter(hasData);
+  const sourceRows = matrix.slice(inference.headerRowIndex + 1);
   return {
     fileName: file.name,
     kind,
     headers: inference.headers,
-    rows,
+    rows: sourceRows.filter(hasData),
     headerRowIndex: inference.headerRowIndex,
     sourceSignature: buildSourceSignature(inference.headers),
     importedSheetName,
-    skippedSheets,
+    sheetOrdinal,
+    sourceRowNumbers: sourceRows
+      .map((row, index) => ({ row, sourceRowNumber: inference.headerRowIndex + index + 2 }))
+      .filter(({ row }) => hasData(row))
+      .map(({ sourceRowNumber }) => sourceRowNumber),
+    skippedSheets: [],
   };
+}
+
+export async function readUniversalWorkbook(file: UploadFileLike): Promise<UniversalSheet[]> {
+  const kind = extension(file.name);
+  if (kind === "xls") {
+    throw new Error("Legacy .xls files are not supported. Save the file as .xlsx or .csv and upload that export.");
+  }
+  if (file.size !== undefined) assertFileSize(file.size);
+  if (kind === "csv" || kind === "tsv") {
+    const text = await file.text();
+    assertFileSize(new TextEncoder().encode(text).byteLength);
+    const matrix = delimitedMatrix(text, kind);
+    assertMatrixLimits([matrix]);
+    return [universalSheet(file, kind, matrix)];
+  }
+  const sheets = await workbookMatrices(file);
+  if (sheets.length === 0) throw new Error("The uploaded file is empty.");
+  return sheets.map(({ matrix, sheetName, sheetOrdinal }) => universalSheet(file, kind, matrix, sheetName, sheetOrdinal));
+}
+
+/** Legacy single-sheet seam. Multi-tab workbooks must be routed through readUniversalWorkbook. */
+export async function readUniversalFile(file: UploadFileLike): Promise<UniversalSheet> {
+  const sheets = await readUniversalWorkbook(file);
+  if (sheets.length !== 1) {
+    throw new Error(
+      `This workbook has ${sheets.length} non-empty sheets. Choose one sheet or export it as separate files.`,
+    );
+  }
+  return sheets[0];
 }

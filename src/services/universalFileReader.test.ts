@@ -1,13 +1,14 @@
 // src/services/universalFileReader.test.ts
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { readUniversalFile } from "@/services/universalFileReader";
+import { readUniversalFile, readUniversalWorkbook } from "@/services/universalFileReader";
 import type { UploadFileLike } from "@/services/importSchema";
 
-function textFile(name: string, content: string): UploadFileLike {
+function textFile(name: string, content: string, size?: number): UploadFileLike {
   const bytes = new TextEncoder().encode(content);
   return {
     name,
+    size,
     type: "text/plain",
     text: async () => content,
     arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
@@ -53,7 +54,7 @@ describe("readUniversalFile", () => {
     expect(sheet.rows[0]).toEqual(["ABC-1", "'=4", "3"]);
   });
 
-  it("warns when a workbook has more than one non-empty worksheet, importing the first", async () => {
+  it("keeps every named non-empty XLSX sheet in workbook order", async () => {
     const workbook = new ExcelJS.Workbook();
     const first = workbook.addWorksheet("Inventory");
     first.addRow(["PN", "Make", "QOH"]);
@@ -70,12 +71,30 @@ describe("readUniversalFile", () => {
       text: async () => "",
       arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     };
-    const sheet = await readUniversalFile(file);
-    // First non-empty sheet is imported byte-for-byte the same as before.
-    expect(sheet.rows).toEqual([["ABC-1", "Acme", "7"]]);
-    // The other non-empty sheet is surfaced, never silently dropped.
-    expect(sheet.importedSheetName).toBe("Inventory");
-    expect(sheet.skippedSheets).toEqual([{ name: "Warehouse B", rowCount: 3 }]);
+    const sheets = await readUniversalWorkbook(file);
+    expect(sheets).toHaveLength(2);
+    expect(sheets.map((sheet) => sheet.importedSheetName)).toEqual(["Inventory", "Warehouse B"]);
+    expect(sheets.map((sheet) => sheet.rows)).toEqual([
+      [["ABC-1", "Acme", "7"]],
+      [["ZZZ-9", "Beta", "3"], ["ZZZ-8", "Beta", "4"]],
+    ]);
+  });
+
+  it("keeps legacy single-sheet callers safe by rejecting multi-sheet workbooks", async () => {
+    const workbook = new ExcelJS.Workbook();
+    workbook.addWorksheet("Inventory").addRow(["PN", "QOH"]);
+    workbook.addWorksheet("Warehouse B").addRow(["PN", "QOH"]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+
+    await expect(readUniversalFile(file)).rejects.toThrow(
+      "This workbook has 2 non-empty sheets. Choose one sheet or export it as separate files.",
+    );
   });
 
   it("does not warn for a single-sheet workbook (happy path unchanged)", async () => {
@@ -93,7 +112,7 @@ describe("readUniversalFile", () => {
     };
     const sheet = await readUniversalFile(file);
     expect(sheet.rows).toEqual([["ABC-1", "Acme", "7"]]);
-    expect(sheet.skippedSheets).toEqual([]);
+    expect(sheet.importedSheetName).toBe("Inventory");
   });
 
   it("imports the data sheet and does not warn about an empty leading sheet", async () => {
@@ -113,11 +132,78 @@ describe("readUniversalFile", () => {
     const sheet = await readUniversalFile(file);
     expect(sheet.rows).toEqual([["ABC-1", "Acme", "7"]]);
     expect(sheet.importedSheetName).toBe("Data");
-    // The empty leading sheet is NOT a skipped-data warning (only non-empty extras count).
-    expect(sheet.skippedSheets).toEqual([]);
+    expect(sheet.importedSheetName).toBe("Data");
   });
 
-  it("accepts OOXML bytes with an .xls filename but rejects genuine legacy BIFF honestly", async () => {
+  it("omits styled-only sheets while preserving the physical sheet and source row ordinals", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const cover = workbook.addWorksheet("Cover");
+    cover.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF000000" } };
+    const data = workbook.addWorksheet("Data");
+    data.addRow(["Report title"]);
+    data.addRow(["PN", "QOH"]);
+    data.addRow(["ABC-1", 7]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+
+    const [sheet] = await readUniversalWorkbook(file);
+    expect(sheet).toMatchObject({ importedSheetName: "Data", sheetOrdinal: 2, headerRowIndex: 1 });
+    expect(sheet.sourceRowNumbers).toEqual([3]);
+  });
+
+  it("uses only cached formula results and leaves uncached formulas empty", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Inventory");
+    worksheet.addRow(["PN", "QOH"]);
+    worksheet.addRow(["ABC-1", { formula: "1+1" }]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+
+    await expect(readUniversalFile(file)).resolves.toMatchObject({ rows: [["ABC-1", ""]] });
+  });
+
+  it("allows exact file, sheet, column, and row limits", async () => {
+    const columns = Array.from({ length: 256 }, (_, index) => `H${index}`).join(",");
+    const row = Array.from({ length: 256 }, (_, index) => `V${index}`).join(",");
+    const csv = [columns, ...Array.from({ length: 4_999 }, () => row)].join("\n");
+    const workbook = await readUniversalWorkbook(textFile("limit.csv", csv, 25 * 1024 * 1024));
+    expect(workbook).toHaveLength(1);
+    expect(workbook[0].rows).toHaveLength(4_999);
+  });
+
+  it("rejects files, workbooks, rows, and columns above their whole-input limits", async () => {
+    await expect(readUniversalWorkbook(textFile("large.csv", "PN\nABC", (25 * 1024 * 1024) + 1))).rejects.toThrow(
+      "The uploaded file exceeds the 25 MiB limit.",
+    );
+    const tooManyColumns = Array.from({ length: 257 }, (_, index) => `H${index}`).join(",");
+    await expect(readUniversalWorkbook(textFile("columns.csv", tooManyColumns))).rejects.toThrow(
+      "The uploaded file exceeds the 256-column limit.",
+    );
+    await expect(readUniversalWorkbook(textFile("rows.csv", Array.from({ length: 5_001 }, () => "PN").join("\n")))).rejects.toThrow(
+      "The uploaded file exceeds the 5,000-row limit.",
+    );
+    const workbook = new ExcelJS.Workbook();
+    for (let index = 0; index < 65; index += 1) workbook.addWorksheet(`Sheet ${index + 1}`).addRow(["PN"]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    await expect(readUniversalWorkbook({
+      name: "sheets.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    })).rejects.toThrow("The uploaded workbook exceeds the 64-sheet limit.");
+  });
+
+  it("rejects every .xls upload with safe conversion guidance", async () => {
     const workbook = new ExcelJS.Workbook();
     workbook.addWorksheet("Inventory").addRow(["PN", "QOH"]);
     const buffer = await workbook.xlsx.writeBuffer();
@@ -127,7 +213,9 @@ describe("readUniversalFile", () => {
       text: async () => "",
       arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     };
-    await expect(readUniversalFile(renamed)).resolves.toMatchObject({ kind: "xls" });
+    await expect(readUniversalWorkbook(renamed)).rejects.toThrow(
+      "Legacy .xls files are not supported. Save the file as .xlsx or .csv and upload that export.",
+    );
 
     const biffBytes = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
     const biff: UploadFileLike = {
@@ -140,7 +228,7 @@ describe("readUniversalFile", () => {
       ),
     };
     await expect(readUniversalFile(biff)).rejects.toThrow(
-      "Legacy binary .xls is not supported by installed ExcelJS 4.4.0. Save it as .xlsx or .csv.",
+      "Legacy .xls files are not supported. Save the file as .xlsx or .csv and upload that export.",
     );
   });
 });

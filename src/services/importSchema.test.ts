@@ -5,6 +5,7 @@ import {
   buildSourceSignature,
   emptyColumnMapping,
 } from "@/services/importSchema";
+import type { UniversalSheet } from "@/services/importSchema";
 
 describe("importSchema", () => {
   it("keeps the nine supported mapping fields in a stable order", () => {
@@ -33,5 +34,18 @@ describe("importSchema", () => {
     expect(a).toEqual({});
     expect(b).toEqual({});
     expect(a).not.toBe(b);
+  });
+
+  it("keeps each workbook sheet independently named for caller selection", () => {
+    const sheet: UniversalSheet = {
+      fileName: "inventory.xlsx",
+      kind: "xlsx",
+      headers: ["PN"],
+      rows: [["ABC-1"]],
+      headerRowIndex: 0,
+      sourceSignature: "import-source-test-1",
+      importedSheetName: "Warehouse B",
+    };
+    expect(sheet.importedSheetName).toBe("Warehouse B");
   });
 });
