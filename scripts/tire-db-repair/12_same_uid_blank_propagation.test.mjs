@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -12,7 +12,7 @@ const { planSameUidBlankPropagation, runSameUidBlankPropagation } = await import
 function fixture({ conflict = false, orphan = false, parentConflict = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "same-uid-propagation-"));
   const file = join(dir, "fixture.db"); const db = new Database(file);
-  db.exec(`CREATE TABLE tires (barcode TEXT PRIMARY KEY, canonical_product_uid TEXT NOT NULL, brand TEXT, model TEXT, size TEXT, manufacturer_part_number TEXT);
+  db.exec(`CREATE TABLE tires (barcode TEXT PRIMARY KEY, canonical_product_uid TEXT, brand TEXT, model TEXT, size TEXT, manufacturer_part_number TEXT);
     CREATE TABLE canonical_tire_products (canonical_product_id TEXT PRIMARY KEY, brand TEXT, model TEXT, size TEXT);
     CREATE TABLE remaining_blank_fill_audit (audit_id INTEGER PRIMARY KEY, action TEXT, trust_color TEXT, confidence_score INTEGER, canonical_product_uid TEXT, barcode TEXT, previous_value TEXT, new_value TEXT, candidate_count INTEGER, candidate_values TEXT, reason TEXT, created_at TEXT);
     CREATE TABLE provenance (id INTEGER PRIMARY KEY, barcode TEXT, content_hash TEXT);
@@ -40,9 +40,14 @@ test("dry-run is byte-identical and plans only unique normalized same-UID donors
 });
 
 test("normalization follows the shared tire token grammar and rejects trailing junk", () => {
-  assert.equal(planSameUidBlankPropagation, planSameUidBlankPropagation); // exported API is deliberately direct for callers
   const x = fixture(); try { const db=new Database(x.file); db.prepare("INSERT INTO tires VALUES ('equivalent','U1','Fortune Inc','Tormenta R/T','35X12.50R17','PN1')").run(); db.close(); assert.equal(planSameUidBlankPropagation(x.file).childChanges.length, 3); } finally { cleanup(x); }
   const x2=fixture(); try { const db=new Database(x2.file); db.prepare("UPDATE tires SET size='not a tire' WHERE barcode='donor'").run(); db.close(); assert.throws(() => planSameUidBlankPropagation(x2.file)); } finally { cleanup(x2); }
+});
+
+test("blank UIDs, wrong authoritative cardinality, and late audit failure cannot write", () => {
+  const x=fixture(); try { const db=new Database(x.file); db.prepare("INSERT INTO tires VALUES ('no-uid','','Brand','Model','235/40R19','')").run(); db.close(); assert.throws(()=>planSameUidBlankPropagation(x.file),/blank canonical_product_uid/); } finally { cleanup(x); }
+  const y=fixture(); try { const named=join(y.dir,"REPAIRED_TIRE_DATABASE.db"); copyFileSync(y.file,named); const before=readFileSync(named); assert.throws(()=>runSameUidBlankPropagation({dbPath:named,execute:true}),/authoritative snapshot guard/); assert.deepEqual(readFileSync(named),before); } finally { cleanup(y); }
+  const z=fixture(); try { const db=new Database(z.file); db.exec("CREATE TRIGGER fail_audit BEFORE INSERT ON remaining_blank_fill_audit BEGIN SELECT RAISE(ABORT, 'audit failure'); END"); db.close(); assert.throws(()=>runSameUidBlankPropagation({dbPath:z.file,execute:true}),/audit failure/); const verify=new Database(z.file); assert.equal(verify.prepare("SELECT brand FROM tires WHERE barcode='blank'").get().brand,""); assert.equal(verify.prepare("SELECT COUNT(*) AS n FROM remaining_blank_fill_audit").get().n,0); verify.close(); } finally { cleanup(z); }
 });
 
 test("execute fills blanks, writes structured audit, and is idempotent", () => {
