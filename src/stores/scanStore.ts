@@ -4565,6 +4565,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // duplicate deep response that re-enters here finds status !== "open" and returns - it can never
         // double-count or duplicate the alias. This reuses the SAME open-status gate liveDecode relies on.
         if (!review || review.status !== "open") return;
+        const requestedBusinessId = state.businessId;
+        const requestedUserId = state.userId;
+        const requestedTenantIsActive = () => isTenantContextActive(requestedBusinessId, requestedUserId);
 
         const s = state.settings;
         const nowIso = now();
@@ -4614,6 +4617,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
           if (!res.ok) return; // never throw into the scan flow; leave the review open for the human
           data = await res.json();
+          if (!requestedTenantIsActive()) return;
         } catch {
           // Network/provider failure on the BACKGROUND pass must be silent: the row is already shown as
           // suggested/needs_review and the human can still resolve it. Never surface a scary error here.

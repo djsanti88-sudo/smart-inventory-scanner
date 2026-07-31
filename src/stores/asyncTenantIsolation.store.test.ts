@@ -176,4 +176,39 @@ describe("async decode tenant isolation", () => {
 
     expectTenantBUnchanged(store, tenantBBreaker);
   });
+
+  it("drops a delayed background deep-verify success after the active tenant changes", async () => {
+    let resolveFetch!: (response: Response) => void;
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => { resolveFetch = resolve; }));
+    vi.stubGlobal("fetch", fetch);
+    const { store, reviewId } = storeWithOpenReview();
+
+    const deepVerify = store.getState().backgroundVerifyDeep(reviewId);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const tenantBBreaker = switchToTenantB(store);
+    resolveFetch({
+      ok: true,
+      json: async () => ({
+        results: [{
+          productName: "Tenant A deep result",
+          brand: "Tenant A",
+          sourceUrls: [],
+          verifiedFacts: [],
+          guesses: [],
+          aliases: [],
+          confidence: 0.6,
+        }],
+        decision: {
+          status: "suggested",
+          confidence: 0.6,
+          reason: "Deep suggestion for tenant A",
+          evidenceStrength: "url_only",
+          exactCodeEvidenceVerifiedByApp: false,
+        },
+      }),
+    } as Response);
+    await deepVerify;
+
+    expectTenantBUnchanged(store, tenantBBreaker);
+  });
 });
