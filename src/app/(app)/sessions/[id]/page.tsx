@@ -15,7 +15,6 @@ import { useAccessLevel } from "@/services/security/useAccessLevel";
 import { getDb } from "@/lib/firebaseClient";
 import { getSession } from "@/lib/auth";
 import { useScanStore } from "@/stores/scanStore";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { ArchivedSessionScans } from "@/components/ArchivedSessionScans";
 import { SessionCountsTable, type SessionCountRow } from "@/components/SessionCountsTable";
 import { countsFromTimeline } from "@/services/sessions/countsFromTimeline";
@@ -160,7 +159,6 @@ export default function SessionDetailPage() {
   }
 
   return (
-    <BusinessContextGate>
     <div className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
       <Link href="/scan" className="text-sm text-blue-700 hover:underline">
         &larr; Back to scan
@@ -244,6 +242,5 @@ export default function SessionDetailPage() {
       </div>
       )}
     </div>
-    </BusinessContextGate>
   );
 }

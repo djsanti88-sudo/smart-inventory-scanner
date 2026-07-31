@@ -13,7 +13,6 @@ import { ExportMenu } from "@/components/ExportMenu";
 import { VarianceReport } from "@/components/VarianceReport";
 import { SessionLockControl } from "@/components/SessionLockControl";
 import { SessionsList } from "@/components/SessionsList";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { planScanBatch } from "./planScan";
 import { runScanBatch, type ScanBatchProgress } from "./runScanBatch";
 import { resolveRawScan } from "@/services/resolver";
@@ -129,7 +128,6 @@ function ScanPageContent() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
       <h1 className="sr-only">Scan</h1>
-      <BusinessContextGate>
       <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4">
         {localDemoProofBatch && (
           <p
@@ -319,7 +317,6 @@ function ScanPageContent() {
       <LiveScanFeed />
       <FinalCountTable />
       <VarianceReport />
-      </BusinessContextGate>
     </div>
   );
 }

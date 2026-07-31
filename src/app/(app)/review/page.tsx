@@ -4,7 +4,6 @@ import { useState } from "react";
 import { NeedsReviewTable } from "@/components/NeedsReviewTable";
 import { SuggestedApprovalPanel } from "@/components/SuggestedApprovalPanel";
 import { SyncStatusBar } from "@/components/SyncStatusBar";
-import { BusinessContextGate } from "@/components/BusinessContextGate";
 
 // Build 3: the review screen gains a "Suggested" tab for batch-approving the Suggested pile
 // (docs/archive/superpowers/specs/2026-07-05-batch-approve-design.md). "All" is the original single-row
@@ -21,8 +20,7 @@ export default function ReviewPage() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-4 p-4">
       <h1 className="sr-only">Review queue</h1>
-      <BusinessContextGate>
-        <SyncStatusBar />
+      <SyncStatusBar />
         <div className="flex gap-2" role="tablist" aria-label="Review tabs">
           <button
             type="button"
@@ -46,7 +44,6 @@ export default function ReviewPage() {
           </button>
         </div>
         {tab === "all" ? <NeedsReviewTable /> : <SuggestedApprovalPanel />}
-      </BusinessContextGate>
     </div>
   );
 }

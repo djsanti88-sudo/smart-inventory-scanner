@@ -1,5 +1,6 @@
 import { StoreHydrator } from "@/components/StoreHydrator";
 import { AuthGuard } from "@/components/AuthGuard";
+import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { Nav } from "@/components/Nav";
 import { ProdFirebaseBanner } from "@/components/ProdFirebaseBanner";
 
@@ -11,7 +12,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <AuthGuard>
         <ProdFirebaseBanner />
         <Nav />
-        <main className="flex-1 bg-zinc-50">{children}</main>
+        <BusinessContextGate>
+          <main className="flex-1 bg-zinc-50">{children}</main>
+        </BusinessContextGate>
       </AuthGuard>
     </StoreHydrator>
   );

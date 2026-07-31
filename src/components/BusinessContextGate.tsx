@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
@@ -16,6 +17,9 @@ import { hasLegacyBlob, persistKeyForUid } from "@/stores/scanPersistNamespace";
 // the per-uid key and calls setBusinessContext exactly once. The mock path renders children directly.
 export function BusinessContextGate({ children }: { children: React.ReactNode }) {
   const cloud = isLiveAuth() && isFirebaseBackend();
+  const pathname = usePathname();
+  const isBusinessSetupRoute = pathname === "/business";
+  const bootstrapStarted = useRef(false);
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const setBusinessContext = useScanStore((s) => s.setBusinessContext);
@@ -24,6 +28,15 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!cloud) return; // mock/local path: nothing to wire (context + data already "ready")
+    // Business setup creates/selects the context this gate validates, so it must remain reachable.
+    if (isBusinessSetupRoute) {
+      bootstrapStarted.current = false;
+      return;
+    }
+    // This client component lives in the shared (app) layout. Keep a resolved tenant across
+    // sibling route changes; only returning from /business deliberately starts a new bootstrap.
+    if (bootstrapStarted.current) return;
+    bootstrapStarted.current = true;
     let active = true;
     void (async () => {
       const user = await getSession();
@@ -55,9 +68,11 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
       setStatus("ready");
     })();
     return () => { active = false; };
-  }, [cloud, setBusinessContext]);
+  }, [cloud, isBusinessSetupRoute, setBusinessContext]);
 
   if (!cloud) return <>{children}</>;
+
+  if (isBusinessSetupRoute) return <>{children}</>;
 
   if (status === "adopt-choice" && pendingCtx) {
     return (
