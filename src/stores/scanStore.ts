@@ -86,7 +86,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createIndexedDbScanPersistStorage, type PersistenceStatus } from "@/stores/scanPersistStorage";
+import { createIndexedDbScanPersistStorage } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
@@ -698,8 +698,6 @@ export interface ScanState {
 
   // hydration guard
   _hasHydrated: boolean;
-  /** Durable browser storage health. Degraded never blocks a physical scan: the in-memory ledger wins. */
-  persistenceStatus: PersistenceStatus;
   // Phase 3: this device's stable identity (localStorage-persisted UUID). Null until first read
   // (e.g. non-browser/test contexts, or before the store has touched deviceIdentity). Used only to
   // derive idempotent auto-session ownership - never part of the count/ledger identity.
@@ -1535,7 +1533,6 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       lastProductDeleteBackup: null,
       lastIdentifierBackfill: null,
       _hasHydrated: deps.persistName ? false : true,
-      persistenceStatus: "available",
       deviceId: null,
       location: "Main",
       recentLocations: [],
@@ -7435,8 +7432,7 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   return out as never;
 }
 
-let reportPersistenceStatus: ((status: PersistenceStatus) => void) | null = null;
-const scanPersistStorage = createIndexedDbScanPersistStorage((status) => reportPersistenceStatus?.(status));
+const scanPersistStorage = createIndexedDbScanPersistStorage();
 
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
@@ -7478,14 +7474,6 @@ export const useScanStore = create<ScanState>()(
     onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
   }),
 );
-
-reportPersistenceStatus = (status) => {
-  // Zustand persist wraps setState, so an unconditional health update would itself trigger a storage
-  // write and recurse forever in a degraded browser. Only observable transitions become state writes.
-  if (useScanStore.getState().persistenceStatus !== status) {
-    useScanStore.setState({ persistenceStatus: status });
-  }
-};
 
 // TEST/DEV ONLY (never production): expose the in-memory store so the local Playwright scan-matrix proof
 // harness can read the FULL unsanitized state (products with verified/provisional, aliases, catalog) that

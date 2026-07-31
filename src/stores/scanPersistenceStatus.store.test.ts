@@ -17,6 +17,7 @@ describe("scan store persistence health", () => {
 
     await expect(useScanStore.persist.rehydrate()).resolves.toBeUndefined();
     expect(useScanStore.getState()._hasHydrated).toBe(true);
-    expect(useScanStore.getState().persistenceStatus).toBe("degraded");
+    const { getBrowserPersistenceStatus } = await import("@/stores/scanPersistStorage");
+    expect(getBrowserPersistenceStatus()).toBe("degraded");
   });
 });

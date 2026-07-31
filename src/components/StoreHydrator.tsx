@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useReconcileStore } from "@/stores/reconcileStore";
+import { getBrowserPersistenceStatus, subscribeBrowserPersistenceStatus } from "@/stores/scanPersistStorage";
 
 // Rehydrates the persisted Zustand stores on the client only, then renders children.
 // Using skipHydration + an explicit rehydrate avoids the App Router hydration mismatch where
@@ -11,7 +12,7 @@ import { useReconcileStore } from "@/stores/reconcileStore";
 // reconcile rehydrate must never block scanning - the reconcile page has its own loading state).
 export function StoreHydrator({ children }: { children: React.ReactNode }) {
   const hasHydrated = useScanStore((s) => s._hasHydrated);
-  const persistenceStatus = useScanStore((s) => s.persistenceStatus);
+  const persistenceStatus = useSyncExternalStore(subscribeBrowserPersistenceStatus, getBrowserPersistenceStatus, getBrowserPersistenceStatus);
 
   useEffect(() => {
     void useScanStore.persist.rehydrate();

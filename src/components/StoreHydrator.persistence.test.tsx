@@ -2,13 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { StoreHydrator } from "@/components/StoreHydrator";
 import { useScanStore } from "@/stores/scanStore";
+import { setBrowserPersistenceStatus } from "@/stores/scanPersistStorage";
 
 beforeEach(() => {
-  useScanStore.setState({ _hasHydrated: true, persistenceStatus: "degraded" });
+  useScanStore.setState({ _hasHydrated: true });
+  setBrowserPersistenceStatus("degraded");
 });
 
 afterEach(() => {
-  useScanStore.setState({ persistenceStatus: "available" });
+  setBrowserPersistenceStatus("available");
 });
 
 describe("StoreHydrator persistence status", () => {
