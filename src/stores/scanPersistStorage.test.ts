@@ -217,6 +217,20 @@ describe("active async persistence adapter", () => {
     expect(await db.get("sis-scan-v1")).toBe("durable recovery");
     expect(local.values.has("sis-scan-v1")).toBe(false);
   });
+  it("promotes a newer fallback snapshot ahead of an older durable snapshot after reload", async () => {
+    const db = new Db();
+    const local = legacy();
+    await db.set("sis-scan-owner", "older durable snapshot");
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    db.fail = true;
+    await storage.setItem("sis-scan-owner", "newer fallback snapshot");
+    db.fail = false;
+
+    const reloaded = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await expect(reloaded.getItem("sis-scan-owner")).resolves.toBe("newer fallback snapshot");
+    expect(await db.get("sis-scan-owner")).toBe("newer fallback snapshot");
+  });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;
     await createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).removeItem("sis-scan-owner");

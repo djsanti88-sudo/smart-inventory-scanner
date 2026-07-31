@@ -76,15 +76,13 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         const legacyPresence = readLegacyBlobPresence();
         const uidPersistKey = persistKeyForUid(user.uid);
         const localUidMarkerPresence = readLocalKeyPresence(uidPersistKey);
-        // The ownership marker is deliberately tiny; a healthy durable UID snapshot may therefore
-        // exist in IndexedDB with no localStorage entry. Never offer legacy adoption until both layers
-        // establish the namespace is absent. An unavailable durable store fails closed as occupied.
-        const durablePresence = localUidMarkerPresence === "found"
-          ? "found"
-          : await getPersistedStatePresence(uidPersistKey);
+        // The ownership marker is deliberately tiny and can be stale. Always inspect the durable
+        // namespace too; if that probe is unavailable, protected content must fail closed rather
+        // than letting hydration create a divergent empty UID snapshot.
+        const durablePresence = await getPersistedStatePresence(uidPersistKey);
         const alreadyOwn = localUidMarkerPresence !== "absent" || durablePresence !== "absent";
         if (!active) return;
-        if (legacyPresence === "found" && durablePresence === "unavailable") {
+        if (durablePresence === "unavailable") {
           completed = true;
           setStatus("error");
           return;

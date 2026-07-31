@@ -80,6 +80,18 @@ describe("BusinessContextGate durable UID namespace safety", () => {
     expect(mocks.rehydrateForUid).not.toHaveBeenCalled();
   });
 
+  it("pauses bootstrap when the durable UID namespace cannot be inspected even with a local ownership pointer", async () => {
+    window.localStorage.setItem("sis-scan-user-1", '{"__scanPersistPointer":1}');
+    mocks.getPersistedStatePresence.mockResolvedValue("unavailable");
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+
+    render(<BusinessContextGate><div data-testid="scanner">scanner</div></BusinessContextGate>);
+
+    await waitFor(() => expect(mocks.getPersistedStatePresence).toHaveBeenCalledWith("sis-scan-user-1"));
+    expect(await screen.findByTestId("business-context-error")).toBeInTheDocument();
+    expect(mocks.rehydrateForUid).not.toHaveBeenCalled();
+  });
+
   it("continues durable UID hydration when localStorage methods throw", async () => {
     const proto = Object.getPrototypeOf(window.localStorage);
     const getItem = vi.spyOn(proto, "getItem").mockImplementation(() => {

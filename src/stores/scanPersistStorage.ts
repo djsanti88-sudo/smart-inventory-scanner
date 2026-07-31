@@ -44,6 +44,10 @@ type DeferredStringStorage = StateStorage & {
 
 const PERSIST_POINTER_KEY = "__scanPersistPointer";
 const TOMBSTONE_SUFFIX = "::scanbin-cleared-v1";
+// A failed durable write can leave a full local fallback newer than an older IndexedDB snapshot.
+// This tiny companion flag survives a reload so hydration can promote those exact newer bytes before
+// it ever reads the stale durable value.
+const FALLBACK_DIRTY_SUFFIX = "::scanbin-fallback-newer-v1";
 
 function isDurablePointer(value: string | null): boolean {
   if (!value) return false;
@@ -144,6 +148,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     if (completed) legacySnapshotsCleaned.add(name);
   };
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
+  const fallbackDirtyKey = (name: string) => `${name}${FALLBACK_DIRTY_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
   const hasTombstone = async (name: string) => {
     if (tombstones.has(name) || legacyGet(tombstoneKey(name)) === "1") return true;
@@ -194,12 +199,13 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     if (durableWritten && generationFor(name) === token) await clearTombstone(name, token);
     if (generationFor(name) !== token) return;
     if (durableWritten) {
+      legacyRemove(fallbackDirtyKey(name));
       removeLegacySnapshotOnce(name);
     } else {
       // A later durable recovery must remove this fallback snapshot after IndexedDB accepts newer bytes.
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
-      legacySet(name, value);
+      if (legacySet(name, value)) legacySet(fallbackDirtyKey(name), "1");
     }
   };
   const flushWrite = (name: string) => {
@@ -241,6 +247,22 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         legacyRemove(name);
         return null;
       }
+      const fallback = legacyGet(name);
+      if (legacyGet(fallbackDirtyKey(name)) === "1" && fallback !== null && !isDurablePointer(fallback)) {
+        if (options.database) {
+          try {
+            await options.database.set(name, fallback);
+            reportAvailable();
+            legacyRemove(fallbackDirtyKey(name));
+            removeLegacySnapshotOnce(name);
+          } catch {
+            reportDegraded();
+          }
+        } else {
+          reportDegraded();
+        }
+        return fallback;
+      }
       if (options.database) {
         try {
           const durable = await options.database.get(name);
@@ -249,7 +271,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
             removeLegacySnapshotOnce(name);
             return durable;
           }
-          const legacy = legacyGet(name);
+          const legacy = fallback;
           if (legacy !== null && !isDurablePointer(legacy)) {
             await options.database.set(name, legacy);
             reportAvailable();
@@ -264,7 +286,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       } else {
         reportDegraded();
       }
-      const legacy = legacyGet(name);
+      const legacy = fallback;
       return isDurablePointer(legacy) ? null : legacy;
       });
     },
@@ -290,6 +312,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         reportDegraded();
       }
       legacyRemove(name);
+      legacyRemove(fallbackDirtyKey(name));
       return {
         cleared: durableTombstone || localTombstone,
         authority: durableTombstone ? "durable" : localTombstone ? "local" : "none",
