@@ -86,7 +86,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
+import { createIndexedDbScanPersistStorage, type PersistenceStatus } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
@@ -698,6 +698,8 @@ export interface ScanState {
 
   // hydration guard
   _hasHydrated: boolean;
+  /** Durable browser storage health. Degraded never blocks a physical scan: the in-memory ledger wins. */
+  persistenceStatus: PersistenceStatus;
   // Phase 3: this device's stable identity (localStorage-persisted UUID). Null until first read
   // (e.g. non-browser/test contexts, or before the store has touched deviceIdentity). Used only to
   // derive idempotent auto-session ownership - never part of the count/ledger identity.
@@ -1533,6 +1535,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       lastProductDeleteBackup: null,
       lastIdentifierBackfill: null,
       _hasHydrated: deps.persistName ? false : true,
+      persistenceStatus: "available",
       deviceId: null,
       location: "Main",
       recentLocations: [],
@@ -1758,19 +1761,17 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       resetForSignOut: () => {
-        // Capture identity BEFORE the reset wipes it: the per-uid key must be removed and the persist
-        // middleware re-pointed to the anon key, or the fail-soft coalesced storage would simply
-        // rewrite sis-scan-<uid> on the next tick and the "cleared" state would leak right back.
-        const uid = get().userId;
+        // Remove the active durable namespace before repointing to anon. This is intentionally separate
+        // from the in-memory reset: clearing a localStorage fallback alone would leave IndexedDB data
+        // behind for a later shared-browser sign-in.
+        if (deps.persistName) void useScanStore.persist.clearStorage();
         // Re-point persist at the anon key BEFORE the wipe below. Firebase's own SDK auth persistence
         // is cleared by fbSignOut (auth.ts:66-69) in the UI sign-out handlers - that call is the
         // authority for SDK state; this action owns only app state. Guarded on deps.persistName so the
         // non-persisted test store (createTestScanStore, persistName: null) never touches the
-        // module-level app store. Doing this BEFORE the wipe (not after) is what stops the coalesced
-        // writer from resurrecting the uid key: the coalescer keeps only one pending slot (latest
-        // name+value), so once persist is re-pointed, the wipe's own write below targets the anon key
-        // and overwrites any older pending write still queued for the uid key. The direct
-        // localStorage.removeItem(persistKeyForUid(uid)) further down stays authoritative regardless.
+        // module-level app store. The durable adapter serializes clear and write operations by key, so
+        // clearing this active namespace before changing the name cannot be resurrected by an older
+        // queued write; the wipe below then persists only to the anonymous namespace.
         if (deps.persistName) {
           const persistApi = (useScanStore as unknown as {
             persist?: { setOptions: (o: { name: string }) => void };
@@ -1807,10 +1808,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           currentSession: cleared.currentSession,
           sessionId: cleared.sessionId,
         });
-        if (typeof window !== "undefined" && window.localStorage) {
+        if (typeof window !== "undefined") {
           try {
             clearSelectedBusinessId(); // sis-selected-business-v1 is NOT uid-namespaced: explicit clear
-            if (uid) window.localStorage.removeItem(persistKeyForUid(uid));
           } catch {
             // ignore storage errors: the in-memory reset above already holds
           }
@@ -1818,7 +1818,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       rehydrateForUid: (uid: string) => {
-        if (typeof window === "undefined" || !window.localStorage) return Promise.resolve();
+        if (typeof window === "undefined") return Promise.resolve();
         // Re-point storage at this uid's key and rehydrate from it. NO legacy migration here:
         // adopting the pre-account blob is an explicit owner action (adoptLegacyLocalData), never an
         // automatic side effect of signing in (shared-browser inheritance hazard).
@@ -1837,11 +1837,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       adoptLegacyLocalData: (uid: string) => {
-        if (typeof window === "undefined" || !window.localStorage) return Promise.resolve();
+        if (typeof window === "undefined") return Promise.resolve();
         // OWNER-INITIATED adopt: copy sis-scan-v1 into this uid's key (normalizing quantityDelta:0),
         // DELETE the legacy blob, then hydrate from the adopted key. Returns the rehydrate promise so
         // callers can await it before setBusinessContext (same ordering rule as the main gate path).
-        migrateLegacyBlobOnce(uid, window.localStorage);
+        try {
+          migrateLegacyBlobOnce(uid, window.localStorage);
+        } catch {
+          // Private-mode localStorage can be unavailable. Rehydrate still safely checks IndexedDB;
+          // there is simply no synchronous legacy handoff source to adopt in this browser.
+        }
         return get().rehydrateForUid(uid);
       },
 
@@ -6798,12 +6803,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // real cloud catalog - the cloud data re-loads on the next page load. In MOCK mode, reset the
         // local MockDb and reload clean seed (the original behavior).
         if (!cloudBackend) db.reset();
-        if (typeof window !== "undefined" && window.localStorage) {
+        if (typeof window !== "undefined") {
           try {
             // Use the active namespace rather than the normal-shop legacy key. In local demo mode
             // this is deliberately sis-local-demo-scan-v1, so clearing the demo cannot erase a
             // shop session that happens to share this browser.
-            window.localStorage.removeItem(persistKeyForUid(get().userId));
             window.localStorage.removeItem("sis-mockdb-v1");
           } catch {
             // ignore
@@ -6835,6 +6839,18 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const fresh = getSeed();
           set({ ...common, products: fresh.products, aliases: fresh.aliases });
         }
+        // Remove the fallback copy synchronously for immediate Clear-local-cache feedback. The durable
+        // remove just below remains the authority for IndexedDB and is serialized after this reset write.
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.removeItem(persistKeyForUid(get().userId));
+          } catch {
+            // A private-mode fallback failure is already exposed through persistenceStatus.
+          }
+        }
+        // The reset above invokes Zustand persistence. Clear LAST so that reset snapshot cannot
+        // resurrect the namespace after an otherwise successful clear.
+        if (deps.persistName) void useScanStore.persist.clearStorage();
       },
 
       applyCleanupSelections: (selectedCountIds) => {
@@ -7419,6 +7435,9 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   return out as never;
 }
 
+let reportPersistenceStatus: ((status: PersistenceStatus) => void) | null = null;
+const scanPersistStorage = createIndexedDbScanPersistStorage((status) => reportPersistenceStatus?.(status));
+
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
     name: persistKeyForUid(null),
@@ -7442,13 +7461,10 @@ export const useScanStore = create<ScanState>()(
     // Owner feature (2026-07-22): v13 -> v14 bump so every existing install gains `sessionHistory`
     // defaulted to [] (see scanStoreMigrate's v14 note above).
     version: 14,
-    // Finding #16 (critical) CONTAINED MITIGATION: the persist store previously used a plain
-    // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota setItem threw
-    // synchronously out of set() inside processScan and bricked the /scan page (fresh tab still broken
-    // until localStorage was cleared). This wrapper fails SOFT (never throws out of a scan) and COALESCES
-    // the ~6 writes/scan into one per tick (flushed on pagehide/visibilitychange so nothing is lost).
-    // See scanPersistStorage.ts. IndexedDB migration remains the recommended architectural follow-up.
-    storage: createJSONStorage(() => createCoalescedFailSoftStorage(() => localStorage)),
+    // Durable asynchronous IndexedDB storage with read-through migration from the current localStorage
+    // namespaces. Its failure path resolves rather than throws, so persistence can never roll back or
+    // brick the synchronous optimistic count. The UI exposes a degraded status when fallback is active.
+    storage: createJSONStorage(() => scanPersistStorage),
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
@@ -7462,6 +7478,14 @@ export const useScanStore = create<ScanState>()(
     onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
   }),
 );
+
+reportPersistenceStatus = (status) => {
+  // Zustand persist wraps setState, so an unconditional health update would itself trigger a storage
+  // write and recurse forever in a degraded browser. Only observable transitions become state writes.
+  if (useScanStore.getState().persistenceStatus !== status) {
+    useScanStore.setState({ persistenceStatus: status });
+  }
+};
 
 // TEST/DEV ONLY (never production): expose the in-memory store so the local Playwright scan-matrix proof
 // harness can read the FULL unsanitized state (products with verified/provisional, aliases, catalog) that

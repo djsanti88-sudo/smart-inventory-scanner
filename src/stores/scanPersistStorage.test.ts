@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createCoalescedFailSoftStorage } from "@/stores/scanPersistStorage";
+import {
+  createAsyncDurableStorage,
+  createCoalescedFailSoftStorage,
+  type AsyncKeyValueDatabase,
+} from "@/stores/scanPersistStorage";
 
 // QA finding #16 (critical, CONTAINED MITIGATION): scanStore.ts used a plain
 // createJSONStorage(() => localStorage) with NO quota guard, so near the ~5MB quota a
@@ -130,5 +134,109 @@ describe("createCoalescedFailSoftStorage - flush on pagehide / visibilitychange 
     document.dispatchEvent(new Event("visibilitychange"));
     expect(backing.setItem).toHaveBeenCalledTimes(1);
     expect(backing.setItem).toHaveBeenLastCalledWith("sis-scan-v1", "latest2");
+  });
+});
+
+class DeferredMemoryDatabase implements AsyncKeyValueDatabase {
+  readonly values = new Map<string, string>();
+  failWrites = false;
+
+  async get(key: string): Promise<string | null> {
+    return this.values.get(key) ?? null;
+  }
+
+  async set(key: string, value: string): Promise<void> {
+    if (this.failWrites) throw new DOMException("Private mode", "InvalidStateError");
+    this.values.set(key, value);
+  }
+
+  async remove(key: string): Promise<void> {
+    this.values.delete(key);
+  }
+}
+
+class SlowWriteDatabase extends DeferredMemoryDatabase {
+  private releaseWrite: (() => void) | null = null;
+  private resume: (() => void) | null = null;
+  readonly writeStarted = new Promise<void>((resolve) => { this.releaseWrite = resolve; });
+  private readonly continueWrite = new Promise<void>((resolve) => { this.resume = resolve; });
+
+  override async set(key: string, value: string): Promise<void> {
+    this.releaseWrite?.();
+    await this.continueWrite;
+    await super.set(key, value);
+  }
+
+  finishWrite(): void {
+    this.resume?.();
+  }
+}
+
+describe("createAsyncDurableStorage - versioned localStorage read-through", () => {
+  it("moves a pre-IndexedDB uid blob into durable storage without changing its bytes", async () => {
+    const legacy = makeBacking();
+    const durable = new DeferredMemoryDatabase();
+    const oldBlob = JSON.stringify({ state: { scanFeed: [{ id: "physical-scan-1" }], finalCounts: [{ productId: "p1", quantity: 1 }] }, version: 14 });
+    legacy.map.set("sis-scan-owner", oldBlob);
+    const storage = createAsyncDurableStorage({
+      database: durable,
+      getLegacyStorage: () => legacy.storage,
+    });
+
+    await expect(storage.getItem("sis-scan-owner")).resolves.toBe(oldBlob);
+    await expect(durable.get("sis-scan-owner")).resolves.toBe(oldBlob);
+  });
+
+  it("keeps the current durable snapshot when a stale localStorage copy remains", async () => {
+    const legacy = makeBacking();
+    const durable = new DeferredMemoryDatabase();
+    legacy.map.set("sis-scan-owner", "old-snapshot");
+    await durable.set("sis-scan-owner", "new-snapshot");
+    const storage = createAsyncDurableStorage({ database: durable, getLegacyStorage: () => legacy.storage });
+
+    await expect(storage.getItem("sis-scan-owner")).resolves.toBe("new-snapshot");
+  });
+
+  it("reports degraded storage and resolves writes when IndexedDB rejects, leaving scans usable in memory", async () => {
+    const legacy = makeBacking();
+    const durable = new DeferredMemoryDatabase();
+    durable.failWrites = true;
+    const statuses: string[] = [];
+    const storage = createAsyncDurableStorage({
+      database: durable,
+      getLegacyStorage: () => legacy.storage,
+      onStatusChange: (status) => statuses.push(status),
+    });
+
+    await expect(storage.setItem("sis-scan-owner", "latest-scan")).resolves.toBeUndefined();
+    expect(statuses).toContain("degraded");
+    expect(legacy.map.get("sis-scan-owner")).toBe("latest-scan");
+  });
+
+  it("clear is authoritative across durable and local legacy copies", async () => {
+    const legacy = makeBacking();
+    const durable = new DeferredMemoryDatabase();
+    legacy.map.set("sis-local-demo-scan-v1", "legacy-demo");
+    await durable.set("sis-local-demo-scan-v1", "durable-demo");
+    const storage = createAsyncDurableStorage({ database: durable, getLegacyStorage: () => legacy.storage });
+
+    await storage.removeItem("sis-local-demo-scan-v1");
+    await expect(durable.get("sis-local-demo-scan-v1")).resolves.toBeNull();
+    expect(legacy.map.has("sis-local-demo-scan-v1")).toBe(false);
+  });
+
+  it("does not let a slower earlier write resurrect data after clear", async () => {
+    const legacy = makeBacking();
+    const durable = new SlowWriteDatabase();
+    const storage = createAsyncDurableStorage({ database: durable, getLegacyStorage: () => legacy.storage });
+
+    const write = storage.setItem("sis-scan-owner", "scan-before-clear");
+    await durable.writeStarted;
+    const clear = storage.removeItem("sis-scan-owner");
+    durable.finishWrite();
+    await Promise.all([write, clear]);
+
+    await expect(durable.get("sis-scan-owner")).resolves.toBeNull();
+    expect(legacy.map.has("sis-scan-owner")).toBe(false);
   });
 });

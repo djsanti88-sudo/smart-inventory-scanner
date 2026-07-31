@@ -11,6 +11,7 @@ import { useReconcileStore } from "@/stores/reconcileStore";
 // reconcile rehydrate must never block scanning - the reconcile page has its own loading state).
 export function StoreHydrator({ children }: { children: React.ReactNode }) {
   const hasHydrated = useScanStore((s) => s._hasHydrated);
+  const persistenceStatus = useScanStore((s) => s.persistenceStatus);
 
   useEffect(() => {
     void useScanStore.persist.rehydrate();
@@ -24,5 +25,14 @@ export function StoreHydrator({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  return <>{children}</>;
+  return (
+    <>
+      {persistenceStatus === "degraded" && (
+        <div data-testid="persistence-degraded" role="status" className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900">
+          Saved in this tab. Durable browser storage is unavailable, so keep this tab open until you can clear space or change browser settings.
+        </div>
+      )}
+      {children}
+    </>
+  );
 }
