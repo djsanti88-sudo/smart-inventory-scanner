@@ -97,32 +97,36 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     }
   };
 
-  const legacyRemove = (name: string) => {
+  const legacyRemove = (name: string): boolean => {
     try {
-      options.getLegacyStorage()?.removeItem(name);
+      const storage = options.getLegacyStorage();
+      if (!storage) return false;
+      storage.removeItem(name);
+      return true;
     } catch {
       reportLegacyFailure();
+      return false;
     }
   };
-  const ensureLegacyMarkerOnce = (name: string) => {
-    if (legacyMarkersEnsured.has(name)) return;
+  const ensureLegacyMarkerOnce = (name: string): boolean => {
+    if (legacyMarkersEnsured.has(name)) return true;
     const marker = JSON.stringify({ [PERSIST_POINTER_KEY]: 1 });
-    if (!isDurablePointer(legacyGet(name))) {
-      legacyRemove(name);
-      try {
-        options.getLegacyStorage()?.setItem(name, marker);
-      } catch {
-        // This marker is supplemental ownership metadata, not the snapshot fallback. IndexedDB is
-        // healthy, so quota pressure must not create a warning/error loop on every persisted update.
-      }
+    try {
+      const storage = options.getLegacyStorage();
+      if (!storage) return false;
+      if (!isDurablePointer(storage.getItem(name))) storage.setItem(name, marker);
+    } catch {
+      // This marker is supplemental ownership metadata, not the snapshot fallback. IndexedDB is
+      // healthy, so quota pressure must not create a warning/error loop on every persisted update.
+      return false;
     }
     legacyMarkersEnsured.add(name);
+    return true;
   };
   const removeLegacySnapshotOnce = (name: string) => {
     if (legacySnapshotsCleaned.has(name)) return;
-    if (isUidNamespace(name)) ensureLegacyMarkerOnce(name);
-    else legacyRemove(name);
-    legacySnapshotsCleaned.add(name);
+    const completed = isUidNamespace(name) ? ensureLegacyMarkerOnce(name) : legacyRemove(name);
+    if (completed) legacySnapshotsCleaned.add(name);
   };
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
@@ -242,6 +246,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       const pending = pendingWrites.get(name);
       if (pending) { pendingWrites.delete(name); pending.resolvers.forEach((resolve) => resolve()); }
       generationByKey.set(name, generationFor(name) + 1);
+      legacyMarkersEnsured.delete(name);
+      legacySnapshotsCleaned.delete(name);
       writeTombstone(name);
       return enqueue(name, async () => {
       await persistTombstone(name);

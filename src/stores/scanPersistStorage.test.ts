@@ -111,6 +111,62 @@ describe("active async persistence adapter", () => {
     expect(local.values.get("sis-scan-owner")).toBe('{"__scanPersistPointer":1}');
     expect(await db.get("sis-scan-owner")).toBe("snapshot-3");
   });
+  it("recreates the uid ownership marker after clear followed by an intentional new write", async () => {
+    const db = new Db();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await storage.setItem("sis-scan-owner", "before clear");
+
+    await storage.removeItem("sis-scan-owner");
+    expect(local.values.has("sis-scan-owner")).toBe(false);
+    await storage.setItem("sis-scan-owner", "after clear");
+
+    expect(await db.get("sis-scan-owner")).toBe("after clear");
+    expect(local.values.get("sis-scan-owner")).toBe('{"__scanPersistPointer":1}');
+  });
+  it("retries uid marker creation after a transient localStorage failure", async () => {
+    const db = new Db();
+    const values = new Map<string, string>();
+    let failMarkerWrite = true;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (failMarkerWrite) throw new DOMException("temporarily blocked", "InvalidStateError");
+        values.set(key, value);
+      },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    await storage.setItem("sis-scan-owner", "snapshot-1");
+    expect(values.has("sis-scan-owner")).toBe(false);
+    failMarkerWrite = false;
+    await storage.setItem("sis-scan-owner", "snapshot-2");
+
+    expect(values.get("sis-scan-owner")).toBe('{"__scanPersistPointer":1}');
+  });
+  it("retries legacy snapshot removal after a transient localStorage failure", async () => {
+    const db = new Db();
+    await db.set("sis-scan-v1", "durable snapshot");
+    const values = new Map([["sis-scan-v1", "stale legacy snapshot"]]);
+    let failRemoval = true;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => {
+        if (failRemoval && key === "sis-scan-v1") throw new DOMException("temporarily blocked", "InvalidStateError");
+        values.delete(key);
+      },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    await expect(storage.getItem("sis-scan-v1")).resolves.toBe("durable snapshot");
+    expect(values.get("sis-scan-v1")).toBe("stale legacy snapshot");
+    failRemoval = false;
+    await storage.setItem("sis-scan-v1", "new durable snapshot");
+
+    expect(values.has("sis-scan-v1")).toBe(false);
+  });
   it("removes the legacy snapshot after successfully migrating its exact bytes into IndexedDB", async () => {
     const db = new Db();
     const local = legacy();
