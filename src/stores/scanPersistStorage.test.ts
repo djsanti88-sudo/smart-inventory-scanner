@@ -130,6 +130,25 @@ class RecoverySetFailsDb extends TombstoneReadFailsDb {
   }
 }
 
+class IntentRemoveFailsDb extends Db {
+  override async remove(key: string): Promise<void> {
+    if (key === "sis-scan-owner::scanbin-write-intent-v1") throw new Error("intent removal blocked");
+    await super.remove(key);
+  }
+}
+
+class BlockedIntentDb extends Db {
+  private releaseIntents: (() => void) | null = null;
+  private readonly intentsMayFinish = new Promise<void>((resolve) => { this.releaseIntents = resolve; });
+
+  override async set(key: string, value: string): Promise<void> {
+    if (key.endsWith("::scanbin-write-intent-v1")) await this.intentsMayFinish;
+    await super.set(key, value);
+  }
+
+  finishIntents(): void { this.releaseIntents?.(); }
+}
+
 
 describe("active async persistence adapter", () => {
   it("migrates legacy bytes into durable storage", async () => {
@@ -142,7 +161,8 @@ describe("active async persistence adapter", () => {
     const db = new Db(), local = legacy(), set = vi.spyOn(db, "set");
     const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
     await Promise.all([storage.setItem("sis-scan-owner", "a"), storage.setItem("sis-scan-owner", "b")]);
-    expect(set).toHaveBeenCalledTimes(1); expect(await db.get("sis-scan-owner")).toBe("b");
+    expect(set.mock.calls.filter(([key]) => key === "sis-scan-owner")).toHaveLength(1);
+    expect(await db.get("sis-scan-owner")).toBe("b");
   });
   it("does not start IndexedDB evidence reads merely from scheduling a coalesced burst", async () => {
     const db = new Db();
@@ -155,6 +175,28 @@ describe("active async persistence adapter", () => {
     expect(get).not.toHaveBeenCalled();
     await Promise.all([first, second]);
     expect(await db.get("sis-scan-owner")).toBe("snapshot-2");
+  });
+  it("keeps 100 scheduled snapshots synchronous, unserialized, and free of IndexedDB reads", async () => {
+    const db = new BlockedIntentDb();
+    const get = vi.spyOn(db, "get");
+    const set = vi.spyOn(db, "set");
+    const serialize = vi.fn((snapshot: unknown) => JSON.stringify(snapshot));
+    const storage = createAsyncDurablePersistStorage<{ scanFeed: number[] }>({
+      database: db,
+      getLegacyStorage: () => null,
+      serialize,
+    });
+
+    const writes = Array.from({ length: 100 }, (_, index) =>
+      storage.setItem("sis-scan-owner", { state: { scanFeed: [index] }, version: 14 }));
+
+    expect(get).not.toHaveBeenCalled();
+    expect(serialize).not.toHaveBeenCalled();
+    expect(set).toHaveBeenCalledTimes(100);
+    expect(set.mock.calls.every(([key]) => key === "sis-scan-owner::scanbin-write-intent-v1")).toBe(true);
+    db.finishIntents();
+    await Promise.all(writes);
+    expect(serialize).toHaveBeenCalledOnce();
   });
   it("defers one typed persist serialization for a burst and encodes only its latest snapshot", async () => {
     const db = new Db();
@@ -647,8 +689,8 @@ describe("active async persistence adapter", () => {
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("first physical scan after clear");
   });
-  it("preserves the first causally post-clear snapshot when a durable-only clear notification is unavailable", async () => {
-    const now = vi.fn().mockReturnValueOnce(5).mockReturnValue(10);
+  it("preserves an equal-time scan issued after a durable-only clear when notification is unavailable", async () => {
+    const now = vi.fn(() => 10);
     vi.stubGlobal("performance", { timeOrigin: 1_000, now });
     const clearingDb = new Db();
     const writingDb = new Db();
@@ -718,6 +760,12 @@ describe("active async persistence adapter", () => {
 
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
       .resolves.toBeNull();
+  });
+  it("does not report a clear authoritative when its write-intent barrier cannot be removed", async () => {
+    const db = new IntentRemoveFailsDb();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => null });
+
+    await expect(storage.removeItem("sis-scan-owner")).resolves.toEqual({ cleared: false, authority: "none" });
   });
   it("uses one physical write to recover when cached no-clear state is followed by cross-adapter conflict publication", async () => {
     const db = new Db();

@@ -45,6 +45,7 @@ type DeferredStringStorage = StateStorage & {
 const PERSIST_POINTER_KEY = "__scanPersistPointer";
 const TOMBSTONE_SUFFIX = "::scanbin-cleared-v1";
 const RECOVERY_SUFFIX = "::scanbin-recovery-v1";
+const WRITE_INTENT_SUFFIX = "::scanbin-write-intent-v1";
 const PERSIST_FALLBACK_KEY = "__scanPersistFallback";
 const PERSIST_RECOVERY_KEY = "__scanPersistRecovery";
 const PERSIST_CLEAR_KEY = "__scanPersistClear";
@@ -57,6 +58,7 @@ type TombstoneState = {
   durableKnown: boolean;
   maxVersion: number;
   maxIssuedAt: number;
+  intentBarrierEstablished: boolean;
   conflictFingerprint: string | null;
 };
 
@@ -67,7 +69,14 @@ function createOperationId(): string {
   return `clear-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
-type ClearToken = { raw: string; version: number; id: string; ordered: boolean; issuedAt: number };
+type ClearToken = {
+  raw: string;
+  version: number;
+  id: string;
+  ordered: boolean;
+  issuedAt: number;
+  intentBarrierEstablished: boolean;
+};
 
 function parseClearToken(raw: string): ClearToken {
   try {
@@ -79,14 +88,28 @@ function parseClearToken(raw: string): ClearToken {
         id: parsed.id,
         ordered: true,
         issuedAt: typeof parsed.issuedAt === "number" && Number.isFinite(parsed.issuedAt) ? parsed.issuedAt : 0,
+        intentBarrierEstablished: parsed.intentBarrierEstablished === true,
       };
     }
   } catch { /* legacy tombstones are opaque version-zero identities */ }
-  return { raw, version: 0, id: raw, ordered: false, issuedAt: 0 };
+  return {
+    raw,
+    version: 0,
+    id: raw,
+    ordered: false,
+    issuedAt: 0,
+    intentBarrierEstablished: false,
+  };
 }
 
-function encodeClearToken(version: number, issuedAt: number): string {
-  return JSON.stringify({ [PERSIST_CLEAR_KEY]: 1, version, id: createOperationId(), issuedAt });
+function encodeClearToken(version: number, issuedAt: number, intentBarrierEstablished = false): string {
+  return JSON.stringify({
+    [PERSIST_CLEAR_KEY]: 1,
+    version,
+    id: createOperationId(),
+    issuedAt,
+    intentBarrierEstablished,
+  });
 }
 
 function resolveNewestClearToken(rawTokens: string[]): { token: string | null; conflict: boolean; maxVersion: number } {
@@ -102,6 +125,35 @@ function resolveNewestClearToken(rawTokens: string[]): { token: string | null; c
 // Synchronous cross-adapter evidence. This is deliberately metadata-only: scheduling a scan never
 // starts IndexedDB work, while clear issuance is immediately visible to other adapters in this tab.
 const publishedClearTokensByDatabase = new WeakMap<AsyncKeyValueDatabase, Map<string, Set<string>>>();
+
+type WriteIntent = {
+  id: string;
+  scheduledAt: number;
+  observedToken: string | null;
+  observedConflictFingerprint: string | null;
+};
+
+function encodeWriteIntent(intent: WriteIntent): string {
+  return JSON.stringify({ __scanPersistWriteIntent: 1, ...intent });
+}
+
+function decodeWriteIntent(raw: string | null): WriteIntent | null {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed.__scanPersistWriteIntent !== 1 || typeof parsed.id !== "string") return null;
+    return {
+      id: parsed.id,
+      scheduledAt: typeof parsed.scheduledAt === "number" ? parsed.scheduledAt : 0,
+      observedToken: typeof parsed.observedToken === "string" ? parsed.observedToken : null,
+      observedConflictFingerprint: typeof parsed.observedConflictFingerprint === "string"
+        ? parsed.observedConflictFingerprint
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function encodeRecoveryCandidate(candidate: RecoveryCandidate): string {
   return JSON.stringify({ [PERSIST_RECOVERY_KEY]: 1, ...candidate });
@@ -181,6 +233,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     token: number;
     observation: TombstoneState;
     scheduledAt: number;
+    intentId: string;
+    intentWrite: Promise<boolean>;
     resolvers: Array<() => void>;
     scheduled: boolean;
   }>();
@@ -317,6 +371,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   };
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
   const recoveryKey = (name: string) => `${name}${RECOVERY_SUFFIX}`;
+  const writeIntentKey = (name: string) => `${name}${WRITE_INTENT_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
   const stateFromTokens = (rawTokens: string[], durableKnown: boolean): TombstoneState => {
     const uniqueTokens = [...new Set(rawTokens)];
@@ -326,7 +381,9 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       ? parsedTokens.filter((token) => token.version === resolved.maxVersion).map((token) => token.raw).sort().join("\n")
       : null;
     const maxIssuedAt = parsedTokens.length === 0 ? 0 : Math.max(...parsedTokens.map((token) => token.issuedAt));
-    return { ...resolved, durableKnown, maxIssuedAt, conflictFingerprint };
+    const intentBarrierEstablished = parsedTokens.length > 0
+      && parsedTokens.every((token) => token.intentBarrierEstablished);
+    return { ...resolved, durableKnown, maxIssuedAt, intentBarrierEstablished, conflictFingerprint };
   };
   const getSynchronousTombstoneEvidence = (name: string): TombstoneState => {
     const local = legacyGet(tombstoneKey(name));
@@ -426,6 +483,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     token: number,
     scheduledObservation: TombstoneState,
     scheduledAt: number,
+    intentId: string,
+    intentWrite: Promise<boolean>,
   ) => {
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
@@ -441,10 +500,33 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     // A legacy token's zero timestamp is unknown, not proof that every modern snapshot followed it.
     const scheduledStrictlyAfterCurrentClear = tombstoneState.maxIssuedAt > 0
       && scheduledAt > tombstoneState.maxIssuedAt;
-    if (!scheduledObservedCurrentAuthority && !scheduledStrictlyAfterCurrentClear) {
+    let matchingSurvivingIntent = false;
+    if (!scheduledObservedCurrentAuthority && !scheduledStrictlyAfterCurrentClear
+      && tombstoneState.intentBarrierEstablished && options.database && await intentWrite) {
+      try {
+        matchingSurvivingIntent = decodeWriteIntent(
+          await options.database.get(writeIntentKey(name)),
+        )?.id === intentId;
+      } catch {
+        reportDegraded();
+      }
+    }
+    const scheduleAuthorityProven = scheduledObservedCurrentAuthority
+      || scheduledStrictlyAfterCurrentClear
+      || matchingSurvivingIntent;
+    if (!scheduleAuthorityProven) {
       reportDegraded();
       return;
     }
+    const removeMatchingIntent = async (): Promise<void> => {
+      if (!options.database) return;
+      try {
+        const currentIntent = decodeWriteIntent(await options.database.get(writeIntentKey(name)));
+        if (currentIntent?.id === intentId) await options.database.remove(writeIntentKey(name));
+      } catch {
+        reportDegraded();
+      }
+    };
     if (options.database && !tombstoneState.durableKnown) {
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
@@ -459,7 +541,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       const observedSameConflict = scheduledState.conflict
         && scheduledState.maxVersion === tombstoneState.maxVersion
         && scheduledState.conflictFingerprint === tombstoneState.conflictFingerprint;
-      if (!observedSameConflict && !scheduledStrictlyAfterCurrentClear) {
+      if (!observedSameConflict && !scheduledStrictlyAfterCurrentClear && !matchingSurvivingIntent) {
         reportDegraded();
         return;
       }
@@ -494,6 +576,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
           reportAvailable();
         } catch { reportDegraded(); }
       }
+      await removeMatchingIntent();
       return;
     }
     const tombstoneToken = tombstoneState.token;
@@ -593,6 +676,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
           reportDegraded();
         }
       }
+      await removeMatchingIntent();
     } else {
       // Payload and authority metadata are one localStorage value, so an interrupted write cannot
       // leave newer bytes looking like an ambiguous legacy snapshot.
@@ -626,7 +710,15 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         supersedesTombstone: tombstones.get(name) ?? legacyGet(tombstoneKey(name)),
       }));
     }
-    void enqueue(name, () => performWrite(name, value, pending.token, pending.observation, pending.scheduledAt))
+    void enqueue(name, () => performWrite(
+      name,
+      value,
+      pending.token,
+      pending.observation,
+      pending.scheduledAt,
+      pending.intentId,
+      pending.intentWrite,
+    ))
       .then(() => pending.resolvers.forEach((resolve) => resolve()));
   };
   if (typeof window !== "undefined") {
@@ -640,17 +732,41 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     // replaces both fields, so a delayed pre-clear payload can never borrow post-clear evidence.
     const observation = getSynchronousTombstoneEvidence(name);
     const scheduledAt = causalNow();
+    const intentId = createOperationId();
+    let intentWrite = Promise.resolve(false);
+    if (options.database) {
+      try {
+        intentWrite = options.database.set(writeIntentKey(name), encodeWriteIntent({
+          id: intentId,
+          scheduledAt,
+          observedToken: observation.token,
+          observedConflictFingerprint: observation.conflictFingerprint,
+        })).then(
+          () => true,
+          () => {
+            reportDegraded();
+            return false;
+          },
+        );
+      } catch {
+        reportDegraded();
+      }
+    }
     const pending = pendingWrites.get(name) ?? {
       serialize,
       token: generationFor(name),
       observation,
       scheduledAt,
+      intentId,
+      intentWrite,
       resolvers: [],
       scheduled: false,
     };
     pending.serialize = serialize;
     pending.observation = observation;
     pending.scheduledAt = scheduledAt;
+    pending.intentId = intentId;
+    pending.intentWrite = intentWrite;
     pending.resolvers.push(resolve);
     pendingWrites.set(name, pending);
     if (!pending.scheduled) { pending.scheduled = true; queueMicrotask(() => flushWrite(name)); }
@@ -792,7 +908,18 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       legacySnapshotsCleaned.delete(name);
       return enqueue(name, async () => {
       const current = await getTombstoneState(name);
-      const operationToken = encodeClearToken(current.maxVersion + 1, causalNow());
+      const issuedAt = causalNow();
+      let intentBarrierEstablished = !options.database;
+      if (options.database) {
+        try {
+          await options.database.remove(writeIntentKey(name));
+          intentBarrierEstablished = true;
+          reportAvailable();
+        } catch {
+          reportDegraded();
+        }
+      }
+      const operationToken = encodeClearToken(current.maxVersion + 1, issuedAt, intentBarrierEstablished);
       const localTombstone = writeTombstone(name, operationToken);
       const durableTombstone = await persistTombstone(name, operationToken);
       let candidateDeleted = !options.database;
@@ -813,7 +940,9 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       }
       legacyRemove(name);
       const authorityEstablished = current.durableKnown || candidateDeleted;
-      if (!authorityEstablished) return { cleared: false, authority: "none" } satisfies PersistenceClearResult;
+      if (!authorityEstablished || !intentBarrierEstablished) {
+        return { cleared: false, authority: "none" } satisfies PersistenceClearResult;
+      }
       return {
         cleared: durableTombstone || localTombstone,
         authority: durableTombstone ? "durable" : localTombstone ? "local" : "none",
