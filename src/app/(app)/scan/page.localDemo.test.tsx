@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     location: "", setLocation: vi.fn(), recentLocations: [], ensureAutoSession: vi.fn(), businessContextReady: true,
     businessDataLoaded: true, scanFeed: [], firstScanAt: null,
   } as Record<string, unknown>,
+  scannerOnScan: null as null | ((raw: string) => unknown),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -27,7 +28,12 @@ vi.mock("@/stores/scanStore", () => ({ useScanStore: (selector: (state: Record<s
 vi.mock("@/services/security/useAccessLevel", () => ({ useIsPlatformOwner: () => false }));
 vi.mock("@/services/resolver", () => ({ resolveRawScan: () => ({ resolverStatus: "unknown" }) }));
 vi.mock("@/services/moatStats", () => ({ computeMoatStats: () => ({ identified: 0, total: 0 }) }));
-vi.mock("@/components/ScannerInput", () => ({ ScannerInput: () => <div /> }));
+vi.mock("@/components/ScannerInput", () => ({
+  ScannerInput: ({ onScan }: { onScan: (raw: string) => unknown }) => {
+    mocks.scannerOnScan = onScan;
+    return <div />;
+  },
+}));
 vi.mock("@/components/CameraScanButton", () => ({ CameraScanButton: () => <div /> }));
 vi.mock("@/components/LiveScanFeed", () => ({ LiveScanFeed: () => <div /> }));
 vi.mock("@/components/FinalCountTable", () => ({ FinalCountTable: () => <div /> }));
@@ -45,6 +51,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
   mocks.searchParams = new URLSearchParams();
   mocks.suspendSearchParams = false;
+  mocks.scannerOnScan = null;
+  vi.useRealTimers();
 });
 
 describe("ScanPage local demo proof batch", () => {
@@ -72,5 +80,40 @@ describe("ScanPage local demo proof batch", () => {
     render(<ScanPage />);
 
     expect(screen.queryByTestId("local-demo-proof-batch")).toBeNull();
+  });
+
+  it("processes a 101-code paste in responsive chunks and reports progress", async () => {
+    vi.useFakeTimers();
+    const codes = Array.from({ length: 101 }, (_, index) => `bulk-${index + 1}`);
+    const processScan = mocks.storeState.processScan as ReturnType<typeof vi.fn>;
+    processScan.mockImplementation((code: string) => ({ cleanCode: code }));
+
+    render(<ScanPage />);
+    if (!mocks.scannerOnScan) throw new Error("scanner callback was not mounted");
+
+    let completion!: Promise<unknown>;
+    await act(async () => {
+      completion = mocks.scannerOnScan!(codes.join(" ")) as Promise<unknown>;
+      await Promise.resolve();
+    });
+
+    expect(processScan).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("1 of 101");
+    expect(screen.getByTestId("start-session")).toBeDisabled();
+    expect(screen.getByTestId("finish-session")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear session" })).toBeDisabled();
+
+    await act(async () => {
+      for (let index = 0; index < 100; index += 1) {
+        await vi.advanceTimersToNextTimerAsync();
+      }
+      await completion;
+    });
+
+    expect(processScan).toHaveBeenCalledTimes(101);
+    expect(processScan.mock.calls.map(([code]) => code)).toEqual(codes);
+    expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
+    expect(screen.getByTestId("start-session")).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear session" })).not.toBeDisabled();
   });
 });

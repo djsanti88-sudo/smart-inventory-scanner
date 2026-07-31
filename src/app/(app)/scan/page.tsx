@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
@@ -15,6 +15,7 @@ import { SessionLockControl } from "@/components/SessionLockControl";
 import { SessionsList } from "@/components/SessionsList";
 import { BusinessContextGate } from "@/components/BusinessContextGate";
 import { planScanBatch } from "./planScan";
+import { runScanBatch, type ScanBatchProgress } from "./runScanBatch";
 import { resolveRawScan } from "@/services/resolver";
 import { computeMoatStats } from "@/services/moatStats";
 
@@ -36,6 +37,8 @@ function ScanPageContent() {
   const clearCategoryWarning = useScanStore((s) => s.clearCategoryWarning);
 
   const [name, setName] = useState("");
+  const [batchProgress, setBatchProgress] = useState<ScanBatchProgress | null>(null);
+  const mountedRef = useRef(true);
   const location = useScanStore((s) => s.location);
   const setLocation = useScanStore((s) => s.setLocation);
   const recentLocations = useScanStore((s) => s.recentLocations);
@@ -64,9 +67,18 @@ function ScanPageContent() {
     const codes = planScanBatch(raw, resolvesAsSingleCode);
     if (codes.length === 0) return processScan(raw);
     if (codes.length === 1) return processScan(codes[0]);
-    let last = null as ReturnType<typeof processScan>;
-    for (const code of codes) last = processScan(code);
-    return last;
+    if (mountedRef.current) setBatchProgress({ processed: 0, total: codes.length });
+    return runScanBatch(codes, processScan, {
+      chunkSize: 1,
+      onProgress: (progress) => {
+        if (mountedRef.current) setBatchProgress(progress);
+      },
+      onError: ({ code, error }) => {
+        console.error(`Bulk scan failed for ${code}.`, error);
+      },
+    }).finally(() => {
+      if (mountedRef.current) setBatchProgress(null);
+    });
   };
 
   // Learn which provider keys are configured (server-side) so unknown scans can auto-decode.
@@ -74,6 +86,13 @@ function ScanPageContent() {
   // if it fails transiently, stale AI/kill-switch status would otherwise persist for the whole
   // session. A lightweight 60s poll lets a transient failure self-heal without user action; the
   // interval is cleared on unmount so it never leaks past this page.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     void refreshAiStatus();
     const intervalId = setInterval(() => {
@@ -165,9 +184,19 @@ function ScanPageContent() {
         <div className="flex flex-wrap items-end gap-3">
           <div className="grow">
             <ScannerInput onScan={handleScan} submitMode={settings.scannerSubmitMode} debounceMs={settings.scannerDebounceMs} />
+            {batchProgress && (
+              <p
+                data-testid="bulk-scan-progress"
+                role="status"
+                aria-live="polite"
+                className="mt-2 text-sm font-semibold text-blue-800"
+              >
+                Processing {batchProgress.processed} of {batchProgress.total} scans...
+              </p>
+            )}
           </div>
           <div className="shrink-0">
-            <CameraScanButton onScan={handleScan} />
+            <CameraScanButton onScan={processScan} />
           </div>
           {SHOW_CATEGORY && (
             <div className="flex flex-col gap-1">
@@ -194,6 +223,7 @@ function ScanPageContent() {
           <summary className="cursor-pointer list-none text-base font-medium text-zinc-700 hover:text-zinc-900">
             <span className="select-none">Sessions and export</span>
           </summary>
+        <fieldset disabled={batchProgress !== null} className="m-0 min-w-0 border-0 p-0">
         <div className="mt-3 flex flex-wrap items-center gap-3 text-base">
           <span className="text-zinc-700">
             Session: <strong className="text-zinc-900">{session?.name ?? "None"}</strong>
@@ -277,6 +307,7 @@ function ScanPageContent() {
         <div className="mt-3">
           <ExportMenu />
         </div>
+        </fieldset>
         </details>
       </div>
 

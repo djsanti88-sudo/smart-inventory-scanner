@@ -63,6 +63,57 @@ describe("ScannerInput buffer", () => {
     expect(document.activeElement).toBe(input);
   });
 
+  it("keeps the page responsive and prevents duplicate submits while an async bulk scan is running", async () => {
+    let finishBatch!: (event: ScanEvent) => void;
+    const onScan = vi.fn(
+      () => new Promise<ScanEvent>((resolve) => {
+        finishBatch = resolve;
+      }),
+    );
+    render(<ScannerInput onScan={onScan} submitMode="enter" />);
+    const input = screen.getByTestId("scanner-input") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "CODE1 CODE2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.value).toBe("");
+    expect(input.disabled).toBe(true);
+    expect(input.getAttribute("aria-busy")).toBe("true");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onScan).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finishBatch(fakeEvent("CODE2"));
+      await Promise.resolve();
+    });
+
+    expect(input.disabled).toBe(false);
+    expect(input.getAttribute("aria-busy")).toBe("false");
+    expect(document.activeElement).toBe(input);
+    expect(screen.getByText("Added.")).toBeTruthy();
+  });
+
+  it("consumes an async batch failure and re-enables the scanner", async () => {
+    const error = new Error("batch failed");
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onScan = vi.fn(() => Promise.reject(error));
+    render(<ScannerInput onScan={onScan} submitMode="enter" />);
+    const input = screen.getByTestId("scanner-input") as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "CODE1 CODE2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.disabled).toBe(true);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(report).toHaveBeenCalledWith("Bulk scan failed.", error);
+    expect(input.disabled).toBe(false);
+    expect(document.activeElement).toBe(input);
+  });
+
   it("does NOT capture keystrokes typed into an unrelated field", async () => {
     const onScan = vi.fn((raw: string) => fakeEvent(raw));
     const user = userEvent.setup();

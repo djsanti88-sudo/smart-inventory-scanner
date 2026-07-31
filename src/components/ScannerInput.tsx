@@ -30,7 +30,7 @@ const PANEL_STYLES: Record<ScanStatus, { border: string; bg: string; heading: st
 // that do not send Enter.
 
 export interface ScannerInputProps {
-  onScan: (raw: string) => ScanEvent | null;
+  onScan: (raw: string) => ScanEvent | null | Promise<ScanEvent | null>;
   submitMode?: "enter" | "debounce" | "both";
   debounceMs?: number;
   disabled?: boolean;
@@ -50,7 +50,9 @@ export function ScannerInput({
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const readyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submittingRef = useRef(false);
   const [lastResult, setLastResult] = useState<ScanEvent | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // Brief green border flash on a successful (counted) scan; red shake on unknown/error.
   const [flash, setFlash] = useState<false | "success" | "error">(false);
   // Role-aware scan confirmation. platformOwner sees the technical detail (clean code + match type);
@@ -99,17 +101,7 @@ export function ScannerInput({
     };
   }, [lastResult, liveDecodeStatus]);
 
-  function submit() {
-    if (debounceTimer.current) {
-      clearTimeout(debounceTimer.current);
-      debounceTimer.current = null;
-    }
-    const el = inputRef.current;
-    if (!el) return;
-    const raw = el.value;
-    if (raw.trim().length === 0) return;
-
-    const ev = onScan(raw); // preserve the raw value exactly; cleaning happens downstream
+  function showResult(ev: ScanEvent | null) {
     setLastResult(ev);
 
     // Flash the input border green when a scan counted; shake on unknown/error.
@@ -122,8 +114,38 @@ export function ScannerInput({
       if (flashTimer.current) clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlash(false), 400);
     }
+  }
+
+  function submit() {
+    if (submittingRef.current) return;
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+    const el = inputRef.current;
+    if (!el) return;
+    const raw = el.value;
+    if (raw.trim().length === 0) return;
 
     el.value = "";
+    const result = onScan(raw); // preserve the raw value exactly; cleaning happens downstream
+    if (result instanceof Promise) {
+      submittingRef.current = true;
+      setIsSubmitting(true);
+      void result
+        .then(showResult)
+        .catch((error: unknown) => {
+          console.error("Bulk scan failed.", error);
+        })
+        .finally(() => {
+          submittingRef.current = false;
+          setIsSubmitting(false);
+          inputRef.current?.focus();
+        });
+      return;
+    }
+
+    showResult(result);
     el.focus(); // refocus so the next scan lands here
   }
 
@@ -177,7 +199,8 @@ export function ScannerInput({
         inputMode="text"
         autoComplete="off"
         spellCheck={false}
-        disabled={disabled}
+        disabled={disabled || isSubmitting}
+        aria-busy={isSubmitting}
         autoFocus={autoFocus}
         placeholder="Scan or type a code"
         onKeyDown={handleKeyDown}
