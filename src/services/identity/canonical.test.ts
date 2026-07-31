@@ -50,14 +50,19 @@ const importInput = {
 const aggregateImportEvent = {
   kind: "aggregate_import",
   eventId: "event-1",
+  idempotencyKey: "key-1",
+  fingerprint: "fingerprint-1",
   importId: "import-1",
   rowId: "row-1",
   businessId: "business-1",
+  productId: "product-1",
+  sessionId: "session-1",
   quantity: 4,
   unitOfMeasure: "each",
   sourceFileOrdinal: 0,
   sheetName: "Inventory",
   sourceRowNumber: 2,
+  createdAt: "2026-07-31T00:00:00.000Z",
 } satisfies AggregateImportEvent;
 
 describe("identity canonical contracts", () => {

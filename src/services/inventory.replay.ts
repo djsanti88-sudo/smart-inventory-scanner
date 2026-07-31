@@ -1,5 +1,5 @@
 import type { InventoryCount, ScanEvent } from "@/types";
-import type { AggregateImportEvent } from "@/services/identity/importLedger";
+import type { AggregateImportEvent } from "@/services/identity/types";
 import { mapAggregateImportEventToCountDelta } from "@/services/identity/importLedger";
 import { createInventoryCount, applyInventoryCountDeltaOnce, applyScanEventOnce } from "@/services/inventory";
 

@@ -109,14 +109,19 @@ export interface IdentityCandidateSource {
 export interface AggregateImportEvent {
   kind: "aggregate_import";
   eventId: string;
+  idempotencyKey: string;
+  fingerprint: string;
   importId: string;
   rowId: string;
   businessId: string;
+  productId: string;
+  sessionId: string;
   quantity: number;
   unitOfMeasure: "each";
   sourceFileOrdinal: number;
   sheetName: string;
   sourceRowNumber: number;
+  createdAt: string;
 }
 
 export interface IdentityLink {
@@ -212,7 +217,15 @@ export interface IdentityReview {
 }
 
 export interface AggregateLedgerPort {
+  applyOnce(event: AggregateImportEvent, idempotencyKey: string): Promise<AggregateLedgerResult>;
+  findByIdempotencyKey(input: {
+    businessId: string;
+    idempotencyKey: string;
+    expectedFingerprint: string;
+  }): Promise<AggregateLedgerResult | null>;
+  /** Compatibility adapter for pre-Task 9 callers. */
   apply(event: AggregateImportEvent, idempotencyKey: string, operationFingerprint: string): Promise<AggregateLedgerResult>;
+  /** Compatibility adapter for pre-Task 9 callers. */
   get(input: { businessId: string; idempotencyKey: string; eventFingerprint: string; operationFingerprint: string }): Promise<{ event: AggregateImportEvent; idempotencyKey: string } | undefined>;
 }
 

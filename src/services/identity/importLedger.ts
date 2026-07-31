@@ -1,10 +1,22 @@
-import type { AggregateImportEvent as AggregateImportEventBase } from "./types";
+import { canonicalSha256 } from "./canonical";
+import type { AggregateImportEvent, IdentityDecisionKind } from "./types";
 
-export interface CreateAggregateImportEventInput {
+export const MAX_IMPORT_QUANTITY = 1_000_000;
+
+type EligibleDecision =
+  | { kind: "automatic"; targetProductId: string }
+  | { kind: "review"; approvedProductId: string };
+
+type IneligibleDecision = {
+  kind: IdentityDecisionKind;
+  targetProductId?: string;
+  approvedProductId?: never;
+};
+
+export interface AggregateImportRow {
   businessId: string;
   importId: string;
   rowId: string;
-  productId: string;
   sessionId: string;
   quantity: number;
   sourceFileOrdinal: number;
@@ -12,6 +24,15 @@ export interface CreateAggregateImportEventInput {
   sourceRowNumber: number;
   createdAt: string;
 }
+
+export type AggregateImportPlanInput =
+  | (AggregateImportRow & { mode: "reconcile"; decision: EligibleDecision | IneligibleDecision })
+  | (AggregateImportRow & { mode: "physical_count"; decision: EligibleDecision | IneligibleDecision });
+
+export type CreateAggregateImportEventInput = AggregateImportRow & {
+  mode: "physical_count";
+  decision: EligibleDecision;
+};
 
 export interface InventoryCountDelta {
   eventId: string;
@@ -23,44 +44,88 @@ export interface InventoryCountDelta {
   createdAt: string;
 }
 
-/** A physical-count projection adds ledger routing metadata without changing Task 7's durable base event. */
-export interface AggregateImportEvent extends AggregateImportEventBase {
-  idempotencyKey: string;
-  productId: string;
-  sessionId: string;
-  createdAt: string;
+function resolvedProductId(decision: EligibleDecision | IneligibleDecision): string | null {
+  if (decision.kind === "automatic") return decision.targetProductId || null;
+  if (decision.kind === "review") return decision.approvedProductId || null;
+  return null;
 }
 
-function aggregateIdentity(input: Pick<CreateAggregateImportEventInput, "businessId" | "importId" | "rowId">): string {
-  return JSON.stringify([input.businessId, input.importId, input.rowId]);
-}
-
-/**
- * Creates one immutable ledger event for a physical-count row. Reconcile callers must not invoke
- * this adapter: expected inventory is report-only and never enters the quantity ledger.
- */
-export function createAggregateImportEvent(input: CreateAggregateImportEventInput): AggregateImportEvent {
-  if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
-    throw new Error("aggregate import quantity must be a finite positive number");
+function assertQuantity(quantity: number): void {
+  if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > MAX_IMPORT_QUANTITY) {
+    throw new Error(`aggregate import quantity must be a safe integer from 0 to ${MAX_IMPORT_QUANTITY}`);
   }
+}
 
-  const identity = aggregateIdentity(input);
-  return {
-    kind: "aggregate_import",
-    eventId: `aggregate-import:${identity}`,
-    idempotencyKey: `aggregate-import:${identity}`,
+function canonicalEventPayload(event: Omit<AggregateImportEvent, "fingerprint">): Omit<AggregateImportEvent, "fingerprint"> {
+  return event;
+}
+
+export async function createAggregateImportEvent(input: CreateAggregateImportEventInput): Promise<AggregateImportEvent> {
+  assertQuantity(input.quantity);
+  const productId = resolvedProductId(input.decision);
+  if (!productId) throw new Error("aggregate import requires an automatic or approved product resolution");
+
+  const identity = { businessId: input.businessId, importId: input.importId, rowId: input.rowId };
+  const eventId = `aggregate-import:${await canonicalSha256({ domain: "event", ...identity })}`;
+  const idempotencyKey = `aggregate-import:${await canonicalSha256({ domain: "idempotency", ...identity })}`;
+  const event = {
+    kind: "aggregate_import" as const,
+    eventId,
+    idempotencyKey,
     importId: input.importId,
     rowId: input.rowId,
     businessId: input.businessId,
-    productId: input.productId,
+    productId,
     sessionId: input.sessionId,
     quantity: input.quantity,
-    unitOfMeasure: "each",
+    unitOfMeasure: "each" as const,
     sourceFileOrdinal: input.sourceFileOrdinal,
     sheetName: input.sheetName,
     sourceRowNumber: input.sourceRowNumber,
     createdAt: input.createdAt,
   };
+  return { ...event, fingerprint: await canonicalSha256(canonicalEventPayload(event)) };
+}
+
+/** Returns null for reconcile, invalid, non-product, review, abstain, or unresolved rows. */
+export async function planAggregateImportEvent(input: AggregateImportPlanInput): Promise<AggregateImportEvent | null> {
+  if (input.mode !== "physical_count") return null;
+  const productId = resolvedProductId(input.decision);
+  if (!productId) return null;
+  return createAggregateImportEvent({ ...input, decision: input.decision.kind === "automatic"
+    ? { kind: "automatic", targetProductId: productId }
+    : { kind: "review", approvedProductId: productId } });
+}
+
+/** Validates the identity-bearing fields before an aggregate event reaches durable accounting. */
+export async function validateAggregateImportEvent(event: AggregateImportEvent): Promise<boolean> {
+  try {
+    assertQuantity(event.quantity);
+    if (!event.businessId || !event.importId || !event.rowId || !event.productId || !event.sessionId) return false;
+    const identity = { businessId: event.businessId, importId: event.importId, rowId: event.rowId };
+    const expectedEventId = `aggregate-import:${await canonicalSha256({ domain: "event", ...identity })}`;
+    const expectedIdempotencyKey = `aggregate-import:${await canonicalSha256({ domain: "idempotency", ...identity })}`;
+    if (event.eventId !== expectedEventId || event.idempotencyKey !== expectedIdempotencyKey) return false;
+    const payload = canonicalEventPayload({
+      kind: event.kind,
+      eventId: event.eventId,
+      idempotencyKey: event.idempotencyKey,
+      importId: event.importId,
+      rowId: event.rowId,
+      businessId: event.businessId,
+      productId: event.productId,
+      sessionId: event.sessionId,
+      quantity: event.quantity,
+      unitOfMeasure: event.unitOfMeasure,
+      sourceFileOrdinal: event.sourceFileOrdinal,
+      sheetName: event.sheetName,
+      sourceRowNumber: event.sourceRowNumber,
+      createdAt: event.createdAt,
+    });
+    return event.fingerprint === await canonicalSha256(payload);
+  } catch {
+    return false;
+  }
 }
 
 /** Maps an aggregate import into count math only; it never manufactures a scanner event. */

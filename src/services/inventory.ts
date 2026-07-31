@@ -68,6 +68,13 @@ export function applyInventoryCountDeltaOnce(
   count: InventoryCount,
   delta: InventoryCountDelta,
 ): { count: InventoryCount; applied: boolean } {
+  if (
+    count.businessId !== delta.businessId ||
+    count.sessionId !== delta.sessionId ||
+    count.productId !== delta.productId
+  ) {
+    throw new Error("aggregate delta does not match the inventory count scope");
+  }
   if (count.scanEventIds.includes(delta.eventId) || count.appliedIdempotencyKeys.includes(delta.idempotencyKey)) {
     return { count, applied: false };
   }
@@ -76,10 +83,10 @@ export function applyInventoryCountDeltaOnce(
     count: {
       ...count,
       quantity: count.quantity + delta.quantityDelta,
-      lastScannedAt: delta.createdAt || count.lastScannedAt,
       scanEventIds: [...count.scanEventIds, delta.eventId],
       appliedIdempotencyKeys: [...count.appliedIdempotencyKeys, delta.idempotencyKey],
-      updatedAt: delta.createdAt || count.updatedAt,
+      lastImportedAt: delta.createdAt,
+      updatedAt: delta.createdAt > count.updatedAt ? delta.createdAt : count.updatedAt,
     },
     applied: true,
   };

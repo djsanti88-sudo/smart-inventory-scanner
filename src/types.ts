@@ -265,6 +265,8 @@ export interface InventoryCount {
   /** Phase 3: the most recent location a scan for this product/session was recorded at. Optional:
    *  older persisted counts lack it. Display-only; never part of the ledger identity. */
   location?: string;
+  /** Latest aggregate physical-count import applied to this count. Never changes scan chronology. */
+  lastImportedAt?: string;
 }
 
 export interface UnknownCodeReview {

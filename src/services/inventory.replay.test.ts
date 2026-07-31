@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ScanEvent } from "@/types";
+import { createInventoryCount, applyInventoryCountDeltaOnce } from "@/services/inventory";
 import { replayInventoryEvents, replayLedgerCounts } from "@/services/inventory.replay";
 import { createAggregateImportEvent } from "@/services/identity/importLedger";
 
@@ -50,18 +51,19 @@ describe("replayLedgerCounts", () => {
     expect(counts[0].scanEventIds).toEqual(["e3"]);
   });
 
-  it("replays one physical aggregate row as its quantity without scanner aliases", () => {
-    const aggregate = createAggregateImportEvent({
+  it("replays one physical aggregate row as its quantity without scanner aliases", async () => {
+    const aggregate = await createAggregateImportEvent({
       businessId: "b",
       importId: "import-1",
       rowId: "row-1",
-      productId: "p1",
       sessionId: "s",
       quantity: 7,
       sourceFileOrdinal: 0,
       sheetName: "Inventory",
       sourceRowNumber: 2,
       createdAt: "2026-07-31T00:00:00.000Z",
+      mode: "physical_count",
+      decision: { kind: "automatic", targetProductId: "p1" },
     });
 
     const [count] = replayInventoryEvents([aggregate], "s");
@@ -70,20 +72,21 @@ describe("replayLedgerCounts", () => {
     expect(count.scanEventIds).toEqual([aggregate.eventId]);
   });
 
-  it("sums mixed scan and aggregate events while deduping the aggregate identity", () => {
-    const aggregate = createAggregateImportEvent({
+  it("sums mixed scan and aggregate events while deduping the aggregate identity", async () => {
+    const aggregate = await createAggregateImportEvent({
       businessId: "b",
       importId: "import-1",
       rowId: "row-1",
-      productId: "p1",
       sessionId: "s",
       quantity: 7,
       sourceFileOrdinal: 0,
       sheetName: "Inventory",
       sourceRowNumber: 2,
       createdAt: "2026-07-31T00:00:00.000Z",
+      mode: "physical_count",
+      decision: { kind: "automatic", targetProductId: "p1" },
     });
-    const otherSession = createAggregateImportEvent({ ...aggregate, rowId: "row-2", sessionId: "other" });
+    const otherSession = await createAggregateImportEvent({ ...aggregate, rowId: "row-2", sessionId: "other", mode: "physical_count", decision: { kind: "automatic", targetProductId: "p1" } });
 
     const [count] = replayInventoryEvents([ev({ id: "scan-1" }), aggregate, aggregate, otherSession], "s");
     expect(count.quantity).toBe(8);
@@ -91,12 +94,13 @@ describe("replayLedgerCounts", () => {
     expect(count.scanEventIds).toEqual(["scan-1", aggregate.eventId]);
   });
 
-  it("keeps same-session aggregate rows tenant-scoped even when their product ids match", () => {
-    const shopA = createAggregateImportEvent({
-      businessId: "shop-a", importId: "import-1", rowId: "row-1", productId: "shared-product", sessionId: "s",
+  it("keeps same-session aggregate rows tenant-scoped even when their product ids match", async () => {
+    const shopA = await createAggregateImportEvent({
+      businessId: "shop-a", importId: "import-1", rowId: "row-1", sessionId: "s",
       quantity: 7, sourceFileOrdinal: 0, sheetName: "Inventory", sourceRowNumber: 2, createdAt: "2026-07-31T00:00:00.000Z",
+      mode: "physical_count", decision: { kind: "automatic", targetProductId: "shared-product" },
     });
-    const shopB = createAggregateImportEvent({ ...shopA, businessId: "shop-b" });
+    const shopB = await createAggregateImportEvent({ ...shopA, businessId: "shop-b", mode: "physical_count", decision: { kind: "automatic", targetProductId: "shared-product" } });
 
     const counts = replayInventoryEvents([shopA, shopB], "s");
     expect(counts).toHaveLength(2);
@@ -104,6 +108,29 @@ describe("replayLedgerCounts", () => {
       ["shop-a", 7],
       ["shop-b", 7],
     ]);
+  });
+
+  it("keeps scan chronology intact when an aggregate delta is replayed", async () => {
+    const aggregate = await createAggregateImportEvent({
+      businessId: "b", importId: "import-2", rowId: "row-1", sessionId: "s", quantity: 0,
+      sourceFileOrdinal: 0, sheetName: "Inventory", sourceRowNumber: 2, createdAt: "2026-07-31T03:00:00.000Z",
+      mode: "physical_count", decision: { kind: "automatic", targetProductId: "p1" },
+    });
+    const [count] = replayInventoryEvents([ev({ createdAt: "2026-07-31T01:00:00.000Z" }), aggregate], "s");
+    expect(count.lastScannedAt).toBe("2026-07-31T01:00:00.000Z");
+    expect(count.lastImportedAt).toBe("2026-07-31T03:00:00.000Z");
+    expect(count.quantity).toBe(1);
+    expect(count.scanEventIds).toContain(aggregate.eventId);
+  });
+
+  it("rejects an aggregate delta whose tenant, session, or product differs from the count", () => {
+    const count = createInventoryCount({
+      id: "count-1", businessId: "b", sessionId: "s", productId: "p1", createdAt: "2026-07-31T00:00:00.000Z",
+    });
+    expect(() => applyInventoryCountDeltaOnce(count, {
+      eventId: "aggregate-1", idempotencyKey: "aggregate-1", businessId: "other", sessionId: "s", productId: "p1",
+      quantityDelta: 1, createdAt: "2026-07-31T01:00:00.000Z",
+    })).toThrow("aggregate delta does not match the inventory count scope");
   });
 
   it("leaves the scan-only compatibility wrapper unchanged", () => {
