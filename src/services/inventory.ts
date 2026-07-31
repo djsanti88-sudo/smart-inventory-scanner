@@ -29,6 +29,30 @@ export function createInventoryCount(params: {
   };
 }
 
+/** Creates a count originated solely by an aggregate physical-count import, not a scanner read. */
+export function createAggregateInventoryCount(params: {
+  id: string;
+  businessId: string;
+  sessionId: string;
+  productId: string;
+  createdAt: string;
+}): InventoryCount {
+  return {
+    id: params.id,
+    businessId: params.businessId,
+    sessionId: params.sessionId,
+    productId: params.productId,
+    quantity: 0,
+    aliasesSeen: [],
+    scanEventIds: [],
+    createdAt: params.createdAt,
+    updatedAt: params.createdAt,
+    syncStatus: "pending",
+    syncError: null,
+    appliedIdempotencyKeys: [],
+  };
+}
+
 /**
  * Apply a scan event to a count EXACTLY ONCE. If the event id was already applied, returns the
  * count unchanged with applied=false. This is the core no-double-count invariant; it must hold

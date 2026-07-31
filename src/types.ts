@@ -254,7 +254,8 @@ export interface InventoryCount {
   sessionId: string;
   productId: string;
   quantity: number;
-  lastScannedAt: string;
+  /** Set only by an actual scanner event; aggregate import-only counts leave this absent. */
+  lastScannedAt?: string;
   aliasesSeen: string[];
   scanEventIds: string[]; // dedupe ledger: an event id present here has already been counted
   createdAt: string;

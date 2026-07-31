@@ -9,6 +9,8 @@ import {
   MAX_IMPORT_QUANTITY,
   planAggregateImportEvent,
 } from "./importLedger";
+import { MAX_IMPORT_QUANTITY as SHARED_MAX_IMPORT_QUANTITY } from "../importQuantity";
+import { MAX_IMPORT_QUANTITY as PREVIEW_MAX_IMPORT_QUANTITY } from "../universalImportPreview";
 
 const physicalRow = {
   businessId: "shop-a",
@@ -55,6 +57,11 @@ function fakeAggregateLedger(): AggregateLedgerPort {
 }
 
 describe("aggregate import ledger adapter", () => {
+  it("uses the shared 100000 quantity cap for both preview and aggregate accounting", () => {
+    expect(SHARED_MAX_IMPORT_QUANTITY).toBe(100_000);
+    expect(MAX_IMPORT_QUANTITY).toBe(SHARED_MAX_IMPORT_QUANTITY);
+    expect(PREVIEW_MAX_IMPORT_QUANTITY).toBe(SHARED_MAX_IMPORT_QUANTITY);
+  });
   it.each([
     ["reconcile", "automatic", "product-1"],
     ["physical_count", "invalid", undefined],

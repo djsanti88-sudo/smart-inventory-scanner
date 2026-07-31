@@ -1,7 +1,7 @@
 import type { InventoryCount, ScanEvent } from "@/types";
 import type { AggregateImportEvent } from "@/services/identity/types";
 import { mapAggregateImportEventToCountDelta } from "@/services/identity/importLedger";
-import { createInventoryCount, applyInventoryCountDeltaOnce, applyScanEventOnce } from "@/services/inventory";
+import { createAggregateInventoryCount, createInventoryCount, applyInventoryCountDeltaOnce, applyScanEventOnce } from "@/services/inventory";
 
 function isAggregateImportEvent(event: ScanEvent | AggregateImportEvent): event is AggregateImportEvent {
   return "kind" in event && event.kind === "aggregate_import";
@@ -33,15 +33,9 @@ export function replayInventoryEvents(
       aggregate &&
       (appliedEventIdentities.has(tenantEventIdentity) || (tenantKeyIdentity && appliedIdempotencyIdentities.has(tenantKeyIdentity)))
     ) continue;
-    const base =
-      byProduct.get(countIdentity) ??
-      createInventoryCount({
-        id: `replay-${seq++}`,
-        businessId: e.businessId,
-        sessionId: e.sessionId,
-        productId,
-        createdAt: e.createdAt,
-      });
+    const base = byProduct.get(countIdentity) ?? (aggregate
+      ? createAggregateInventoryCount({ id: `replay-${seq++}`, businessId: e.businessId, sessionId: e.sessionId, productId, createdAt: e.createdAt })
+      : createInventoryCount({ id: `replay-${seq++}`, businessId: e.businessId, sessionId: e.sessionId, productId, createdAt: e.createdAt }));
     const result = aggregate
       ? applyInventoryCountDeltaOnce(base, mapAggregateImportEventToCountDelta(e))
       : applyScanEventOnce(base, e);

@@ -3,14 +3,29 @@ import { validateAggregateImportEvent } from "@/services/identity/importLedger";
 import type { AtomicLocalStorage } from "./atomicLocalStorage";
 
 const ledgerKey = "aggregate-ledger";
-type StoredResult = { event: AggregateImportEvent; idempotencyKey: string; fingerprint: string };
+type StoredResult = {
+  event: AggregateImportEvent;
+  idempotencyKey: string;
+  fingerprint: string;
+  operationFingerprint?: string;
+};
 
 function entryKey(businessId: string, idempotencyKey: string): string {
   return JSON.stringify([businessId, idempotencyKey]);
 }
 
 export function createLocalAggregateLedger(storage: AtomicLocalStorage): AggregateLedgerPort {
-  async function applyOnce(event: AggregateImportEvent, idempotencyKey: string): Promise<AggregateLedgerResult> {
+  async function storedResultIsValid(item: StoredResult, expectedFingerprint: string): Promise<boolean> {
+    return item.fingerprint === item.event.fingerprint &&
+      item.fingerprint === expectedFingerprint &&
+      await validateAggregateImportEvent(item.event);
+  }
+
+  async function store(
+    event: AggregateImportEvent,
+    idempotencyKey: string,
+    operationFingerprint?: string,
+  ): Promise<AggregateLedgerResult> {
     if (idempotencyKey !== event.idempotencyKey || !(await validateAggregateImportEvent(event))) {
       return { kind: "idempotency_conflict", idempotencyKey };
     }
@@ -19,14 +34,19 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
       const key = entryKey(event.businessId, idempotencyKey);
       const existing = entries[key];
       if (existing) {
-        return existing.fingerprint === event.fingerprint
+        return await storedResultIsValid(existing, event.fingerprint) &&
+          (operationFingerprint === undefined || existing.operationFingerprint === operationFingerprint)
           ? { event: existing.event, idempotencyKey: existing.idempotencyKey }
           : { kind: "idempotency_conflict", idempotencyKey };
       }
-      entries[key] = { event, idempotencyKey, fingerprint: event.fingerprint };
+      entries[key] = { event, idempotencyKey, fingerprint: event.fingerprint, operationFingerprint };
       await transaction.set(ledgerKey, entries);
       return { event, idempotencyKey };
     });
+  }
+
+  async function applyOnce(event: AggregateImportEvent, idempotencyKey: string): Promise<AggregateLedgerResult> {
+    return store(event, idempotencyKey);
   }
 
   async function findByIdempotencyKey(input: {
@@ -37,7 +57,7 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
     return storage.transaction(async (transaction) => {
       const entries = await transaction.get<Record<string, StoredResult>>(ledgerKey);
       const item = entries?.[entryKey(input.businessId, input.idempotencyKey)];
-      return item && item.fingerprint === input.expectedFingerprint
+      return item && await storedResultIsValid(item, input.expectedFingerprint)
         ? { event: item.event, idempotencyKey: item.idempotencyKey }
         : null;
     });
@@ -47,9 +67,7 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
     applyOnce,
     findByIdempotencyKey,
     async apply(event, idempotencyKey, operationFingerprint) {
-      return operationFingerprint === event.fingerprint
-        ? applyOnce(event, idempotencyKey)
-        : { kind: "idempotency_conflict", idempotencyKey };
+      return store(event, idempotencyKey, operationFingerprint);
     },
     async get(input) {
       const result = await findByIdempotencyKey({
@@ -57,7 +75,14 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
         idempotencyKey: input.idempotencyKey,
         expectedFingerprint: input.eventFingerprint,
       });
-      return result && "event" in result ? result : undefined;
+      if (!result || !("event" in result)) return undefined;
+      return result.event.fingerprint === input.eventFingerprint &&
+        (await storage.transaction(async (transaction) => {
+          const entries = await transaction.get<Record<string, StoredResult>>(ledgerKey);
+          return entries?.[entryKey(input.businessId, input.idempotencyKey)]?.operationFingerprint === input.operationFingerprint;
+        }))
+        ? result
+        : undefined;
     },
   };
 }

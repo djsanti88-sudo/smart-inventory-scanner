@@ -1,6 +1,9 @@
 import type { ColumnMapping, ImportPreview, ImportPreviewRow, ImportPreviewStatus, MappedImportRow, MappingSource, RetailCatalogMatch, UniversalSheet } from "@/services/importSchema";
 import type { MatchResult } from "@/services/reconcile/identityMatcher";
 import type { IdentityDecisionKind } from "@/services/identity/types";
+import { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
+
+export { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
 
 /**
  * User-facing warning when a multi-tab workbook had more than one non-empty worksheet. Only the first
@@ -20,8 +23,6 @@ const SENSITIVE_HEADER = /(^|[ _-])(cost|price|retail|msrp|margin)([ _-]|$)/i;
 // Upper bound for a single import row's quantity. A real shop's on-hand count for one SKU never
 // approaches this; values above it almost always mean a mis-mapped column (e.g. a 12-digit barcode
 // mapped to Quantity), which would otherwise drive ~10^11 processScan calls downstream (browser hang).
-export const MAX_IMPORT_QUANTITY = 100_000;
-
 export interface PreviewMatchResult extends MatchResult {
   retailCatalogMatch?: RetailCatalogMatch;
 }

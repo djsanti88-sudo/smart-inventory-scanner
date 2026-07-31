@@ -1,7 +1,8 @@
 import { canonicalSha256 } from "./canonical";
 import type { AggregateImportEvent, IdentityDecisionKind } from "./types";
+import { MAX_IMPORT_QUANTITY } from "../importQuantity";
 
-export const MAX_IMPORT_QUANTITY = 1_000_000;
+export { MAX_IMPORT_QUANTITY } from "../importQuantity";
 
 type EligibleDecision =
   | { kind: "automatic"; targetProductId: string }
@@ -101,7 +102,19 @@ export async function planAggregateImportEvent(input: AggregateImportPlanInput):
 export async function validateAggregateImportEvent(event: AggregateImportEvent): Promise<boolean> {
   try {
     assertQuantity(event.quantity);
-    if (!event.businessId || !event.importId || !event.rowId || !event.productId || !event.sessionId) return false;
+    if (
+      event.kind !== "aggregate_import" ||
+      event.unitOfMeasure !== "each" ||
+      !event.businessId.trim() ||
+      !event.importId.trim() ||
+      !event.rowId.trim() ||
+      !event.productId.trim() ||
+      !event.sessionId.trim() ||
+      !Number.isSafeInteger(event.sourceFileOrdinal) || event.sourceFileOrdinal < 0 ||
+      !Number.isSafeInteger(event.sourceRowNumber) || event.sourceRowNumber <= 0 ||
+      !event.sheetName.trim() ||
+      Number.isNaN(Date.parse(event.createdAt))
+    ) return false;
     const identity = { businessId: event.businessId, importId: event.importId, rowId: event.rowId };
     const expectedEventId = `aggregate-import:${await canonicalSha256({ domain: "event", ...identity })}`;
     const expectedIdempotencyKey = `aggregate-import:${await canonicalSha256({ domain: "idempotency", ...identity })}`;

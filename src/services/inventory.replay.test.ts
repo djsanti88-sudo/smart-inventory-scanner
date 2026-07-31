@@ -68,6 +68,8 @@ describe("replayLedgerCounts", () => {
 
     const [count] = replayInventoryEvents([aggregate], "s");
     expect(count.quantity).toBe(7);
+    expect(count.lastScannedAt).toBeUndefined();
+    expect(count.lastImportedAt).toBe("2026-07-31T00:00:00.000Z");
     expect(count.aliasesSeen).toEqual([]);
     expect(count.scanEventIds).toEqual([aggregate.eventId]);
   });
