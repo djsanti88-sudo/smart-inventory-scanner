@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 const mocks = vi.hoisted(() => ({
   getPersistedStatePresence: vi.fn(),
+  hasLegacyBlob: vi.fn(),
   rehydrateForUid: vi.fn(),
   setBusinessContext: vi.fn(),
 }));
@@ -19,7 +20,7 @@ vi.mock("@/lib/auth", () => ({
   }]),
 }));
 vi.mock("@/stores/scanPersistNamespace", () => ({
-  hasLegacyBlob: () => true,
+  hasLegacyBlob: (...args: unknown[]) => mocks.hasLegacyBlob(...args),
   persistKeyForUid: (uid: string | null) => (uid ? `sis-scan-${uid}` : "sis-scan-v1"),
 }));
 vi.mock("@/stores/scanPersistStorage", () => ({
@@ -41,9 +42,14 @@ vi.mock("@/stores/scanStore", () => ({
 
 import { BusinessContextGate } from "./BusinessContextGate";
 
+beforeEach(() => {
+  mocks.hasLegacyBlob.mockReturnValue(true);
+});
+
 afterEach(() => {
   cleanup();
   mocks.getPersistedStatePresence.mockReset();
+  mocks.hasLegacyBlob.mockReset();
   mocks.rehydrateForUid.mockReset();
   mocks.setBusinessContext.mockReset();
 });
@@ -72,5 +78,25 @@ describe("BusinessContextGate durable UID namespace safety", () => {
     await waitFor(() => expect(mocks.getPersistedStatePresence).toHaveBeenCalledWith("sis-scan-user-1"));
     expect(screen.queryByTestId("adopt-banner")).toBeNull();
     await waitFor(() => expect(mocks.rehydrateForUid).toHaveBeenCalledWith("user-1"));
+  });
+
+  it("continues durable UID hydration when localStorage methods throw", async () => {
+    const proto = Object.getPrototypeOf(window.localStorage);
+    const getItem = vi.spyOn(proto, "getItem").mockImplementation(() => {
+      throw new DOMException("storage blocked", "InvalidStateError");
+    });
+    mocks.hasLegacyBlob.mockImplementation((storage: Storage) => {
+      storage.getItem("sis-scan-v1");
+      return false;
+    });
+    mocks.getPersistedStatePresence.mockResolvedValue("found");
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+
+    render(<BusinessContextGate><div data-testid="scanner">scanner</div></BusinessContextGate>);
+
+    await waitFor(() => expect(mocks.getPersistedStatePresence).toHaveBeenCalledWith("sis-scan-user-1"));
+    await waitFor(() => expect(mocks.rehydrateForUid).toHaveBeenCalledWith("user-1"));
+    expect(screen.getByTestId("scanner")).toBeInTheDocument();
+    getItem.mockRestore();
   });
 });

@@ -8,7 +8,25 @@ import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { hasLegacyBlob, persistKeyForUid } from "@/stores/scanPersistNamespace";
-import { getPersistedStatePresence } from "@/stores/scanPersistStorage";
+import { getPersistedStatePresence, type PersistedStatePresence } from "@/stores/scanPersistStorage";
+
+function readLegacyBlobPresence(): PersistedStatePresence {
+  if (typeof window === "undefined") return "absent";
+  try {
+    return hasLegacyBlob(window.localStorage) ? "found" : "absent";
+  } catch {
+    return "unavailable";
+  }
+}
+
+function readLocalKeyPresence(key: string): PersistedStatePresence {
+  if (typeof window === "undefined") return "absent";
+  try {
+    return window.localStorage.getItem(key) === null ? "absent" : "found";
+  } catch {
+    return "unavailable";
+  }
+}
 
 // Wires the REAL signed-in business context into the scan/count workflow (live mode + Firebase backend).
 // On mount it resolves the authenticated user + the selected business and verifies a real membership.
@@ -55,19 +73,18 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         if (!membership) { completed = true; setStatus("no-business"); return; }
 
         // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
-        const legacy = typeof window !== "undefined" && hasLegacyBlob(window.localStorage);
+        const legacyPresence = readLegacyBlobPresence();
         const uidPersistKey = persistKeyForUid(user.uid);
-        const localUidMarker =
-          typeof window !== "undefined" && window.localStorage.getItem(uidPersistKey) !== null;
+        const localUidMarkerPresence = readLocalKeyPresence(uidPersistKey);
         // The ownership marker is deliberately tiny; a healthy durable UID snapshot may therefore
         // exist in IndexedDB with no localStorage entry. Never offer legacy adoption until both layers
         // establish the namespace is absent. An unavailable durable store fails closed as occupied.
-        const durablePresence = !localUidMarker && legacy
-          ? await getPersistedStatePresence(uidPersistKey)
-          : "absent";
-        const alreadyOwn = localUidMarker || durablePresence !== "absent";
+        const durablePresence = localUidMarkerPresence === "found"
+          ? "found"
+          : await getPersistedStatePresence(uidPersistKey);
+        const alreadyOwn = localUidMarkerPresence !== "absent" || durablePresence !== "absent";
         if (!active) return;
-        if (legacy && !alreadyOwn) {
+        if (legacyPresence === "found" && !alreadyOwn) {
           completed = true;
           setPendingCtx({ businessId: membership.businessId, uid: user.uid });
           setStatus("adopt-choice");
