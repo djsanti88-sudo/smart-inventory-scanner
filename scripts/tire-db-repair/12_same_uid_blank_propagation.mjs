@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+/** Conservative local-only repair: copy a unique sibling value into blank tire fields. */
+import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const Database = require("better-sqlite3");
+const FIELDS = ["brand", "model", "size"];
+const REQUIRED = ["tires", "canonical_tire_products", "remaining_blank_fill_audit", "provenance", "tire_part_numbers", "tire_product_part_number_aliases", "tire_barcode_aliases"];
+const here = fileURLToPath(import.meta.url);
+const blank = value => String(value ?? "").trim() === "";
+// Same brand semantics as src/services/catalog/brandPrefixGeneral.ts, duplicated deliberately for Node-only repair tooling.
+export function normalizeBrand(value) { return String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\b(tire|tires|tyre|tyres|inc|llc|co|company)\b/g, "").replace(/\s+/g, " ").trim(); }
+export function normalizeModel(value) { return String(value ?? "").trim().toLowerCase().replace(/\s+/g, " "); }
+// Exact Node-compatible copy of tireSizeToken's deterministic metric/commercial grammar in
+// src/services/ai/tireSpecs.ts. Keep this intentionally narrow: arbitrary trailing text is not size evidence.
+const METRIC_SIZE = /\b(?:LT|P|ST)?\d{3}\/\d{2}\s?(?:Z?R|-)\s?\d{2}\b/i;
+const COMMERCIAL_SIZE = /(?<![A-Z0-9/.])\d{2}(?:\.\d)?(?:X(?:[4-9]|1[0-8])(?:\.\d{1,2})?)?R\d{2}(?:\.\d)?\b/i;
+const PREFIX_SLASH_FLOTATION = /(?<![A-Z0-9])(?:LT|P|ST)(?:2[2-9]|3\d|4[0-4])\/(?:[4-9]|1[0-8])\.\d{1,2}(?:Z?R|-)(?:0[89]|1\d|2\d|30)(?:\.\d)?(?![A-Z0-9/])/i;
+const PREFIX_X_FLOTATION = /(?<![A-Z0-9])(?:LT|P|ST)(?:2[2-9]|3\d|4[0-4])X(?:[4-9]|1[0-8])\.\d{1,2}(?:Z?R|-)(?:0[89]|1\d|2\d|30)(?:\.\d)?(?![A-Z0-9/])/i;
+export function normalizeSize(value) { const src=String(value ?? "").replace(/(?:XL|RF)\s*$/i, ""); const m=src.match(METRIC_SIZE) || src.match(PREFIX_SLASH_FLOTATION) || src.match(PREFIX_X_FLOTATION) || src.match(COMMERCIAL_SIZE); if (!m) return ""; const token=m[0].replace(/\s+/g, "").toUpperCase(); if (PREFIX_SLASH_FLOTATION.test(m[0])) return token.replace(/^((?:LT|P|ST)\d{2})\//, "$1X"); return METRIC_SIZE.test(m[0]) ? token.replace(/(\d{2})-(\d{2})$/, "$1R$2") : token; }
+function normalizer(field) { return field === "brand" ? normalizeBrand : field === "model" ? normalizeModel : normalizeSize; }
+function hashRows(db, table, fields) { const cols=fields ?? db.prepare(`PRAGMA table_info(${table})`).all().map(x=>x.name); return createHash("sha256").update(JSON.stringify(db.prepare(`SELECT ${cols.join(",")} FROM ${table} ORDER BY ${cols.join(",")}`).all())).digest("hex"); }
+function assertSchema(db) { const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(x => x.name)); for (const t of REQUIRED) if (!tables.has(t)) throw new Error(`missing required table: ${t}`); const cols = new Set(db.prepare("PRAGMA table_info(tires)").all().map(x => x.name)); for (const c of ["barcode", "canonical_product_uid", "manufacturer_part_number", ...FIELDS]) if (!cols.has(c)) throw new Error(`tires missing ${c}`); const orphan = db.prepare("SELECT COUNT(*) AS n FROM tire_barcode_aliases a LEFT JOIN tires t ON t.barcode=a.barcode WHERE t.barcode IS NULL OR t.canonical_product_uid<>a.canonical_product_id").get().n; if (orphan) throw new Error(`alias orphan/inconsistent rows: ${orphan}`); }
+function invariants(db) { return { integrity: db.pragma("integrity_check", { simple: true }), provenance: hashRows(db,"provenance"), pn: hashRows(db,"tire_part_numbers"), pnAliases: hashRows(db,"tire_product_part_number_aliases"), aliases: hashRows(db,"tire_barcode_aliases"), identity: hashRows(db,"tires",["barcode","canonical_product_uid","manufacturer_part_number"]) }; }
+function makePlan(db) {
+  assertSchema(db); const rows = db.prepare("SELECT barcode,canonical_product_uid,brand,model,size FROM tires ORDER BY canonical_product_uid,barcode").all(); if (rows.some(x => blank(x.canonical_product_uid))) throw new Error("blank canonical_product_uid is not eligible for same-UID propagation"); const parents = new Map(db.prepare("SELECT canonical_product_id,brand,model,size FROM canonical_tire_products").all().map(x => [x.canonical_product_id,x])); const childChanges=[]; const parentChanges=[]; const parentAgreements=[];
+  for (const field of FIELDS) { const norm=normalizer(field); const byUid=new Map(); for (const row of rows) { if (!byUid.has(row.canonical_product_uid)) byUid.set(row.canonical_product_uid,[]); byUid.get(row.canonical_product_uid).push(row); }
+    for (const [uid, group] of byUid) { const targets=group.filter(x=>blank(x[field])); if (!targets.length) continue; const donors=group.filter(x=>!blank(x[field])).map(x=>({ ...x, key:norm(x[field]) })); if (field === "size" && donors.some(x=>!x.key)) throw new Error(`malformed size donor for UID ${uid}`); const values=new Map(); for (const donor of donors) { if (!donor.key) continue; if (!values.has(donor.key)) values.set(donor.key,donor); } if (values.size>1) throw new Error(`conflicting ${field} donors for UID ${uid}`); if (!values.size) continue; const donor=[...values.values()][0]; for (const target of targets) childChanges.push({ uid, field, barcode:target.barcode, value:donor[field], normalizedKey:donor.key, donorBarcode:donor.barcode, candidateCount:1 });
+      const parent=parents.get(uid); if (!parent) throw new Error(`missing canonical parent for UID ${uid}`); if (blank(parent[field])) { parentChanges.push({ uid, field, value:donor[field], normalizedKey:donor.key }); for (const duplicate of targets.slice(1)) parentAgreements.push({ uid, field, barcode:duplicate.barcode, value:donor[field], normalizedKey:donor.key, reason:"same blank parent field covered by another child action" }); } else if (norm(parent[field])!==donor.key) throw new Error(`canonical parent conflicts for UID ${uid}/${field}`); else parentAgreements.push({ uid, field, value:parent[field], normalizedKey:donor.key, reason:"pre-existing parent agrees" });
+    }
+  }
+  return { childChanges, parentChanges, parentAgreements };
+}
+export function planSameUidBlankPropagation(dbPath) { const db=new Database(dbPath, { readonly:true, fileMustExist:true }); try { return makePlan(db); } finally { db.close(); } }
+function samePlan(a,b) { return JSON.stringify(a)===JSON.stringify(b); }
+export function runSameUidBlankPropagation({ dbPath, execute=false }={}) {
+  if (!dbPath) throw new Error("database path is required; no default database is permitted"); const db=new Database(dbPath, { readonly:!execute, fileMustExist:true }); try { const beforeBytes = invariants(db); const plan=makePlan(db); if (!execute) return { executed:false, plan, invariants:beforeBytes };
+    const isAuthoritative = /REPAIRED_TIRE_DATABASE\.db$/i.test(dbPath); if (isAuthoritative && (plan.childChanges.length!==21 || plan.parentChanges.length!==17 || plan.parentAgreements.length!==4 || new Set(plan.childChanges.map(x=>x.barcode)).size!==9)) throw new Error("authoritative snapshot guard failed (expected 9 child rows / 21 child cells / 17 blank parent writes + 4 verified parent agreements)");
+    let after; db.transaction(() => { const current=makePlan(db); if (!samePlan(plan,current)) throw new Error("repair plan drifted before transaction"); const audit=db.prepare("INSERT INTO remaining_blank_fill_audit (action,trust_color,confidence_score,canonical_product_uid,barcode,previous_value,new_value,candidate_count,candidate_values,reason,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'))");
+      for (const c of plan.childChanges) { const q=`UPDATE tires SET ${c.field}=? WHERE barcode=? AND canonical_product_uid=? AND TRIM(COALESCE(${c.field},''))=''`; if (db.prepare(q).run(c.value,c.barcode,c.uid).changes!==1) throw new Error(`child cardinality failure ${c.barcode}/${c.field}`); audit.run(`backfill_from_same_canonical_uid_unique_value_v1:${c.field}`,"green",100,c.uid,c.barcode,"",c.value,c.candidateCount,JSON.stringify({donor_barcode:c.donorBarcode,donor_raw:c.value,normalized_key:c.normalizedKey}),`exact canonical UID ${c.uid}; unique normalized sibling donor`); }
+      for (const c of plan.parentChanges) { const q=`UPDATE canonical_tire_products SET ${c.field}=? WHERE canonical_product_id=? AND TRIM(COALESCE(${c.field},''))=''`; if (db.prepare(q).run(c.value,c.uid).changes!==1) throw new Error(`parent cardinality failure ${c.uid}/${c.field}`); }
+      after=invariants(db); if (after.integrity!=="ok" || after.provenance!==beforeBytes.provenance || after.pn!==beforeBytes.pn || after.pnAliases!==beforeBytes.pnAliases || after.aliases!==beforeBytes.aliases || after.identity!==beforeBytes.identity) throw new Error("post-repair invariant failure"); if (makePlan(db).childChanges.length || makePlan(db).parentChanges.length) throw new Error("repair was not idempotent");
+    })(); return { executed:true, plan, invariants:after };
+  } finally { db.close(); }
+}
+if (process.argv[1] === here) { const [dbPath,...flags]=process.argv.slice(2); const result=runSameUidBlankPropagation({dbPath,execute:flags.includes("--execute")}); console.log(JSON.stringify({ executed:result.executed, childCells:result.plan.childChanges.length, parentCells:result.plan.parentChanges.length, parentAgreements:result.plan.parentAgreements.length },null,2)); }
