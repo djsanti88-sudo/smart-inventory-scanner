@@ -1,8 +1,28 @@
 import { tireLoadSpeedToken, tireSizeToken } from "@/services/ai/tireSpecs";
 import { sameBrandFamily } from "@/services/catalog/brandFamilies";
 import { jaccard, nameTokens, plusGenerationDiff } from "@/services/catalog/identityMerge";
+import { normalizeIdentifier } from "./canonical";
 import type { ConstraintResult, IdentityCategoryPlugin } from "./plugins";
 import type { IdentityCandidate, IdentityInput } from "./types";
+
+export function normalizeCategory(value: string | undefined): string {
+  const normalized = (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return normalized === "tires" ? "tire" : normalized;
+}
+
+/** Shared category-plugin normalization keeps typed identifiers identical across plugin selection. */
+export function normalizePluginInput(input: IdentityInput): IdentityInput {
+  return {
+    ...input,
+    brand: input.brand?.trim(),
+    title: input.title?.trim(),
+    description: input.description?.trim(),
+    identifiers: input.identifiers.map((identifier) => ({
+      ...identifier,
+      normalized: normalizeIdentifier(identifier.type, identifier.raw),
+    })),
+  };
+}
 
 function textFor(input: Pick<IdentityInput, "title" | "description">): string {
   return [input.title, input.description].filter(Boolean).join(" ");
@@ -10,6 +30,22 @@ function textFor(input: Pick<IdentityInput, "title" | "description">): string {
 
 function candidateText(candidate: IdentityCandidate): string {
   return candidate.title ?? "";
+}
+
+/**
+ * Canonical structured tire-size fields accepted from import/catalog adapters, in precedence order.
+ * Values are whitespace-compacted and then parsed by the authoritative tireSizeToken primitive.
+ */
+const structuredSizeKeys = ["tireSize", "tire_size", "size"] as const;
+
+function sizeFor(record: Pick<IdentityInput | IdentityCandidate, "attributes" | "brand">, text: string): string {
+  for (const key of structuredSizeKeys) {
+    const raw = record.attributes[key]?.trim();
+    if (!raw) continue;
+    const structured = tireSizeToken({ productName: raw.replace(/\s+/g, ""), brand: record.brand, category: "Tire" });
+    if (structured) return structured;
+  }
+  return tireSizeToken({ productName: text, brand: record.brand, category: "Tire" });
 }
 
 function loadSpeedFor(record: Pick<IdentityInput | IdentityCandidate, "attributes">, text: string): string {
@@ -31,7 +67,7 @@ export const tireIdentityPlugin: IdentityCategoryPlugin = {
   version: "identity-tire-v1",
 
   normalize(input) {
-    return { ...input, brand: input.brand?.trim(), title: input.title?.trim(), description: input.description?.trim() };
+    return normalizePluginInput(input);
   },
 
   deterministicKeys(input) {
@@ -39,10 +75,15 @@ export const tireIdentityPlugin: IdentityCategoryPlugin = {
   },
 
   hardConstraints(input, candidate) {
+    const candidateCategory = normalizeCategory(candidate.category);
+    if (candidateCategory && candidateCategory !== "tire") {
+      return { outcome: "reject", contradictions: [`category_mismatch:tire!=${candidateCategory}`], missing: [] };
+    }
+
     const inputText = textFor(input);
     const candidateName = candidateText(candidate);
-    const inputSize = tireSizeToken({ productName: inputText, brand: input.brand, category: "Tire" });
-    const candidateSize = tireSizeToken({ productName: candidateName, brand: candidate.brand, category: "Tire" });
+    const inputSize = sizeFor(input, inputText);
+    const candidateSize = sizeFor(candidate, candidateName);
     const inputLoadSpeed = loadSpeedFor(input, inputText);
     const candidateLoadSpeed = loadSpeedFor(candidate, candidateName);
     const contradictions: string[] = [];

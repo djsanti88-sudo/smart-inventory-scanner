@@ -82,4 +82,48 @@ describe("genericIdentityPlugin", () => {
     expect(pluginFor(input({ categoryHint: "Tires" })).category).toBe("tire");
     expect(pluginFor(input({ categoryHint: "hardware" }))).toBe(genericIdentityPlugin);
   });
+
+  it("fails closed when explicit generic categories are incompatible", () => {
+    const result = genericIdentityPlugin.hardConstraints(
+      input({ categoryHint: "hardware" }),
+      {
+        productId: "product-1",
+        category: "apparel",
+        businessScope: "master",
+        verificationTier: "human_verified",
+        automaticEligible: true,
+        evidenceId: "catalog-1",
+        evidenceVersion: "v1",
+        exactCodeEvidence: true,
+        identifiers: [],
+        attributes: {},
+        catalogVersion: "catalog-v1",
+        catalogSnapshotHash: "snapshot-1",
+      },
+    );
+
+    expect(result).toEqual({ outcome: "reject", contradictions: ["category_mismatch:hardware!=apparel"], missing: [] });
+  });
+
+  it("keeps a missing generic input category neutral", () => {
+    expect(
+      genericIdentityPlugin.hardConstraints(
+        input({ categoryHint: undefined }),
+        {
+          productId: "product-1",
+          category: "apparel",
+          businessScope: "master",
+          verificationTier: "human_verified",
+          automaticEligible: true,
+          evidenceId: "catalog-1",
+          evidenceVersion: "v1",
+          exactCodeEvidence: true,
+          identifiers: [],
+          attributes: {},
+          catalogVersion: "catalog-v1",
+          catalogSnapshotHash: "snapshot-1",
+        },
+      ),
+    ).toEqual({ outcome: "pass", corroborated: [], missing: ["category"] });
+  });
 });

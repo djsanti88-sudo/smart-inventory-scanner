@@ -1,7 +1,6 @@
 import { jaccard, nameTokens } from "@/services/catalog/identityMerge";
-import { tireIdentityPlugin } from "./tirePlugin";
+import { normalizeCategory, normalizePluginInput, tireIdentityPlugin } from "./tirePlugin";
 import type { IdentityCandidate, IdentityInput } from "./types";
-import { normalizeIdentifier } from "./canonical";
 
 export type ConstraintResult =
   | { outcome: "pass"; corroborated: string[]; missing: string[] }
@@ -32,24 +31,28 @@ export const genericIdentityPlugin: IdentityCategoryPlugin = {
   version: "identity-generic-v1",
 
   normalize(input) {
-    return {
-      ...input,
-      brand: input.brand?.trim(),
-      title: input.title?.trim(),
-      description: input.description?.trim(),
-      identifiers: input.identifiers.map((identifier) => ({
-        ...identifier,
-        normalized: normalizeIdentifier(identifier.type, identifier.raw),
-      })),
-    };
+    return normalizePluginInput(input);
   },
 
   deterministicKeys(input) {
     return input.identifiers.map((identifier) => JSON.stringify([identifier.type, identifier.namespace ?? "", identifier.normalized]));
   },
 
-  hardConstraints() {
-    return { outcome: "pass", corroborated: [], missing: [] };
+  hardConstraints(input, candidate) {
+    const inputCategory = normalizeCategory(input.categoryHint);
+    const candidateCategory = normalizeCategory(candidate.category);
+    if (inputCategory && candidateCategory && inputCategory !== candidateCategory) {
+      return {
+        outcome: "reject",
+        contradictions: [`category_mismatch:${inputCategory}!=${candidateCategory}`],
+        missing: [],
+      };
+    }
+    return {
+      outcome: "pass",
+      corroborated: inputCategory && candidateCategory ? [`category:${inputCategory}`] : [],
+      missing: inputCategory && candidateCategory ? [] : ["category"],
+    };
   },
 
   semanticFeatures(input, candidate) {
