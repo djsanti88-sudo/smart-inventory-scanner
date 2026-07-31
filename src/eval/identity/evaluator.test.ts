@@ -73,4 +73,41 @@ describe("evaluateIdentityCases", () => {
   it("fails closed when case or decision accounting is not one-to-one", () => {
     expect(() => evaluateIdentityCases(cases, decisions.slice(0, 2))).toThrow("decision_case_mismatch");
   });
+
+  it("counts wrong, negative, and targetless automatic decisions as false automatic", () => {
+    const automaticCases: IdentityEvaluationCase[] = [
+      { ...cases[0]!, caseId: "wrong", truthProductId: "product-a" },
+      { ...cases[0]!, caseId: "negative", truthProductId: undefined },
+      { ...cases[0]!, caseId: "missing-target", truthProductId: "product-a" },
+    ];
+    const automaticDecisions: IdentityEvaluationDecision[] = [
+      { caseId: "wrong", kind: "automatic", targetProductId: "wrong-product", candidateProductIds: ["wrong-product"], latencyMs: 1 },
+      { caseId: "negative", kind: "automatic", candidateProductIds: [], latencyMs: 1 },
+      { caseId: "missing-target", kind: "automatic", candidateProductIds: ["product-a"], latencyMs: 1 },
+    ];
+
+    const metrics = evaluateIdentityCases(automaticCases, automaticDecisions, { bootstrapSamples: 10 });
+
+    expect(metrics.falseAutomatic).toEqual({ numerator: 3, denominator: 3, rate: 1, gatePassed: false });
+    expect(metrics.correctAutomaticCoverage).toEqual({ numerator: 0, denominator: 2, rate: 0 });
+  });
+
+  it("uses fixed SHA-256 golden group assignments and validates bootstrap sample bounds", () => {
+    const metrics = evaluateIdentityCases(cases, decisions, { splitSeed: "split-seed", bootstrapSeed: "stable-seed", bootstrapSamples: 10 });
+
+    expect(metrics.split).toEqual({ "group-a": "locked", "group-b": "train", "group-c": "locked" });
+    expect(metrics.confidenceIntervals.falseAutomatic).toEqual({ lower: 0, upper: 0, samples: 10, method: "fixed-seed-group-bootstrap" });
+    expect(() => evaluateIdentityCases(cases, decisions, { bootstrapSamples: 0 })).toThrow("invalid_bootstrap_samples");
+    expect(() => evaluateIdentityCases(cases, decisions, { bootstrapSamples: -1 })).toThrow("invalid_bootstrap_samples");
+    expect(() => evaluateIdentityCases(cases, decisions, { bootstrapSamples: 1.5 })).toThrow("invalid_bootstrap_samples");
+  });
+
+  it("handles empty and one-group evaluation deterministically", () => {
+    const empty = evaluateIdentityCases([], [], { bootstrapSamples: 2 });
+    const oneGroup = evaluateIdentityCases([cases[0]!], [decisions[0]!], { bootstrapSamples: 2 });
+
+    expect(empty.rowAccounting).toEqual({ automatic: 0, review: 0, abstain: 0, non_product: 0, invalid: 0, input: 0, exact: true });
+    expect(empty.confidenceIntervals.correctAutomaticCoverage).toEqual({ lower: 0, upper: 0, samples: 2, method: "fixed-seed-group-bootstrap" });
+    expect(oneGroup.confidenceIntervals.correctAutomaticCoverage).toEqual({ lower: 1, upper: 1, samples: 2, method: "fixed-seed-group-bootstrap" });
+  });
 });

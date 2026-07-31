@@ -3,13 +3,540 @@
   "manifestVersion": "identity-manifest-v1",
   "syntheticOnly": true,
   "promotionEligible": false,
-  "promotionBlockers": ["synthetic_only", "real_export_evidence_required"],
+  "promotionBlockers": [
+    "synthetic_only",
+    "real_export_evidence_required"
+  ],
   "baselineStatus": "not_a_promotion_baseline",
   "evaluatorVersion": "identity-evaluator-v1",
   "splitSeed": "identity-split-v1",
-  "notes": [
-    "Synthetic cases measure evaluator mechanics only.",
-    "This report cannot satisfy any promotion gate or be overridden into eligibility.",
-    "A future locked real-export suite must supply the promotion evidence."
-  ]
+  "manifestHash": "fd5496ef3b9146292c9fb2f8ea07e263a7f93a2a35a2738c5e8697220389983e",
+  "decisionHash": "e1e925840731d9f68ccde7e4bf2b7e2e16a4522ab99869f48966602b62bc5c02",
+  "metrics": {
+    "rowAccounting": {
+      "automatic": 1,
+      "review": 1,
+      "abstain": 1,
+      "non_product": 0,
+      "invalid": 0,
+      "input": 3,
+      "exact": true
+    },
+    "quantityAccounting": {
+      "automatic": 2,
+      "review": 3,
+      "abstain": 1,
+      "non_product": 0,
+      "invalid": 0,
+      "input": 6,
+      "exact": true
+    },
+    "falseAutomatic": {
+      "numerator": 0,
+      "denominator": 1,
+      "rate": 0,
+      "gatePassed": true
+    },
+    "correctAutomaticCoverage": {
+      "numerator": 1,
+      "denominator": 2,
+      "rate": 0.5
+    },
+    "reviewRecallAt3": {
+      "numerator": 0,
+      "denominator": 1,
+      "rate": 0
+    },
+    "reviewPrecisionAt3": {
+      "numerator": 0,
+      "denominator": 1,
+      "rate": 0
+    },
+    "latency": {
+      "count": 3,
+      "p50": 2,
+      "p95": 3,
+      "p99": 3,
+      "max": 3,
+      "percentileMethod": "nearest-rank"
+    },
+    "split": {
+      "synthetic-group-a": "train",
+      "synthetic-group-b": "train",
+      "synthetic-group-c": "locked"
+    },
+    "confidenceIntervals": {
+      "falseAutomatic": {
+        "lower": 0,
+        "upper": 0,
+        "samples": 1000,
+        "method": "fixed-seed-group-bootstrap"
+      },
+      "correctAutomaticCoverage": {
+        "lower": 0,
+        "upper": 1,
+        "samples": 1000,
+        "method": "fixed-seed-group-bootstrap"
+      },
+      "reviewRecallAt3": {
+        "lower": 0,
+        "upper": 0,
+        "samples": 1000,
+        "method": "fixed-seed-group-bootstrap"
+      }
+    },
+    "strata": {
+      "category": {
+        "tire": {
+          "rowAccounting": {
+            "automatic": 1,
+            "review": 1,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 3,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 2,
+            "review": 3,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 6,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 1,
+            "denominator": 2,
+            "rate": 0.5
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "latency": {
+            "count": 3,
+            "p50": 2,
+            "p95": 3,
+            "p99": 3,
+            "max": 3,
+            "percentileMethod": "nearest-rank"
+          }
+        }
+      },
+      "sourceSystem": {
+        "synthetic-fixture": {
+          "rowAccounting": {
+            "automatic": 1,
+            "review": 1,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 3,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 2,
+            "review": 3,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 6,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 1,
+            "denominator": 2,
+            "rate": 0.5
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "latency": {
+            "count": 3,
+            "p50": 2,
+            "p95": 3,
+            "p99": 3,
+            "max": 3,
+            "percentileMethod": "nearest-rank"
+          }
+        }
+      },
+      "vendorId": {
+        "synthetic-vendor": {
+          "rowAccounting": {
+            "automatic": 1,
+            "review": 1,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 3,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 2,
+            "review": 3,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 6,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 1,
+            "denominator": 2,
+            "rate": 0.5
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "latency": {
+            "count": 3,
+            "p50": 2,
+            "p95": 3,
+            "p99": 3,
+            "max": 3,
+            "percentileMethod": "nearest-rank"
+          }
+        }
+      },
+      "transformation": {
+        "exact-identifier": {
+          "rowAccounting": {
+            "automatic": 1,
+            "review": 0,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 2,
+            "review": 0,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 2,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 1,
+            "denominator": 1,
+            "rate": 1
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "latency": {
+            "count": 1,
+            "p50": 1,
+            "p95": 1,
+            "p99": 1,
+            "max": 1,
+            "percentileMethod": "nearest-rank"
+          }
+        },
+        "missing-barcode": {
+          "rowAccounting": {
+            "automatic": 0,
+            "review": 1,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 0,
+            "review": 3,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 3,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "latency": {
+            "count": 1,
+            "p50": 2,
+            "p95": 2,
+            "p99": 2,
+            "max": 2,
+            "percentileMethod": "nearest-rank"
+          }
+        },
+        "negative": {
+          "rowAccounting": {
+            "automatic": 0,
+            "review": 0,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 0,
+            "review": 0,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "latency": {
+            "count": 1,
+            "p50": 3,
+            "p95": 3,
+            "p99": 3,
+            "max": 3,
+            "percentileMethod": "nearest-rank"
+          }
+        }
+      },
+      "stratum": {
+        "missing-identifier": {
+          "rowAccounting": {
+            "automatic": 0,
+            "review": 1,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 0,
+            "review": 3,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 3,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0
+          },
+          "latency": {
+            "count": 1,
+            "p50": 2,
+            "p95": 2,
+            "p99": 2,
+            "max": 2,
+            "percentileMethod": "nearest-rank"
+          }
+        },
+        "negative": {
+          "rowAccounting": {
+            "automatic": 0,
+            "review": 0,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 0,
+            "review": 0,
+            "abstain": 1,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "latency": {
+            "count": 1,
+            "p50": 3,
+            "p95": 3,
+            "p99": 3,
+            "max": 3,
+            "percentileMethod": "nearest-rank"
+          }
+        },
+        "positive": {
+          "rowAccounting": {
+            "automatic": 1,
+            "review": 0,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 1,
+            "exact": true
+          },
+          "quantityAccounting": {
+            "automatic": 2,
+            "review": 0,
+            "abstain": 0,
+            "non_product": 0,
+            "invalid": 0,
+            "input": 2,
+            "exact": true
+          },
+          "falseAutomatic": {
+            "numerator": 0,
+            "denominator": 1,
+            "rate": 0,
+            "gatePassed": true
+          },
+          "correctAutomaticCoverage": {
+            "numerator": 1,
+            "denominator": 1,
+            "rate": 1
+          },
+          "reviewRecallAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "reviewPrecisionAt3": {
+            "numerator": 0,
+            "denominator": 0,
+            "rate": 0
+          },
+          "latency": {
+            "count": 1,
+            "p50": 1,
+            "p95": 1,
+            "p99": 1,
+            "max": 1,
+            "percentileMethod": "nearest-rank"
+          }
+        }
+      }
+    }
+  }
 }
