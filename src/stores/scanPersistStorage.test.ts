@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getPersistedStatePresence, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
+import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getAuthoritativePersistFallback, getPersistedStatePresence, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
 
 class Db implements AsyncKeyValueDatabase {
   values = new Map<string, string>(); fail = false;
@@ -208,7 +208,7 @@ describe("active async persistence adapter", () => {
 
     await storage.setItem("sis-scan-v1", "fallback snapshot");
 
-    expect(local.values.get("sis-scan-v1")).toBe("fallback snapshot");
+    expect(getAuthoritativePersistFallback(local.values.get("sis-scan-v1") ?? null)).toBe("fallback snapshot");
     await expect(createAsyncDurableStorage({ database: null, getLegacyStorage: () => local }).getItem("sis-scan-v1")).resolves.toBe("fallback snapshot");
 
     db.fail = false;
@@ -230,6 +230,58 @@ describe("active async persistence adapter", () => {
     const reloaded = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
     await expect(reloaded.getItem("sis-scan-owner")).resolves.toBe("newer fallback snapshot");
     expect(await db.get("sis-scan-owner")).toBe("newer fallback snapshot");
+  });
+  it("records fallback payload and authority atomically when interrupted at the local write boundary", async () => {
+    const db = new Db();
+    await db.set("sis-scan-owner", "older durable snapshot");
+    db.fail = true;
+    const values = new Map<string, string>();
+    let setCalls = 0;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        setCalls += 1;
+        if (setCalls > 1) throw new Error("simulated interruption after one atomic local write");
+        values.set(key, value);
+      },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+
+    await storage.setItem("sis-scan-owner", "newer fallback snapshot");
+
+    expect(setCalls).toBe(1);
+    expect(getAuthoritativePersistFallback(values.get("sis-scan-owner") ?? null)).toBe("newer fallback snapshot");
+    db.fail = false;
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("newer fallback snapshot");
+  });
+  it("updates an existing fallback envelope before a recovered durable write can commit", async () => {
+    const db = new Db();
+    const local = legacy();
+    const events: string[] = [];
+    const originalDbSet = db.set.bind(db);
+    vi.spyOn(db, "set").mockImplementation(async (key, value) => {
+      events.push(`db:${value}`);
+      await originalDbSet(key, value);
+    });
+    const originalLocalSet = local.setItem.bind(local);
+    vi.spyOn(local, "setItem").mockImplementation((key, value) => {
+      events.push(`local:${value}`);
+      return originalLocalSet(key, value);
+    });
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    db.fail = true;
+    await storage.setItem("sis-scan-owner", "older fallback snapshot");
+
+    events.length = 0;
+    db.fail = false;
+    await storage.setItem("sis-scan-owner", "latest recovered snapshot");
+
+    const localLatest = events.findIndex((event) => event.startsWith("local:") && event.includes("latest recovered snapshot"));
+    const durableLatest = events.findIndex((event) => event === "db:latest recovered snapshot");
+    expect(localLatest).toBeGreaterThanOrEqual(0);
+    expect(durableLatest).toBeGreaterThan(localLatest);
   });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;

@@ -25,6 +25,11 @@ vi.mock("@/stores/scanPersistNamespace", () => ({
 }));
 vi.mock("@/stores/scanPersistStorage", () => ({
   getPersistedStatePresence: (...args: unknown[]) => mocks.getPersistedStatePresence(...args),
+  getAuthoritativePersistFallback: (value: string | null) => {
+    if (!value) return null;
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return parsed.__scanPersistFallback === 1 && typeof parsed.payload === "string" ? parsed.payload : null;
+  },
 }));
 vi.mock("@/stores/scanStore", () => ({
   useScanStore: Object.assign(
@@ -90,6 +95,22 @@ describe("BusinessContextGate durable UID namespace safety", () => {
     await waitFor(() => expect(mocks.getPersistedStatePresence).toHaveBeenCalledWith("sis-scan-user-1"));
     expect(await screen.findByTestId("business-context-error")).toBeInTheDocument();
     expect(mocks.rehydrateForUid).not.toHaveBeenCalled();
+  });
+
+  it("hydrates from an authoritative atomic fallback when IndexedDB cannot be inspected", async () => {
+    window.localStorage.setItem(
+      "sis-scan-user-1",
+      JSON.stringify({ __scanPersistFallback: 1, payload: '{"version":14}' }),
+    );
+    mocks.getPersistedStatePresence.mockResolvedValue("unavailable");
+    mocks.rehydrateForUid.mockResolvedValue(undefined);
+
+    render(<BusinessContextGate><div data-testid="scanner">scanner</div></BusinessContextGate>);
+
+    await waitFor(() => expect(mocks.getPersistedStatePresence).toHaveBeenCalledWith("sis-scan-user-1"));
+    await waitFor(() => expect(mocks.rehydrateForUid).toHaveBeenCalledWith("user-1"));
+    expect(mocks.setBusinessContext).toHaveBeenCalledWith("shop-1", "user-1");
+    expect(screen.getByTestId("scanner")).toBeInTheDocument();
   });
 
   it("continues durable UID hydration when localStorage methods throw", async () => {

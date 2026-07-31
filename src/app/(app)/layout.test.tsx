@@ -33,6 +33,10 @@ vi.mock("@/stores/scanPersistNamespace", () => ({
   hasLegacyBlob: () => false,
   persistKeyForUid: (uid: string) => `sis-scan-${uid}`,
 }));
+vi.mock("@/stores/scanPersistStorage", () => ({
+  getPersistedStatePresence: () => Promise.resolve("absent"),
+  getAuthoritativePersistFallback: () => null,
+}));
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
 }));

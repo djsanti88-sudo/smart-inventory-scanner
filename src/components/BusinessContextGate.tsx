@@ -8,7 +8,7 @@ import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { hasLegacyBlob, persistKeyForUid } from "@/stores/scanPersistNamespace";
-import { getPersistedStatePresence, type PersistedStatePresence } from "@/stores/scanPersistStorage";
+import { getAuthoritativePersistFallback, getPersistedStatePresence, type PersistedStatePresence } from "@/stores/scanPersistStorage";
 
 function readLegacyBlobPresence(): PersistedStatePresence {
   if (typeof window === "undefined") return "absent";
@@ -19,12 +19,16 @@ function readLegacyBlobPresence(): PersistedStatePresence {
   }
 }
 
-function readLocalKeyPresence(key: string): PersistedStatePresence {
-  if (typeof window === "undefined") return "absent";
+function readLocalKeyState(key: string): { presence: PersistedStatePresence; authoritativeFallback: boolean } {
+  if (typeof window === "undefined") return { presence: "absent", authoritativeFallback: false };
   try {
-    return window.localStorage.getItem(key) === null ? "absent" : "found";
+    const value = window.localStorage.getItem(key);
+    return {
+      presence: value === null ? "absent" : "found",
+      authoritativeFallback: getAuthoritativePersistFallback(value) !== null,
+    };
   } catch {
-    return "unavailable";
+    return { presence: "unavailable", authoritativeFallback: false };
   }
 }
 
@@ -75,14 +79,14 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
         // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
         const legacyPresence = readLegacyBlobPresence();
         const uidPersistKey = persistKeyForUid(user.uid);
-        const localUidMarkerPresence = readLocalKeyPresence(uidPersistKey);
+        const localUidState = readLocalKeyState(uidPersistKey);
         // The ownership marker is deliberately tiny and can be stale. Always inspect the durable
         // namespace too; if that probe is unavailable, protected content must fail closed rather
         // than letting hydration create a divergent empty UID snapshot.
         const durablePresence = await getPersistedStatePresence(uidPersistKey);
-        const alreadyOwn = localUidMarkerPresence !== "absent" || durablePresence !== "absent";
+        const alreadyOwn = localUidState.presence !== "absent" || durablePresence !== "absent";
         if (!active) return;
-        if (durablePresence === "unavailable") {
+        if (durablePresence === "unavailable" && !localUidState.authoritativeFallback) {
           completed = true;
           setStatus("error");
           return;

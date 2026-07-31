@@ -20,6 +20,10 @@ vi.mock("@/stores/scanPersistNamespace", () => ({
   hasLegacyBlob: () => false,
   persistKeyForUid: () => "sis-scan-user",
 }));
+vi.mock("@/stores/scanPersistStorage", () => ({
+  getPersistedStatePresence: () => Promise.resolve("absent"),
+  getAuthoritativePersistFallback: () => null,
+}));
 vi.mock("@/stores/scanStore", () => ({
   useScanStore: Object.assign(
     (select: (state: Record<string, unknown>) => unknown) =>
