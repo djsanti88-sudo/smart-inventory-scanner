@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { StatusBadge, SyncBadge } from "@/components/badges";
@@ -135,10 +135,12 @@ export function NeedsReviewTable() {
 }
 
 function ProductPicker({
+  pickerId,
   products,
   onChoose,
   onCancel,
 }: {
+  pickerId: string;
   products: ReturnType<typeof useScanStore.getState>["products"];
   onChoose: (productId: string) => void;
   onCancel: () => void;
@@ -183,20 +185,20 @@ function ProductPicker({
         autoFocus
         role="combobox"
         aria-autocomplete="list"
-        aria-controls="product-matches"
+        aria-controls={`${pickerId}-matches`}
         aria-expanded="true"
-        aria-activedescendant={activeProduct ? `product-option-${activeProduct.id}` : undefined}
+        aria-activedescendant={activeProduct ? `${pickerId}-option-${currentActiveIndex}` : undefined}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Search products"
         className="min-h-[44px] rounded-lg border border-zinc-300 px-3 text-base"
       />
-      <div id="product-matches" role="listbox" aria-label="Product matches" className="max-h-56 overflow-y-auto">
-        {matchingProducts.map((product) => (
+      <div id={`${pickerId}-matches`} role="listbox" aria-label="Product matches" className="max-h-56 overflow-y-auto">
+        {matchingProducts.map((product, index) => (
           <button
             key={product.id}
-            id={`product-option-${product.id}`}
+            id={`${pickerId}-option-${index}`}
             type="button"
             role="option"
             aria-selected={activeProduct?.id === product.id}
@@ -239,6 +241,7 @@ function ReviewRow({
   const [linkId, setLinkId] = useState("");
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const chooseProductButtonRef = useRef<HTMLButtonElement>(null);
+  const pickerId = useId();
   const [applyToCount, setApplyToCount] = useState(true);
   const [np, setNp] = useState({ name: "", brand: "", category: "" });
 
@@ -536,6 +539,7 @@ function ReviewRow({
             </button>
             {isProductPickerOpen && (
               <ProductPicker
+                pickerId={pickerId}
                 products={products}
                 onChoose={(productId) => {
                   setLinkId(productId);

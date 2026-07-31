@@ -94,17 +94,54 @@ describe("NeedsReviewTable - product linking", () => {
     fireEvent.click(screen.getByTestId("choose-product-keys-1"));
     const search = screen.getByRole("combobox", { name: "Search products" });
     fireEvent.keyDown(search, { key: "ArrowDown" });
-    expect(search).toHaveAttribute("aria-activedescendant", "product-option-prod-one");
-    expect(screen.getByRole("option", { name: "First Product" })).toHaveAttribute("aria-selected", "true");
+    const firstOption = screen.getByRole("option", { name: "First Product" });
+    expect(search).toHaveAttribute("aria-activedescendant", firstOption.id);
+    expect(firstOption).toHaveAttribute("aria-selected", "true");
 
     fireEvent.keyDown(search, { key: "ArrowDown" });
-    expect(search).toHaveAttribute("aria-activedescendant", "product-option-prod-two");
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Second Product" }).id);
     fireEvent.keyDown(search, { key: "Enter" });
     expect(screen.queryByTestId("product-picker")).toBeNull();
 
     fireEvent.click(screen.getByTestId("choose-product-keys-1"));
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Search products" }), { key: "Escape" });
     expect(screen.queryByTestId("product-picker")).toBeNull();
+  });
+
+  it("gives concurrently open pickers unique listbox and active-option IDs", () => {
+    useScanStore.setState({
+      needsReviewQueue: [
+        review({ id: "picker-a", cleanCode: "PICKER-A" }),
+        review({ id: "picker-b", cleanCode: "PICKER-B" }),
+      ],
+      products: [
+        { id: "shared-product", name: "shared_product" },
+        { id: "other-product", name: "other_product" },
+      ] as unknown as import("@/types").Product[],
+    });
+    render(<NeedsReviewTable />);
+
+    fireEvent.click(screen.getByTestId("choose-product-picker-a"));
+    fireEvent.click(screen.getByTestId("choose-product-picker-b"));
+    const [firstPicker, secondPicker] = screen.getAllByRole("combobox", { name: "Search products" });
+    const firstListId = firstPicker.getAttribute("aria-controls");
+    const secondListId = secondPicker.getAttribute("aria-controls");
+
+    expect(firstListId).toBeTruthy();
+    expect(secondListId).toBeTruthy();
+    expect(firstListId).not.toBe(secondListId);
+    expect(document.getElementById(firstListId!)).toHaveAttribute("role", "listbox");
+    expect(document.getElementById(secondListId!)).toHaveAttribute("role", "listbox");
+
+    fireEvent.keyDown(firstPicker, { key: "ArrowDown" });
+    fireEvent.keyDown(secondPicker, { key: "ArrowDown" });
+    const firstActiveId = firstPicker.getAttribute("aria-activedescendant");
+    const secondActiveId = secondPicker.getAttribute("aria-activedescendant");
+    expect(firstActiveId).toBeTruthy();
+    expect(secondActiveId).toBeTruthy();
+    expect(firstActiveId).not.toBe(secondActiveId);
+    expect(document.getElementById(firstActiveId!)).toHaveAttribute("aria-selected", "true");
+    expect(document.getElementById(secondActiveId!)).toHaveAttribute("aria-selected", "true");
   });
 });
 
