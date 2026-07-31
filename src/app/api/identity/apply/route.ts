@@ -31,7 +31,8 @@ export function createIdentityApplyRoute(dependencies: { enabled: () => boolean;
     try { return json(await dependencies.apply({ ...body, corrections: body.corrections ?? [] }, actor), 200); }
     catch (error) {
       const code = error instanceof Error ? error.message : "";
-      const conflict = new Set(["apply_in_progress", "apply_idempotency_conflict", "apply_target_stale", "apply_correction_target_invalid", "apply_preview_invalidated"]);
+      if (code === "apply_source_unavailable") return json({ error: "Identity apply is temporarily unavailable.", code }, 503);
+      const conflict = new Set(["apply_in_progress", "apply_idempotency_conflict", "apply_target_stale", "apply_correction_target_invalid", "apply_preview_invalidated", "preview_versions_stale"]);
       const publicCode = conflict.has(code) ? code : "apply_internal_error";
       return json({ error: "Identity apply was rejected.", code: publicCode }, conflict.has(code) ? 409 : 400);
     }

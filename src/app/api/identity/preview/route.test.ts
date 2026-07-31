@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentityPreviewRoute, POST } from "./route";
 import { setLocalIdentityPreviewCompositionForTest } from "@/server/identity/previewComposition";
+import { deriveConfiguredSnapshotHashes } from "@/server/identity/localIdentityReadModel";
 
 const actualBody = {
   rows: [{ businessId: "demo-shop", sourceSystem: "csv", sourceSignature: "headers-v1", vendorId: "vendor-a", sourceFileFingerprint: "file-a", sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, identifiers: [{ type: "manufacturer_part_number", namespace: "vendor-a", raw: "PN-1", normalized: "PN-1", source: "csv", evidenceAuthority: "vendor_import", evidenceId: "row-1", evidenceVersion: "1" }], attributes: {}, quantity: 1, rawRecordFingerprint: "row-1" }],
@@ -11,6 +12,12 @@ afterEach(() => {
   setLocalIdentityPreviewCompositionForTest(undefined);
   vi.unstubAllEnvs();
 });
+
+async function configuredEmptySnapshot(): Promise<string> {
+  const wire = { catalogVersion: "local-v1", catalogSnapshotHash: "", barcodeCandidates: [], partNumberCandidates: [], approvedLinks: [] };
+  wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+  return JSON.stringify(wire);
+}
 
 describe("POST /api/identity/preview", () => {
   it("is unavailable unless the local mock feature flag is enabled", async () => {
@@ -54,7 +61,7 @@ describe("POST /api/identity/preview", () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
     vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", Buffer.alloc(32, 2).toString("base64url"));
     vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
-    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify({ catalogVersion: "local-v1", catalogSnapshotHash: "a".repeat(64), barcodeCandidates: [], partNumberCandidates: [], approvedLinks: [] }));
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", await configuredEmptySnapshot());
     vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
     const fetch = vi.spyOn(globalThis, "fetch");
     const response = await POST(new Request("http://localhost/api/identity/preview", {
@@ -72,7 +79,7 @@ describe("POST /api/identity/preview", () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
     vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", Buffer.alloc(32, 3).toString("base64url"));
     vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
-    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify({ catalogVersion: "local-v1", catalogSnapshotHash: "a".repeat(64), barcodeCandidates: [], partNumberCandidates: [], approvedLinks: [] }));
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", await configuredEmptySnapshot());
     vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
     const response = await POST(new Request("http://localhost/api/identity/preview", {
       method: "POST", headers: { "x-scanbin-local-actor": "forged-viewer" }, body: JSON.stringify(actualBody),

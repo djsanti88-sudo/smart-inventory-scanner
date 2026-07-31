@@ -42,6 +42,7 @@ export function isCompleteIdentityCandidate(value: unknown): value is IdentityCa
   return nonEmptyString(candidate.productId)
     && nonEmptyString(candidate.category)
     && (candidate.businessScope === "tenant" || candidate.businessScope === "master")
+    && (candidate.businessScope !== "tenant" || nonEmptyString(candidate.tenantBusinessId))
     && ["approved", "human_verified", "exact_code_verified", "suggested"].includes(candidate.verificationTier ?? "")
     && typeof candidate.automaticEligible === "boolean"
     && nonEmptyString(candidate.evidenceId)

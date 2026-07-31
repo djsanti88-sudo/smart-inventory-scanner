@@ -1,6 +1,5 @@
 import "server-only";
 
-import { canonicalSha256 } from "@/services/identity/canonical";
 import { createIdentityPreview, type CreateIdentityPreviewInput, type PreviewVersions } from "@/services/identity/preview";
 import type { LocalIdentitySnapshot } from "./localSnapshotIndex";
 import { createReadOnlyCandidateSource, type ApprovedLinkLookupInput, type ApprovedLinkLookupResult } from "./readOnlyCandidateSource";
@@ -45,11 +44,11 @@ function configuredMemberships(): LocalPreviewMembership[] | undefined {
 async function configuredLocalComposition(): Promise<LocalIdentityPreviewComposition | undefined> {
   const memberships = configuredMemberships();
   if (!memberships) return undefined;
-  const model = loadConfiguredLocalIdentityReadModel();
+  const model = await loadConfiguredLocalIdentityReadModel();
   if (!model) return undefined;
   const snapshot = model.snapshot;
   const linkVersion = "local-snapshot-links-v1";
-  const linkSnapshotHash = await canonicalSha256({ linkVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash });
+  const linkSnapshotHash = model.linkSnapshotHash;
   return {
     snapshot,
     lookupApprovedLinks: model.lookupApprovedLinks,

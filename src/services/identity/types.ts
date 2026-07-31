@@ -57,6 +57,7 @@ export interface IdentityCandidate {
   productId: string;
   category: string;
   businessScope: "tenant" | "master";
+  tenantBusinessId?: string;
   verificationTier: "approved" | "human_verified" | "exact_code_verified" | "suggested";
   automaticEligible: boolean;
   evidenceId: string;
@@ -200,7 +201,7 @@ export interface ExpectedInventorySession {
   importId: string;
   businessId: string;
   sourceEvidenceSnapshot: string;
-  rows: Array<{ rowId: string; targetProductId?: string; expectedQuantity: number; currentQuantity: null; varianceQuantity: null; status: "unavailable"; correctionTargetProductId?: string }>;
+  rows: Array<{ rowId: string; targetProductId?: string; expectedQuantity: number; currentQuantity: null; varianceQuantity: null; status: "expected_only" | "current_unavailable"; correctionTargetProductId?: string; decisionFingerprint?: string; evidenceSnapshot?: unknown; constraintSnapshot?: unknown; chosenAction?: string }>;
 }
 
 export type ImportOperationState = "pending" | "applied" | "failed_retryable" | "failed_terminal";

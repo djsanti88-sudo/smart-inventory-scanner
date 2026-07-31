@@ -24,6 +24,10 @@ describe("POST /api/identity/apply", () => {
     expect((await inProgress(request())).status).toBe(409);
     const stale = createIdentityApplyRoute({ enabled: () => true, authorize: async () => actor, apply: async () => { throw new Error("apply_target_stale"); } });
     expect((await stale(request())).status).toBe(409);
+    const versions = createIdentityApplyRoute({ enabled: () => true, authorize: async () => actor, apply: async () => { throw new Error("preview_versions_stale"); } });
+    expect((await versions(request())).status).toBe(409);
+    const unavailable = createIdentityApplyRoute({ enabled: () => true, authorize: async () => actor, apply: async () => { throw new Error("apply_source_unavailable"); } });
+    expect((await unavailable(request())).status).toBe(503);
   });
 
   it("never exposes unknown internal apply errors", async () => {

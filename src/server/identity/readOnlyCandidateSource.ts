@@ -65,7 +65,7 @@ function uniqueIdentifiers(identifiers: ScopedIdentifier[]): ScopedIdentifier[] 
   });
 }
 
-function snapshotCandidates(snapshot: LocalIdentitySnapshot, identifiers: ScopedIdentifier[]): IdentityCandidate[] {
+function snapshotCandidates(snapshot: LocalIdentitySnapshot, identifiers: ScopedIdentifier[], businessId: string): IdentityCandidate[] {
   const barcodeKeys = identifiers
     .filter((identifier) => barcodeIdentifierTypes.has(identifier.type))
     .map((identifier) => identifier.normalized);
@@ -76,7 +76,7 @@ function snapshotCandidates(snapshot: LocalIdentitySnapshot, identifiers: Scoped
   return [
     ...lookupAllLocalBarcodes(snapshot, barcodeKeys),
     ...lookupAllLocalPartNumbers(snapshot, partNumberKeys),
-  ];
+  ].filter((candidate) => candidate.businessScope === "master" || candidate.tenantBusinessId === businessId);
 }
 
 function candidateSortKey(candidate: IdentityCandidate): string {
@@ -84,6 +84,7 @@ function candidateSortKey(candidate: IdentityCandidate): string {
     productId: candidate.productId,
     category: candidate.category,
     businessScope: candidate.businessScope,
+    tenantBusinessId: candidate.tenantBusinessId ?? "",
     verificationTier: candidate.verificationTier,
     automaticEligible: candidate.automaticEligible,
     evidenceId: candidate.evidenceId,
@@ -111,7 +112,7 @@ function orderAtomicCandidates(candidates: IdentityCandidate[]): IdentityCandida
     || candidateSortKey(candidate) !== candidateSortKey(ordered[index - 1]!));
 }
 
-function isValidApprovedLink(
+export function isValidApprovedLink(
   result: unknown,
   scope: ApprovedLinkLookupInput,
 ): result is ApprovedLinkLookupResult {
@@ -193,7 +194,7 @@ export function createReadOnlyCandidateSource(
           identifiers,
         };
         const links = approvedLinkCandidates(await dependencies.lookupApprovedLinks(scope), scope, snapshot);
-        return [input.rawRecordFingerprint, orderAtomicCandidates([...snapshotCandidates(snapshot, identifiers), ...links])];
+        return [input.rawRecordFingerprint, orderAtomicCandidates([...snapshotCandidates(snapshot, identifiers, input.businessId), ...links])];
       }));
 
       return {

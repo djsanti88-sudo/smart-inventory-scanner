@@ -6,6 +6,7 @@ import type { IdentityCandidateSource } from "@/services/identity/types";
 import { setLocalIdentityApplyCompositionForTest } from "./applyComposition";
 import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalPreviewSigner } from "./previewSigner";
+import { deriveConfiguredSnapshotHashes } from "./localIdentityReadModel";
 import { POST as applyPost } from "@/app/api/identity/apply/route";
 import { POST as previewPost } from "@/app/api/identity/preview/route";
 
@@ -24,7 +25,7 @@ afterEach(() => { setLocalIdentityApplyCompositionForTest(undefined); vi.unstubA
 describe("local signed apply composition", () => {
   it("routes a configured vetted snapshot through signed preview and one durable physical count", async () => {
     const run = `route-proof-${Date.now()}`;
-    const catalogSnapshotHash = "a".repeat(64);
+    const catalogSnapshotHash = "";
     const owner = { actorId: "local-owner", businessId: "demo-shop", role: "owner" } as const;
     const product = {
       productId: "vetted-tire-1", category: "tire", businessScope: "master", verificationTier: "human_verified", automaticEligible: true,
@@ -35,7 +36,9 @@ describe("local signed apply composition", () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
     vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", signingKey);
     vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([owner]));
-    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify({ catalogVersion: "local-v1", catalogSnapshotHash, barcodeCandidates: [["012345678905", [product]]], partNumberCandidates: [], approvedLinks: [] }));
+    const wire = { catalogVersion: "local-v1", catalogSnapshotHash, barcodeCandidates: [["012345678905", [product]]], partNumberCandidates: [], approvedLinks: [] };
+    wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
     vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", owner.actorId);
     const previewRequest = {
       rows: [{ businessId: owner.businessId, sourceSystem: "csv", sourceSignature: "vetted-headers-v1", vendorId: "vetted-vendor", sourceFileFingerprint: `file-${run}`, sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, identifiers: [{ type: "upc", raw: "012345678905", normalized: "012345678905", source: "csv", evidenceAuthority: "vendor_import", evidenceId: `row-${run}`, evidenceVersion: "1" }], attributes: {}, quantity: 3, rawRecordFingerprint: run }],
@@ -47,7 +50,7 @@ describe("local signed apply composition", () => {
     const preview = await previewResponse.json() as { signedPayloads: string[] };
     const payload = JSON.parse(preview.signedPayloads[0]!);
     expect(payload.actorId).toBe(owner.actorId);
-    expect(payload.versions).toMatchObject({ catalogVersion: "local-v1", catalogSnapshotHash });
+    expect(payload.versions).toMatchObject({ catalogVersion: "local-v1", catalogSnapshotHash: wire.catalogSnapshotHash });
 
     const applyRequest = { signedPayloads: preview.signedPayloads, mode: "physical_count", corrections: [] } as const;
     const firstApply = await applyPost(new Request("http://localhost/api/identity/apply", { method: "POST", headers: { "x-scanbin-local-actor": "forged-viewer" }, body: JSON.stringify(applyRequest) }));
@@ -65,11 +68,13 @@ describe("local signed apply composition", () => {
     expect(invalidCorrection.status).toBe(409);
     expect(await invalidCorrection.json()).toEqual({ error: "Identity apply was rejected.", code: "apply_correction_target_invalid" });
 
-    const changedProduct = { ...product, catalogVersion: "local-v2", catalogSnapshotHash: "b".repeat(64) };
-    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify({ catalogVersion: "local-v2", catalogSnapshotHash: "b".repeat(64), barcodeCandidates: [["012345678905", [changedProduct]]], partNumberCandidates: [], approvedLinks: [] }));
+    const changedProduct = { ...product, catalogVersion: "local-v2", catalogSnapshotHash: "" };
+    const changedWire = { catalogVersion: "local-v2", catalogSnapshotHash: "", barcodeCandidates: [["012345678905", [changedProduct]]], partNumberCandidates: [], approvedLinks: [] };
+    changedWire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(changedWire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(changedWire));
     const staleVersion = await applyPost(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify(applyRequest) }));
-    expect(staleVersion.status).toBe(400);
-    expect(await staleVersion.json()).toEqual({ error: "Identity apply was rejected.", code: "apply_internal_error" });
+    expect(staleVersion.status).toBe(409);
+    expect(await staleVersion.json()).toEqual({ error: "Identity apply was rejected.", code: "preview_versions_stale" });
   });
 
   it("uses server-owned owner membership and one injected atomic storage for exported POST", async () => {
@@ -103,7 +108,9 @@ describe("local signed apply composition", () => {
 
   it("returns 403 for a configured local actor without membership", async () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1"); vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", signingKey);
-    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify({ catalogVersion: "local-v1", catalogSnapshotHash: "a".repeat(64), barcodeCandidates: [], partNumberCandidates: [], approvedLinks: [] }));
+    const wire = { catalogVersion: "local-v1", catalogSnapshotHash: "", barcodeCandidates: [], partNumberCandidates: [], approvedLinks: [] };
+    wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
     vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "member", businessId: "shop-a", role: "owner" }])); vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "not-a-member");
     expect((await applyPost(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ signedPayloads: [await token()], mode: "reconcile", corrections: [] }) }))).status).toBe(403);
   });

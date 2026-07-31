@@ -3,7 +3,7 @@ import "server-only";
 import { canonicalSha256 } from "@/services/identity/canonical";
 import { createAggregateImportEvent } from "@/services/identity/importLedger";
 import type { PreviewVerificationExpectation, SignedPreviewChunk } from "@/services/identity/preview";
-import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, ImportRun } from "@/services/identity/types";
+import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, ImportRun, ScopedIdentifier } from "@/services/identity/types";
 import type { ImportOperationClaim, LocalIdentityRepository } from "./localRepository";
 
 type Role = "owner" | "admin" | "counter" | "viewer";
@@ -14,7 +14,7 @@ export interface ApplyActor { actorId: string; businessId: string; role: Role; }
 /** A concrete server-owned read model. It must reject missing, cross-tenant, revoked, or stale targets. */
 export interface ApplySource {
   versions: PreviewVerificationExpectation["versions"];
-  revalidateCountableTarget?: (input: { businessId: string; targetProductId: string; row: Record<string, unknown>; decision: IdentityDecision; corrected: boolean }) => Promise<boolean>;
+  revalidateCountableTarget?: (input: { businessId: string; sourceSystem: string; sourceSignature: string; vendorId: string; targetProductId: string; identifiers: ScopedIdentifier[]; row: Record<string, unknown>; decision: IdentityDecision; corrected: boolean }) => Promise<boolean>;
 }
 type ApplyRepository = {
   createImportRun: (...args: Parameters<LocalIdentityRepository["createImportRun"]>) => Promise<unknown>;
@@ -30,7 +30,7 @@ export interface ApplyDependencies {
   verifier: (payloads: string[], now: string, expected: PreviewVerificationExpectation) => Promise<SignedPreviewChunk[]>;
   source: ApplySource; ledger: Pick<AggregateLedgerPort, "applyOnce" | "findByIdempotencyKey">; clock: () => string; actor: ApplyActor;
 }
-export interface ApplyAuditRecord { action: "counted" | "reconciled" | "not_counted"; sourceQuantity: number; targetProductId?: string; decisionKind: IdentityDecision["kind"]; correctionTargetProductId?: string; }
+export interface ApplyAuditRecord { action: "counted" | "reconciled" | "not_counted"; sourceQuantity: number; targetProductId?: string; decisionKind: IdentityDecision["kind"]; decisionFingerprint: string; evidenceSnapshot: IdentityDecision["decisionBasis"]; constraintSnapshot: IdentityDecision["constraintOutcomes"]; correctionTargetProductId?: string; }
 export interface ApplyResult { importId: string; mode: Mode; countedRows: number; countQuantity: number; rows: Array<{ rowId: string; status: "counted" | "reconciled" | "not_counted"; eventId?: string; audit: ApplyAuditRecord }>; reconciliation?: { expectedRows: number; expectedQuantity: number; currentInventoryStatus: "unavailable"; varianceQuantity: null }; }
 type ApplyDecision = IdentityDecision & { approvedProductId?: string };
 type RowApplyResult = { row: ApplyResult["rows"][number] };
@@ -69,7 +69,8 @@ async function preflightRows(chunks: SignedPreviewChunk[], input: ApplyIdentityI
     const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
     if (input.mode === "physical_count" && targetProductId) {
       if (!source.revalidateCountableTarget) throw new Error("apply_source_unavailable");
-      if (!await source.revalidateCountableTarget({ businessId: chunks[0]!.scope.businessId, targetProductId, row: record, decision: original, corrected: Boolean(correction) })) throw new Error(correction ? "apply_correction_target_invalid" : "apply_target_stale");
+      const identifiers = Array.isArray(record.identifiers) ? record.identifiers as ScopedIdentifier[] : [];
+      if (!await source.revalidateCountableTarget({ businessId: chunks[0]!.scope.businessId, sourceSystem: chunks[0]!.scope.sourceSystem, sourceSignature: chunks[0]!.scope.sourceSignature, vendorId: chunks[0]!.scope.vendorId, targetProductId, identifiers, row: record, decision: original, corrected: Boolean(correction) })) throw new Error(correction ? "apply_correction_target_invalid" : "apply_target_stale");
     }
     preflight.push({ rowId, row: record, decision, correction });
   }
@@ -122,7 +123,7 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     if (claim.kind === "in_progress") throw new Error("apply_in_progress");
     if (claim.kind === "idempotency_conflict" || claim.kind === "terminal") throw new Error("apply_idempotency_conflict");
     const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
-    let rowResult: ApplyResult["rows"][number] = { rowId, status: input.mode === "reconcile" ? "reconciled" : "not_counted", audit: { action: input.mode === "reconcile" ? "reconciled" : "not_counted", sourceQuantity: row.quantity as number, ...(targetProductId ? { targetProductId } : {}), decisionKind: decision.kind, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) } };
+    let rowResult: ApplyResult["rows"][number] = { rowId, status: input.mode === "reconcile" ? "reconciled" : "not_counted", audit: { action: input.mode === "reconcile" ? "reconciled" : "not_counted", sourceQuantity: row.quantity as number, ...(targetProductId ? { targetProductId } : {}), decisionKind: decision.kind, decisionFingerprint: decision.decisionFingerprint, evidenceSnapshot: decision.decisionBasis, constraintSnapshot: decision.constraintOutcomes, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) } };
     if (input.mode === "physical_count" && (decision.kind === "automatic" || decision.kind === "review" && decision.approvedProductId)) {
       // The run's original timestamp is part of the aggregate-event fingerprint; retries must not
       // turn a recovered post-ledger crash into a conflicting new event.
@@ -130,14 +131,17 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
       const recovered = await dependencies.ledger.findByIdempotencyKey({ businessId: run.businessId, idempotencyKey: event.idempotencyKey, expectedFingerprint: event.fingerprint });
       const stored = recovered ?? await dependencies.ledger.applyOnce(event, event.idempotencyKey);
       if (!("event" in stored)) throw new Error("apply_ledger_conflict");
-      rowResult = { rowId, status: "counted", eventId: stored.event.eventId, audit: { action: "counted", sourceQuantity: row.quantity as number, targetProductId: stored.event.productId, decisionKind: decision.kind, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) } };
+      rowResult = { rowId, status: "counted", eventId: stored.event.eventId, audit: { action: "counted", sourceQuantity: row.quantity as number, targetProductId: stored.event.productId, decisionKind: decision.kind, decisionFingerprint: decision.decisionFingerprint, evidenceSnapshot: decision.decisionBasis, constraintSnapshot: decision.constraintOutcomes, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) } };
     }
     await dependencies.repository.completeImportOperation(claim.operation, claim.leaseId, { row: rowResult } satisfies RowApplyResult);
     rows.push(rowResult);
   }
   const result: ApplyResult = { importId: run.importId, mode: input.mode, countedRows: rows.filter((row) => row.status === "counted").length, countQuantity: rows.filter((row) => row.status === "counted").reduce((sum, row) => sum + (row.status === "counted" ? Number((allRows[allRowIds.indexOf(row.rowId)] as Record<string, unknown>).quantity) : 0), 0), rows, ...(input.mode === "reconcile" ? { reconciliation: { expectedRows: rows.length, expectedQuantity: rows.reduce((sum, row) => sum + row.audit.sourceQuantity, 0), currentInventoryStatus: "unavailable" as const, varianceQuantity: null } } : {}) };
   if (input.mode === "reconcile" && dependencies.repository.saveExpectedInventorySession) {
-    const session: ExpectedInventorySession = { importId: run.importId, businessId: run.businessId, sourceEvidenceSnapshot: run.sourceFingerprint, rows: rows.map((row) => ({ rowId: row.rowId, ...(row.audit.targetProductId ? { targetProductId: row.audit.targetProductId } : {}), expectedQuantity: row.audit.sourceQuantity, currentQuantity: null, varianceQuantity: null, status: "unavailable", ...(row.audit.correctionTargetProductId ? { correctionTargetProductId: row.audit.correctionTargetProductId } : {}) })) };
+    const session: ExpectedInventorySession = { importId: run.importId, businessId: run.businessId, sourceEvidenceSnapshot: run.sourceFingerprint, rows: rows.map((row) => {
+      const item = preflight.find((entry) => entry.rowId === row.rowId)!;
+      return { rowId: row.rowId, ...(row.audit.targetProductId ? { targetProductId: row.audit.targetProductId } : {}), expectedQuantity: row.audit.sourceQuantity, currentQuantity: null, varianceQuantity: null, status: "expected_only" as const, decisionFingerprint: item.decision.decisionFingerprint, evidenceSnapshot: item.decision.decisionBasis, constraintSnapshot: item.decision.constraintOutcomes, chosenAction: row.audit.action, ...(row.audit.correctionTargetProductId ? { correctionTargetProductId: row.audit.correctionTargetProductId } : {}) };
+    }) };
     await dependencies.repository.saveExpectedInventorySession(session);
   }
   if (dependencies.repository.completeImportRun) await dependencies.repository.completeImportRun(run.businessId, run.importId, result);
