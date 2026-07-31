@@ -66,6 +66,23 @@ class SnapshotDeleteFailsDb extends Db {
   }
 }
 
+class SelectiveRecoveryDb extends Db {
+  failMainWrite = false;
+  failCandidateRemove = false;
+
+  override async set(key: string, value: string): Promise<void> {
+    if (this.failMainWrite && key === "sis-scan-owner") throw new Error("main write interrupted");
+    await super.set(key, value);
+  }
+
+  override async remove(key: string): Promise<void> {
+    if (this.failCandidateRemove && key === "sis-scan-owner::scanbin-recovery-v1") {
+      throw new Error("candidate cleanup interrupted");
+    }
+    await super.remove(key);
+  }
+}
+
 describe("active async persistence adapter", () => {
   it("migrates legacy bytes into durable storage", async () => {
     const db = new Db(), local = legacy(); local.values.set("sis-scan-owner", '{"version":14}');
@@ -282,6 +299,86 @@ describe("active async persistence adapter", () => {
     const durableLatest = events.findIndex((event) => event === "db:latest recovered snapshot");
     expect(localLatest).toBeGreaterThanOrEqual(0);
     expect(durableLatest).toBeGreaterThan(localLatest);
+  });
+  it("journals the newest snapshot durably when quota blocks updating an existing fallback envelope", async () => {
+    const db = new SelectiveRecoveryDb();
+    await db.set("sis-scan-owner", "original durable snapshot");
+    const values = new Map<string, string>();
+    let quotaBlocked = false;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (quotaBlocked) throw new DOMException("quota full", "QuotaExceededError");
+        values.set(key, value);
+      },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    db.failMainWrite = true;
+    await storage.setItem("sis-scan-owner", "older fallback snapshot");
+
+    quotaBlocked = true;
+    db.failMainWrite = false;
+    await storage.setItem("sis-scan-owner", "newest quota-blocked snapshot");
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("newest quota-blocked snapshot");
+  });
+  it("rehydrates the recovery candidate when interrupted after journaling but before the main write", async () => {
+    const db = new SelectiveRecoveryDb();
+    await db.set("sis-scan-owner", "original durable snapshot");
+    const values = new Map<string, string>();
+    let quotaBlocked = false;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (quotaBlocked) throw new DOMException("quota full", "QuotaExceededError");
+        values.set(key, value);
+      },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    db.failMainWrite = true;
+    await storage.setItem("sis-scan-owner", "older fallback snapshot");
+    quotaBlocked = true;
+
+    await storage.setItem("sis-scan-owner", "newest journaled snapshot");
+    expect(await db.get("sis-scan-owner")).toBe("original durable snapshot");
+    db.failMainWrite = false;
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("newest journaled snapshot");
+  });
+  it("keeps a recovery candidate authoritative through cleanup interruption and prevents clear resurrection", async () => {
+    const db = new SelectiveRecoveryDb();
+    await db.set("sis-scan-owner", "original durable snapshot");
+    const values = new Map<string, string>();
+    let storageBlocked = false;
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (storageBlocked) throw new DOMException("quota full", "QuotaExceededError");
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        if (storageBlocked) throw new DOMException("storage interrupted", "InvalidStateError");
+        values.delete(key);
+      },
+    };
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    db.failMainWrite = true;
+    await storage.setItem("sis-scan-owner", "older fallback snapshot");
+    db.failMainWrite = false;
+    db.failCandidateRemove = true;
+    storageBlocked = true;
+
+    await storage.setItem("sis-scan-owner", "newest cleanup-interrupted snapshot");
+    expect(await db.get("sis-scan-owner::scanbin-recovery-v1")).toBe("newest cleanup-interrupted snapshot");
+    const clearResult = await storage.removeItem("sis-scan-owner");
+    expect(clearResult).toMatchObject({ cleared: true, authority: "durable" });
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
   });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;

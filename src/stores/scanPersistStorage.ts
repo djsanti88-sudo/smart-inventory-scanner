@@ -44,6 +44,7 @@ type DeferredStringStorage = StateStorage & {
 
 const PERSIST_POINTER_KEY = "__scanPersistPointer";
 const TOMBSTONE_SUFFIX = "::scanbin-cleared-v1";
+const RECOVERY_SUFFIX = "::scanbin-recovery-v1";
 const PERSIST_FALLBACK_KEY = "__scanPersistFallback";
 
 function encodeAuthoritativePersistFallback(payload: string): string {
@@ -107,14 +108,17 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     if (!options.database) reportDegraded();
   };
 
-  const legacyGet = (name: string): string | null => {
+  const legacyRead = (name: string): { available: boolean; value: string | null } => {
     try {
-      return options.getLegacyStorage()?.getItem(name) ?? null;
+      const storage = options.getLegacyStorage();
+      if (!storage) return { available: false, value: null };
+      return { available: true, value: storage.getItem(name) };
     } catch {
       reportLegacyFailure();
-      return null;
+      return { available: false, value: null };
     }
   };
+  const legacyGet = (name: string): string | null => legacyRead(name).value;
 
   const legacySet = (name: string, value: string): boolean => {
     try {
@@ -162,12 +166,18 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     if (completed) legacySnapshotsCleaned.add(name);
   };
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
+  const recoveryKey = (name: string) => `${name}${RECOVERY_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
   const hasTombstone = async (name: string) => {
-    if (tombstones.has(name) || legacyGet(tombstoneKey(name)) === "1") return true;
+    if (tombstones.has(name) || legacyGet(tombstoneKey(name)) === "1") {
+      tombstones.add(name);
+      return true;
+    }
     if (!options.database) return false;
     try {
-      return await options.database.get(tombstoneKey(name)) === "1";
+      const found = await options.database.get(tombstoneKey(name)) === "1";
+      if (found) tombstones.add(name);
+      return found;
     } catch {
       reportDegraded();
       return false;
@@ -202,13 +212,62 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     legacyRemove(tombstoneKey(name));
   };
 
+  const retireAuthoritativeLocalFallback = (name: string): boolean => {
+    const local = legacyRead(name);
+    if (!local.available) {
+      reportDegraded();
+      return false;
+    }
+    if (local.value === null) {
+      if (isUidNamespace(name)) ensureLegacyMarkerOnce(name);
+      return true;
+    }
+    if (isDurablePointer(local.value)) return true;
+    // Any non-pointer payload is ambiguous once a recovery candidate exists. Replace or remove it
+    // before retiring the candidate so a later IndexedDB outage cannot resurrect stale local bytes.
+    if (isUidNamespace(name) && ensureLegacyMarkerOnce(name)) {
+      legacySnapshotsCleaned.add(name);
+      return true;
+    }
+    const removed = legacyRemove(name);
+    if (removed) legacySnapshotsCleaned.add(name);
+    else reportDegraded();
+    return removed;
+  };
+
   const performWrite = async (name: string, value: string, token: number) => {
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
     const hadFallback = getAuthoritativePersistFallback(legacyGet(name)) !== null;
+    let recoveryWritten = false;
     if (hadFallback && !legacySet(name, encodeAuthoritativePersistFallback(value))) {
-      reportDegraded();
-      return;
+      if (!options.database) {
+        reportDegraded();
+        return;
+      }
+      try {
+        await options.database.set(recoveryKey(name), value);
+        recoveryWritten = true;
+        reportAvailable();
+      } catch {
+        reportDegraded();
+        return;
+      }
+    }
+    // A post-clear write must supersede any candidate whose deletion was interrupted by the clear.
+    if (tombstones.has(name) && !recoveryWritten) {
+      if (!options.database) {
+        reportDegraded();
+        return;
+      }
+      try {
+        await options.database.set(recoveryKey(name), value);
+        recoveryWritten = true;
+        reportAvailable();
+      } catch {
+        reportDegraded();
+        return;
+      }
     }
     let durableWritten = false;
     if (options.database) {
@@ -216,16 +275,27 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     } else reportDegraded();
     // A successful write after an intentional clear supersedes its tombstone. An older in-flight
     // write is deliberately ignored: it may have reached IndexedDB, but the newer tombstone wins.
-    if (durableWritten && generationFor(name) === token) await clearTombstone(name, token);
     if (generationFor(name) !== token) return;
     if (durableWritten) {
-      removeLegacySnapshotOnce(name);
+      const localRetired = recoveryWritten
+        ? retireAuthoritativeLocalFallback(name)
+        : (removeLegacySnapshotOnce(name), true);
+      await clearTombstone(name, token);
+      if (recoveryWritten && localRetired && options.database) {
+        try {
+          await options.database.remove(recoveryKey(name));
+          reportAvailable();
+        } catch {
+          // The candidate contains the same newest bytes and remains authoritative on reload.
+          reportDegraded();
+        }
+      }
     } else {
       // Payload and authority metadata are one localStorage value, so an interrupted write cannot
       // leave newer bytes looking like an ambiguous legacy snapshot.
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
-      if (!hadFallback) legacySet(name, encodeAuthoritativePersistFallback(value));
+      if (!hadFallback && !recoveryWritten) legacySet(name, encodeAuthoritativePersistFallback(value));
     }
   };
   const flushWrite = (name: string) => {
@@ -263,11 +333,42 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       flushWrite(name);
       return enqueue(name, async () => {
       if (await hasTombstone(name)) {
-        if (options.database) { try { await options.database.remove(name); } catch { reportDegraded(); } }
+        if (options.database) {
+          try {
+            await options.database.remove(name);
+            await options.database.remove(recoveryKey(name));
+          } catch { reportDegraded(); }
+        }
         legacyRemove(name);
         return null;
       }
       const localValue = legacyGet(name);
+      if (options.database) {
+        let recovery: string | null = null;
+        try {
+          recovery = await options.database.get(recoveryKey(name));
+        } catch {
+          reportDegraded();
+        }
+        if (recovery !== null) {
+          try {
+            await options.database.set(name, recovery);
+            reportAvailable();
+          } catch {
+            reportDegraded();
+            return recovery;
+          }
+          if (retireAuthoritativeLocalFallback(name)) {
+            try {
+              await options.database.remove(recoveryKey(name));
+              reportAvailable();
+            } catch {
+              reportDegraded();
+            }
+          }
+          return recovery;
+        }
+      }
       const authoritativeFallback = getAuthoritativePersistFallback(localValue);
       if (authoritativeFallback !== null) {
         if (options.database) {
@@ -278,9 +379,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
           } catch {
             reportDegraded();
           }
-        } else {
-          reportDegraded();
-        }
+        } else reportDegraded();
         return authoritativeFallback;
       }
       if (options.database) {
@@ -324,6 +423,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       if (options.database) {
         try {
           await options.database.remove(name);
+          await options.database.remove(recoveryKey(name));
           reportAvailable();
         } catch {
           reportDegraded();
