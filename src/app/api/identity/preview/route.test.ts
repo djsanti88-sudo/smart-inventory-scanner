@@ -4,7 +4,7 @@ import { setLocalIdentityPreviewCompositionForTest } from "@/server/identity/pre
 
 const actualBody = {
   rows: [{ businessId: "demo-shop", sourceSystem: "csv", sourceSignature: "headers-v1", vendorId: "vendor-a", sourceFileFingerprint: "file-a", sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, identifiers: [{ type: "manufacturer_part_number", namespace: "vendor-a", raw: "PN-1", normalized: "PN-1", source: "csv", evidenceAuthority: "vendor_import", evidenceId: "row-1", evidenceVersion: "1" }], attributes: {}, quantity: 1, rawRecordFingerprint: "row-1" }],
-  orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN" } }], sourceFileHashes: ["file-a"], importerVersion: "v1", issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z",
+  orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN" } }], sourceFileHashes: ["file-a"], importerVersion: "v1",
 };
 
 afterEach(() => {
@@ -48,5 +48,42 @@ describe("POST /api/identity/preview", () => {
     const response = await POST(new Request("http://localhost/api/identity/preview", { method: "POST", body: JSON.stringify(actualBody) }));
     expect(response.status).toBe(200);
     expect(JSON.parse((await response.json()).signedPayloads[0]).actorId).toBe("member-1");
+  });
+
+  it("uses the configured local read-only composition without test injection", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", Buffer.alloc(32, 2).toString("base64url"));
+    vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
+    vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const response = await POST(new Request("http://localhost/api/identity/preview", {
+      method: "POST", body: JSON.stringify(actualBody),
+    }));
+    expect(response.status).toBe(200);
+    const payload = JSON.parse((await response.json()).signedPayloads[0]);
+    expect(payload.actorId).toBe("local-owner");
+    expect(payload.versions.catalogSnapshotHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(payload.versions.linkSnapshotHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not accept a caller-controlled actor header", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", Buffer.alloc(32, 3).toString("base64url"));
+    vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
+    vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
+    const response = await POST(new Request("http://localhost/api/identity/preview", {
+      method: "POST", headers: { "x-scanbin-local-actor": "forged-viewer" }, body: JSON.stringify(actualBody),
+    }));
+    expect(response.status).toBe(200);
+    expect(JSON.parse((await response.json()).signedPayloads[0]).actorId).toBe("local-owner");
+  });
+
+  it("does not touch fetch or a writer when an actual exported POST is rejected before composition", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const response = await POST(new Request("http://localhost/api/identity/preview", { method: "POST", body: JSON.stringify(actualBody) }));
+    expect(response.status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -89,6 +89,16 @@ describe("signed identity preview", () => {
     expect(JSON.parse(first.signedPayloads[0]!).actorId).toBe("actor-1");
   });
 
+  it("checks the current actor, business, and read-model versions when requested", async () => {
+    const signer = await createHmacPreviewSigner("local-test-key");
+    const preview = await create();
+    const expected = { actorId: "actor-1", businessId: "demo-shop", versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" } };
+    await expect(verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z", expected)).resolves.toHaveLength(1);
+    await expect(verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z", { ...expected, actorId: "other" })).rejects.toThrow("preview_actor_mismatch");
+    await expect(verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z", { ...expected, businessId: "other-shop" })).rejects.toThrow("preview_business_mismatch");
+    await expect(verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z", { ...expected, versions: { ...expected.versions, linkSnapshotHash: "changed" } })).rejects.toThrow("preview_versions_stale");
+  });
+
   it("rejects re-signed row-id and decision-fingerprint mismatches", async () => {
     const signer = await createHmacPreviewSigner("local-test-key");
     const preview = await create();
