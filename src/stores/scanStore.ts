@@ -1817,8 +1817,16 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           finishReset();
           return Promise.resolve({ cleared: true, authority: "none" } as const);
         }
+        const scanFeedAtClearStart = get().scanFeed;
         return get().clearPersistedState().then((persistenceClear) => {
           if (!persistenceClear.cleared) return persistenceClear;
+          // A physical scan may arrive while IndexedDB is completing the clear. Because every scan
+          // counts synchronously, discarding that newer feed here would violate the counting law and
+          // could race its post-clear persist write. Keep the active UID namespace/state intact and
+          // make the caller retry sign-out; the adapter's same-key queue preserves the new snapshot.
+          if (get().scanFeed !== scanFeedAtClearStart) {
+            return { ...persistenceClear, cleared: false };
+          }
           finishReset();
           return persistenceClear;
         });

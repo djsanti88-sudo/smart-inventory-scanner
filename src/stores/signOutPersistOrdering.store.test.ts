@@ -70,4 +70,26 @@ describe("resetForSignOut durable clear ordering", () => {
     expect(useScanStore.persist.getOptions().name).toBe("sis-scan-v1");
     expect(useScanStore.getState()).toMatchObject({ businessId: "demo-business", userId: null, scanFeed: [] });
   });
+
+  it("aborts the reset when a physical scan is counted while the UID clear is pending", async () => {
+    let resolveClear!: (result: { cleared: boolean; authority: "durable" | "local" | "none" }) => void;
+    mocks.removeItem.mockReturnValueOnce(new Promise((resolve) => { resolveClear = resolve; }));
+
+    const { useScanStore } = await import("@/stores/scanStore");
+    await useScanStore.getState().rehydrateForUid("owner");
+    useScanStore.setState({ businessId: "business-owner", userId: "owner", scanFeed: [], finalCounts: [] });
+
+    const reset = useScanStore.getState().resetForSignOut();
+    const scan = useScanStore.getState().processScan("6419440485331");
+    expect(scan).not.toBeNull();
+    expect(useScanStore.getState().scanFeed).toHaveLength(1);
+    expect(useScanStore.getState().finalCounts.reduce((total, row) => total + row.quantity, 0)).toBe(1);
+
+    resolveClear({ cleared: true, authority: "durable" });
+    await expect(reset).resolves.toEqual({ cleared: false, authority: "durable" });
+
+    expect(useScanStore.persist.getOptions().name).toBe("sis-scan-owner");
+    expect(useScanStore.getState().scanFeed).toHaveLength(1);
+    expect(useScanStore.getState().finalCounts.reduce((total, row) => total + row.quantity, 0)).toBe(1);
+  });
 });
