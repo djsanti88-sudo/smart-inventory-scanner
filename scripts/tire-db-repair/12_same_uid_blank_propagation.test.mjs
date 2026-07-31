@@ -15,17 +15,17 @@ function fixture({ conflict = false, orphan = false, parentConflict = false } = 
   db.exec(`CREATE TABLE tires (barcode TEXT PRIMARY KEY, canonical_product_uid TEXT, brand TEXT, model TEXT, size TEXT, manufacturer_part_number TEXT);
     CREATE TABLE canonical_tire_products (canonical_product_id TEXT PRIMARY KEY, brand TEXT, model TEXT, size TEXT);
     CREATE TABLE remaining_blank_fill_audit (audit_id INTEGER PRIMARY KEY, action TEXT, trust_color TEXT, confidence_score INTEGER, canonical_product_uid TEXT, barcode TEXT, previous_value TEXT, new_value TEXT, candidate_count INTEGER, candidate_values TEXT, reason TEXT, created_at TEXT);
-    CREATE TABLE provenance (id INTEGER PRIMARY KEY, barcode TEXT, content_hash TEXT);
-    CREATE TABLE tire_part_numbers (id INTEGER PRIMARY KEY, canonical_product_uid TEXT, part_number TEXT);
-    CREATE TABLE tire_product_part_number_aliases (id INTEGER PRIMARY KEY, canonical_product_uid TEXT, normalized_part_number TEXT);
-    CREATE TABLE tire_barcode_aliases (barcode TEXT PRIMARY KEY, canonical_product_id TEXT NOT NULL);
+    CREATE TABLE provenance (id INTEGER PRIMARY KEY, product_id TEXT, barcode TEXT, source_name TEXT, source_ref TEXT, sheet TEXT, row TEXT, batch_id TEXT, imported_at TEXT, evidence_level TEXT, license_note TEXT, content_hash TEXT);
+    CREATE TABLE tire_part_numbers (id INTEGER PRIMARY KEY, canonical_product_uid TEXT, part_number TEXT, normalized_part_number TEXT);
+    CREATE TABLE tire_product_part_number_aliases (canonical_product_id TEXT, normalized_part_number TEXT, display_part_number TEXT, source TEXT, trust_color TEXT, confidence_score INTEGER, is_unambiguous INTEGER);
+    CREATE TABLE tire_barcode_aliases (barcode TEXT PRIMARY KEY, barcode_type TEXT, canonical_product_id TEXT NOT NULL, source_table TEXT, alias_confidence TEXT);
     INSERT INTO canonical_tire_products VALUES ('U1','','',''), ('U2','Keep','Model','235/40R19');
     INSERT INTO tires VALUES ('donor','U1','Fortune Tires','Tormenta   R/T','35x12.50r17','PN1'), ('blank','U1','','','', 'PN1'), ('other','U2','','','', 'PN2');
-    INSERT INTO tire_barcode_aliases VALUES ('donor','U1'), ('blank','U1'), ('other','U2');
-    INSERT INTO provenance VALUES (1,'donor','p1'); INSERT INTO tire_part_numbers VALUES (1,'U1','PN1'); INSERT INTO tire_product_part_number_aliases VALUES (1,'U1','PN1');`);
+    INSERT INTO tire_barcode_aliases (barcode,canonical_product_id) VALUES ('donor','U1'), ('blank','U1'), ('other','U2');
+    INSERT INTO provenance (id,barcode,content_hash) VALUES (1,'donor','p1'); INSERT INTO tire_part_numbers (canonical_product_uid,part_number,normalized_part_number) VALUES ('U1','PN1','PN1'); INSERT INTO tire_product_part_number_aliases VALUES ('U1','PN1','PN1','test','green',100,1);`);
   if (conflict) db.prepare("INSERT INTO tires VALUES ('conflict','U1','Other','','','PN1')").run();
   if (parentConflict) db.prepare("UPDATE canonical_tire_products SET model='Wrong Model' WHERE canonical_product_id='U1'").run();
-  if (orphan) db.prepare("INSERT OR REPLACE INTO tire_barcode_aliases VALUES ('orphan','MISSING')").run();
+  if (orphan) db.prepare("INSERT OR REPLACE INTO tire_barcode_aliases (barcode,canonical_product_id) VALUES ('orphan','MISSING')").run();
   db.close(); return { dir, file };
 }
 function cleanup(x) { try { rmSync(x.dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch (error) { if (error?.code !== "EPERM") throw error; } }
@@ -48,6 +48,10 @@ test("blank UIDs, wrong authoritative cardinality, and late audit failure cannot
   const x=fixture(); try { const db=new Database(x.file); db.prepare("INSERT INTO tires VALUES ('no-uid','','Brand','Model','235/40R19','')").run(); db.close(); assert.throws(()=>planSameUidBlankPropagation(x.file),/blank canonical_product_uid/); } finally { cleanup(x); }
   const y=fixture(); try { const named=join(y.dir,"REPAIRED_TIRE_DATABASE.db"); copyFileSync(y.file,named); const before=readFileSync(named); assert.throws(()=>runSameUidBlankPropagation({dbPath:named,execute:true}),/authoritative snapshot guard/); assert.deepEqual(readFileSync(named),before); } finally { cleanup(y); }
   const z=fixture(); try { const db=new Database(z.file); db.exec("CREATE TRIGGER fail_audit BEFORE INSERT ON remaining_blank_fill_audit BEGIN SELECT RAISE(ABORT, 'audit failure'); END"); db.close(); assert.throws(()=>runSameUidBlankPropagation({dbPath:z.file,execute:true}),/audit failure/); const verify=new Database(z.file); assert.equal(verify.prepare("SELECT brand FROM tires WHERE barcode='blank'").get().brand,""); assert.equal(verify.prepare("SELECT COUNT(*) AS n FROM remaining_blank_fill_audit").get().n,0); verify.close(); } finally { cleanup(z); }
+});
+
+test("ignored child or parent UPDATE cardinality rolls back the complete repair", () => {
+  for (const [name, trigger] of [["child", "CREATE TRIGGER ignore_child BEFORE UPDATE ON tires BEGIN SELECT RAISE(IGNORE); END"], ["parent", "CREATE TRIGGER ignore_parent BEFORE UPDATE ON canonical_tire_products BEGIN SELECT RAISE(IGNORE); END"]]) { const x=fixture(); try { const db=new Database(x.file); db.exec(trigger); db.close(); assert.throws(()=>runSameUidBlankPropagation({dbPath:x.file,execute:true}),new RegExp(`${name} cardinality failure`)); const verify=new Database(x.file); assert.equal(verify.prepare("SELECT brand FROM tires WHERE barcode='blank'").get().brand,""); assert.equal(verify.prepare("SELECT brand FROM canonical_tire_products WHERE canonical_product_id='U1'").get().brand,""); assert.equal(verify.prepare("SELECT COUNT(*) AS n FROM remaining_blank_fill_audit").get().n,0); verify.close(); } finally { cleanup(x); } }
 });
 
 test("execute fills blanks, writes structured audit, and is idempotent", () => {
