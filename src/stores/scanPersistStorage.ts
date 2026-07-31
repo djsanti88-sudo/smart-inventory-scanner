@@ -92,6 +92,10 @@ function resolveNewestClearToken(rawTokens: string[]): { token: string | null; c
   return { token: newest[0].raw, conflict: false, maxVersion };
 }
 
+// Synchronous cross-adapter evidence. This is deliberately metadata-only: scheduling a scan never
+// starts IndexedDB work, while clear issuance is immediately visible to other adapters in this tab.
+const publishedClearTokensByDatabase = new WeakMap<AsyncKeyValueDatabase, Map<string, Set<string>>>();
+
 function encodeRecoveryCandidate(candidate: RecoveryCandidate): string {
   return JSON.stringify({ [PERSIST_RECOVERY_KEY]: 1, ...candidate });
 }
@@ -172,14 +176,33 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     resolvers: Array<() => void>;
     scheduled: boolean;
   }>();
-  const unobservedTombstoneState: TombstoneState = Object.freeze({
-    token: null,
-    conflict: false,
-    durableKnown: false,
-    maxVersion: 0,
-    conflictFingerprint: null,
-  });
   const lastObservedTombstoneState = new Map<string, TombstoneState>();
+  const publishedClearTokens = options.database
+    ? (publishedClearTokensByDatabase.get(options.database) ?? new Map<string, Set<string>>())
+    : new Map<string, Set<string>>();
+  if (options.database) publishedClearTokensByDatabase.set(options.database, publishedClearTokens);
+  const publishClearToken = (name: string, token: string): void => {
+    const tokens = publishedClearTokens.get(name) ?? new Set<string>();
+    tokens.add(token);
+    publishedClearTokens.set(name, tokens);
+  };
+  let clearBroadcast: BroadcastChannel | null = null;
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (event) => {
+      if (!event.key?.endsWith(TOMBSTONE_SUFFIX) || event.newValue === null) return;
+      publishClearToken(event.key.slice(0, -TOMBSTONE_SUFFIX.length), event.newValue);
+    });
+    try {
+      if (typeof window.BroadcastChannel !== "undefined") {
+        clearBroadcast = new window.BroadcastChannel("scanbin-persist-clear-v1");
+        clearBroadcast.onmessage = (event: MessageEvent<{ name?: unknown; token?: unknown }>) => {
+          if (typeof event.data?.name === "string" && typeof event.data.token === "string") {
+            publishClearToken(event.data.name, event.data.token);
+          }
+        };
+      }
+    } catch { clearBroadcast = null; }
+  }
   const tombstones = new Map<string, string>();
   const legacySnapshotsCleaned = new Set<string>();
   const legacyMarkersEnsured = new Set<string>();
@@ -272,6 +295,19 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
   const recoveryKey = (name: string) => `${name}${RECOVERY_SUFFIX}`;
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
+  const stateFromTokens = (rawTokens: string[], durableKnown: boolean): TombstoneState => {
+    const uniqueTokens = [...new Set(rawTokens)];
+    const resolved = resolveNewestClearToken(uniqueTokens);
+    const conflictFingerprint = resolved.conflict
+      ? uniqueTokens.filter((raw) => parseClearToken(raw).version === resolved.maxVersion).sort().join("\n")
+      : null;
+    return { ...resolved, durableKnown, conflictFingerprint };
+  };
+  const getSynchronousTombstoneEvidence = (name: string): TombstoneState => {
+    const local = legacyGet(tombstoneKey(name));
+    const published = [...(publishedClearTokens.get(name) ?? [])];
+    return stateFromTokens(local === null ? published : [...published, local], false);
+  };
   const getTombstoneState = async (name: string): Promise<TombstoneState> => {
     const remembered = tombstones.get(name) ?? null;
     const local = legacyGet(tombstoneKey(name));
@@ -288,20 +324,16 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     }
     }
     const rawTokens = [remembered, local, durable, candidateToken].filter((value): value is string => value !== null);
-    const resolved = resolveNewestClearToken(rawTokens);
-    const { token } = resolved;
+    rawTokens.forEach((raw) => publishClearToken(name, raw));
+    const state = stateFromTokens(rawTokens, durableKnown);
+    const { token } = state;
     if (token !== null) tombstones.set(name, token);
-    const conflictFingerprint = resolved.conflict
-      ? rawTokens
-        .filter((raw) => parseClearToken(raw).version === resolved.maxVersion)
-        .sort()
-        .join("\n")
-      : null;
-    const state = { ...resolved, durableKnown, conflictFingerprint } satisfies TombstoneState;
     lastObservedTombstoneState.set(name, state);
     return state;
   };
   const writeTombstone = (name: string, operationToken: string): boolean => {
+    publishClearToken(name, operationToken);
+    try { clearBroadcast?.postMessage({ name, token: operationToken }); } catch { /* local evidence remains */ }
     tombstones.set(name, operationToken);
     return legacySet(tombstoneKey(name), operationToken);
   };
@@ -375,6 +407,15 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     const hadFallback = existingLocalFallback !== null;
     const scheduledState = scheduledObservation;
     const tombstoneState = await getTombstoneState(name);
+    const scheduledObservedCurrentAuthority = tombstoneState.conflict
+      ? scheduledState.conflict
+        && scheduledState.maxVersion === tombstoneState.maxVersion
+        && scheduledState.conflictFingerprint === tombstoneState.conflictFingerprint
+      : tombstoneState.token === null || scheduledState.token === tombstoneState.token;
+    if (!scheduledObservedCurrentAuthority) {
+      reportDegraded();
+      return;
+    }
     if (options.database && !tombstoneState.durableKnown) {
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
@@ -386,8 +427,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       return;
     }
     if (tombstoneState.conflict) {
-      const observedSameConflict = scheduledState.durableKnown
-        && scheduledState.conflict
+      const observedSameConflict = scheduledState.conflict
         && scheduledState.maxVersion === tombstoneState.maxVersion
         && scheduledState.conflictFingerprint === tombstoneState.conflictFingerprint;
       if (!observedSameConflict) {
@@ -568,7 +608,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const scheduleWrite = (name: string, serialize: () => string) => new Promise<void>((resolve) => {
     // Capture authority evidence at the same moment as the snapshot. A coalesced newer snapshot
     // replaces both fields, so a delayed pre-clear payload can never borrow post-clear evidence.
-    const observation = lastObservedTombstoneState.get(name) ?? unobservedTombstoneState;
+    const observation = getSynchronousTombstoneEvidence(name);
     const pending = pendingWrites.get(name) ?? {
       serialize,
       token: generationFor(name),

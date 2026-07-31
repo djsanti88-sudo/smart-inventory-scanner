@@ -630,6 +630,40 @@ describe("active async persistence adapter", () => {
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("snapshot scheduled after conflict");
   });
+  it("suppresses a pre-single-clear write while the first post-clear write survives from synchronous evidence", async () => {
+    const db = new Db();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    const delayed = storage.setItem("sis-scan-owner", "scheduled before one clear");
+    const clear = JSON.stringify({ __scanPersistClear: 1, version: 13, id: "other-tab-clear" });
+    local.values.set("sis-scan-owner::scanbin-cleared-v1", clear);
+    await db.set("sis-scan-owner::scanbin-cleared-v1", clear);
+    window.dispatchEvent(new StorageEvent("storage", { key: "sis-scan-owner::scanbin-cleared-v1", newValue: clear }));
+    await delayed;
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
+
+    await storage.setItem("sis-scan-owner", "first physical scan after clear");
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("first physical scan after clear");
+  });
+  it("uses one physical write to recover when cached no-clear state is followed by cross-adapter conflict publication", async () => {
+    const db = new Db();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await expect(storage.getItem("sis-scan-owner")).resolves.toBeNull();
+    const clearA = JSON.stringify({ __scanPersistClear: 1, version: 14, id: "tab-a" });
+    const clearB = JSON.stringify({ __scanPersistClear: 1, version: 14, id: "tab-b" });
+    local.values.set("sis-scan-owner::scanbin-cleared-v1", clearA);
+    await db.set("sis-scan-owner::scanbin-cleared-v1", clearB);
+    window.dispatchEvent(new StorageEvent("storage", { key: "sis-scan-owner::scanbin-cleared-v1", newValue: clearA }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "sis-scan-owner::scanbin-cleared-v1", newValue: clearB }));
+
+    await storage.setItem("sis-scan-owner", "only physical write after conflict");
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("only physical write after conflict");
+  });
   it("reports a clear non-authoritative when candidate ordering is unknown and deletion fails", async () => {
     const db = new CandidateReadFailsDb();
     db.failCandidateRead = false;
