@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createTestScanStore } from "@/stores/scanStore";
 import type { SyncTarget } from "@/services/db/syncTarget";
 import type { SyncResult } from "@/services/mockDb";
@@ -36,21 +36,29 @@ const alias = {
 const loader = async () => ({ products: [product], aliases: [alias], sessions: [] as InventorySession[], counts: [] as InventoryCount[] });
 
 describe("cloud drain race (regression)", () => {
-  it("does not lose ops enqueued while an async drain is in flight", async () => {
+  it("does not lose ops enqueued while an async drain is in flight", { timeout: 15_000 }, async () => {
     const target = new SlowTarget();
     const store = createTestScanStore({ db: target, cloudBackend: true, loadBusinessData: loader });
     store.getState().setBusinessContext("biz-race", "user-race");
-    await new Promise((r) => setTimeout(r, 20)); // let context + data load settle
+    await vi.waitFor(() => {
+      expect(store.getState()).toMatchObject({
+        businessId: "biz-race",
+        userId: "user-race",
+        businessContextReady: true,
+        businessDataLoaded: true,
+      });
+      expect(store.getState().products.some((item) => item.id === product.id)).toBe(true);
+    }, { timeout: 10_000, interval: 10 });
 
     const N = 6;
     for (let i = 0; i < N; i++) store.getState().processScan(CODE); // rapid known scans (each: SAVE_SCAN_EVENT + INCREMENT)
 
-    // Wait for all chained drains to finish.
-    await new Promise((r) => setTimeout(r, 300));
-
-    const increments = target.applied.filter((i) => i.operation === "INCREMENT_COUNT");
-    expect(increments).toHaveLength(N); // every increment reached the target - none clobbered
-    expect(store.getState().pendingSyncQueue).toHaveLength(0); // queue fully drained
-    expect(store.getState().finalCounts.find((c) => c.productId === "p-race")?.quantity).toBe(N);
+    // Observe completion rather than guessing how long the chained drains need under suite load.
+    await vi.waitFor(() => {
+      const increments = target.applied.filter((item) => item.operation === "INCREMENT_COUNT");
+      expect(increments).toHaveLength(N); // every increment reached the target - none clobbered
+      expect(store.getState().pendingSyncQueue).toHaveLength(0); // queue fully drained
+      expect(store.getState().finalCounts.find((count) => count.productId === "p-race")?.quantity).toBe(N);
+    }, { timeout: 10_000, interval: 10 });
   });
 });
