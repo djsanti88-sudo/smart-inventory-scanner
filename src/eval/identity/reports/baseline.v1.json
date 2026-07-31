@@ -61,9 +61,9 @@
       "percentileMethod": "nearest-rank"
     },
     "split": {
-      "synthetic-group-a": "train",
+      "synthetic-group-a": "dev",
       "synthetic-group-b": "train",
-      "synthetic-group-c": "locked"
+      "synthetic-group-c": "train"
     },
     "confidenceIntervals": {
       "falseAutomatic": {

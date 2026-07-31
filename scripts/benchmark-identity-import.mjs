@@ -4,11 +4,11 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const manifestPath = resolve(root, "src/eval/identity/fixtures/identity-manifest.v1.json");
 const baselinePath = resolve(root, "src/eval/identity/reports/baseline.v1.json");
-const inner = process.argv.includes("--inner");
 const command = process.argv.find((argument) => argument === "--evaluate" || argument === "--write-synthetic-baseline") ?? "--evaluate";
 
 function hash(value) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
@@ -18,17 +18,13 @@ function assertSynthetic(value) {
 async function buildReport() {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assertSynthetic(manifest);
-  const { evaluateIdentityCases } = await import("../src/eval/identity/evaluator.ts");
+  const source = await readFile(resolve(root, "src/eval/identity/evaluator.ts"), "utf8");
+  const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText;
+  const { evaluateIdentityCases } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
   const metrics = evaluateIdentityCases(manifest.cases, manifest.expectedDecisions, { splitSeed: manifest.splitSeed, bootstrapSeed: "identity-bootstrap-v1", bootstrapSamples: 1000 });
   return { reportVersion: "identity-baseline-v1", manifestVersion: manifest.manifestVersion, syntheticOnly: true, promotionEligible: false, promotionBlockers: ["synthetic_only", "real_export_evidence_required"], baselineStatus: "not_a_promotion_baseline", evaluatorVersion: "identity-evaluator-v1", splitSeed: manifest.splitSeed, manifestHash: hash({ ...manifest, expectedDecisions: undefined }), decisionHash: hash(manifest.expectedDecisions), metrics };
 }
 async function main() {
-  if (!inner) {
-    const { spawnSync } = await import("node:child_process");
-    const result = spawnSync(process.execPath, ["--experimental-strip-types", process.argv[1], "--inner", command], { cwd: root, encoding: "utf8" });
-    if (result.status !== 0) throw new Error(result.stderr.trim() || "identity_evaluation_failed");
-    process.stdout.write(result.stdout); return;
-  }
   const report = await buildReport();
   if (command === "--write-synthetic-baseline") await writeFile(baselinePath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   else {

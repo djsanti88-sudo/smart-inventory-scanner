@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   EvaluateIdentityOptions,
   IdentityAccounting,
@@ -18,7 +19,7 @@ function compareCodePoints(left: string, right: string): number {
   return left === right ? 0 : left < right ? -1 : 1;
 }
 
-function sha256(value: string): string {
+function handwrittenSha256Removed(value: string): string {
   const bytes = new TextEncoder().encode(value);
   const words: number[] = [];
   for (let index = 0; index < bytes.length; index += 1) words[index >> 2] = (words[index >> 2] ?? 0) | (bytes[index] << (24 - (index % 4) * 8));
@@ -56,6 +57,15 @@ function sha256(value: string): string {
     hash = [hash[0]! + a, hash[1]! + b, hash[2]! + c, hash[3]! + d, hash[4]! + e, hash[5]! + f, hash[6]! + g, hash[7]! + h];
   }
   return hash.map((part) => (part >>> 0).toString(16).padStart(8, "0")).join("");
+}
+
+/** Node-only evaluator hash: standards-backed SHA-256 over UTF-8 bytes. */
+export function sha256ForIdentityEvaluation(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function sha256(value: string): string {
+  return sha256ForIdentityEvaluation(value);
 }
 
 function rate(numerator: number, denominator: number): IdentityRate {
