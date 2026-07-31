@@ -39,4 +39,18 @@ describe("local signed apply composition", () => {
     const response = await POST(new Request("http://localhost/api/identity/apply", { method: "POST", headers: { "x-scanbin-local-actor": "owner-a" }, body: JSON.stringify({ signedPayloads: [await token()], mode: "reconcile", corrections: [] }) }));
     expect(response.status).toBe(403);
   });
+
+  it("distinguishes no session from a configured nonmember without trusting a forged actor header", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    setLocalIdentityApplyCompositionForTest({ storage: createMemoryAtomicLocalStorage(), signingKey: () => signingKey, versions, authenticate: async () => undefined });
+    expect((await POST(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ signedPayloads: [await token()], mode: "reconcile", corrections: [] }) }))).status).toBe(401);
+    setLocalIdentityApplyCompositionForTest({ storage: createMemoryAtomicLocalStorage(), signingKey: () => signingKey, versions, authenticate: async () => { throw new Error("apply_nonmember"); } });
+    expect((await POST(new Request("http://localhost/api/identity/apply", { method: "POST", headers: { "x-scanbin-local-actor": "owner-a" }, body: JSON.stringify({ signedPayloads: [await token()], mode: "reconcile", corrections: [] }) }))).status).toBe(403);
+  });
+
+  it("returns 403 for a configured local actor without membership", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1"); vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", signingKey);
+    vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "member", businessId: "shop-a", role: "owner" }])); vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "not-a-member");
+    expect((await POST(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ signedPayloads: [await token()], mode: "reconcile", corrections: [] }) }))).status).toBe(403);
+  });
 });

@@ -109,4 +109,22 @@ describe("applyIdentityImport", () => {
     await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, dependencies)).rejects.toThrow(/run.*applying/i);
     expect(await ledger.findByIdempotencyKey({ businessId: "shop-a", idempotencyKey: "missing", expectedFingerprint: "missing" })).toBeNull();
   });
+
+  it("conflicts when a retry changes the correction bound into the operation fingerprint", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    const dependencies = { repository: createLocalRepository(storage), ledger: createLocalAggregateLedger(storage), verifier: async () => [chunk()], source: { versions, validateCorrectionTarget: async () => true }, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
+    await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [{ rowId: "row-1", targetProductId: "product-2" }] }, dependencies);
+    await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [{ rowId: "row-1", targetProductId: "product-3" }] }, dependencies)).rejects.toThrow("apply_idempotency_conflict");
+  });
+
+  it("never counts invalid, non-product, or unresolved rows in physical mode", async () => {
+    const h = harness(); const terminal = ["invalid", "non_product", "abstain"] as const;
+    for (const kind of terminal) {
+      const decision = { ...chunk().decisions[0]!, kind };
+      delete decision.targetProductId;
+      h.verifier.mockResolvedValueOnce([{ ...chunk(), decisions: [decision] }]);
+      await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, { ...h, source: { versions }, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } });
+    }
+    expect(h.ledger.applyOnce).not.toHaveBeenCalled();
+  });
 });
