@@ -705,6 +705,30 @@ describe("active async persistence adapter", () => {
     await expect(createAsyncDurableStorage({ database: writingDb, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
       .resolves.toBe("first physical scan after durable-only clear");
   });
+  it("ignores a stale lower-version local tombstone when validating a newer durable intent barrier", async () => {
+    vi.stubGlobal("performance", { timeOrigin: 1_500, now: vi.fn(() => 10) });
+    const clearingDb = new Db();
+    const writingDb = new Db();
+    writingDb.values = clearingDb.values;
+    const values = new Map<string, string>([["sis-scan-owner::scanbin-cleared-v1", "legacy-clear"]]);
+    const local = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (key.endsWith("::scanbin-cleared-v1")) throw new Error("local tombstone overwrite blocked");
+        values.set(key, value);
+      },
+      removeItem: (key: string) => values.delete(key),
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const clearingTab = createAsyncDurableStorage({ database: clearingDb, getLegacyStorage: () => local });
+    await expect(clearingTab.removeItem("sis-scan-owner")).resolves.toMatchObject({ cleared: true, authority: "durable" });
+    const writingTab = createAsyncDurableStorage({ database: writingDb, getLegacyStorage: () => local });
+
+    await writingTab.setItem("sis-scan-owner", "equal-time scan after newer durable clear");
+
+    expect(await writingDb.get("sis-scan-owner")).toBe("equal-time scan after newer durable clear");
+    warn.mockRestore();
+  });
   it("suppresses a pre-clear snapshot even when its durable write is delayed until after the clear", async () => {
     vi.stubGlobal("performance", { timeOrigin: 2_000, now: vi.fn(() => 10) });
     const db = new Db();

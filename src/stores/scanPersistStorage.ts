@@ -378,12 +378,15 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     const uniqueTokens = [...new Set(rawTokens)];
     const parsedTokens = uniqueTokens.map(parseClearToken);
     const resolved = resolveNewestClearToken(uniqueTokens);
+    const authoritativeTokens = parsedTokens.filter((token) => token.version === resolved.maxVersion);
     const conflictFingerprint = resolved.conflict
-      ? parsedTokens.filter((token) => token.version === resolved.maxVersion).map((token) => token.raw).sort().join("\n")
+      ? authoritativeTokens.map((token) => token.raw).sort().join("\n")
       : null;
-    const maxIssuedAt = parsedTokens.length === 0 ? 0 : Math.max(...parsedTokens.map((token) => token.issuedAt));
-    const intentBarrierEstablished = parsedTokens.length > 0
-      && parsedTokens.every((token) => token.intentBarrierEstablished);
+    const maxIssuedAt = authoritativeTokens.length === 0
+      ? 0
+      : Math.max(...authoritativeTokens.map((token) => token.issuedAt));
+    const intentBarrierEstablished = authoritativeTokens.length > 0
+      && authoritativeTokens.every((token) => token.intentBarrierEstablished);
     return { ...resolved, durableKnown, maxIssuedAt, intentBarrierEstablished, conflictFingerprint };
   };
   const getSynchronousTombstoneEvidence = (name: string): TombstoneState => {
