@@ -23,8 +23,9 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
   const businessContextReady = useScanStore((s) => s.businessContextReady);
   const businessDataLoaded = useScanStore((s) => s.businessDataLoaded);
   const setBusinessContext = useScanStore((s) => s.setBusinessContext);
-  const [status, setStatus] = useState<"resolving" | "no-user" | "no-business" | "adopt-choice" | "ready">("resolving");
+  const [status, setStatus] = useState<"resolving" | "no-user" | "no-business" | "adopt-choice" | "ready" | "error">("resolving");
   const [pendingCtx, setPendingCtx] = useState<{ businessId: string; uid: string } | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   useEffect(() => {
     if (!cloud) return; // mock/local path: nothing to wire (context + data already "ready")
@@ -38,41 +39,74 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
     if (bootstrapStarted.current) return;
     bootstrapStarted.current = true;
     let active = true;
+    let completed = false;
+    setStatus("resolving");
     void (async () => {
-      const user = await getSession();
-      if (!active) return;
-      if (!user) { setStatus("no-user"); return; }
+      try {
+        const user = await getSession();
+        if (!active) return;
+        if (!user) { completed = true; setStatus("no-user"); return; }
 
-      const selected = getSelectedBusinessId();
-      const memberships = await listMemberships();
-      if (!active) return;
-      const membership = selected ? memberships.find((m) => m.businessId === selected) : undefined;
-      if (!membership) { setStatus("no-business"); return; }
+        const selected = getSelectedBusinessId();
+        const memberships = await listMemberships();
+        if (!active) return;
+        const membership = selected ? memberships.find((m) => m.businessId === selected) : undefined;
+        if (!membership) { completed = true; setStatus("no-business"); return; }
 
-      // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
-      const legacy = typeof window !== "undefined" && hasLegacyBlob(window.localStorage);
-      const alreadyOwn =
-        typeof window !== "undefined" && window.localStorage.getItem(persistKeyForUid(user.uid)) !== null;
-      if (legacy && !alreadyOwn) {
-        setPendingCtx({ businessId: membership.businessId, uid: user.uid });
-        setStatus("adopt-choice");
-        return;
+        // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
+        const legacy = typeof window !== "undefined" && hasLegacyBlob(window.localStorage);
+        const alreadyOwn =
+          typeof window !== "undefined" && window.localStorage.getItem(persistKeyForUid(user.uid)) !== null;
+        if (legacy && !alreadyOwn) {
+          completed = true;
+          setPendingCtx({ businessId: membership.businessId, uid: user.uid });
+          setStatus("adopt-choice");
+          return;
+        }
+
+        // Await rehydrate BEFORE setBusinessContext: only once the persisted per-uid state has loaded
+        // does the store's businessId/userId reflect it, letting setBusinessContext's same-tenant guard
+        // recognize a refresh (vs a real switch) and preserve scanFeed/finalCounts/needsReviewQueue.
+        await useScanStore.getState().rehydrateForUid(user.uid);
+        if (!active) return;
+        completed = true;
+        setBusinessContext(membership.businessId, user.uid);
+        setStatus("ready");
+      } catch {
+        if (!active) return;
+        bootstrapStarted.current = false;
+        setStatus("error");
       }
-
-      // Await rehydrate BEFORE setBusinessContext: only once the persisted per-uid state has loaded
-      // does the store's businessId/userId reflect it, letting setBusinessContext's same-tenant guard
-      // recognize a refresh (vs a real switch) and preserve scanFeed/finalCounts/needsReviewQueue.
-      await useScanStore.getState().rehydrateForUid(user.uid);
-      if (!active) return;
-      setBusinessContext(membership.businessId, user.uid);
-      setStatus("ready");
     })();
-    return () => { active = false; };
-  }, [cloud, isBusinessSetupRoute, setBusinessContext]);
+    return () => {
+      active = false;
+      if (!completed) bootstrapStarted.current = false;
+    };
+  }, [cloud, isBusinessSetupRoute, pathname, retryAttempt, setBusinessContext]);
 
   if (!cloud) return <>{children}</>;
 
   if (isBusinessSetupRoute) return <>{children}</>;
+
+  if (status === "error") {
+    return (
+      <div data-testid="business-context-error" className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+        We could not load your business context.
+        <button
+          type="button"
+          data-testid="business-context-retry"
+          onClick={() => {
+            bootstrapStarted.current = false;
+            setStatus("resolving");
+            setRetryAttempt((attempt) => attempt + 1);
+          }}
+          className="ml-2 font-medium underline"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   if (status === "adopt-choice" && pendingCtx) {
     return (
