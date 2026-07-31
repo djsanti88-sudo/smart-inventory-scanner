@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createFileAtomicLocalStorage } from "./atomicLocalStorage";
+import { createFileAtomicLocalStorage, createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalAggregateLedger } from "./localAggregateLedger";
 
 const storageBase = path.resolve(process.cwd(), ".tmp", "identity-import");
@@ -42,9 +42,17 @@ describe("local aggregate ledger", () => {
     await first.apply(event, "import-1:row-1");
 
     const second = createLocalAggregateLedger(createFileAtomicLocalStorage({ root }));
-    await expect(second.apply({ ...event, quantity: 999 }, "import-1:row-1")).resolves.toEqual({
+    await expect(second.apply(event, "import-1:row-1")).resolves.toEqual({
       event,
       idempotencyKey: "import-1:row-1",
     });
+  });
+
+  it("returns idempotency_conflict rather than another tenant or payload's prior result", async () => {
+    const ledger = createLocalAggregateLedger(createMemoryAtomicLocalStorage());
+    const event = { kind: "aggregate_import" as const, eventId: "event", importId: "import", rowId: "row", businessId: "shop-a", quantity: 1, unitOfMeasure: "each" as const, sourceFileOrdinal: 0, sheetName: "Inventory", sourceRowNumber: 2 };
+    await ledger.apply(event, "same-key");
+    await expect(ledger.apply({ ...event, businessId: "shop-b" }, "same-key")).resolves.toMatchObject({ kind: "idempotency_conflict" });
+    await expect(ledger.apply({ ...event, quantity: 2 }, "same-key")).resolves.toMatchObject({ kind: "idempotency_conflict" });
   });
 });

@@ -193,6 +193,7 @@ export interface ImportOperation {
   importId: string;
   rowId: string;
   idempotencyKey: string;
+  payloadFingerprint: string;
   state: ImportOperationState;
   leaseId?: string;
   leaseExpiresAt?: number;
@@ -211,6 +212,10 @@ export interface IdentityReview {
 }
 
 export interface AggregateLedgerPort {
-  apply(event: AggregateImportEvent, idempotencyKey: string): Promise<{ event: AggregateImportEvent; idempotencyKey: string }>;
+  apply(event: AggregateImportEvent, idempotencyKey: string): Promise<AggregateLedgerResult>;
   get(idempotencyKey: string): Promise<{ event: AggregateImportEvent; idempotencyKey: string } | undefined>;
 }
+
+export type AggregateLedgerResult =
+  | { event: AggregateImportEvent; idempotencyKey: string }
+  | { kind: "idempotency_conflict"; idempotencyKey: string };

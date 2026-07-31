@@ -35,6 +35,15 @@ describe("local identity repository", () => {
     });
   });
 
+  it("returns a proposed exact link as review and honors only the latest non-revoked version", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    await repository.saveIdentityLink({ ...approvedLink, status: "proposed", version: 1 });
+    await expect(repository.resolveLink(approvedLink)).resolves.toMatchObject({ kind: "review" });
+    await repository.saveIdentityLink({ ...approvedLink, version: 2 });
+    await repository.saveIdentityLink({ ...approvedLink, status: "revoked", version: 3 });
+    await expect(repository.resolveLink(approvedLink)).resolves.toEqual({ kind: "abstain" });
+  });
+
   it("never broadens a vendor-wide transformation into an automatic link", async () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
     await repository.saveTransformation({
@@ -61,28 +70,31 @@ describe("local identity repository", () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
     await repository.saveIdentityLink(approvedLink);
 
-    await expect(repository.saveIdentityLink({ ...approvedLink, targetProductId: "tire-b" })).rejects.toThrow(
+    await expect(repository.saveIdentityLink({ ...approvedLink, targetProductId: "tire-b", version: 2 })).rejects.toThrow(
       /already belongs to tire-a/,
     );
   });
 
   it("makes one concurrent import operation lease claim and reports the other as in progress", async () => {
-    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
-    const input = { businessId: "shop-a", importId: "import-a", rowId: "row-1", idempotencyKey: "import-a:row-1" };
-    const claims = await Promise.all([repository.claimImportOperation(input, 100, 30), repository.claimImportOperation(input, 100, 30)]);
+    const now = 100;
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => now });
+    await startRun(repository, "shop-a", "import-a");
+    const input = { businessId: "shop-a", importId: "import-a", rowId: "row-1", idempotencyKey: "import-a:row-1", payloadFingerprint: "payload-1" };
+    const claims = await Promise.all([repository.claimImportOperation(input, 30), repository.claimImportOperation(input, 30)]);
 
     expect(claims.filter((claim) => claim.kind === "claimed")).toHaveLength(1);
     expect(claims.filter((claim) => claim.kind === "in_progress")).toHaveLength(1);
   });
 
   it("returns a completed operation result on a safe retry", async () => {
-    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
-    const input = { businessId: "shop-a", importId: "import-a", rowId: "row-1", idempotencyKey: "import-a:row-1" };
-    const claim = await repository.claimImportOperation(input, 100, 30);
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => 100 });
+    await startRun(repository, "shop-a", "import-a");
+    const input = { businessId: "shop-a", importId: "import-a", rowId: "row-1", idempotencyKey: "import-a:row-1", payloadFingerprint: "payload-1" };
+    const claim = await repository.claimImportOperation(input, 30);
     if (claim.kind !== "claimed") throw new Error("expected lease claim");
     await repository.completeImportOperation(claim.operation, claim.leaseId, { eventId: "event-1" });
 
-    await expect(repository.claimImportOperation(input, 101, 30)).resolves.toMatchObject({
+    await expect(repository.claimImportOperation(input, 30)).resolves.toMatchObject({
       kind: "completed",
       result: { eventId: "event-1" },
     });
@@ -102,8 +114,39 @@ describe("local identity repository", () => {
       catalogVersion: "catalog-v1",
       createdAt: "2026-07-31T00:00:00.000Z",
     });
-    await expect(repository.transitionImportRun(run.importId, "applying")).resolves.toMatchObject({ state: "applying" });
-    await expect(repository.transitionImportRun(run.importId, "completed")).resolves.toMatchObject({ state: "completed" });
-    await expect(repository.transitionImportRun(run.importId, "applying")).rejects.toThrow(/cannot transition/);
+    await expect(repository.transitionImportRun("shop-a", run.importId, "applying")).resolves.toMatchObject({ state: "applying" });
+    await expect(repository.transitionImportRun("shop-a", run.importId, "completed")).resolves.toMatchObject({ state: "completed" });
+    await expect(repository.transitionImportRun("shop-a", run.importId, "applying")).rejects.toThrow(/cannot transition/);
+  });
+
+  it("scopes same import IDs and collision-proof operation tuples by tenant", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => 100 });
+    await startRun(repository, "a", "x:y");
+    await startRun(repository, "a:x", "y");
+    await expect(repository.transitionImportRun("b", "same", "applying")).rejects.toThrow(/Unknown/);
+    const first = await repository.claimImportOperation({ businessId: "a", importId: "x:y", rowId: "z", idempotencyKey: "one", payloadFingerprint: "first" }, 30);
+    const second = await repository.claimImportOperation({ businessId: "a:x", importId: "y", rowId: "z", idempotencyKey: "two", payloadFingerprint: "second" }, 30);
+    expect(first.kind).toBe("claimed");
+    expect(second.kind).toBe("claimed");
+  });
+
+  it("rejects an idempotency conflict, non-applying runs, invalid leases, and expired completion", async () => {
+    let now = 100;
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => now });
+    const input = { businessId: "shop-a", importId: "import-a", rowId: "row-1", idempotencyKey: "idempotency", payloadFingerprint: "payload-a" };
+    await expect(repository.claimImportOperation(input, 30)).rejects.toThrow(/run.*applying/i);
+    await startRun(repository, "shop-a", "import-a");
+    await expect(repository.claimImportOperation(input, 0)).rejects.toThrow(/lease/i);
+    const claim = await repository.claimImportOperation(input, 30);
+    await expect(repository.claimImportOperation({ ...input, idempotencyKey: "different" }, 30)).resolves.toMatchObject({ kind: "idempotency_conflict" });
+    await expect(repository.claimImportOperation({ ...input, payloadFingerprint: "payload-b" }, 30)).resolves.toMatchObject({ kind: "idempotency_conflict" });
+    if (claim.kind !== "claimed") throw new Error("expected claim");
+    now = 131;
+    await expect(repository.completeImportOperation(claim.operation, claim.leaseId, { eventId: "event" })).rejects.toThrow(/expired/);
   });
 });
+
+async function startRun(repository: ReturnType<typeof createLocalRepository>, businessId: string, importId: string): Promise<void> {
+  await repository.createImportRun({ importId, businessId, sourceFingerprint: "source", mappingFingerprint: "mapping", previewFingerprint: "preview", actorId: "manager", engineVersion: "engine", pluginVersion: "plugin", catalogVersion: "catalog", createdAt: "now" });
+  await repository.transitionImportRun(businessId, importId, "applying");
+}
