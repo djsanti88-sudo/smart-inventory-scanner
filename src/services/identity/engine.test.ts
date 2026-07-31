@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { decideIdentity, decideIdentityBatch, type IdentityCandidateSnapshot } from "./engine";
+import {
+  decideIdentity,
+  decideIdentityBatch,
+  identityDecisionFingerprintProjection,
+  type IdentityCandidateSnapshot,
+} from "./engine";
+import { canonicalSha256 } from "./canonical";
 import { genericIdentityPlugin } from "./plugins";
 import type { IdentityCandidate, IdentityCandidateSource, IdentityInput, ScopedIdentifier } from "./types";
 
@@ -117,10 +123,26 @@ describe("identity decision engine", () => {
     ).resolves.toMatchObject({ kind: "abstain" });
   });
 
-  it("returns invalid for malformed input without inspecting candidates", async () => {
-    const decision = await decideIdentity({ ...input(), quantity: -1 } as IdentityInput, snapshot([candidate()]), genericIdentityPlugin);
+  it("classifies an explicit adapter record type as non-product but never arbitrary text", async () => {
+    await expect(decideIdentity(input({ recordType: "labor" }), snapshot([]), genericIdentityPlugin)).resolves.toMatchObject({
+      kind: "non_product",
+      decisionBasis: [expect.objectContaining({ rule: "explicit_adapter_record_type" })],
+    });
+    await expect(
+      decideIdentity(input({ recordType: "labor charge" as "labor" }), snapshot([]), genericIdentityPlugin),
+    ).resolves.toMatchObject({ kind: "abstain" });
+  });
 
-    expect(decision).toMatchObject({ kind: "invalid", candidates: [] });
+  it("returns invalid malformed runtime input without normalizing it", async () => {
+    const normalize = vi.fn(() => {
+      throw new Error("invalid input must not normalize");
+    });
+    const plugin = { ...genericIdentityPlugin, normalize };
+    const malformed = { rawRecordFingerprint: "bad-row", identifiers: "not-an-array" } as unknown as IdentityInput;
+    const decision = await decideIdentity(malformed, snapshot([candidate()]), plugin);
+
+    expect(normalize).not.toHaveBeenCalled();
+    expect(decision).toMatchObject({ kind: "invalid", candidates: [], normalizedKeys: [], sourceRecordFingerprint: "bad-row" });
   });
 
   it("orders candidates and fingerprints independently of source candidate order", async () => {
@@ -143,6 +165,32 @@ describe("identity decision engine", () => {
     expect(decision.candidates.map((entry) => entry.productId)).toEqual(["product-1", "product-2"]);
   });
 
+  it("uses the qualifying immutable evidence deterministically for duplicate product records", async () => {
+    const provider = candidate({ verificationTier: "suggested", automaticEligible: false, evidenceId: "provider-evidence" });
+    const verified = candidate({ evidenceId: "verified-evidence", evidenceVersion: "v2" });
+    const providerFirst = await decideIdentity(input(), snapshot([provider, verified]), genericIdentityPlugin);
+    const verifiedFirst = await decideIdentity(input(), snapshot([verified, provider]), genericIdentityPlugin);
+
+    expect(providerFirst).toEqual(verifiedFirst);
+    expect(providerFirst.decisionBasis).toEqual([
+      { rule: "unique_immutable_exact_evidence", evidenceId: "verified-evidence", evidenceVersion: "v2" },
+    ]);
+  });
+
+  it("uses the common fingerprint projection for contradicted abstentions", async () => {
+    const decision = await decideIdentity(
+      input({ categoryHint: "hardware" }),
+      snapshot([candidate({ category: "apparel" })]),
+      genericIdentityPlugin,
+    );
+
+    expect(decision.kind).toBe("abstain");
+    await expect(canonicalSha256(identityDecisionFingerprintProjection(decision))).resolves.toBe(decision.decisionFingerprint);
+    await expect(
+      decideIdentity(input({ categoryHint: "hardware" }), snapshot([candidate({ category: "apparel" })]), genericIdentityPlugin),
+    ).resolves.toMatchObject({ decisionFingerprint: decision.decisionFingerprint });
+  });
+
   it("uses a read-only source once for a batch and preserves input order", async () => {
     const first = input({ rawRecordFingerprint: "row-1" });
     const second = input({ rawRecordFingerprint: "row-2" });
@@ -160,5 +208,22 @@ describe("identity decision engine", () => {
     expect(decisions).toHaveLength(2);
     expect(decisions.map((decision) => decision.kind)).toEqual(["automatic", "abstain"]);
     expect(decisions.map((decision) => decision.sourceRecordFingerprint)).toEqual(["row-1", "row-2"]);
+  });
+
+  it("accounts for malformed batch rows without sending them to the candidate source", async () => {
+    const valid = input({ rawRecordFingerprint: "valid-row" });
+    const malformed = { rawRecordFingerprint: "invalid-row", identifiers: "not-an-array" } as unknown as IdentityInput;
+    const lookupBatch = vi.fn<IdentityCandidateSource["lookupBatch"]>().mockResolvedValue({
+      catalogVersion: "catalog-v1",
+      catalogSnapshotHash: "snapshot-1",
+      candidatesByRecord: new Map([["valid-row", [candidate()]]]),
+    });
+
+    const decisions = await decideIdentityBatch([valid, malformed], { readonlyOnly: true, lookupBatch });
+
+    expect(lookupBatch).toHaveBeenCalledOnce();
+    expect(lookupBatch).toHaveBeenCalledWith([valid]);
+    expect(decisions.map((decision) => decision.kind)).toEqual(["automatic", "invalid"]);
+    expect(decisions.map((decision) => decision.sourceRecordFingerprint)).toEqual(["valid-row", "invalid-row"]);
   });
 });

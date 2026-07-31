@@ -1,5 +1,5 @@
 import { canonicalSha256, validateIdentityInput } from "./canonical";
-import { pluginFor, type IdentityCategoryPlugin } from "./plugins";
+import { genericIdentityPlugin, pluginFor, type IdentityCategoryPlugin } from "./plugins";
 import type {
   EvidenceAuthority,
   IdentityCandidate,
@@ -30,6 +30,14 @@ interface CandidateGroup {
   semanticScore: number;
   evidence: string[];
   missing: string[];
+  qualifyingEvidence?: ImmutableEvidence;
+}
+
+interface ImmutableEvidence {
+  candidateEvidenceId: string;
+  candidateEvidenceVersion: string;
+  identifierEvidenceId: string;
+  identifierEvidenceVersion: string;
 }
 
 function normalizedCategory(value: string | undefined): string {
@@ -44,19 +52,34 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort();
 }
 
-function immutableExactEvidence(input: IdentityInput, candidate: IdentityCandidate): boolean {
-  if (!candidate.automaticEligible || !candidate.exactCodeEvidence) return false;
+function evidenceKey(evidence: ImmutableEvidence): string {
+  return [
+    evidence.candidateEvidenceId,
+    evidence.candidateEvidenceVersion,
+    evidence.identifierEvidenceId,
+    evidence.identifierEvidenceVersion,
+  ].join("\u0000");
+}
+
+function immutableExactEvidence(input: IdentityInput, candidate: IdentityCandidate): ImmutableEvidence | undefined {
+  if (!candidate.automaticEligible || !candidate.exactCodeEvidence) return undefined;
   if (
     candidate.verificationTier !== "approved" &&
     candidate.verificationTier !== "human_verified" &&
     candidate.verificationTier !== "exact_code_verified"
   ) {
-    return false;
+    return undefined;
   }
   const inputKeys = new Set(input.identifiers.map(identifierKey));
-  return candidate.identifiers.some(
-    (identifier) => inputKeys.has(identifierKey(identifier)) && immutableAuthorities.has(identifier.evidenceAuthority),
-  );
+  return candidate.identifiers
+    .filter((identifier) => inputKeys.has(identifierKey(identifier)) && immutableAuthorities.has(identifier.evidenceAuthority))
+    .map((identifier) => ({
+      candidateEvidenceId: candidate.evidenceId,
+      candidateEvidenceVersion: candidate.evidenceVersion,
+      identifierEvidenceId: identifier.evidenceId,
+      identifierEvidenceVersion: identifier.evidenceVersion,
+    }))
+    .sort((left, right) => evidenceKey(left).localeCompare(evidenceKey(right)))[0];
 }
 
 function compareGroups(left: CandidateGroup, right: CandidateGroup): number {
@@ -69,9 +92,8 @@ function initialDecision(input: IdentityInput, snapshot: IdentityCandidateSnapsh
   IdentityDecision,
   "kind" | "targetProductId" | "selectedCandidateId" | "candidates" | "decisionBasis" | "constraintOutcomes" | "decisionFingerprint"
 > {
-  const normalized = plugin.normalize(input);
   return {
-    normalizedKeys: normalized.identifiers.map((identifier) => ({
+    normalizedKeys: input.identifiers.map((identifier) => ({
       type: identifier.type,
       ...(identifier.namespace ? { namespace: identifier.namespace } : {}),
       value: identifier.normalized,
@@ -83,24 +105,52 @@ function initialDecision(input: IdentityInput, snapshot: IdentityCandidateSnapsh
   };
 }
 
+function sourceRecordFingerprint(input: unknown): string {
+  if (input && typeof input === "object" && typeof (input as { rawRecordFingerprint?: unknown }).rawRecordFingerprint === "string") {
+    return (input as { rawRecordFingerprint: string }).rawRecordFingerprint;
+  }
+  return "";
+}
+
+function invalidDecisionMetadata(
+  input: unknown,
+  snapshot: IdentityCandidateSnapshot,
+  plugin: IdentityCategoryPlugin,
+): Omit<IdentityDecision, "kind" | "targetProductId" | "selectedCandidateId" | "candidates" | "decisionBasis" | "constraintOutcomes" | "decisionFingerprint"> {
+  return {
+    normalizedKeys: [],
+    candidateSnapshotHash: snapshot.catalogSnapshotHash,
+    engineVersion,
+    pluginVersion: plugin.version,
+    sourceRecordFingerprint: sourceRecordFingerprint(input),
+  };
+}
+
+/** The canonical, undefined-free projection used for every decision fingerprint. */
+export function identityDecisionFingerprintProjection(
+  decision: Omit<IdentityDecision, "decisionFingerprint"> | IdentityDecision,
+): Record<string, unknown> {
+  return {
+    kind: decision.kind,
+    ...(decision.targetProductId ? { targetProductId: decision.targetProductId } : {}),
+    candidates: decision.candidates,
+    ...(decision.selectedCandidateId ? { selectedCandidateId: decision.selectedCandidateId } : {}),
+    decisionBasis: decision.decisionBasis,
+    normalizedKeys: decision.normalizedKeys,
+    constraintOutcomes: decision.constraintOutcomes,
+    candidateSnapshotHash: decision.candidateSnapshotHash,
+    engineVersion: decision.engineVersion,
+    pluginVersion: decision.pluginVersion,
+    sourceRecordFingerprint: decision.sourceRecordFingerprint,
+  };
+}
+
 async function finalize(
   base: Omit<IdentityDecision, "decisionFingerprint">,
 ): Promise<IdentityDecision> {
   return {
     ...base,
-    decisionFingerprint: await canonicalSha256({
-      kind: base.kind,
-      ...(base.targetProductId ? { targetProductId: base.targetProductId } : {}),
-      candidates: base.candidates,
-      ...(base.selectedCandidateId ? { selectedCandidateId: base.selectedCandidateId } : {}),
-      decisionBasis: base.decisionBasis,
-      normalizedKeys: base.normalizedKeys,
-      constraintOutcomes: base.constraintOutcomes,
-      candidateSnapshotHash: base.candidateSnapshotHash,
-      engineVersion: base.engineVersion,
-      pluginVersion: base.pluginVersion,
-      sourceRecordFingerprint: base.sourceRecordFingerprint,
-    }),
+    decisionFingerprint: await canonicalSha256(identityDecisionFingerprintProjection(base)),
   };
 }
 
@@ -121,6 +171,21 @@ function terminal(
   });
 }
 
+function invalidTerminal(
+  input: unknown,
+  snapshot: IdentityCandidateSnapshot,
+  plugin: IdentityCategoryPlugin,
+  errors: string[],
+): Promise<IdentityDecision> {
+  return finalize({
+    ...invalidDecisionMetadata(input, snapshot, plugin),
+    kind: "invalid",
+    candidates: [],
+    decisionBasis: [{ rule: "input_validation", evidenceId: errors.join("|"), evidenceVersion: engineVersion }],
+    constraintOutcomes: [],
+  });
+}
+
 /** Makes a pure, replayable identity decision from a previously read candidate snapshot. */
 export async function decideIdentity(
   input: IdentityInput,
@@ -128,9 +193,12 @@ export async function decideIdentity(
   plugin: IdentityCategoryPlugin,
 ): Promise<IdentityDecision> {
   const errors = validateIdentityInput(input);
-  if (errors.length > 0) return terminal(input, snapshot, plugin, "invalid", "input_validation", errors.join("|"));
+  if (errors.length > 0) return invalidTerminal(input, snapshot, plugin, errors);
 
   const normalized = plugin.normalize(input);
+  if (normalized.recordType && normalized.recordType !== "product" && nonProductCategories.has(normalized.recordType)) {
+    return terminal(normalized, snapshot, plugin, "non_product", "explicit_adapter_record_type", normalized.recordType);
+  }
   const category = normalizedCategory(normalized.categoryHint);
   if (nonProductCategories.has(category)) return terminal(normalized, snapshot, plugin, "non_product", "allowlisted_category", category);
 
@@ -156,7 +224,11 @@ export async function decideIdentity(
       missing: [],
     };
     existing.candidates.push(candidate);
-    existing.exactImmutable ||= immutableExactEvidence(normalized, candidate);
+    const immutableEvidence = immutableExactEvidence(normalized, candidate);
+    existing.exactImmutable ||= Boolean(immutableEvidence);
+    if (immutableEvidence && (!existing.qualifyingEvidence || evidenceKey(immutableEvidence) < evidenceKey(existing.qualifyingEvidence))) {
+      existing.qualifyingEvidence = immutableEvidence;
+    }
     existing.semanticScore = Math.max(existing.semanticScore, semantic.score);
     existing.evidence.push(candidate.evidenceId, ...candidate.identifiers.map((identifier) => identifier.evidenceId));
     existing.missing.push(...constraint.missing);
@@ -172,15 +244,19 @@ export async function decideIdentity(
   });
   if (groups.length === 0) {
     const hasRejection = orderedOutcomes.some((outcome) => outcome.result.outcome === "reject");
-    const decision = await terminal(
-      normalized,
-      snapshot,
-      plugin,
-      "abstain",
-      hasRejection ? "all_candidates_contradicted" : "no_viable_candidate",
-      snapshot.catalogSnapshotHash,
-    );
-    return { ...decision, constraintOutcomes: orderedOutcomes, decisionFingerprint: await canonicalSha256({ ...decision, constraintOutcomes: orderedOutcomes }) };
+    return finalize({
+      ...initialDecision(normalized, snapshot, plugin),
+      kind: "abstain",
+      candidates: [],
+      decisionBasis: [
+        {
+          rule: hasRejection ? "all_candidates_contradicted" : "no_viable_candidate",
+          evidenceId: snapshot.catalogSnapshotHash,
+          evidenceVersion: snapshot.catalogVersion,
+        },
+      ],
+      constraintOutcomes: orderedOutcomes,
+    });
   }
 
   const candidates = groups.map((group, index) => ({
@@ -202,8 +278,8 @@ export async function decideIdentity(
       ? [
           {
             rule: "unique_immutable_exact_evidence",
-            evidenceId: selected.candidates[0]!.evidenceId,
-            evidenceVersion: selected.candidates[0]!.evidenceVersion,
+            evidenceId: selected.qualifyingEvidence!.candidateEvidenceId,
+            evidenceVersion: selected.qualifyingEvidence!.candidateEvidenceVersion,
           },
         ]
       : [{ rule: "review_ranked_candidates", evidenceId: snapshot.catalogSnapshotHash, evidenceVersion: snapshot.catalogVersion }],
@@ -220,7 +296,7 @@ export async function decideIdentityBatch(
   const lookup = await source.lookupBatch(validInputs);
   return Promise.all(
     inputs.map((input) => {
-      const plugin = pluginFor(input);
+      const plugin = validateIdentityInput(input).length === 0 ? pluginFor(input) : genericIdentityPlugin;
       return decideIdentity(
         input,
         {

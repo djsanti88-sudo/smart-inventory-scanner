@@ -40,6 +40,8 @@ export interface IdentityInput {
   sourceFileOrdinal: number;
   sheetName: string;
   sourceRowNumber: number;
+  /** Adapter-declared structural row kind; arbitrary text never classifies a row as non-product. */
+  recordType?: "product" | "labor" | "service" | "fee" | "subtotal" | "header";
   categoryHint?: string;
   identifiers: ScopedIdentifier[];
   brand?: string;
