@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { lookupAllLocalBarcodes, lookupAllLocalPartNumbers, type LocalIdentitySnapshot } from "./localSnapshotIndex";
 import { createReadOnlyCandidateSource, type ApprovedLinkLookupResult } from "./readOnlyCandidateSource";
+import { decideIdentity } from "@/services/identity/engine";
+import { genericIdentityPlugin } from "@/services/identity/plugins";
 import type { IdentityCandidate, IdentityInput, ScopedIdentifier } from "@/services/identity/types";
 
 const identifier = (overrides: Partial<ScopedIdentifier> = {}): ScopedIdentifier => ({
@@ -64,6 +66,9 @@ const approvedLink = (targetProductId: string, overrides: Partial<ApprovedLinkLo
   normalizedValue: "012345678905",
   status: "approved",
   version: 1,
+  evidenceId: `link-${targetProductId}`,
+  evidenceVersion: "v1",
+  automaticEligible: true,
   revokedAt: undefined,
   targetProductId,
   currentTarget: candidate(targetProductId),
@@ -112,10 +117,10 @@ describe("read-only local identity candidate source", () => {
       vendorId: scoped.vendorId,
       identifiers: scoped.identifiers,
     });
-    expect(result.candidatesByRecord.get(scoped.rawRecordFingerprint)).toContainEqual(candidate("tenant-product"));
+    expect(result.candidatesByRecord.get(scoped.rawRecordFingerprint)).toContainEqual(expect.objectContaining({ productId: "tenant-product" }));
   });
 
-  it("merges same-product barcode, part-number, and link hits deterministically while retaining all evidence", async () => {
+  it("keeps same-product barcode, part-number, and link evidence atomic in deterministic order", async () => {
     const barcodeHit = candidate("product-a", { evidenceId: "barcode-evidence" });
     const partNumberHit = candidate("product-a", {
       type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", evidenceId: "part-number-evidence",
@@ -128,19 +133,69 @@ describe("read-only local identity candidate source", () => {
     const source = createReadOnlyCandidateSource({
       snapshot: local,
       lookupApprovedLinks: vi.fn().mockResolvedValue([
-        approvedLink("product-a", { currentTarget: candidate("product-a", { evidenceId: "link-evidence" }) }),
+        approvedLink("product-a", { evidenceId: "link-evidence", currentTarget: candidate("product-a", { evidenceId: "link-evidence" }) }),
       ]),
     });
     const forward = await source.lookupBatch([input({ identifiers: [identifier(), identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100" })] })]);
     const reverse = await source.lookupBatch([input({ identifiers: [identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100" }), identifier()] })]);
 
     const forwardCandidates = forward.candidatesByRecord.get("row-1")!;
-    expect(forwardCandidates.map((entry) => entry.productId)).toEqual(["product-a", "product-b"]);
+    expect(forwardCandidates.map((entry) => entry.productId)).toEqual(["product-a", "product-a", "product-a", "product-b"]);
     expect(reverse.candidatesByRecord.get("row-1")).toEqual(forwardCandidates);
-    expect((forwardCandidates[0] as IdentityCandidate & { sourceEvidence: unknown[] }).sourceEvidence).toHaveLength(3);
-    expect(forwardCandidates[0]?.identifiers.map((entry) => entry.evidenceId).sort()).toEqual([
+    expect(forwardCandidates.filter((entry) => entry.productId === "product-a").flatMap((entry) => entry.identifiers).map((entry) => entry.evidenceId).sort()).toEqual([
       "barcode-evidence", "link-evidence", "part-number-evidence",
     ]);
+  });
+
+  it("does not synthesize automatic authority by combining eligibility and immutable evidence from different records", async () => {
+    const eligibleButUnverified = {
+      ...candidate("product-a"),
+      identifiers: [identifier({ evidenceAuthority: "vendor_import" })],
+    };
+    const immutableButIneligible = {
+      ...candidate("product-a"),
+      automaticEligible: false,
+      identifiers: [identifier({ evidenceAuthority: "human_verified_master" })],
+    };
+    const local: LocalIdentitySnapshot = {
+      ...snapshot(),
+      barcodeCandidates: new Map([["012345678905", [eligibleButUnverified, immutableButIneligible]]]),
+    };
+    const source = createReadOnlyCandidateSource({ snapshot: local, lookupApprovedLinks: vi.fn().mockResolvedValue([]) });
+
+    const candidates = (await source.lookupBatch([input()])).candidatesByRecord.get("row-1")!;
+    const decision = await decideIdentity(input(), { catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-1", candidates }, genericIdentityPlugin);
+
+    expect(candidates).toHaveLength(2);
+    expect(decision.kind).toBe("review");
+  });
+
+  it("materializes an approved alias as atomic tenant-link evidence even when the target catalog lacks that alias", async () => {
+    const targetWithoutAlias = candidate("tenant-product", { raw: "OTHER-ALIAS", normalized: "OTHER-ALIAS" });
+    const source = createReadOnlyCandidateSource({
+      snapshot: snapshot(),
+      lookupApprovedLinks: vi.fn().mockResolvedValue([
+        approvedLink("tenant-product", { evidenceId: "approved-link-1", evidenceVersion: "link-v3", currentTarget: targetWithoutAlias }),
+      ]),
+    });
+
+    const candidates = (await source.lookupBatch([input()])).candidatesByRecord.get("row-1")!;
+    const linkCandidate = candidates.find((entry) => entry.productId === "tenant-product")!;
+
+    expect(linkCandidate).toMatchObject({
+      businessScope: "tenant",
+      verificationTier: "approved",
+      automaticEligible: true,
+      exactCodeEvidence: true,
+      evidenceId: "approved-link-1",
+      evidenceVersion: "link-v3",
+      identifiers: [expect.objectContaining({
+        normalized: "012345678905",
+        evidenceAuthority: "approved_tenant_link",
+        evidenceId: "approved-link-1",
+        evidenceVersion: "link-v3",
+      })],
+    });
   });
 
   it("excludes malformed, non-approved, revoked, cross-scoped, deleted, and conflicting approved links", async () => {

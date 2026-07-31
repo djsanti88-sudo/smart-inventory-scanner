@@ -42,22 +42,13 @@ export interface ApprovedLinkLookupResult {
   normalizedValue: string;
   status: "proposed" | "approved" | "rejected" | "revoked";
   version: number;
+  evidenceId: string;
+  evidenceVersion: string;
+  automaticEligible: boolean;
   revokedAt?: string;
   targetProductId: string;
   /** Null means the target was deleted or is otherwise no longer available. */
   currentTarget: IdentityCandidate | null;
-}
-
-interface MergedIdentityCandidate extends IdentityCandidate {
-  /** Additive provenance retained when multiple local entries resolve to one product. */
-  sourceEvidence: Array<{
-    evidenceId: string;
-    evidenceVersion: string;
-    verificationTier: IdentityCandidate["verificationTier"];
-    exactCodeEvidence: boolean;
-    automaticEligible: boolean;
-    identifiers: ScopedIdentifier[];
-  }>;
 }
 
 function identifierKey(identifier: ScopedIdentifier): string {
@@ -107,33 +98,17 @@ function candidateSortKey(candidate: IdentityCandidate): string {
   });
 }
 
-function mergeCandidates(candidates: IdentityCandidate[]): IdentityCandidate[] {
-  const grouped = new Map<string, IdentityCandidate[]>();
-  for (const candidate of candidates) {
-    const group = grouped.get(candidate.productId);
-    if (group) group.push(candidate);
-    else grouped.set(candidate.productId, [candidate]);
-  }
-  return [...grouped.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([, group]) => {
-      const ordered = [...group].sort((left, right) => candidateSortKey(left).localeCompare(candidateSortKey(right)));
-      const primary = ordered[0]!;
-      const identifiers = ordered.flatMap((candidate) => candidate.identifiers)
-        .filter((identifier, index, values) => values.findIndex((other) => identifierKey(other) === identifierKey(identifier)
-          && other.evidenceId === identifier.evidenceId && other.evidenceVersion === identifier.evidenceVersion) === index)
-        .sort((left, right) => `${identifierKey(left)}\u0000${left.evidenceId}\u0000${left.evidenceVersion}`.localeCompare(`${identifierKey(right)}\u0000${right.evidenceId}\u0000${right.evidenceVersion}`));
-      const sourceEvidence = ordered.map((candidate) => ({
-        evidenceId: candidate.evidenceId,
-        evidenceVersion: candidate.evidenceVersion,
-        verificationTier: candidate.verificationTier,
-        exactCodeEvidence: candidate.exactCodeEvidence,
-        automaticEligible: candidate.automaticEligible,
-        identifiers: [...candidate.identifiers].sort((left, right) => identifierKey(left).localeCompare(identifierKey(right))),
-      }));
-      if (ordered.length === 1) return primary;
-      return { ...primary, identifiers, sourceEvidence } satisfies MergedIdentityCandidate;
-    });
+/**
+ * Evidence records remain atomic: ordering/deduplication can remove only an identical record,
+ * never combine an eligible flag from one record with an immutable identifier from another.
+ */
+function orderAtomicCandidates(candidates: IdentityCandidate[]): IdentityCandidate[] {
+  const ordered = [...candidates].sort((left, right) => {
+    const product = left.productId.localeCompare(right.productId);
+    return product || candidateSortKey(left).localeCompare(candidateSortKey(right));
+  });
+  return ordered.filter((candidate, index) => index === 0
+    || candidateSortKey(candidate) !== candidateSortKey(ordered[index - 1]!));
 }
 
 function isValidApprovedLink(
@@ -145,14 +120,19 @@ function isValidApprovedLink(
   if (link.businessId !== scope.businessId || link.sourceSystem !== scope.sourceSystem
     || link.sourceSignature !== scope.sourceSignature || link.vendorId !== scope.vendorId
     || link.status !== "approved" || link.revokedAt !== undefined || !Number.isSafeInteger(link.version) || (link.version ?? 0) < 1
-    || typeof link.namespace !== "string" || typeof link.normalizedValue !== "string" || !link.normalizedValue
+    || typeof link.evidenceId !== "string" || !link.evidenceId || typeof link.evidenceVersion !== "string" || !link.evidenceVersion
+    || typeof link.automaticEligible !== "boolean" || typeof link.namespace !== "string" || typeof link.normalizedValue !== "string" || !link.normalizedValue
     || !barcodeIdentifierTypes.has(link.identifierType as string) && link.identifierType !== "manufacturer_part_number") return false;
   if (!link.targetProductId || !isCompleteIdentityCandidate(link.currentTarget) || link.currentTarget.productId !== link.targetProductId) return false;
   return scope.identifiers.some((identifier) => identifier.type === link.identifierType
     && (identifier.namespace ?? "") === link.namespace && identifier.normalized === link.normalizedValue);
 }
 
-function approvedLinkCandidates(results: unknown[], scope: ApprovedLinkLookupInput): IdentityCandidate[] {
+function approvedLinkCandidates(
+  results: unknown[],
+  scope: ApprovedLinkLookupInput,
+  snapshot: LocalIdentitySnapshot,
+): IdentityCandidate[] {
   const valid = results.filter((result): result is ApprovedLinkLookupResult => isValidApprovedLink(result, scope));
   const targetsByIdentifier = new Map<string, Set<string>>();
   for (const link of valid) {
@@ -162,7 +142,32 @@ function approvedLinkCandidates(results: unknown[], scope: ApprovedLinkLookupInp
     targetsByIdentifier.set(key, targets);
   }
   if ([...targetsByIdentifier.values()].some((targets) => targets.size > 1)) return [];
-  return valid.map((link) => link.currentTarget!);
+  return valid.map((link) => {
+    const matchedIdentifier = scope.identifiers.find((identifier) => identifier.type === link.identifierType
+      && (identifier.namespace ?? "") === link.namespace && identifier.normalized === link.normalizedValue)!;
+    const target = link.currentTarget!;
+    return {
+      ...target,
+      businessScope: "tenant",
+      verificationTier: "approved",
+      automaticEligible: link.automaticEligible,
+      evidenceId: link.evidenceId,
+      evidenceVersion: link.evidenceVersion,
+      exactCodeEvidence: true,
+      identifiers: [{
+        type: link.identifierType,
+        raw: matchedIdentifier.raw,
+        normalized: matchedIdentifier.normalized,
+        ...(link.namespace ? { namespace: link.namespace } : {}),
+        source: "approved-tenant-link",
+        evidenceAuthority: "approved_tenant_link",
+        evidenceId: link.evidenceId,
+        evidenceVersion: link.evidenceVersion,
+      }],
+      catalogVersion: snapshot.catalogVersion,
+      catalogSnapshotHash: snapshot.catalogSnapshotHash,
+    };
+  });
 }
 
 /**
@@ -187,8 +192,8 @@ export function createReadOnlyCandidateSource(
           vendorId: input.vendorId,
           identifiers,
         };
-        const links = approvedLinkCandidates(await dependencies.lookupApprovedLinks(scope), scope);
-        return [input.rawRecordFingerprint, mergeCandidates([...snapshotCandidates(snapshot, identifiers), ...links])];
+        const links = approvedLinkCandidates(await dependencies.lookupApprovedLinks(scope), scope, snapshot);
+        return [input.rawRecordFingerprint, orderAtomicCandidates([...snapshotCandidates(snapshot, identifiers), ...links])];
       }));
 
       return {
