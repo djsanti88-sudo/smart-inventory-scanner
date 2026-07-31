@@ -169,7 +169,7 @@ describe("NeedsReviewTable - review queue scaling", () => {
     expect(screen.getByText("100 reviews")).toBeInTheDocument();
   });
 
-  it("normalizes the stored page after the queue shrinks so one Previous click reaches the first page", () => {
+  it("normalizes the stored page after the queue shrinks so one Previous click reaches the first page", async () => {
     const reviews = Array.from({ length: 100 }, (_, index) =>
       review({ id: `shrink-${index + 1}`, cleanCode: `SHRINK-${index + 1}` }),
     );
@@ -179,7 +179,9 @@ describe("NeedsReviewTable - review queue scaling", () => {
     for (let page = 1; page < 4; page += 1) {
       fireEvent.click(screen.getByRole("button", { name: "Next reviews" }));
     }
-    act(() => useScanStore.setState({ needsReviewQueue: reviews.slice(0, 26) }));
+    await act(async () => {
+      useScanStore.setState({ needsReviewQueue: reviews.slice(0, 26) });
+    });
 
     expect(screen.getByTestId("review-row-SHRINK-26")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Previous reviews" }));

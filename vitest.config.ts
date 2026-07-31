@@ -52,6 +52,7 @@ export default defineConfig({
             "scripts/tire-db-repair/09_promote_preflight.test.mjs",
             "scripts/tire-db-repair/10_promote_execute.test.mjs",
             "scripts/tire-db-repair/11_twin_columns.test.mjs",
+            "scripts/tire-db-repair/12_same_uid_blank_propagation.test.mjs",
             "scripts/tire-db-repair/model_styling.test.mjs",
             "scripts/tire-db-repair/validate.test.mjs",
           ],
