@@ -6,6 +6,13 @@ import { applyComposedIdentityImport, authorizeLocalIdentityApply, isLocalIdenti
 
 function json(body: unknown, status: number): NextResponse { return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } }); }
 const maxApplyBodyBytes = 32 * 1024 * 1024;
+async function readBoundedBody(request: Request): Promise<Uint8Array> {
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader(); const parts: Uint8Array[] = []; let size = 0;
+  try { for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.byteLength; if (size > maxApplyBodyBytes) { await reader.cancel("apply_body_too_large"); throw new Error("apply_body_too_large"); } parts.push(next.value); } }
+  finally { reader.releaseLock(); }
+  const body = new Uint8Array(size); let offset = 0; for (const part of parts) { body.set(part, offset); offset += part.byteLength; } return body;
+}
 function request(value: unknown): value is ApplyIdentityImportInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const body = value as Record<string, unknown>;
@@ -16,7 +23,7 @@ export function createIdentityApplyRoute(dependencies: { enabled: () => boolean;
     if (!dependencies.enabled()) return json({ error: "Identity apply is unavailable." }, 404);
     const declared = Number(httpRequest.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxApplyBodyBytes) return json({ error: "Identity apply body is too large." }, 400);
-    let body: unknown; try { const bytes = await httpRequest.arrayBuffer(); if (bytes.byteLength > maxApplyBodyBytes) return json({ error: "Identity apply body is too large." }, 400); body = JSON.parse(new TextDecoder().decode(bytes)) as unknown; } catch { return json({ error: "Body must be valid JSON." }, 400); }
+    let body: unknown; try { body = JSON.parse(new TextDecoder().decode(await readBoundedBody(httpRequest))) as unknown; } catch (error) { return json({ error: error instanceof Error && error.message === "apply_body_too_large" ? "Identity apply body is too large." : "Body must be valid JSON." }, 400); }
     if (!request(body)) return json({ error: "Identity apply request was invalid." }, 400);
     let actor: ApplyActor | undefined; try { actor = await dependencies.authorize(httpRequest, { ...body, corrections: body.corrections ?? [] }); } catch (error) { return json({ error: error instanceof Error && error.message === "apply_nonmember" ? "Business access is required." : "Identity apply is temporarily unavailable." }, error instanceof Error && error.message === "apply_nonmember" ? 403 : 503); }
     if (!actor) return json({ error: "Sign in is required." }, 401);
@@ -25,7 +32,8 @@ export function createIdentityApplyRoute(dependencies: { enabled: () => boolean;
     catch (error) {
       const code = error instanceof Error ? error.message : "";
       const conflict = new Set(["apply_in_progress", "apply_idempotency_conflict", "apply_target_stale", "apply_correction_target_invalid", "apply_preview_invalidated"]);
-      return json({ error: "Identity apply was rejected.", code: code || undefined }, conflict.has(code) ? 409 : 400);
+      const publicCode = conflict.has(code) ? code : "apply_internal_error";
+      return json({ error: "Identity apply was rejected.", code: publicCode }, conflict.has(code) ? 409 : 400);
     }
   };
 }

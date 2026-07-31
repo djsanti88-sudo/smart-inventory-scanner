@@ -25,4 +25,11 @@ describe("POST /api/identity/apply", () => {
     const stale = createIdentityApplyRoute({ enabled: () => true, authorize: async () => actor, apply: async () => { throw new Error("apply_target_stale"); } });
     expect((await stale(request())).status).toBe(409);
   });
+
+  it("never exposes unknown internal apply errors", async () => {
+    const handler = createIdentityApplyRoute({ enabled: () => true, authorize: async () => ({ actorId: "owner", businessId: "shop-a", role: "owner" }), apply: async () => { throw new Error("database password leaked"); } });
+    const response = await handler(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ signedPayloads: ["token"], mode: "reconcile" }) }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Identity apply was rejected.", code: "apply_internal_error" });
+  });
 });
