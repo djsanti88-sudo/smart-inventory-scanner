@@ -69,15 +69,15 @@ describe("BusinessContextGate durable UID namespace safety", () => {
     expect(mocks.setBusinessContext).toHaveBeenCalledWith("shop-1", "user-1");
   });
 
-  it("fails closed when the durable UID namespace cannot be inspected", async () => {
+  it("pauses legacy adoption when the durable UID namespace cannot be inspected", async () => {
     mocks.getPersistedStatePresence.mockResolvedValue("unavailable");
     mocks.rehydrateForUid.mockResolvedValue(undefined);
 
     render(<BusinessContextGate><div data-testid="scanner">scanner</div></BusinessContextGate>);
 
     await waitFor(() => expect(mocks.getPersistedStatePresence).toHaveBeenCalledWith("sis-scan-user-1"));
-    expect(screen.queryByTestId("adopt-banner")).toBeNull();
-    await waitFor(() => expect(mocks.rehydrateForUid).toHaveBeenCalledWith("user-1"));
+    expect(await screen.findByTestId("business-context-error")).toBeInTheDocument();
+    expect(mocks.rehydrateForUid).not.toHaveBeenCalled();
   });
 
   it("continues durable UID hydration when localStorage methods throw", async () => {

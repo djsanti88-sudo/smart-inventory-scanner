@@ -31,7 +31,8 @@ export async function runSignOutFlow(
 ): Promise<boolean> {
   const left = await useScanStore.getState().prepareSignOut();
   if (!confirmFn(unsyncedSignOutMessage(left))) return false; // cancel aborts: no reset, no signOut
-  await useScanStore.getState().resetForSignOut();
+  const cleared = await useScanStore.getState().resetForSignOut();
+  if (cleared && typeof cleared === "object" && !cleared.cleared) return false;
   await signOut();
   redirect();
   return true;
@@ -46,6 +47,7 @@ export async function runSignOutFlow(
  * next session on this browser. The caller performs the redirect (deletion uses window.location.href).
  */
 export async function wipeAndSignOut(): Promise<void> {
-  await useScanStore.getState().resetForSignOut();
+  const cleared = await useScanStore.getState().resetForSignOut();
+  if (cleared && typeof cleared === "object" && !cleared.cleared) return;
   await signOut();
 }

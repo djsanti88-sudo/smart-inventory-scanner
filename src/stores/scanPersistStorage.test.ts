@@ -263,6 +263,12 @@ describe("active async persistence adapter", () => {
     const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => { throw new Error("private"); } });
     await expect(storage.setItem("sis-scan-owner", "scan")).resolves.toBeUndefined();
   });
+  it("reports a non-authoritative clear when neither durable nor local tombstone can be recorded", async () => {
+    const db = new Db(); db.fail = true;
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => { throw new Error("private"); } });
+
+    await expect(storage.removeItem("sis-scan-owner")).resolves.toMatchObject({ cleared: false });
+  });
   it("notifies an external status consumer when durable and local storage fail", async () => {
     const db = new Db(); db.fail = true;
     const status = vi.fn();

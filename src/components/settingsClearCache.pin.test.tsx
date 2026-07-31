@@ -93,6 +93,18 @@ describe("clear cache PIN gate", () => {
     expect(setTimeoutSpy.mock.calls.filter(([, delay]) => delay === 1400)).toHaveLength(reloadCountBefore + 1);
   });
 
+  it("shows a retryable error instead of success when no authoritative clear can be recorded", async () => {
+    storeState.settings.ownerPinHash = "";
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    clearLocalCache.mockResolvedValue({ cleared: false });
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId("clear-cache"));
+
+    expect(await screen.findByTestId("clear-cache-error")).toHaveTextContent("could not safely clear");
+    expect(screen.queryByTestId("clear-cache-message")).toBeNull();
+  });
+
   it("rejects a WRONG PIN: does NOT clear, and shows the visible 'Wrong PIN' error (F3)", async () => {
     verifyOwnerPin.mockResolvedValue(false); // owner PIN check fails
     vi.spyOn(window, "confirm").mockReturnValue(true);

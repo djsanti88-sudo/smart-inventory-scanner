@@ -84,6 +84,11 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
           : await getPersistedStatePresence(uidPersistKey);
         const alreadyOwn = localUidMarkerPresence !== "absent" || durablePresence !== "absent";
         if (!active) return;
+        if (legacyPresence === "found" && durablePresence === "unavailable") {
+          completed = true;
+          setStatus("error");
+          return;
+        }
         if (legacyPresence === "found" && !alreadyOwn) {
           completed = true;
           setPendingCtx({ businessId: membership.businessId, uid: user.uid });

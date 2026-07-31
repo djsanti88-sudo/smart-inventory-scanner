@@ -97,6 +97,16 @@ describe("runSignOutFlow", () => {
     expect(signOut).not.toHaveBeenCalled();
     expect(redirect).not.toHaveBeenCalled();
   });
+
+  it("does not sign out or redirect when the local clear is not authoritative", async () => {
+    resetForSignOut.mockResolvedValue({ cleared: false });
+    const redirect = vi.fn();
+
+    await expect(runSignOutFlow(redirect, () => true)).resolves.toBe(false);
+
+    expect(signOut).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+  });
 });
 
 describe("wipeAndSignOut", () => {

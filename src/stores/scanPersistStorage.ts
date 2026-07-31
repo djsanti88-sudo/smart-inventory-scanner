@@ -25,6 +25,8 @@ export interface AsyncKeyValueDatabase {
   remove: (key: string) => Promise<void>;
 }
 
+export type PersistenceClearResult = { cleared: boolean; authority: "durable" | "local" | "none" };
+
 type AsyncDurableStorageOptions = {
   database: AsyncKeyValueDatabase | null;
   getLegacyStorage: () => Backing | null;
@@ -96,13 +98,17 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     }
   };
 
-  const legacySet = (name: string, value: string) => {
+  const legacySet = (name: string, value: string): boolean => {
     try {
-      options.getLegacyStorage()?.setItem(name, value);
+      const storage = options.getLegacyStorage();
+      if (!storage) return false;
+      storage.setItem(name, value);
+      return true;
     } catch {
       reportLegacyFailure();
       // Kept as a diagnostic supplement only. The store/UI status is the user-visible failure path.
       console.warn(`[scanStore] Could not persist '${name}' to local fallback storage.`);
+      return false;
     }
   };
 
@@ -149,17 +155,17 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       return false;
     }
   };
-  const writeTombstone = (name: string) => { tombstones.add(name); legacySet(tombstoneKey(name), "1"); };
-  const persistTombstone = async (name: string) => {
+  const writeTombstone = (name: string): boolean => { tombstones.add(name); return legacySet(tombstoneKey(name), "1"); };
+  const persistTombstone = async (name: string): Promise<boolean> => {
     if (!options.database) {
       reportDegraded();
-      return;
+      return false;
     }
     try {
       await options.database.set(tombstoneKey(name), "1");
-      reportAvailable();
+      reportAvailable(); return true;
     } catch {
-      reportDegraded();
+      reportDegraded(); return false;
     }
   };
   const clearTombstone = async (name: string, token: number) => {
@@ -270,9 +276,9 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       generationByKey.set(name, generationFor(name) + 1);
       legacyMarkersEnsured.delete(name);
       legacySnapshotsCleaned.delete(name);
-      writeTombstone(name);
+      const localTombstone = writeTombstone(name);
       return enqueue(name, async () => {
-      await persistTombstone(name);
+      const durableTombstone = await persistTombstone(name);
       if (options.database) {
         try {
           await options.database.remove(name);
@@ -284,6 +290,10 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         reportDegraded();
       }
       legacyRemove(name);
+      return {
+        cleared: durableTombstone || localTombstone,
+        authority: durableTombstone ? "durable" : localTombstone ? "local" : "none",
+      } satisfies PersistenceClearResult;
       });
     },
   } as DeferredStringStorage;
@@ -377,20 +387,4 @@ export function createNativeIndexedDbDatabase(): AsyncKeyValueDatabase | null {
     set: async (key, value) => { await run("readwrite", (store) => store.put(value, key)); },
     remove: async (key) => { await run("readwrite", (store) => store.delete(key)); },
   };
-}
-
-/** Browser-facing factory. SSR, tests, and private mode fall back to localStorage without throwing. */
-export function createIndexedDbScanPersistStorage(onStatusChange?: (status: PersistenceStatus) => void): StateStorage {
-  return createAsyncDurableStorage({
-    database: createNativeIndexedDbDatabase(),
-    getLegacyStorage: () => {
-      if (typeof window === "undefined") return null;
-      try {
-        return window.localStorage;
-      } catch {
-        return null;
-      }
-    },
-    onStatusChange: onStatusChange ?? setBrowserPersistenceStatus,
-  });
 }

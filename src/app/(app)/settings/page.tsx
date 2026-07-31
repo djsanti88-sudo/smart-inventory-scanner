@@ -64,6 +64,7 @@ export default function SettingsPage() {
   }, [isLocalDemo]);
 
   const [cacheMsg, setCacheMsg] = useState("");
+  const [cacheError, setCacheError] = useState("");
   const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
   const verifyOwnerPin = useScanStore((s) => s.verifyOwnerPin);
   const [pinPrompt, setPinPrompt] = useState(false);
@@ -72,10 +73,15 @@ export default function SettingsPage() {
 
   // The pre-existing clear-cache body, verbatim (AM-R9 preserved). The PIN gate wraps AROUND it.
   async function doClear() {
-    await clearLocalCache();
+    const cleared = await clearLocalCache();
+    if (cleared && typeof cleared === "object" && !cleared.cleared) {
+      setCacheError("We could not safely clear local data. Please try again.");
+      return;
+    }
     // AM-R9: the reconcile session is browser-local session state too - the same wipe clears it.
     useReconcileStore.getState().clearLocalCache();
     setCacheMsg("Local browser cache cleared. Cloud data was not deleted.");
+    setCacheError("");
     // Reload cleanly so cloud data re-loads fresh (and a poisoned alias that returns proves it is in
     // cloud data, to be fixed via the alias repair path, not local cache).
     if (typeof window !== "undefined") setTimeout(() => window.location.reload(), 1400);
@@ -489,6 +495,11 @@ export default function SettingsPage() {
         {cacheMsg && (
           <p className="mt-2 text-sm font-medium text-green-700" data-testid="clear-cache-message">
             {cacheMsg}
+          </p>
+        )}
+        {cacheError && (
+          <p className="mt-2 text-sm font-medium text-red-700" data-testid="clear-cache-error">
+            {cacheError}
           </p>
         )}
         {pinPrompt && (

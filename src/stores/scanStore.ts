@@ -86,7 +86,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createAsyncDurablePersistStorage, createNativeIndexedDbDatabase, setBrowserPersistenceStatus } from "@/stores/scanPersistStorage";
+import { createAsyncDurablePersistStorage, createNativeIndexedDbDatabase, setBrowserPersistenceStatus, type PersistenceClearResult } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
@@ -726,7 +726,7 @@ export interface ScanState {
   prepareSignOut: () => Promise<number>;
   /** Sign-out: wipes tenant state to the anon baseline, clears the selected-business key, removes the
    *  signed-out user's per-uid localStorage key, and re-points persist at the anon key. */
-  resetForSignOut: () => Promise<void>;
+  resetForSignOut: () => Promise<PersistenceClearResult>;
   /** Re-point persist at this uid's key and rehydrate (no legacy-blob migration). Returns a promise
    *  that resolves once rehydrate has applied, so callers can await it before reading state. */
   rehydrateForUid: (uid: string) => Promise<void>;
@@ -919,9 +919,9 @@ export interface ScanState {
   getProduct: (id: string | null) => Product | undefined;
   clearSession: () => void;
   /** Await the active namespace removal rather than Zustand's fire-and-forget clearStorage wrapper. */
-  clearPersistedState: () => Promise<void>;
+  clearPersistedState: () => Promise<PersistenceClearResult>;
   /** Dev/recovery action: wipe persisted + mock-backend state and reload clean seed data. */
-  clearLocalCache: () => Promise<void>;
+  clearLocalCache: () => Promise<PersistenceClearResult>;
   /** Remove the owner-selected recommended count rows (+ orphaned products/aliases). Snapshots for Undo. */
   applyCleanupSelections: (selectedCountIds: string[]) => { removed: number; backup: CleanupBackup | null };
   /** Convenience: apply all high-confidence (default-checked) recommendations. */
@@ -6798,16 +6798,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         },
 
       clearPersistedState: () => {
-        if (!deps.persistName) return Promise.resolve();
+        if (!deps.persistName) return Promise.resolve({ cleared: true, authority: "none" } as const);
         const persistApi = (useScanStore as unknown as {
           persist?: { getOptions?: () => { name?: string } };
         }).persist;
         const name = persistApi?.getOptions?.().name ?? deps.persistName;
         // Call the adapter directly: Zustand's persist.clearStorage() explicitly discards this promise.
-        return Promise.resolve(scanPersistStorage.removeItem(name)).then(
-          () => undefined,
-          () => undefined,
-        );
+        return Promise.resolve(scanPersistStorage.removeItem(name)) as Promise<PersistenceClearResult>;
       },
 
       clearLocalCache: () => {
