@@ -549,6 +549,11 @@ function carriedProvisionalBarcode(params: {
 // can request enrichment for the same freshly minted row in one scan flow; only one fetch ever fires.
 const enrichInFlight = new Set<string>();
 
+// Incremented at the actual Zustand persistence boundary for every app-store mutation that can
+// schedule a persisted snapshot. resetForSignOut uses this generation to detect more than feed edits:
+// async product enrichment, queue reconciliation, settings, and every other persisted-state update.
+let appPersistMutationEpoch = 0;
+
 function provisionalPlaceholderName(code: string): string {
   const ct = detectCodeType(code);
   const struct = decodeBarcodeStructure(code, ct);
@@ -1817,14 +1822,14 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           finishReset();
           return Promise.resolve({ cleared: true, authority: "none" } as const);
         }
-        const scanFeedAtClearStart = get().scanFeed;
+        const persistMutationEpochAtClearStart = appPersistMutationEpoch;
         return get().clearPersistedState().then((persistenceClear) => {
           if (!persistenceClear.cleared) return persistenceClear;
-          // A physical scan may arrive while IndexedDB is completing the clear. Because every scan
-          // counts synchronously, discarding that newer feed here would violate the counting law and
-          // could race its post-clear persist write. Keep the active UID namespace/state intact and
-          // make the caller retry sign-out; the adapter's same-key queue preserves the new snapshot.
-          if (get().scanFeed !== scanFeedAtClearStart) {
+          // Any persisted mutation may land while IndexedDB is completing the clear: physical scans,
+          // async enrichment, sync reconciliation, or settings changes. Discarding that newer state
+          // could violate the counting law or let its post-clear write recreate tenant data. Keep the
+          // active UID namespace/state intact and make the caller retry sign-out.
+          if (appPersistMutationEpoch !== persistMutationEpochAtClearStart) {
             return { ...persistenceClear, cleared: false };
           }
           finishReset();
@@ -4476,12 +4481,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
 
       enrichPrefixFloorLabel: (code, productId) => {
         if (isLocalDemo()) return;
+        const requestedBusinessId = get().businessId;
+        const requestedUserId = get().userId;
+        const isRequestedTenantActive = () => {
+          const state = get();
+          return state.businessId === requestedBusinessId && state.userId === requestedUserId;
+        };
         // Fire-and-forget: never awaited by any caller, never blocks/delays the row that already
         // appeared + counted synchronously. Deferred a tick so any SYNCHRONOUS same-call resolution
         // (catalog-first hit, deterministic alias, a decode landing in the same stack) renames the row
         // first and the pre-fetch bare-label check below skips the network call entirely - the fetch
         // only fires for a row that genuinely settled as a bare "Unidentified item".
         setTimeout(() => {
+          if (!isRequestedTenantActive()) return;
           if (!get().online) return; // offline: no fetch, label silently stays (retry is not needed - naming aid only)
           if (enrichInFlight.has(productId)) return; // one enrichment round-trip per row, never a duplicate fetch
           const before = get().products.find((p) => p.id === productId);
@@ -4489,6 +4501,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           enrichInFlight.add(productId);
           void fetchPrefixFloorEnrichment(code).finally(() => enrichInFlight.delete(productId)).then((floor) => {
             if (!floor) return; // offline / no derived-tier hit / non-barcode-shaped code: silent no-op
+            if (!isRequestedTenantActive()) return; // never apply a prior tenant's delayed response
             const prod = get().products.find((p) => p.id === productId);
             // Re-check after the round-trip too: only upgrade if the row STILL carries the exact bare
             // fallback label for this code - a decode may have landed (real name), or a human may have
@@ -7505,7 +7518,10 @@ export const useScanStore = create<ScanState>()(
     // any sensitive keys an older build left in this browser's localStorage. This governs ONLY what is
     // written to disk; the in-memory store keeps the full data it needs to render/resolve in-session
     // (seed in mock, the loader in cloud), so resolution is unaffected.
-    partialize: (s) => buildPersistedScanState(s as unknown as PersistableScanState),
+    partialize: (s) => {
+      appPersistMutationEpoch += 1;
+      return buildPersistedScanState(s as unknown as PersistableScanState);
+    },
     onRehydrateStorage: () => (state) => state?.setHasHydrated(true),
   }),
 );

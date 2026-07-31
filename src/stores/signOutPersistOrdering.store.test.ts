@@ -92,4 +92,83 @@ describe("resetForSignOut durable clear ordering", () => {
     expect(useScanStore.getState().scanFeed).toHaveLength(1);
     expect(useScanStore.getState().finalCounts.reduce((total, row) => total + row.quantity, 0)).toBe(1);
   });
+
+  it("aborts the reset when prefix enrichment mutates persisted product state during the UID clear", async () => {
+    let resolveClear!: (result: { cleared: boolean; authority: "durable" | "local" | "none" }) => void;
+    let resolveFloor!: (response: Response) => void;
+    mocks.removeItem.mockReturnValueOnce(new Promise((resolve) => { resolveClear = resolve; }));
+    const prefixFetch = vi.fn((url: string) => {
+      if (!String(url).includes("/api/prefix-floor")) throw new Error(`unexpected fetch: ${url}`);
+      return new Promise<Response>((resolve) => { resolveFloor = resolve; });
+    });
+    vi.stubGlobal("fetch", prefixFetch);
+
+    const { useScanStore } = await import("@/stores/scanStore");
+    await useScanStore.getState().rehydrateForUid("owner");
+    useScanStore.setState({ businessId: "business-owner", userId: "owner", scanFeed: [], finalCounts: [] });
+    useScanStore.getState().updateSettings({ aiLookupEnabled: false });
+    useScanStore.getState().processScan("5603344000016");
+    await vi.waitFor(() => expect(prefixFetch).toHaveBeenCalledWith("/api/prefix-floor?code=5603344000016"));
+    const countedProductId = useScanStore.getState().finalCounts[0]?.productId;
+    expect(countedProductId).toBeTruthy();
+    expect(useScanStore.getState().products.find((product) => product.id === countedProductId)?.name)
+      .toBe("Unidentified item (barcode 5603344000016)");
+
+    const reset = useScanStore.getState().resetForSignOut();
+    resolveFloor({
+      ok: true,
+      json: async () => ({
+        floor: {
+          name: "General (Continental family) / product unconfirmed",
+          brand: "General",
+          familyLabel: "Continental family",
+        },
+      }),
+    } as Response);
+    await vi.waitFor(() => {
+      expect(useScanStore.getState().products.find((product) => product.id === countedProductId)?.brand).toBe("General");
+    });
+    expect(useScanStore.getState().scanFeed).toHaveLength(1);
+    expect(useScanStore.getState().finalCounts.reduce((total, row) => total + row.quantity, 0)).toBe(1);
+
+    resolveClear({ cleared: true, authority: "durable" });
+    await expect(reset).resolves.toEqual({ cleared: false, authority: "durable" });
+
+    expect(useScanStore.persist.getOptions().name).toBe("sis-scan-owner");
+    expect(useScanStore.getState().products.find((product) => product.id === countedProductId)?.brand).toBe("General");
+    expect(useScanStore.getState().scanFeed).toHaveLength(1);
+    expect(useScanStore.getState().finalCounts.reduce((total, row) => total + row.quantity, 0)).toBe(1);
+  });
+
+  it("does not apply a delayed prefix enrichment response after the active tenant changes", async () => {
+    let resolveFloor!: (response: Response) => void;
+    const prefixFetch = vi.fn((url: string) => {
+      if (!String(url).includes("/api/prefix-floor")) throw new Error(`unexpected fetch: ${url}`);
+      return new Promise<Response>((resolve) => { resolveFloor = resolve; });
+    });
+    vi.stubGlobal("fetch", prefixFetch);
+
+    const { useScanStore } = await import("@/stores/scanStore");
+    await useScanStore.getState().rehydrateForUid("owner");
+    useScanStore.setState({ businessId: "business-owner", userId: "owner", scanFeed: [], finalCounts: [] });
+    useScanStore.getState().updateSettings({ aiLookupEnabled: false });
+    useScanStore.getState().processScan("5603344000016");
+    await vi.waitFor(() => expect(prefixFetch).toHaveBeenCalledWith("/api/prefix-floor?code=5603344000016"));
+    const countedProductId = useScanStore.getState().finalCounts[0]?.productId;
+    expect(countedProductId).toBeTruthy();
+
+    useScanStore.setState({ businessId: "business-next", userId: "next-owner" });
+    const json = vi.fn(async () => ({
+      floor: {
+        name: "General (Continental family) / product unconfirmed",
+        brand: "General",
+        familyLabel: "Continental family",
+      },
+    }));
+    resolveFloor({ ok: true, json } as unknown as Response);
+    await vi.waitFor(() => expect(json).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useScanStore.getState().products.find((product) => product.id === countedProductId)?.brand).toBe("");
+  });
 });
