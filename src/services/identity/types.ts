@@ -169,3 +169,48 @@ export interface CreateImportIdsInput {
 export interface ImportIds {
   importId: string;
 }
+
+export type ImportRunState = "previewed" | "applying" | "completed" | "failed" | "invalidated";
+
+export interface ImportRun {
+  importId: string;
+  businessId: string;
+  sourceFingerprint: string;
+  mappingFingerprint: string;
+  previewFingerprint: string;
+  actorId: string;
+  engineVersion: string;
+  pluginVersion: string;
+  catalogVersion: string;
+  createdAt: string;
+  state: ImportRunState;
+}
+
+export type ImportOperationState = "pending" | "applied" | "failed_retryable" | "failed_terminal";
+
+export interface ImportOperation {
+  businessId: string;
+  importId: string;
+  rowId: string;
+  idempotencyKey: string;
+  state: ImportOperationState;
+  leaseId?: string;
+  leaseExpiresAt?: number;
+  result?: unknown;
+}
+
+export interface IdentityReview {
+  reviewId: string;
+  businessId: string;
+  importId: string;
+  rowId: string;
+  decision: IdentityDecision;
+  resolution?: "confirmed" | "rejected" | "create_product";
+  resolvedBy?: string;
+  resolvedAt?: string;
+}
+
+export interface AggregateLedgerPort {
+  apply(event: AggregateImportEvent, idempotencyKey: string): Promise<{ event: AggregateImportEvent; idempotencyKey: string }>;
+  get(idempotencyKey: string): Promise<{ event: AggregateImportEvent; idempotencyKey: string } | undefined>;
+}
