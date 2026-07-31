@@ -20,6 +20,14 @@ const FORBIDDEN = [
   "@/lib/firebaseClient",
 ];
 
+const IDENTITY_SOURCE_FORBIDDEN = [
+  "@/server/upc/storage",
+  "@libsql/client",
+  "fetch",
+  "@/server/decode/pipeline",
+  "/api/ai-lookup",
+];
+
 // Resolve an import specifier to a repo file path, or null if it is external (node_modules) / unresolved.
 function resolveInternal(spec: string, fromFile: string): string | null {
   let base: string;
@@ -94,4 +102,14 @@ describe("API route import-graph guard (no client Firebase SDK in server bundle)
       expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
     });
   }
+});
+
+describe("read-only identity candidate-source import guard", () => {
+  it("does not import storage, providers, decode, or AI lookup paths", () => {
+    const source = resolve(ROOT, "src/server/identity/readOnlyCandidateSource.ts");
+    const index = resolve(ROOT, "src/server/identity/localSnapshotIndex.ts");
+    const imported = [...runtimeSpecifiers(readFileSync(source, "utf8")), ...runtimeSpecifiers(readFileSync(index, "utf8"))];
+
+    expect(imported.filter((specifier) => IDENTITY_SOURCE_FORBIDDEN.includes(specifier))).toEqual([]);
+  });
 });
