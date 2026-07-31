@@ -336,7 +336,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const performWrite = async (name: string, value: string, token: number) => {
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
-    const hadFallback = getAuthoritativePersistFallback(legacyGet(name)) !== null;
+    const existingLocalFallback = decodeAuthoritativePersistFallback(legacyGet(name));
+    const hadFallback = existingLocalFallback !== null;
     const tombstoneState = await getTombstoneState(name);
     if (options.database && !tombstoneState.durableKnown) {
       legacySnapshotsCleaned.delete(name);
@@ -391,10 +392,15 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         }
       }
     }
-    const localFallbackUpdated = !hadFallback || legacySet(name, encodeAuthoritativePersistFallback(value, {
+    const causalityRequiresRecovery = existingRecovery
+      || tombstoneToken !== null
+      || existingLocalFallback?.invalidatesRecovery === true;
+    const shouldWriteLocalFallback = hadFallback || causalityRequiresRecovery;
+    const localFallbackUpdated = !shouldWriteLocalFallback || legacySet(name, encodeAuthoritativePersistFallback(value, {
+      invalidatesRecovery: causalityRequiresRecovery,
       supersedesTombstone: tombstoneToken,
     }));
-    const needsRecovery = existingRecovery || tombstoneToken !== null || !localFallbackUpdated;
+    const needsRecovery = causalityRequiresRecovery || !localFallbackUpdated;
     if (needsRecovery && !existingRecovery) {
       if (!options.database) { reportDegraded(); return; }
       try {

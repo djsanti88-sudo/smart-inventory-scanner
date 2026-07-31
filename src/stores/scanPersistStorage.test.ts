@@ -122,6 +122,14 @@ class CandidateReadFailsDb extends Db {
   }
 }
 
+class RecoverySetFailsDb extends TombstoneReadFailsDb {
+  failRecoverySet = false;
+  override async set(key: string, value: string): Promise<void> {
+    if (this.failRecoverySet && key === "sis-scan-owner::scanbin-recovery-v1") throw new Error("recovery journal unavailable");
+    await super.set(key, value);
+  }
+}
+
 describe("active async persistence adapter", () => {
   it("migrates legacy bytes into durable storage", async () => {
     const db = new Db(), local = legacy(); local.values.set("sis-scan-owner", '{"version":14}');
@@ -590,6 +598,33 @@ describe("active async persistence adapter", () => {
     db.failTombstoneRead = false;
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("physical scan after clear");
+  });
+  it("keeps an existing post-clear fallback causal when recovery journal update fails", async () => {
+    const db = new RecoverySetFailsDb();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await storage.removeItem("sis-scan-owner");
+    db.failTombstoneRead = true;
+    await storage.setItem("sis-scan-owner", "first local post-clear scan");
+    db.failTombstoneRead = false;
+    db.failRecoverySet = true;
+
+    await storage.setItem("sis-scan-owner", "newest local post-clear scan");
+
+    await expect(createAsyncDurableStorage({ database: null, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("newest local post-clear scan");
+  });
+  it("creates a causal local fallback before a first post-clear recovery journal write can fail", async () => {
+    const db = new RecoverySetFailsDb();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await storage.removeItem("sis-scan-owner");
+    db.failRecoverySet = true;
+
+    await storage.setItem("sis-scan-owner", "first scan after clear");
+
+    await expect(createAsyncDurableStorage({ database: null, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("first scan after clear");
   });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;
