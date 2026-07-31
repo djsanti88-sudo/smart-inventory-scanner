@@ -50,7 +50,7 @@ describe("local aggregate ledger", () => {
     })).resolves.toEqual({ event: aggregate, idempotencyKey: aggregate.idempotencyKey });
   });
 
-  it("refuses corrupted stored event payloads or sidecar fingerprints on recovery", async () => {
+  it("refuses corrupted stored event payloads, sidecars, and recovery scope", async () => {
     const values = new Map<string, unknown>();
     const storage: AtomicLocalStorage = {
       async transaction(fn) {
@@ -64,7 +64,7 @@ describe("local aggregate ledger", () => {
     const ledger = createLocalAggregateLedger(storage);
     const aggregate = await event();
     await ledger.applyOnce(aggregate, aggregate.idempotencyKey);
-    const records = values.get("aggregate-ledger") as Record<string, { event: typeof aggregate; fingerprint: string }>;
+    const records = values.get("aggregate-ledger") as Record<string, { event: typeof aggregate; idempotencyKey: string; fingerprint: string }>;
     const record = Object.values(records)[0];
     record.event.quantity = 1;
     await expect(ledger.findByIdempotencyKey({
@@ -74,6 +74,22 @@ describe("local aggregate ledger", () => {
     record.fingerprint = "corrupt-sidecar";
     await expect(ledger.findByIdempotencyKey({
       businessId: aggregate.businessId, idempotencyKey: aggregate.idempotencyKey, expectedFingerprint: aggregate.fingerprint,
+    })).resolves.toBeNull();
+    record.fingerprint = aggregate.fingerprint;
+    const originalKey = JSON.stringify([aggregate.businessId, aggregate.idempotencyKey]);
+    const movedKey = JSON.stringify(["shop-b", aggregate.idempotencyKey]);
+    records[movedKey] = record;
+    delete records[originalKey];
+    await expect(ledger.findByIdempotencyKey({
+      businessId: "shop-b", idempotencyKey: aggregate.idempotencyKey, expectedFingerprint: aggregate.fingerprint,
+    })).resolves.toBeNull();
+    await expect(ledger.get({
+      businessId: "shop-b", idempotencyKey: aggregate.idempotencyKey,
+      eventFingerprint: aggregate.fingerprint, operationFingerprint: "operation-1",
+    })).resolves.toBeUndefined();
+    record.idempotencyKey = "corrupt-sidecar-key";
+    await expect(ledger.findByIdempotencyKey({
+      businessId: "shop-b", idempotencyKey: aggregate.idempotencyKey, expectedFingerprint: aggregate.fingerprint,
     })).resolves.toBeNull();
   });
   it("applies a canonical event once and recovers it after a restart by tenant and expected fingerprint", async () => {

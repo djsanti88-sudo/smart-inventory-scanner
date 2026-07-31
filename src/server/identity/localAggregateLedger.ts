@@ -15,8 +15,16 @@ function entryKey(businessId: string, idempotencyKey: string): string {
 }
 
 export function createLocalAggregateLedger(storage: AtomicLocalStorage): AggregateLedgerPort {
-  async function storedResultIsValid(item: StoredResult, expectedFingerprint: string): Promise<boolean> {
-    return item.fingerprint === item.event.fingerprint &&
+  async function storedResultIsValid(
+    item: StoredResult,
+    expectedBusinessId: string,
+    expectedIdempotencyKey: string,
+    expectedFingerprint: string,
+  ): Promise<boolean> {
+    return item.event.businessId === expectedBusinessId &&
+      item.event.idempotencyKey === expectedIdempotencyKey &&
+      item.idempotencyKey === expectedIdempotencyKey &&
+      item.fingerprint === item.event.fingerprint &&
       item.fingerprint === expectedFingerprint &&
       await validateAggregateImportEvent(item.event);
   }
@@ -34,7 +42,7 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
       const key = entryKey(event.businessId, idempotencyKey);
       const existing = entries[key];
       if (existing) {
-        return await storedResultIsValid(existing, event.fingerprint) &&
+        return await storedResultIsValid(existing, event.businessId, idempotencyKey, event.fingerprint) &&
           (operationFingerprint === undefined || existing.operationFingerprint === operationFingerprint)
           ? { event: existing.event, idempotencyKey: existing.idempotencyKey }
           : { kind: "idempotency_conflict", idempotencyKey };
@@ -57,7 +65,12 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
     return storage.transaction(async (transaction) => {
       const entries = await transaction.get<Record<string, StoredResult>>(ledgerKey);
       const item = entries?.[entryKey(input.businessId, input.idempotencyKey)];
-      return item && await storedResultIsValid(item, input.expectedFingerprint)
+      return item && await storedResultIsValid(
+        item,
+        input.businessId,
+        input.idempotencyKey,
+        input.expectedFingerprint,
+      )
         ? { event: item.event, idempotencyKey: item.idempotencyKey }
         : null;
     });
