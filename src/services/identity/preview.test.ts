@@ -59,6 +59,33 @@ describe("signed identity preview", () => {
     await expect(verifySignedPreviewChunks([preview.signedPayloads[0]!, other.signedPayloads[0]!], signer)).rejects.toThrow("preview_chunks_mixed_root");
   });
 
+  it("rejects an oversized raw signed token before parsing or signature verification", async () => {
+    const signer = await createHmacPreviewSigner("local-test-key");
+    let verifyCalls = 0;
+    signer.verify = async () => { verifyCalls += 1; return false; };
+    await expect(verifySignedPreviewChunks([" ".repeat(512 * 1024 + 1)], signer)).rejects.toThrow("preview_signed_chunk_too_large");
+    expect(verifyCalls).toBe(0);
+  });
+
+  it("uses one full-preview fingerprint across chunks and rejects fingerprint tampering", async () => {
+    const signer = await createHmacPreviewSigner("local-test-key");
+    const preview = await createIdentityPreview({
+      rows: [row(), row({ sourceRowNumber: 3, rawRecordFingerprint: "row-2" })],
+      orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN" } }], sourceFileHashes: ["file-a"], importerVersion: "v1",
+      issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z", maxChunkBytes: 2_000, actorId: "actor-1",
+      versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
+    }, { source, signer });
+    const chunks = preview.signedPayloads.map((payload) => JSON.parse(payload) as Record<string, unknown>);
+    expect(chunks).toHaveLength(2);
+    expect(chunks.map((chunk) => chunk.previewFingerprint)).toEqual([preview.preview.previewFingerprint, preview.preview.previewFingerprint]);
+    chunks[1]!.previewFingerprint = "tampered";
+    const unsigned = { ...chunks[1]! };
+    delete unsigned.signature;
+    chunks[1]!.signature = await signer.sign(JSON.stringify(unsigned));
+    await expect(verifySignedPreviewChunks(chunks.map((chunk) => JSON.stringify(chunk)), signer, "2026-07-31T00:01:00.000Z"))
+      .rejects.toThrow("preview_fingerprint_invalid");
+  });
+
   it("rejects an otherwise valid expired signed preview", async () => {
     const preview = await create();
     await expect(verifySignedPreviewChunks(preview.signedPayloads, await createHmacPreviewSigner("local-test-key"), "2026-07-31T00:11:00.000Z"))

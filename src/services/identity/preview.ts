@@ -150,8 +150,21 @@ async function createPreviewRowId(importId: string, row: Record<string, unknown>
   return canonicalSha256({ importId, sourceFileOrdinal: row.sourceFileOrdinal, sheetName: row.sheetName, sourceRowNumber: row.sourceRowNumber, sanitizedRow: row });
 }
 
-async function createPreviewFingerprint(chunk: Omit<SignedPreviewChunk, "signature" | "previewFingerprint">): Promise<string> {
-  return canonicalSha256({ manifestVersion: chunk.manifestVersion, sanitizedContentRootHash: chunk.sanitizedContentRootHash, importId: chunk.importId, scope: chunk.scope, versions: chunk.versions, rows: chunk.rows, rowIds: chunk.rowIds, decisions: chunk.decisions.map(identityDecisionFingerprintProjection) });
+interface PreviewFingerprintInput {
+  sanitizedContentRootHash: string;
+  importId: string;
+  scope: SignedPreviewChunk["scope"];
+  versions: PreviewVersions;
+  orderedMappings: SignedPreviewChunk["orderedMappings"];
+  importerVersion: string;
+  rows: Record<string, unknown>[];
+  decisions: IdentityDecision[];
+  rowIds: string[];
+}
+
+/** One fingerprint binds the reconstructed ordered preview, never an individual transport chunk. */
+async function createPreviewFingerprint(preview: PreviewFingerprintInput): Promise<string> {
+  return canonicalSha256({ manifestVersion, sanitizedContentRootHash: preview.sanitizedContentRootHash, importId: preview.importId, scope: preview.scope, versions: preview.versions, orderedMappings: preview.orderedMappings, importerVersion: preview.importerVersion, rows: preview.rows, rowIds: preview.rowIds, decisions: preview.decisions.map(identityDecisionFingerprintProjection) });
 }
 
 function unsignedChunk(chunk: SignedPreviewChunk): Omit<SignedPreviewChunk, "signature"> {
@@ -193,7 +206,7 @@ function parseChunk(payload: string): SignedPreviewChunk {
 export async function createIdentityPreview(
   input: CreateIdentityPreviewInput,
   dependencies: CreateIdentityPreviewDependencies,
-): Promise<{ preview: { importId: string; sanitizedContentRootHash: string; decisions: IdentityDecision[] }; signedPayloads: string[] }> {
+): Promise<{ preview: { importId: string; sanitizedContentRootHash: string; previewFingerprint: string; decisions: IdentityDecision[] }; signedPayloads: string[] }> {
   if (!Array.isArray(input.rows) || input.rows.length === 0) throw new Error("preview_rows_required");
   if (input.actorId !== undefined && (!input.actorId || input.actorId.length > 256)) throw new Error("preview_actor_invalid");
   if (input.rows.length > maxRows) throw new Error("preview_rows_exceeded");
@@ -221,11 +234,12 @@ export async function createIdentityPreview(
   }
   if (groups.length > maxChunks) throw new Error("preview_chunks_exceeded");
   const unsigned = await Promise.all(groups.map(async (group, chunkIndex) => ({ manifestVersion, chunkIndex, chunkCount: groups.length, sanitizedContentRootHash, importId, scope, actorId: input.actorId ?? "local-test-actor", versions, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt, rowIds: await Promise.all(group.rows.map((row) => createPreviewRowId(importId, row))), ...group })));
-  const fingerprinted = await Promise.all(unsigned.map(async (chunk) => ({ ...chunk, previewFingerprint: await createPreviewFingerprint(chunk as Omit<SignedPreviewChunk, "signature" | "previewFingerprint">) })));
+  const previewFingerprint = await createPreviewFingerprint({ sanitizedContentRootHash, importId, scope, versions, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, rows: unsigned.flatMap((chunk) => chunk.rows), rowIds: unsigned.flatMap((chunk) => chunk.rowIds), decisions: unsigned.flatMap((chunk) => chunk.decisions) });
+  const fingerprinted = unsigned.map((chunk) => ({ ...chunk, previewFingerprint }));
   const signedPayloads = await Promise.all(fingerprinted.map(async (chunk) => canonicalJson({ ...chunk, signature: await dependencies.signer.sign(canonicalJson(chunk)) })));
   if (signedPayloads.some((payload) => new TextEncoder().encode(payload).byteLength > cap)
     || signedPayloads.reduce((total, payload) => total + new TextEncoder().encode(payload).byteLength, 0) > maxSignedSetBytes) throw new Error("preview_signed_size_exceeded");
-  return { preview: { importId, sanitizedContentRootHash, decisions }, signedPayloads };
+  return { preview: { importId, sanitizedContentRootHash, previewFingerprint, decisions }, signedPayloads };
 }
 
 /** Verifies the complete ordered signed manifest and recomputes its content identity without source bytes. */
@@ -236,6 +250,7 @@ export async function verifySignedPreviewChunks(
   expected?: PreviewVerificationExpectation,
 ): Promise<SignedPreviewChunk[]> {
   if (payloads.length === 0 || payloads.length > maxChunks) throw new Error("preview_chunks_incomplete");
+  if (payloads.some((payload) => new TextEncoder().encode(payload).byteLength > maxSignedChunkBytes)) throw new Error("preview_signed_chunk_too_large");
   if (payloads.reduce((total, payload) => total + new TextEncoder().encode(payload).byteLength, 0) > maxSignedSetBytes) throw new Error("preview_signed_size_exceeded");
   const chunks = payloads.map(parseChunk);
   const first = chunks[0]!;
@@ -266,7 +281,8 @@ export async function verifySignedPreviewChunks(
   const versions = completeVersions(first.versions, decisions);
   const { importId: recomputedImportId } = await createImportIds({ sanitizedContentRootHash: root, orderedMappings: first.orderedMappings, businessId: first.scope.businessId, sourceSystem: first.scope.sourceSystem, vendorId: first.scope.vendorId, importerVersion: first.importerVersion });
   if (recomputedImportId !== first.importId) throw new Error("preview_import_id_invalid");
-  if (!(await Promise.all(chunks.map(async (chunk) => { const { previewFingerprint, ...unsigned } = unsignedChunk(chunk); return previewFingerprint === await createPreviewFingerprint(unsigned); }))).every(Boolean)) throw new Error("preview_fingerprint_invalid");
+  if (chunks.some((chunk) => chunk.previewFingerprint !== first.previewFingerprint)
+    || first.previewFingerprint !== await createPreviewFingerprint({ sanitizedContentRootHash: root, importId: first.importId, scope: first.scope, versions, orderedMappings: first.orderedMappings, importerVersion: first.importerVersion, rows, rowIds, decisions })) throw new Error("preview_fingerprint_invalid");
   const computed = await canonicalSha256(contentProjection(rows, decisions, { ...first, versions }, first.scope));
   if (computed !== root) throw new Error("preview_content_root_invalid");
   return chunks;
