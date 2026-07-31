@@ -153,7 +153,7 @@ interface IdentityCandidateSource {
   }>;
 }
 
-type IdentityDecisionKind = "automatic" | "review" | "abstain" | "non_product";
+type IdentityDecisionKind = "automatic" | "review" | "abstain" | "non_product" | "invalid";
 
 interface IdentityDecision {
   kind: IdentityDecisionKind;
@@ -177,6 +177,8 @@ interface IdentityDecision {
   decisionFingerprint: string;
 }
 ```
+
+This five-kind union is the single decision/serialization/accounting contract. `invalid` is a terminal, visible, non-countable row whose shape, quantity, unit, identifier, or required scope failed validation; `non_product` is a terminal, visible, non-countable valid row deterministically identified by an explicit source-adapter record type or an exact allowlisted normalized category (`labor`, `service`, `fee`, `subtotal`, or `header`). Free text, semantic similarity, missing identity, or a model guess can never classify `non_product`; those rows abstain or are invalid.
 
 Identifiers are typed and namespaced. A vendor SKU must not be queried as a global manufacturer part number. Raw values and provenance are retained; normalization never destroys the original evidence.
 
@@ -323,7 +325,9 @@ Reconcile and Universal Import use one preview path:
 
 Preview must not initialize storage that writes, create products or aliases, alter reviews/counts, call decode, or access paid/live providers.
 
-Fingerprints use canonical JSON with sorted object keys, UTF-8 encoding, and SHA-256 under a versioned `identity-import-v1` domain separator. `sourceFileFingerprint` hashes the original bytes without retaining them. `importId` hashes business, file fingerprints in ordinal order, per-sheet names and mappings, source/vendor scope, and importer version. `rowId` hashes import ID, file ordinal, sheet name, source row number, and canonical normalized row data; source position disambiguates duplicate rows. `decisionFingerprint` hashes engine/plugin/catalog/link versions, candidate snapshot, evidence, constraints, and ordered decision output.
+Preview returns `signedPayloads: string[]`, not one unbounded token. Each token signs canonical UTF-8 JSON of at most 512 KiB and carries `manifestVersion`, `chunkIndex`, `chunkCount`, deterministic `sanitizedContentRootHash`, actor/business/source/vendor scope, selected mappings, engine/plugin/catalog/link versions, original file hashes as provenance, issued/expiry metadata, and a contiguous subset of canonical sanitized mapped inputs plus their ordered decisions and fingerprints. Compute `sanitizedContentRootHash` once from the canonical ordered content-identity projection of the chunks: sanitized mapped inputs, ordered mappings/scope, decisions/fingerprints, and stable engine/plugin/catalog/link versions; explicitly omit original file hashes, `sanitizedContentRootHash`, signatures, and issued/expiry metadata. Then insert the root and provenance/time fields and sign each full chunk, so each signature cryptographically binds provenance without making it part of content identity. Apply verifies signatures and the complete chunk set, recomputes the same content-identity projection/root, reconstructs canonical sanitized material, and recomputes import/row/decision/preview fingerprints without reupload. Missing, duplicated, reordered, mixed-root, oversized, expired, or content-changed chunks fail closed.
+
+Fingerprints use canonical JSON with sorted object keys, UTF-8 encoding, and SHA-256 under a versioned `identity-import-v1` domain separator. `sourceFileFingerprint` hashes original bytes at preview and is separately embedded and cryptographically bound by each chunk signature; apply neither recomputes it nor includes it in `sanitizedContentRootHash` or import identity. `importId` hashes recomputable `sanitizedContentRootHash`, business/source/vendor scope, ordered selected-sheet names and mappings, and importer version. `rowId` hashes import ID, file ordinal, sheet name, source row number, and canonical sanitized normalized row data; source position disambiguates duplicates. `decisionFingerprint` hashes engine/plugin/catalog/link versions, candidate snapshot, evidence, constraints, and ordered decision output.
 
 ## Durable apply and counting integrity
 
@@ -333,7 +337,7 @@ Introduce tenant-scoped durable records:
 - `ImportOperation`: unique `(businessId, importId, rowId)`, chosen action, target, evidence snapshot, idempotency key, state, lease, and result.
 - `IdentityReview`: candidate decision and explicit human resolution independent of scan-only reviews.
 
-`importId` is derived from canonical source bytes, mapping, business, and importer version. `rowId` is derived from source position plus canonical normalized row fields. Apply accepts only the import ID, preview fingerprint, and explicit corrections.
+`importId` is derived from verified `sanitizedContentRootHash`, ordered mappings, business/source/vendor scope, and importer version—not original bytes or preview time metadata. Apply recomputes the content-identity projection/root and import/row IDs from verified canonical sanitized chunk content, rejects content/mapping/scope changes, and treats signed original-file hashes only as non-recomputed provenance. Apply accepts only complete `signedPayloads`, explicit corrections, and selected mode; no preview record or source-byte reupload is required.
 
 Before mutation, apply must:
 
@@ -363,7 +367,7 @@ Creating a new tenant product is a separate visible action. An exact-looking imp
 - Decision/audit output must not expose secrets, provider keys, or private cross-tenant evidence.
 - Server-enforced roles: business managers/owners may apply runs and approve/revoke tenant identity links; clerks may upload and preview but cannot approve links, create products, or apply count-changing imports; platform-owner catalog promotion remains a separate role and workflow.
 
-Local/demo persistence uses a dedicated IndexedDB/mock repository with the same uniqueness and state-machine contract. Production implementation later requires explicit Firestore collection paths, indexes, and rules for `businesses/{businessId}/identityLinks`, `importRuns`, `importOperations`, and `identityReviews`; no production rule or database change is authorized by this design. Browser-only uniqueness is never accepted as production idempotency.
+Local/demo durability is server-owned behind an injected atomic storage port. The concrete local/mock adapter is file-backed under an explicitly resolved repository-local `.tmp/identity-import/<test-or-run-id>/` directory, uses atomic temp-file replacement plus a process mutex for unique claims/applied keys, and is tested across adapter reconstruction/crash recovery. It must refuse paths outside that `.tmp/identity-import` root. Browser IndexedDB may cache signed preview chunks only and never implements uniqueness, claims, links, runs, or ledger durability. Production implementation later requires explicit Firestore collection paths, indexes, and rules for `businesses/{businessId}/identityLinks`, `importRuns`, `importOperations`, and `identityReviews`; no production backend/rule/database change is authorized by this design.
 
 ## Evaluation and continuous improvement loop
 
@@ -465,6 +469,7 @@ Stop increasing automatic coverage when a change causes any false automatic matc
 - Project identity decisions into the existing import preview UI.
 - Add mapping correction, multi-sheet warnings, complete error messages, and candidate explanations.
 - Keep existing apply behind a local feature flag until the new apply path is proven.
+- Use `NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1=1` only in local/mock mode to expose the new preview/apply path alongside legacy Universal Import/Reconcile. Keep legacy callers intact while the flag is off. Remove the legacy path only after matcher, ledger, import, security, frozen benchmark, and conditional Firebase gates pass and a separate owner-approved cutoff change is reviewed.
 
 ### Phase 3: Durable idempotent apply
 
