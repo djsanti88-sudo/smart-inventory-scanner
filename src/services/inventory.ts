@@ -1,4 +1,5 @@
 import type { InventoryCount, ScanEvent } from "@/types";
+import type { InventoryCountDelta } from "@/services/identity/importLedger";
 
 // Deterministic inventory math. AI is NEVER responsible for counts.
 // The dedupe guarantee lives here: an InventoryCount records every scanEvent id it has applied,
@@ -57,6 +58,31 @@ export function applyScanEventOnce(
     updatedAt: event.createdAt || count.updatedAt,
   };
   return { count: updated, applied: true };
+}
+
+/**
+ * Applies a neutral count delta exactly once. Aggregate imports use this boundary so their
+ * source quantities participate in replay without pretending to be scanner reads or aliases.
+ */
+export function applyInventoryCountDeltaOnce(
+  count: InventoryCount,
+  delta: InventoryCountDelta,
+): { count: InventoryCount; applied: boolean } {
+  if (count.scanEventIds.includes(delta.eventId) || count.appliedIdempotencyKeys.includes(delta.idempotencyKey)) {
+    return { count, applied: false };
+  }
+
+  return {
+    count: {
+      ...count,
+      quantity: count.quantity + delta.quantityDelta,
+      lastScannedAt: delta.createdAt || count.lastScannedAt,
+      scanEventIds: [...count.scanEventIds, delta.eventId],
+      appliedIdempotencyKeys: [...count.appliedIdempotencyKeys, delta.idempotencyKey],
+      updatedAt: delta.createdAt || count.updatedAt,
+    },
+    applied: true,
+  };
 }
 
 /**

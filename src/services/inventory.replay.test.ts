@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ScanEvent } from "@/types";
-import { replayLedgerCounts } from "@/services/inventory.replay";
+import { replayInventoryEvents, replayLedgerCounts } from "@/services/inventory.replay";
+import { createAggregateImportEvent } from "@/services/identity/importLedger";
 
 function ev(over: Partial<ScanEvent>): ScanEvent {
   return {
@@ -47,5 +48,66 @@ describe("replayLedgerCounts", () => {
     expect(counts.length).toBe(1);
     expect(counts[0].quantity).toBe(1);
     expect(counts[0].scanEventIds).toEqual(["e3"]);
+  });
+
+  it("replays one physical aggregate row as its quantity without scanner aliases", () => {
+    const aggregate = createAggregateImportEvent({
+      businessId: "b",
+      importId: "import-1",
+      rowId: "row-1",
+      productId: "p1",
+      sessionId: "s",
+      quantity: 7,
+      sourceFileOrdinal: 0,
+      sheetName: "Inventory",
+      sourceRowNumber: 2,
+      createdAt: "2026-07-31T00:00:00.000Z",
+    });
+
+    const [count] = replayInventoryEvents([aggregate], "s");
+    expect(count.quantity).toBe(7);
+    expect(count.aliasesSeen).toEqual([]);
+    expect(count.scanEventIds).toEqual([aggregate.eventId]);
+  });
+
+  it("sums mixed scan and aggregate events while deduping the aggregate identity", () => {
+    const aggregate = createAggregateImportEvent({
+      businessId: "b",
+      importId: "import-1",
+      rowId: "row-1",
+      productId: "p1",
+      sessionId: "s",
+      quantity: 7,
+      sourceFileOrdinal: 0,
+      sheetName: "Inventory",
+      sourceRowNumber: 2,
+      createdAt: "2026-07-31T00:00:00.000Z",
+    });
+    const otherSession = createAggregateImportEvent({ ...aggregate, rowId: "row-2", sessionId: "other" });
+
+    const [count] = replayInventoryEvents([ev({ id: "scan-1" }), aggregate, aggregate, otherSession], "s");
+    expect(count.quantity).toBe(8);
+    expect(count.aliasesSeen).toEqual(["1"]);
+    expect(count.scanEventIds).toEqual(["scan-1", aggregate.eventId]);
+  });
+
+  it("keeps same-session aggregate rows tenant-scoped even when their product ids match", () => {
+    const shopA = createAggregateImportEvent({
+      businessId: "shop-a", importId: "import-1", rowId: "row-1", productId: "shared-product", sessionId: "s",
+      quantity: 7, sourceFileOrdinal: 0, sheetName: "Inventory", sourceRowNumber: 2, createdAt: "2026-07-31T00:00:00.000Z",
+    });
+    const shopB = createAggregateImportEvent({ ...shopA, businessId: "shop-b" });
+
+    const counts = replayInventoryEvents([shopA, shopB], "s");
+    expect(counts).toHaveLength(2);
+    expect(counts.map((count) => [count.businessId, count.quantity]).sort()).toEqual([
+      ["shop-a", 7],
+      ["shop-b", 7],
+    ]);
+  });
+
+  it("leaves the scan-only compatibility wrapper unchanged", () => {
+    const scans = [ev({ id: "e1" }), ev({ id: "e2" })];
+    expect(replayLedgerCounts(scans, "s")).toEqual(replayInventoryEvents(scans, "s"));
   });
 });
