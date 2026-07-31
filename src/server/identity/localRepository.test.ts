@@ -154,12 +154,13 @@ describe("local identity repository", () => {
   });
 
   it("allows one terminal review resolution and rejects a conflicting rewrite", async () => {
-    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => Date.parse("2026-08-01T12:00:00.000Z") });
     const review = { reviewId: "review-a", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "abstain" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };
     await repository.saveIdentityReview(review);
-    const resolved = await repository.resolveIdentityReview("shop-a", "review-a", "confirmed", "manager-a", "2026-07-31T00:00:00.000Z");
+    const resolved = await repository.resolveIdentityReview("shop-a", "review-a", "confirmed", "manager-a", "client-first-timestamp");
+    expect(resolved.resolvedAt).toBe("2026-08-01T12:00:00.000Z");
 
-    await expect(repository.resolveIdentityReview("shop-a", "review-a", "confirmed", "manager-a", "2026-07-31T00:00:00.000Z")).resolves.toEqual(resolved);
+    await expect(repository.resolveIdentityReview("shop-a", "review-a", "confirmed", "manager-a", "client-retry-timestamp")).resolves.toEqual(resolved);
     await expect(repository.resolveIdentityReview("shop-a", "review-a", "rejected", "manager-a", "2026-07-31T00:00:00.000Z")).rejects.toThrow(/terminal|conflict/i);
   });
 
