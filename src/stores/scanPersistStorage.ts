@@ -56,6 +56,7 @@ type TombstoneState = {
   conflict: boolean;
   durableKnown: boolean;
   maxVersion: number;
+  maxIssuedAt: number;
   conflictFingerprint: string | null;
 };
 
@@ -66,20 +67,26 @@ function createOperationId(): string {
   return `clear-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
-type ClearToken = { raw: string; version: number; id: string; ordered: boolean };
+type ClearToken = { raw: string; version: number; id: string; ordered: boolean; issuedAt: number };
 
 function parseClearToken(raw: string): ClearToken {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (parsed[PERSIST_CLEAR_KEY] === 1 && Number.isSafeInteger(parsed.version) && (parsed.version as number) > 0 && typeof parsed.id === "string") {
-      return { raw, version: parsed.version as number, id: parsed.id, ordered: true };
+      return {
+        raw,
+        version: parsed.version as number,
+        id: parsed.id,
+        ordered: true,
+        issuedAt: typeof parsed.issuedAt === "number" && Number.isFinite(parsed.issuedAt) ? parsed.issuedAt : 0,
+      };
     }
   } catch { /* legacy tombstones are opaque version-zero identities */ }
-  return { raw, version: 0, id: raw, ordered: false };
+  return { raw, version: 0, id: raw, ordered: false, issuedAt: 0 };
 }
 
-function encodeClearToken(version: number): string {
-  return JSON.stringify({ [PERSIST_CLEAR_KEY]: 1, version, id: createOperationId() });
+function encodeClearToken(version: number, issuedAt: number): string {
+  return JSON.stringify({ [PERSIST_CLEAR_KEY]: 1, version, id: createOperationId(), issuedAt });
 }
 
 function resolveNewestClearToken(rawTokens: string[]): { token: string | null; conflict: boolean; maxVersion: number } {
@@ -173,9 +180,25 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     serialize: () => string;
     token: number;
     observation: TombstoneState;
+    scheduledAt: number;
     resolvers: Array<() => void>;
     scheduled: boolean;
   }>();
+  let lastCausalTimestamp = Number.NEGATIVE_INFINITY;
+  const causalNow = (): number => {
+    let timestamp = Date.now();
+    let bump = 1;
+    try {
+      const highResolution = globalThis.performance.timeOrigin + globalThis.performance.now();
+      if (Number.isFinite(highResolution)) {
+        timestamp = highResolution;
+        bump = 0.001;
+      }
+    } catch { /* Date.now remains the epoch-clock fallback */ }
+    if (timestamp <= lastCausalTimestamp) timestamp = lastCausalTimestamp + bump;
+    lastCausalTimestamp = timestamp;
+    return timestamp;
+  };
   const lastObservedTombstoneState = new Map<string, TombstoneState>();
   const publishedClearTokens = options.database
     ? (publishedClearTokensByDatabase.get(options.database) ?? new Map<string, Set<string>>())
@@ -297,11 +320,13 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const generationFor = (name: string) => generationByKey.get(name) ?? 0;
   const stateFromTokens = (rawTokens: string[], durableKnown: boolean): TombstoneState => {
     const uniqueTokens = [...new Set(rawTokens)];
+    const parsedTokens = uniqueTokens.map(parseClearToken);
     const resolved = resolveNewestClearToken(uniqueTokens);
     const conflictFingerprint = resolved.conflict
-      ? uniqueTokens.filter((raw) => parseClearToken(raw).version === resolved.maxVersion).sort().join("\n")
+      ? parsedTokens.filter((token) => token.version === resolved.maxVersion).map((token) => token.raw).sort().join("\n")
       : null;
-    return { ...resolved, durableKnown, conflictFingerprint };
+    const maxIssuedAt = parsedTokens.length === 0 ? 0 : Math.max(...parsedTokens.map((token) => token.issuedAt));
+    return { ...resolved, durableKnown, maxIssuedAt, conflictFingerprint };
   };
   const getSynchronousTombstoneEvidence = (name: string): TombstoneState => {
     const local = legacyGet(tombstoneKey(name));
@@ -400,6 +425,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     value: string,
     token: number,
     scheduledObservation: TombstoneState,
+    scheduledAt: number,
   ) => {
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
@@ -412,7 +438,10 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         && scheduledState.maxVersion === tombstoneState.maxVersion
         && scheduledState.conflictFingerprint === tombstoneState.conflictFingerprint
       : tombstoneState.token === null || scheduledState.token === tombstoneState.token;
-    if (!scheduledObservedCurrentAuthority) {
+    // A legacy token's zero timestamp is unknown, not proof that every modern snapshot followed it.
+    const scheduledStrictlyAfterCurrentClear = tombstoneState.maxIssuedAt > 0
+      && scheduledAt > tombstoneState.maxIssuedAt;
+    if (!scheduledObservedCurrentAuthority && !scheduledStrictlyAfterCurrentClear) {
       reportDegraded();
       return;
     }
@@ -430,12 +459,12 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       const observedSameConflict = scheduledState.conflict
         && scheduledState.maxVersion === tombstoneState.maxVersion
         && scheduledState.conflictFingerprint === tombstoneState.conflictFingerprint;
-      if (!observedSameConflict) {
+      if (!observedSameConflict && !scheduledStrictlyAfterCurrentClear) {
         reportDegraded();
         return;
       }
       if (!options.database) { reportDegraded(); return; }
-      const recoveryToken = encodeClearToken(tombstoneState.maxVersion + 1);
+      const recoveryToken = encodeClearToken(tombstoneState.maxVersion + 1, causalNow());
       try {
         // The full payload is durable before either conflicting clear is reconciled. Its strictly
         // newer generation then provides the only safe ordering point for all tabs.
@@ -597,7 +626,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         supersedesTombstone: tombstones.get(name) ?? legacyGet(tombstoneKey(name)),
       }));
     }
-    void enqueue(name, () => performWrite(name, value, pending.token, pending.observation)).then(() => pending.resolvers.forEach((resolve) => resolve()));
+    void enqueue(name, () => performWrite(name, value, pending.token, pending.observation, pending.scheduledAt))
+      .then(() => pending.resolvers.forEach((resolve) => resolve()));
   };
   if (typeof window !== "undefined") {
     const flushAll = () => [...pendingWrites.keys()].forEach((name) => flushWrite(name, true));
@@ -609,15 +639,18 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     // Capture authority evidence at the same moment as the snapshot. A coalesced newer snapshot
     // replaces both fields, so a delayed pre-clear payload can never borrow post-clear evidence.
     const observation = getSynchronousTombstoneEvidence(name);
+    const scheduledAt = causalNow();
     const pending = pendingWrites.get(name) ?? {
       serialize,
       token: generationFor(name),
       observation,
+      scheduledAt,
       resolvers: [],
       scheduled: false,
     };
     pending.serialize = serialize;
     pending.observation = observation;
+    pending.scheduledAt = scheduledAt;
     pending.resolvers.push(resolve);
     pendingWrites.set(name, pending);
     if (!pending.scheduled) { pending.scheduled = true; queueMicrotask(() => flushWrite(name)); }
@@ -759,7 +792,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       legacySnapshotsCleaned.delete(name);
       return enqueue(name, async () => {
       const current = await getTombstoneState(name);
-      const operationToken = encodeClearToken(current.maxVersion + 1);
+      const operationToken = encodeClearToken(current.maxVersion + 1, causalNow());
       const localTombstone = writeTombstone(name, operationToken);
       const durableTombstone = await persistTombstone(name, operationToken);
       let candidateDeleted = !options.database;

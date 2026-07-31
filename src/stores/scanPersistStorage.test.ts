@@ -647,6 +647,78 @@ describe("active async persistence adapter", () => {
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("first physical scan after clear");
   });
+  it("preserves the first causally post-clear snapshot when a durable-only clear notification is unavailable", async () => {
+    const now = vi.fn().mockReturnValueOnce(5).mockReturnValue(10);
+    vi.stubGlobal("performance", { timeOrigin: 1_000, now });
+    const clearingDb = new Db();
+    const writingDb = new Db();
+    writingDb.values = clearingDb.values;
+    const clearingTab = createAsyncDurableStorage({ database: clearingDb, getLegacyStorage: () => null });
+    await clearingTab.removeItem("sis-scan-owner");
+    const writingTab = createAsyncDurableStorage({ database: writingDb, getLegacyStorage: () => null });
+
+    await writingTab.setItem("sis-scan-owner", "first physical scan after durable-only clear");
+
+    await expect(createAsyncDurableStorage({ database: writingDb, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
+      .resolves.toBe("first physical scan after durable-only clear");
+  });
+  it("suppresses a pre-clear snapshot even when its durable write is delayed until after the clear", async () => {
+    vi.stubGlobal("performance", { timeOrigin: 2_000, now: vi.fn(() => 10) });
+    const db = new Db();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => null });
+    const delayed = storage.setItem("sis-scan-owner", "snapshot scheduled before durable-only clear");
+    await db.set(
+      "sis-scan-owner::scanbin-cleared-v1",
+      JSON.stringify({ __scanPersistClear: 1, version: 16, id: "later-clear", issuedAt: 2_011 }),
+    );
+
+    await delayed;
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
+  });
+  it("recovers the first causally post-conflict snapshot when conflict notification is delayed", async () => {
+    vi.stubGlobal("performance", { timeOrigin: 3_000, now: vi.fn(() => 10) });
+    const db = new Db();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => null });
+    await db.set(
+      "sis-scan-owner::scanbin-cleared-v1",
+      JSON.stringify({ __scanPersistClear: 1, version: 17, id: "conflict-a", issuedAt: 3_005 }),
+    );
+    await db.set(
+      "sis-scan-owner::scanbin-recovery-v1",
+      JSON.stringify({
+        __scanPersistRecovery: 1,
+        payload: "uncommitted",
+        supersedesTombstone: JSON.stringify({
+          __scanPersistClear: 1,
+          version: 17,
+          id: "conflict-b",
+          issuedAt: 3_006,
+        }),
+      }),
+    );
+
+    await storage.setItem("sis-scan-owner", "first physical scan after unseen conflict");
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
+      .resolves.toBe("first physical scan after unseen conflict");
+  });
+  it("fails closed when a snapshot and an unseen durable clear have equal causal timestamps", async () => {
+    vi.stubGlobal("performance", { timeOrigin: 4_000, now: vi.fn(() => 10) });
+    const db = new Db();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => null });
+    const write = storage.setItem("sis-scan-owner", "snapshot at ambiguous boundary");
+    await db.set(
+      "sis-scan-owner::scanbin-cleared-v1",
+      JSON.stringify({ __scanPersistClear: 1, version: 18, id: "equal-time-clear", issuedAt: 4_010 }),
+    );
+
+    await write;
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
+  });
   it("uses one physical write to recover when cached no-clear state is followed by cross-adapter conflict publication", async () => {
     const db = new Db();
     const local = legacy();
