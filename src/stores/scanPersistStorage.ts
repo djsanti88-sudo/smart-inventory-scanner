@@ -341,7 +341,10 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     if (options.database && !tombstoneState.durableKnown) {
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
-      legacySet(name, encodeAuthoritativePersistFallback(value, { invalidatesRecovery: true }));
+      legacySet(name, encodeAuthoritativePersistFallback(value, {
+        invalidatesRecovery: true,
+        supersedesTombstone: tombstoneState.token,
+      }));
       reportDegraded();
       return;
     }
@@ -626,28 +629,28 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       legacySnapshotsCleaned.delete(name);
       return enqueue(name, async () => {
       const current = await getTombstoneState(name);
-      let candidateVersion = 0;
-      if (options.database) {
-        try {
-          const candidate = decodeRecoveryCandidate(await options.database.get(recoveryKey(name)));
-          if (candidate?.supersedesTombstone) candidateVersion = parseClearToken(candidate.supersedesTombstone).version;
-        } catch { reportDegraded(); }
-      }
-      const operationToken = encodeClearToken(Math.max(current.maxVersion, candidateVersion) + 1);
+      const operationToken = encodeClearToken(current.maxVersion + 1);
       const localTombstone = writeTombstone(name, operationToken);
       const durableTombstone = await persistTombstone(name, operationToken);
+      let candidateDeleted = !options.database;
       if (options.database) {
         try {
           await options.database.remove(name);
-          await options.database.remove(recoveryKey(name));
           reportAvailable();
         } catch {
           reportDegraded();
         }
+        try {
+          await options.database.remove(recoveryKey(name));
+          candidateDeleted = true;
+          reportAvailable();
+        } catch { reportDegraded(); }
       } else {
         reportDegraded();
       }
       legacyRemove(name);
+      const authorityEstablished = current.durableKnown || candidateDeleted;
+      if (!authorityEstablished) return { cleared: false, authority: "none" } satisfies PersistenceClearResult;
       return {
         cleared: durableTombstone || localTombstone,
         authority: durableTombstone ? "durable" : localTombstone ? "local" : "none",
@@ -685,7 +688,12 @@ export async function getPersistedStatePresenceFromDatabase(
     const tombstone = await database.get(`${name}${TOMBSTONE_SUFFIX}`);
     const main = await database.get(name);
     const recovery = decodeRecoveryCandidate(await database.get(`${name}${RECOVERY_SUFFIX}`));
-    if (tombstone !== null) return recovery?.supersedesTombstone === tombstone ? "found" : "absent";
+    if (tombstone !== null) {
+      if (!recovery?.supersedesTombstone) return "absent";
+      const resolved = resolveNewestClearToken([tombstone, recovery.supersedesTombstone]);
+      if (resolved.conflict) return "unavailable";
+      return resolved.token === recovery.supersedesTombstone ? "found" : "absent";
+    }
     return main !== null || recovery !== null ? "found" : "absent";
   } catch {
     return "unavailable";

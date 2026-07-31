@@ -109,6 +109,19 @@ class TombstoneReadFailsDb extends Db {
   }
 }
 
+class CandidateReadFailsDb extends Db {
+  failCandidateRead = true;
+  failCandidateRemove = false;
+  override async get(key: string): Promise<string | null> {
+    if (this.failCandidateRead && key === "sis-scan-owner::scanbin-recovery-v1") throw new Error("candidate unreadable");
+    return super.get(key);
+  }
+  override async remove(key: string): Promise<void> {
+    if (this.failCandidateRemove && key === "sis-scan-owner::scanbin-recovery-v1") throw new Error("candidate removal failed");
+    await super.remove(key);
+  }
+}
+
 describe("active async persistence adapter", () => {
   it("migrates legacy bytes into durable storage", async () => {
     const db = new Db(), local = legacy(); local.values.set("sis-scan-owner", '{"version":14}');
@@ -547,6 +560,37 @@ describe("active async persistence adapter", () => {
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
       .resolves.toBe("candidate after clear 5");
   });
+  it("reports a clear non-authoritative when candidate ordering is unknown and deletion fails", async () => {
+    const db = new CandidateReadFailsDb();
+    db.failCandidateRead = false;
+    await db.set("sis-scan-owner::scanbin-recovery-v1", "unreadable candidate");
+    db.failCandidateRead = true;
+    db.failCandidateRemove = true;
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => legacy() });
+    await expect(storage.removeItem("sis-scan-owner")).resolves.toEqual({ cleared: false, authority: "none" });
+  });
+  it("establishes clear authority when unknown candidate ordering is eliminated by confirmed deletion", async () => {
+    const db = new CandidateReadFailsDb();
+    db.failCandidateRead = false;
+    await db.set("sis-scan-owner::scanbin-recovery-v1", "unreadable candidate");
+    db.failCandidateRead = true;
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => legacy() });
+    await expect(storage.removeItem("sis-scan-owner")).resolves.toMatchObject({ cleared: true });
+    db.failCandidateRead = false;
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => legacy() }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
+  });
+  it("preserves a post-clear scan locally while durable clear reads fail and promotes it after recovery", async () => {
+    const db = new TombstoneReadFailsDb();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
+    await storage.removeItem("sis-scan-owner");
+    db.failTombstoneRead = true;
+    await storage.setItem("sis-scan-owner", "physical scan after clear");
+    db.failTombstoneRead = false;
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("physical scan after clear");
+  });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;
     await createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).removeItem("sis-scan-owner");
@@ -645,6 +689,21 @@ describe("native IndexedDB bridge", () => {
     const db = new Db();
     await db.set("sis-scan-owner::scanbin-recovery-v1", "raw legacy recovery");
     await expect(getPersistedStatePresenceFromDatabase("sis-scan-owner", db)).resolves.toBe("found");
+  });
+
+  it("orders durable clear and recovery causality for namespace presence", async () => {
+    const older = JSON.stringify({ __scanPersistClear: 1, version: 2, id: "clear-2" });
+    const newer = JSON.stringify({ __scanPersistClear: 1, version: 3, id: "clear-3" });
+    const conflict = JSON.stringify({ __scanPersistClear: 1, version: 3, id: "other-clear-3" });
+    const db = new Db();
+    await db.set("sis-scan-owner::scanbin-cleared-v1", older);
+    await db.set("sis-scan-owner::scanbin-recovery-v1", JSON.stringify({ __scanPersistRecovery: 1, payload: "newer", supersedesTombstone: newer }));
+    await expect(getPersistedStatePresenceFromDatabase("sis-scan-owner", db)).resolves.toBe("found");
+    await db.set("sis-scan-owner::scanbin-cleared-v1", newer);
+    await db.set("sis-scan-owner::scanbin-recovery-v1", JSON.stringify({ __scanPersistRecovery: 1, payload: "older", supersedesTombstone: older }));
+    await expect(getPersistedStatePresenceFromDatabase("sis-scan-owner", db)).resolves.toBe("absent");
+    await db.set("sis-scan-owner::scanbin-recovery-v1", JSON.stringify({ __scanPersistRecovery: 1, payload: "conflict", supersedesTombstone: conflict }));
+    await expect(getPersistedStatePresenceFromDatabase("sis-scan-owner", db)).resolves.toBe("unavailable");
   });
 
   it("reports an inaccessible IndexedDB namespace as unavailable, never absent", async () => {
