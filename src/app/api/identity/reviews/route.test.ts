@@ -42,7 +42,42 @@ describe("identity review route", () => {
     const { handler, repository } = route();
     const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a"));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ reviews: [review] });
+    expect(await response.json()).toEqual({ reviews: [review], page: 1, pageSize: 25, total: 1 });
     expect(repository.listIdentityReviews).toHaveBeenCalledWith("shop-a");
+  });
+
+  it("rejects direct counter and viewer mutations after server authorization", async () => {
+    for (const role of ["counter", "viewer"] as const) {
+      const { handler, repository } = route({ authorize: vi.fn().mockResolvedValue({ actorId: role, businessId: "shop-a", role }) });
+      const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "reject", reviewId: "review-1" }) }));
+      expect(response.status).toBe(403);
+      expect(repository.resolveIdentityReview).not.toHaveBeenCalled();
+    }
+  });
+
+  it("bounds GET pagination and maps repository errors without exposing internals", async () => {
+    const reviews = Array.from({ length: 27 }, (_, index) => ({ ...review, reviewId: `review-${index}`, rowId: `row-${index}` }));
+    const { handler } = route({ repository: { listIdentityReviews: vi.fn().mockResolvedValue(reviews) } as never });
+    const paged = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&page=2&pageSize=1000"));
+    expect(paged.status).toBe(200);
+    expect(await paged.json()).toMatchObject({ page: 2, pageSize: 25, total: 27, reviews: [expect.objectContaining({ reviewId: "review-25" }), expect.objectContaining({ reviewId: "review-26" })] });
+    const failing = route({ repository: { listIdentityReviews: vi.fn().mockRejectedValue(new Error("filesystem internals")) } as never }).handler;
+    const response = await failing(new Request("http://local/api/identity/reviews?businessId=shop-a"));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Unable to load identity reviews." });
+  });
+
+  it("rejects oversized action bodies before persistence", async () => {
+    const { handler, repository } = route();
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "reject", reviewId: "review-1", name: "x".repeat(16_385) }) }));
+    expect(response.status).toBe(400);
+    expect(repository.resolveIdentityReview).not.toHaveBeenCalled();
+  });
+
+  it("maps action persistence failures to a safe server error", async () => {
+    const { handler } = route({ repository: { listIdentityReviews: vi.fn().mockResolvedValue([review]), resolveIdentityReview: vi.fn().mockRejectedValue(new Error("storage path leaked")) } as never });
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "reject", reviewId: "review-1" }) }));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Unable to update identity review." });
   });
 });

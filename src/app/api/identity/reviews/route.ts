@@ -28,6 +28,8 @@ async function defaultVersions(): Promise<Versions> { const model = await loadCo
 
 type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: () => Promise<Versions>; currentModel?: () => ReturnType<typeof loadConfiguredLocalIdentityReadModel> };
 type Action = "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
+const maxBodyBytes = 16 * 1024;
+function positiveInteger(value: string | null, fallback: number, maximum: number): number { const parsed = Number(value); return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback; }
 function requestBody(value: unknown): value is { businessId: string; reviewId: string; action: Action; targetProductId?: string; name?: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const input = value as Record<string, unknown>;
@@ -42,14 +44,15 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     const url = new URL(request.url);
     const businessId = request.method === "GET" ? url.searchParams.get("businessId") ?? "" : "";
     let body: { businessId: string; reviewId: string; action: Action; targetProductId?: string; name?: string } | undefined;
-    if (request.method === "POST") { try { const parsed: unknown = await request.json(); if (!requestBody(parsed)) return json({ error: "Identity review request was invalid." }, 400); body = parsed; } catch { return json({ error: "Body must be valid JSON." }, 400); } }
+    if (request.method === "POST") { if (Number(request.headers.get("content-length")) > maxBodyBytes) return json({ error: "Identity review request was too large." }, 400); try { const text = await request.text(); if (new TextEncoder().encode(text).byteLength > maxBodyBytes) return json({ error: "Identity review request was too large." }, 400); const parsed: unknown = JSON.parse(text); if (!requestBody(parsed)) return json({ error: "Identity review request was invalid." }, 400); body = parsed; } catch { return json({ error: "Body must be valid JSON." }, 400); } }
     const scope = body?.businessId ?? businessId;
     if (!scope) return json({ error: "Business access is required." }, 400);
     const actor = await dependencies.authorize(request, scope);
     if (!actor || actor.businessId !== scope) return json({ error: "Business access is required." }, 403);
-    if (request.method === "GET") return json({ reviews: await dependencies.repository.listIdentityReviews(scope) });
+    if (request.method === "GET") { try { const reviews = await dependencies.repository.listIdentityReviews(scope); const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25), requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER), page = Math.min(requestedPage, Math.max(1, Math.ceil(reviews.length / pageSize))); return json({ reviews: reviews.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: reviews.length }); } catch { return json({ error: "Unable to load identity reviews." }, 500); } }
     if (request.method !== "POST" || !body) return json({ error: "Method not allowed." }, 405);
     if (!isManager(actor)) return json({ error: "Only owners and admins can resolve identity reviews." }, 403);
+    try {
     const review = (await dependencies.repository.listIdentityReviews(scope)).find((item) => item.reviewId === body!.reviewId);
     if (!review) return json({ error: "Identity review was not found." }, 404);
     const actionId = request.headers.get("Idempotency-Key") ?? `review:${review.reviewId}:${body.action}`;
@@ -75,6 +78,7 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     const versions = await dependencies.currentVersions();
     const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: body.action === "revoke_link" ? 2 : 1 };
     return json(await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link));
+    } catch { return json({ error: "Unable to update identity review." }, 500); }
   };
 }
 
