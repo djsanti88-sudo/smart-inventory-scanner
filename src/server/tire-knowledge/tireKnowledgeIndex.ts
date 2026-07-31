@@ -324,7 +324,8 @@ function isSafeLocalDemoTwin(raw: TireKnowledgeRow, companion: TireKnowledgeRow)
   if (!trimmed(raw.canonical_product_uid) || raw.canonical_product_uid !== companion.canonical_product_uid) return false;
   const rawMpn = trimmed(raw.manufacturer_part_number);
   const companionMpn = trimmed(companion.manufacturer_part_number);
-  if (rawMpn && companionMpn && !tirePartNumberVariants(rawMpn).some((variant) => tirePartNumberVariants(companionMpn).includes(variant))) return false;
+  if (!rawMpn || !companionMpn) return false;
+  if (!tirePartNumberVariants(rawMpn).some((variant) => tirePartNumberVariants(companionMpn).includes(variant))) return false;
   return trimmed(companion.confidence) === "process_verified_green"
     && trimmed(companion.current_status) === "active_retail"
     && trimmed(companion.usable_for) === "auto_count_candidate"

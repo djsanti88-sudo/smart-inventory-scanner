@@ -96,6 +96,8 @@ describe("lookupByExactBarcodeLocal", () => {
     ["invalid companion checksum", {}, { barcode: "0191563023535" }],
     ["valid but non-padding barcode", {}, { barcode: "0840139632891" }],
     ["empty canonical uid", { canonical_product_uid: "" }, { canonical_product_uid: "" }],
+    ["empty raw MPN", { manufacturer_part_number: "" }, {}],
+    ["empty companion MPN", {}, { manufacturer_part_number: "" }],
   ])("fails closed for a %s twin pair", async (_label, rawPatch, companionPatch) => {
     const raw = demoRow({ barcode: "191563023534", canonical_product_uid: "TIRE_SHARED", manufacturer_part_number: "15506", ...rawPatch });
     const companion = demoRow({ barcode: "0191563023534", canonical_product_uid: "TIRE_SHARED", barcode_type: "ean", manufacturer_part_number: "NX15506", confidence: "process_verified_green", usable_for: "auto_count_candidate", source_count: 0, ...companionPatch });
