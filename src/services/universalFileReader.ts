@@ -58,21 +58,30 @@ function delimitedMatrix(text: string, kind: UploadKind): string[][] {
   return records.map((row) => row.map((cell) => sanitizeCell(String(cell ?? ""))));
 }
 
-function excelCellText(value: unknown): string {
+function inertCellText(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return value.toISOString();
-  if (typeof value !== "object") return String(value);
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return "";
+}
+
+function excelCellText(value: unknown): string {
+  if (typeof value !== "object" || value === null || value instanceof Date) return inertCellText(value);
   const record = value as Record<string, unknown>;
-  if (record.formula !== undefined) return record.result === undefined ? "" : String(record.result ?? "");
-  if (record.result !== undefined) return String(record.result ?? "");
+  // Formula text is never evaluated. Only a scalar cached result is importable; errors and
+  // unsupported result objects are deliberately inert rather than becoming "[object Object]".
+  if (record.formula !== undefined) return inertCellText(record.result);
+  if (record.result !== undefined) return inertCellText(record.result);
   if (Array.isArray(record.richText)) {
     return record.richText
-      .map((part) => typeof part === "object" && part !== null ? String((part as { text?: unknown }).text ?? "") : "")
+      .map((part) => typeof part === "object" && part !== null ? inertCellText((part as { text?: unknown }).text) : "")
       .join("");
   }
-  if (record.text !== undefined) return String(record.text ?? "");
-  if (record.hyperlink !== undefined) return String(record.text ?? record.hyperlink ?? "");
-  return String(value);
+  if (record.text !== undefined) return inertCellText(record.text);
+  if (record.hyperlink !== undefined) return inertCellText(record.text ?? record.hyperlink);
+  return "";
 }
 
 interface NamedMatrix {
@@ -88,7 +97,10 @@ function assertFileSize(size: number): void {
 function assertMatrixLimits(matrices: string[][][]): void {
   const totalRows = matrices.reduce((total, matrix) => total + matrix.filter(hasData).length, 0);
   if (totalRows > MAX_TOTAL_ROWS) throw new Error("The uploaded file exceeds the 5,000-row limit.");
-  if (matrices.some((matrix) => matrix.some((row) => row.length > MAX_COLUMNS))) {
+  const hasTooWideData = matrices.some((matrix) => matrix.some((row) =>
+    row.reduce((lastDataColumn, cell, index) => cell.trim() === "" ? lastDataColumn : index + 1, 0) > MAX_COLUMNS,
+  ));
+  if (hasTooWideData) {
     throw new Error("The uploaded file exceeds the 256-column limit.");
   }
 }

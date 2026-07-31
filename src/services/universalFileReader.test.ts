@@ -172,6 +172,41 @@ describe("readUniversalFile", () => {
     await expect(readUniversalFile(file)).resolves.toMatchObject({ rows: [["ABC-1", ""]] });
   });
 
+  it("turns cached formula error objects into inert empty cells", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Inventory");
+    worksheet.addRow(["PN", "QOH"]);
+    worksheet.addRow(["ABC-1", { formula: "1/0", result: { error: "#DIV/0!" } }]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+
+    await expect(readUniversalFile(file)).resolves.toMatchObject({ rows: [["ABC-1", ""]] });
+  });
+
+  it("does not count styled far-away cells toward the data width limit", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Inventory");
+    worksheet.addRow(["PN", "QOH"]);
+    worksheet.addRow(["ABC-1", 7]);
+    worksheet.getCell("XFD1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF000000" } };
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const file: UploadFileLike = {
+      name: "inventory.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    };
+
+    const sheet = await readUniversalFile(file);
+    expect(sheet.rows[0].slice(0, 2)).toEqual(["ABC-1", "7"]);
+    expect(sheet.rows[0]).toHaveLength(16_384);
+  });
+
   it("allows exact file, sheet, column, and row limits", async () => {
     const columns = Array.from({ length: 256 }, (_, index) => `H${index}`).join(",");
     const row = Array.from({ length: 256 }, (_, index) => `V${index}`).join(",");
@@ -201,6 +236,20 @@ describe("readUniversalFile", () => {
       text: async () => "",
       arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     })).rejects.toThrow("The uploaded workbook exceeds the 64-sheet limit.");
+  });
+
+  it("accepts exactly 64 non-empty workbook sheets", async () => {
+    const workbook = new ExcelJS.Workbook();
+    for (let index = 0; index < 64; index += 1) workbook.addWorksheet(`Sheet ${index + 1}`).addRow(["PN"]);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const sheets = await readUniversalWorkbook({
+      name: "64-sheets.xlsx",
+      text: async () => "",
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    });
+    expect(sheets).toHaveLength(64);
+    expect(sheets.at(-1)?.sheetOrdinal).toBe(64);
   });
 
   it("rejects every .xls upload with safe conversion guidance", async () => {
