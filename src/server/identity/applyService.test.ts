@@ -5,6 +5,7 @@ import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalRepository } from "./localRepository";
 import { createLocalAggregateLedger } from "./localAggregateLedger";
 import { canonicalSha256 } from "@/services/identity/canonical";
+import { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
 
 const versions = { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
 const freshSource = { versions, revalidateCountableTarget: async () => true };
@@ -54,6 +55,21 @@ describe("applyIdentityImport", () => {
       actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const },
     })).rejects.toThrow("apply_target_stale");
     expect(h.repository.createImportRun).not.toHaveBeenCalled();
+    expect(h.repository.claimImportOperation).not.toHaveBeenCalled();
+    expect(h.ledger.applyOnce).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an over-cap quantity", { quantity: MAX_IMPORT_QUANTITY + 1 }],
+    ["a negative source-file ordinal", { sourceFileOrdinal: -1 }],
+  ])("rejects a signed preview with %s before any durable mutation", async (_label, rowPatch) => {
+    const h = harness();
+    h.verifier.mockResolvedValueOnce([{ ...chunk(), rows: [{ ...chunk().rows[0]!, ...rowPatch }] }]);
+    await expect(applyIdentityImport({ signedPayloads: ["signed-preview"], mode: "physical_count", corrections: [] }, {
+      ...h, source: freshSource, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const },
+    })).rejects.toThrow("apply_row_invalid");
+    expect(h.repository.createImportRun).not.toHaveBeenCalled();
+    expect(h.repository.transitionImportRun).not.toHaveBeenCalled();
     expect(h.repository.claimImportOperation).not.toHaveBeenCalled();
     expect(h.ledger.applyOnce).not.toHaveBeenCalled();
   });

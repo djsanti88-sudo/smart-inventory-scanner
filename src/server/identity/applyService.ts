@@ -2,6 +2,7 @@ import "server-only";
 
 import { canonicalSha256 } from "@/services/identity/canonical";
 import { createAggregateImportEvent } from "@/services/identity/importLedger";
+import { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
 import type { PreviewVerificationExpectation, SignedPreviewChunk } from "@/services/identity/preview";
 import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, ImportRun, ScopedIdentifier } from "@/services/identity/types";
 import type { ImportOperationClaim, LocalIdentityRepository } from "./localRepository";
@@ -53,6 +54,15 @@ function rowResultFrom(value: unknown): ApplyResult["rows"][number] | undefined 
 
 type PreflightRow = { rowId: string; row: Record<string, unknown>; decision: ApplyDecision; correction?: ApplyCorrection };
 
+function isAggregateEventRow(record: Record<string, unknown>): boolean {
+  const quantity = record.quantity;
+  return Number.isSafeInteger(quantity) && (quantity as number) >= 0 && (quantity as number) <= MAX_IMPORT_QUANTITY
+    && Number.isSafeInteger(record.sourceFileOrdinal) && (record.sourceFileOrdinal as number) >= 0
+    && typeof record.sheetName === "string" && Boolean(record.sheetName.trim())
+    && Number.isSafeInteger(record.sourceRowNumber) && (record.sourceRowNumber as number) >= 1
+    && (record.unitOfMeasure === undefined || typeof record.unitOfMeasure === "string" && record.unitOfMeasure.toLowerCase() === "each");
+}
+
 async function preflightRows(chunks: SignedPreviewChunk[], input: ApplyIdentityImportInput, source: ApplySource, corrections: Map<string, ApplyCorrection>): Promise<PreflightRow[]> {
   const rowIds = chunks.flatMap((chunk) => chunk.rowIds);
   const rows = chunks.flatMap((chunk) => chunk.rows);
@@ -62,8 +72,8 @@ async function preflightRows(chunks: SignedPreviewChunk[], input: ApplyIdentityI
   for (let index = 0; index < rowIds.length; index += 1) {
     const rowId = rowIds[index]!, row = rows[index]; const original = decisions[index];
     if (!row || typeof row !== "object" || Array.isArray(row) || !original || typeof original !== "object") throw new Error("apply_row_invalid");
-    const record = row as Record<string, unknown>, quantity = record.quantity;
-    if (!Number.isSafeInteger(quantity) || (quantity as number) < 0 || !Number.isSafeInteger(record.sourceFileOrdinal) || typeof record.sheetName !== "string" || !record.sheetName || !Number.isSafeInteger(record.sourceRowNumber) || (record.sourceRowNumber as number) < 1) throw new Error("apply_row_invalid");
+    const record = row as Record<string, unknown>;
+    if (!isAggregateEventRow(record)) throw new Error("apply_row_invalid");
     const correction = corrections.get(rowId);
     const decision: ApplyDecision = correction ? { ...original, kind: "review", approvedProductId: correction.targetProductId } : original;
     const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
