@@ -8,7 +8,7 @@ import { prettifyBrand, prettifyProductName } from "@/services/format/productDis
 import { DecodeStatusBadge, SyncBadge } from "@/components/badges";
 import { matchTireSize, plainTireSizeDigits } from "@/services/tire/tireSizeNormalizer";
 import { UndoDeleteBanner, confirmAndDeleteProduct } from "@/components/UndoDeleteBanner";
-import { filterProducts } from "@/services/polish/filterProducts";
+import { createFinalCountRowSelector, filterFinalCountRows } from "@/components/finalCountRows";
 import { requiresOwnerPin } from "@/services/security/destructiveGuard";
 import type { InventoryCount, Product, UnknownCodeReview } from "@/types";
 
@@ -70,15 +70,13 @@ export function FinalCountTable() {
   // F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge into
   // finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts). This table
   // must show only the CURRENT session's counts, not every session's counts merged into the store.
-  const sessionCounts = currentSession
-    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
-    : finalCounts;
-
-  const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
-  const rows = useMemo(() => sessionCounts
-    .map((c) => ({ count: c, product: productById.get(c.productId) }))
-    .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
-    .sort((a, b) => b.count.quantity - a.count.quantity), [sessionCounts, productById]);
+  // The selector retains its complete, sorted row model until one of these three real inputs changes.
+  const rowSelector = useMemo(() => createFinalCountRowSelector(), []);
+  const rows = rowSelector({
+    finalCounts,
+    products,
+    currentSessionId: currentSession?.id,
+  });
   const reviewsByProductId = useMemo(() => {
     const index = new Map<string, { review: UnknownCodeReview; position: number }>();
     needsReviewQueue.forEach((review, position) => {
@@ -100,20 +98,16 @@ export function FinalCountTable() {
   }, [aliases]);
 
   // Task 4: digits-only query filters by sizeTag prefix; any other text filters brand/model/description.
-  const visibleRows = useMemo(() => {
-    const filterable = rows.map((r) => ({
-      id: r.count.id,
-      brand: resolvedBrand(r.product),
-      // Filtering always searches the raw structured model (not the customer-cleaned display value):
-      // the filter box is a search index, not a rendered cell, and this keeps filter behavior
-      // unchanged for both roles.
-      model: resolvedModel(r.product, true),
-      description: r.product.structuredDescription || r.product.name,
-      sizeTag: resolvedSizeTag(r.product),
-    }));
-    const kept = new Set(filterProducts(filterable, filterQuery).map((f) => f.id));
-    return rows.filter((r) => kept.has(r.count.id));
-  }, [rows, filterQuery]);
+  const visibleRows = useMemo(() => filterFinalCountRows(rows, filterQuery, (row) => ({
+    id: row.count.id,
+    brand: resolvedBrand(row.product),
+    // Filtering always searches the raw structured model (not the customer-cleaned display value):
+    // the filter box is a search index, not a rendered cell, and this keeps filter behavior
+    // unchanged for both roles.
+    model: resolvedModel(row.product, true),
+    description: row.product.structuredDescription || row.product.name,
+    sizeTag: resolvedSizeTag(row.product),
+  })), [rows, filterQuery]);
 
   const renderedRows = visibleRows.slice(0, visibleCount);
   return (
