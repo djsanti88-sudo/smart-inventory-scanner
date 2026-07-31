@@ -46,8 +46,9 @@ export async function runSignOutFlow(
  * state stops the deleted business's scan feed / products / aliases (sis-scan-v1) from ghosting into the
  * next session on this browser. The caller performs the redirect (deletion uses window.location.href).
  */
-export async function wipeAndSignOut(): Promise<void> {
+export async function wipeAndSignOut(): Promise<boolean> {
   const cleared = await useScanStore.getState().resetForSignOut();
-  if (cleared && typeof cleared === "object" && !cleared.cleared) return;
+  if (cleared && typeof cleared === "object" && !cleared.cleared) return false;
   await signOut();
+  return true;
 }

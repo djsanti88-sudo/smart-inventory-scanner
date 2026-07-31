@@ -110,6 +110,13 @@ describe("runSignOutFlow", () => {
 });
 
 describe("wipeAndSignOut", () => {
+  it("returns false and leaves auth active when the clear is not authoritative", async () => {
+    resetForSignOut.mockResolvedValue({ cleared: false });
+
+    await expect(wipeAndSignOut()).resolves.toBe(false);
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
   it("wipes then signs out, no confirm invoked", async () => {
     const order: string[] = [];
     resetForSignOut.mockImplementation(() => order.push("reset"));

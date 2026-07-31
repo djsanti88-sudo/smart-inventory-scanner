@@ -172,7 +172,11 @@ export default function SettingsPage() {
       // aliases in sis-scan-v1) is now meaningless AND a data leak - without this wipe it ghosts into
       // the next session on this browser. No unsynced-work confirm here: there is nothing to preserve,
       // and the typed-phrase + confirm already gated the destructive act. Same wipe as the sign-out flow.
-      await wipeAndSignOut();
+      const signedOut = await wipeAndSignOut();
+      if (signedOut !== true) {
+        setDeleteErr("Your account was deleted, but we could not safely clear local data. Please try again.");
+        return;
+      }
       if (typeof window !== "undefined") window.location.href = "/login";
     } catch {
       setDeleteErr("Deletion failed. Check your connection and try again.");
