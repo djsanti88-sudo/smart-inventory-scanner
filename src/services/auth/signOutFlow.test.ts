@@ -1,8 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createAsyncDurableStorage, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
 
 const prepareSignOut = vi.fn();
 const resetForSignOut = vi.fn();
 const signOut = vi.fn();
+
+class DelayedClearDatabase implements AsyncKeyValueDatabase {
+  private notifyRemoveStarted: (() => void) | undefined;
+  private releaseRemove: (() => void) | undefined;
+  readonly removeStarted = new Promise<void>((resolve) => { this.notifyRemoveStarted = resolve; });
+  private readonly removeMayFinish = new Promise<void>((resolve) => { this.releaseRemove = resolve; });
+  async get() { return null; }
+  async set() {}
+  async remove() { this.notifyRemoveStarted?.(); await this.removeMayFinish; }
+  release() { this.releaseRemove?.(); }
+}
 
 vi.mock("@/stores/scanStore", () => ({
   useScanStore: { getState: () => ({ prepareSignOut, resetForSignOut }) },
@@ -44,6 +56,30 @@ describe("runSignOutFlow", () => {
 
     expect(proceeded).toBe(true);
     expect(order).toEqual(["reset", "signOut", "redirect"]);
+  });
+
+  it("waits for the durable local-state clear before signing out or redirecting", async () => {
+    const order: string[] = [];
+    const database = new DelayedClearDatabase();
+    const storage = createAsyncDurableStorage({
+      database,
+      getLegacyStorage: () => ({ getItem: () => null, setItem: () => {}, removeItem: () => {} }),
+    });
+    resetForSignOut.mockImplementation(() => Promise.resolve(storage.removeItem("sis-scan-user")).then(() => {
+      order.push("clear-complete");
+    }));
+    signOut.mockImplementation(async () => { order.push("signOut"); });
+    const redirect = vi.fn(() => order.push("redirect"));
+
+    const flow = runSignOutFlow(redirect, () => true);
+    await database.removeStarted;
+
+    expect(signOut).not.toHaveBeenCalled();
+    expect(redirect).not.toHaveBeenCalled();
+    database.release();
+    await flow;
+
+    expect(order).toEqual(["clear-complete", "signOut", "redirect"]);
   });
 
   it("warns HONESTLY when queued changes across businesses could not sync", async () => {

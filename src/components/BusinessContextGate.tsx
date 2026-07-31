@@ -8,6 +8,7 @@ import { getSession, listMemberships } from "@/lib/auth";
 import { getSelectedBusinessId, isFirebaseBackend } from "@/lib/selectedBusiness";
 import { isLiveAuth } from "@/services/auth/authMode";
 import { hasLegacyBlob, persistKeyForUid } from "@/stores/scanPersistNamespace";
+import { hasPersistedState } from "@/stores/scanPersistStorage";
 
 // Wires the REAL signed-in business context into the scan/count workflow (live mode + Firebase backend).
 // On mount it resolves the authenticated user + the selected business and verifies a real membership.
@@ -55,8 +56,14 @@ export function BusinessContextGate({ children }: { children: React.ReactNode })
 
         // Legacy pre-account data on this browser + no per-uid key yet: the OWNER decides.
         const legacy = typeof window !== "undefined" && hasLegacyBlob(window.localStorage);
-        const alreadyOwn =
-          typeof window !== "undefined" && window.localStorage.getItem(persistKeyForUid(user.uid)) !== null;
+        const uidPersistKey = persistKeyForUid(user.uid);
+        const localUidMarker =
+          typeof window !== "undefined" && window.localStorage.getItem(uidPersistKey) !== null;
+        // The ownership marker is deliberately tiny; a healthy durable UID snapshot may therefore
+        // exist in IndexedDB with no localStorage entry. Never offer legacy adoption until both layers
+        // establish the namespace is absent (and fail closed if durable storage cannot be checked).
+        const alreadyOwn = localUidMarker || (legacy && await hasPersistedState(uidPersistKey));
+        if (!active) return;
         if (legacy && !alreadyOwn) {
           completed = true;
           setPendingCtx({ businessId: membership.businessId, uid: user.uid });

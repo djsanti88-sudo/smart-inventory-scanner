@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAsyncDurableStorage, createNativeIndexedDbDatabase, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
+import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
 
 class Db implements AsyncKeyValueDatabase {
   values = new Map<string, string>(); fail = false;
@@ -78,6 +78,26 @@ describe("active async persistence adapter", () => {
     const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => local });
     await Promise.all([storage.setItem("sis-scan-owner", "a"), storage.setItem("sis-scan-owner", "b")]);
     expect(set).toHaveBeenCalledTimes(1); expect(await db.get("sis-scan-owner")).toBe("b");
+  });
+  it("defers one typed persist serialization for a burst and encodes only its latest snapshot", async () => {
+    const db = new Db();
+    const serialize = vi.fn((snapshot: unknown) => JSON.stringify(snapshot));
+    const storage = createAsyncDurablePersistStorage<{ scanFeed: string[] }>({
+      database: db,
+      getLegacyStorage: () => legacy(),
+      serialize,
+    });
+
+    await Promise.all([
+      storage.setItem("sis-scan-owner", { state: { scanFeed: ["scan-1"] }, version: 14 }),
+      storage.setItem("sis-scan-owner", { state: { scanFeed: ["scan-1", "scan-2"] }, version: 14 }),
+      storage.setItem("sis-scan-owner", { state: { scanFeed: ["scan-1", "scan-2", "scan-3"] }, version: 14 }),
+    ]);
+
+    expect(serialize).toHaveBeenCalledTimes(1);
+    expect(await db.get("sis-scan-owner")).toBe(
+      JSON.stringify({ state: { scanFeed: ["scan-1", "scan-2", "scan-3"] }, version: 14 }),
+    );
   });
   it("never retries full-snapshot localStorage writes across a healthy IndexedDB scan burst", async () => {
     const db = new Db();

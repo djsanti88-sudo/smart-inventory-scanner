@@ -1,7 +1,7 @@
 // Fail-soft IndexedDB persistence for the scan store. It keeps the optimistic count in memory first,
 // migrates legacy localStorage safely, and coalesces durable snapshots outside the scan hot path.
 
-import type { StateStorage } from "zustand/middleware";
+import type { PersistStorage, StateStorage, StorageValue } from "zustand/middleware";
 
 // Backing storage may or may not be present (SSR / disabled). Kept minimal on purpose.
 type Backing = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -31,6 +31,15 @@ type AsyncDurableStorageOptions = {
   onStatusChange?: (status: PersistenceStatus) => void;
 };
 
+type AsyncDurablePersistStorageOptions = AsyncDurableStorageOptions & {
+  /** Test seam; production uses JSON.stringify at the deferred flush boundary. */
+  serialize?: (snapshot: unknown) => string;
+};
+
+type DeferredStringStorage = StateStorage & {
+  setDeferredItem: (name: string, serialize: () => string) => Promise<void>;
+};
+
 const PERSIST_POINTER_KEY = "__scanPersistPointer";
 const TOMBSTONE_SUFFIX = "::scanbin-cleared-v1";
 
@@ -57,7 +66,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const reportDegraded = () => options.onStatusChange?.("degraded");
   const reportAvailable = () => options.onStatusChange?.("available");
   const queuedByKey = new Map<string, Promise<void>>();
-  const pendingWrites = new Map<string, { value: string; token: number; resolvers: Array<() => void>; scheduled: boolean }>();
+  const pendingWrites = new Map<string, { serialize: () => string; token: number; resolvers: Array<() => void>; scheduled: boolean }>();
   const tombstones = new Set<string>();
   const legacySnapshotsCleaned = new Set<string>();
   const legacyMarkersEnsured = new Set<string>();
@@ -191,13 +200,31 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     const pending = pendingWrites.get(name);
     if (!pending) return;
     pendingWrites.delete(name);
-    void enqueue(name, () => performWrite(name, pending.value, pending.token)).then(() => pending.resolvers.forEach((resolve) => resolve()));
+    let value: string;
+    try {
+      // JSON encoding belongs here, after coalescing chose the latest state, never on Zustand's
+      // synchronous set() path. An encode error remains fail-soft just like a durable write failure.
+      value = pending.serialize();
+    } catch {
+      reportDegraded();
+      pending.resolvers.forEach((resolve) => resolve());
+      return;
+    }
+    void enqueue(name, () => performWrite(name, value, pending.token)).then(() => pending.resolvers.forEach((resolve) => resolve()));
   };
   if (typeof window !== "undefined") {
     const flushAll = () => [...pendingWrites.keys()].forEach(flushWrite);
     window.addEventListener("pagehide", flushAll);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushAll(); });
   }
+
+  const scheduleWrite = (name: string, serialize: () => string) => new Promise<void>((resolve) => {
+    const pending = pendingWrites.get(name) ?? { serialize, token: generationFor(name), resolvers: [], scheduled: false };
+    pending.serialize = serialize;
+    pending.resolvers.push(resolve);
+    pendingWrites.set(name, pending);
+    if (!pending.scheduled) { pending.scheduled = true; queueMicrotask(() => flushWrite(name)); }
+  });
 
   return {
     getItem: (name) => {
@@ -235,13 +262,8 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       return isDurablePointer(legacy) ? null : legacy;
       });
     },
-    setItem: (name, value) => new Promise<void>((resolve) => {
-      const pending = pendingWrites.get(name) ?? { value, token: generationFor(name), resolvers: [], scheduled: false };
-      pending.value = value;
-      pending.resolvers.push(resolve);
-      pendingWrites.set(name, pending);
-      if (!pending.scheduled) { pending.scheduled = true; queueMicrotask(() => flushWrite(name)); }
-    }),
+    setItem: (name, value) => scheduleWrite(name, () => value),
+    setDeferredItem: scheduleWrite,
     removeItem: (name) => {
       const pending = pendingWrites.get(name);
       if (pending) { pendingWrites.delete(name); pending.resolvers.forEach((resolve) => resolve()); }
@@ -264,7 +286,38 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       legacyRemove(name);
       });
     },
+  } as DeferredStringStorage;
+}
+
+/**
+ * Zustand's typed persistence boundary. It intentionally receives the object snapshot rather than a
+ * pre-stringified value, so a scan burst selects its latest snapshot before JSON encoding happens.
+ */
+export function createAsyncDurablePersistStorage<S>(options: AsyncDurablePersistStorageOptions): PersistStorage<S> {
+  const { serialize = JSON.stringify, ...durableOptions } = options;
+  const storage = createAsyncDurableStorage(durableOptions) as DeferredStringStorage;
+  return {
+    getItem: async (name) => {
+      const raw = await storage.getItem(name);
+      return raw === null ? null : JSON.parse(raw) as StorageValue<S>;
+    },
+    setItem: (name, snapshot) => storage.setDeferredItem(name, () => serialize(snapshot)),
+    removeItem: (name) => storage.removeItem(name),
   };
+}
+
+/**
+ * Conservative durable namespace probe for the sign-in adoption gate. If the browser cannot prove
+ * the UID namespace is absent, treat it as occupied so one shared-browser user never adopts another
+ * user's state merely because IndexedDB was briefly unavailable.
+ */
+export async function hasPersistedState(name: string): Promise<boolean> {
+  try {
+    const storage = createIndexedDbScanPersistStorage();
+    return await storage.getItem(name) !== null;
+  } catch {
+    return true;
+  }
 }
 
 // Exported as a narrow test seam for the native transaction lifecycle; application callers use the

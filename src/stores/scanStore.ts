@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { persist } from "zustand/middleware";
 import type {
   Alias,
   AiLookupLog,
@@ -86,7 +86,7 @@ import { toAuditEvent, type AuditEventInput } from "@/services/audit/audit";
 import { parseCsv, buildProductImport, type ImportConflict } from "@/services/csvImport";
 import { getSeed, DEMO_BUSINESS_ID } from "@/seed/seedData";
 import { buildPersistedScanState, type PersistableScanState } from "@/stores/scanPersist";
-import { createIndexedDbScanPersistStorage } from "@/stores/scanPersistStorage";
+import { createAsyncDurablePersistStorage, createNativeIndexedDbDatabase, setBrowserPersistenceStatus } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
 import { persistKeyForUid, migrateLegacyBlobOnce } from "@/stores/scanPersistNamespace";
@@ -726,7 +726,7 @@ export interface ScanState {
   prepareSignOut: () => Promise<number>;
   /** Sign-out: wipes tenant state to the anon baseline, clears the selected-business key, removes the
    *  signed-out user's per-uid localStorage key, and re-points persist at the anon key. */
-  resetForSignOut: () => void;
+  resetForSignOut: () => Promise<void>;
   /** Re-point persist at this uid's key and rehydrate (no legacy-blob migration). Returns a promise
    *  that resolves once rehydrate has applied, so callers can await it before reading state. */
   rehydrateForUid: (uid: string) => Promise<void>;
@@ -918,8 +918,10 @@ export interface ScanState {
   pendingCount: () => number;
   getProduct: (id: string | null) => Product | undefined;
   clearSession: () => void;
+  /** Await the active namespace removal rather than Zustand's fire-and-forget clearStorage wrapper. */
+  clearPersistedState: () => Promise<void>;
   /** Dev/recovery action: wipe persisted + mock-backend state and reload clean seed data. */
-  clearLocalCache: () => void;
+  clearLocalCache: () => Promise<void>;
   /** Remove the owner-selected recommended count rows (+ orphaned products/aliases). Snapshots for Undo. */
   applyCleanupSelections: (selectedCountIds: string[]) => { removed: number; backup: CleanupBackup | null };
   /** Convenience: apply all high-confidence (default-checked) recommendations. */
@@ -1761,7 +1763,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // Remove the active durable namespace before repointing to anon. This is intentionally separate
         // from the in-memory reset: clearing a localStorage fallback alone would leave IndexedDB data
         // behind for a later shared-browser sign-in.
-        if (deps.persistName) void useScanStore.persist.clearStorage();
+        const persistenceClear = get().clearPersistedState();
         // Re-point persist at the anon key BEFORE the wipe below. Firebase's own SDK auth persistence
         // is cleared by fbSignOut (auth.ts:66-69) in the UI sign-out handlers - that call is the
         // authority for SDK state; this action owns only app state. Guarded on deps.persistName so the
@@ -1812,6 +1814,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             // ignore storage errors: the in-memory reset above already holds
           }
         }
+        return persistenceClear;
       },
 
       rehydrateForUid: (uid: string) => {
@@ -6794,6 +6797,19 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
         },
 
+      clearPersistedState: () => {
+        if (!deps.persistName) return Promise.resolve();
+        const persistApi = (useScanStore as unknown as {
+          persist?: { getOptions?: () => { name?: string } };
+        }).persist;
+        const name = persistApi?.getOptions?.().name ?? deps.persistName;
+        // Call the adapter directly: Zustand's persist.clearStorage() explicitly discards this promise.
+        return Promise.resolve(scanPersistStorage.removeItem(name)).then(
+          () => undefined,
+          () => undefined,
+        );
+      },
+
       clearLocalCache: () => {
         // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
         // guards against a destructive cloud wipe and throws) and must NEVER reseed mock data over the
@@ -6847,7 +6863,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         // The reset above invokes Zustand persistence. Clear LAST so that reset snapshot cannot
         // resurrect the namespace after an otherwise successful clear.
-        if (deps.persistName) void useScanStore.persist.clearStorage();
+        return get().clearPersistedState();
       },
 
       applyCleanupSelections: (selectedCountIds) => {
@@ -7432,7 +7448,14 @@ export function scanStoreMigrate(persisted: unknown, version: number) {
   return out as never;
 }
 
-const scanPersistStorage = createIndexedDbScanPersistStorage();
+const scanPersistStorage = createAsyncDurablePersistStorage<Record<string, unknown>>({
+  database: createNativeIndexedDbDatabase(),
+  getLegacyStorage: () => {
+    if (typeof window === "undefined") return null;
+    try { return window.localStorage; } catch { return null; }
+  },
+  onStatusChange: setBrowserPersistenceStatus,
+});
 
 export const useScanStore = create<ScanState>()(
   persist(buildScanInitializer(appDeps), {
@@ -7460,7 +7483,7 @@ export const useScanStore = create<ScanState>()(
     // Durable asynchronous IndexedDB storage with read-through migration from the current localStorage
     // namespaces. Its failure path resolves rather than throws, so persistence can never roll back or
     // brick the synchronous optimistic count. The UI exposes a degraded status when fallback is active.
-    storage: createJSONStorage(() => scanPersistStorage),
+    storage: scanPersistStorage,
     skipHydration: true,
     migrate: scanStoreMigrate,
     // Sec-4: split persisted state by access level. A customer browser must NEVER persist the reusable
