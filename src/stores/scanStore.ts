@@ -1395,6 +1395,11 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       set({ firstScanAt: now() });
     };
 
+    const isTenantContextActive = (businessId: string, userId: string | null) => {
+      const current = get();
+      return current.businessId === businessId && current.userId === userId;
+    };
+
     // Serialize cloud drains: rapid scans each call syncPending, and overlapping async drains would
     // contend on the same _appliedKeys doc (self-inflicted "already-exists"). A promise-chain mutex runs
     // each drain after the previous completes; every enqueue still triggers a drain that picks up the
@@ -2989,6 +2994,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
+        const requestedBusinessId = state.businessId;
+        const requestedUserId = state.userId;
+        const requestedTenantIsActive = () => isTenantContextActive(requestedBusinessId, requestedUserId);
 
         const s = state.settings;
         const nowIso = now();
@@ -3063,6 +3071,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           });
           if (!res.ok) throw new Error(`lookup failed ${res.status}`);
           const data = (await res.json()) as { providerName: string; result: AiLookupResult };
+          if (!requestedTenantIsActive()) return;
           const result = data.result;
 
           set((st) => ({
@@ -3104,6 +3113,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           // It is NEVER auto-saved as an alias and NEVER counted. A human must approve it via the
           // Needs Review actions. This is the fix for the wrong-product bug.
         } catch {
+          if (!requestedTenantIsActive()) return;
           const nextBreaker = recordFailure(gate.breaker, nowMs);
           set((st) => ({
             aiLookupLogs: [log("error", s.primaryProvider, 0, nextBreaker), ...st.aiLookupLogs],
@@ -3253,6 +3263,9 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         const state = get();
         const review = state.needsReviewQueue.find((r) => r.id === reviewId);
         if (!review || review.status !== "open") return;
+        const requestedBusinessId = state.businessId;
+        const requestedUserId = state.userId;
+        const requestedTenantIsActive = () => isTenantContextActive(requestedBusinessId, requestedUserId);
 
         const s = state.settings;
         const nowIso = now();
@@ -3421,6 +3434,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           } finally {
             clearTimeout(abortTimer);
           }
+          if (!requestedTenantIsActive()) return;
           // BUG #14 (QA hardening 2026-07-16): CLIENT-SIDE defense in depth. The server already
           // sanitizes reasonText/decision.reason (pipeline.ts) before responding, but this store must
           // not trust that unconditionally - sanitize both here too, ONCE, right at the response
@@ -4165,6 +4179,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             syncDecodedState(reviewId);
           }
         } catch (e) {
+          if (!requestedTenantIsActive()) return;
           const nextBreaker = recordFailure(gate.breaker, nowMs);
           // Emit only on the closed/half-open -> open transition. This best-effort request must not
           // participate in the scan/decode control flow or report a raw scan/provider error.
