@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getAuthoritativePersistFallback, getPersistedStatePresence, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
+import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getAuthoritativePersistFallback, getPersistedStatePresence, getPersistedStatePresenceFromDatabase, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
 
 class Db implements AsyncKeyValueDatabase {
   values = new Map<string, string>(); fail = false;
@@ -96,6 +96,16 @@ class ToggleUnavailableDb extends Db {
   override async set(key: string, value: string): Promise<void> {
     if (this.unavailable) throw new Error("IndexedDB unavailable");
     await super.set(key, value);
+  }
+}
+
+class TombstoneReadFailsDb extends Db {
+  failTombstoneRead = false;
+  override async get(key: string): Promise<string | null> {
+    if (this.failTombstoneRead && key === "sis-scan-owner::scanbin-cleared-v1") {
+      throw new Error("durable tombstone unreadable");
+    }
+    return super.get(key);
   }
 }
 
@@ -501,6 +511,42 @@ describe("active async persistence adapter", () => {
       .resolves.toBe("newest offline snapshot");
     expect(await db.get("sis-scan-owner")).toBe("newest offline snapshot");
   });
+  it("does not promote or retire a candidate while the durable tombstone is unreadable", async () => {
+    const db = new TombstoneReadFailsDb();
+    const clear = JSON.stringify({ __scanPersistClear: 1, version: 3, id: "clear-3" });
+    const candidate = JSON.stringify({
+      __scanPersistRecovery: 1,
+      payload: "post-clear candidate",
+      supersedesTombstone: clear,
+    });
+    await db.set("sis-scan-owner", "stale main");
+    await db.set("sis-scan-owner::scanbin-cleared-v1", clear);
+    await db.set("sis-scan-owner::scanbin-recovery-v1", candidate);
+    db.failTombstoneRead = true;
+
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => legacy() });
+    await expect(storage.getItem("sis-scan-owner")).resolves.toBeNull();
+
+    db.failTombstoneRead = false;
+    expect(await db.get("sis-scan-owner")).toBe("stale main");
+    expect(await db.get("sis-scan-owner::scanbin-recovery-v1")).toBe(candidate);
+  });
+  it("selects a newer local ordered clear over an older durable clear and its candidate", async () => {
+    const db = new Db();
+    const local = legacy();
+    const older = JSON.stringify({ __scanPersistClear: 1, version: 4, id: "clear-4" });
+    const newer = JSON.stringify({ __scanPersistClear: 1, version: 5, id: "clear-5" });
+    await db.set("sis-scan-owner::scanbin-cleared-v1", older);
+    await db.set("sis-scan-owner::scanbin-recovery-v1", JSON.stringify({
+      __scanPersistRecovery: 1,
+      payload: "candidate after clear 5",
+      supersedesTombstone: newer,
+    }));
+    local.values.set("sis-scan-owner::scanbin-cleared-v1", newer);
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).getItem("sis-scan-owner"))
+      .resolves.toBe("candidate after clear 5");
+  });
   it("tombstones failed deletion so stale data cannot rehydrate", async () => {
     const db = new Db(), local = legacy(); await db.set("sis-scan-owner", "old"); db.fail = true;
     await createAsyncDurableStorage({ database: db, getLegacyStorage: () => local }).removeItem("sis-scan-owner");
@@ -576,6 +622,31 @@ describe("active async persistence adapter", () => {
 });
 
 describe("native IndexedDB bridge", () => {
+  it("reports a tokenized clear absent even when failed deletion leaves the main snapshot", async () => {
+    const db = new Db();
+    await db.set("sis-scan-owner", "stale main");
+    await db.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 2, id: "clear-2" }));
+    await expect(getPersistedStatePresenceFromDatabase("sis-scan-owner", db)).resolves.toBe("absent");
+  });
+
+  it("reports recovery-only post-clear state found only when it supersedes the exact clear", async () => {
+    const db = new Db();
+    const clear = JSON.stringify({ __scanPersistClear: 1, version: 2, id: "clear-2" });
+    await db.set("sis-scan-owner::scanbin-cleared-v1", clear);
+    await db.set("sis-scan-owner::scanbin-recovery-v1", JSON.stringify({
+      __scanPersistRecovery: 1,
+      payload: "post-clear snapshot",
+      supersedesTombstone: clear,
+    }));
+    await expect(getPersistedStatePresenceFromDatabase("sis-scan-owner", db)).resolves.toBe("found");
+  });
+
+  it("reports a recovery-only namespace found without a clear", async () => {
+    const db = new Db();
+    await db.set("sis-scan-owner::scanbin-recovery-v1", "raw legacy recovery");
+    await expect(getPersistedStatePresenceFromDatabase("sis-scan-owner", db)).resolves.toBe("found");
+  });
+
   it("reports an inaccessible IndexedDB namespace as unavailable, never absent", async () => {
     const failedOpen = {
       error: new DOMException("blocked", "InvalidStateError"),
