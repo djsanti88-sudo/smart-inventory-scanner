@@ -226,4 +226,20 @@ describe("identity decision engine", () => {
     expect(decisions.map((decision) => decision.kind)).toEqual(["automatic", "invalid"]);
     expect(decisions.map((decision) => decision.sourceRecordFingerprint)).toEqual(["valid-row", "invalid-row"]);
   });
+
+  it("accounts for null and undefined batch rows without dereferencing them", async () => {
+    const lookupBatch = vi.fn<IdentityCandidateSource["lookupBatch"]>().mockResolvedValue({
+      catalogVersion: "catalog-v1",
+      catalogSnapshotHash: "snapshot-1",
+      candidatesByRecord: new Map(),
+    });
+
+    const decisions = await decideIdentityBatch([null, undefined], { readonlyOnly: true, lookupBatch });
+
+    expect(lookupBatch).toHaveBeenCalledOnce();
+    expect(lookupBatch).toHaveBeenCalledWith([]);
+    expect(decisions).toHaveLength(2);
+    expect(decisions.map((decision) => decision.kind)).toEqual(["invalid", "invalid"]);
+    expect(decisions.map((decision) => decision.sourceRecordFingerprint)).toEqual(["", ""]);
+  });
 });

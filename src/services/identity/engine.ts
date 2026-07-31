@@ -188,14 +188,14 @@ function invalidTerminal(
 
 /** Makes a pure, replayable identity decision from a previously read candidate snapshot. */
 export async function decideIdentity(
-  input: IdentityInput,
+  input: unknown,
   snapshot: IdentityCandidateSnapshot,
   plugin: IdentityCategoryPlugin,
 ): Promise<IdentityDecision> {
   const errors = validateIdentityInput(input);
   if (errors.length > 0) return invalidTerminal(input, snapshot, plugin, errors);
 
-  const normalized = plugin.normalize(input);
+  const normalized = plugin.normalize(input as IdentityInput);
   if (normalized.recordType && normalized.recordType !== "product" && nonProductCategories.has(normalized.recordType)) {
     return terminal(normalized, snapshot, plugin, "non_product", "explicit_adapter_record_type", normalized.recordType);
   }
@@ -289,20 +289,20 @@ export async function decideIdentity(
 
 /** Reads all candidates once, then applies the pure engine in the caller's input order. */
 export async function decideIdentityBatch(
-  inputs: IdentityInput[],
+  inputs: unknown[],
   source: IdentityCandidateSource,
 ): Promise<IdentityDecision[]> {
-  const validInputs = inputs.filter((input) => validateIdentityInput(input).length === 0);
+  const validInputs = inputs.filter((input): input is IdentityInput => validateIdentityInput(input).length === 0);
   const lookup = await source.lookupBatch(validInputs);
   return Promise.all(
     inputs.map((input) => {
-      const plugin = validateIdentityInput(input).length === 0 ? pluginFor(input) : genericIdentityPlugin;
+      const plugin = validateIdentityInput(input).length === 0 ? pluginFor(input as IdentityInput) : genericIdentityPlugin;
       return decideIdentity(
         input,
         {
           catalogVersion: lookup.catalogVersion,
           catalogSnapshotHash: lookup.catalogSnapshotHash,
-          candidates: lookup.candidatesByRecord.get(input.rawRecordFingerprint) ?? [],
+          candidates: lookup.candidatesByRecord.get(sourceRecordFingerprint(input)) ?? [],
         },
         plugin,
       );
