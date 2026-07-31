@@ -1760,61 +1760,68 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       resetForSignOut: () => {
-        // Remove the active durable namespace before repointing to anon. This is intentionally separate
-        // from the in-memory reset: clearing a localStorage fallback alone would leave IndexedDB data
-        // behind for a later shared-browser sign-in.
-        const persistenceClear = get().clearPersistedState();
-        // Re-point persist at the anon key BEFORE the wipe below. Firebase's own SDK auth persistence
-        // is cleared by fbSignOut (auth.ts:66-69) in the UI sign-out handlers - that call is the
-        // authority for SDK state; this action owns only app state. Guarded on deps.persistName so the
-        // non-persisted test store (createTestScanStore, persistName: null) never touches the
-        // module-level app store. The durable adapter serializes clear and write operations by key, so
-        // clearing this active namespace before changing the name cannot be resurrected by an older
-        // queued write; the wipe below then persists only to the anonymous namespace.
-        if (deps.persistName) {
-          const persistApi = (useScanStore as unknown as {
-            persist?: { setOptions: (o: { name: string }) => void };
-          }).persist;
-          if (persistApi) persistApi.setOptions({ name: persistKeyForUid(null) });
-        }
-        const cleared = emptyTenantState();
-        trustedCorpusModelsByReviewId.clear();
-        set({
-          businessId: DEMO_BUSINESS_ID,
-          userId: null,
-          businessContextReady: !cloudBackend,
-          businessDataLoaded: !cloudBackend,
-          products: cleared.products,
-          aliases: cleared.aliases,
-          sessions: cleared.sessions,
-          scanFeed: cleared.scanFeed,
-          finalCounts: cleared.finalCounts,
-          needsReviewQueue: cleared.needsReviewQueue,
-          settings: cleared.settings,
-          firstScanAt: cleared.firstScanAt,
-          recentLocations: cleared.recentLocations,
-          pendingSyncQueue: [],
-          syncedScanEventIds: [],
-          lastSyncError: null,
-          // N2: the wipe write also deposits tenant-scoped SESSION IDENTITY + variance SNAPSHOTS into the
-          // persisted blob. Clear them too so a signed-out browser holds no residue of the prior tenant's
-          // session/report data (and does not spuriously look "non-empty" to hasLegacyBlob). countSnapshots
-          // is the variance ring buffer; currentSession/sessionId are the active-session identity.
-          // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
-          // sessionHistory carries the tenant's scanned codes - same residue rule.
-          countSnapshots: cleared.countSnapshots,
-          sessionHistory: [],
-          currentSession: cleared.currentSession,
-          sessionId: cleared.sessionId,
-        });
-        if (typeof window !== "undefined") {
-          try {
-            clearSelectedBusinessId(); // sis-selected-business-v1 is NOT uid-namespaced: explicit clear
-          } catch {
-            // ignore storage errors: the in-memory reset above already holds
+        const finishReset = () => {
+          // Re-point persist at the anon key only AFTER the signed-in namespace has been authoritatively
+          // cleared. Firebase's own SDK auth persistence is cleared by fbSignOut (auth.ts:66-69) in the
+          // UI sign-out handlers; this action owns only app state. The durable adapter serializes clear
+          // and write operations by key, so the anon wipe cannot resurrect an older signed-in snapshot.
+          if (deps.persistName) {
+            const persistApi = (useScanStore as unknown as {
+              persist?: { setOptions: (o: { name: string }) => void };
+            }).persist;
+            if (persistApi) persistApi.setOptions({ name: persistKeyForUid(null) });
           }
+          const cleared = emptyTenantState();
+          trustedCorpusModelsByReviewId.clear();
+          set({
+            businessId: DEMO_BUSINESS_ID,
+            userId: null,
+            businessContextReady: !cloudBackend,
+            businessDataLoaded: !cloudBackend,
+            products: cleared.products,
+            aliases: cleared.aliases,
+            sessions: cleared.sessions,
+            scanFeed: cleared.scanFeed,
+            finalCounts: cleared.finalCounts,
+            needsReviewQueue: cleared.needsReviewQueue,
+            settings: cleared.settings,
+            firstScanAt: cleared.firstScanAt,
+            recentLocations: cleared.recentLocations,
+            pendingSyncQueue: [],
+            syncedScanEventIds: [],
+            lastSyncError: null,
+            // N2: the wipe write also deposits tenant-scoped SESSION IDENTITY + variance SNAPSHOTS into the
+            // persisted blob. Clear them too so a signed-out browser holds no residue of the prior tenant's
+            // session/report data (and does not spuriously look "non-empty" to hasLegacyBlob). countSnapshots
+            // is the variance ring buffer; currentSession/sessionId are the active-session identity.
+            // sessionId is typed `string` (non-nullable), so it is cleared to "" rather than null.
+            // sessionHistory carries the tenant's scanned codes - same residue rule.
+            countSnapshots: cleared.countSnapshots,
+            sessionHistory: [],
+            currentSession: cleared.currentSession,
+            sessionId: cleared.sessionId,
+          });
+          if (typeof window !== "undefined") {
+            try {
+              clearSelectedBusinessId(); // sis-selected-business-v1 is NOT uid-namespaced: explicit clear
+            } catch {
+              // ignore storage errors: the in-memory reset above already holds
+            }
+          }
+        };
+
+        // The non-persisted test store has no namespace to clear, so retain its synchronous reset
+        // behavior. A persisted browser must prove the active UID namespace was cleared before it can
+        // switch to anon or discard its in-memory tenant state.
+        if (!deps.persistName) {
+          finishReset();
+          return Promise.resolve({ cleared: true, authority: "none" } as const);
         }
-        return persistenceClear;
+        return get().clearPersistedState().then((persistenceClear) => {
+          if (!persistenceClear.cleared) return persistenceClear;
+          finishReset();
+          return persistenceClear;
+        });
       },
 
       rehydrateForUid: (uid: string) => {
