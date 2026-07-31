@@ -13,7 +13,7 @@ import { createLocalPreviewSigner } from "./previewSigner";
 export interface LocalIdentityApplyComposition {
   storage: AtomicLocalStorage; signingKey: () => string | undefined; versions: PreviewVersions; now?: () => Date;
   authenticate(request: Request, businessId: string): Promise<ApplyActor | undefined>;
-  validateCorrectionTarget?: (input: { businessId: string; targetProductId: string }) => Promise<boolean>;
+  revalidateCountableTarget?: (input: { businessId: string; targetProductId: string; row: Record<string, unknown>; decision: import("@/services/identity/types").IdentityDecision; corrected: boolean }) => Promise<boolean>;
 }
 let injected: LocalIdentityApplyComposition | undefined;
 type Membership = ApplyActor;
@@ -28,7 +28,7 @@ async function configured(): Promise<LocalIdentityApplyComposition | undefined> 
   const catalogVersion = "local-preview-empty-catalog-v1", catalogSnapshotHash = await canonicalSha256({ catalogVersion, barcodeCandidates: [], partNumberCandidates: [] });
   const linkVersion = "local-preview-empty-links-v1", linkSnapshotHash = await canonicalSha256({ linkVersion, catalogSnapshotHash, approvedLinks: [] });
   const root = path.join(process.cwd(), ".tmp", "identity-import", "local-apply-v1");
-  return { storage: createFileAtomicLocalStorage({ root }), signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, authenticate: async (_request, businessId) => { const actorId = process.env.SCANBIN_LOCAL_ACTOR_ID; if (!actorId) return undefined; const member = configuredMemberships.find((membership) => membership.actorId === actorId && membership.businessId === businessId); if (!member) throw new Error("apply_nonmember"); return member; } };
+  return { storage: createFileAtomicLocalStorage({ root }), signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async () => false, authenticate: async (_request, businessId) => { const actorId = process.env.SCANBIN_LOCAL_ACTOR_ID; if (!actorId) return undefined; const member = configuredMemberships.find((membership) => membership.actorId === actorId && membership.businessId === businessId); if (!member) throw new Error("apply_nonmember"); return member; } };
 }
 async function composition(): Promise<LocalIdentityApplyComposition | undefined> { return injected ?? configured(); }
 export function setLocalIdentityApplyCompositionForTest(value: LocalIdentityApplyComposition | undefined): void { injected = value; }
@@ -45,5 +45,5 @@ export async function authorizeLocalIdentityApply(request: Request, token: strin
 export async function applyComposedIdentityImport(input: ApplyIdentityImportInput, actor: ApplyActor): Promise<ApplyResult> {
   const current = await composition(); if (!current) throw new Error("local_apply_configuration_unavailable");
   const signer = await createLocalPreviewSigner(current.signingKey()); const clock = () => (current.now?.() ?? new Date()).toISOString();
-  return applyIdentityImport(input, { repository: createLocalRepository(current.storage), ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions: current.versions, validateCorrectionTarget: current.validateCorrectionTarget }, clock, actor });
+  return applyIdentityImport(input, { repository: createLocalRepository(current.storage), ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions: current.versions, revalidateCountableTarget: current.revalidateCountableTarget }, clock, actor });
 }

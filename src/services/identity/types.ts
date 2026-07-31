@@ -187,8 +187,12 @@ export interface ImportRun {
   engineVersion: string;
   pluginVersion: string;
   catalogVersion: string;
+  /** Binds mode and audited corrections for idempotent apply retries. */
+  operationFingerprint?: string;
   createdAt: string;
   state: ImportRunState;
+  /** Server-produced terminal result; never supplied by preview transport. */
+  result?: unknown;
 }
 
 export type ImportOperationState = "pending" | "applied" | "failed_retryable" | "failed_terminal";

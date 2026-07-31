@@ -16,4 +16,13 @@ describe("POST /api/identity/apply", () => {
     const unavailable = createIdentityApplyRoute({ enabled: () => true, authorize: async () => { throw new Error("config"); }, apply: vi.fn() });
     expect((await unavailable(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ signedPayloads: ["token"], mode: "reconcile" }) }))).status).toBe(503);
   });
+
+  it("maps in-progress and stale apply outcomes to conflict responses", async () => {
+    const actor = { actorId: "owner", businessId: "shop-a", role: "owner" as const };
+    const request = () => new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify({ signedPayloads: ["token"], mode: "reconcile" }) });
+    const inProgress = createIdentityApplyRoute({ enabled: () => true, authorize: async () => actor, apply: async () => { throw new Error("apply_in_progress"); } });
+    expect((await inProgress(request())).status).toBe(409);
+    const stale = createIdentityApplyRoute({ enabled: () => true, authorize: async () => actor, apply: async () => { throw new Error("apply_target_stale"); } });
+    expect((await stale(request())).status).toBe(409);
+  });
 });
