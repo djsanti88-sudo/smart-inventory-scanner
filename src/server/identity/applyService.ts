@@ -92,11 +92,6 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
   if (prior?.state === "invalidated") throw new Error("apply_preview_invalidated");
   const createdAt = prior?.createdAt ?? dependencies.clock();
   const proposedRun = { importId: first.importId, businessId: first.scope.businessId, sourceFingerprint: first.sanitizedContentRootHash, mappingFingerprint: await canonicalSha256(first.orderedMappings), previewFingerprint: first.previewFingerprint, actorId: dependencies.actor.actorId, engineVersion: first.versions.engineVersion, pluginVersion: first.versions.pluginVersions.join(","), catalogVersion: first.versions.catalogVersion, operationFingerprint, createdAt };
-  const events = new Map<string, Awaited<ReturnType<typeof createAggregateImportEvent>>>();
-  if (input.mode === "physical_count") for (const item of preflight) {
-    const targetProductId = item.decision.kind === "automatic" ? item.decision.targetProductId : item.decision.kind === "review" ? item.decision.approvedProductId : undefined;
-    if (targetProductId) events.set(item.rowId, await createAggregateImportEvent({ businessId: first.scope.businessId, importId: first.importId, rowId: item.rowId, sessionId: `identity-import:${first.importId}`, quantity: item.row.quantity as number, sourceFileOrdinal: item.row.sourceFileOrdinal as number, sheetName: item.row.sheetName as string, sourceRowNumber: item.row.sourceRowNumber as number, createdAt, mode: "physical_count", decision: item.decision.kind === "automatic" ? { kind: "automatic", targetProductId } : { kind: "review", approvedProductId: targetProductId } }));
-  }
   let created: ImportRun;
   try { created = await dependencies.repository.createImportRun(proposedRun) as ImportRun; }
   catch (error) { if (error instanceof Error && /idempotency conflict/i.test(error.message)) throw new Error("apply_idempotency_conflict"); throw error; }
@@ -107,6 +102,11 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     return stored;
   }
   if (run.state === "previewed" || run.state === "failed") await dependencies.repository.transitionImportRun(run.businessId, run.importId, "applying");
+  const events = new Map<string, Awaited<ReturnType<typeof createAggregateImportEvent>>>();
+  if (input.mode === "physical_count") for (const item of preflight) {
+    const targetProductId = item.decision.kind === "automatic" ? item.decision.targetProductId : item.decision.kind === "review" ? item.decision.approvedProductId : undefined;
+    if (targetProductId) events.set(item.rowId, await createAggregateImportEvent({ businessId: run.businessId, importId: run.importId, rowId: item.rowId, sessionId: `identity-import:${run.importId}`, quantity: item.row.quantity as number, sourceFileOrdinal: item.row.sourceFileOrdinal as number, sheetName: item.row.sheetName as string, sourceRowNumber: item.row.sourceRowNumber as number, createdAt: run.createdAt, mode: "physical_count", decision: item.decision.kind === "automatic" ? { kind: "automatic", targetProductId } : { kind: "review", approvedProductId: targetProductId } }));
+  }
   const rows: ApplyResult["rows"] = [];
   const allRows = preflight.map((item) => item.row);
   for (const item of preflight) {
