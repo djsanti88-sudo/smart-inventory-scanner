@@ -241,15 +241,16 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   let lastCausalTimestamp = Number.NEGATIVE_INFINITY;
   const causalNow = (): number => {
     let timestamp = Date.now();
-    let bump = 1;
     try {
       const highResolution = globalThis.performance.timeOrigin + globalThis.performance.now();
       if (Number.isFinite(highResolution)) {
-        timestamp = highResolution;
-        bump = 0.001;
+        // performance.now is already monotonic. Preserve equal reduced-precision ticks: inventing
+        // sub-tick order would let a pre-clear burst appear causally newer than a same-tick clear.
+        lastCausalTimestamp = highResolution;
+        return highResolution;
       }
     } catch { /* Date.now remains the epoch-clock fallback */ }
-    if (timestamp <= lastCausalTimestamp) timestamp = lastCausalTimestamp + bump;
+    if (timestamp <= lastCausalTimestamp) timestamp = lastCausalTimestamp + 1;
     lastCausalTimestamp = timestamp;
     return timestamp;
   };
@@ -732,6 +733,17 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     // replaces both fields, so a delayed pre-clear payload can never borrow post-clear evidence.
     const observation = getSynchronousTombstoneEvidence(name);
     const scheduledAt = causalNow();
+    const pending = pendingWrites.get(name);
+    if (pending) {
+      // The first snapshot owns the burst's ordering intent. Reusing it prevents scan bursts from
+      // creating one IndexedDB transaction per keystroke. If a clear removes that intent while the
+      // burst is pending, later coalesced bytes cannot recreate or borrow post-clear authority.
+      pending.serialize = serialize;
+      pending.observation = observation;
+      pending.scheduledAt = scheduledAt;
+      pending.resolvers.push(resolve);
+      return;
+    }
     const intentId = createOperationId();
     let intentWrite = Promise.resolve(false);
     if (options.database) {
@@ -752,24 +764,18 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         reportDegraded();
       }
     }
-    const pending = pendingWrites.get(name) ?? {
+    const nextPending = {
       serialize,
       token: generationFor(name),
       observation,
       scheduledAt,
       intentId,
       intentWrite,
-      resolvers: [],
-      scheduled: false,
+      resolvers: [resolve],
+      scheduled: true,
     };
-    pending.serialize = serialize;
-    pending.observation = observation;
-    pending.scheduledAt = scheduledAt;
-    pending.intentId = intentId;
-    pending.intentWrite = intentWrite;
-    pending.resolvers.push(resolve);
-    pendingWrites.set(name, pending);
-    if (!pending.scheduled) { pending.scheduled = true; queueMicrotask(() => flushWrite(name)); }
+    pendingWrites.set(name, nextPending);
+    queueMicrotask(() => flushWrite(name));
   });
 
   return {

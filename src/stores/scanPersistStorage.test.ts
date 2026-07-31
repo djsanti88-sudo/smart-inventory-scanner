@@ -192,11 +192,12 @@ describe("active async persistence adapter", () => {
 
     expect(get).not.toHaveBeenCalled();
     expect(serialize).not.toHaveBeenCalled();
-    expect(set).toHaveBeenCalledTimes(100);
+    expect(set).toHaveBeenCalledOnce();
     expect(set.mock.calls.every(([key]) => key === "sis-scan-owner::scanbin-write-intent-v1")).toBe(true);
     db.finishIntents();
     await Promise.all(writes);
     expect(serialize).toHaveBeenCalledOnce();
+    expect(set.mock.calls.filter(([key]) => key === "sis-scan-owner")).toHaveLength(1);
   });
   it("defers one typed persist serialization for a burst and encodes only its latest snapshot", async () => {
     const db = new Db();
@@ -757,6 +758,29 @@ describe("active async persistence adapter", () => {
     );
 
     await write;
+
+    await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
+      .resolves.toBeNull();
+  });
+  it("does not let a later coalesced snapshot recreate an intent removed by a cross-tab clear", async () => {
+    vi.stubGlobal("performance", { timeOrigin: 4_500, now: vi.fn(() => 10) });
+    const db = new Db();
+    const storage = createAsyncDurableStorage({ database: db, getLegacyStorage: () => null });
+    const beforeClear = storage.setItem("sis-scan-owner", "snapshot before equal-time clear");
+    void db.remove("sis-scan-owner::scanbin-write-intent-v1");
+    void db.set(
+      "sis-scan-owner::scanbin-cleared-v1",
+      JSON.stringify({
+        __scanPersistClear: 1,
+        version: 19,
+        id: "cross-tab-clear",
+        issuedAt: 4_510,
+        intentBarrierEstablished: true,
+      }),
+    );
+    const coalescedAfterClear = storage.setItem("sis-scan-owner", "coalesced after equal-time clear");
+
+    await Promise.all([beforeClear, coalescedAfterClear]);
 
     await expect(createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }).getItem("sis-scan-owner"))
       .resolves.toBeNull();
