@@ -56,8 +56,11 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   const reportDegraded = () => options.onStatusChange?.("degraded");
   const reportAvailable = () => options.onStatusChange?.("available");
   const queuedByKey = new Map<string, Promise<void>>();
-  const pendingWrites = new Map<string, { value: string; resolvers: Array<() => void>; scheduled: boolean }>();
+  const pendingWrites = new Map<string, { value: string; token: number; resolvers: Array<() => void>; scheduled: boolean }>();
   const tombstones = new Set<string>();
+  // Each clear moves a key to a new generation. A write captures the generation it was created in,
+  // so a pre-clear write that completes late cannot remove the newer clear tombstone.
+  const generationByKey = new Map<string, number>();
   const enqueue = <T>(name: string, task: () => Promise<T>): Promise<T> => {
     const prior = queuedByKey.get(name);
     // Start the first operation immediately. This preserves the fail-soft guarantee at Zustand's
@@ -66,12 +69,17 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     queuedByKey.set(name, next.then(() => undefined, () => undefined));
     return next;
   };
+  // localStorage is a migration/fallback layer, not the durable authority. Its absence must not mark
+  // a healthy IndexedDB session degraded; IndexedDB failures report their own status below.
+  const reportLegacyFailure = () => {
+    if (!options.database) reportDegraded();
+  };
 
   const legacyGet = (name: string): string | null => {
     try {
       return options.getLegacyStorage()?.getItem(name) ?? null;
     } catch {
-      reportDegraded();
+      reportLegacyFailure();
       return null;
     }
   };
@@ -80,7 +88,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     try {
       options.getLegacyStorage()?.setItem(name, value);
     } catch {
-      reportDegraded();
+      reportLegacyFailure();
       // Kept as a diagnostic supplement only. The store/UI status is the user-visible failure path.
       console.warn(`[scanStore] Could not persist '${name}' to local fallback storage.`);
     }
@@ -90,20 +98,59 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     try {
       options.getLegacyStorage()?.removeItem(name);
     } catch {
-      reportDegraded();
+      reportLegacyFailure();
     }
   };
   const tombstoneKey = (name: string) => `${name}${TOMBSTONE_SUFFIX}`;
-  const hasTombstone = (name: string) => tombstones.has(name) || legacyGet(tombstoneKey(name)) === "1";
+  const generationFor = (name: string) => generationByKey.get(name) ?? 0;
+  const hasTombstone = async (name: string) => {
+    if (tombstones.has(name) || legacyGet(tombstoneKey(name)) === "1") return true;
+    if (!options.database) return false;
+    try {
+      return await options.database.get(tombstoneKey(name)) === "1";
+    } catch {
+      reportDegraded();
+      return false;
+    }
+  };
   const writeTombstone = (name: string) => { tombstones.add(name); legacySet(tombstoneKey(name), "1"); };
-  const clearTombstone = (name: string) => { tombstones.delete(name); legacyRemove(tombstoneKey(name)); };
+  const persistTombstone = async (name: string) => {
+    if (!options.database) {
+      reportDegraded();
+      return;
+    }
+    try {
+      await options.database.set(tombstoneKey(name), "1");
+      reportAvailable();
+    } catch {
+      reportDegraded();
+    }
+  };
+  const clearTombstone = async (name: string, token: number) => {
+    if (generationFor(name) !== token) return;
+    if (options.database) {
+      try {
+        await options.database.remove(tombstoneKey(name));
+        reportAvailable();
+      } catch {
+        reportDegraded();
+        return;
+      }
+    }
+    if (generationFor(name) !== token) return;
+    tombstones.delete(name);
+    legacyRemove(tombstoneKey(name));
+  };
 
-  const performWrite = async (name: string, value: string) => {
+  const performWrite = async (name: string, value: string, token: number) => {
     let durableWritten = false;
     if (options.database) {
       try { await options.database.set(name, value); durableWritten = true; reportAvailable(); } catch { reportDegraded(); }
     } else reportDegraded();
-    if (durableWritten) clearTombstone(name);
+    // A successful write after an intentional clear supersedes its tombstone. An older in-flight
+    // write is deliberately ignored: it may have reached IndexedDB, but the newer tombstone wins.
+    if (durableWritten && generationFor(name) === token) await clearTombstone(name, token);
+    if (generationFor(name) !== token) return;
     if (!durableWritten || name === "sis-scan-v1") legacySet(name, value);
     else if (isUidNamespace(name)) legacySet(name, JSON.stringify({ [PERSIST_POINTER_KEY]: 1 }));
   };
@@ -111,7 +158,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     const pending = pendingWrites.get(name);
     if (!pending) return;
     pendingWrites.delete(name);
-    void enqueue(name, () => performWrite(name, pending.value)).then(() => pending.resolvers.forEach((resolve) => resolve()));
+    void enqueue(name, () => performWrite(name, pending.value, pending.token)).then(() => pending.resolvers.forEach((resolve) => resolve()));
   };
   if (typeof window !== "undefined") {
     const flushAll = () => [...pendingWrites.keys()].forEach(flushWrite);
@@ -123,8 +170,9 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     getItem: (name) => {
       flushWrite(name);
       return enqueue(name, async () => {
-      if (hasTombstone(name)) {
+      if (await hasTombstone(name)) {
         if (options.database) { try { await options.database.remove(name); } catch { reportDegraded(); } }
+        legacyRemove(name);
         return null;
       }
       if (options.database) {
@@ -153,7 +201,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       });
     },
     setItem: (name, value) => new Promise<void>((resolve) => {
-      const pending = pendingWrites.get(name) ?? { value, resolvers: [], scheduled: false };
+      const pending = pendingWrites.get(name) ?? { value, token: generationFor(name), resolvers: [], scheduled: false };
       pending.value = value;
       pending.resolvers.push(resolve);
       pendingWrites.set(name, pending);
@@ -162,8 +210,10 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     removeItem: (name) => {
       const pending = pendingWrites.get(name);
       if (pending) { pendingWrites.delete(name); pending.resolvers.forEach((resolve) => resolve()); }
+      generationByKey.set(name, generationFor(name) + 1);
       writeTombstone(name);
       return enqueue(name, async () => {
+      await persistTombstone(name);
       if (options.database) {
         try {
           await options.database.remove(name);
@@ -180,7 +230,9 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
   };
 }
 
-function createNativeIndexedDbDatabase(): AsyncKeyValueDatabase | null {
+// Exported as a narrow test seam for the native transaction lifecycle; application callers use the
+// browser-facing storage factory below.
+export function createNativeIndexedDbDatabase(): AsyncKeyValueDatabase | null {
   if (typeof window === "undefined") return null;
   let indexedDb: IDBFactory;
   try {
@@ -207,7 +259,9 @@ function createNativeIndexedDbDatabase(): AsyncKeyValueDatabase | null {
     request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
     });
     opening = openPromise;
-    void openPromise.finally(() => { opening = null; });
+    // Do not leave a rejected promise created solely by `finally` unobserved. The caller owns the
+    // original openPromise and receives its failure through the normal fail-soft adapter path.
+    void openPromise.then(() => { opening = null; }, () => { opening = null; });
     return openPromise;
   };
   const run = <T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> =>
