@@ -2,21 +2,19 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { useScanStore } from "@/stores/scanStore";
-import { useReconcileStore } from "@/stores/reconcileStore";
 import { getBrowserPersistenceStatus, subscribeBrowserPersistenceStatus } from "@/stores/scanPersistStorage";
 
 // Rehydrates the persisted Zustand stores on the client only, then renders children.
 // Using skipHydration + an explicit rehydrate avoids the App Router hydration mismatch where
 // the server renders empty state and the client immediately swaps in localStorage data.
-// The reconcile store follows the same pattern; only the scan store gates rendering (a slow
-// reconcile rehydrate must never block scanning - the reconcile page has its own loading state).
+// Only the scan store gates rendering. Reconcile data is hydrated by ReconcileStoreHydrator on
+// its route, so a large dormant reconcile session never competes with scanner startup.
 export function StoreHydrator({ children }: { children: React.ReactNode }) {
   const hasHydrated = useScanStore((s) => s._hasHydrated);
   const persistenceStatus = useSyncExternalStore(subscribeBrowserPersistenceStatus, getBrowserPersistenceStatus, getBrowserPersistenceStatus);
 
   useEffect(() => {
     void useScanStore.persist.rehydrate();
-    void useReconcileStore.persist.rehydrate();
   }, []);
 
   if (!hasHydrated) {
@@ -36,4 +34,12 @@ export function StoreHydrator({ children }: { children: React.ReactNode }) {
       {children}
     </>
   );
+}
+
+/** Keep reconciliation persistence off the scanner's app-wide startup path. */
+export function ReconcileStoreHydrator({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    void import("@/stores/reconcileStore").then(({ useReconcileStore }) => useReconcileStore.persist.rehydrate());
+  }, []);
+  return <>{children}</>;
 }

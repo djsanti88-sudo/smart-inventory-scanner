@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { act, render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { Profiler } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { InventoryCount, Product } from "@/types";
@@ -36,6 +37,19 @@ afterEach(() => {
 });
 
 describe("ExportMenu session scoping (M2, same leak class as F2)", () => {
+  it("does not rerender for an unrelated sync-error update", () => {
+    let commits = 0;
+    render(<Profiler id="export-menu" onRender={() => { commits += 1; }}><ExportMenu /></Profiler>);
+    const initialCommits = commits;
+
+    act(() => {
+      const current = useScanStore.getState().lastSyncError;
+      useScanStore.setState({ lastSyncError: current === null ? "temporary sync failure" : null });
+    });
+
+    expect(commits).toBe(initialCommits);
+  });
+
   it("exports only the current session's counts after a simulated cross-session merge", () => {
     process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER = "1"; // platform role exposes exportFinalCounts (has session/barcode detail)
     const otherSessionProduct: Product = { ...product, id: "pOther", name: "Other Session Widget", primaryBarcode: "999888777666" };

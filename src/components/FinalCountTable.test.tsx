@@ -30,6 +30,18 @@ afterEach(() => {
 });
 
 describe("FinalCountTable role gating (Phase 6)", () => {
+  it("bounds the initial DOM for 250 counts and can reveal the final count", () => {
+    const products = Array.from({ length: 250 }, (_, index) => ({ ...product, id: `product-${index}`, name: `Widget ${index}` }));
+    const counts = products.map((item, index) => ({ ...count, id: `count-${index}`, productId: item.id, quantity: 250 - index }));
+    useScanStore.setState({ products, finalCounts: counts });
+    render(<FinalCountTable />);
+
+    expect(screen.getAllByTestId(/^count-row-product-/)).toHaveLength(100);
+    expect(screen.queryByTestId("count-row-product-249")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /show 100 more products/i }));
+    fireEvent.click(screen.getByRole("button", { name: /show 50 more products/i }));
+    expect(screen.getByTestId("count-row-product-249")).toBeInTheDocument();
+  });
   it("shows the product's own scanned Barcode to every role; alias DB stays platformOwner-only (owner order 2026-07-10)", () => {
     delete process.env.NEXT_PUBLIC_E2E_PLATFORM_OWNER; // business / customer
     seed();

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { LiveScanFeed } from "@/components/LiveScanFeed";
 import { useScanStore } from "@/stores/scanStore";
 import type { ScanEvent, UnknownCodeReview, Product } from "@/types";
@@ -80,6 +80,19 @@ afterEach(() => {
 });
 
 describe("LiveScanFeed - local demo proof selectors", () => {
+  it("bounds the initial DOM for a 250-scan feed and can reveal the oldest scan", () => {
+    const rows = Array.from({ length: 250 }, (_, index) => ({
+      ...baseEvent(`code-${index}`, `product-${index}`), id: `event-${index}`,
+    }));
+    useScanStore.setState({ scanFeed: rows, products: [], needsReviewQueue: [], finalCounts: [] });
+    render(<LiveScanFeed />);
+
+    expect(screen.getAllByTestId(/^feed-barcode-event-/)).toHaveLength(100);
+    expect(screen.queryByTestId("feed-barcode-event-249")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /show 100 older scans/i }));
+    fireEvent.click(screen.getByRole("button", { name: /show 50 older scans/i }));
+    expect(screen.getByTestId("feed-barcode-event-249")).toBeInTheDocument();
+  });
   it("adds the event, matched-product, and direct canonical-UID selectors to each row in local-demo mode", () => {
     process.env.NEXT_PUBLIC_LOCAL_DEMO = "1";
     const event = {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
 import { DecodeStatusBadge, MatchBadge, StatusBadge, SyncBadge } from "@/components/badges";
@@ -23,12 +24,22 @@ function resolvedFeedSize(product: Product | undefined, displayName: string): st
 // and the scan status of each scan, never the code strings or how the code matched internally.
 export function LiveScanFeed() {
   const scanFeed = useScanStore((s) => s.scanFeed);
-  const getProduct = useScanStore((s) => s.getProduct);
+  const products = useScanStore((s) => s.products);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
   const approveSuggestion = useScanStore((s) => s.approveSuggestion);
   const declineSuggestion = useScanStore((s) => s.declineSuggestion);
   const isPlatform = useIsPlatformOwner();
   const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
+  const [visibleCount, setVisibleCount] = useState(100);
+  const productsById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
+  const suggestionsByCode = useMemo(() => {
+    const index = new Map<string, (typeof needsReviewQueue)[number]>();
+    for (const review of needsReviewQueue) {
+      if (review.suggestedProductName && !index.has(review.cleanCode)) index.set(review.cleanCode, review);
+    }
+    return index;
+  }, [needsReviewQueue]);
+  const visibleScanFeed = scanFeed.slice(0, visibleCount);
   // The "Barcode" column shows the code the user JUST scanned (their own in-memory scan, never persisted
   // for customers and never the catalog/alias database) - visible to ALL roles. Raw code + Match remain
   // platformOwner-only. Customer columns: Time, Barcode, Brand, Product, Size, SKU, Qty, Status, Reason,
@@ -72,8 +83,8 @@ export function LiveScanFeed() {
                 </td>
               </tr>
             ) : (
-              scanFeed.map((e) => {
-                const product = getProduct(e.matchedProductId);
+              visibleScanFeed.map((e) => {
+                const product = e.matchedProductId ? productsById.get(e.matchedProductId) : undefined;
                 // TASK 3 FIX (feed stuck on "Unidentified item"): ensureProvisionalCount ALWAYS mints a
                 // provisional placeholder Product synchronously at scan time, before decode finishes, so
                 // `product` is truthy even when there is no real identity yet. A naive `product ? undefined
@@ -81,7 +92,7 @@ export function LiveScanFeed() {
                 // lookup also runs when the matched product is still `provisional` (not yet a real,
                 // human-confirmed identity), so the feed shows the best-known name as soon as decode has one.
                 const suggestion = (!product || product.provisional)
-                  ? needsReviewQueue.find((r) => r.cleanCode === e.cleanCode && r.suggestedProductName)
+                  ? suggestionsByCode.get(e.cleanCode)
                   : undefined;
                 // Display priority: a real (non-provisional) product name wins outright. Otherwise prefer the
                 // decoded suggestion's name over the safe-but-uninformative provisional placeholder name, and
@@ -233,6 +244,13 @@ export function LiveScanFeed() {
           </tbody>
         </table>
       </div>
+      {visibleScanFeed.length < scanFeed.length && (
+        <div className="border-t border-zinc-200 p-3 text-center">
+          <button type="button" onClick={() => setVisibleCount((current) => Math.min(current + 100, scanFeed.length))} className="min-h-[44px] rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-800 hover:bg-zinc-50">
+            Show {Math.min(100, scanFeed.length - visibleScanFeed.length)} older scans
+          </button>
+        </div>
+      )}
     </div>
   );
 }

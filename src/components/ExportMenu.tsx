@@ -28,19 +28,28 @@ type Fmt = "csv" | "xlsx" | "pdf" | "html";
 interface Dataset { testid: string; title: string; filenameBase: string; rows: number; csv: () => string }
 
 export function ExportMenu() {
-  const s = useScanStore();
+  const products = useScanStore((store) => store.products);
+  const aliases = useScanStore((store) => store.aliases);
+  const finalCounts = useScanStore((store) => store.finalCounts);
+  const scanFeed = useScanStore((store) => store.scanFeed);
+  const needsReviewQueue = useScanStore((store) => store.needsReviewQueue);
+  const pendingSyncQueue = useScanStore((store) => store.pendingSyncQueue);
+  const businessId = useScanStore((store) => store.businessId);
+  const sessionId = useScanStore((store) => store.sessionId);
+  const auditCsvExport = useScanStore((store) => store.auditCsvExport);
+  const importProductsCsv = useScanStore((store) => store.importProductsCsv);
   const currentSession = useScanStore((store) => store.currentSession);
   const level = useAccessLevel();
   const isPlatform = level === "platform";
-  const activePendingQueue = s.pendingSyncQueue.filter((item) => item.businessId === s.businessId);
+  const activePendingQueue = pendingSyncQueue.filter((item) => item.businessId === businessId);
 
   // M2 fix (same leak class as F2/FinalCountTable): refreshFromCloud intentionally does an ADDITIVE
   // cross-session merge into finalCounts (a tested cross-device sync path - see
   // refreshFromCloud.store.test.ts). This menu must export only the CURRENT session's counts, not
   // every session's counts merged into the store.
   const sessionFinalCounts = currentSession
-    ? s.finalCounts.filter((c) => c.sessionId === currentSession.id)
-    : s.finalCounts;
+    ? finalCounts.filter((c) => c.sessionId === currentSession.id)
+    : finalCounts;
 
   const fileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -63,26 +72,26 @@ export function ExportMenu() {
   const groups: { group: string; datasets: Dataset[] }[] = isPlatform
     ? [
         { group: "Inventory", datasets: [
-          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: sessionFinalCounts.length, csv: () => exportFinalCounts(sessionFinalCounts, s.products, s.sessionId) },
-          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: sessionFinalCounts.length, csv: () => exportQuantityAdjustments(sessionFinalCounts, s.products, s.sessionId) },
+          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: sessionFinalCounts.length, csv: () => exportFinalCounts(sessionFinalCounts, products, sessionId) },
+          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: sessionFinalCounts.length, csv: () => exportQuantityAdjustments(sessionFinalCounts, products, sessionId) },
         ] },
         { group: "Activity", datasets: [
-          { testid: "export-raw-log", title: "Raw scan log", filenameBase: "raw-scan-log", rows: s.scanFeed.length, csv: () => exportRawScanLog(s.scanFeed) },
-          { testid: "export-unknowns", title: "Unrecognised codes", filenameBase: "unknown-codes", rows: s.needsReviewQueue.length, csv: () => exportUnknowns(s.needsReviewQueue) },
+          { testid: "export-raw-log", title: "Raw scan log", filenameBase: "raw-scan-log", rows: scanFeed.length, csv: () => exportRawScanLog(scanFeed) },
+          { testid: "export-unknowns", title: "Unrecognised codes", filenameBase: "unknown-codes", rows: needsReviewQueue.length, csv: () => exportUnknowns(needsReviewQueue) },
           { testid: "export-pending", title: "Items waiting to sync", filenameBase: "pending-sync", rows: activePendingQueue.length, csv: () => exportPendingQueue(activePendingQueue) },
         ] },
         { group: "Catalog", datasets: [
-          { testid: "export-products", title: "Products", filenameBase: "products", rows: s.products.length, csv: () => exportProducts(s.products) },
-          { testid: "export-aliases", title: "Barcode mappings", filenameBase: "aliases", rows: s.aliases.length, csv: () => exportAliases(s.aliases) },
+          { testid: "export-products", title: "Products", filenameBase: "products", rows: products.length, csv: () => exportProducts(products) },
+          { testid: "export-aliases", title: "Barcode mappings", filenameBase: "aliases", rows: aliases.length, csv: () => exportAliases(aliases) },
         ] },
       ]
     : [
         { group: "Inventory", datasets: [
-          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: sessionFinalCounts.length, csv: () => exportFinalCountsCustomer(sessionFinalCounts, s.products, s.sessionId) },
-          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: sessionFinalCounts.length, csv: () => exportQuantityAdjustmentsCustomer(sessionFinalCounts, s.products, s.sessionId) },
+          { testid: "export-final-counts", title: "Final counts", filenameBase: "final-counts", rows: sessionFinalCounts.length, csv: () => exportFinalCountsCustomer(sessionFinalCounts, products, sessionId) },
+          { testid: "export-qty-adjustments", title: "Quantity adjustments", filenameBase: "quantity-adjustments", rows: sessionFinalCounts.length, csv: () => exportQuantityAdjustmentsCustomer(sessionFinalCounts, products, sessionId) },
         ] },
         { group: "Activity", datasets: [
-          { testid: "export-unknowns", title: "Items to check", filenameBase: "items-to-check", rows: s.needsReviewQueue.length, csv: () => exportUnknownsCustomer(s.needsReviewQueue) },
+          { testid: "export-unknowns", title: "Items to check", filenameBase: "items-to-check", rows: needsReviewQueue.length, csv: () => exportUnknownsCustomer(needsReviewQueue) },
         ] },
       ];
 
@@ -105,7 +114,7 @@ export function ExportMenu() {
         else if (fmt === "pdf") await downloadPdf(data, meta(d));
         else await downloadHtml(data, meta(d));
       }
-      s.auditCsvExport(d.testid, d.rows, fmt);
+      auditCsvExport(d.testid, d.rows, fmt);
       setDone(key);
       setTimeout(() => setDone((cur) => (cur === key ? null : cur)), 1500);
     } catch (e) {
@@ -117,7 +126,7 @@ export function ExportMenu() {
 
   async function handleImport(file: File) {
     const text = await file.text();
-    const r = s.importProductsCsv(text);
+    const r = importProductsCsv(text);
     const conflictNote = r.conflicts.length ? `, ${r.conflicts.length} conflict(s) skipped` : "";
     const dupNote = r.duplicates ? `, ${r.duplicates} duplicate(s)` : "";
     // QA Task 7 (owner decision): existing-barcode rows refresh descriptive fields only - never a

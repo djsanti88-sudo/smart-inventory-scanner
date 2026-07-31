@@ -54,10 +54,18 @@ function resolvedSizeDisplay(product: Product): string {
 export function FinalCountTable() {
   const finalCounts = useScanStore((s) => s.finalCounts);
   const currentSession = useScanStore((s) => s.currentSession);
-  const getProduct = useScanStore((s) => s.getProduct);
+  const products = useScanStore((s) => s.products);
+  const aliases = useScanStore((s) => s.aliases);
   const needsReviewQueue = useScanStore((s) => s.needsReviewQueue);
+  const removeFromCount = useScanStore((s) => s.removeFromCount);
+  const correctProduct = useScanStore((s) => s.correctProduct);
+  const markWrong = useScanStore((s) => s.markWrong);
+  const approveDiscoveredIdentifiers = useScanStore((s) => s.approveDiscoveredIdentifiers);
+  const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
+  const verifyOwnerPin = useScanStore((s) => s.verifyOwnerPin);
   const isPlatform = useIsPlatformOwner();
   const [filterQuery, setFilterQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(100);
 
   // F2 fix (Phase 3 review): refreshFromCloud intentionally does an ADDITIVE cross-session merge into
   // finalCounts (a tested cross-device sync path - see refreshFromCloud.store.test.ts). This table
@@ -66,10 +74,30 @@ export function FinalCountTable() {
     ? finalCounts.filter((c) => c.sessionId === currentSession.id)
     : finalCounts;
 
-  const rows = sessionCounts
-    .map((c) => ({ count: c, product: getProduct(c.productId) }))
+  const productById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products]);
+  const rows = useMemo(() => sessionCounts
+    .map((c) => ({ count: c, product: productById.get(c.productId) }))
     .filter((r): r is { count: InventoryCount; product: Product } => !!r.product)
-    .sort((a, b) => b.count.quantity - a.count.quantity);
+    .sort((a, b) => b.count.quantity - a.count.quantity), [sessionCounts, productById]);
+  const reviewsByProductId = useMemo(() => {
+    const index = new Map<string, { review: UnknownCodeReview; position: number }>();
+    needsReviewQueue.forEach((review, position) => {
+      if (review.provisionalProductId && !index.has(review.provisionalProductId)) index.set(review.provisionalProductId, { review, position });
+    });
+    return index;
+  }, [needsReviewQueue]);
+  const reviewsByCode = useMemo(() => {
+    const index = new Map<string, { review: UnknownCodeReview; position: number }>();
+    needsReviewQueue.forEach((review, position) => {
+      if (review.suggestedProductName && !index.has(review.cleanCode)) index.set(review.cleanCode, { review, position });
+    });
+    return index;
+  }, [needsReviewQueue]);
+  const discoveredByProductId = useMemo(() => {
+    const index = new Map<string, typeof aliases>();
+    for (const alias of aliases) if (!alias.approved) index.set(alias.productId, [...(index.get(alias.productId) ?? []), alias]);
+    return index;
+  }, [aliases]);
 
   // Task 4: digits-only query filters by sizeTag prefix; any other text filters brand/model/description.
   const visibleRows = useMemo(() => {
@@ -87,6 +115,7 @@ export function FinalCountTable() {
     return rows.filter((r) => kept.has(r.count.id));
   }, [rows, filterQuery]);
 
+  const renderedRows = visibleRows.slice(0, visibleCount);
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
@@ -148,13 +177,27 @@ export function FinalCountTable() {
                 </td>
               </tr>
             ) : (
-              visibleRows.map(({ count, product }) => (
-                <CountRow key={count.id} count={count} product={product} isPlatform={isPlatform} needsReviewQueue={needsReviewQueue} />
-              ))
+              renderedRows.map(({ count, product }) => {
+                const productReview = reviewsByProductId.get(product.id);
+                const codeReview = reviewsByCode.get(product.primaryBarcode);
+                const suggestion = !productReview
+                  ? codeReview?.review
+                  : !codeReview || productReview.position <= codeReview.position
+                    ? productReview.review
+                    : codeReview.review;
+                return <CountRow key={count.id} count={count} product={product} isPlatform={isPlatform} suggestion={suggestion} discovered={discoveredByProductId.get(product.id) ?? []} actions={{ removeFromCount, correctProduct, markWrong, approveDiscoveredIdentifiers, hasPin, verifyOwnerPin }} />;
+              })
             )}
           </tbody>
         </table>
       </div>
+      {renderedRows.length < visibleRows.length && (
+        <div className="border-t border-zinc-200 p-3 text-center">
+          <button type="button" onClick={() => setVisibleCount((current) => Math.min(current + 100, visibleRows.length))} className="min-h-[44px] rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-800 hover:bg-zinc-50">
+            Show {Math.min(100, visibleRows.length - renderedRows.length)} more products
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -163,23 +206,27 @@ function CountRow({
   count,
   product,
   isPlatform,
-  needsReviewQueue,
+  suggestion,
+  discovered,
+  actions,
 }: {
   count: InventoryCount;
   product: Product;
   isPlatform: boolean;
-  needsReviewQueue: UnknownCodeReview[];
+  suggestion: UnknownCodeReview | undefined;
+  discovered: { id: string; cleanCode: string }[];
+  actions: {
+    removeFromCount: (productId: string) => void;
+    correctProduct: (productId: string, update: Partial<Product>) => void;
+    markWrong: (productId: string, options?: { reason?: string }) => Promise<string | null>;
+    approveDiscoveredIdentifiers: (productId: string, codes: string[]) => void;
+    hasPin: boolean;
+    verifyOwnerPin: (pin: string) => Promise<boolean>;
+  };
 }) {
-  const removeFromCount = useScanStore((s) => s.removeFromCount);
-  const correctProduct = useScanStore((s) => s.correctProduct);
-  const markWrong = useScanStore((s) => s.markWrong);
-  const aliases = useScanStore((s) => s.aliases);
-  const approveDiscoveredIdentifiers = useScanStore((s) => s.approveDiscoveredIdentifiers);
-  const hasPin = useScanStore((s) => !!s.settings.ownerPinHash);
-  const verifyOwnerPin = useScanStore((s) => s.verifyOwnerPin);
+  const { removeFromCount, correctProduct, markWrong, approveDiscoveredIdentifiers, hasPin, verifyOwnerPin } = actions;
   // Discovered (grounded, not-yet-approved) identifiers for this product: offered for one-click approval.
   // They do NOT match or count until approved (the resolver ignores approved !== true).
-  const discovered = aliases.filter((a) => a.productId === product.id && !a.approved);
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: product.name, brand: product.brand, category: product.category, location: product.location ?? "" });
@@ -226,11 +273,7 @@ function CountRow({
   // provisional rows: prefer a review keyed by this product's id (auto-applied identity still resolves
   // to the correct review for its confidence/tag), falling back to a cleanCode match on this product's
   // barcode with a usable suggested name.
-  const suggestion = product.provisional
-    ? needsReviewQueue.find(
-        (r) => r.provisionalProductId === product.id || (r.cleanCode === product.primaryBarcode && r.suggestedProductName),
-      )
-    : undefined;
+  const relevantSuggestion = product.provisional ? suggestion : undefined;
   const hasAppliedIdentity = product.provisional && !product.name.startsWith("Unidentified item");
   // Owner order 2026-07-10 refinement: "all rows showing something if possible... whats available
   // suggested or if full specs suggested everything". A row with a findable suggestion (and no
@@ -241,26 +284,26 @@ function CountRow({
   // product row instead of showing "-" across the board. Fields the suggestion doesn't carry keep the
   // product's own (placeholder) value, preserving the existing "-" convention.
   const displayProduct: Product =
-    suggestion && !hasAppliedIdentity
+    relevantSuggestion && !hasAppliedIdentity
       ? {
           ...product,
-          name: suggestion.suggestedProductName || product.name,
-          brand: suggestion.suggestedBrand || product.brand,
+          name: relevantSuggestion.suggestedProductName || product.name,
+          brand: relevantSuggestion.suggestedBrand || product.brand,
           structuredBrand: undefined,
           structuredModel: undefined,
-          category: suggestion.suggestedCategory || product.category,
-          specsShort: suggestion.suggestedSpecsShort || product.specsShort,
-          primarySku: suggestion.suggestedPrimarySku || product.primarySku,
+          category: relevantSuggestion.suggestedCategory || product.category,
+          specsShort: relevantSuggestion.suggestedSpecsShort || product.specsShort,
+          primarySku: relevantSuggestion.suggestedPrimarySku || product.primarySku,
         }
       : product;
   const displayName = prettifyProductName(hasAppliedIdentity ? product.name : displayProduct.name);
   const displayBrand = resolvedBrand(displayProduct);
   // Trust rule (same as the feed): confidence >= 0.8 -> neutral "unconfirmed"; < 0.8 -> amber
   // "(suggested)". No tag when no suggestion/review is findable for a provisional row.
-  const suggestionTag = suggestion ? (suggestion.confidence >= 0.8 ? "unconfirmed" : "(suggested)") : null;
+  const suggestionTag = relevantSuggestion ? (relevantSuggestion.confidence >= 0.8 ? "unconfirmed" : "(suggested)") : null;
   const statusBadge = product.verified ? (
     <DecodeStatusBadge status="verified" />
-  ) : product.provisional && (suggestion || hasAppliedIdentity) ? (
+  ) : product.provisional && (relevantSuggestion || hasAppliedIdentity) ? (
     <DecodeStatusBadge status="suggested" />
   ) : product.provisional ? (
     <DecodeStatusBadge status="needs_review" />
