@@ -9,7 +9,7 @@ import { applyIdentityImport, type ApplyActor, type ApplyIdentityImportInput, ty
 import { createLocalAggregateLedger } from "./localAggregateLedger";
 import { createLocalRepository } from "./localRepository";
 import { createLocalPreviewSigner } from "./previewSigner";
-import { loadConfiguredLocalIdentityReadModel } from "./localIdentityReadModel";
+import { loadConfiguredLocalIdentityReadModel, deriveAuthoritativeLinkSnapshotHash } from "./localIdentityReadModel";
 
 export interface LocalIdentityApplyComposition {
   storage: AtomicLocalStorage; signingKey: () => string | undefined; versions: PreviewVersions; now?: () => Date;
@@ -18,6 +18,12 @@ export interface LocalIdentityApplyComposition {
 }
 let injected: LocalIdentityApplyComposition | undefined;
 type Membership = ApplyActor;
+/** Isolates local/test durable state without accepting a path from the environment. */
+export function localIdentityStorageRoot(): string {
+  const runId = process.env.IDENTITY_LOCAL_RUN_ID;
+  const safeRunId = runId && /^[A-Za-z0-9_-]{1,128}$/.test(runId) ? runId : "local-apply-v1";
+  return path.join(process.cwd(), ".tmp", "identity-import", safeRunId);
+}
 
 function memberships(): Membership[] | undefined {
   const raw = process.env.IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON;
@@ -29,7 +35,7 @@ async function configured(): Promise<LocalIdentityApplyComposition | undefined> 
   const model = await loadConfiguredLocalIdentityReadModel(); if (!model) return undefined;
   const catalogVersion = model.snapshot.catalogVersion, catalogSnapshotHash = model.snapshot.catalogSnapshotHash;
   const linkVersion = "local-snapshot-links-v1", linkSnapshotHash = model.linkSnapshotHash;
-  const root = path.join(process.cwd(), ".tmp", "identity-import", "local-apply-v1");
+  const root = localIdentityStorageRoot();
   return { storage: createFileAtomicLocalStorage({ root }), signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async (input) => model.hasCurrentTarget({ businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, targetProductId: input.targetProductId, identifiers: input.identifiers }), authenticate: async (_request, businessId) => { const actorId = process.env.SCANBIN_LOCAL_ACTOR_ID; if (!actorId) return undefined; const member = configuredMemberships.find((membership) => membership.actorId === actorId && membership.businessId === businessId); if (!member) throw new Error("apply_nonmember"); return member; } };
 }
 async function composition(): Promise<LocalIdentityApplyComposition | undefined> { return injected ?? configured(); }
@@ -47,5 +53,8 @@ export async function authorizeLocalIdentityApply(request: Request, token: strin
 export async function applyComposedIdentityImport(input: ApplyIdentityImportInput, actor: ApplyActor): Promise<ApplyResult> {
   const current = await composition(); if (!current) throw new Error("local_apply_configuration_unavailable");
   const signer = await createLocalPreviewSigner(current.signingKey()); const clock = () => (current.now?.() ?? new Date()).toISOString();
-  return applyIdentityImport(input, { repository: createLocalRepository(current.storage), ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions: current.versions, revalidateCountableTarget: current.revalidateCountableTarget }, clock, actor });
+  const repository = createLocalRepository(current.storage);
+  const linkSnapshotHash = injected ? current.versions.linkSnapshotHash : await deriveAuthoritativeLinkSnapshotHash({ linkSnapshotHash: current.versions.linkSnapshotHash }, repository, actor.businessId);
+  const versions = { ...current.versions, linkSnapshotHash };
+  return applyIdentityImport(input, { repository, ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions, revalidateCountableTarget: current.revalidateCountableTarget }, clock, actor });
 }

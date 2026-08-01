@@ -4,7 +4,10 @@ import { createIdentityPreview, type CreateIdentityPreviewInput, type PreviewVer
 import type { LocalIdentitySnapshot } from "./localSnapshotIndex";
 import { createReadOnlyCandidateSource, type ApprovedLinkLookupInput, type ApprovedLinkLookupResult } from "./readOnlyCandidateSource";
 import { createLocalPreviewSigner } from "./previewSigner";
-import { loadConfiguredLocalIdentityReadModel } from "./localIdentityReadModel";
+import { loadAuthoritativeLocalIdentityReadModel, deriveAuthoritativeLinkSnapshotHash } from "./localIdentityReadModel";
+import { createFileAtomicLocalStorage } from "./atomicLocalStorage";
+import { createLocalRepository } from "./localRepository";
+import { localIdentityStorageRoot } from "./applyComposition";
 
 export type IdentityPreviewRole = "owner" | "admin" | "counter" | "viewer";
 export interface IdentityPreviewActor { actorId: string; role: IdentityPreviewRole; }
@@ -44,7 +47,8 @@ function configuredMemberships(): LocalPreviewMembership[] | undefined {
 async function configuredLocalComposition(): Promise<LocalIdentityPreviewComposition | undefined> {
   const memberships = configuredMemberships();
   if (!memberships) return undefined;
-  const model = await loadConfiguredLocalIdentityReadModel();
+  const repository = createLocalRepository(createFileAtomicLocalStorage({ root: localIdentityStorageRoot() }));
+  const model = await loadAuthoritativeLocalIdentityReadModel(repository);
   if (!model) return undefined;
   const snapshot = model.snapshot;
   const linkVersion = "local-snapshot-links-v1";
@@ -84,5 +88,12 @@ export async function createComposedIdentityPreview(input: CreateIdentityPreview
   const signer = await createLocalPreviewSigner(composition.signingKey());
   const issuedAt = (composition.now?.() ?? new Date()).toISOString();
   const expiresAt = new Date(Date.parse(issuedAt) + 15 * 60 * 1000).toISOString();
-  return createIdentityPreview({ ...input, actorId: actor.actorId, versions: composition.versions, issuedAt, expiresAt }, { source, signer });
+  // The durable tenant link state is part of the signed preview version. A confirmation or revoke
+  // therefore invalidates an already-issued preview even when the injected master snapshot is unchanged.
+  const linkSnapshotHash = localComposition ? composition.versions.linkSnapshotHash : await deriveAuthoritativeLinkSnapshotHash(
+    { linkSnapshotHash: composition.versions.linkSnapshotHash },
+    createLocalRepository(createFileAtomicLocalStorage({ root: localIdentityStorageRoot() })),
+    input.rows[0]?.businessId ?? "",
+  );
+  return createIdentityPreview({ ...input, actorId: actor.actorId, versions: { ...composition.versions, linkSnapshotHash }, issuedAt, expiresAt }, { source, signer });
 }

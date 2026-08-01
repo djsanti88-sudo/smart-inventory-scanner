@@ -4,6 +4,7 @@ import { isValidApprovedLink, type ApprovedLinkLookupInput, type ApprovedLinkLoo
 import { isCompleteLocalIdentitySnapshot, type LocalIdentitySnapshot } from "./localSnapshotIndex";
 import type { IdentityCandidate, ScopedIdentifier } from "@/services/identity/types";
 import { canonicalSha256 } from "@/services/identity/canonical";
+import type { LocalIdentityRepository } from "./localRepository";
 
 type Scope = Pick<ApprovedLinkLookupInput, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId">;
 type SnapshotWire = { catalogVersion: string; catalogSnapshotHash: string; barcodeCandidates: Array<[string, IdentityCandidate[]]>; partNumberCandidates: Array<[string, IdentityCandidate[]]>; approvedLinks: ApprovedLinkLookupResult[] };
@@ -12,7 +13,7 @@ export interface LocalIdentityReadModel {
   snapshot: LocalIdentitySnapshot;
   linkSnapshotHash: string;
   lookupApprovedLinks(input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]>;
-  hasCurrentTarget(input: Scope & { targetProductId: string; identifiers?: ScopedIdentifier[] }): boolean;
+  hasCurrentTarget(input: Scope & { targetProductId: string; identifiers?: ScopedIdentifier[] }): boolean | Promise<boolean>;
 }
 
 function scopeMatches(left: Scope, right: Scope): boolean { return left.businessId === right.businessId && left.sourceSystem === right.sourceSystem && left.sourceSignature === right.sourceSignature && left.vendorId === right.vendorId; }
@@ -45,8 +46,49 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
     hasCurrentTarget(input) {
       const scopedLinkInput = { businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, identifiers: input.identifiers ?? [] };
       const requested = input.identifiers ?? [];
-      return candidates.some((candidate) => candidate.productId === input.targetProductId && (candidate.businessScope === "master" || candidate.tenantBusinessId === input.businessId) && requested.some((key) => candidate.identifiers.some((identifier) => identifier.type === key.type && (identifier.namespace ?? "") === (key.namespace ?? "") && identifier.normalized === key.normalized)))
+      return candidates.some((candidate) => candidate.productId === input.targetProductId && (candidate.businessScope === "master" || candidate.tenantBusinessId === input.businessId) && (requested.length === 0 || requested.some((key) => candidate.identifiers.some((identifier) => identifier.type === key.type && (identifier.namespace ?? "") === (key.namespace ?? "") && identifier.normalized === key.normalized))))
         || wire.approvedLinks.some((link) => isValidApprovedLink(link, scopedLinkInput) && link.targetProductId === input.targetProductId);
     },
   };
+}
+
+/**
+ * The configured master snapshot is immutable, but tenant products/links are durable local state.
+ * This joins both before any preview/apply consumer reads them, so the link hash is an actual
+ * content version rather than a configuration label.
+ */
+export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<LocalIdentityRepository, "listCurrentIdentityLinks" | "listTenantProducts">): Promise<LocalIdentityReadModel | undefined> {
+  const configured = await loadConfiguredLocalIdentityReadModel();
+  if (!configured) return undefined;
+  const configuredCandidates = allCandidates(configured.snapshot);
+  // There is no cross-tenant enumeration path. The caller supplies its current tenant through lookup;
+  // products are loaded lazily below and cached only for the duration of this model instance.
+  const linksFor = async (input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]> => {
+    const [durable, products] = await Promise.all([repository.listCurrentIdentityLinks(input.businessId), repository.listTenantProducts(input.businessId)]);
+    const productById = new Map(products.map((product) => [product.productId, product]));
+    const current = durable.filter((link) => scopeMatches(link, input));
+    const configuredLinks = await configured.lookupApprovedLinks(input);
+    return [...configuredLinks, ...current.map((link): ApprovedLinkLookupResult => {
+      const master = configuredCandidates.find((candidate) => candidate.productId === link.targetProductId && candidate.businessScope === "master");
+      const product = productById.get(link.targetProductId);
+      const target = master ?? (product ? { productId: product.productId, category: "tenant", businessScope: "tenant" as const, tenantBusinessId: product.businessId, verificationTier: "approved" as const, automaticEligible: true, evidenceId: `tenant-product:${product.productId}`, evidenceVersion: product.createdAt, exactCodeEvidence: true, identifiers: [{ type: link.identifierType, raw: link.rawValue, normalized: link.normalizedValue, ...(link.namespace ? { namespace: link.namespace } : {}), source: "tenant-identity-link", evidenceAuthority: "approved_tenant_link" as const, evidenceId: `identity-link:${link.version}`, evidenceVersion: String(link.version) }], title: product.name, attributes: {}, catalogVersion: configured.snapshot.catalogVersion, catalogSnapshotHash: configured.snapshot.catalogSnapshotHash } : null);
+      return { businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, status: link.status, version: link.version, evidenceId: `identity-link:${link.version}`, evidenceVersion: String(link.version), automaticEligible: true, targetProductId: link.targetProductId, currentTarget: target };
+    })];
+  };
+  return {
+    snapshot: configured.snapshot,
+    // The composition folds the current durable link set into this base per authenticated tenant.
+    linkSnapshotHash: configured.linkSnapshotHash,
+    lookupApprovedLinks: linksFor,
+    async hasCurrentTarget(input) {
+      if (configured.hasCurrentTarget(input)) return true;
+      const results = await linksFor({ ...input, identifiers: input.identifiers ?? [] });
+      return results.some((link) => link.status === "approved" && link.targetProductId === input.targetProductId);
+    },
+  };
+}
+
+export async function deriveAuthoritativeLinkSnapshotHash(model: Pick<LocalIdentityReadModel, "linkSnapshotHash">, repository: Pick<LocalIdentityRepository, "listCurrentIdentityLinks">, businessId: string): Promise<string> {
+  const durable = await repository.listCurrentIdentityLinks(businessId);
+  return canonicalSha256({ configuredLinkSnapshotHash: model.linkSnapshotHash, businessId, currentDurableLinks: durable.map((link) => ({ businessId: link.businessId, sourceSystem: link.sourceSystem, vendorId: link.vendorId, sourceSignature: link.sourceSignature, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, status: link.status, version: link.version })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) });
 }

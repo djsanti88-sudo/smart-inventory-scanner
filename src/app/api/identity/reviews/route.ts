@@ -1,9 +1,8 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import { NextResponse } from "next/server";
-import { isLocalIdentityApplyEnabled } from "@/server/identity/applyComposition";
+import { isLocalIdentityApplyEnabled, localIdentityStorageRoot } from "@/server/identity/applyComposition";
 import { createFileAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
 import { createLocalRepository, type LocalIdentityRepository } from "@/server/identity/localRepository";
 import { loadConfiguredLocalIdentityReadModel } from "@/server/identity/localIdentityReadModel";
@@ -12,10 +11,9 @@ import type { IdentityLink, IdentityReview, TenantIdentityProduct } from "@/serv
 import { canonicalSha256 } from "@/services/identity/canonical";
 
 type ReviewRole = ApplyActor["role"];
-type ReviewRepository = Pick<LocalIdentityRepository, "listIdentityReviews"> & Partial<Pick<LocalIdentityRepository, "applyReviewAction" | "resolveIdentityReview" | "saveIdentityLink" | "createTenantProduct">>;
+type ReviewRepository = Pick<LocalIdentityRepository, "listIdentityReviews"> & Partial<Pick<LocalIdentityRepository, "listCurrentIdentityLinks" | "applyReviewAction" | "resolveIdentityReview" | "saveIdentityLink" | "createTenantProduct">>;
 type Versions = { catalogVersion: string; linkVersion: string };
 const roles: ReviewRole[] = ["owner", "admin", "counter", "viewer"];
-const root = path.join(process.cwd(), ".tmp", "identity-import", "local-apply-v1");
 
 function json(body: unknown, status = 200): NextResponse { return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } }); }
 function actorFromEnvironment(businessId: string): ApplyActor | undefined {
@@ -28,6 +26,8 @@ async function defaultVersions(): Promise<Versions> { const model = await loadCo
 
 type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: () => Promise<Versions>; currentModel?: () => ReturnType<typeof loadConfiguredLocalIdentityReadModel> };
 type Action = "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
+type Bucket = "automatic" | "review" | "abstain" | "non_product" | "invalid";
+const bucketValues = new Set<Bucket>(["automatic", "review", "abstain", "non_product", "invalid"]);
 const maxBodyBytes = 16 * 1024;
 function positiveInteger(value: string | null, fallback: number, maximum: number): number { const parsed = Number(value); return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback; }
 function requestBody(value: unknown): value is { businessId: string; reviewId: string; action: Action; targetProductId?: string; name?: string } {
@@ -49,7 +49,7 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     if (!scope) return json({ error: "Business access is required." }, 400);
     const actor = await dependencies.authorize(request, scope);
     if (!actor || actor.businessId !== scope) return json({ error: "Business access is required." }, 403);
-    if (request.method === "GET") { try { const reviews = await dependencies.repository.listIdentityReviews(scope); const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25), requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER), page = Math.min(requestedPage, Math.max(1, Math.ceil(reviews.length / pageSize))); return json({ reviews: reviews.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: reviews.length }); } catch { return json({ error: "Unable to load identity reviews." }, 500); } }
+    if (request.method === "GET") { try { const requestedBucket = url.searchParams.get("bucket"); if (requestedBucket && !bucketValues.has(requestedBucket as Bucket)) return json({ error: "Identity review filter was invalid." }, 400); const reviews = (await dependencies.repository.listIdentityReviews(scope)).filter((review) => !requestedBucket || review.decision.kind === requestedBucket); const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25), requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER), page = Math.min(requestedPage, Math.max(1, Math.ceil(reviews.length / pageSize))); return json({ reviews: reviews.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: reviews.length }); } catch { return json({ error: "Unable to load identity reviews." }, 500); } }
     if (request.method !== "POST" || !body) return json({ error: "Method not allowed." }, 405);
     if (!isManager(actor)) return json({ error: "Only owners and admins can resolve identity reviews." }, 403);
     try {
@@ -58,7 +58,7 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     const actionId = request.headers.get("Idempotency-Key") ?? `review:${review.reviewId}:${body.action}`;
     const apply = async (resolution: NonNullable<IdentityReview["resolution"]>, link?: IdentityLink, product?: TenantIdentityProduct) => {
       const payloadFingerprint = await canonicalSha256({ reviewId: review.reviewId, action: body!.action, targetProductId: body!.targetProductId ?? "", name: body!.name?.trim() ?? "" });
-      if (dependencies.repository.applyReviewAction) return dependencies.repository.applyReviewAction({ businessId: scope, reviewId: review.reviewId, actionId, payloadFingerprint, resolution, resolvedBy: actor.actorId, ...(link ? { link } : {}), ...(product ? { product } : {}) });
+      if (dependencies.repository.applyReviewAction) return dependencies.repository.applyReviewAction({ businessId: scope, reviewId: review.reviewId, actionId, payloadFingerprint, action: body!.action, resolution, resolvedBy: actor.actorId, ...(link ? { link } : {}), ...(product ? { product } : {}) });
       if (product) await dependencies.repository.createTenantProduct?.(product); if (link) await dependencies.repository.saveIdentityLink?.(link);
       return { review: await dependencies.repository.resolveIdentityReview!(scope, review.reviewId, resolution, actor.actorId, new Date().toISOString()), ...(link ? { link } : {}), ...(product ? { product } : {}) };
     };
@@ -76,11 +76,15 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     const model = dependencies.currentModel ? await dependencies.currentModel() : undefined;
     if (dependencies.currentModel && (!model || !model.hasCurrentTarget({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, namespace: key.namespace, source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }))) return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
     const versions = await dependencies.currentVersions();
-    const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: body.action === "revoke_link" ? 2 : 1 };
+    if (body.action === "revoke_link" && dependencies.repository.listCurrentIdentityLinks) {
+      const current = (await dependencies.repository.listCurrentIdentityLinks(scope)).find((link) => link.sourceSystem === review.scope!.sourceSystem && link.vendorId === review.scope!.vendorId && link.sourceSignature === review.scope!.sourceSignature && link.identifierType === key.type && link.namespace === (key.namespace ?? "") && link.normalizedValue === key.value);
+      if (!current || current.status !== "approved" || current.targetProductId !== targetProductId) return json({ error: "The approved identity link is no longer current." }, 409);
+    }
+    const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: 0 };
     return json(await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link));
-    } catch { return json({ error: "Unable to update identity review." }, 500); }
+    } catch (error) { if (error instanceof Error && /identity_review_(action_conflict|terminal|revoke_conflict)/.test(error.message)) return json({ error: "The identity review changed before this action could be applied." }, 409); return json({ error: "Unable to update identity review." }, 500); }
   };
 }
 
-export const GET = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: createLocalRepository(createFileAtomicLocalStorage({ root })), currentVersions: defaultVersions, currentModel: loadConfiguredLocalIdentityReadModel });
+export const GET = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: createLocalRepository(createFileAtomicLocalStorage({ root: localIdentityStorageRoot() })), currentVersions: defaultVersions, currentModel: loadConfiguredLocalIdentityReadModel });
 export const POST = GET;

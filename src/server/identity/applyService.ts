@@ -117,7 +117,9 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
   // Applying a signed preview is the sole point that creates durable human work.  Preview itself
   // remains pure; the review keeps the exact signed decision/evidence snapshot for later audit.
   if (dependencies.repository.saveIdentityReview) for (const item of preflight) {
-    if (item.decision.kind === "automatic" || item.decision.kind === "non_product") continue;
+    // A manual correction has already supplied an auditable target and is counted below; creating
+    // an actionable review for it would advertise work that is no longer actionable.
+    if (item.correction || item.decision.kind === "automatic" || item.decision.kind === "non_product") continue;
     const reviewId = `identity-review:${await canonicalSha256({ businessId: run.businessId, importId: run.importId, rowId: item.rowId })}`;
     const review: IdentityReview = { reviewId, businessId: run.businessId, importId: run.importId, rowId: item.rowId, decision: item.decision, scope: { sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId } };
     await dependencies.repository.saveIdentityReview(review);

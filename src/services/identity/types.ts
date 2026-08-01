@@ -230,6 +230,19 @@ export interface IdentityReview {
   resolvedAt?: string;
 }
 
+/** The immutable, durable outcome of a manager action on one review row. */
+export interface ReviewAction {
+  actionId: string;
+  payloadFingerprint: string;
+  action: "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
+  targetProductId?: string;
+  productId?: string;
+  link?: Pick<IdentityLink, "businessId" | "sourceSystem" | "vendorId" | "sourceSignature" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "status" | "version">;
+  outcome: "confirmed" | "rejected" | "create_product" | "revoked";
+  resolvedBy: string;
+  resolvedAt: string;
+}
+
 export interface TenantIdentityProduct { productId: string; businessId: string; name: string; createdBy: string; createdAt: string; }
 
 export interface AggregateLedgerPort {
