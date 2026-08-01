@@ -7,6 +7,8 @@ import { createFileAtomicLocalStorage } from "@/server/identity/atomicLocalStora
 import { createLocalRepository, type LocalIdentityRepository } from "@/server/identity/localRepository";
 import { deriveAuthoritativeLinkSnapshotHash, loadAuthoritativeLocalIdentityReadModel, type CurrentApprovedIdentityLink } from "@/server/identity/localIdentityReadModel";
 import type { ApplyActor } from "@/server/identity/applyService";
+import { createLocalAtomicCountedApply, type LocalAtomicCountedApplyInput, type LocalAtomicCountedApplyResult } from "@/server/identity/localAtomicCountedApply";
+import { createAggregateImportEvent } from "@/services/identity/importLedger";
 import type { IdentityLink, IdentityReview, TenantIdentityProduct } from "@/services/identity/types";
 import { canonicalSha256, isValidIdentityNamespace } from "@/services/identity/canonical";
 
@@ -22,11 +24,20 @@ function actorFromEnvironment(businessId: string): ApplyActor | undefined {
   if (!actorId || !raw || raw.length > 64 * 1024) return undefined;
   try { const members: unknown = JSON.parse(raw); if (!Array.isArray(members)) return undefined; const member = members.find((value) => value && typeof value === "object" && (value as ApplyActor).actorId === actorId && (value as ApplyActor).businessId === businessId && roles.includes((value as ApplyActor).role)); return member as ApplyActor | undefined; } catch { return undefined; }
 }
-const defaultRepository = createLocalRepository(createFileAtomicLocalStorage({ root: localIdentityStorageRoot() }));
+const defaultStorage = createFileAtomicLocalStorage({ root: localIdentityStorageRoot() });
+const defaultRepository = createLocalRepository(defaultStorage);
 async function defaultModel() { return loadAuthoritativeLocalIdentityReadModel(defaultRepository); }
 async function defaultVersions(businessId?: string): Promise<Versions> { const model = await defaultModel(); if (!model) throw new Error("review_configuration_unavailable"); return { catalogVersion: model.snapshot.catalogVersion, linkVersion: businessId ? await deriveAuthoritativeLinkSnapshotHash(model, defaultRepository, businessId) : model.linkSnapshotHash }; }
+const defaultAtomicCountedRow = createLocalAtomicCountedApply(defaultStorage, async (validation) => {
+  const model = await defaultModel();
+  return Boolean(model && await model.hasCurrentTarget({
+    businessId: validation.businessId, sourceSystem: validation.sourceSystem,
+    sourceSignature: validation.sourceSignature, vendorId: validation.vendorId,
+    targetProductId: validation.targetProductId, identifiers: validation.identifiers,
+  }));
+}, { allowedRunStates: ["completed"] });
 
-type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: (businessId?: string) => Promise<Versions>; currentModel?: () => ReturnType<typeof loadAuthoritativeLocalIdentityReadModel>; currentApprovedLinks?: (businessId: string) => Promise<CurrentApprovedIdentityLink[]>; pageCurrentApprovedLinks?: (businessId: string, input: { page: number; pageSize: number }) => Promise<{ items: CurrentApprovedIdentityLink[]; total: number }> };
+type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: (businessId?: string) => Promise<Versions>; currentModel?: () => ReturnType<typeof loadAuthoritativeLocalIdentityReadModel>; currentApprovedLinks?: (businessId: string) => Promise<CurrentApprovedIdentityLink[]>; pageCurrentApprovedLinks?: (businessId: string, input: { page: number; pageSize: number }) => Promise<{ items: CurrentApprovedIdentityLink[]; total: number }>; atomicCountedRow?: (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult> };
 type Action = "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
 type Bucket = "automatic" | "review" | "abstain" | "non_product" | "invalid";
 const bucketValues = new Set<Bucket>(["automatic", "review", "abstain", "non_product", "invalid"]);
@@ -40,7 +51,17 @@ function requestBody(value: unknown): value is { businessId: string; reviewId?: 
   return Object.keys(input).every((key) => ["businessId", "reviewId", "action", "targetProductId", "name", "link"].includes(key)) && typeof input.businessId === "string" && input.businessId.length > 0 && ["confirm_candidate", "reject", "create_tenant_product", "revoke_link"].includes(input.action as string) && ((typeof input.reviewId === "string" && input.reviewId.length > 0) || (input.action === "revoke_link" && standaloneLink(input.link))) && (input.targetProductId === undefined || typeof input.targetProductId === "string") && (input.name === undefined || typeof input.name === "string");
 }
 function isManager(actor: ApplyActor): boolean { return actor.role === "owner" || actor.role === "admin"; }
-function chosenCandidate(review: IdentityReview, targetProductId: string | undefined): string | undefined { return targetProductId && review.decision.candidates.some((candidate) => candidate.productId === targetProductId) ? targetProductId : undefined; }
+type ReviewCandidate = IdentityReview["decision"]["candidates"][number];
+type IdentifierFamily = NonNullable<ReviewCandidate["identifierFamily"]>;
+function chosenCandidate(review: IdentityReview, targetProductId: string | undefined): ReviewCandidate | undefined { return targetProductId ? review.decision.candidates.find((candidate) => candidate.productId === targetProductId) : undefined; }
+function candidateFamilies(review: IdentityReview): IdentifierFamily[] { return review.decision.candidates.flatMap((candidate) => candidate.identifierFamily ? [candidate.identifierFamily] : []); }
+function creationIdentifierFamily(review: IdentityReview): IdentifierFamily | undefined {
+  const candidate = candidateFamilies(review)[0];
+  if (candidate) return candidate;
+  return review.signedRowContext?.identifiers
+    .map((identifier) => ({ type: identifier.type, ...(identifier.namespace ? { namespace: identifier.namespace } : {}), value: identifier.normalized }))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))[0];
+}
 async function boundedText(request: Request): Promise<string> { const reader = request.body?.getReader(); if (!reader) return ""; const chunks: Uint8Array[] = []; let bytes = 0; while (true) { const chunk = await reader.read(); if (chunk.done) break; bytes += chunk.value.byteLength; if (bytes > maxBodyBytes) { await reader.cancel(); throw new Error("too_large"); } chunks.push(chunk.value); } return new TextDecoder().decode(Buffer.concat(chunks)); }
 
 export function createIdentityReviewRoute(dependencies: Dependencies): (request: Request) => Promise<NextResponse> {
@@ -54,7 +75,44 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     if (!scope) return json({ error: "Business access is required." }, 400);
     let actor: ApplyActor | undefined; try { actor = await dependencies.authorize(request, scope); } catch { return json({ error: "Business access is required." }, 403); }
     if (!actor || actor.businessId !== scope) return json({ error: "Business access is required." }, 403);
-    if (request.method === "GET") { try { const requestedBucket = url.searchParams.get("bucket"); if (requestedBucket && !bucketValues.has(requestedBucket as Bucket)) return json({ error: "Identity review filter was invalid." }, 400); const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25), requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER), linkPage = positiveInteger(url.searchParams.get("linkPage"), 1, Number.MAX_SAFE_INTEGER); const all = dependencies.repository.pageIdentityReviews ? undefined : await dependencies.repository.listIdentityReviews(scope), filtered = all?.filter((review) => !requestedBucket || review.decision.kind === requestedBucket) ?? [], reviewPage = dependencies.repository.pageIdentityReviews ? await dependencies.repository.pageIdentityReviews(scope, { ...(requestedBucket ? { bucket: requestedBucket } : {}), page: requestedPage, pageSize }) : { items: filtered.slice((requestedPage - 1) * pageSize, requestedPage * pageSize), total: filtered.length, bucketTotals: Object.fromEntries([...bucketValues].map((bucket) => [bucket, all!.filter((review) => review.decision.kind === bucket).length])) }, page = Math.min(requestedPage, Math.max(1, Math.ceil(reviewPage.total / pageSize))), lookups = reviewPage.items.flatMap((review) => { const key = review.decision.normalizedKeys[0]; return key && review.scope ? [{ businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", normalizedValue: key.value }] : []; }), links = dependencies.repository.findCurrentIdentityLinks ? await dependencies.repository.findCurrentIdentityLinks(scope, lookups) : dependencies.repository.listCurrentIdentityLinks ? await dependencies.repository.listCurrentIdentityLinks(scope) : []; const approvedPage = dependencies.pageCurrentApprovedLinks ? await dependencies.pageCurrentApprovedLinks(scope, { page: linkPage, pageSize }) : dependencies.currentApprovedLinks ? (() => dependencies.currentApprovedLinks!(scope).then((items) => ({ items: items.slice((linkPage - 1) * pageSize, linkPage * pageSize), total: items.length })))() : Promise.resolve({ items: [] as CurrentApprovedIdentityLink[], total: 0 }); const approved = await approvedPage; const enrich = (review: IdentityReview) => { const key = review.decision.normalizedKeys[0], link = key && review.scope ? links.find((entry) => entry.status === "approved" && entry.sourceSystem === review.scope!.sourceSystem && entry.vendorId === review.scope!.vendorId && entry.sourceSignature === review.scope!.sourceSignature && entry.identifierType === key.type && entry.namespace === (key.namespace ?? "") && entry.normalizedValue === key.value) : undefined; return link ? { ...review, currentApprovedLink: { targetProductId: link.targetProductId, version: link.version } } : review; }; return json({ reviews: reviewPage.items.map(enrich), currentApprovedLinks: approved.items, page, linkPage, pageSize, total: reviewPage.total, linkTotal: approved.total, bucketTotals: reviewPage.bucketTotals }); } catch { return json({ error: "Unable to load identity reviews." }, 500); } }
+    if (request.method === "GET") {
+      try {
+        const requestedBucket = url.searchParams.get("bucket");
+        if (requestedBucket && !bucketValues.has(requestedBucket as Bucket)) return json({ error: "Identity review filter was invalid." }, 400);
+        const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25);
+        const requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER);
+        const linkPage = positiveInteger(url.searchParams.get("linkPage"), 1, Number.MAX_SAFE_INTEGER);
+        const all = dependencies.repository.pageIdentityReviews ? undefined : await dependencies.repository.listIdentityReviews(scope);
+        const filtered = all?.filter((review) => !requestedBucket || review.decision.kind === requestedBucket) ?? [];
+        const reviewPage = dependencies.repository.pageIdentityReviews
+          ? await dependencies.repository.pageIdentityReviews(scope, { ...(requestedBucket ? { bucket: requestedBucket } : {}), page: requestedPage, pageSize })
+          : { items: filtered.slice((requestedPage - 1) * pageSize, requestedPage * pageSize), total: filtered.length, bucketTotals: Object.fromEntries([...bucketValues].map((bucket) => [bucket, all!.filter((review) => review.decision.kind === bucket).length])) };
+        const page = Math.min(requestedPage, Math.max(1, Math.ceil(reviewPage.total / pageSize)));
+        const lookups = reviewPage.items.flatMap((review) => review.scope ? candidateFamilies(review).map((family) => ({
+          businessId: scope, sourceSystem: review.scope!.sourceSystem, vendorId: review.scope!.vendorId,
+          sourceSignature: review.scope!.sourceSignature, identifierType: family.type,
+          namespace: family.namespace ?? "", normalizedValue: family.value,
+        })) : []);
+        const links = dependencies.repository.findCurrentIdentityLinks
+          ? await dependencies.repository.findCurrentIdentityLinks(scope, lookups)
+          : dependencies.repository.listCurrentIdentityLinks ? await dependencies.repository.listCurrentIdentityLinks(scope) : [];
+        const approvedPage = dependencies.pageCurrentApprovedLinks
+          ? await dependencies.pageCurrentApprovedLinks(scope, { page: linkPage, pageSize })
+          : dependencies.currentApprovedLinks
+            ? dependencies.currentApprovedLinks(scope).then((items) => ({ items: items.slice((linkPage - 1) * pageSize, linkPage * pageSize), total: items.length }))
+            : Promise.resolve({ items: [] as CurrentApprovedIdentityLink[], total: 0 });
+        const approved = await approvedPage;
+        const enrich = (review: IdentityReview) => {
+          const families = candidateFamilies(review);
+          const link = review.scope ? links.find((entry) => entry.status === "approved"
+            && entry.sourceSystem === review.scope!.sourceSystem && entry.vendorId === review.scope!.vendorId
+            && entry.sourceSignature === review.scope!.sourceSignature && families.some((family) =>
+              entry.identifierType === family.type && entry.namespace === (family.namespace ?? "") && entry.normalizedValue === family.value)) : undefined;
+          return link ? { ...review, currentApprovedLink: { targetProductId: link.targetProductId, version: link.version } } : review;
+        };
+        return json({ reviews: reviewPage.items.map(enrich), currentApprovedLinks: approved.items, page, linkPage, pageSize, total: reviewPage.total, linkTotal: approved.total, bucketTotals: reviewPage.bucketTotals });
+      } catch { return json({ error: "Unable to load identity reviews." }, 500); }
+    }
     if (request.method !== "POST" || !body) return json({ error: "Method not allowed." }, 405);
     if (!isManager(actor)) return json({ error: "Only owners and admins can resolve identity reviews." }, 403);
     try {
@@ -68,23 +126,49 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     const review = (await dependencies.repository.listIdentityReviews(scope)).find((item) => item.reviewId === body!.reviewId);
     if (!review) return json({ error: "Identity review was not found." }, 404);
     const actionId = request.headers.get("Idempotency-Key") ?? `review:${review.reviewId}:${body.action}`;
+    const payloadFingerprint = await canonicalSha256({ reviewId: review.reviewId, action: body.action, targetProductId: body.targetProductId ?? "", name: body.name?.trim() ?? "" });
     const apply = async (resolution: NonNullable<IdentityReview["resolution"]>, link?: IdentityLink, product?: TenantIdentityProduct) => {
-      const payloadFingerprint = await canonicalSha256({ reviewId: review.reviewId, action: body!.action, targetProductId: body!.targetProductId ?? "", name: body!.name?.trim() ?? "" });
       if (dependencies.repository.applyReviewAction) return dependencies.repository.applyReviewAction({ businessId: scope, reviewId: review.reviewId, actionId, payloadFingerprint, action: body!.action, resolution, resolvedBy: actor.actorId, ...(link ? { link } : {}), ...(product ? { product } : {}) });
       if (product) await dependencies.repository.createTenantProduct?.(product); if (link) await dependencies.repository.saveIdentityLink?.(link);
       return { review: await dependencies.repository.resolveIdentityReview!(scope, review.reviewId, resolution, actor.actorId, new Date().toISOString()), ...(link ? { link } : {}), ...(product ? { product } : {}) };
+    };
+    const countLaterApproval = async (targetProductId: string, applied: Record<string, unknown>) => {
+      const context = review.signedRowContext;
+      if (!context || context.mode !== "physical_count") return json(applied);
+      if (!dependencies.atomicCountedRow || !review.scope) throw new Error("review_counting_unavailable");
+      const countRowId = `review-count:${review.reviewId}`;
+      const event = await createAggregateImportEvent({
+        businessId: scope, importId: review.importId, rowId: countRowId, sessionId: context.sessionId,
+        quantity: context.quantity, sourceFileOrdinal: context.sourceFileOrdinal, sheetName: context.sheetName,
+        sourceRowNumber: context.sourceRowNumber, createdAt: context.eventCreatedAt, mode: "physical_count",
+        decision: { kind: "review", approvedProductId: targetProductId },
+      });
+      const operationFingerprint = await canonicalSha256({ reviewId: review.reviewId, payloadFingerprint, eventFingerprint: event.fingerprint });
+      const row = { quantity: context.quantity, unitOfMeasure: context.unitOfMeasure, sourceFileOrdinal: context.sourceFileOrdinal, sheetName: context.sheetName, sourceRowNumber: context.sourceRowNumber, identifiers: context.identifiers };
+      const atomic = await dependencies.atomicCountedRow({
+        validation: { businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: context.identifiers, row, decision: review.decision, corrected: true },
+        operation: { businessId: scope, importId: review.importId, rowId: countRowId, idempotencyKey: `identity-review-count:${review.reviewId}`, payloadFingerprint: await canonicalSha256({ payloadFingerprint, eventFingerprint: event.fingerprint }) },
+        event, operationFingerprint,
+        result: { row: { rowId: review.rowId, status: "counted", eventId: event.eventId, audit: { action: "counted", sourceQuantity: context.quantity, targetProductId, decisionKind: "review", decisionFingerprint: review.decision.decisionFingerprint, evidenceSnapshot: review.decision.decisionBasis, constraintSnapshot: review.decision.constraintOutcomes } } },
+      });
+      if (atomic.kind === "stale") return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
+      if (atomic.kind === "in_progress") return json({ error: "The approved row count is still being applied." }, 409);
+      if (atomic.kind === "idempotency_conflict") return json({ error: "The approved row count conflicts with an earlier action." }, 409);
+      return json({ ...applied, laterCount: { kind: atomic.kind, eventId: atomic.event.eventId, quantity: atomic.event.quantity } });
     };
     if (body.action === "reject") return json(await apply("rejected"));
     if (body.action === "create_tenant_product") {
       const name = body.name?.trim(); if (!name || name.length > 200) return json({ error: "A tenant product name is required." }, 400);
       const product: TenantIdentityProduct = { productId: `tenant:${randomUUID()}`, businessId: scope, name, createdBy: actor.actorId, createdAt: new Date().toISOString() };
-      const key = review.decision.normalizedKeys[0]; if (!key || !review.scope) return json({ error: "The review has no durable identifier." }, 409);
+      const key = creationIdentifierFamily(review); if (!key || !review.scope) return json({ error: "The review has no durable identifier." }, 409);
       const versions = await dependencies.currentVersions(scope); const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId: product.productId, status: "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), approvedBy: actor.actorId, approvedAt: new Date().toISOString(), version: 1 };
-      return json(await apply("create_product", link, product));
+      const applied = await apply("create_product", link, product);
+      return countLaterApproval(product.productId, applied as Record<string, unknown>);
     }
-    const targetProductId = chosenCandidate(review, body.targetProductId);
-    if (!targetProductId || !review.scope) return json({ error: "The selected candidate is not available for this review." }, 409);
-    const key = review.decision.normalizedKeys[0]; if (!key) return json({ error: "The review has no durable identifier." }, 409);
+    const candidate = chosenCandidate(review, body.targetProductId);
+    if (!candidate || !review.scope) return json({ error: "The selected candidate is not available for this review." }, 409);
+    const targetProductId = candidate.productId;
+    const key = candidate.identifierFamily; if (!key) return json({ error: "The review has no durable candidate identifier." }, 409);
     const model = dependencies.currentModel ? await dependencies.currentModel() : undefined;
     if (dependencies.currentModel && (!model || !await model.hasCurrentTarget({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, namespace: key.namespace, source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }))) return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
     const versions = await dependencies.currentVersions(scope);
@@ -97,11 +181,12 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
       if (!current || current.status !== "approved" || current.targetProductId !== targetProductId) return json({ error: "The approved identity link is no longer current." }, 409);
     }
     const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: 0 };
-    return json(await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link));
+    const applied = await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link);
+    return body.action === "confirm_candidate" ? countLaterApproval(targetProductId, applied as Record<string, unknown>) : json(applied);
     } catch (error) { if (error instanceof Error && /identity_(?:review_(?:action_conflict|terminal|revoke_conflict|target_conflict)|link_revoke_conflict)/.test(error.message)) return json({ error: "The identity review changed before this action could be applied." }, 409); return json({ error: "Unable to update identity review." }, 500); }
   };
 }
 
 async function defaultCurrentApprovedLinks(businessId: string): Promise<CurrentApprovedIdentityLink[]> { const model = await defaultModel(); return model?.listCurrentApprovedLinks ? model.listCurrentApprovedLinks(businessId) : []; }
 async function defaultPageCurrentApprovedLinks(businessId: string, input: { page: number; pageSize: number }) { const model = await defaultModel(); if (!model?.pageCurrentApprovedLinks) return { items: [] as CurrentApprovedIdentityLink[], total: 0 }; return model.pageCurrentApprovedLinks(businessId, input); }
-export const defaultIdentityReviewRoute = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: defaultRepository, currentVersions: defaultVersions, currentModel: defaultModel, currentApprovedLinks: defaultCurrentApprovedLinks, pageCurrentApprovedLinks: defaultPageCurrentApprovedLinks });
+export const defaultIdentityReviewRoute = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: defaultRepository, currentVersions: defaultVersions, currentModel: defaultModel, currentApprovedLinks: defaultCurrentApprovedLinks, pageCurrentApprovedLinks: defaultPageCurrentApprovedLinks, atomicCountedRow: defaultAtomicCountedRow });

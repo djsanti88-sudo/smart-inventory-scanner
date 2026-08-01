@@ -31,6 +31,7 @@ interface CandidateGroup {
   evidence: string[];
   missing: string[];
   qualifyingEvidence?: ImmutableEvidence;
+  identifierFamily?: { type: ScopedIdentifier["type"]; namespace?: string; value: string };
 }
 
 interface ImmutableEvidence {
@@ -51,6 +52,14 @@ function identifierKey(identifier: Pick<ScopedIdentifier, "type" | "namespace" |
 
 function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort();
+}
+
+function candidateIdentifierFamily(input: IdentityInput, candidate: IdentityCandidate): CandidateGroup["identifierFamily"] {
+  const inputKeys = new Set(input.identifiers.map(identifierKey));
+  return candidate.identifiers
+    .filter((identifier) => inputKeys.has(identifierKey(identifier)))
+    .map((identifier) => ({ type: identifier.type, ...(identifier.namespace ? { namespace: identifier.namespace } : {}), value: identifier.normalized }))
+    .sort((left, right) => JSON.stringify([left.type, left.namespace ?? "", left.value]).localeCompare(JSON.stringify([right.type, right.namespace ?? "", right.value])))[0];
 }
 
 function evidenceKey(evidence: ImmutableEvidence): string {
@@ -230,6 +239,12 @@ export async function decideIdentity(
       missing: [],
     };
     existing.candidates.push(candidate);
+    const identifierFamily = candidateIdentifierFamily(normalized, candidate);
+    if (identifierFamily && (!existing.identifierFamily
+      || JSON.stringify([identifierFamily.type, identifierFamily.namespace ?? "", identifierFamily.value])
+        < JSON.stringify([existing.identifierFamily.type, existing.identifierFamily.namespace ?? "", existing.identifierFamily.value]))) {
+      existing.identifierFamily = identifierFamily;
+    }
     const immutableEvidence = immutableExactEvidence(normalized, candidate);
     existing.exactImmutable ||= Boolean(immutableEvidence);
     if (immutableEvidence && (!existing.qualifyingEvidence || evidenceKey(immutableEvidence) < evidenceKey(existing.qualifyingEvidence))) {
@@ -269,6 +284,7 @@ export async function decideIdentity(
     productId: group.productId,
     rank: index + 1,
     score: group.semanticScore,
+    ...(group.identifierFamily ? { identifierFamily: group.identifierFamily } : {}),
     evidence: uniqueSorted(group.evidence),
     missingFields: uniqueSorted(group.missing),
     contradictions: [],

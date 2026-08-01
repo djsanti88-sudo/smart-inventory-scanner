@@ -19,6 +19,12 @@ const format = process.argv.includes("--format=markdown") ? "markdown" : "json";
 const writeImportBaseline = process.argv.includes("--write-import-performance-baseline");
 
 function hash(value) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+function canonicalJson(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+}
+function canonicalSha256(value) { return createHash("sha256").update(`identity-import-v1:${canonicalJson(value)}`).digest("hex"); }
 function assertSynthetic(value) {
   if (value?.manifestVersion !== "identity-manifest-v1" || value.syntheticOnly !== true || value.promotionEligible !== false || !Array.isArray(value.promotionBlockers) || !value.promotionBlockers.includes("synthetic_only") || !value.promotionBlockers.includes("real_export_evidence_required")) throw new Error("synthetic_manifest_must_remain_promotion_ineligible");
 }
@@ -37,6 +43,7 @@ async function main() {
     const fixtureBytes = await readFile(resolve(root, "src/eval/identity/fixtures/frozen-5000.v1.json"));
     const fixture = JSON.parse(fixtureBytes.toString("utf8"));
     if (fixture.fixtureVersion !== baseline.fixture.fixtureVersion || fixture.rowCount !== baseline.fixture.rowCount || fixture.sourceHash !== baseline.fixture.sourceHash) throw new Error("import_performance_fixture_mismatch");
+    if (!Array.isArray(fixture.rows) || fixture.rows.length !== 5_000 || !Array.isArray(fixture.snapshot?.barcodeCandidates) || fixture.snapshot.barcodeCandidates.length !== 2_000 || canonicalSha256({ rows: fixture.rows, snapshot: fixture.snapshot }) !== fixture.contentSha256) throw new Error("import_performance_canonical_fixture_mismatch");
     const fixtureSha256 = createHash("sha256").update(fixtureBytes).digest("hex");
     if (fixtureSha256 !== baseline.fixture.fixtureSha256) throw new Error("import_performance_fixture_hash_mismatch");
     const run = spawnSync(process.execPath, [resolve(root, "node_modules/vitest/vitest.mjs"), "run", "src/eval/identity/importPerf.test.ts"], { cwd: root, encoding: "utf8", env: { ...process.env, IDENTITY_CAPTURE_PERF: "1" } });

@@ -8,7 +8,7 @@ import {
 import type { UniversalSheet } from "@/services/importSchema";
 
 describe("importSchema", () => {
-  it("keeps the nine supported mapping fields in a stable order", () => {
+  it("keeps the supported mapping fields in a stable order", () => {
     expect(IMPORT_FIELD_ORDER).toEqual([
       "partNumber",
       "brand",
@@ -19,6 +19,7 @@ describe("importSchema", () => {
       "barcode",
       "name",
       "category",
+      "recordType",
     ]);
   });
 

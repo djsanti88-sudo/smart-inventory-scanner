@@ -3,7 +3,7 @@ import { createIdentityReviewRoute } from "@/server/identity/reviewRoute";
 
 const review = {
   reviewId: "review-1", businessId: "shop-a", importId: "import-1", rowId: "row-1",
-  decision: { kind: "review", candidates: [{ productId: "tire-a", rank: 1, evidence: [], missingFields: [], contradictions: [] }], decisionBasis: [], normalizedKeys: [{ type: "vendor_sku", namespace: "vendor", value: "SKU-1" }], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "tire", sourceRecordFingerprint: "source", decisionFingerprint: "decision" }, scope: { sourceSystem: "demo", sourceSignature: "demo-v1", vendorId: "vendor-a" },
+  decision: { kind: "review", candidates: [{ productId: "tire-a", rank: 1, identifierFamily: { type: "vendor_sku" as const, namespace: "vendor", value: "SKU-1" }, evidence: [], missingFields: [], contradictions: [] }], decisionBasis: [], normalizedKeys: [{ type: "vendor_sku", namespace: "vendor", value: "SKU-1" }], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "tire", sourceRecordFingerprint: "source", decisionFingerprint: "decision" }, scope: { sourceSystem: "demo", sourceSignature: "demo-v1", vendorId: "vendor-a" },
 };
 
 function route(overrides: Partial<Parameters<typeof createIdentityReviewRoute>[0]> = {}) {
@@ -22,6 +22,59 @@ describe("identity review route", () => {
     expect(response.status).toBe(200);
     expect(repository.saveIdentityLink).toHaveBeenCalledWith(expect.objectContaining({ businessId: "shop-a", targetProductId: "tire-a", status: "approved", approvedBy: "manager" }));
     expect(repository.resolveIdentityReview).toHaveBeenCalledWith("shop-a", "review-1", "confirmed", "manager", expect.any(String));
+  });
+
+  it("persists the selected candidate's exact evidence family instead of the row's first normalized key", async () => {
+    const selected = {
+      ...review,
+      decision: {
+        ...review.decision,
+        normalizedKeys: [
+          { type: "internal_code" as const, namespace: "shop", value: "INTERNAL-1" },
+          { type: "vendor_sku" as const, namespace: "vendor-a", value: "SKU-2" },
+        ],
+        candidates: [{ ...review.decision.candidates[0]!, identifierFamily: { type: "vendor_sku" as const, namespace: "vendor-a", value: "SKU-2" } }],
+      },
+    };
+    const saveIdentityLink = vi.fn().mockResolvedValue(undefined);
+    const { handler } = route({ repository: {
+      listIdentityReviews: vi.fn().mockResolvedValue([selected]),
+      saveIdentityLink,
+      resolveIdentityReview: vi.fn().mockResolvedValue({ ...selected, resolution: "confirmed" }),
+    } as never });
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
+
+    expect(response.status).toBe(200);
+    expect(saveIdentityLink).toHaveBeenCalledWith(expect.objectContaining({
+      identifierType: "vendor_sku", namespace: "vendor-a", normalizedValue: "SKU-2",
+    }));
+  });
+
+  it("counts a later physical-count approval through atomicCountedRow with the signed source quantity", async () => {
+    const countedReview = {
+      ...review,
+      signedRowContext: {
+        mode: "physical_count" as const, quantity: 7, unitOfMeasure: "each" as const, sourceFileOrdinal: 0,
+        sheetName: "Stock", sourceRowNumber: 2, sessionId: "identity-import:import-1",
+        eventCreatedAt: "2026-07-31T00:01:00.000Z", identifiers: [],
+      },
+    };
+    const applyReviewAction = vi.fn(async () => ({ review: { ...countedReview, resolution: "confirmed" }, link: { targetProductId: "tire-a" }, action: { outcome: "confirmed" } }));
+    const atomicCountedRow = vi.fn(async (input) => ({ kind: "applied" as const, event: input.event, result: { row: { rowId: "row-1", status: "counted", eventId: input.event.eventId } } }));
+    const { handler } = route({
+      repository: { listIdentityReviews: vi.fn().mockResolvedValue([countedReview]), applyReviewAction } as never,
+      atomicCountedRow,
+    } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", headers: { "Idempotency-Key": "review:review-1:confirm" }, body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
+
+    expect(response.status).toBe(200);
+    expect(atomicCountedRow).toHaveBeenCalledTimes(1);
+    expect(atomicCountedRow).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({ kind: "aggregate_import", quantity: 7, productId: "tire-a", sessionId: "identity-import:import-1" }),
+      operation: expect.objectContaining({ idempotencyKey: "identity-review-count:review-1" }),
+    }));
   });
 
   it("derives authorization from the server and refuses a counter action even when the request claims admin", async () => {

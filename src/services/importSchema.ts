@@ -12,6 +12,7 @@ export const IMPORT_FIELD_ORDER = [
   "barcode",
   "name",
   "category",
+  "recordType",
 ] as const;
 
 export type ImportField = (typeof IMPORT_FIELD_ORDER)[number];
@@ -61,6 +62,7 @@ export interface MappedImportRow {
   model: string;
   size: string;
   category: string;
+  recordType?: string;
   quantity: number;
   uom: string;
 }

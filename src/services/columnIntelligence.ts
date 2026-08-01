@@ -29,6 +29,7 @@ export const HEADER_SYNONYMS: Readonly<Record<ImportField, readonly string[]>> =
   barcode: ["barcode", "primary barcode", "upc", "ean", "gtin"],
   name: ["name", "product name", "item name"],
   category: ["category", "department", "product category"],
+  recordType: ["record type", "line type", "item type", "row type"],
 };
 
 // Extra text cues that strongly imply a field but are not standalone synonyms. A header containing
@@ -39,6 +40,7 @@ const FIELD_TEXT_CUES: Readonly<Partial<Record<ImportField, readonly string[]>>>
   name: ["desc", "description", "title", "item"],
   brand: ["vendor", "supplier"],
   quantity: ["hand", "stock", "avail", "available", "onhand"],
+  recordType: ["record", "line", "row", "type"],
 };
 
 // A fuzzy header text score at or above this maps the field (MEDIUM tier unless corroborated).

@@ -93,6 +93,20 @@ describe("identity decision engine", () => {
     expect(decision.candidates[0]?.score).toBe(1);
   });
 
+  it("binds each ranked candidate to the exact identifier family that produced its evidence", async () => {
+    const vendorSku = identifier({ type: "vendor_sku", raw: "SKU-2", normalized: "SKU-2", namespace: "vendor-a", evidenceId: "input-sku" });
+    const decision = await decideIdentity(
+      input({ identifiers: [identifier({ type: "internal_code", raw: "INTERNAL-1", normalized: "INTERNAL-1", namespace: "shop" }), vendorSku] }),
+      snapshot([candidate({ identifiers: [{ ...vendorSku, source: "catalog", evidenceAuthority: "unverified_master", evidenceId: "catalog-sku" }], verificationTier: "suggested", automaticEligible: false, exactCodeEvidence: false })]),
+      genericIdentityPlugin,
+    );
+
+    expect(decision.candidates[0]).toMatchObject({
+      productId: "product-1",
+      identifierFamily: { type: "vendor_sku", namespace: "vendor-a", value: "SKU-2" },
+    });
+  });
+
   it("rejects hard contradictions and abstains when none remain", async () => {
     const decision = await decideIdentity(
       input({ categoryHint: "hardware" }),

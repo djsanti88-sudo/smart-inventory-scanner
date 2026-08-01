@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createIdentityPreview, type CreateIdentityPreviewInput, type PreviewVersions } from "@/services/identity/preview";
+import { identityPluginVersions } from "@/services/identity/plugins";
 import type { LocalIdentitySnapshot } from "./localSnapshotIndex";
 import { createReadOnlyCandidateSource, type ApprovedLinkLookupInput, type ApprovedLinkLookupResult } from "./readOnlyCandidateSource";
 import { createLocalPreviewSigner } from "./previewSigner";
@@ -64,7 +65,7 @@ async function configuredLocalComposition(): Promise<LocalIdentityPreviewComposi
       return membership ? { actorId: membership.actorId, role: membership.role } : undefined;
     },
     signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY,
-    versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion, linkSnapshotHash },
+    versions: { engineVersion: "identity-engine-v1", pluginVersions: [...identityPluginVersions], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion, linkSnapshotHash },
   };
 }
 

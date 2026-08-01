@@ -1,6 +1,7 @@
 import type { AggregateImportEvent, AggregateLedgerPort, AggregateLedgerResult } from "@/services/identity/types";
 import { validateAggregateImportEvent } from "@/services/identity/importLedger";
 import type { AtomicLocalStorage } from "./atomicLocalStorage";
+import { writeLocalInventoryProjection } from "./localInventoryProjection";
 
 const ledgerKey = "aggregate-ledger";
 type StoredResult = {
@@ -43,13 +44,16 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
       const key = entryKey(event.businessId, idempotencyKey);
       const existing = entries[key];
       if (existing) {
-        return await storedResultIsValid(existing, event.businessId, idempotencyKey, event.fingerprint) &&
-          (operationFingerprint === undefined || existing.operationFingerprint === operationFingerprint)
-          ? { event: existing.event, idempotencyKey: existing.idempotencyKey }
-          : { kind: "idempotency_conflict", idempotencyKey };
+        if (!await storedResultIsValid(existing, event.businessId, idempotencyKey, event.fingerprint)
+          || operationFingerprint !== undefined && existing.operationFingerprint !== operationFingerprint) {
+          return { kind: "idempotency_conflict", idempotencyKey };
+        }
+        await writeLocalInventoryProjection(transaction, entries, existing.event.businessId, existing.event.sessionId);
+        return { event: existing.event, idempotencyKey: existing.idempotencyKey };
       }
       entries[key] = { event, idempotencyKey, fingerprint: event.fingerprint, operationFingerprint };
       await transaction.set(ledgerKey, entries);
+      await writeLocalInventoryProjection(transaction, entries, event.businessId, event.sessionId);
       return { event, idempotencyKey };
     });
   }

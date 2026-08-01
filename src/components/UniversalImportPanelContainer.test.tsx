@@ -15,6 +15,9 @@ import type { ColumnMapping, UniversalSheet } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
 import { createIdentityPreviewRoute } from "@/server/identity/previewRoute";
 import fixture from "@/eval/identity/fixtures/frozen-5000.v1.json";
+import { decideIdentityBatch } from "@/services/identity/engine";
+import { createReadOnlyCandidateSource } from "@/server/identity/readOnlyCandidateSource";
+import type { IdentityCandidate } from "@/services/identity/types";
 
 const getSession = vi.fn();
 const readUniversalWorkbook = vi.fn();
@@ -122,6 +125,38 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
     const request = buildLocalIdentityPreviewRequest({ file: { name: "fixture.csv", size: 1 }, sheets: [{ fileName: "fixture.csv", kind: "csv", headers: ["PN", "Qty"], rows, headerRowIndex: 0, sourceSignature: "fixture", sourceRowNumbers: rows.map((_, index) => index + 2) }], businessId: "biz-test" });
     expect(request.rows).toHaveLength(5_000);
     expect(request.rows.map((row) => row.sourceRowNumber)).toEqual(rows.map((_, index) => index + 2));
+  });
+  it("projects category and adapter record type so tire contradictions and service rows stay safe", async () => {
+    const sheet: UniversalSheet = {
+      fileName: "mixed.csv", kind: "csv",
+      headers: ["Part Number", "Brand", "Name", "Size", "Category", "Record Type", "Quantity"],
+      rows: [
+        ["TIRE-1", "Michelin", "Defender", "225/65R17", "Tires", "product", "1"],
+        ["LABOR-1", "", "Mounting labor", "", "Services", "service", "2"],
+      ],
+      headerRowIndex: 0, sourceSignature: "mixed-v1", sourceRowNumbers: [2, 3],
+    };
+    const request = buildLocalIdentityPreviewRequest({ file: { name: "mixed.csv", size: 100 }, sheets: [sheet], businessId: "biz-test" });
+    expect(request.rows.map(({ categoryHint, recordType }) => ({ categoryHint, recordType }))).toEqual([
+      { categoryHint: "Tires", recordType: "product" },
+      { categoryHint: "Services", recordType: "service" },
+    ]);
+    const identifier = request.rows[0]!.identifiers[0]!;
+    const contradicted: IdentityCandidate = {
+      productId: "wrong-tire", category: "tire", businessScope: "master", verificationTier: "exact_code_verified",
+      automaticEligible: true, evidenceId: "candidate:TIRE-1", evidenceVersion: "v1", exactCodeEvidence: true,
+      identifiers: [{ ...identifier, source: "fixture", evidenceAuthority: "verified_exact_code_corpus", evidenceId: "candidate:TIRE-1" }],
+      brand: "Bridgestone", title: "Bridgestone Dueler 235/65R17", attributes: { size: "235/65R17" },
+      catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1",
+    };
+    const source = createReadOnlyCandidateSource({
+      snapshot: { catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", barcodeCandidates: new Map(), partNumberCandidates: new Map([[identifier.normalized, [contradicted]]]) },
+      lookupApprovedLinks: async () => [],
+    });
+    await expect(decideIdentityBatch(request.rows, source)).resolves.toMatchObject([
+      { kind: "abstain" },
+      { kind: "non_product" },
+    ]);
   });
   it("renders the local-demo unavailable state without any request", () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");

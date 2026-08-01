@@ -19,6 +19,13 @@ type LocalPreviewRequest = {
   importerVersion: string;
 };
 
+const SAFE_RECORD_TYPES = new Set(["product", "labor", "service", "fee", "subtotal", "header"]);
+
+function safeRecordType(value: string): IdentityInput["recordType"] {
+  const normalized = value.trim().toLowerCase();
+  return SAFE_RECORD_TYPES.has(normalized) ? normalized as IdentityInput["recordType"] : undefined;
+}
+
 /** Browser-only shaping: every physical source row becomes one engine input in stable source order. */
 export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: { file: Pick<UploadFileLike, "name" | "size">; sheets: UniversalSheet[]; businessId: string }): LocalPreviewRequest {
   const rows: IdentityInput[] = [];
@@ -42,6 +49,8 @@ export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: {
       const barcode = item?.barcode ?? value("barcode");
       const partNumber = item?.partNumber ?? value("partNumber");
       const brand = item?.brand ?? value("brand");
+      const category = item?.category ?? value("category");
+      const recordType = safeRecordType(item?.recordType ?? value("recordType"));
       const identifiers: ScopedIdentifier[] = [];
       if (barcode.trim()) identifiers.push({ type: "barcode", raw: barcode, normalized: barcode.trim(), namespace: "local-upload", source: "universal_import", evidenceAuthority: "vendor_import", evidenceId: `${sheetIndex}:${physicalRow}:barcode`, evidenceVersion: "v1" });
       if (partNumber.trim()) identifiers.push({ type: "manufacturer_part_number", raw: partNumber, normalized: partNumber.trim().toUpperCase(), namespace: brand.trim().toLowerCase() || "local-upload", source: "universal_import", evidenceAuthority: "vendor_import", evidenceId: `${sheetIndex}:${physicalRow}:part_number`, evidenceVersion: "v1" });
@@ -52,7 +61,8 @@ export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: {
         vendorId: "local-upload", sourceFileFingerprint: fileFingerprint, sourceFileOrdinal: sheet.sheetOrdinal ?? sheetIndex + 1,
         sheetName: sheet.importedSheetName ?? sheet.fileName, sourceRowNumber: physicalRow, identifiers,
         brand: brand || undefined, title: item?.name || value("name") || `Source row ${physicalRow}`,
-        attributes: { model: item?.model ?? value("model"), size: item?.size ?? value("size"), category: item?.category ?? value("category"), sourceUnitOfMeasure: item?.uom || value("uom"), adapterStatus: classified?.status ?? "invalid" },
+        categoryHint: category || undefined, recordType,
+        attributes: { model: item?.model ?? value("model"), size: item?.size ?? value("size"), category, sourceUnitOfMeasure: item?.uom || value("uom"), adapterStatus: classified?.status ?? "invalid" },
         quantity: Number.isSafeInteger(parsedQuantity) && parsedQuantity >= 0 ? parsedQuantity : 0,
         unitOfMeasure: "each",
         rawRecordFingerprint: `${fileFingerprint}:${sheet.sheetOrdinal ?? sheetIndex + 1}:${sheet.importedSheetName ?? sheet.fileName}:${physicalRow}`,

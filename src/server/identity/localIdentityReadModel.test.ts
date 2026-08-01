@@ -90,4 +90,24 @@ describe("configured local identity read model", () => {
     expect(repository.currentIdentityLinksFingerprint).toHaveBeenCalledWith("shop-a");
     expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
   });
+
+  it("loads tenant products and current links once for concurrent preview lookups", async () => {
+    const wire = { catalogVersion: "catalog-v1", catalogSnapshotHash: "", barcodeCandidates: [["012345678905", [candidate]]], partNumberCandidates: [], approvedLinks: [] };
+    wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
+    const repository = {
+      listCurrentIdentityLinks: vi.fn().mockResolvedValue([]),
+      listTenantProducts: vi.fn().mockResolvedValue([]),
+    };
+    const model = await loadAuthoritativeLocalIdentityReadModel(repository as never);
+    const lookup = (sourceRow: string) => model!.lookupApprovedLinks({
+      businessId: "shop-a", sourceSystem: "csv", sourceSignature: "v1", vendorId: "vendor-a",
+      identifiers: [{ type: "upc", raw: sourceRow, normalized: sourceRow, source: "csv", evidenceAuthority: "vendor_import", evidenceId: sourceRow, evidenceVersion: "v1" }],
+    });
+
+    await Promise.all([lookup("012345678905"), lookup("036000291452"), lookup("012345678905")]);
+
+    expect(repository.listCurrentIdentityLinks).toHaveBeenCalledTimes(1);
+    expect(repository.listTenantProducts).toHaveBeenCalledTimes(1);
+  });
 });

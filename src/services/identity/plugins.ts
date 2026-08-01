@@ -66,3 +66,8 @@ export function pluginFor(input: IdentityInput): IdentityCategoryPlugin {
     ? tireIdentityPlugin
     : genericIdentityPlugin;
 }
+
+/** Complete, deterministic registry bound into every signed preview/apply manifest. */
+export const identityPluginVersions = Object.freeze(
+  [genericIdentityPlugin.version, tireIdentityPlugin.version].sort(),
+);

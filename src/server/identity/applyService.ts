@@ -123,7 +123,22 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
     // an actionable review for it would advertise work that is no longer actionable.
     if (item.correction || item.decision.kind === "automatic" || item.decision.kind === "non_product") continue;
     const reviewId = `identity-review:${await canonicalSha256({ businessId: run.businessId, importId: run.importId, rowId: item.rowId })}`;
-    const review: IdentityReview = { reviewId, businessId: run.businessId, importId: run.importId, rowId: item.rowId, decision: item.decision, scope: { sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId } };
+    const review: IdentityReview = {
+      reviewId, businessId: run.businessId, importId: run.importId, rowId: item.rowId,
+      decision: item.decision,
+      scope: { sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId },
+      signedRowContext: {
+        mode: input.mode,
+        quantity: item.row.quantity as number,
+        unitOfMeasure: "each",
+        sourceFileOrdinal: item.row.sourceFileOrdinal as number,
+        sheetName: item.row.sheetName as string,
+        sourceRowNumber: item.row.sourceRowNumber as number,
+        sessionId: `identity-import:${run.importId}`,
+        eventCreatedAt: run.createdAt,
+        identifiers: Array.isArray(item.row.identifiers) ? item.row.identifiers as ScopedIdentifier[] : [],
+      },
+    };
     await dependencies.repository.saveIdentityReview(review);
   }
   const events = new Map<string, Awaited<ReturnType<typeof createAggregateImportEvent>>>();

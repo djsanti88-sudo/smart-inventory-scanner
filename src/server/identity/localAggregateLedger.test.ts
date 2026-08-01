@@ -6,6 +6,8 @@ import { createAggregateImportEvent } from "@/services/identity/importLedger";
 import { createFileAtomicLocalStorage, createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import type { AtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalAggregateLedger } from "./localAggregateLedger";
+import { readLocalInventoryProjection } from "./localInventoryProjection";
+import { replayInventoryEvents } from "@/services/inventory.replay";
 
 const storageBase = path.resolve(process.cwd(), ".tmp", "identity-import");
 const ownedRoots: string[] = [];
@@ -125,5 +127,18 @@ describe("local aggregate ledger", () => {
     const shopB = await event({ businessId: "shop-b" });
     await expect(ledger.applyOnce(shopA, shopA.idempotencyKey)).resolves.toEqual({ event: shopA, idempotencyKey: shopA.idempotencyKey });
     await expect(ledger.applyOnce(shopB, shopB.idempotencyKey)).resolves.toEqual({ event: shopB, idempotencyKey: shopB.idempotencyKey });
+  });
+
+  it("projects each aggregate event into the replay-equivalent inventory count exactly once", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    const ledger = createLocalAggregateLedger(storage);
+    const aggregate = await event({ quantity: 7 });
+
+    await ledger.applyOnce(aggregate, aggregate.idempotencyKey);
+    await ledger.applyOnce(aggregate, aggregate.idempotencyKey);
+
+    expect(await readLocalInventoryProjection(storage, aggregate.businessId, aggregate.sessionId)).toEqual(
+      replayInventoryEvents([aggregate], aggregate.sessionId),
+    );
   });
 });

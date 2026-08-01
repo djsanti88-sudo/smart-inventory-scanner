@@ -1,30 +1,38 @@
 import fixture from "./fixtures/frozen-5000.v1.json";
-import { describe, expect, it } from "vitest";
+import baseline from "./reports/import-perf-baseline.v1.json";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHmacPreviewSigner, createIdentityPreview, verifySignedPreviewChunks } from "@/services/identity/preview";
 import { decideIdentity } from "@/services/identity/engine";
-import { genericIdentityPlugin } from "@/services/identity/plugins";
-import type { IdentityCandidate, IdentityCandidateSource, IdentityInput } from "@/services/identity/types";
+import { identityPluginVersions, pluginFor } from "@/services/identity/plugins";
+import type { IdentityCandidate, IdentityInput } from "@/services/identity/types";
+import { canonicalSha256 } from "@/services/identity/canonical";
+import { createReadOnlyCandidateSource } from "@/server/identity/readOnlyCandidateSource";
+import type { LocalIdentitySnapshot } from "@/server/identity/localSnapshotIndex";
 
 const now = "2026-07-31T00:00:00.000Z";
-const versions = { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "frozen-local-v1", catalogSnapshotHash: "frozen-local-hash-v1", linkVersion: "frozen-links-v1", linkSnapshotHash: "frozen-links-hash-v1" };
-const rows = Array.from({ length: fixture.rowCount }, (_, index): IdentityInput => ({
-  businessId: "local-perf-shop", sourceSystem: "synthetic", sourceSignature: fixture.seed, vendorId: "synthetic-vendor",
-  sourceFileFingerprint: fixture.sourceHash, sourceFileOrdinal: 1, sheetName: "Frozen", sourceRowNumber: index + 2,
-  ...(index % 5 === 3 ? { recordType: "service" as const } : {}),
-  identifiers: [{ type: "barcode", raw: `SYN-${index}`, normalized: index % 5 === 4 ? "" : `SYN-${index}`, namespace: "synthetic-vendor", source: "fixture", evidenceAuthority: "vendor_import", evidenceId: `fixture-${index}`, evidenceVersion: "v1" }],
-  attributes: {}, quantity: (index % 5) + 1, unitOfMeasure: "each", rawRecordFingerprint: `frozen-${index}`,
-}));
-
-const source: IdentityCandidateSource = { readonlyOnly: true, async lookupBatch(inputs) {
-  const candidate = (input: IdentityInput, automatic: boolean): IdentityCandidate => ({ productId: `product-${input.sourceRowNumber}`, category: "tire", businessScope: "master", verificationTier: automatic ? "exact_code_verified" : "suggested", automaticEligible: automatic, evidenceId: `candidate-${input.sourceRowNumber}`, evidenceVersion: "v1", exactCodeEvidence: automatic, identifiers: input.identifiers.map((identifier) => ({ ...identifier, evidenceAuthority: automatic ? "verified_exact_code_corpus" : "unverified_master" })), attributes: {}, catalogVersion: versions.catalogVersion, catalogSnapshotHash: versions.catalogSnapshotHash });
-  return { catalogVersion: versions.catalogVersion, catalogSnapshotHash: versions.catalogSnapshotHash, candidatesByRecord: new Map(inputs.map((input) => [input.rawRecordFingerprint, (input.sourceRowNumber - 2) % 5 === 0 ? [candidate(input, true)] : (input.sourceRowNumber - 2) % 5 === 1 ? [candidate(input, false)] : []])) };
-} };
+const rows = fixture.rows as IdentityInput[];
+const snapshot: LocalIdentitySnapshot = {
+  catalogVersion: fixture.snapshot.catalogVersion,
+  catalogSnapshotHash: fixture.snapshot.catalogSnapshotHash,
+  barcodeCandidates: new Map(fixture.snapshot.barcodeCandidates as unknown as Array<[string, IdentityCandidate[]]>),
+  partNumberCandidates: new Map(fixture.snapshot.partNumberCandidates as unknown as Array<[string, IdentityCandidate[]]>),
+};
+const versions = { engineVersion: "identity-engine-v1", pluginVersions: [...identityPluginVersions], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion: "frozen-links-v1", linkSnapshotHash: "frozen-links-hash-v1" };
+const approvedLinkReads = vi.fn(async () => []);
+const source = createReadOnlyCandidateSource({ snapshot, lookupApprovedLinks: approvedLinkReads });
 
 function nearestRankP95(values: number[]): number { return [...values].sort((left, right) => left - right)[Math.ceil(values.length * 0.95) - 1]!; }
 
 describe("frozen local 5,000-row identity preview", () => {
+  beforeEach(() => { vi.stubGlobal("fetch", vi.fn(() => { throw new Error("benchmark_external_fetch_forbidden"); })); });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
   it("uses one batch retrieval, sequential decisions, real signed chunks, and exact accounting within local gates", async () => {
     expect(fixture).toMatchObject({ fixtureVersion: "identity-frozen-5000-v1", syntheticOnly: true, rowCount: 5_000, expectedQuantity: 15_000 });
+    expect(fixture.rows).toHaveLength(5_000);
+    expect(fixture.snapshot).toMatchObject({ catalogVersion: versions.catalogVersion, catalogSnapshotHash: baseline.snapshotHash });
+    expect(fixture.snapshot.barcodeCandidates).toHaveLength(2_000);
+    expect(await canonicalSha256({ rows: fixture.rows, snapshot: fixture.snapshot })).toBe(fixture.contentSha256);
     const signer = await createHmacPreviewSigner("frozen-perf-key");
     // Cold diagnostic is deliberately excluded from gates. Then warm crypto/parser/engine/signer.
     const coldStart = performance.now();
@@ -45,7 +53,7 @@ describe("frozen local 5,000-row identity preview", () => {
     const decisions = [];
     for (const row of rows) {
       const started = performance.now();
-      decisions.push(await decideIdentity(row, { catalogVersion: lookup.catalogVersion, catalogSnapshotHash: lookup.catalogSnapshotHash, candidates: lookup.candidatesByRecord.get(row.rawRecordFingerprint) ?? [] }, genericIdentityPlugin));
+      decisions.push(await decideIdentity(row, { catalogVersion: lookup.catalogVersion, catalogSnapshotHash: lookup.catalogSnapshotHash, candidates: lookup.candidatesByRecord.get(row.rawRecordFingerprint) ?? [] }, pluginFor(row)));
       decisionDurations.push(performance.now() - started);
     }
     const verified = await verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z");

@@ -29,6 +29,7 @@ function harness() {
       return { kind: "claimed", operation: input, leaseId: "lease-1" };
     }),
     completeImportOperation: vi.fn(async (operation, _lease, result) => { operations.set((operation as { rowId: string }).rowId, result); return { ...operation, state: "applied", result }; }),
+    saveIdentityReview: vi.fn(async (review) => review),
   };
   const ledger = { applyOnce: vi.fn(async (event) => { applied.push(event); return { event, idempotencyKey: (event as { idempotencyKey: string }).idempotencyKey }; }), findByIdempotencyKey: vi.fn(async () => null) };
   const verifier = vi.fn(async () => [chunk()]);
@@ -104,6 +105,25 @@ describe("applyIdentityImport", () => {
     h.verifier.mockResolvedValueOnce([{ ...chunk(), decisions: [{ ...review, kind: "review" }] }]);
     await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, dependencies);
     expect(h.ledger.applyOnce).not.toHaveBeenCalled();
+  });
+
+  it("persists the verified signed row quantity and later-count context with a physical-count review", async () => {
+    const h = harness();
+    const unresolved = { ...chunk().decisions[0]!, kind: "review" as const, targetProductId: undefined };
+    h.verifier.mockResolvedValueOnce([{ ...chunk(), decisions: [unresolved] }]);
+
+    await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, {
+      ...h, source: freshSource, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const },
+    });
+
+    expect(h.repository.saveIdentityReview).toHaveBeenCalledWith(expect.objectContaining({
+      rowId: "row-1",
+      signedRowContext: {
+        mode: "physical_count", quantity: 7, unitOfMeasure: "each", sourceFileOrdinal: 0,
+        sheetName: "Stock", sourceRowNumber: 2, sessionId: "identity-import:import-1",
+        eventCreatedAt: "2026-07-31T00:01:00.000Z", identifiers: [],
+      },
+    }));
   });
 
   it("rejects a correction that targets another tenant before claiming anything", async () => {

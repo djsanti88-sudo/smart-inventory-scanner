@@ -61,6 +61,7 @@ const FIELD_LABELS: Record<(typeof IMPORT_FIELD_ORDER)[number], string> = {
   barcode: "Barcode",
   name: "Name",
   category: "Category",
+  recordType: "Record type",
 };
 
 export function UniversalImportPanel({

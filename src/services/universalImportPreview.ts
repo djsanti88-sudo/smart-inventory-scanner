@@ -82,6 +82,7 @@ export function mapUniversalRows(sheet: UniversalSheet, mapping: ColumnMapping):
       model: cell(sourceCells, mapping, "model"),
       size: cell(sourceCells, mapping, "size"),
       category: cell(sourceCells, mapping, "category"),
+      recordType: cell(sourceCells, mapping, "recordType"),
       quantity,
       uom: cell(sourceCells, mapping, "uom"),
     };

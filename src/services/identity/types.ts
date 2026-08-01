@@ -78,6 +78,7 @@ export interface IdentityDecision {
     productId: string;
     rank: number;
     score?: number;
+    identifierFamily?: { type: IdentifierType; namespace?: string; value: string };
     evidence: string[];
     missingFields: string[];
     contradictions: string[];
@@ -225,6 +226,18 @@ export interface IdentityReview {
   rowId: string;
   decision: IdentityDecision;
   scope?: Pick<IdentityInput, "sourceSystem" | "vendorId" | "sourceSignature">;
+  /** Server-bound physical row facts required to count a later manager approval exactly once. */
+  signedRowContext?: {
+    mode: "physical_count" | "reconcile";
+    quantity: number;
+    unitOfMeasure: "each";
+    sourceFileOrdinal: number;
+    sheetName: string;
+    sourceRowNumber: number;
+    sessionId: string;
+    eventCreatedAt: string;
+    identifiers: ScopedIdentifier[];
+  };
   resolution?: "confirmed" | "rejected" | "create_product";
   resolvedBy?: string;
   resolvedAt?: string;

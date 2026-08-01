@@ -11,6 +11,8 @@ import { createLocalAggregateLedger } from "./localAggregateLedger";
 import { createLocalAtomicCountedApply } from "./localAtomicCountedApply";
 import { createLocalRepository } from "./localRepository";
 import { applyIdentityImport } from "./applyService";
+import { readLocalInventoryProjection } from "./localInventoryProjection";
+import { replayInventoryEvents } from "@/services/inventory.replay";
 
 const versions = {
   engineVersion: "identity-engine-v1",
@@ -103,6 +105,17 @@ function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void> {
 }
 
 describe("identity apply concurrency guards", () => {
+  it("atomically publishes a replay-equivalent inventory projection with the counted row", async () => {
+    const current = dependencies(async () => true);
+    await applyIdentityImport({ signedPayloads: ["signed"], mode: "physical_count", corrections: [] }, current);
+    const entries = await current.storage.read!((transaction) => transaction.get<Record<string, { event: import("@/services/identity/types").AggregateImportEvent }>>("aggregate-ledger"));
+    const events = Object.values(entries ?? {}).map(({ event }) => event);
+
+    expect(await readLocalInventoryProjection(current.storage, "shop-a", "identity-import:import-1")).toEqual(
+      replayInventoryEvents(events, "identity-import:import-1"),
+    );
+  });
+
   it("revalidates a corrected reconcile target before it enters expected inventory and never counts", async () => {
     const revalidate = vi.fn(async () => false);
     const current = dependencies(revalidate);
@@ -160,7 +173,7 @@ describe("identity apply concurrency guards", () => {
       const { createLocalAtomicCountedApply } = await import(pathToFileURL(applyModule).href);
       process.stdout.write("READY\\n");
       while (true) { try { await access(barrier); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); } }
-      const apply = createLocalAtomicCountedApply(createFileAtomicLocalStorage({ root }), async () => true);
+      const apply = createLocalAtomicCountedApply(createFileAtomicLocalStorage({ root }), async () => true, { writeProjection: async () => {} });
       const result = await apply({
         validation: { businessId: "shop-a", targetProductId: "product-1" },
         operation: { businessId: "shop-a", importId: "import-1", rowId: "row-1", idempotencyKey: "identity-apply:row-1", payloadFingerprint: "payload-1" },
@@ -181,7 +194,7 @@ describe("identity apply concurrency guards", () => {
     expect(Object.values(state.operations ?? {})).toEqual([expect.objectContaining({ state: "applied" })]);
     await expect(access(path.join(root, "identity-local-storage.lock"))).rejects.toMatchObject({ code: "ENOENT" });
 
-    const retry = createLocalAtomicCountedApply(storage, async () => true);
+    const retry = createLocalAtomicCountedApply(storage, async () => true, { writeProjection: async () => {} });
     const preview = chunk(), row = preview.rows[0]!, decision = preview.decisions[0]!;
     await expect(retry({
       validation: { businessId: "shop-a", sourceSystem: preview.scope.sourceSystem, sourceSignature: preview.scope.sourceSignature, vendorId: preview.scope.vendorId, targetProductId: "product-1", identifiers: (row.identifiers ?? []) as ScopedIdentifier[], row: row as Record<string, unknown>, decision, corrected: false },
