@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createIdentityReviewRoute } from "./route";
+import { createIdentityReviewRoute } from "@/server/identity/reviewRoute";
 
 const review = {
   reviewId: "review-1", businessId: "shop-a", importId: "import-1", rowId: "row-1",

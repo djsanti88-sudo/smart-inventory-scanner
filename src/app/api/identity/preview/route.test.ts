@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentityPreviewRoute, POST } from "./route";
+import { createIdentityPreviewRoute, defaultIdentityPreviewRoute as POST } from "@/server/identity/previewRoute";
 import { setLocalIdentityPreviewCompositionForTest } from "@/server/identity/previewComposition";
 import { deriveConfiguredSnapshotHashes } from "@/server/identity/localIdentityReadModel";
 import { buildLocalIdentityPreviewRequest } from "@/components/UniversalImportPanelContainer";

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createIdentityApplyRoute } from "./route";
+import { createIdentityApplyRoute } from "@/server/identity/applyRoute";
 
 describe("POST /api/identity/apply", () => {
   it("rejects caller-supplied authority and allows only server-authenticated owners or admins", async () => {

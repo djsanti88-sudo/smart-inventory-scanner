@@ -13,7 +13,7 @@ import { buildLocalIdentityPreviewRequest, sha256UploadFile, UniversalImportPane
 import { useScanStore } from "@/stores/scanStore";
 import type { ColumnMapping, UniversalSheet } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
-import { createIdentityPreviewRoute } from "@/app/api/identity/preview/route";
+import { createIdentityPreviewRoute } from "@/server/identity/previewRoute";
 import fixture from "@/eval/identity/fixtures/frozen-5000.v1.json";
 
 const getSession = vi.fn();
