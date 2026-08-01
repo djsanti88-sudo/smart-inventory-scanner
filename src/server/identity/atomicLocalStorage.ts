@@ -41,6 +41,7 @@ export type FileStorageHooks = {
   syncDirectory?: (directory: string) => Promise<void>;
   observeRead?: (observation: FileReadObservation) => void;
   afterGenerationFileWrite?: (filePath: string) => Promise<void>;
+  beforeReaderPinPublish?: (filePath: string) => Promise<void>;
 };
 
 const rootMutexes = new Map<string, Promise<void>>();
@@ -100,9 +101,9 @@ async function recheckPhysicalRoot(root: string): Promise<string> {
 }
 
 /**
- * A preview is a read model, not a storage initializer.  Check an existing root
- * without creating it; writers recheck and materialize the root only after the
- * callback has actually staged a mutation.
+ * A preview is a read model, not a storage initializer. Check an existing root
+ * without creating it; transaction callers are writers and materialize the root
+ * before their callback runs once under the process lock.
  */
 async function existingPhysicalRoot(root: string): Promise<string | undefined> {
   try { await lstat(root); }
@@ -282,11 +283,21 @@ function parseReaderPin(body: string | undefined): ReaderPinOwner | undefined {
       : undefined;
   } catch { return undefined; }
 }
-async function createReaderPin(root: string, generation: string): Promise<{ filePath: string; body: string }> {
+async function createReaderPin(root: string, generation: string, io: FileStorageHooks): Promise<{ filePath: string; body: string }> {
   const owner: ReaderPinOwner = { token: randomUUID(), pid: process.pid, generation };
-  const filePath = path.join(root, readerPinFileName(generation, owner.token)), body = JSON.stringify(owner);
-  await syncFile(filePath, body);
-  return { filePath, body };
+  const filePath = path.join(root, readerPinFileName(generation, owner.token));
+  const tempPath = path.join(root, `identity-local-storage.reader-pin.${process.pid}.${owner.token}.tmp`);
+  const body = JSON.stringify(owner);
+  try {
+    await syncFile(tempPath, body);
+    await io.beforeReaderPinPublish?.(tempPath);
+    await rename(tempPath, filePath);
+    await (io.syncDirectory ?? syncDirectory)(root);
+    return { filePath, body };
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 async function releaseReaderPin(pin: { filePath: string; body: string }, io: FileStorageHooks): Promise<void> {
   const current = await readText(pin.filePath, io, { optional: true, maxBytes: 1_024, observe: false }).catch(() => undefined);
@@ -668,7 +679,7 @@ export function createFileAtomicLocalStorage({ root, io = {} }: { root: string; 
           if (transaction.changed) throw new Error("identity_storage_read_only");
           return result;
         }
-        const pin = await createReaderPin(existingRoot, manifest.generation);
+        const pin = await createReaderPin(existingRoot, manifest.generation, io);
         try {
           const confirmedBody = await readText(statePath, io, { maxBytes: maxIndexFileBytes, observe: false });
           const confirmed = parseManifest(confirmedBody!);
@@ -682,26 +693,7 @@ export function createFileAtomicLocalStorage({ root, io = {} }: { root: string; 
       throw new Error("identity_storage_reader_retry_exhausted");
     },
     async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> {
-    const existingRoot = await existingPhysicalRoot(safeRoot);
-    // Do not create a directory merely to serve an empty preview from a root
-    // that has never received a durable write.
-    if (!existingRoot) {
-      const probe = new FileTransaction(safeRoot, undefined, io), probeResult = await fn(probe);
-      if (!probe.changed) return probeResult;
-      const canonicalRoot = await recheckPhysicalRoot(safeRoot);
-      return withMutex(canonicalRoot, () => withFileLock(canonicalRoot, async () => {
-        const statePath = path.join(canonicalRoot, "identity-local-storage.json");
-        const manifest = await loadOrMigrateManifest(canonicalRoot, statePath, io);
-        const latest = new FileTransaction(canonicalRoot, manifest, io);
-        // The root may have been initialized by another process after the
-        // write probe. Re-evaluate against the locked latest snapshot instead
-        // of replaying a whole stale top-level value over that committed work.
-        const result = await fn(latest);
-        if (latest.changed) await commitGeneration(canonicalRoot, statePath, await latest.snapshot(), io, manifest?.generation);
-        return result;
-      }));
-    }
-    const canonicalRoot = existingRoot;
+    const canonicalRoot = await recheckPhysicalRoot(safeRoot);
     return withMutex(canonicalRoot, () => withFileLock(canonicalRoot, async () => {
       const statePath = path.join(canonicalRoot, "identity-local-storage.json");
       await recheckPhysicalRoot(canonicalRoot);

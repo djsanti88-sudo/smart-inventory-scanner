@@ -50,7 +50,7 @@ describe("createFileAtomicLocalStorage", () => {
     const root = testRoot();
     const storage = createFileAtomicLocalStorage({ root });
 
-    await expect(storage.transaction((transaction) => transaction.scanPage!("identity-links", {
+    await expect(storage.read!((transaction) => transaction.scanPage!("identity-links", {
       offset: 0,
       limit: 25,
       filter: () => true,
@@ -60,6 +60,20 @@ describe("createFileAtomicLocalStorage", () => {
     }))).resolves.toMatchObject({ items: [], total: 0 });
 
     await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("invokes an absent-root mutation callback and its external validation side effect exactly once", async () => {
+    const root = testRoot();
+    let callbacks = 0, validations = 0;
+
+    await createFileAtomicLocalStorage({ root }).transaction(async (transaction) => {
+      callbacks += 1;
+      validations += await Promise.resolve(1);
+      await transaction.set("record", { value: "committed" });
+    });
+
+    expect({ callbacks, validations }).toEqual({ callbacks: 1, validations: 1 });
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "committed" });
   });
 
   it("performs an initialized-root preview read without creating a lock or cache file", async () => {
@@ -113,7 +127,7 @@ describe("createFileAtomicLocalStorage", () => {
     expect(names).not.toContain("identity-local-storage.lock");
   });
 
-  it("re-evaluates two first writers against the locked latest snapshot so distinct updates to one key survive", async () => {
+  it("serializes two absent-root writers against the locked latest snapshot with one callback each", async () => {
     const root = testRoot(), barrier = path.join(storageBase, `first-writers-${randomUUID()}.start`);
     ownedRoots.push(barrier);
     const modulePath = path.resolve(process.cwd(), "src/server/identity/atomicLocalStorage.ts");
@@ -122,17 +136,16 @@ describe("createFileAtomicLocalStorage", () => {
       import { pathToFileURL } from "node:url";
       const [modulePath, root, barrier, itemKey] = process.argv.slice(1);
       const { createFileAtomicLocalStorage } = await import(pathToFileURL(modulePath).href);
-      let attempts = 0;
+      process.stdout.write("READY\\n");
+      while (true) { try { await access(barrier); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); } }
+      let callbacks = 0;
       await createFileAtomicLocalStorage({ root }).transaction(async (transaction) => {
-        attempts += 1;
+        callbacks += 1;
         const current = (await transaction.get("shared-first-write")) ?? {};
-        if (attempts === 1) {
-          process.stdout.write("READY\\n");
-          while (true) { try { await access(barrier); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); } }
-        }
         current[itemKey] = itemKey;
         await transaction.set("shared-first-write", current);
       });
+      if (callbacks !== 1) throw new Error("callback_count:" + callbacks);
     `;
     const children = ["first", "second"].map((itemKey) => spawn(process.execPath, ["--experimental-transform-types", "--input-type=module", "-e", childProgram, modulePath, root, barrier, itemKey], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }));
     const exits = children.map(waitForChildExit);
@@ -537,6 +550,43 @@ describe("createFileAtomicLocalStorage", () => {
     await exit;
 
     expect(JSON.parse(await readFile(resultPath, "utf8"))).toEqual({ value: { value: "before" } });
+  });
+
+  it("publishes a reader pin from a synced non-matching temp while cleanup advances generations", async () => {
+    const root = testRoot(), release = path.join(root, "pin-publish.release"), resultPath = path.join(root, "pin-publish.result.json");
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "before" }));
+    const modulePath = path.resolve(process.cwd(), "src/server/identity/atomicLocalStorage.ts");
+    const childProgram = `
+      import { access, writeFile } from "node:fs/promises";
+      import { pathToFileURL } from "node:url";
+      const [modulePath, root, release, resultPath] = process.argv.slice(1);
+      const { createFileAtomicLocalStorage } = await import(pathToFileURL(modulePath).href);
+      let paused = false, result;
+      const storage = createFileAtomicLocalStorage({ root, io: { beforeReaderPinPublish: async (filePath) => {
+        if (paused) return;
+        paused = true;
+        process.stdout.write("PIN_TEMP_SYNCED:" + filePath + "\\n");
+        while (true) { try { await access(release); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); } }
+      } } });
+      try { result = { value: await storage.read((transaction) => transaction.get("record")) }; }
+      catch (error) { result = { error: error instanceof Error ? error.message : String(error) }; }
+      await writeFile(resultPath, JSON.stringify(result), "utf8");
+    `;
+    const child = spawn(process.execPath, ["--experimental-transform-types", "--input-type=module", "-e", childProgram, modulePath, root, release, resultPath], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
+    const exit = waitForChildExit(child);
+    await waitForChildLine(child, "PIN_TEMP_SYNCED:");
+    const duringPublication = await readdir(root);
+    expect(duringPublication.some((name) => name.includes("reader-pin") && name.endsWith(".tmp"))).toBe(true);
+    expect(duringPublication.some((name) => name.endsWith(".pin"))).toBe(false);
+
+    for (const value of ["after-1", "after-2", "after-3"]) {
+      await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value }));
+    }
+    await writeFile(release, "continue", "utf8");
+    await exit;
+
+    expect(JSON.parse(await readFile(resultPath, "utf8"))).toEqual({ value: { value: "after-3" } });
+    expect((await readdir(root)).filter((name) => name.includes("reader") && (name.endsWith(".pin") || name.endsWith(".tmp")))).toEqual([]);
   });
 
   it("removes an abandoned dead-process reader pin during locked generation cleanup", async () => {

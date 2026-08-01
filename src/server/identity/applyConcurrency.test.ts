@@ -191,4 +191,22 @@ describe("identity apply concurrency guards", () => {
       result: { row: { rowId: "row-1", status: "counted", eventId: "event-1", audit: { action: "counted" } } },
     })).resolves.toMatchObject({ kind: "completed" });
   });
+
+  it("runs localAtomicCountedApply validation exactly once for one file transaction", async () => {
+    const root = path.join(storageBase, `apply-validation-${randomUUID()}`); ownedRoots.push(root);
+    const storage = createFileAtomicLocalStorage({ root });
+    await storage.transaction((transaction) => transaction.set("identity-runs", [{ businessId: "shop-a", importId: "import-1", state: "applying" }]));
+    const revalidate = vi.fn(async () => true);
+    const apply = createLocalAtomicCountedApply(storage, revalidate);
+    const preview = chunk(), row = preview.rows[0]!, decision = preview.decisions[0]!;
+
+    await expect(apply({
+      validation: { businessId: "shop-a", sourceSystem: preview.scope.sourceSystem, sourceSignature: preview.scope.sourceSignature, vendorId: preview.scope.vendorId, targetProductId: "product-1", identifiers: (row.identifiers ?? []) as ScopedIdentifier[], row: row as Record<string, unknown>, decision, corrected: false },
+      operation: { businessId: "shop-a", importId: "import-1", rowId: "row-1", idempotencyKey: "identity-apply:row-1", payloadFingerprint: "payload-1" },
+      event: { kind: "aggregate_import", businessId: "shop-a", importId: "import-1", rowId: "row-1", idempotencyKey: "identity-aggregate:import-1:row-1", fingerprint: "event-fingerprint", eventId: "event-1", productId: "product-1", sessionId: "identity-import:import-1", quantity: 7, unitOfMeasure: "each", sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, createdAt: "2026-07-31T00:01:00.000Z" },
+      operationFingerprint: "operation-1",
+      result: { row: { rowId: "row-1", status: "counted", eventId: "event-1", audit: { action: "counted" } } },
+    })).resolves.toMatchObject({ kind: "applied" });
+    expect(revalidate).toHaveBeenCalledTimes(1);
+  });
 });
