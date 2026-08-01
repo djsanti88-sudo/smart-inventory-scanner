@@ -3,6 +3,13 @@
   "syntheticOnly": true,
   "rowCount": 5000,
   "seed": "scanbin-local-identity-5000",
-  "expectedQuantity": 5000,
-  "sourceHash": "deterministic-generator-v1"
+  "expectedQuantity": 15000,
+  "sourceHash": "deterministic-generator-v1",
+  "buckets": [
+    { "kind": "automatic", "rows": 1000, "quantity": 1000 },
+    { "kind": "review", "rows": 1000, "quantity": 2000 },
+    { "kind": "abstain", "rows": 1000, "quantity": 3000 },
+    { "kind": "non_product", "rows": 1000, "quantity": 4000 },
+    { "kind": "invalid", "rows": 1000, "quantity": 5000 }
+  ]
 }

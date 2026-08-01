@@ -25,3 +25,11 @@
 - Measured cold diagnostic was 3.4064 ms. Three warm runs were 398.6923, 397.5722, and 466.7902 ms; median 398.6923 ms. Sequential decision p95 was 0.0475 ms. Actual signed output: 12 chunks, maximum 479,234 bytes, aggregate 5,635,054 bytes.
 - The offline benchmark supports `--import-performance --compare-baseline --format=json|markdown` and reports an environment mismatch rather than treating this machine baseline as portable proof.
 - DOM proof uploads through the real container/shaper into an injected preview route: service receives all 5,000 rows in source order, each of five buckets totals 1,000, and the aggregate-only UI renders only 25 review controls. Oversized or malformed chunk sets keep Apply unavailable.
+
+## Fix round 2
+
+- The benchmark CLI now executes the shared harness for every `--import-performance` invocation. It performs one cold diagnostic, one warmup, three measured warm runs, and one real batch retrieval followed by sequential decisions. It exits nonzero if the absolute 10,000 ms / 2 ms gates fail or if a comparable-machine median exceeds 110% of baseline.
+- Current comparison run: cold 3.6955 ms; warm 449.4470, 448.6229, and 461.5591 ms; median 449.4470 ms versus baseline limit 645.1210 ms; decision p95 0.0598 ms. Signed output had 13 chunks, maximum 478,340 bytes, aggregate 5,970,125 bytes.
+- Runtime fixture SHA-256 verification binds `96ead7180f18147d23ac007f9ed2b247bd5bbe260d3f166fc04980be5b1298c3`. The shared fixture contract requires 5,000 rows, total quantity 15,000, and bucket vectors: automatic 1,000/1,000; review 1,000/2,000; abstain 1,000/3,000; non-product 1,000/4,000; invalid 1,000/5,000. Performance proof sums quantities from verified signed row/decision pairs; DOM proof imports the same contract.
+- Stream enforcement proof sends 33 one-MiB chunks through a `ReadableStream` with no `Content-Length`; the route returns 413 and delegates zero times.
+- Exact build blocker: `npm.cmd run build` on Windows 10.0.26200, Node v24.15.0, Next 16.2.12. Turbopack rejected the linked-worktree symlink: `Symlink [project]/node_modules is invalid, it points out of the filesystem root`. This is distinct from the route-purity test's sandbox `EPERM` creating `.tmp/identity-import/...`.

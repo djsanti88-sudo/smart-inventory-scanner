@@ -39,6 +39,19 @@ describe("POST /api/identity/preview", () => {
     expect(declared.status).toBe(413);
     expect(createPreview).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects a no-length streamed body above 32 MiB without delegation", async () => {
+    const createPreview = vi.fn();
+    const handler = createIdentityPreviewRoute({ enabled: () => true, createPreview });
+    let emitted = 0;
+    const stream = new ReadableStream<Uint8Array>({ pull(controller) {
+      if (emitted++ < 33) controller.enqueue(new Uint8Array(1024 * 1024));
+      else controller.close();
+    } });
+    const response = await handler(new Request("http://localhost/api/identity/preview", { method: "POST", body: stream, duplex: "half" } as RequestInit & { duplex: "half" }));
+    expect(response.status).toBe(413);
+    expect(createPreview).not.toHaveBeenCalled();
+  });
   it("accepts held and adapter-invalid physical rows and returns one terminal decision for each", async () => {
     const requestBody = buildLocalIdentityPreviewRequest({
       businessId: "demo-shop", file: { name: "held.csv", size: 42 }, sheets: [{

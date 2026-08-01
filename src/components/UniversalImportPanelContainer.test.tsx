@@ -14,6 +14,7 @@ import { useScanStore } from "@/stores/scanStore";
 import type { ColumnMapping, UniversalSheet } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
 import { createIdentityPreviewRoute } from "@/app/api/identity/preview/route";
+import fixture from "@/eval/identity/fixtures/frozen-5000.v1.json";
 
 const getSession = vi.fn();
 const readUniversalWorkbook = vi.fn();
@@ -78,9 +79,9 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
   it("DOM upload shapes all 5,000 rows then delegates once through the injected preview route without rendering 5,000 rows", async () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
     vi.stubEnv("NEXT_PUBLIC_LOCAL_IDENTITY_ROLE", "owner");
-    const rows = Array.from({ length: 5_000 }, (_, index) => [`PN-${index}`, String((index % 5) + 1)]);
+    const rows = Array.from({ length: fixture.rowCount }, (_, index) => [`PN-${index}`, String((index % fixture.buckets.length) + 1)]);
     readUniversalWorkbook.mockResolvedValue([{ fileName: "fixture.csv", kind: "csv", headers: ["Part Number", "Quantity"], rows, headerRowIndex: 0, sourceSignature: "fixture", sourceRowNumbers: rows.map((_, index) => index + 2) }]);
-    const kinds = ["automatic", "review", "abstain", "non_product", "invalid"] as const;
+    const kinds = fixture.buckets.map((bucket) => bucket.kind) as Array<"automatic" | "review" | "abstain" | "non_product" | "invalid">;
     const tokens = Array.from({ length: 5 }, (_, chunkIndex) => JSON.stringify({ manifestVersion: "identity-preview-v1", chunkIndex, chunkCount: 5, sanitizedContentRootHash: "root", importId: "import", previewFingerprint: "preview", signature: `sig-${chunkIndex}`, rowIds: Array.from({ length: 1_000 }, (_, index) => `row-${chunkIndex}-${index}`), decisions: Array.from({ length: 1_000 }, (_, index) => ({ kind: kinds[(chunkIndex * 1_000 + index) % 5], candidates: [] })) }));
     const createPreview = vi.fn().mockResolvedValue({ preview: { decisions: Array.from({ length: 5_000 }, (_, index) => ({ kind: kinds[index % 5] })) }, signedPayloads: tokens });
     const handler = createIdentityPreviewRoute({ enabled: () => true, createPreview });
@@ -95,7 +96,7 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
     const input = createPreview.mock.calls[0]![0];
     expect(input.rows).toHaveLength(5_000);
     expect(input.rows.map((row: { sourceRowNumber: number }) => row.sourceRowNumber)).toEqual(rows.map((_, index) => index + 2));
-    expect(kinds.map((kind, offset) => input.rows.filter((row: { quantity: number }, index: number) => index % 5 === offset).reduce((total: number, row: { quantity: number }) => total + row.quantity, 0))).toEqual([1_000, 2_000, 3_000, 4_000, 5_000]);
+    expect(kinds.map((_kind, offset) => input.rows.filter((_row: { quantity: number }, index: number) => index % kinds.length === offset).reduce((total: number, row: { quantity: number }) => total + row.quantity, 0))).toEqual(fixture.buckets.map((bucket) => bucket.quantity));
     expect(panel).toHaveTextContent("automatic 1000, review 1000, abstain 1000, non_product 1000, invalid 1000");
     expect(panel.querySelectorAll("select")).toHaveLength(25);
   });
