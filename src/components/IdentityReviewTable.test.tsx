@@ -57,6 +57,21 @@ describe("IdentityReviewTable", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/confirmed/i));
   });
 
+  it("lets a manager select any ranked candidate and submits that exact selection with its evidence", async () => {
+    const ranked = { ...review, decision: { ...review.decision, candidates: [{ productId: "first", rank: 1, evidence: ["first evidence"], missingFields: [], contradictions: [] }, { productId: "second", rank: 2, evidence: ["second evidence"], missingFields: ["size"], contradictions: ["brand"] }] } };
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [ranked], total: 1, bucketTotals: { automatic: 0, review: 1, abstain: 0, non_product: 0, invalid: 0 } }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ review: { ...ranked, resolution: "confirmed" } }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], total: 0, bucketTotals: { automatic: 0, review: 0, abstain: 0, non_product: 0, invalid: 0 } }) });
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    const second = await screen.findByRole("radio", { name: /second/i });
+    fireEvent.click(second);
+    expect(screen.getByText("second evidence")).toBeTruthy();
+    expect(screen.getByText("Missing: size")).toBeTruthy();
+    expect(screen.getByText("Contradiction: brand")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /confirm second/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string)).toMatchObject({ action: "confirm_candidate", targetProductId: "second" });
+  });
+
   it("ignores a stale business response", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
     let resolveOld: (value: unknown) => void = () => undefined;
