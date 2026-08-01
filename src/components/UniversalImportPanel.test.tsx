@@ -35,6 +35,14 @@ const foreignSheet: UniversalSheet = {
   sourceSignature: "source-foreign",
 };
 
+function signedChunks(tokens = ["chunk-a", "chunk-b"]) {
+  return tokens.map((token, chunkIndex) => JSON.stringify({
+    manifestVersion: "identity-preview-v1", chunkIndex, chunkCount: tokens.length,
+    sanitizedContentRootHash: "root-a", importId: "import-a", previewFingerprint: "preview-a",
+    signature: token,
+  }));
+}
+
 function props() {
   return {
     readFile: vi.fn().mockResolvedValue(nonsenseSheet),
@@ -63,11 +71,11 @@ describe("UniversalImportPanel", () => {
       preview: { decisions: [
         { kind: "automatic" }, { kind: "review" }, { kind: "abstain" }, { kind: "non_product" }, { kind: "invalid" },
       ] },
-      signedPayloads: ["chunk-0", "chunk-1"],
+      signedPayloads: signedChunks(),
     });
     const localProps = {
       ...handlers,
-      localIdentity: { enabled: true, canApply: false, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet, secondSheet]), previewIdentity },
+      localIdentity: { enabled: true, role: "counter", mode: "physical_count" as const, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet, secondSheet]), previewIdentity },
     };
     render(<UniversalImportPanel {...localProps} />);
     fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
@@ -82,12 +90,13 @@ describe("UniversalImportPanel", () => {
 
   it("submits the complete ordered signed payload set for an authorized local identity apply", async () => {
     const handlers = props();
+    const chunks = signedChunks();
     const applyIdentity = vi.fn().mockResolvedValue({ applied: 2, queuedForReview: 1, rejected: 0 });
     const localProps = {
       ...handlers,
       localIdentity: {
-        enabled: true, canApply: true, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]),
-        previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "automatic" }, { kind: "review" }] }, signedPayloads: ["chunk-0", "chunk-1"] }),
+        enabled: true, role: "manager", mode: "physical_count" as const, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]),
+        previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "automatic" }, { kind: "review" }] }, signedPayloads: chunks }),
         applyIdentity,
       },
     };
@@ -95,8 +104,42 @@ describe("UniversalImportPanel", () => {
     fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
     await screen.findByTestId("identity-preview");
     fireEvent.click(screen.getByTestId("identity-apply"));
-    await waitFor(() => expect(applyIdentity).toHaveBeenCalledWith({ signedPayloads: ["chunk-0", "chunk-1"], mode: "physical_count", corrections: [] }));
+    await waitFor(() => expect(applyIdentity).toHaveBeenCalledWith({ signedPayloads: chunks, mode: "physical_count", corrections: [] }));
     expect(handlers.onApply).not.toHaveBeenCalled();
+  });
+
+  it("disables apply for unknown roles and incomplete or duplicate signed chunk sets", async () => {
+    const handlers = props();
+    for (const signedPayloads of [[signedChunks()[0]!], [signedChunks()[0]!, signedChunks()[0]!]]) {
+      const view = render(<UniversalImportPanel {...handlers} localIdentity={{
+        enabled: true, role: undefined, mode: "physical_count", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]),
+        previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "review" as const }] }, signedPayloads }),
+        applyIdentity: vi.fn(),
+      }} />);
+      fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+      expect(await screen.findByTestId("identity-preview")).toHaveTextContent(/signed preview.*incomplete|invalid/i);
+      expect(screen.queryByTestId("identity-apply")).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it("re-previews a stale apply and requires an explicit retry with the replacement chunks", async () => {
+    const handlers = props();
+    const oldChunks = signedChunks();
+    const newChunks = signedChunks(["new-a", "new-b"]);
+    const previewIdentity = vi.fn()
+      .mockResolvedValueOnce({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: oldChunks })
+      .mockResolvedValueOnce({ preview: { decisions: [{ kind: "automatic" }] }, signedPayloads: newChunks });
+    const applyIdentity = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error("Preview is stale."), { code: "apply_target_stale" }))
+      .mockResolvedValueOnce({ applied: 1, queuedForReview: 0, rejected: 0 });
+    render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "owner", mode: "physical_count", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity, applyIdentity }} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+    await screen.findByTestId("identity-apply");
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/preview refreshed.*apply again/i);
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await waitFor(() => expect(applyIdentity).toHaveBeenLastCalledWith({ signedPayloads: newChunks, mode: "physical_count", corrections: [] }));
   });
 
   it("shows actual headers and sample values for a low-confidence file without applying anything", async () => {

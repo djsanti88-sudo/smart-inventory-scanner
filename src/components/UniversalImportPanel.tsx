@@ -10,6 +10,7 @@ import { buildImportPreview, describeSkippedSheets, mapUniversalRows, type Previ
 const PREVIEW_LIMIT = 20;
 
 export interface UniversalImportPanelProps {
+  fileTestId?: string;
   readFile?: (file: UploadFileLike) => Promise<UniversalSheet>;
   loadMapping(sourceSignature: string): Promise<ColumnMapping | null>;
   saveMapping(sourceSignature: string, mapping: ColumnMapping): Promise<void>;
@@ -18,7 +19,8 @@ export interface UniversalImportPanelProps {
   /** Local/mock Task 8 transport. Kept optional so the production/legacy path stays unchanged. */
   localIdentity?: {
     enabled: boolean;
-    canApply: boolean;
+    role?: string;
+    mode: "physical_count" | "reconcile";
     readWorkbook(file: UploadFileLike): Promise<UniversalSheet[]>;
     previewIdentity(input: { file: UploadFileLike; sheets: UniversalSheet[] }): Promise<{
       preview: { decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }> };
@@ -26,6 +28,24 @@ export interface UniversalImportPanelProps {
     }>;
     applyIdentity?(input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: [] }): Promise<UniversalImportApplySummary>;
   };
+}
+
+const APPLY_ROLES = new Set(["manager", "admin", "owner"]);
+
+function validateSignedPayloadSet(tokens: string[]): string | null {
+  if (tokens.length === 0) return "Signed preview is incomplete or invalid.";
+  try {
+    const chunks = tokens.map((token) => JSON.parse(token) as Record<string, unknown>);
+    const first = chunks[0]!;
+    const count = first.chunkCount;
+    if (!Number.isInteger(count) || count !== chunks.length || chunks.some((chunk, index) =>
+      chunk.chunkIndex !== index || chunk.chunkCount !== count || chunk.manifestVersion !== "identity-preview-v1"
+      || chunk.sanitizedContentRootHash !== first.sanitizedContentRootHash || chunk.importId !== first.importId
+      || chunk.previewFingerprint !== first.previewFingerprint || typeof chunk.signature !== "string" || !chunk.signature)) {
+      return "Signed preview is incomplete or invalid.";
+    }
+    return null;
+  } catch { return "Signed preview is incomplete or invalid."; }
 }
 
 const FIELD_LABELS: Record<(typeof IMPORT_FIELD_ORDER)[number], string> = {
@@ -41,6 +61,7 @@ const FIELD_LABELS: Record<(typeof IMPORT_FIELD_ORDER)[number], string> = {
 };
 
 export function UniversalImportPanel({
+  fileTestId = "universal-import-file",
   readFile = readUniversalFile,
   loadMapping,
   saveMapping,
@@ -58,6 +79,8 @@ export function UniversalImportPanel({
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<UniversalImportApplySummary | null>(null);
   const [identityPreview, setIdentityPreview] = useState<{ sheets: UniversalSheet[]; decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }>; signedPayloads: string[] } | null>(null);
+  const [identitySource, setIdentitySource] = useState<{ file: UploadFileLike; sheets: UniversalSheet[] } | null>(null);
+  const [identityChunkError, setIdentityChunkError] = useState<string | null>(null);
 
   async function previewWith(nextSheet: UniversalSheet, nextMapping: ColumnMapping, source: "header" | "content" | "manual" | "remembered") {
     const validation = validateManualMapping(nextSheet.headers, nextMapping);
@@ -95,8 +118,10 @@ export function UniversalImportPanel({
         const sheets = await localIdentity.readWorkbook(file);
         if (sheets.length === 0) throw new Error("The uploaded workbook is empty.");
         const result = await localIdentity.previewIdentity({ file, sheets });
-        if (result.signedPayloads.length === 0) throw new Error("Identity preview did not return signed chunks.");
+        const chunkError = validateSignedPayloadSet(result.signedPayloads);
         setSheet(sheets[0]!);
+        setIdentitySource({ file, sheets });
+        setIdentityChunkError(chunkError);
         setIdentityPreview({ sheets, decisions: result.preview.decisions, signedPayloads: [...result.signedPayloads] });
         return;
       }
@@ -149,10 +174,15 @@ export function UniversalImportPanel({
     setBusy(true);
     setError("");
     try {
-      const result = await localIdentity.applyIdentity({ signedPayloads: identityPreview.signedPayloads, mode: "physical_count", corrections: [] });
+      const result = await localIdentity.applyIdentity({ signedPayloads: identityPreview.signedPayloads, mode: localIdentity.mode, corrections: [] });
       setSummary(result);
     } catch (cause) {
-      setError((cause instanceof Error && cause.message) || "Could not apply this identity import.");
+      if (cause && typeof cause === "object" && "code" in cause && (cause as { code?: unknown }).code === "apply_target_stale" && identitySource) {
+        const refreshed = await localIdentity.previewIdentity(identitySource);
+        setIdentityChunkError(validateSignedPayloadSet(refreshed.signedPayloads));
+        setIdentityPreview({ sheets: identitySource.sheets, decisions: refreshed.preview.decisions, signedPayloads: [...refreshed.signedPayloads] });
+        setError("Preview refreshed because the catalog changed. Review it, then press Apply again.");
+      } else setError((cause instanceof Error && cause.message) || "Could not apply this identity import.");
     } finally { setBusy(false); }
   }
 
@@ -169,7 +199,7 @@ export function UniversalImportPanel({
           className="hidden"
           type="file"
           accept=".csv,.tsv,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          data-testid="universal-import-file"
+          data-testid={fileTestId}
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
@@ -245,7 +275,8 @@ export function UniversalImportPanel({
           <p className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
             {identityPreview.sheets.length} sheets. {(["automatic", "review", "abstain", "non_product", "invalid"] as const).map((kind) => `${kind} ${identityPreview.decisions.filter((decision) => decision.kind === kind).length}`).join(", ")}.
           </p>
-          {localIdentity?.canApply ? (
+          {identityChunkError && <p role="status" className="text-sm text-red-700">{identityChunkError}</p>}
+          {localIdentity?.role && APPLY_ROLES.has(localIdentity.role) && !identityChunkError ? (
             <button type="button" data-testid="identity-apply" disabled={busy} onClick={() => void applyIdentity()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply signed identity preview</button>
           ) : <p role="status" className="text-sm text-zinc-600">A manager must apply this preview.</p>}
         </div>

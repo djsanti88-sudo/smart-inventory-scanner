@@ -326,6 +326,24 @@ describe("ReconcilePanel - de-branded copy (M3/H1)", () => {
 // reused (read-only) so any spreadsheet a shop exports runs the compare-vs-counted loop; the
 // Shop-Ware CSV path keeps working unchanged as a fast path.
 describe("ReconcilePanel - universal file intake (M3/H1)", () => {
+  it("uses the complete signed identity preview and reconcile apply flow when the local identity flag is on", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_IDENTITY_ROLE", "manager");
+    const chunks = [0, 1].map((chunkIndex) => JSON.stringify({ manifestVersion: "identity-preview-v1", chunkIndex, chunkCount: 2, sanitizedContentRootHash: "root-r", importId: "import-r", previewFingerprint: "preview-r", signature: `sig-${chunkIndex}` }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ preview: { decisions: [{ kind: "automatic" }] }, signedPayloads: chunks }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ applied: 0, queuedForReview: 0, rejected: 0 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ReconcilePanel />);
+    const csv = "Name,Brand,Part Number,Barcode,Quantity\nWidget,Acme,W-1,012345678905,9\n";
+    fireEvent.change(screen.getByTestId("reconcile-file"), { target: { files: [fixtureFile("generic.csv", csv)] } });
+    expect(await screen.findByTestId("identity-preview")).toHaveTextContent("automatic 1");
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]!.body))).toEqual({ signedPayloads: chunks, mode: "reconcile", corrections: [] });
+    expect(useReconcileStore.getState().session).toBeNull();
+  });
+
   it("keeps the Shop-Ware CSV fast path working (regression): the real fixture still imports via parseShopwareCsv", async () => {
     render(<ReconcilePanel />);
     fireEvent.change(screen.getByTestId("reconcile-file"), {

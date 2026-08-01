@@ -9,9 +9,9 @@
 // undefined without calling getSession - no Firebase auth mocking is needed here.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
+import { buildLocalIdentityPreviewRequest, UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
 import { useScanStore } from "@/stores/scanStore";
-import type { ColumnMapping } from "@/services/importSchema";
+import type { ColumnMapping, UniversalSheet } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
 
 const getSession = vi.fn();
@@ -71,6 +71,18 @@ beforeEach(() => {
 });
 
 describe("UniversalImportPanelContainer - empty businessId (fresh signup, no membership yet)", () => {
+  it("namespaces barcode evidence and represents held and invalid source rows with collision-safe fingerprints", () => {
+    const sheet: UniversalSheet = {
+      fileName: "same.xlsx", kind: "xlsx", importedSheetName: "Stock", sheetOrdinal: 2,
+      headers: ["Barcode", "Name", "Quantity", "Unit"], rows: [["036000291452", "Tire", "2", "each"], ["", "Held", "3", "box"], ["", "Bad", "", "each"]],
+      headerRowIndex: 0, sourceSignature: "same-headers", sourceRowNumbers: [2, 3, 7],
+    };
+    const request = buildLocalIdentityPreviewRequest({ file: { name: "same.xlsx", size: 123 }, sheets: [sheet], businessId: "biz-test" });
+    expect(request.rows).toHaveLength(3);
+    expect(request.rows[0]!.identifiers[0]!.namespace).toBe("local-upload");
+    expect(new Set(request.rows.map((row) => row.rawRecordFingerprint)).size).toBe(3);
+    expect(request.rows.map((row) => row.sourceRowNumber)).toEqual([2, 3, 7]);
+  });
   it("renders the local-demo unavailable state without any request", () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
     const fetchMock = vi.fn();
