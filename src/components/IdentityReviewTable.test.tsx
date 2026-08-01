@@ -9,6 +9,16 @@ beforeEach(() => { global.fetch = vi.fn().mockResolvedValue({ ok: true, json: as
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("IdentityReviewTable", () => {
+  it("renders at most one server page for 100 reviews and 500 approved links", async () => {
+    const reviews = Array.from({ length: 25 }, (_, index) => ({ ...review, reviewId: `review-${index}`, rowId: `row-${index}` }));
+    const links = Array.from({ length: 25 }, (_, index) => ({ ...approvedLink, normalizedValue: `SKU-${index}`, predecessorFingerprint: `link-${index}` }));
+    vi.mocked(global.fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ reviews, total: 100, page: 1, pageSize: 25, currentApprovedLinks: links, linkTotal: 500, linkPage: 1, bucketTotals: { review: 100, automatic: 0, abstain: 0, non_product: 0, invalid: 0 } }) } as Response);
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("row-24");
+    expect(screen.getAllByRole("row")).toHaveLength(52); // two headers plus 25 review and 25 link rows
+    expect(screen.getByRole("table", { name: /current approved links/i }).querySelectorAll("tbody tr")).toHaveLength(25);
+    expect(screen.queryByText("row-25")).not.toBeInTheDocument();
+  });
   it("uses a semantic table, status region, and keyboard-focusable pagination", async () => {
     render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
     await waitFor(() => expect(screen.getByRole("table", { name: /identity review queue/i })).toBeTruthy());

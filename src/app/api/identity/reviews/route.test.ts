@@ -67,6 +67,17 @@ describe("identity review route", () => {
     expect(await response.json()).toEqual({ error: "Unable to load identity reviews." });
   });
 
+  it("bounds 500 approved links independently and requests only the selected repository page", async () => {
+    const links = Array.from({ length: 500 }, (_, index) => ({ sourceSystem: "demo", sourceSignature: "v1", vendorId: "vendor", identifierType: "upc", namespace: "", normalizedValue: String(index), targetProductId: `p-${index}`, version: 1, predecessorFingerprint: `f-${index}`, predecessorSource: "configured" }));
+    const pageCurrentApprovedLinks = vi.fn().mockResolvedValue({ items: links.slice(25, 50), total: 500 });
+    const { handler } = route({ currentApprovedLinks: undefined, pageCurrentApprovedLinks } as never);
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&linkPage=2&pageSize=25"));
+    const body = await response.json();
+    expect(body.currentApprovedLinks).toHaveLength(25);
+    expect(body).toMatchObject({ linkPage: 2, linkTotal: 500, pageSize: 25 });
+    expect(pageCurrentApprovedLinks).toHaveBeenCalledWith("shop-a", { page: 2, pageSize: 25 });
+  });
+
   it("returns all queue bucket totals and the exact current approved link while paging a filtered bucket", async () => {
     const automatic = { ...review, reviewId: "automatic", rowId: "automatic", decision: { ...review.decision, kind: "automatic" as const } };
     const { handler } = route({ repository: {

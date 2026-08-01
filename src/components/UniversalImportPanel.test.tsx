@@ -43,6 +43,10 @@ function signedChunks(tokens = ["chunk-a", "chunk-b"]) {
   }));
 }
 
+function reviewChunk(rowId: string, productId: string) {
+  return JSON.stringify({ manifestVersion: "identity-preview-v1", chunkIndex: 0, chunkCount: 1, sanitizedContentRootHash: `root-${rowId}`, importId: `import-${rowId}`, previewFingerprint: `preview-${rowId}`, signature: `sig-${rowId}`, rowIds: [rowId], decisions: [{ kind: "review", candidates: [{ productId }] }] });
+}
+
 function props() {
   return {
     readFile: vi.fn().mockResolvedValue(nonsenseSheet),
@@ -177,6 +181,42 @@ describe("UniversalImportPanel", () => {
     fireEvent.click(screen.getByTestId("identity-apply"));
     await waitFor(() => expect(applyIdentity).toHaveBeenCalledWith({ signedPayloads: [token], mode: "reconcile", corrections: [{ rowId: "row-0", targetProductId: "product-0" }] }));
     expect(await screen.findByTestId("identity-apply-summary")).toHaveTextContent("Reconciled 100 rows, expected quantity 450");
+  });
+
+  it("clears selected corrections and the prior apply result when a new file is previewed", async () => {
+    const handlers = props();
+    const applyIdentity = vi.fn().mockResolvedValue({ importId: "one", mode: "reconcile", countedRows: 0, countQuantity: 0, rows: [], reconciliation: { expectedRows: 1, expectedQuantity: 1 } });
+    const previewIdentity = vi.fn()
+      .mockResolvedValueOnce({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: [reviewChunk("row-old", "product-old")] })
+      .mockResolvedValueOnce({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: [reviewChunk("row-new", "product-new")] });
+    render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "owner", mode: "reconcile", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity, applyIdentity }} />);
+    const input = screen.getByTestId("universal-import-file");
+    fireEvent.change(input, { target: { files: [new File(["one"], "one.csv")] } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Correction for row-old" }), { target: { value: "product-old" } });
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await screen.findByTestId("identity-apply-summary");
+    fireEvent.change(input, { target: { files: [new File(["two"], "two.csv")] } });
+    await screen.findByRole("combobox", { name: "Correction for row-new" });
+    expect(screen.queryByTestId("identity-apply-summary")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await waitFor(() => expect(applyIdentity).toHaveBeenLastCalledWith(expect.objectContaining({ corrections: [] })));
+  });
+
+  it("drops corrections that are absent from a stale replacement preview", async () => {
+    const handlers = props();
+    const previewIdentity = vi.fn()
+      .mockResolvedValueOnce({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: [reviewChunk("row-old", "product-old")] })
+      .mockResolvedValueOnce({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: [reviewChunk("row-new", "product-new")] });
+    const applyIdentity = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error("stale"), { code: "preview_versions_stale" }))
+      .mockResolvedValueOnce({ importId: "new", mode: "reconcile", countedRows: 0, countQuantity: 0, rows: [], reconciliation: { expectedRows: 1, expectedQuantity: 1 } });
+    render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "admin", mode: "reconcile", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity, applyIdentity }} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["one"], "one.csv")] } });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Correction for row-old" }), { target: { value: "product-old" } });
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await screen.findByRole("combobox", { name: "Correction for row-new" });
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await waitFor(() => expect(applyIdentity).toHaveBeenLastCalledWith(expect.objectContaining({ corrections: [] })));
   });
 
   it("shows actual headers and sample values for a low-confidence file without applying anything", async () => {

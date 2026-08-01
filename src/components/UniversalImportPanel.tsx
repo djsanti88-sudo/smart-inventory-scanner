@@ -116,6 +116,8 @@ export function UniversalImportPanel({
     setError("");
     setPreview(null);
     setIdentityPreview(null);
+    setCorrections({});
+    setIdentityApplyResult(null);
     setSummary(null);
     try {
       if (localIdentity?.enabled) {
@@ -187,6 +189,8 @@ export function UniversalImportPanel({
           const refreshed = await localIdentity.previewIdentity(identitySource);
           setIdentityChunkError(validateSignedPayloadSet(refreshed.signedPayloads));
           setIdentityPreview({ sheets: identitySource.sheets, decisions: refreshed.preview.decisions, signedPayloads: [...refreshed.signedPayloads] });
+          setCorrections({});
+          setIdentityApplyResult(null);
           setError("Preview refreshed because the catalog changed. Review it, then press Apply again.");
         } catch {
           setIdentityChunkError("Signed preview is unavailable. Choose the file again to re-preview.");
