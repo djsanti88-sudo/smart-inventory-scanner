@@ -57,8 +57,11 @@ describe("frozen local 5,000-row identity preview", () => {
     expect(preview.preview.decisions).toHaveLength(fixture.rowCount);
     expect(rows.reduce((total, row) => total + row.quantity, 0)).toBe(fixture.expectedQuantity);
     expect(decisions).toHaveLength(fixture.rowCount);
+    const warmMedianMs = [...runs].sort((left, right) => left - right)[1]!;
+    const decisionP95Ms = nearestRankP95(decisionDurations);
+    console.info("identity_import_performance", JSON.stringify({ coldDiagnosticMs: coldMs, warmRunsMs: runs, warmMedianMs, decisionP95Ms, chunkCount: preview.signedPayloads.length, maxChunkBytes: Math.max(...bytes), aggregateChunkBytes: bytes.reduce((total, value) => total + value, 0) }));
     expect(Math.max(...runs)).toBeLessThanOrEqual(10_000);
-    expect(nearestRankP95(decisionDurations)).toBeLessThanOrEqual(2);
+    expect(decisionP95Ms).toBeLessThanOrEqual(2);
     expect(coldMs).toBeGreaterThanOrEqual(0);
   }, 60_000);
 });

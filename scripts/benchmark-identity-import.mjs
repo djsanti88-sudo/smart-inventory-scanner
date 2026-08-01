@@ -9,7 +9,11 @@ import ts from "typescript";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const manifestPath = resolve(root, "src/eval/identity/fixtures/identity-manifest.v1.json");
 const baselinePath = resolve(root, "src/eval/identity/reports/baseline.v1.json");
+const importPerformanceBaselinePath = resolve(root, "src/eval/identity/reports/import-perf-baseline.v1.json");
 const command = process.argv.find((argument) => argument === "--evaluate" || argument === "--write-synthetic-baseline") ?? "--evaluate";
+const importPerformance = process.argv.includes("--import-performance");
+const compareBaseline = process.argv.includes("--compare-baseline");
+const format = process.argv.includes("--format=markdown") ? "markdown" : "json";
 
 function hash(value) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 function assertSynthetic(value) {
@@ -25,6 +29,18 @@ async function buildReport() {
   return { reportVersion: "identity-baseline-v1", manifestVersion: manifest.manifestVersion, syntheticOnly: true, promotionEligible: false, promotionBlockers: ["synthetic_only", "real_export_evidence_required"], baselineStatus: "not_a_promotion_baseline", evaluatorVersion: "identity-evaluator-v1", splitSeed: manifest.splitSeed, manifestHash: hash({ ...manifest, expectedDecisions: undefined }), decisionHash: hash(manifest.expectedDecisions), metrics };
 }
 async function main() {
+  if (importPerformance) {
+    const baseline = JSON.parse(await readFile(importPerformanceBaselinePath, "utf8"));
+    const fixture = JSON.parse(await readFile(resolve(root, "src/eval/identity/fixtures/frozen-5000.v1.json"), "utf8"));
+    if (fixture.fixtureVersion !== baseline.fixture.fixtureVersion || fixture.rowCount !== baseline.fixture.rowCount || fixture.sourceHash !== baseline.fixture.sourceHash) throw new Error("import_performance_fixture_mismatch");
+    const current = { platform: process.platform, arch: process.arch, node: process.version };
+    const comparable = current.platform === baseline.environment.platform && current.arch === baseline.environment.arch && current.node === baseline.environment.node;
+    const report = { ...baseline, mode: "offline-import-performance", comparison: compareBaseline ? (comparable ? { status: "recorded_machine", tolerance: baseline.gates.baselineTolerance } : { status: "environment_mismatch", current, recorded: baseline.environment }) : { status: "not_requested" } };
+    process.stdout.write(format === "markdown"
+      ? `# Local identity import performance\n\nFixture: ${fixture.fixtureVersion}, ${fixture.rowCount} rows.\n\nWarm median: ${report.metrics.warmMedianMs} ms. Decision p95: ${report.metrics.decisionP95Ms} ms. Browser main thread: BLOCKED.\n`
+      : `${JSON.stringify(report)}\n`);
+    return;
+  }
   const report = await buildReport();
   if (command === "--write-synthetic-baseline") await writeFile(baselinePath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   else {

@@ -18,3 +18,10 @@
 
 - The existing exported-route purity test that initializes `.tmp/identity-import` is environment-blocked by `EPERM mkdir` under the sandbox. It is not treated as product proof or a code regression.
 - A portable baseline comparison is diagnostic only until this machine's baseline JSON is deliberately recorded; no cross-machine timing claim is made.
+
+## Fix round 1
+
+- Recorded-machine baseline: Windows 10.0.26200 x64, Intel Core i7-14650HX, 24 logical CPUs, Node v24.15.0. The immutable fixture SHA-256 is `873572f1ddf8835e3e7e9dea2307aec2361c7663e2592d841a670bd5a9640c86`; snapshot hash is `frozen-local-hash-v1`.
+- Measured cold diagnostic was 3.4064 ms. Three warm runs were 398.6923, 397.5722, and 466.7902 ms; median 398.6923 ms. Sequential decision p95 was 0.0475 ms. Actual signed output: 12 chunks, maximum 479,234 bytes, aggregate 5,635,054 bytes.
+- The offline benchmark supports `--import-performance --compare-baseline --format=json|markdown` and reports an environment mismatch rather than treating this machine baseline as portable proof.
+- DOM proof uploads through the real container/shaper into an injected preview route: service receives all 5,000 rows in source order, each of five buckets totals 1,000, and the aggregate-only UI renders only 25 review controls. Oversized or malformed chunk sets keep Apply unavailable.

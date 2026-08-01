@@ -35,6 +35,8 @@ const APPLY_ROLES = new Set(["admin", "owner"]);
 
 function validateSignedPayloadSet(tokens: string[]): string | null {
   if (tokens.length === 0) return "Signed preview is incomplete or invalid.";
+  if (tokens.some((token) => new TextEncoder().encode(token).byteLength > 512 * 1024)
+    || tokens.reduce((total, token) => total + new TextEncoder().encode(token).byteLength, 0) > 32 * 1024 * 1024) return "Signed preview is incomplete or invalid.";
   try {
     const chunks = tokens.map((token) => JSON.parse(token) as Record<string, unknown>);
     const first = chunks[0]!;

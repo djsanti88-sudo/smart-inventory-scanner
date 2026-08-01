@@ -1,0 +1,10 @@
+{
+  "reportVersion": "identity-import-performance-v1",
+  "recordedAt": "2026-07-31T22:56:09.000Z",
+  "environment": { "platform": "win32", "release": "10.0.26200", "arch": "x64", "cpu": "Intel(R) Core(TM) i7-14650HX", "logicalConcurrency": 24, "node": "v24.15.0" },
+  "fixture": { "path": "src/eval/identity/fixtures/frozen-5000.v1.json", "fixtureVersion": "identity-frozen-5000-v1", "sourceHash": "deterministic-generator-v1", "fixtureSha256": "873572f1ddf8835e3e7e9dea2307aec2361c7663e2592d841a670bd5a9640c86", "rowCount": 5000, "quantity": 5000 },
+  "snapshotHash": "frozen-local-hash-v1",
+  "protocol": { "coldDiagnostic": true, "warmupRuns": 1, "measuredWarmRuns": 3, "decisionRetrieval": "one lookupBatch then sequential decideIdentity", "browserMainThread": "BLOCKED_OWNER_FORBIDDEN_E2E" },
+  "gates": { "warmPreviewWallMs": 10000, "decisionP95Ms": 2, "baselineTolerance": 1.1 },
+  "metrics": { "coldDiagnosticMs": 3.4064, "warmRunsMs": [398.6923, 397.5722, 466.7902], "warmMedianMs": 398.6923, "decisionP95Ms": 0.0475, "chunkCount": 12, "maxChunkBytes": 479234, "aggregateChunkBytes": 5635054 }
+}

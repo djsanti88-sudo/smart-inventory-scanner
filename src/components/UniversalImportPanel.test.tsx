@@ -127,6 +127,15 @@ describe("UniversalImportPanel", () => {
     }
   });
 
+  it("keeps Apply unavailable for an oversized signed preview token", async () => {
+    const handlers = props();
+    const oversized = `${signedChunks()[0]!}${" ".repeat(512 * 1024)}`;
+    render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "owner", mode: "physical_count", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "review" as const }] }, signedPayloads: [oversized] }), applyIdentity: vi.fn() }} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+    expect(await screen.findByTestId("identity-preview")).toHaveTextContent(/signed preview.*incomplete|invalid/i);
+    expect(screen.queryByTestId("identity-apply")).not.toBeInTheDocument();
+  });
+
   it("does not grant the non-server manager role an Apply control", async () => {
     const handlers = props();
     render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "manager", mode: "physical_count", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: signedChunks() }), applyIdentity: vi.fn() }} />);

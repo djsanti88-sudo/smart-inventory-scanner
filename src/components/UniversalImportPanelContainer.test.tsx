@@ -13,11 +13,14 @@ import { buildLocalIdentityPreviewRequest, sha256UploadFile, UniversalImportPane
 import { useScanStore } from "@/stores/scanStore";
 import type { ColumnMapping, UniversalSheet } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
+import { createIdentityPreviewRoute } from "@/app/api/identity/preview/route";
 
 const getSession = vi.fn();
+const readUniversalWorkbook = vi.fn();
 vi.mock("@/lib/auth", () => ({
   getSession: (...args: unknown[]) => getSession(...args),
 }));
+vi.mock("@/services/universalFileReader", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/services/universalFileReader")>()), readUniversalWorkbook: (...args: unknown[]) => readUniversalWorkbook(...args) }));
 
 // Real CSV content (the container has no readFile override, so it runs the real
 // readUniversalFile -> inferColumnMapping chain; recognizable headers are required to reach
@@ -68,9 +71,33 @@ beforeEach(() => {
     products: [] as Product[],
     aliases: [] as Alias[],
   });
+  readUniversalWorkbook.mockReset();
 });
 
 describe("UniversalImportPanelContainer - empty businessId (fresh signup, no membership yet)", () => {
+  it("DOM upload shapes all 5,000 rows then delegates once through the injected preview route without rendering 5,000 rows", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_IDENTITY_ROLE", "owner");
+    const rows = Array.from({ length: 5_000 }, (_, index) => [`PN-${index}`, String((index % 5) + 1)]);
+    readUniversalWorkbook.mockResolvedValue([{ fileName: "fixture.csv", kind: "csv", headers: ["Part Number", "Quantity"], rows, headerRowIndex: 0, sourceSignature: "fixture", sourceRowNumbers: rows.map((_, index) => index + 2) }]);
+    const kinds = ["automatic", "review", "abstain", "non_product", "invalid"] as const;
+    const tokens = Array.from({ length: 5 }, (_, chunkIndex) => JSON.stringify({ manifestVersion: "identity-preview-v1", chunkIndex, chunkCount: 5, sanitizedContentRootHash: "root", importId: "import", previewFingerprint: "preview", signature: `sig-${chunkIndex}`, rowIds: Array.from({ length: 1_000 }, (_, index) => `row-${chunkIndex}-${index}`), decisions: Array.from({ length: 1_000 }, (_, index) => ({ kind: kinds[(chunkIndex * 1_000 + index) % 5], candidates: [] })) }));
+    const createPreview = vi.fn().mockResolvedValue({ preview: { decisions: Array.from({ length: 5_000 }, (_, index) => ({ kind: kinds[index % 5] })) }, signedPayloads: tokens });
+    const handler = createIdentityPreviewRoute({ enabled: () => true, createPreview });
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: { body?: string }) => {
+      const response = await handler(new Request("http://localhost/api/identity/preview", { method: "POST", body: init?.body }));
+      return { ok: response.ok, status: response.status, json: () => response.json() };
+    }));
+    render(<UniversalImportPanelContainer />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["fixture"], "fixture.csv")] } });
+    const panel = await screen.findByTestId("identity-preview");
+    expect(createPreview).toHaveBeenCalledTimes(1);
+    const input = createPreview.mock.calls[0]![0];
+    expect(input.rows).toHaveLength(5_000);
+    expect(input.rows.map((row: { sourceRowNumber: number }) => row.sourceRowNumber)).toEqual(rows.map((_, index) => index + 2));
+    expect(panel).toHaveTextContent("automatic 1000, review 1000, abstain 1000, non_product 1000, invalid 1000");
+    expect(panel.querySelectorAll("select")).toHaveLength(25);
+  });
   it("hashes original upload bytes with SHA-256 instead of trusting filename and size", async () => {
     const bytes = new TextEncoder().encode("abc");
     const file = { name: "same.csv", size: 3, text: async () => "abc", arrayBuffer: async () => bytes.buffer };
