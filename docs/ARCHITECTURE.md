@@ -168,6 +168,12 @@ config booleans + `geminiUsedForDecode: false` and never leaks secrets.
 |---|---|
 | `GET/POST /api/ai-lookup` | GET = config/status peek (no secrets). POST = decode entry (abuse guards -> `runDecodePipeline`); legacy `mode:"lookup"` single-provider path still exists |
 | `POST /api/reconcile/match` | Pure identityMatcher against the local tire corpus; no keys, no paid calls |
+
+### Local hybrid identity preview boundaries
+
+The local-only identity preview accepts at most 5,000 returned source rows. Browser shaping preserves every physical row and source order, then `POST /api/identity/preview` accepts a separately bounded 32 MiB input. The response is a stateless ordered set of HMAC-signed chunks: each emitted token is measured after signing and limited to 512 KiB, while the complete set is capped at 32 MiB. Apply recomputes and verifies the signed root, row IDs, decision fingerprints, scope, and versions; it never needs source bytes again.
+
+Preview identity and inventory counting are intentionally separate. A physical-count apply creates aggregate import ledger events only after signed-preview verification; reconcile creates an expected-inventory view and does not alter scan counts. Browser long-task evidence is BLOCKED: this owner-forbidden task does not run E2E or Playwright, so Node timing is not claimed as browser responsiveness proof.
 | `POST /api/resolve-scan` | Customer-role server-side resolve: verifies Firebase token + membership, resolves via Admin SDK, returns sanitized result (customer browsers never download the alias/catalog DB) |
 
 ## 7. Test layout

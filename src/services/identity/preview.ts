@@ -9,6 +9,9 @@ const maxChunks = 64;
 const maxSignedSetBytes = 32 * 1024 * 1024;
 const maxPreviewTtlMs = 15 * 60 * 1000;
 const maxFutureSkewMs = 60 * 1000;
+// The pre-sign grouping estimate must reserve JSON field and HMAC transport bytes.  The final
+// enforcement below still measures emitted UTF-8 tokens as the authority.
+const signatureTransportReserveBytes = 64 * 1024;
 
 export interface PreviewSigner {
   sign(canonicalPayload: string): Promise<string>;
@@ -220,25 +223,34 @@ export async function createIdentityPreview(
   const { importId } = await createImportIds({ sanitizedContentRootHash, orderedMappings: input.orderedMappings, businessId: scope.businessId, sourceSystem: scope.sourceSystem, vendorId: scope.vendorId, importerVersion: input.importerVersion });
   const cap = Math.min(maxSignedChunkBytes, input.maxChunkBytes ?? maxSignedChunkBytes);
   if (!Number.isSafeInteger(cap) || cap < 1) throw new Error("preview_chunk_limit_invalid");
+  const packingReserveBytes = cap < 64 * 1024 ? 128 : signatureTransportReserveBytes;
   const groups: Array<{ rows: Record<string, unknown>[]; decisions: IdentityDecision[] }> = [];
+  // Keep packing linear. Re-serializing a growing tentative array made the local 5k preview O(n²).
+  const staticChunkBytes = new TextEncoder().encode(canonicalJson({ scope, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt })).byteLength;
+  let estimatedGroupBytes = staticChunkBytes;
   for (let index = 0; index < rows.length; index += 1) {
     const current = groups.at(-1);
-    const tentative = current ? { rows: [...current.rows, rows[index]!], decisions: [...current.decisions, decisions[index]!] } : { rows: [rows[index]!], decisions: [decisions[index]!] };
-    // A full metadata-bearing chunk is measured, not merely row bytes.  A lowered test cap still
-    // permits one row so integrity tests can force a multi-chunk manifest.
-    const measured = new TextEncoder().encode(canonicalJson({ ...tentative, scope, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt })).byteLength;
-    if (!current && measured > cap) throw new Error("preview_row_too_large");
-    if (current && measured > cap) groups.push({ rows: [rows[index]!], decisions: [decisions[index]!] });
-    else if (current) groups[groups.length - 1] = tentative;
-    else groups.push(tentative);
+    const entryBytes = new TextEncoder().encode(canonicalJson({ row: rows[index], decision: decisions[index] })).byteLength + 2;
+    if (!current && staticChunkBytes + entryBytes + packingReserveBytes > cap) throw new Error("preview_row_too_large");
+    if (current && estimatedGroupBytes + entryBytes + packingReserveBytes > cap) {
+      groups.push({ rows: [rows[index]!], decisions: [decisions[index]!] });
+      estimatedGroupBytes = staticChunkBytes + entryBytes;
+    } else if (current) {
+      current.rows.push(rows[index]!);
+      current.decisions.push(decisions[index]!);
+      estimatedGroupBytes += entryBytes;
+    } else {
+      groups.push({ rows: [rows[index]!], decisions: [decisions[index]!] });
+      estimatedGroupBytes = staticChunkBytes + entryBytes;
+    }
   }
   if (groups.length > maxChunks) throw new Error("preview_chunks_exceeded");
   const unsigned = await Promise.all(groups.map(async (group, chunkIndex) => ({ manifestVersion, chunkIndex, chunkCount: groups.length, sanitizedContentRootHash, importId, scope, actorId: input.actorId ?? "local-test-actor", versions, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, sourceFileHashes: input.sourceFileHashes, issuedAt: input.issuedAt, expiresAt: input.expiresAt, rowIds: await Promise.all(group.rows.map((row) => createPreviewRowId(importId, row))), ...group })));
   const previewFingerprint = await createPreviewFingerprint({ sanitizedContentRootHash, importId, scope, versions, orderedMappings: input.orderedMappings, importerVersion: input.importerVersion, rows: unsigned.flatMap((chunk) => chunk.rows), rowIds: unsigned.flatMap((chunk) => chunk.rowIds), decisions: unsigned.flatMap((chunk) => chunk.decisions) });
   const fingerprinted = unsigned.map((chunk) => ({ ...chunk, previewFingerprint }));
   const signedPayloads = await Promise.all(fingerprinted.map(async (chunk) => canonicalJson({ ...chunk, signature: await dependencies.signer.sign(canonicalJson(chunk)) })));
-  if (signedPayloads.some((payload) => new TextEncoder().encode(payload).byteLength > cap)
-    || signedPayloads.reduce((total, payload) => total + new TextEncoder().encode(payload).byteLength, 0) > maxSignedSetBytes) throw new Error("preview_signed_size_exceeded");
+  const emittedBytes = signedPayloads.map((payload) => new TextEncoder().encode(payload).byteLength);
+  if (emittedBytes.some((value) => value > cap) || emittedBytes.reduce((total, value) => total + value, 0) > maxSignedSetBytes) throw new Error("preview_signed_size_exceeded");
   return { preview: { importId, sanitizedContentRootHash, previewFingerprint, decisions }, signedPayloads };
 }
 

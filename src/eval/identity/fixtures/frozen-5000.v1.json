@@ -1,0 +1,8 @@
+{
+  "fixtureVersion": "identity-frozen-5000-v1",
+  "syntheticOnly": true,
+  "rowCount": 5000,
+  "seed": "scanbin-local-identity-5000",
+  "expectedQuantity": 5000,
+  "sourceHash": "deterministic-generator-v1"
+}
