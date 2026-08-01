@@ -15,6 +15,7 @@ const identifierTypes = new Set<IdentifierType>([
   "source_alias",
 ]);
 const namespacedIdentifierTypes = new Set<IdentifierType>([
+  "barcode",
   "manufacturer_part_number",
   "vendor_sku",
   "oem_number",

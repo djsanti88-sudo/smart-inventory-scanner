@@ -111,6 +111,17 @@ describe("identity review route", () => {
     expect(await response.json()).toEqual({ error: "The identity review changed before this action could be applied." });
   });
 
+  it("rejects an empty barcode namespace but accepts the same scoped barcode link", async () => {
+    const barcode = { businessId: "shop-a", sourceSystem: "demo", vendorId: "vendor-a", sourceSignature: "demo-v1", identifierType: "barcode" as const, namespace: "vendor-a", normalizedValue: "BC-1", targetProductId: "tire-a", version: 1, predecessorFingerprint: "barcode-fingerprint", predecessorSource: "configured" as const };
+    const standalone = { sourceSystem: barcode.sourceSystem, vendorId: barcode.vendorId, sourceSignature: barcode.sourceSignature, identifierType: barcode.identifierType, namespace: barcode.namespace, normalizedValue: barcode.normalizedValue, targetProductId: barcode.targetProductId, version: barcode.version, predecessorFingerprint: barcode.predecessorFingerprint, predecessorSource: barcode.predecessorSource };
+    const revokeIdentityLink = vi.fn().mockResolvedValue({ ...barcode, status: "revoked", version: 2 });
+    const { handler } = route({ currentApprovedLinks: vi.fn().mockResolvedValue([barcode]), repository: { listIdentityReviews: vi.fn().mockResolvedValue([]), revokeIdentityLink } as never });
+    const rejected = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "revoke_link", link: { ...standalone, namespace: "" } }) }));
+    expect(rejected.status).toBe(400);
+    const accepted = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "revoke_link", link: standalone }) }));
+    expect(accepted.status).toBe(200);
+  });
+
   it("does not let a confirm action repoint a different current approved target", async () => {
     const { handler, repository } = route({ repository: {
       listIdentityReviews: vi.fn().mockResolvedValue([review]),

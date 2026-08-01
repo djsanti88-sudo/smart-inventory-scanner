@@ -162,6 +162,12 @@ describe("identity canonical contracts", () => {
     ).toEqual([]);
   });
 
+  it("keeps barcode identifiers namespaced while UPC remains globally scoped", () => {
+    expect(validateIdentityInput({ ...validInput(), identifiers: [{ ...validIdentifier, type: "barcode", namespace: undefined }] })).toContain("identifiers[0] requires a namespace for barcode");
+    expect(validateIdentityInput({ ...validInput(), identifiers: [{ ...validIdentifier, type: "barcode", namespace: "vendor-a" }] })).toEqual([]);
+    expect(validateIdentityInput({ ...validInput(), identifiers: [{ ...validIdentifier, type: "upc", raw: "012345678905", normalized: "012345678905", namespace: undefined }] })).toEqual([]);
+  });
+
   it("hashes equivalent objects identically regardless of object key order", async () => {
     await expect(canonicalSha256({ z: 1, nested: { b: 2, a: 1 } })).resolves.toBe(
       await canonicalSha256({ nested: { a: 1, b: 2 }, z: 1 }),

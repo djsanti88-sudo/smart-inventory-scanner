@@ -82,6 +82,13 @@ describe("local identity repository", () => {
     await expect(repository.revokeIdentityLink({ link: { ...approvedLink, namespace: "" }, predecessor: { source: "configured", fingerprint: "configured-sku", version: 1 } })).rejects.toThrow(/namespace/);
   });
 
+  it("requires a barcode namespace when revoking while retaining globally scoped UPC revocation", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const barcode = { ...approvedLink, identifierType: "barcode" as const, namespace: "vendor-a", rawValue: "BC-1", normalizedValue: "BC-1" };
+    await expect(repository.revokeIdentityLink({ link: { ...barcode, namespace: "" }, predecessor: { source: "configured", fingerprint: "empty-barcode", version: 1 } })).rejects.toThrow(/namespace/);
+    await expect(repository.revokeIdentityLink({ link: barcode, predecessor: { source: "configured", fingerprint: "scoped-barcode", version: 1 } })).resolves.toMatchObject({ status: "revoked", namespace: "vendor-a" });
+  });
+
   it("makes one concurrent import operation lease claim and reports the other as in progress", async () => {
     const now = 100;
     const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => now });
