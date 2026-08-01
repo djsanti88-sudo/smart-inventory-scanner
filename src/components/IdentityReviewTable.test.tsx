@@ -4,6 +4,7 @@ import { IdentityReviewTable } from "./IdentityReviewTable";
 
 const review = { reviewId: "review-1", rowId: "row-1", decision: { kind: "review", candidates: [{ productId: "tire-a", rank: 1, evidence: ["exact vendor SKU"], missingFields: [], contradictions: [] }] } };
 const previewDecisions = [review, { reviewId: "preview-auto", rowId: "row-auto", decision: { kind: "automatic", candidates: [] } }, { reviewId: "preview-abstain", rowId: "row-abstain", decision: { kind: "abstain", candidates: [] } }, { reviewId: "preview-non-product", rowId: "row-non-product", decision: { kind: "non_product", candidates: [] } }, { reviewId: "preview-invalid", rowId: "row-invalid", decision: { kind: "invalid", candidates: [] } }];
+const approvedLink = { sourceSystem: "vendor-feed", sourceSignature: "feed-v1", vendorId: "vendor-a", identifierType: "vendor_sku", namespace: "vendor", normalizedValue: "SKU-1", targetProductId: "tire-a", version: 3, predecessorFingerprint: "approved-link-fingerprint", predecessorSource: "configured" as const };
 beforeEach(() => { global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reviews: [review] }) }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -95,5 +96,40 @@ describe("IdentityReviewTable", () => {
     fireEvent.click(screen.getByRole("button", { name: /confirm tire-a/i }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect((fetchMock.mock.calls[2]![0] as string)).toContain("page=1");
+  });
+
+  it("renders configured current approved links separately and revokes with the exact predecessor selector", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], total: 1, bucketTotals: { automatic: 0, review: 1, abstain: 0, non_product: 0, invalid: 0 }, currentApprovedLinks: [approvedLink] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ link: { ...approvedLink, status: "revoked" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], total: 1, bucketTotals: { automatic: 0, review: 1, abstain: 0, non_product: 0, invalid: 0 }, currentApprovedLinks: [] }) });
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    expect(await screen.findByRole("table", { name: /current approved links/i })).toBeTruthy();
+    expect(screen.getAllByText(/SKU-1/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/vendor-feed/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /revoke approved link sku-1/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string)).toEqual({ businessId: "shop-a", action: "revoke_link", link: approvedLink });
+    await waitFor(() => expect(screen.queryByText("SKU-1")).toBeNull());
+    expect(screen.getByRole("status").textContent).toMatch(/revoked/i);
+  });
+
+  it("keeps standalone current links read-only for non-managers", async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink] }) });
+    render(<IdentityReviewTable businessId="shop-a" actorRole="viewer" />);
+    await screen.findByRole("table", { name: /current approved links/i });
+    expect(screen.queryByRole("button", { name: /revoke approved link/i })).toBeNull();
+  });
+
+  it("moves focus to the next current-link action after revocation", async () => {
+    const nextLink = { ...approvedLink, normalizedValue: "SKU-2", predecessorFingerprint: "next-link-fingerprint" };
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [approvedLink, nextLink] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ link: { ...approvedLink, status: "revoked" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [nextLink] }) });
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: /revoke approved link sku-1/i }));
+    const nextAction = await screen.findByRole("button", { name: /revoke approved link sku-2/i });
+    await waitFor(() => expect(document.activeElement).toBe(nextAction));
   });
 });

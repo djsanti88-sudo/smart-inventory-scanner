@@ -78,6 +78,15 @@ describe("identity review route", () => {
     expect(await response.json()).toMatchObject({ total: 1, bucketTotals: { review: 1, automatic: 1, abstain: 0, non_product: 0, invalid: 0 }, reviews: [expect.objectContaining({ currentApprovedLink: { targetProductId: "tire-a", version: 7 } })] });
   });
 
+  it("returns authoritative approved links even when no review row remains to revoke them", async () => {
+    const currentApprovedLinks = vi.fn().mockResolvedValue([{ businessId: "shop-a", sourceSystem: "demo", vendorId: "vendor-a", sourceSignature: "demo-v1", identifierType: "vendor_sku", namespace: "vendor", normalizedValue: "SKU-1", targetProductId: "tire-a", version: 1, predecessorFingerprint: "configured-link" }]);
+    const { handler } = route({ currentApprovedLinks } as never);
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ currentApprovedLinks: [{ targetProductId: "tire-a", predecessorFingerprint: "configured-link" }] });
+    expect(currentApprovedLinks).toHaveBeenCalledWith("shop-a");
+  });
+
   it("does not let a confirm action repoint a different current approved target", async () => {
     const { handler, repository } = route({ repository: {
       listIdentityReviews: vi.fn().mockResolvedValue([review]),

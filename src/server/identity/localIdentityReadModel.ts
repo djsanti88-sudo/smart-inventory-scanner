@@ -14,7 +14,12 @@ export interface LocalIdentityReadModel {
   linkSnapshotHash: string;
   lookupApprovedLinks(input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]>;
   hasCurrentTarget(input: Scope & { targetProductId: string; identifiers?: ScopedIdentifier[] }): boolean | Promise<boolean>;
+  listCurrentApprovedLinks?(businessId: string): Promise<CurrentApprovedIdentityLink[]>;
 }
+
+export type CurrentApprovedIdentityLink = Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version"> & { predecessorFingerprint: string; predecessorSource: "configured" | "durable" };
+function predecessorContent(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version">): unknown { return { businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, version: link.version }; }
+export async function identityLinkPredecessorFingerprint(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version">): Promise<string> { return canonicalSha256(predecessorContent(link)); }
 
 function scopeMatches(left: Scope, right: Scope): boolean { return left.businessId === right.businessId && left.sourceSystem === right.sourceSystem && left.sourceSignature === right.sourceSignature && left.vendorId === right.vendorId; }
 function linkFamily(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue">): string { return JSON.stringify([link.businessId, link.sourceSystem, link.sourceSignature, link.vendorId, link.identifierType, link.namespace, link.normalizedValue]); }
@@ -44,6 +49,10 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
     snapshot,
     linkSnapshotHash: hashes.linkSnapshotHash,
     async lookupApprovedLinks(input) { return wire.approvedLinks.filter((link) => scopeMatches(link, input)); },
+    async listCurrentApprovedLinks(businessId) {
+      const approved = wire.approvedLinks.filter((link) => link.businessId === businessId && link.status === "approved");
+      return Promise.all(approved.map(async (link) => ({ businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, version: link.version, predecessorSource: "configured" as const, predecessorFingerprint: await identityLinkPredecessorFingerprint(link) })));
+    },
     hasCurrentTarget(input) {
       const scopedLinkInput = { businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, identifiers: input.identifiers ?? [] };
       const requested = input.identifiers ?? [];
@@ -79,11 +88,22 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
     }
     return [...merged.values()].filter((link) => link.status === "approved");
   };
+  const currentApprovedLinksFor = async (businessId: string): Promise<CurrentApprovedIdentityLink[]> => {
+    const [durable, configuredLinks] = await Promise.all([repository.listCurrentIdentityLinks(businessId), configured.listCurrentApprovedLinks ? configured.listCurrentApprovedLinks(businessId) : []]);
+    const merged = new Map<string, Omit<CurrentApprovedIdentityLink, "predecessorFingerprint">>(configuredLinks.map((link) => [linkFamily(link), { ...link, predecessorSource: "configured" as const }]));
+    for (const link of durable) {
+      const key = linkFamily(link);
+      if (link.status === "approved") merged.set(key, { businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, version: link.version, predecessorSource: "durable" as const });
+      else merged.delete(key);
+    }
+    return Promise.all([...merged.values()].map(async (link) => ({ ...link, predecessorFingerprint: await identityLinkPredecessorFingerprint(link) }))).then((links) => links.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+  };
   return {
     snapshot: configured.snapshot,
     // The composition folds the current durable link set into this base per authenticated tenant.
     linkSnapshotHash: configured.linkSnapshotHash,
     lookupApprovedLinks: linksFor,
+    listCurrentApprovedLinks: currentApprovedLinksFor,
     async hasCurrentTarget(input) {
       const results = await linksFor({ ...input, identifiers: input.identifiers ?? [] });
       if (results.some((link) => link.status === "approved" && link.targetProductId === input.targetProductId)) return true;
