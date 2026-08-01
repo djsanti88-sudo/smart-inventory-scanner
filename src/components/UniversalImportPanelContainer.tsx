@@ -29,11 +29,15 @@ export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: {
     const mapping = inference.mapping;
     orderedMappings.push({ sheetName: sheet.importedSheetName ?? sheet.fileName, mapping: Object.fromEntries(Object.entries(mapping).map(([field, index]) => [field, sheet.headers[index!] ?? ""])) });
     const mapped = mapUniversalRows(sheet, mapping);
-    const mappedByLine = new Map([...mapped.rows, ...mapped.heldForReview.flatMap((item) => item.source ? [item.source] : [])].map((item) => [item.line, item]));
+    // One indexed classification pass. Do not call mapped.rows.includes for every physical row.
+    const mappedByLine = new Map<number, { item?: MappedImportRow; status: "mapped" | "held" | "invalid" }>();
+    for (const item of mapped.rows) mappedByLine.set(item.line, { item, status: "mapped" });
+    for (const held of mapped.heldForReview) if (held.source) mappedByLine.set(held.line, { item: held.source, status: "held" });
     sheet.rows.forEach((cells, rowIndex) => {
       const physicalRow = sheet.sourceRowNumbers?.[rowIndex] ?? sheet.headerRowIndex + rowIndex + 2;
       const line = sheet.headerRowIndex + rowIndex + 2;
-      const item = mappedByLine.get(line);
+      const classified = mappedByLine.get(line);
+      const item = classified?.item;
       const value = (field: keyof ColumnMapping) => mapping[field] === undefined ? "" : cells[mapping[field]!] ?? "";
       const barcode = item?.barcode ?? value("barcode");
       const partNumber = item?.partNumber ?? value("partNumber");
@@ -48,7 +52,7 @@ export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: {
         vendorId: "local-upload", sourceFileFingerprint: fileFingerprint, sourceFileOrdinal: sheet.sheetOrdinal ?? sheetIndex + 1,
         sheetName: sheet.importedSheetName ?? sheet.fileName, sourceRowNumber: physicalRow, identifiers,
         brand: brand || undefined, title: item?.name || value("name") || `Source row ${physicalRow}`,
-        attributes: { model: item?.model ?? value("model"), size: item?.size ?? value("size"), category: item?.category ?? value("category"), sourceUnitOfMeasure: item?.uom || value("uom"), adapterStatus: item ? (mapped.rows.includes(item) ? "mapped" : "held") : "invalid" },
+        attributes: { model: item?.model ?? value("model"), size: item?.size ?? value("size"), category: item?.category ?? value("category"), sourceUnitOfMeasure: item?.uom || value("uom"), adapterStatus: classified?.status ?? "invalid" },
         quantity: Number.isSafeInteger(parsedQuantity) && parsedQuantity >= 0 ? parsedQuantity : 0,
         unitOfMeasure: "each",
         rawRecordFingerprint: `${fileFingerprint}:${sheet.sheetOrdinal ?? sheetIndex + 1}:${sheet.importedSheetName ?? sheet.fileName}:${physicalRow}`,

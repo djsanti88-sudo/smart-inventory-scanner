@@ -255,7 +255,7 @@ describe("readUniversalFile", () => {
       text: async () => "",
       arrayBuffer: async () => xlsxBytes.buffer.slice(xlsxBytes.byteOffset, xlsxBytes.byteOffset + xlsxBytes.byteLength),
     })).rejects.toThrow("The uploaded file exceeds the 256-column limit.");
-    await expect(readUniversalWorkbook(textFile("rows.csv", Array.from({ length: 5_001 }, () => "PN").join("\n")))).rejects.toThrow(
+    await expect(readUniversalWorkbook(textFile("rows.csv", Array.from({ length: 5_002 }, () => "PN").join("\n")))).rejects.toThrow(
       "The uploaded file exceeds the 5,000-row limit.",
     );
     const workbook = new ExcelJS.Workbook();
@@ -298,6 +298,8 @@ describe("readUniversalFile", () => {
     })).resolves.toHaveLength(2);
 
     exactWorkbook.getWorksheet("Two")?.addRow(["PN-over-limit"]);
+    exactWorkbook.getWorksheet("Two")?.addRow(["PN-over-limit-2"]);
+    exactWorkbook.getWorksheet("Two")?.addRow(["PN-over-limit-3"]);
     const oversizedBuffer = await exactWorkbook.xlsx.writeBuffer();
     const oversizedBytes = new Uint8Array(oversizedBuffer);
     await expect(readUniversalWorkbook({
@@ -307,12 +309,12 @@ describe("readUniversalFile", () => {
     })).rejects.toThrow("The uploaded file exceeds the 5,000-row limit.");
   });
 
-  it("stops sparse worksheet traversal at the 5,001st retained row", () => {
+  it("stops sparse worksheet traversal at the 8,193rd physical row", () => {
     let visitedRows = 0;
     const worksheet: SparseWorksheetLike = {
       name: "Instrumented",
       eachRow: (_options, callback) => {
-        for (let rowNumber = 1; rowNumber <= 5_002; rowNumber += 1) {
+        for (let rowNumber = 1; rowNumber <= 8_194; rowNumber += 1) {
           visitedRows += 1;
           callback({
             eachCell: (_cellOptions, cellCallback) => {
@@ -323,8 +325,8 @@ describe("readUniversalFile", () => {
       },
     };
 
-    expect(() => collectSparseWorksheetMatrices([worksheet])).toThrow("The uploaded file exceeds the 5,000-row limit.");
-    expect(visitedRows).toBe(5_001);
+    expect(() => collectSparseWorksheetMatrices([worksheet])).toThrow("The uploaded file exceeds the 8,192 physical-row limit.");
+    expect(visitedRows).toBe(8_193);
   });
 
   it("rejects every .xls upload with safe conversion guidance", async () => {
@@ -354,5 +356,12 @@ describe("readUniversalFile", () => {
     await expect(readUniversalFile(biff)).rejects.toThrow(
       "Legacy .xls files are not supported. Save the file as .xlsx or .csv and upload that export.",
     );
+  });
+
+  it("allows 8,192 physical rows before inference but rejects 5,001 returned data rows", async () => {
+    const physical = Array.from({ length: 8_192 }, (_, index) => index === 0 ? "PN" : "").join("\n");
+    await expect(readUniversalWorkbook(textFile("physical.csv", physical))).resolves.toHaveLength(1);
+    const returned = ["PN", ...Array.from({ length: 5_001 }, (_, index) => `PN-${index}`)].join("\n");
+    await expect(readUniversalWorkbook(textFile("returned.csv", returned))).rejects.toThrow("5,000-row limit");
   });
 });

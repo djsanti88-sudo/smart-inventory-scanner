@@ -88,6 +88,12 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
     expect(new Set(request.rows.map((row) => row.rawRecordFingerprint)).size).toBe(3);
     expect(request.rows.map((row) => row.sourceRowNumber)).toEqual([2, 3, 7]);
   });
+  it("shapes 5,000 physical rows in source order without rescanning mapped buckets", () => {
+    const rows = Array.from({ length: 5_000 }, (_, index) => [`PN-${index}`, "1"]);
+    const request = buildLocalIdentityPreviewRequest({ file: { name: "fixture.csv", size: 1 }, sheets: [{ fileName: "fixture.csv", kind: "csv", headers: ["PN", "Qty"], rows, headerRowIndex: 0, sourceSignature: "fixture", sourceRowNumbers: rows.map((_, index) => index + 2) }], businessId: "biz-test" });
+    expect(request.rows).toHaveLength(5_000);
+    expect(request.rows.map((row) => row.sourceRowNumber)).toEqual(rows.map((_, index) => index + 2));
+  });
   it("renders the local-demo unavailable state without any request", () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_DEMO", "1");
     const fetchMock = vi.fn();

@@ -6,7 +6,8 @@ import type { CreateIdentityPreviewInput } from "@/services/identity/preview";
 import { authorizeLocalIdentityPreview, createComposedIdentityPreview } from "@/server/identity/previewComposition";
 import { decodePreviewSigningKey } from "@/server/identity/previewSigner";
 
-const MAX_REQUEST_BYTES = 512 * 1024;
+/** Input is intentionally larger than signed output chunks: local 5k-row shaping stays bounded. */
+export const MAX_LOCAL_PREVIEW_REQUEST_BYTES = 32 * 1024 * 1024;
 
 function json(body: unknown, status: number): NextResponse {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -21,7 +22,7 @@ async function readBounded(request: Request): Promise<string> {
       const next = await reader.read();
       if (next.done) break;
       size += next.value.byteLength;
-      if (size > MAX_REQUEST_BYTES) throw new Error("preview_request_too_large");
+      if (size > MAX_LOCAL_PREVIEW_REQUEST_BYTES) throw new Error("preview_request_too_large");
       chunks.push(next.value);
     }
   } finally { reader.releaseLock(); }
@@ -70,12 +71,12 @@ export function createIdentityPreviewRoute(dependencies: {
   return async (request) => {
     if (!dependencies.enabled()) return json({ error: "Identity preview is unavailable." }, 404);
     const declared = Number(request.headers.get("content-length") ?? "0");
-    if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) return json({ error: "Preview request must be 512KB or smaller." }, 413);
+    if (Number.isFinite(declared) && declared > MAX_LOCAL_PREVIEW_REQUEST_BYTES) return json({ error: "Preview request must be 32 MiB or smaller." }, 413);
     let body: unknown;
     try {
       const raw = await readBounded(request);
       body = JSON.parse(raw) as unknown;
-    } catch (error) { return error instanceof Error && error.message === "preview_request_too_large" ? json({ error: "Preview request must be 512KB or smaller." }, 413) : json({ error: "Body must be valid JSON." }, 400); }
+    } catch (error) { return error instanceof Error && error.message === "preview_request_too_large" ? json({ error: "Preview request must be 32 MiB or smaller." }, 413) : json({ error: "Body must be valid JSON." }, 400); }
     if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Body must be an identity preview request." }, 400);
     if (!isPreviewRequest(body)) return json({ error: "Identity preview request was invalid." }, 400);
     const input = body;

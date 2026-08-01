@@ -158,15 +158,20 @@ export function buildImportPreview(
     };
   });
   const rows = [...matchedRows, ...mapped.heldForReview, ...mapped.rejected].sort((a, b) => a.line - b.line);
-  const count = (status: ImportPreviewStatus) => rows.filter((row) => row.status === status).length;
-  const exact = count("exact");
+  let exact = 0, fuzzy = 0, review = 0, reject = 0;
+  for (const row of rows) {
+    if (row.status === "exact") exact += 1;
+    else if (row.status === "fuzzy") fuzzy += 1;
+    else if (row.status === "review") review += 1;
+    else reject += 1;
+  }
   return {
     rows,
     total: rows.length,
     exact,
-    fuzzy: count("fuzzy"),
-    review: count("review"),
-    reject: count("reject"),
+    fuzzy,
+    review,
+    reject,
     headline: `Matched ${exact} of ${rows.length} automatically`,
   };
 }

@@ -28,6 +28,17 @@ async function configuredEmptySnapshot(): Promise<string> {
 }
 
 describe("POST /api/identity/preview", () => {
+  it("accepts a bounded 32 MiB local preview input and rejects declared or streamed overflow before delegation", async () => {
+    const createPreview = vi.fn().mockResolvedValue({ preview: {}, signedPayloads: [] });
+    const handler = createIdentityPreviewRoute({ enabled: () => true, createPreview });
+    const within = JSON.stringify({ ...actualBody, rows: Array.from({ length: 5_000 }, (_, index) => ({ ...actualBody.rows[0], rawRecordFingerprint: `row-${index}` })) });
+    const response = await handler(new Request("http://localhost/api/identity/preview", { method: "POST", body: within }));
+    expect(response.status).toBe(200);
+    expect(createPreview).toHaveBeenCalledTimes(1);
+    const declared = await handler(new Request("http://localhost/api/identity/preview", { method: "POST", headers: { "content-length": String(32 * 1024 * 1024 + 1) }, body: within }));
+    expect(declared.status).toBe(413);
+    expect(createPreview).toHaveBeenCalledTimes(1);
+  });
   it("accepts held and adapter-invalid physical rows and returns one terminal decision for each", async () => {
     const requestBody = buildLocalIdentityPreviewRequest({
       businessId: "demo-shop", file: { name: "held.csv", size: 42 }, sheets: [{

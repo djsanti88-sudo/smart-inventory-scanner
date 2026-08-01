@@ -239,4 +239,11 @@ describe("universalImportPreview", () => {
     expect(identityDecisionToPreviewStatus("non_product")).toBe("review");
     expect(identityDecisionToPreviewStatus("invalid")).toBe("reject");
   });
+
+  it("computes preview bucket totals in one pass without changing accounting", () => {
+    const mapped = mapUniversalRows(sheet, { partNumber: 0, quantity: 4 });
+    const matches = mapped.rows.map((row) => ({ row: row.expected, status: "unmatched" as const, reason: "none", confidence: 0 }));
+    const preview = buildImportPreview(mapped, matches, "header");
+    expect(preview).toMatchObject({ total: 3, exact: 0, fuzzy: 0, review: 2, reject: 1 });
+  });
 });

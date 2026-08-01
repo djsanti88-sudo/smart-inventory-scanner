@@ -13,7 +13,10 @@ const DELIMITERS = [",", "\t", ";", "|"] as const;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_SHEETS = 64;
 const MAX_COLUMNS = 256;
-const MAX_TOTAL_ROWS = 5_000;
+/** Pre-inference physical non-empty row ceiling, including preamble/header rows. */
+export const MAX_PHYSICAL_NONEMPTY_ROWS = 8_192;
+/** Returned data-row ceiling after header inference across every sheet. */
+export const MAX_RETURNED_DATA_ROWS = 5_000;
 
 export function detectDelimitedSeparator(text: string): (typeof DELIMITERS)[number] {
   const line = text.replace(/^﻿/, "").split(/\r?\n/).find((value) => value.trim() !== "") ?? "";
@@ -116,7 +119,7 @@ function assertFileSize(size: number): void {
 
 function assertMatrixLimits(matrices: string[][][]): void {
   const totalRows = matrices.reduce((total, matrix) => total + matrix.filter(hasData).length, 0);
-  if (totalRows > MAX_TOTAL_ROWS) throw new Error("The uploaded file exceeds the 5,000-row limit.");
+  if (totalRows > MAX_PHYSICAL_NONEMPTY_ROWS) throw new Error("The uploaded file exceeds the 8,192 physical-row limit.");
   const hasTooWideData = matrices.some((matrix) => matrix.some((row) =>
     row.reduce((lastDataColumn, cell, index) => cell.trim() === "" ? lastDataColumn : index + 1, 0) > MAX_COLUMNS,
   ));
@@ -165,7 +168,7 @@ export function collectSparseWorksheetMatrices(worksheets: readonly SparseWorksh
       });
       if (!hasData(row)) return;
       retainedDataRows += 1;
-      if (retainedDataRows > MAX_TOTAL_ROWS) throw new Error("The uploaded file exceeds the 5,000-row limit.");
+      if (retainedDataRows > MAX_PHYSICAL_NONEMPTY_ROWS) throw new Error("The uploaded file exceeds the 8,192 physical-row limit.");
       matrix.push(row);
       sourceRowNumbers.push(rowNumber);
     });
@@ -188,11 +191,13 @@ function universalSheet(
   const headerRowIndex = matrixSourceRowNumbers[inference.headerRowIndex] - 1;
   const sourceRows = matrix.slice(inference.headerRowIndex + 1);
   const sourceRowNumbers = matrixSourceRowNumbers.slice(inference.headerRowIndex + 1);
+  const rows = sourceRows.filter(hasData);
+  if (rows.length > MAX_RETURNED_DATA_ROWS) throw new Error("The uploaded file exceeds the 5,000-row limit.");
   return {
     fileName: file.name,
     kind,
     headers: inference.headers,
-    rows: sourceRows.filter(hasData),
+    rows,
     headerRowIndex,
     sourceSignature: buildSourceSignature(inference.headers),
     importedSheetName,
@@ -220,9 +225,11 @@ export async function readUniversalWorkbook(file: UploadFileLike): Promise<Unive
   }
   const sheets = await workbookMatrices(file);
   if (sheets.length === 0) throw new Error("The uploaded file is empty.");
-  return sheets.map(({ matrix, sourceRowNumbers, sheetName, sheetOrdinal }) =>
+  const result = sheets.map(({ matrix, sourceRowNumbers, sheetName, sheetOrdinal }) =>
     universalSheet(file, kind, matrix, sheetName, sheetOrdinal, sourceRowNumbers),
   );
+  if (result.reduce((total, sheet) => total + sheet.rows.length, 0) > MAX_RETURNED_DATA_ROWS) throw new Error("The uploaded file exceeds the 5,000-row limit.");
+  return result;
 }
 
 /** Legacy single-sheet seam. Multi-tab workbooks must be routed through readUniversalWorkbook. */
