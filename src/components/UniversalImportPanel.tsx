@@ -15,6 +15,17 @@ export interface UniversalImportPanelProps {
   saveMapping(sourceSignature: string, mapping: ColumnMapping): Promise<void>;
   matchRows(rows: MappedImportRow[]): Promise<PreviewMatchResult[]>;
   onApply(rows: ImportPreviewRow[]): Promise<UniversalImportApplySummary> | UniversalImportApplySummary;
+  /** Local/mock Task 8 transport. Kept optional so the production/legacy path stays unchanged. */
+  localIdentity?: {
+    enabled: boolean;
+    canApply: boolean;
+    readWorkbook(file: UploadFileLike): Promise<UniversalSheet[]>;
+    previewIdentity(input: { file: UploadFileLike; sheets: UniversalSheet[] }): Promise<{
+      preview: { decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }> };
+      signedPayloads: string[];
+    }>;
+    applyIdentity?(input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: [] }): Promise<UniversalImportApplySummary>;
+  };
 }
 
 const FIELD_LABELS: Record<(typeof IMPORT_FIELD_ORDER)[number], string> = {
@@ -35,6 +46,7 @@ export function UniversalImportPanel({
   saveMapping,
   matchRows,
   onApply,
+  localIdentity,
 }: UniversalImportPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<UniversalSheet | null>(null);
@@ -45,6 +57,7 @@ export function UniversalImportPanel({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<UniversalImportApplySummary | null>(null);
+  const [identityPreview, setIdentityPreview] = useState<{ sheets: UniversalSheet[]; decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }>; signedPayloads: string[] } | null>(null);
 
   async function previewWith(nextSheet: UniversalSheet, nextMapping: ColumnMapping, source: "header" | "content" | "manual" | "remembered") {
     const validation = validateManualMapping(nextSheet.headers, nextMapping);
@@ -75,8 +88,18 @@ export function UniversalImportPanel({
     setBusy(true);
     setError("");
     setPreview(null);
+    setIdentityPreview(null);
     setSummary(null);
     try {
+      if (localIdentity?.enabled) {
+        const sheets = await localIdentity.readWorkbook(file);
+        if (sheets.length === 0) throw new Error("The uploaded workbook is empty.");
+        const result = await localIdentity.previewIdentity({ file, sheets });
+        if (result.signedPayloads.length === 0) throw new Error("Identity preview did not return signed chunks.");
+        setSheet(sheets[0]!);
+        setIdentityPreview({ sheets, decisions: result.preview.decisions, signedPayloads: [...result.signedPayloads] });
+        return;
+      }
       const nextSheet = await readFile(file);
       setSheet(nextSheet);
       const remembered = await loadMapping(nextSheet.sourceSignature);
@@ -119,6 +142,18 @@ export function UniversalImportPanel({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function applyIdentity() {
+    if (!identityPreview || !localIdentity?.applyIdentity) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await localIdentity.applyIdentity({ signedPayloads: identityPreview.signedPayloads, mode: "physical_count", corrections: [] });
+      setSummary(result);
+    } catch (cause) {
+      setError((cause instanceof Error && cause.message) || "Could not apply this identity import.");
+    } finally { setBusy(false); }
   }
 
   return (
@@ -203,6 +238,16 @@ export function UniversalImportPanel({
             </table>
           </div>
           {!summary && <button type="button" data-testid="import-apply" disabled={busy} onClick={() => void apply()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply {preview.total} rows</button>}
+        </div>
+      )}
+      {identityPreview && (
+        <div className="flex flex-col gap-3" data-testid="identity-preview">
+          <p className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+            {identityPreview.sheets.length} sheets. {(["automatic", "review", "abstain", "non_product", "invalid"] as const).map((kind) => `${kind} ${identityPreview.decisions.filter((decision) => decision.kind === kind).length}`).join(", ")}.
+          </p>
+          {localIdentity?.canApply ? (
+            <button type="button" data-testid="identity-apply" disabled={busy} onClick={() => void applyIdentity()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply signed identity preview</button>
+          ) : <p role="status" className="text-sm text-zinc-600">A manager must apply this preview.</p>}
         </div>
       )}
       {summary && <p aria-live="polite" className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900" data-testid="import-summary">Applied {summary.applied}. Needs Review {summary.queuedForReview}. Rejected {summary.rejected}.</p>}

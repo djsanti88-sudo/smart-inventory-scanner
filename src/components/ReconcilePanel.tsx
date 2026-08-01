@@ -15,7 +15,7 @@ import { cleanScanCode } from "@/services/scanCleaner";
 import { downloadCsv } from "@/services/exportFormats";
 import { getSession } from "@/lib/auth";
 import { isLiveAuth } from "@/services/auth/authMode";
-import { readUniversalFile } from "@/services/universalFileReader";
+import { readUniversalFile, readUniversalWorkbook } from "@/services/universalFileReader";
 import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
 
 // Reconcile panel (Task 7, de-branded + universal intake M3/H1): upload an inventory export (CSV,
@@ -121,17 +121,22 @@ export function ReconcilePanel() {
       if (!adapterResult) {
         // Universal fallback (M3/H1): TSV, XLSX, XLS, or any CSV Shop-Ware's synonyms could not
         // place. Reuses the SAME parse + column-mapping intelligence Universal Import uses.
-        const sheet = await readUniversalFile(file);
-        const inference = inferColumnMapping([sheet.headers, ...sheet.rows]);
-        const validation = validateManualMapping(sheet.headers, inference.mapping);
-        if (!validation.ok) {
-          setImportError(
-            `Nothing was imported: ${validation.errors.join(" ")} Seen headers: ${sheet.headers.join(", ") || "(none)"}.`,
-          );
-          return;
-        }
-        adapterResult = mapUniversalSheetToAdapterResult(sheet, inference.mapping);
-        if (includeUnitCost) unitCostsFromFile = extractUniversalUnitCosts(sheet, inference.mapping);
+        // The flagged local identity path must never silently select workbook tab one. It keeps
+        // every sheet in source order; legacy callers retain their single-sheet compatibility seam.
+        const sheets = process.env.NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1 === "1" && !isLiveAuth()
+          ? await readUniversalWorkbook(file)
+          : [await readUniversalFile(file)];
+        const mapped = sheets.map((sheet) => {
+          const inference = inferColumnMapping([sheet.headers, ...sheet.rows]);
+          const validation = validateManualMapping(sheet.headers, inference.mapping);
+          if (!validation.ok) throw new Error(`Nothing was imported: ${validation.errors.join(" ")} Seen headers: ${sheet.headers.join(", ") || "(none)"}.`);
+          return { result: mapUniversalSheetToAdapterResult(sheet, inference.mapping), costs: includeUnitCost ? extractUniversalUnitCosts(sheet, inference.mapping) : {} };
+        });
+        adapterResult = {
+          rows: mapped.flatMap(({ result }) => result.rows), uomReview: mapped.flatMap(({ result }) => result.uomReview),
+          unparseable: mapped.flatMap(({ result }) => result.unparseable), assumptions: mapped.flatMap(({ result }) => result.assumptions),
+        };
+        unitCostsFromFile = Object.assign({}, ...mapped.map(({ costs }) => costs));
       }
 
       if (adapterResult.rows.length === 0 && adapterResult.uomReview.length === 0) {

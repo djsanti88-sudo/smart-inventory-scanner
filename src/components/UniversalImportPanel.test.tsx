@@ -56,6 +56,49 @@ function props() {
 }
 
 describe("UniversalImportPanel", () => {
+  it("uses every workbook sheet and retains every signed preview chunk in local identity mode", async () => {
+    const handlers = props();
+    const secondSheet: UniversalSheet = { ...nonsenseSheet, importedSheetName: "Second", sourceSignature: "source-second" };
+    const previewIdentity = vi.fn().mockResolvedValue({
+      preview: { decisions: [
+        { kind: "automatic" }, { kind: "review" }, { kind: "abstain" }, { kind: "non_product" }, { kind: "invalid" },
+      ] },
+      signedPayloads: ["chunk-0", "chunk-1"],
+    });
+    const localProps = {
+      ...handlers,
+      localIdentity: { enabled: true, canApply: false, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet, secondSheet]), previewIdentity },
+    };
+    render(<UniversalImportPanel {...localProps} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+
+    expect(await screen.findByTestId("identity-preview")).toHaveTextContent("2 sheets");
+    expect(screen.getByTestId("identity-preview")).toHaveTextContent("automatic 1");
+    expect(screen.getByTestId("identity-preview")).toHaveTextContent("review 1");
+    expect(screen.queryByTestId("import-apply")).not.toBeInTheDocument();
+    expect(handlers.matchRows).not.toHaveBeenCalled();
+    expect(previewIdentity).toHaveBeenCalledWith(expect.objectContaining({ sheets: [nonsenseSheet, secondSheet] }));
+  });
+
+  it("submits the complete ordered signed payload set for an authorized local identity apply", async () => {
+    const handlers = props();
+    const applyIdentity = vi.fn().mockResolvedValue({ applied: 2, queuedForReview: 1, rejected: 0 });
+    const localProps = {
+      ...handlers,
+      localIdentity: {
+        enabled: true, canApply: true, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]),
+        previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "automatic" }, { kind: "review" }] }, signedPayloads: ["chunk-0", "chunk-1"] }),
+        applyIdentity,
+      },
+    };
+    render(<UniversalImportPanel {...localProps} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+    await screen.findByTestId("identity-preview");
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await waitFor(() => expect(applyIdentity).toHaveBeenCalledWith({ signedPayloads: ["chunk-0", "chunk-1"], mode: "physical_count", corrections: [] }));
+    expect(handlers.onApply).not.toHaveBeenCalled();
+  });
+
   it("shows actual headers and sample values for a low-confidence file without applying anything", async () => {
     const handlers = props();
     render(<UniversalImportPanel {...handlers} />);
