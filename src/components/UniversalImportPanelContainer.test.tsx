@@ -95,6 +95,7 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
     const input = createPreview.mock.calls[0]![0];
     expect(input.rows).toHaveLength(5_000);
     expect(input.rows.map((row: { sourceRowNumber: number }) => row.sourceRowNumber)).toEqual(rows.map((_, index) => index + 2));
+    expect(kinds.map((kind, offset) => input.rows.filter((row: { quantity: number }, index: number) => index % 5 === offset).reduce((total: number, row: { quantity: number }) => total + row.quantity, 0))).toEqual([1_000, 2_000, 3_000, 4_000, 5_000]);
     expect(panel).toHaveTextContent("automatic 1000, review 1000, abstain 1000, non_product 1000, invalid 1000");
     expect(panel.querySelectorAll("select")).toHaveLength(25);
   });
