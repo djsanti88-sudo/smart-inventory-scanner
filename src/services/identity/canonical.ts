@@ -15,7 +15,6 @@ const identifierTypes = new Set<IdentifierType>([
   "source_alias",
 ]);
 const namespacedIdentifierTypes = new Set<IdentifierType>([
-  "barcode",
   "manufacturer_part_number",
   "vendor_sku",
   "oem_number",
@@ -23,6 +22,12 @@ const namespacedIdentifierTypes = new Set<IdentifierType>([
   "shelf_code",
   "source_alias",
 ]);
+
+/** Global scan identifiers may omit a namespace; local/vendor identifiers must not. */
+export function isValidIdentityNamespace(type: unknown, namespace: unknown): boolean {
+  if (typeof type !== "string" || !identifierTypes.has(type as IdentifierType) || typeof namespace !== "string") return false;
+  return !namespacedIdentifierTypes.has(type as IdentifierType) || Boolean(namespace.trim());
+}
 
 function unsupportedCanonicalValue(): never {
   throw new TypeError("Unsupported canonical JSON value");
@@ -138,10 +143,7 @@ function validateIdentityInputUnsafe(input: unknown): string[] {
       }
     }
     const identifierType = type as IdentifierType;
-    if (
-      namespacedIdentifierTypes.has(identifierType) &&
-      (typeof identifier.namespace !== "string" || !identifier.namespace.trim())
-    ) {
+    if (!isValidIdentityNamespace(identifierType, identifier.namespace ?? "")) {
       errors.push(`identifiers[${index}] requires a namespace for ${identifierType}`);
     }
     if (

@@ -87,6 +87,30 @@ describe("identity review route", () => {
     expect(currentApprovedLinks).toHaveBeenCalledWith("shop-a");
   });
 
+  it("revokes a globally scoped UPC link with an empty namespace but rejects an unscoped vendor SKU", async () => {
+    const upcLink = { businessId: "shop-a", sourceSystem: "demo", vendorId: "vendor-a", sourceSignature: "demo-v1", identifierType: "upc" as const, namespace: "", normalizedValue: "012345678905", targetProductId: "tire-a", version: 1, predecessorFingerprint: "upc-fingerprint", predecessorSource: "configured" as const };
+    const standaloneUpcLink = { sourceSystem: upcLink.sourceSystem, vendorId: upcLink.vendorId, sourceSignature: upcLink.sourceSignature, identifierType: upcLink.identifierType, namespace: upcLink.namespace, normalizedValue: upcLink.normalizedValue, targetProductId: upcLink.targetProductId, version: upcLink.version, predecessorFingerprint: upcLink.predecessorFingerprint, predecessorSource: upcLink.predecessorSource };
+    const revokeIdentityLink = vi.fn().mockResolvedValue({ ...upcLink, status: "revoked", version: 2 });
+    const { handler } = route({ currentApprovedLinks: vi.fn().mockResolvedValue([upcLink]), repository: { listIdentityReviews: vi.fn().mockResolvedValue([]), revokeIdentityLink } as never });
+    const revoked = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "revoke_link", link: standaloneUpcLink }) }));
+    expect(revoked.status).toBe(200);
+    expect(revokeIdentityLink).toHaveBeenCalledWith(expect.objectContaining({ link: expect.objectContaining({ identifierType: "upc", namespace: "" }), predecessor: { source: "configured", fingerprint: "upc-fingerprint", version: 1 } }));
+
+    const vendorSku = { ...standaloneUpcLink, identifierType: "vendor_sku", normalizedValue: "SKU-1", predecessorFingerprint: "vendor-fingerprint" };
+    const rejected = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "revoke_link", link: vendorSku }) }));
+    expect(rejected.status).toBe(400);
+    expect(revokeIdentityLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps a standalone-link revoke race to a safe conflict response", async () => {
+    const link = { businessId: "shop-a", sourceSystem: "demo", vendorId: "vendor-a", sourceSignature: "demo-v1", identifierType: "upc" as const, namespace: "", normalizedValue: "012345678905", targetProductId: "tire-a", version: 1, predecessorFingerprint: "raced", predecessorSource: "durable" as const };
+    const standaloneLink = { sourceSystem: link.sourceSystem, vendorId: link.vendorId, sourceSignature: link.sourceSignature, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, version: link.version, predecessorFingerprint: link.predecessorFingerprint, predecessorSource: link.predecessorSource };
+    const { handler } = route({ currentApprovedLinks: vi.fn().mockResolvedValue([link]), repository: { listIdentityReviews: vi.fn().mockResolvedValue([]), revokeIdentityLink: vi.fn().mockRejectedValue(new Error("identity_link_revoke_conflict")) } as never });
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "revoke_link", link: standaloneLink }) }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "The identity review changed before this action could be applied." });
+  });
+
   it("does not let a confirm action repoint a different current approved target", async () => {
     const { handler, repository } = route({ repository: {
       listIdentityReviews: vi.fn().mockResolvedValue([review]),

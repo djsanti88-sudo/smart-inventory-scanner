@@ -132,4 +132,22 @@ describe("IdentityReviewTable", () => {
     const nextAction = await screen.findByRole("button", { name: /revoke approved link sku-2/i });
     await waitFor(() => expect(document.activeElement).toBe(nextAction));
   });
+
+  it("keeps revocation focus inside its own table when multiple review tables are mounted", async () => {
+    const first = { ...approvedLink, normalizedValue: "SHOP-A-1", predecessorFingerprint: "shop-a-one" };
+    const next = { ...approvedLink, normalizedValue: "SHOP-A-2", predecessorFingerprint: "shop-a-two" };
+    const other = { ...approvedLink, normalizedValue: "SHOP-B-1", predecessorFingerprint: "shop-b-one" };
+    let shopAGets = 0;
+    global.fetch = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve({ ok: true, json: async () => ({ link: { ...first, status: "revoked" } }) });
+      const url = new URL(input.toString(), "http://local");
+      const isShopA = url.searchParams.get("businessId") === "shop-a";
+      return Promise.resolve({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: isShopA ? (shopAGets++ === 0 ? [first, next] : [next]) : [other] }) });
+    }) as typeof fetch;
+    render(<><IdentityReviewTable businessId="shop-b" actorRole="admin" /><IdentityReviewTable businessId="shop-a" actorRole="admin" /></>);
+    const firstAction = await screen.findByRole("button", { name: /revoke approved link shop-a-1/i });
+    fireEvent.click(firstAction);
+    const nextAction = await screen.findByRole("button", { name: /revoke approved link shop-a-2/i });
+    await waitFor(() => expect(document.activeElement).toBe(nextAction));
+  });
 });

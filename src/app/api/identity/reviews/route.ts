@@ -8,7 +8,7 @@ import { createLocalRepository, type LocalIdentityRepository } from "@/server/id
 import { deriveAuthoritativeLinkSnapshotHash, loadAuthoritativeLocalIdentityReadModel, type CurrentApprovedIdentityLink } from "@/server/identity/localIdentityReadModel";
 import type { ApplyActor } from "@/server/identity/applyService";
 import type { IdentityLink, IdentityReview, TenantIdentityProduct } from "@/services/identity/types";
-import { canonicalSha256 } from "@/services/identity/canonical";
+import { canonicalSha256, isValidIdentityNamespace } from "@/services/identity/canonical";
 
 type ReviewRole = ApplyActor["role"];
 type ReviewRepository = Pick<LocalIdentityRepository, "listIdentityReviews"> & Partial<Pick<LocalIdentityRepository, "listCurrentIdentityLinks" | "applyReviewAction" | "resolveIdentityReview" | "saveIdentityLink" | "createTenantProduct" | "revokeIdentityLink">>;
@@ -33,7 +33,7 @@ const bucketValues = new Set<Bucket>(["automatic", "review", "abstain", "non_pro
 const maxBodyBytes = 16 * 1024;
 function positiveInteger(value: string | null, fallback: number, maximum: number): number { const parsed = Number(value); return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback; }
 type StandaloneLink = Pick<CurrentApprovedIdentityLink, "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version" | "predecessorFingerprint" | "predecessorSource">;
-function standaloneLink(value: unknown): value is StandaloneLink { if (!value || typeof value !== "object" || Array.isArray(value)) return false; const link = value as Record<string, unknown>; return Object.keys(link).every((key) => ["sourceSystem", "sourceSignature", "vendorId", "identifierType", "namespace", "normalizedValue", "targetProductId", "version", "predecessorFingerprint", "predecessorSource"].includes(key)) && ["sourceSystem", "sourceSignature", "vendorId", "identifierType", "namespace", "normalizedValue", "targetProductId", "predecessorFingerprint"].every((key) => typeof link[key] === "string" && Boolean((link[key] as string).trim())) && Number.isSafeInteger(link.version) && (link.predecessorSource === "configured" || link.predecessorSource === "durable"); }
+function standaloneLink(value: unknown): value is StandaloneLink { if (!value || typeof value !== "object" || Array.isArray(value)) return false; const link = value as Record<string, unknown>; return Object.keys(link).every((key) => ["sourceSystem", "sourceSignature", "vendorId", "identifierType", "namespace", "normalizedValue", "targetProductId", "version", "predecessorFingerprint", "predecessorSource"].includes(key)) && ["sourceSystem", "sourceSignature", "vendorId", "identifierType", "normalizedValue", "targetProductId", "predecessorFingerprint"].every((key) => typeof link[key] === "string" && Boolean((link[key] as string).trim())) && isValidIdentityNamespace(link.identifierType, link.namespace) && Number.isSafeInteger(link.version) && (link.predecessorSource === "configured" || link.predecessorSource === "durable"); }
 function requestBody(value: unknown): value is { businessId: string; reviewId?: string; action: Action; targetProductId?: string; name?: string; link?: StandaloneLink } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const input = value as Record<string, unknown>;
@@ -98,7 +98,7 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     }
     const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: 0 };
     return json(await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link));
-    } catch (error) { if (error instanceof Error && /identity_review_(action_conflict|terminal|revoke_conflict|target_conflict)/.test(error.message)) return json({ error: "The identity review changed before this action could be applied." }, 409); return json({ error: "Unable to update identity review." }, 500); }
+    } catch (error) { if (error instanceof Error && /identity_(?:review_(?:action_conflict|terminal|revoke_conflict|target_conflict)|link_revoke_conflict)/.test(error.message)) return json({ error: "The identity review changed before this action could be applied." }, 409); return json({ error: "Unable to update identity review." }, 500); }
   };
 }
 

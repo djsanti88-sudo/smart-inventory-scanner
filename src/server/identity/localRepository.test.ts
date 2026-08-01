@@ -75,6 +75,13 @@ describe("local identity repository", () => {
     );
   });
 
+  it("revokes a configured globally scoped UPC link with an empty namespace but rejects an empty vendor SKU namespace", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const upcLink = { ...approvedLink, identifierType: "upc" as const, namespace: "", rawValue: "012345678905", normalizedValue: "012345678905" };
+    await expect(repository.revokeIdentityLink({ link: upcLink, predecessor: { source: "configured", fingerprint: "configured-upc", version: 1 } })).resolves.toMatchObject({ status: "revoked", namespace: "", version: 2 });
+    await expect(repository.revokeIdentityLink({ link: { ...approvedLink, namespace: "" }, predecessor: { source: "configured", fingerprint: "configured-sku", version: 1 } })).rejects.toThrow(/namespace/);
+  });
+
   it("makes one concurrent import operation lease claim and reports the other as in progress", async () => {
     const now = 100;
     const repository = createLocalRepository(createMemoryAtomicLocalStorage(), { now: () => now });
