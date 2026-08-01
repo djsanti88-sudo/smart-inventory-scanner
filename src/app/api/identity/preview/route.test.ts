@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentityPreviewRoute, POST } from "./route";
 import { setLocalIdentityPreviewCompositionForTest } from "@/server/identity/previewComposition";
 import { deriveConfiguredSnapshotHashes } from "@/server/identity/localIdentityReadModel";
+import { buildLocalIdentityPreviewRequest } from "@/components/UniversalImportPanelContainer";
 
 const actualBody = {
   rows: [{ businessId: "demo-shop", sourceSystem: "csv", sourceSignature: "headers-v1", vendorId: "vendor-a", sourceFileFingerprint: "file-a", sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, identifiers: [{ type: "manufacturer_part_number", namespace: "vendor-a", raw: "PN-1", normalized: "PN-1", source: "csv", evidenceAuthority: "vendor_import", evidenceId: "row-1", evidenceVersion: "1" }], attributes: {}, quantity: 1, rawRecordFingerprint: "row-1" }],
@@ -20,6 +21,27 @@ async function configuredEmptySnapshot(): Promise<string> {
 }
 
 describe("POST /api/identity/preview", () => {
+  it("accepts held and adapter-invalid physical rows and returns one terminal decision for each", async () => {
+    const requestBody = buildLocalIdentityPreviewRequest({
+      businessId: "demo-shop", file: { name: "held.csv", size: 42 }, sheets: [{
+        fileName: "held.csv", kind: "csv", headers: ["Name", "Quantity", "Unit"],
+        rows: [["Held", "3", "box"], ["Bad", "", "each"]], headerRowIndex: 0,
+        sourceSignature: "headers-held", sourceRowNumbers: [2, 5],
+      }],
+    });
+    const createPreview = vi.fn().mockImplementation(async (input: typeof requestBody) => ({
+      preview: { decisions: input.rows.map((row) => ({ kind: row.attributes.adapterStatus === "held" ? "review" : "invalid" })) },
+      signedPayloads: ["signed"],
+    }));
+    const handler = createIdentityPreviewRoute({ enabled: () => true, authorize: async (_request, businessId) => businessId === "demo-shop" ? { actorId: "viewer-1", role: "viewer" } : undefined, createPreview });
+    const response = await handler(new Request("http://localhost/api/identity/preview", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).preview.decisions).toEqual([{ kind: "review" }, { kind: "invalid" }]);
+    expect(createPreview).toHaveBeenCalledWith(expect.objectContaining({ rows: expect.arrayContaining([
+      expect.objectContaining({ sourceRowNumber: 2 }), expect.objectContaining({ sourceRowNumber: 5 }),
+    ]) }), { actorId: "viewer-1", role: "viewer" });
+  });
+
   it("is unavailable unless the local mock feature flag is enabled", async () => {
     const handler = createIdentityPreviewRoute({ enabled: () => false, createPreview: vi.fn() });
     const response = await handler(new Request("http://localhost/api/identity/preview", { method: "POST", body: "{}" }));

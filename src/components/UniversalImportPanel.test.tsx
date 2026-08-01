@@ -91,11 +91,11 @@ describe("UniversalImportPanel", () => {
   it("submits the complete ordered signed payload set for an authorized local identity apply", async () => {
     const handlers = props();
     const chunks = signedChunks();
-    const applyIdentity = vi.fn().mockResolvedValue({ applied: 2, queuedForReview: 1, rejected: 0 });
+    const applyIdentity = vi.fn().mockResolvedValue({ importId: "import-a", mode: "physical_count", countedRows: 2, countQuantity: 3, rows: [{ rowId: "r1", status: "counted" }, { rowId: "r2", status: "not_counted" }] });
     const localProps = {
       ...handlers,
       localIdentity: {
-        enabled: true, role: "manager", mode: "physical_count" as const, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]),
+        enabled: true, role: "admin", mode: "physical_count" as const, readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]),
         previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "automatic" }, { kind: "review" }] }, signedPayloads: chunks }),
         applyIdentity,
       },
@@ -123,7 +123,15 @@ describe("UniversalImportPanel", () => {
     }
   });
 
-  it("re-previews a stale apply and requires an explicit retry with the replacement chunks", async () => {
+  it("does not grant the non-server manager role an Apply control", async () => {
+    const handlers = props();
+    render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "manager", mode: "physical_count", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: signedChunks() }), applyIdentity: vi.fn() }} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+    await screen.findByTestId("identity-preview");
+    expect(screen.queryByTestId("identity-apply")).not.toBeInTheDocument();
+  });
+
+  it.each(["apply_target_stale", "apply_preview_invalidated", "preview_versions_stale"])("re-previews %s and requires an explicit retry with replacement chunks", async (code) => {
     const handlers = props();
     const oldChunks = signedChunks();
     const newChunks = signedChunks(["new-a", "new-b"]);
@@ -131,8 +139,8 @@ describe("UniversalImportPanel", () => {
       .mockResolvedValueOnce({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: oldChunks })
       .mockResolvedValueOnce({ preview: { decisions: [{ kind: "automatic" }] }, signedPayloads: newChunks });
     const applyIdentity = vi.fn()
-      .mockRejectedValueOnce(Object.assign(new Error("Preview is stale."), { code: "apply_target_stale" }))
-      .mockResolvedValueOnce({ applied: 1, queuedForReview: 0, rejected: 0 });
+      .mockRejectedValueOnce(Object.assign(new Error("Preview is stale."), { code }))
+      .mockResolvedValueOnce({ importId: "import-a", mode: "physical_count", countedRows: 1, countQuantity: 1, rows: [{ rowId: "r1", status: "counted" }] });
     render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "owner", mode: "physical_count", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity, applyIdentity }} />);
     fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
     await screen.findByTestId("identity-apply");
@@ -140,6 +148,35 @@ describe("UniversalImportPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/preview refreshed.*apply again/i);
     fireEvent.click(screen.getByTestId("identity-apply"));
     await waitFor(() => expect(applyIdentity).toHaveBeenLastCalledWith({ signedPayloads: newChunks, mode: "physical_count", corrections: [] }));
+  });
+
+  it("fails closed when refreshing a stale preview fails and invites a recoverable re-preview", async () => {
+    const handlers = props();
+    const previewIdentity = vi.fn()
+      .mockResolvedValueOnce({ preview: { decisions: [{ kind: "review" }] }, signedPayloads: signedChunks() })
+      .mockRejectedValueOnce(new Error("Snapshot unavailable"));
+    const applyIdentity = vi.fn().mockRejectedValueOnce(Object.assign(new Error("Preview invalidated"), { code: "apply_preview_invalidated" }));
+    render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "admin", mode: "physical_count", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity, applyIdentity }} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+    await screen.findByTestId("identity-apply");
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not refresh.*choose the file again/i);
+    expect(screen.queryByTestId("identity-apply")).not.toBeInTheDocument();
+  });
+
+  it("submits stable-row corrections and renders the real apply result with a bounded review surface", async () => {
+    const handlers = props();
+    const reviews = Array.from({ length: 100 }, (_, index) => ({ kind: "review", candidates: [{ productId: `product-${index}` }] }));
+    const token = JSON.stringify({ manifestVersion: "identity-preview-v1", chunkIndex: 0, chunkCount: 1, sanitizedContentRootHash: "root", importId: "import", previewFingerprint: "preview", signature: "sig", rowIds: reviews.map((_, index) => `row-${index}`), decisions: reviews });
+    const applyIdentity = vi.fn().mockResolvedValue({ importId: "import", mode: "reconcile", countedRows: 0, countQuantity: 0, rows: reviews.map((_, index) => ({ rowId: `row-${index}`, status: "reconciled" })), reconciliation: { expectedRows: 100, expectedQuantity: 450 } });
+    render(<UniversalImportPanel {...handlers} localIdentity={{ enabled: true, role: "owner", mode: "reconcile", readWorkbook: vi.fn().mockResolvedValue([nonsenseSheet]), previewIdentity: vi.fn().mockResolvedValue({ preview: { decisions: reviews }, signedPayloads: [token] }), applyIdentity }} />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["x"], "book.xlsx")] } });
+    await screen.findByTestId("identity-apply");
+    expect(screen.getAllByRole("combobox", { name: /Correction for row-/ })).toHaveLength(25);
+    fireEvent.change(screen.getByRole("combobox", { name: "Correction for row-0" }), { target: { value: "product-0" } });
+    fireEvent.click(screen.getByTestId("identity-apply"));
+    await waitFor(() => expect(applyIdentity).toHaveBeenCalledWith({ signedPayloads: [token], mode: "reconcile", corrections: [{ rowId: "row-0", targetProductId: "product-0" }] }));
+    expect(await screen.findByTestId("identity-apply-summary")).toHaveTextContent("Reconciled 100 rows, expected quantity 450");
   });
 
   it("shows actual headers and sample values for a low-confidence file without applying anything", async () => {

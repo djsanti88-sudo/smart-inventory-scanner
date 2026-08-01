@@ -18,7 +18,7 @@ import { isLiveAuth } from "@/services/auth/authMode";
 import { readUniversalFile, readUniversalWorkbook } from "@/services/universalFileReader";
 import { inferColumnMapping, validateManualMapping } from "@/services/columnIntelligence";
 import { UniversalImportPanel } from "@/components/UniversalImportPanel";
-import { buildLocalIdentityPreviewRequest } from "@/components/UniversalImportPanelContainer";
+import { buildLocalIdentityPreviewRequest, sha256UploadFile } from "@/components/UniversalImportPanelContainer";
 
 // Reconcile panel (Task 7, de-branded + universal intake M3/H1): upload an inventory export (CSV,
 // TSV, or Excel), match it against the local tire corpus server-side, and compare the expected
@@ -104,16 +104,17 @@ export function ReconcilePanel() {
 
   if (localIdentityEnabled) {
     const previewIdentity = async ({ file, sheets }: { file: { name: string; size?: number }; sheets: Awaited<ReturnType<typeof readUniversalWorkbook>> }) => {
-      const response = await fetch("/api/identity/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildLocalIdentityPreviewRequest({ file, sheets, businessId })) });
+      const originalFileHash = await sha256UploadFile(file as File);
+      const response = await fetch("/api/identity/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildLocalIdentityPreviewRequest({ file: { name: originalFileHash, size: file.size }, sheets, businessId })) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "Could not create the reconcile preview.");
       return body as { preview: { decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }> }; signedPayloads: string[] };
     };
-    const applyIdentity = async (input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: [] }) => {
+    const applyIdentity = async (input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: Array<{ rowId: string; targetProductId: string }> }) => {
       const response = await fetch("/api/identity/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw Object.assign(new Error(body.error ?? "Could not apply the reconcile preview."), { code: body.code ?? (response.status === 409 ? "apply_target_stale" : undefined) });
-      return { applied: body.applied ?? 0, queuedForReview: body.queuedForReview ?? 0, rejected: body.rejected ?? 0 };
+      return body;
     };
     return <UniversalImportPanel
       fileTestId="reconcile-file"

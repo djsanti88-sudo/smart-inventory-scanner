@@ -9,7 +9,7 @@
 // undefined without calling getSession - no Firebase auth mocking is needed here.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildLocalIdentityPreviewRequest, UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
+import { buildLocalIdentityPreviewRequest, sha256UploadFile, UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
 import { useScanStore } from "@/stores/scanStore";
 import type { ColumnMapping, UniversalSheet } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
@@ -71,6 +71,11 @@ beforeEach(() => {
 });
 
 describe("UniversalImportPanelContainer - empty businessId (fresh signup, no membership yet)", () => {
+  it("hashes original upload bytes with SHA-256 instead of trusting filename and size", async () => {
+    const bytes = new TextEncoder().encode("abc");
+    const file = { name: "same.csv", size: 3, text: async () => "abc", arrayBuffer: async () => bytes.buffer };
+    expect(await sha256UploadFile(file)).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  });
   it("namespaces barcode evidence and represents held and invalid source rows with collision-safe fingerprints", () => {
     const sheet: UniversalSheet = {
       fileName: "same.xlsx", kind: "xlsx", importedSheetName: "Stock", sheetOrdinal: 2,

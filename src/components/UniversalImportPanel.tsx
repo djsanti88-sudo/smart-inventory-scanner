@@ -1,7 +1,7 @@
 // src/components/UniversalImportPanel.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { IMPORT_FIELD_ORDER, type ColumnMapping, type ImportField, type ImportPreview, type ImportPreviewRow, type MappedImportRow, type UniversalImportApplySummary, type UniversalSheet, type UploadFileLike } from "@/services/importSchema";
 import { inferColumnMapping, validateManualMapping, type FieldTier } from "@/services/columnIntelligence";
 import { readUniversalFile } from "@/services/universalFileReader";
@@ -11,6 +11,7 @@ const PREVIEW_LIMIT = 20;
 
 export interface UniversalImportPanelProps {
   fileTestId?: string;
+  reviewSurface?: ReactNode;
   readFile?: (file: UploadFileLike) => Promise<UniversalSheet>;
   loadMapping(sourceSignature: string): Promise<ColumnMapping | null>;
   saveMapping(sourceSignature: string, mapping: ColumnMapping): Promise<void>;
@@ -26,11 +27,11 @@ export interface UniversalImportPanelProps {
       preview: { decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }> };
       signedPayloads: string[];
     }>;
-    applyIdentity?(input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: [] }): Promise<UniversalImportApplySummary>;
+    applyIdentity?(input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: Array<{ rowId: string; targetProductId: string }> }): Promise<{ importId: string; mode: "physical_count" | "reconcile"; countedRows: number; countQuantity: number; rows: Array<{ rowId: string; status: "counted" | "reconciled" | "not_counted" }>; reconciliation?: { expectedRows: number; expectedQuantity: number } }>;
   };
 }
 
-const APPLY_ROLES = new Set(["manager", "admin", "owner"]);
+const APPLY_ROLES = new Set(["admin", "owner"]);
 
 function validateSignedPayloadSet(tokens: string[]): string | null {
   if (tokens.length === 0) return "Signed preview is incomplete or invalid.";
@@ -62,6 +63,7 @@ const FIELD_LABELS: Record<(typeof IMPORT_FIELD_ORDER)[number], string> = {
 
 export function UniversalImportPanel({
   fileTestId = "universal-import-file",
+  reviewSurface,
   readFile = readUniversalFile,
   loadMapping,
   saveMapping,
@@ -81,6 +83,8 @@ export function UniversalImportPanel({
   const [identityPreview, setIdentityPreview] = useState<{ sheets: UniversalSheet[]; decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }>; signedPayloads: string[] } | null>(null);
   const [identitySource, setIdentitySource] = useState<{ file: UploadFileLike; sheets: UniversalSheet[] } | null>(null);
   const [identityChunkError, setIdentityChunkError] = useState<string | null>(null);
+  const [corrections, setCorrections] = useState<Record<string, string>>({});
+  const [identityApplyResult, setIdentityApplyResult] = useState<{ countedRows: number; countQuantity: number; rows: Array<{ status: string }>; reconciliation?: { expectedRows: number; expectedQuantity: number } } | null>(null);
 
   async function previewWith(nextSheet: UniversalSheet, nextMapping: ColumnMapping, source: "header" | "content" | "manual" | "remembered") {
     const validation = validateManualMapping(nextSheet.headers, nextMapping);
@@ -174,14 +178,20 @@ export function UniversalImportPanel({
     setBusy(true);
     setError("");
     try {
-      const result = await localIdentity.applyIdentity({ signedPayloads: identityPreview.signedPayloads, mode: localIdentity.mode, corrections: [] });
-      setSummary(result);
+      const result = await localIdentity.applyIdentity({ signedPayloads: identityPreview.signedPayloads, mode: localIdentity.mode, corrections: Object.entries(corrections).filter((entry) => entry[1]).map(([rowId, targetProductId]) => ({ rowId, targetProductId })) });
+      setIdentityApplyResult(result);
     } catch (cause) {
-      if (cause && typeof cause === "object" && "code" in cause && (cause as { code?: unknown }).code === "apply_target_stale" && identitySource) {
-        const refreshed = await localIdentity.previewIdentity(identitySource);
-        setIdentityChunkError(validateSignedPayloadSet(refreshed.signedPayloads));
-        setIdentityPreview({ sheets: identitySource.sheets, decisions: refreshed.preview.decisions, signedPayloads: [...refreshed.signedPayloads] });
-        setError("Preview refreshed because the catalog changed. Review it, then press Apply again.");
+      const staleCodes = new Set(["apply_target_stale", "apply_preview_invalidated", "preview_versions_stale"]);
+      if (cause && typeof cause === "object" && "code" in cause && staleCodes.has(String((cause as { code?: unknown }).code)) && identitySource) {
+        try {
+          const refreshed = await localIdentity.previewIdentity(identitySource);
+          setIdentityChunkError(validateSignedPayloadSet(refreshed.signedPayloads));
+          setIdentityPreview({ sheets: identitySource.sheets, decisions: refreshed.preview.decisions, signedPayloads: [...refreshed.signedPayloads] });
+          setError("Preview refreshed because the catalog changed. Review it, then press Apply again.");
+        } catch {
+          setIdentityChunkError("Signed preview is unavailable. Choose the file again to re-preview.");
+          setError("Could not refresh the stale preview. Choose the file again to re-preview.");
+        }
       } else setError((cause instanceof Error && cause.message) || "Could not apply this identity import.");
     } finally { setBusy(false); }
   }
@@ -276,11 +286,26 @@ export function UniversalImportPanel({
             {identityPreview.sheets.length} sheets. {(["automatic", "review", "abstain", "non_product", "invalid"] as const).map((kind) => `${kind} ${identityPreview.decisions.filter((decision) => decision.kind === kind).length}`).join(", ")}.
           </p>
           {identityChunkError && <p role="status" className="text-sm text-red-700">{identityChunkError}</p>}
+          {identityPreview.signedPayloads.flatMap((token) => {
+            try {
+              const chunk = JSON.parse(token) as { rowIds?: string[]; decisions?: Array<{ kind?: string; candidates?: Array<{ productId?: string }> }> };
+              return (chunk.decisions ?? []).map((decision, index) => ({ rowId: chunk.rowIds?.[index], decision })).filter((item) => item.rowId && item.decision.kind === "review").slice(0, 25);
+            } catch { return []; }
+          }).slice(0, 25).map(({ rowId, decision }) => (
+            <label key={rowId} className="flex flex-col gap-1 text-sm">Resolve {rowId}
+              <select aria-label={`Correction for ${rowId}`} value={corrections[rowId!] ?? ""} onChange={(event) => setCorrections((current) => ({ ...current, [rowId!]: event.target.value }))}>
+                <option value="">Leave for review</option>
+                {(decision.candidates ?? []).map((candidate) => candidate.productId ? <option key={candidate.productId} value={candidate.productId}>{candidate.productId}</option> : null)}
+              </select>
+            </label>
+          ))}
           {localIdentity?.role && APPLY_ROLES.has(localIdentity.role) && !identityChunkError ? (
             <button type="button" data-testid="identity-apply" disabled={busy} onClick={() => void applyIdentity()} className="min-h-[44px] w-fit rounded-lg bg-blue-600 px-4 font-medium text-white disabled:opacity-50">Apply signed identity preview</button>
           ) : <p role="status" className="text-sm text-zinc-600">A manager must apply this preview.</p>}
         </div>
       )}
+      {identityApplyResult && <p aria-live="polite" data-testid="identity-apply-summary" className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900">{identityApplyResult.reconciliation ? `Reconciled ${identityApplyResult.reconciliation.expectedRows} rows, expected quantity ${identityApplyResult.reconciliation.expectedQuantity}.` : `Counted ${identityApplyResult.countedRows} rows, quantity ${identityApplyResult.countQuantity}.`} Not counted {identityApplyResult.rows.filter((row) => row.status === "not_counted").length}.</p>}
+      {identityApplyResult && reviewSurface}
       {summary && <p aria-live="polite" className="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900" data-testid="import-summary">Applied {summary.applied}. Needs Review {summary.queuedForReview}. Rejected {summary.rejected}.</p>}
       {busy && <p aria-live="polite" className="text-sm text-zinc-600">Working...</p>}
     </section>

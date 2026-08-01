@@ -2,6 +2,7 @@
 
 import { getSession } from "@/lib/auth";
 import { UniversalImportPanel } from "@/components/UniversalImportPanel";
+import { IdentityReviewTable } from "@/components/IdentityReviewTable";
 import { isLiveAuth } from "@/services/auth/authMode";
 import type { ColumnMapping, MappedImportRow, UniversalSheet, UploadFileLike } from "@/services/importSchema";
 import { readUniversalWorkbook } from "@/services/universalFileReader";
@@ -22,7 +23,7 @@ type LocalPreviewRequest = {
 export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: { file: Pick<UploadFileLike, "name" | "size">; sheets: UniversalSheet[]; businessId: string }): LocalPreviewRequest {
   const rows: IdentityInput[] = [];
   const orderedMappings: LocalPreviewRequest["orderedMappings"] = [];
-  const fileFingerprint = `${file.name}:${file.size ?? 0}`;
+  const fileFingerprint = /^[a-f0-9]{64}$/i.test(file.name) ? file.name.toLowerCase() : `${file.name}:${file.size ?? 0}`;
   sheets.forEach((sheet, sheetIndex) => {
     const inference = inferColumnMapping([sheet.headers, ...sheet.rows]);
     const mapping = inference.mapping;
@@ -47,14 +48,19 @@ export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: {
         vendorId: "local-upload", sourceFileFingerprint: fileFingerprint, sourceFileOrdinal: sheet.sheetOrdinal ?? sheetIndex + 1,
         sheetName: sheet.importedSheetName ?? sheet.fileName, sourceRowNumber: physicalRow, identifiers,
         brand: brand || undefined, title: item?.name || value("name") || `Source row ${physicalRow}`,
-        attributes: { model: item?.model ?? value("model"), size: item?.size ?? value("size"), category: item?.category ?? value("category"), adapterStatus: item ? (mapped.rows.includes(item) ? "mapped" : "held") : "invalid" },
+        attributes: { model: item?.model ?? value("model"), size: item?.size ?? value("size"), category: item?.category ?? value("category"), sourceUnitOfMeasure: item?.uom || value("uom"), adapterStatus: item ? (mapped.rows.includes(item) ? "mapped" : "held") : "invalid" },
         quantity: Number.isSafeInteger(parsedQuantity) && parsedQuantity >= 0 ? parsedQuantity : 0,
-        unitOfMeasure: item?.uom || value("uom") || "each",
+        unitOfMeasure: "each",
         rawRecordFingerprint: `${fileFingerprint}:${sheet.sheetOrdinal ?? sheetIndex + 1}:${sheet.importedSheetName ?? sheet.fileName}:${physicalRow}`,
       });
     });
   });
   return { rows, orderedMappings, sourceFileHashes: [fileFingerprint], importerVersion: "universal-import-ui-v1" };
+}
+
+export async function sha256UploadFile(file: UploadFileLike): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 async function token(): Promise<string | undefined> {
@@ -124,21 +130,22 @@ export function UniversalImportPanelContainer() {
   }
 
   async function previewIdentity({ file, sheets }: { file: { name: string; size?: number }; sheets: Awaited<ReturnType<typeof readUniversalWorkbook>> }) {
-    const request = buildLocalIdentityPreviewRequest({ file, sheets, businessId });
+    const originalFileHash = await sha256UploadFile(file as UploadFileLike);
+    const request = buildLocalIdentityPreviewRequest({ file: { name: originalFileHash, size: file.size }, sheets, businessId });
     const response = await fetch("/api/identity/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? "Could not create the identity preview.");
     return body as { preview: { decisions: Array<{ kind: "automatic" | "review" | "abstain" | "non_product" | "invalid" }> }; signedPayloads: string[] };
   }
 
-  async function applyIdentity(input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: [] }) {
+  async function applyIdentity(input: { signedPayloads: string[]; mode: "physical_count" | "reconcile"; corrections: Array<{ rowId: string; targetProductId: string }> }) {
     const response = await fetch("/api/identity/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = Object.assign(new Error(body.error ?? "Could not apply the identity preview."), { code: body.code ?? (response.status === 409 ? "apply_target_stale" : undefined) });
       throw error;
     }
-    return { applied: body.applied ?? 0, queuedForReview: body.queuedForReview ?? 0, rejected: body.rejected ?? 0 };
+    return body;
   }
 
   return (
@@ -147,6 +154,7 @@ export function UniversalImportPanelContainer() {
       saveMapping={saveMapping}
       matchRows={matchRows}
       onApply={async (rows) => applyUniversalImport(rows)}
+      reviewSurface={businessId && (localRole === "owner" || localRole === "admin") ? <IdentityReviewTable businessId={businessId} actorRole={localRole} /> : undefined}
       localIdentity={localIdentityEnabled ? { enabled: true, role: localRole, mode: "physical_count", readWorkbook: readUniversalWorkbook, previewIdentity, applyIdentity } : undefined}
     />
   );
