@@ -42,7 +42,7 @@ describe("identity review route", () => {
     const { handler, repository } = route();
     const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a"));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ reviews: [review], page: 1, pageSize: 25, total: 1 });
+    expect(await response.json()).toMatchObject({ reviews: [review], page: 1, pageSize: 25, total: 1, bucketTotals: { review: 1 } });
     expect(repository.listIdentityReviews).toHaveBeenCalledWith("shop-a");
   });
 
@@ -65,6 +65,34 @@ describe("identity review route", () => {
     const response = await failing(new Request("http://local/api/identity/reviews?businessId=shop-a"));
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "Unable to load identity reviews." });
+  });
+
+  it("returns all queue bucket totals and the exact current approved link while paging a filtered bucket", async () => {
+    const automatic = { ...review, reviewId: "automatic", rowId: "automatic", decision: { ...review.decision, kind: "automatic" as const } };
+    const { handler } = route({ repository: {
+      listIdentityReviews: vi.fn().mockResolvedValue([review, automatic]),
+      listCurrentIdentityLinks: vi.fn().mockResolvedValue([{ businessId: "shop-a", sourceSystem: "demo", vendorId: "vendor-a", sourceSignature: "demo-v1", identifierType: "vendor_sku", namespace: "vendor", normalizedValue: "SKU-1", targetProductId: "tire-a", status: "approved", version: 7 }]),
+    } as never });
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&bucket=review"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ total: 1, bucketTotals: { review: 1, automatic: 1, abstain: 0, non_product: 0, invalid: 0 }, reviews: [expect.objectContaining({ currentApprovedLink: { targetProductId: "tire-a", version: 7 } })] });
+  });
+
+  it("does not let a confirm action repoint a different current approved target", async () => {
+    const { handler, repository } = route({ repository: {
+      listIdentityReviews: vi.fn().mockResolvedValue([review]),
+      listCurrentIdentityLinks: vi.fn().mockResolvedValue([{ businessId: "shop-a", sourceSystem: "demo", vendorId: "vendor-a", sourceSignature: "demo-v1", identifierType: "vendor_sku", namespace: "vendor", normalizedValue: "SKU-1", targetProductId: "other-tire", status: "approved", version: 3 }]),
+    } as never });
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
+    expect(response.status).toBe(409);
+    expect(repository.saveIdentityLink).not.toHaveBeenCalled();
+  });
+
+  it("maps authorization failures to a safe access response", async () => {
+    const { handler } = route({ authorize: vi.fn().mockRejectedValue(new Error("membership store path")) });
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a"));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Business access is required." });
   });
 
   it("rejects oversized action bodies before persistence", async () => {

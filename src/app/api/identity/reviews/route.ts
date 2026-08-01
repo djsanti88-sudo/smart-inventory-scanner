@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { isLocalIdentityApplyEnabled, localIdentityStorageRoot } from "@/server/identity/applyComposition";
 import { createFileAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
 import { createLocalRepository, type LocalIdentityRepository } from "@/server/identity/localRepository";
-import { loadConfiguredLocalIdentityReadModel } from "@/server/identity/localIdentityReadModel";
+import { deriveAuthoritativeLinkSnapshotHash, loadAuthoritativeLocalIdentityReadModel } from "@/server/identity/localIdentityReadModel";
 import type { ApplyActor } from "@/server/identity/applyService";
 import type { IdentityLink, IdentityReview, TenantIdentityProduct } from "@/services/identity/types";
 import { canonicalSha256 } from "@/services/identity/canonical";
@@ -22,9 +22,11 @@ function actorFromEnvironment(businessId: string): ApplyActor | undefined {
   if (!actorId || !raw || raw.length > 64 * 1024) return undefined;
   try { const members: unknown = JSON.parse(raw); if (!Array.isArray(members)) return undefined; const member = members.find((value) => value && typeof value === "object" && (value as ApplyActor).actorId === actorId && (value as ApplyActor).businessId === businessId && roles.includes((value as ApplyActor).role)); return member as ApplyActor | undefined; } catch { return undefined; }
 }
-async function defaultVersions(): Promise<Versions> { const model = await loadConfiguredLocalIdentityReadModel(); if (!model) throw new Error("review_configuration_unavailable"); return { catalogVersion: model.snapshot.catalogVersion, linkVersion: model.linkSnapshotHash }; }
+const defaultRepository = createLocalRepository(createFileAtomicLocalStorage({ root: localIdentityStorageRoot() }));
+async function defaultModel() { return loadAuthoritativeLocalIdentityReadModel(defaultRepository); }
+async function defaultVersions(businessId?: string): Promise<Versions> { const model = await defaultModel(); if (!model) throw new Error("review_configuration_unavailable"); return { catalogVersion: model.snapshot.catalogVersion, linkVersion: businessId ? await deriveAuthoritativeLinkSnapshotHash(model, defaultRepository, businessId) : model.linkSnapshotHash }; }
 
-type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: () => Promise<Versions>; currentModel?: () => ReturnType<typeof loadConfiguredLocalIdentityReadModel> };
+type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: (businessId?: string) => Promise<Versions>; currentModel?: () => ReturnType<typeof loadAuthoritativeLocalIdentityReadModel> };
 type Action = "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
 type Bucket = "automatic" | "review" | "abstain" | "non_product" | "invalid";
 const bucketValues = new Set<Bucket>(["automatic", "review", "abstain", "non_product", "invalid"]);
@@ -37,6 +39,7 @@ function requestBody(value: unknown): value is { businessId: string; reviewId: s
 }
 function isManager(actor: ApplyActor): boolean { return actor.role === "owner" || actor.role === "admin"; }
 function chosenCandidate(review: IdentityReview, targetProductId: string | undefined): string | undefined { return targetProductId && review.decision.candidates.some((candidate) => candidate.productId === targetProductId) ? targetProductId : undefined; }
+async function boundedText(request: Request): Promise<string> { const reader = request.body?.getReader(); if (!reader) return ""; const chunks: Uint8Array[] = []; let bytes = 0; while (true) { const chunk = await reader.read(); if (chunk.done) break; bytes += chunk.value.byteLength; if (bytes > maxBodyBytes) { await reader.cancel(); throw new Error("too_large"); } chunks.push(chunk.value); } return new TextDecoder().decode(Buffer.concat(chunks)); }
 
 export function createIdentityReviewRoute(dependencies: Dependencies): (request: Request) => Promise<NextResponse> {
   return async (request) => {
@@ -44,12 +47,12 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     const url = new URL(request.url);
     const businessId = request.method === "GET" ? url.searchParams.get("businessId") ?? "" : "";
     let body: { businessId: string; reviewId: string; action: Action; targetProductId?: string; name?: string } | undefined;
-    if (request.method === "POST") { if (Number(request.headers.get("content-length")) > maxBodyBytes) return json({ error: "Identity review request was too large." }, 400); try { const text = await request.text(); if (new TextEncoder().encode(text).byteLength > maxBodyBytes) return json({ error: "Identity review request was too large." }, 400); const parsed: unknown = JSON.parse(text); if (!requestBody(parsed)) return json({ error: "Identity review request was invalid." }, 400); body = parsed; } catch { return json({ error: "Body must be valid JSON." }, 400); } }
+    if (request.method === "POST") { if (Number(request.headers.get("content-length")) > maxBodyBytes) return json({ error: "Identity review request was too large." }, 400); try { const parsed: unknown = JSON.parse(await boundedText(request)); if (!requestBody(parsed)) return json({ error: "Identity review request was invalid." }, 400); body = parsed; } catch (error) { return json({ error: error instanceof Error && error.message === "too_large" ? "Identity review request was too large." : "Body must be valid JSON." }, 400); } }
     const scope = body?.businessId ?? businessId;
     if (!scope) return json({ error: "Business access is required." }, 400);
-    const actor = await dependencies.authorize(request, scope);
+    let actor: ApplyActor | undefined; try { actor = await dependencies.authorize(request, scope); } catch { return json({ error: "Business access is required." }, 403); }
     if (!actor || actor.businessId !== scope) return json({ error: "Business access is required." }, 403);
-    if (request.method === "GET") { try { const requestedBucket = url.searchParams.get("bucket"); if (requestedBucket && !bucketValues.has(requestedBucket as Bucket)) return json({ error: "Identity review filter was invalid." }, 400); const reviews = (await dependencies.repository.listIdentityReviews(scope)).filter((review) => !requestedBucket || review.decision.kind === requestedBucket); const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25), requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER), page = Math.min(requestedPage, Math.max(1, Math.ceil(reviews.length / pageSize))); return json({ reviews: reviews.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: reviews.length }); } catch { return json({ error: "Unable to load identity reviews." }, 500); } }
+    if (request.method === "GET") { try { const requestedBucket = url.searchParams.get("bucket"); if (requestedBucket && !bucketValues.has(requestedBucket as Bucket)) return json({ error: "Identity review filter was invalid." }, 400); const all = await dependencies.repository.listIdentityReviews(scope), totals = Object.fromEntries([...bucketValues].map((bucket) => [bucket, all.filter((review) => review.decision.kind === bucket).length])), reviews = all.filter((review) => !requestedBucket || review.decision.kind === requestedBucket); const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25), requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER), page = Math.min(requestedPage, Math.max(1, Math.ceil(reviews.length / pageSize))), links = dependencies.repository.listCurrentIdentityLinks ? await dependencies.repository.listCurrentIdentityLinks(scope) : []; const enrich = (review: IdentityReview) => { const key = review.decision.normalizedKeys[0], link = key && review.scope ? links.find((entry) => entry.status === "approved" && entry.sourceSystem === review.scope!.sourceSystem && entry.vendorId === review.scope!.vendorId && entry.sourceSignature === review.scope!.sourceSignature && entry.identifierType === key.type && entry.namespace === (key.namespace ?? "") && entry.normalizedValue === key.value) : undefined; return link ? { ...review, currentApprovedLink: { targetProductId: link.targetProductId, version: link.version } } : review; }; return json({ reviews: reviews.slice((page - 1) * pageSize, page * pageSize).map(enrich), page, pageSize, total: reviews.length, bucketTotals: totals }); } catch { return json({ error: "Unable to load identity reviews." }, 500); } }
     if (request.method !== "POST" || !body) return json({ error: "Method not allowed." }, 405);
     if (!isManager(actor)) return json({ error: "Only owners and admins can resolve identity reviews." }, 403);
     try {
@@ -74,17 +77,21 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
     if (!targetProductId || !review.scope) return json({ error: "The selected candidate is not available for this review." }, 409);
     const key = review.decision.normalizedKeys[0]; if (!key) return json({ error: "The review has no durable identifier." }, 409);
     const model = dependencies.currentModel ? await dependencies.currentModel() : undefined;
-    if (dependencies.currentModel && (!model || !model.hasCurrentTarget({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, namespace: key.namespace, source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }))) return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
+    if (dependencies.currentModel && (!model || !await model.hasCurrentTarget({ businessId: scope, sourceSystem: review.scope.sourceSystem, sourceSignature: review.scope.sourceSignature, vendorId: review.scope.vendorId, targetProductId, identifiers: [{ type: key.type, raw: key.value, normalized: key.value, namespace: key.namespace, source: "review", evidenceAuthority: "vendor_import", evidenceId: review.reviewId, evidenceVersion: review.decision.decisionFingerprint }] }))) return json({ error: "The selected target is stale or no longer supported by its exact identifier." }, 409);
     const versions = await dependencies.currentVersions();
+    if (body.action !== "revoke_link" && dependencies.repository.listCurrentIdentityLinks) {
+      const current = (await dependencies.repository.listCurrentIdentityLinks(scope)).find((link) => link.sourceSystem === review.scope!.sourceSystem && link.vendorId === review.scope!.vendorId && link.sourceSignature === review.scope!.sourceSignature && link.identifierType === key.type && link.namespace === (key.namespace ?? "") && link.normalizedValue === key.value);
+      if (current?.status === "approved" && current.targetProductId !== targetProductId) return json({ error: "The approved identity link is no longer current." }, 409);
+    }
     if (body.action === "revoke_link" && dependencies.repository.listCurrentIdentityLinks) {
       const current = (await dependencies.repository.listCurrentIdentityLinks(scope)).find((link) => link.sourceSystem === review.scope!.sourceSystem && link.vendorId === review.scope!.vendorId && link.sourceSignature === review.scope!.sourceSignature && link.identifierType === key.type && link.namespace === (key.namespace ?? "") && link.normalizedValue === key.value);
       if (!current || current.status !== "approved" || current.targetProductId !== targetProductId) return json({ error: "The approved identity link is no longer current." }, 409);
     }
     const link: IdentityLink = { businessId: scope, sourceSystem: review.scope.sourceSystem, vendorId: review.scope.vendorId, sourceSignature: review.scope.sourceSignature, identifierType: key.type, namespace: key.namespace ?? "", rawValue: key.value, normalizedValue: key.value, targetProductId, status: body.action === "revoke_link" ? "revoked" : "approved", evidence: [...review.decision.decisionBasis.map((basis) => basis.evidenceId), `catalog:${versions.catalogVersion}`, `links:${versions.linkVersion}`, `review:${review.reviewId}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), ...(body.action === "confirm_candidate" ? { approvedBy: actor.actorId, approvedAt: new Date().toISOString() } : {}), version: 0 };
     return json(await apply(body.action === "revoke_link" ? "rejected" : "confirmed", link));
-    } catch (error) { if (error instanceof Error && /identity_review_(action_conflict|terminal|revoke_conflict)/.test(error.message)) return json({ error: "The identity review changed before this action could be applied." }, 409); return json({ error: "Unable to update identity review." }, 500); }
+    } catch (error) { if (error instanceof Error && /identity_review_(action_conflict|terminal|revoke_conflict|target_conflict)/.test(error.message)) return json({ error: "The identity review changed before this action could be applied." }, 409); return json({ error: "Unable to update identity review." }, 500); }
   };
 }
 
-export const GET = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: createLocalRepository(createFileAtomicLocalStorage({ root: localIdentityStorageRoot() })), currentVersions: defaultVersions, currentModel: loadConfiguredLocalIdentityReadModel });
+export const GET = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: defaultRepository, currentVersions: defaultVersions, currentModel: defaultModel });
 export const POST = GET;

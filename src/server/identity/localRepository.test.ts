@@ -164,6 +164,19 @@ describe("local identity repository", () => {
     await expect(repository.resolveIdentityReview("shop-a", "review-a", "rejected", "manager-a", "2026-07-31T00:00:00.000Z")).rejects.toThrow(/terminal|conflict/i);
   });
 
+  it("atomically refuses to repoint a current approved link and returns a complete idempotent action result", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const review = { reviewId: "review-action", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "review" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };
+    const link = { ...approvedLink, targetProductId: "old-target", version: 1, status: "approved" as const, evidence: ["evidence"], createdBy: "manager", createdAt: "now" };
+    await repository.saveIdentityReview(review);
+    await repository.saveIdentityLink(link);
+    await expect(repository.applyReviewAction({ businessId: "shop-a", reviewId: review.reviewId, actionId: "confirm", payloadFingerprint: "fingerprint", action: "confirm_candidate", resolution: "confirmed", resolvedBy: "manager", link: { ...link, targetProductId: "new-target", version: 0 } })).rejects.toThrow(/target_conflict/i);
+    const rejected = await repository.applyReviewAction({ businessId: "shop-a", reviewId: review.reviewId, actionId: "reject", payloadFingerprint: "reject-fingerprint", action: "reject", resolution: "rejected", resolvedBy: "manager" });
+    const replay = await repository.applyReviewAction({ businessId: "shop-a", reviewId: review.reviewId, actionId: "reject", payloadFingerprint: "reject-fingerprint", action: "reject", resolution: "rejected", resolvedBy: "manager" });
+    expect(replay).toEqual(rejected);
+    expect(replay.action).toMatchObject({ action: "reject", outcome: "rejected", resolvedBy: "manager" });
+  });
+
   it("returns every latest approved vendor-wide rule as review-only candidates", async () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
     const base = { businessId: "shop-a", sourceSystem: "vendor-feed", vendorId: "vendor-a", sourceSignature: "*", examples: ["example"], status: "approved" as const, approvedBy: "manager-a", approvedAt: "2026-07-31T00:00:00.000Z", collisionTestIds: ["collision"], version: 1 };

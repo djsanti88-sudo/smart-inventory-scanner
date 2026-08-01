@@ -31,15 +31,13 @@ describe("IdentityReviewTable", () => {
     expect(screen.queryByRole("button", { name: /confirm|reject|create product|revoke/i })).toBeNull();
   });
 
-  it("accounts for every preview row in five decision buckets and defaults to Review", async () => {
+  it("rejects unauthoritative preview rows and defaults to the server Review queue", async () => {
     render(<IdentityReviewTable businessId="shop-a" actorRole="admin" previewDecisions={previewDecisions} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: /review \(1\)/i })).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("row-1")).toBeTruthy());
     expect(screen.getByText("row-1")).toBeTruthy();
     expect(screen.queryByText("row-auto")).toBeNull();
-    expect(screen.getByRole("button", { name: /automatic \(1\)/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /abstain \(1\)/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /non-product \(1\)/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /invalid \(1\)/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /automatic \(0\)/i })).toBeTruthy();
+    expect(screen.queryByText("row-auto")).toBeNull();
   });
 
   it("uses the top-ranked candidate, exposes evidence, and prevents duplicate submission", async () => {
@@ -68,5 +66,19 @@ describe("IdentityReviewTable", () => {
     await screen.findByText("new-row");
     resolveOld({ ok: true, json: async () => ({ reviews: [review] }) });
     await waitFor(() => expect(screen.queryByText("row-1")).toBeNull());
+  });
+
+  it("uses server bucket totals, rejects unknown preview rows, and refetches after a resolution", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], page: 1, pageSize: 25, total: 1, bucketTotals: { automatic: 4, review: 1, abstain: 0, non_product: 0, invalid: 0 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ review: { ...review, resolution: "confirmed" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], page: 1, pageSize: 25, total: 0, bucketTotals: { automatic: 4, review: 0, abstain: 0, non_product: 0, invalid: 0 } }) });
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" previewDecisions={[{ ...review, reviewId: "unknown-preview", rowId: "unknown-preview" }]} />);
+    await screen.findByText("row-1");
+    expect(screen.queryByText("unknown-preview")).toBeNull();
+    expect(screen.getByRole("button", { name: /automatic \(4\)/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /confirm tire-a/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect((fetchMock.mock.calls[2]![0] as string)).toContain("page=1");
   });
 });

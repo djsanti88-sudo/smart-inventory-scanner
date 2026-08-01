@@ -17,6 +17,7 @@ export interface LocalIdentityReadModel {
 }
 
 function scopeMatches(left: Scope, right: Scope): boolean { return left.businessId === right.businessId && left.sourceSystem === right.sourceSystem && left.sourceSignature === right.sourceSignature && left.vendorId === right.vendorId; }
+function linkFamily(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue">): string { return JSON.stringify([link.businessId, link.sourceSystem, link.sourceSignature, link.vendorId, link.identifierType, link.namespace, link.normalizedValue]); }
 function allCandidates(snapshot: LocalIdentitySnapshot): IdentityCandidate[] { return [...snapshot.barcodeCandidates.values(), ...snapshot.partNumberCandidates.values()].flatMap((rows) => [...rows]); }
 function content(entries: Array<[string, IdentityCandidate[]]>): unknown[] { return entries.map(([key, candidates]) => [key, candidates.map((candidate) => Object.fromEntries(Object.entries(candidate).filter(([property]) => property !== "catalogSnapshotHash"))).sort((a, b) => a.productId.localeCompare(b.productId))]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))); }
 export async function deriveConfiguredSnapshotHashes(wire: { catalogVersion: string; barcodeCandidates: unknown; partNumberCandidates: unknown; approvedLinks: unknown }): Promise<{ catalogSnapshotHash: string; linkSnapshotHash: string }> {
@@ -68,12 +69,15 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
     const productById = new Map(products.map((product) => [product.productId, product]));
     const current = durable.filter((link) => scopeMatches(link, input));
     const configuredLinks = await configured.lookupApprovedLinks(input);
-    return [...configuredLinks, ...current.map((link): ApprovedLinkLookupResult => {
+    const merged = new Map(configuredLinks.map((link) => [linkFamily(link), link]));
+    for (const link of current) {
       const master = configuredCandidates.find((candidate) => candidate.productId === link.targetProductId && candidate.businessScope === "master");
       const product = productById.get(link.targetProductId);
       const target = master ?? (product ? { productId: product.productId, category: "tenant", businessScope: "tenant" as const, tenantBusinessId: product.businessId, verificationTier: "approved" as const, automaticEligible: true, evidenceId: `tenant-product:${product.productId}`, evidenceVersion: product.createdAt, exactCodeEvidence: true, identifiers: [{ type: link.identifierType, raw: link.rawValue, normalized: link.normalizedValue, ...(link.namespace ? { namespace: link.namespace } : {}), source: "tenant-identity-link", evidenceAuthority: "approved_tenant_link" as const, evidenceId: `identity-link:${link.version}`, evidenceVersion: String(link.version) }], title: product.name, attributes: {}, catalogVersion: configured.snapshot.catalogVersion, catalogSnapshotHash: configured.snapshot.catalogSnapshotHash } : null);
-      return { businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, status: link.status, version: link.version, evidenceId: `identity-link:${link.version}`, evidenceVersion: String(link.version), automaticEligible: true, targetProductId: link.targetProductId, currentTarget: target };
-    })];
+      // Current durable state wins for this exact identifier family, including tombstones.
+      merged.set(linkFamily(link), { businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, status: link.status, version: link.version, evidenceId: `identity-link:${link.version}`, evidenceVersion: String(link.version), automaticEligible: true, targetProductId: link.targetProductId, currentTarget: target });
+    }
+    return [...merged.values()].filter((link) => link.status === "approved");
   };
   return {
     snapshot: configured.snapshot,
@@ -81,9 +85,10 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
     linkSnapshotHash: configured.linkSnapshotHash,
     lookupApprovedLinks: linksFor,
     async hasCurrentTarget(input) {
-      if (configured.hasCurrentTarget(input)) return true;
       const results = await linksFor({ ...input, identifiers: input.identifiers ?? [] });
-      return results.some((link) => link.status === "approved" && link.targetProductId === input.targetProductId);
+      if (results.some((link) => link.status === "approved" && link.targetProductId === input.targetProductId)) return true;
+      const requested = input.identifiers ?? [];
+      return configuredCandidates.some((candidate) => candidate.productId === input.targetProductId && (candidate.businessScope === "master" || candidate.tenantBusinessId === input.businessId) && (requested.length === 0 || requested.some((key) => candidate.identifiers.some((identifier) => identifier.type === key.type && (identifier.namespace ?? "") === (key.namespace ?? "") && identifier.normalized === key.normalized))));
     },
   };
 }
