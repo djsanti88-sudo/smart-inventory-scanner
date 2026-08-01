@@ -6,7 +6,19 @@ type StoredValue = null | boolean | number | string | StoredValue[] | { [key: st
 type StoredRecord = Record<string, StoredValue>;
 interface StoredEnvelope { version: 1; values: StoredRecord }
 
-export interface AtomicTransaction { get<T>(key: string): Promise<T | undefined>; set<T>(key: string, value: T): Promise<void>; delete(key: string): Promise<void> }
+export type AtomicPageOptions<T> = {
+  offset: number;
+  limit: number;
+  filter?: (item: T) => boolean;
+  visible?: (item: T) => boolean;
+  compare: (left: T, right: T) => number;
+  groupBy?: (item: T) => string;
+  collapseBy?: (item: T) => string;
+  versionOf?: (item: T) => number;
+  baseItems?: readonly T[];
+};
+export type AtomicPage<T> = { items: T[]; origins: Array<"base" | "stored">; total: number; groupTotals: Record<string, number> };
+export interface AtomicTransaction { get<T>(key: string): Promise<T | undefined>; scanPage?<T>(key: string, options: AtomicPageOptions<T>): Promise<AtomicPage<T>>; set<T>(key: string, value: T): Promise<void>; delete(key: string): Promise<void> }
 export interface AtomicLocalStorage { transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> }
 
 const rootMutexes = new Map<string, Promise<void>>();
@@ -68,12 +80,54 @@ async function withMutex<T>(root: string, action: () => Promise<T>): Promise<T> 
 }
 
 class MapTransaction implements AtomicTransaction {
-  private dirty = false;
-  constructor(private readonly values: StoredRecord) {}
+  private working: StoredRecord | undefined;
+  constructor(private readonly initial: StoredRecord) {}
+  private get values(): StoredRecord { return this.working ?? this.initial; }
+  private writable(): StoredRecord { if (!this.working) this.working = clone(this.initial); return this.working; }
   async get<T>(key: string): Promise<T | undefined> { return clone(this.values[key]) as T | undefined; }
-  async set<T>(key: string, value: T): Promise<void> { this.values[key] = clone(value) as StoredValue; this.dirty = true; }
-  async delete(key: string): Promise<void> { if (key in this.values) { delete this.values[key]; this.dirty = true; } }
-  get changed(): boolean { return this.dirty; }
+  async scanPage<T>(key: string, options: AtomicPageOptions<T>): Promise<AtomicPage<T>> {
+    if (!Number.isSafeInteger(options.offset) || options.offset < 0 || !Number.isSafeInteger(options.limit) || options.limit <= 0 || options.limit > 1_000) throw new Error("atomic page bounds are invalid");
+    const stored = Array.isArray(this.values[key]) ? this.values[key] as T[] : [];
+    type PageEntry = { item: T; origin: "base" | "stored" };
+    let source: Iterable<PageEntry>;
+    if (options.collapseBy) {
+      const merged = new Map<string, PageEntry>();
+      for (const item of options.baseItems ?? []) {
+        if (options.filter && !options.filter(item)) continue;
+        const family = options.collapseBy(item), current = merged.get(family);
+        if (!current || (options.versionOf?.(item) ?? 0) > (options.versionOf?.(current.item) ?? 0)) merged.set(family, { item, origin: "base" });
+      }
+      const durable = new Map<string, PageEntry>();
+      for (const item of stored) {
+        if (options.filter && !options.filter(item)) continue;
+        const family = options.collapseBy(item), current = durable.get(family);
+        if (!current || (options.versionOf?.(item) ?? 0) > (options.versionOf?.(current.item) ?? 0)) durable.set(family, { item, origin: "stored" });
+      }
+      // Stored state is authoritative over configured base state, including tombstones.
+      for (const [family, entry] of durable) merged.set(family, entry);
+      source = merged.values();
+    } else {
+      source = (function* () { for (const item of options.baseItems ?? []) yield { item, origin: "base" as const }; for (const item of stored) yield { item, origin: "stored" as const }; })();
+    }
+    const groupTotals: Record<string, number> = {}, retained: PageEntry[] = [], retainCount = options.offset + options.limit;
+    let total = 0;
+    for (const entry of source) {
+      const item = entry.item;
+      if (!options.collapseBy && options.filter && !options.filter(item)) continue;
+      const group = options.groupBy?.(item); if (group !== undefined) groupTotals[group] = (groupTotals[group] ?? 0) + 1;
+      if (options.visible && !options.visible(item)) continue;
+      total += 1;
+      let low = 0, high = retained.length;
+      while (low < high) { const middle = (low + high) >>> 1; if (options.compare(retained[middle]!.item, item) <= 0) low = middle + 1; else high = middle; }
+      retained.splice(low, 0, entry); if (retained.length > retainCount) retained.pop();
+    }
+    const selected = retained.slice(options.offset, options.offset + options.limit);
+    return { items: clone(selected.map((entry) => entry.item)), origins: selected.map((entry) => entry.origin), total, groupTotals };
+  }
+  async set<T>(key: string, value: T): Promise<void> { this.writable()[key] = clone(value) as StoredValue; }
+  async delete(key: string): Promise<void> { if (key in this.values) delete this.writable()[key]; }
+  get changed(): boolean { return Boolean(this.working); }
+  get snapshot(): StoredRecord { return this.values; }
 }
 
 function parseEnvelope(input: string): StoredRecord {
@@ -100,13 +154,13 @@ async function syncDirectory(directory: string): Promise<void> {
 
 export function createMemoryAtomicLocalStorage(): AtomicLocalStorage {
   let values: StoredRecord = {}, mutex = Promise.resolve();
-  return { async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> { const previous = mutex; let release: () => void = () => {}; mutex = new Promise<void>((resolve) => { release = resolve; }); await previous; try { const working = clone(values); const transaction = new MapTransaction(working); const result = await fn(transaction); if (transaction.changed) values = working; return result; } finally { release(); } } };
+  return { async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> { const previous = mutex; let release: () => void = () => {}; mutex = new Promise<void>((resolve) => { release = resolve; }); await previous; try { const transaction = new MapTransaction(values); const result = await fn(transaction); if (transaction.changed) values = transaction.snapshot; return result; } finally { release(); } } };
 }
 
 export function createFileAtomicLocalStorage({ root, io = {} }: { root: string; io?: FileStorageHooks }): AtomicLocalStorage {
   const safeRoot = assertConfiguredRoot(root);
   return { async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> { const canonicalRoot = await recheckPhysicalRoot(safeRoot); return withMutex(canonicalRoot, async () => { const statePath = path.join(canonicalRoot, "identity-local-storage.json"); await recheckPhysicalRoot(canonicalRoot); const values = await readState(statePath);
     const transaction = new MapTransaction(values), result = await fn(transaction);
-    if (transaction.changed) { await recheckPhysicalRoot(canonicalRoot); await assertStateFile(statePath); const temp = path.join(canonicalRoot, `identity-local-storage.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`); try { await (io.writeTemp ?? syncFile)(temp, JSON.stringify({ version: schemaVersion, values } satisfies StoredEnvelope)); await (io.replace ?? rename)(temp, statePath); await (io.syncDirectory ?? syncDirectory)(canonicalRoot); } catch (error) { await rm(temp, { force: true }).catch(() => undefined); throw error; } }
+    if (transaction.changed) { await recheckPhysicalRoot(canonicalRoot); await assertStateFile(statePath); const temp = path.join(canonicalRoot, `identity-local-storage.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`); try { await (io.writeTemp ?? syncFile)(temp, JSON.stringify({ version: schemaVersion, values: transaction.snapshot } satisfies StoredEnvelope)); await (io.replace ?? rename)(temp, statePath); await (io.syncDirectory ?? syncDirectory)(canonicalRoot); } catch (error) { await rm(temp, { force: true }).catch(() => undefined); throw error; } }
     return result; }); } };
 }

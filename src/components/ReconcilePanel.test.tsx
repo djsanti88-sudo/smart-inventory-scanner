@@ -326,6 +326,16 @@ describe("ReconcilePanel - de-branded copy (M3/H1)", () => {
 // reused (read-only) so any spreadsheet a shop exports runs the compare-vs-counted loop; the
 // Shop-Ware CSV path keeps working unchanged as a fast path.
 describe("ReconcilePanel - universal file intake (M3/H1)", () => {
+  it("keeps the legacy reconcile selected in production even when the public identity flag is set", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+
+    render(<ReconcilePanel />);
+
+    expect(screen.getByTestId("reconcile-empty-state")).toBeInTheDocument();
+    expect(screen.queryByTestId("identity-preview")).not.toBeInTheDocument();
+  });
+
   it("uses the complete signed identity preview and reconcile apply flow when the local identity flag is on", async () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
     vi.stubEnv("NEXT_PUBLIC_LOCAL_IDENTITY_ROLE", "admin");

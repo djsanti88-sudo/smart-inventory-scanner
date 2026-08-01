@@ -53,4 +53,28 @@ describe("configured local identity read model", () => {
     await expect(model?.lookupApprovedLinks(input)).resolves.toEqual([]);
     await expect(model?.hasCurrentTarget({ ...input, targetProductId: target.productId })).resolves.toBe(false);
   });
+
+  it("pages 500 configured and durable links without a full durable read while preserving tombstones", async () => {
+    const configuredLinks = Array.from({ length: 500 }, (_, index) => {
+      const value = String(index).padStart(3, "0");
+      return { businessId: "shop-a", sourceSystem: "csv", sourceSignature: "v1", vendorId: "vendor-a", identifierType: "upc" as const, namespace: "", rawValue: value, normalizedValue: value, targetProductId: `configured-${value}`, status: "approved" as const, version: 1, evidenceId: `configured-${value}`, evidenceVersion: "v1", automaticEligible: true, currentTarget: { ...candidate, productId: `configured-${value}` }, createdBy: "snapshot-builder" };
+    });
+    const wire = { catalogVersion: "catalog-v1", catalogSnapshotHash: "", barcodeCandidates: [], partNumberCandidates: [], approvedLinks: configuredLinks };
+    wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    await repository.saveIdentityLink({ ...configuredLinks[0]!, evidence: ["review"], createdBy: "admin", createdAt: "now", status: "revoked", version: 2 });
+    await repository.saveIdentityLink({ ...configuredLinks[0]!, rawValue: "000a", normalizedValue: "000a", targetProductId: "durable-new", evidence: ["review"], createdBy: "admin", createdAt: "now", status: "approved", version: 1 });
+    repository.listCurrentIdentityLinks = vi.fn().mockRejectedValue(new Error("unbounded durable read"));
+
+    const model = await loadAuthoritativeLocalIdentityReadModel(repository);
+    const page = await model?.pageCurrentApprovedLinks?.("shop-a", { page: 1, pageSize: 25 });
+
+    expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
+    expect(page?.items).toHaveLength(25);
+    expect(page?.total).toBe(500);
+    expect(page?.items.some((link) => link.normalizedValue === "000")).toBe(false);
+    expect(page?.items).toContainEqual(expect.objectContaining({ normalizedValue: "000a", targetProductId: "durable-new", predecessorSource: "durable" }));
+    expect(page?.items).toContainEqual(expect.objectContaining({ normalizedValue: "001", predecessorSource: "configured" }));
+  });
 });

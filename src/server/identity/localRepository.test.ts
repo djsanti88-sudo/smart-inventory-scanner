@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalRepository } from "./localRepository";
 
@@ -165,6 +165,38 @@ describe("local identity repository", () => {
     const review = { reviewId: "review-a", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "abstain" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };
     await repository.saveIdentityReview(review);
     await expect(repository.saveIdentityReview({ ...review, rowId: "row-b" })).rejects.toThrow(/idempotency.*conflict/i);
+  });
+
+  it("pages 100 reviews without calling the full-list repository path", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const decision = { kind: "review" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" };
+    for (let index = 0; index < 100; index += 1) {
+      await repository.saveIdentityReview({ reviewId: `review-${String(index).padStart(3, "0")}`, businessId: "shop-a", importId: "import-a", rowId: `row-${index}`, decision });
+    }
+    repository.listIdentityReviews = vi.fn().mockRejectedValue(new Error("unbounded review read"));
+
+    const page = await repository.pageIdentityReviews("shop-a", { bucket: "review", page: 2, pageSize: 25 });
+
+    expect(repository.listIdentityReviews).not.toHaveBeenCalled();
+    expect(page.items).toHaveLength(25);
+    expect(page.items[0]?.reviewId).toBe("review-025");
+    expect(page).toMatchObject({ total: 100, bucketTotals: { review: 100 } });
+  });
+
+  it("pages 500 current links without calling the full-list repository path", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    for (let index = 0; index < 500; index += 1) {
+      const value = String(index).padStart(3, "0");
+      await repository.saveIdentityLink({ ...approvedLink, rawValue: value, normalizedValue: value, targetProductId: `tire-${value}` });
+    }
+    repository.listCurrentIdentityLinks = vi.fn().mockRejectedValue(new Error("unbounded link read"));
+
+    const page = await repository.pageCurrentIdentityLinks("shop-a", { page: 2, pageSize: 25 });
+
+    expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
+    expect(page.items).toHaveLength(25);
+    expect(page.items[0]?.normalizedValue).toBe("025");
+    expect(page.total).toBe(500);
   });
 
   it("allows one terminal review resolution and rejects a conflicting rewrite", async () => {

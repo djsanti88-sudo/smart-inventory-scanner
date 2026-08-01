@@ -4,7 +4,7 @@ import { isValidApprovedLink, type ApprovedLinkLookupInput, type ApprovedLinkLoo
 import { isCompleteLocalIdentitySnapshot, type LocalIdentitySnapshot } from "./localSnapshotIndex";
 import type { IdentityCandidate, ScopedIdentifier } from "@/services/identity/types";
 import { canonicalSha256 } from "@/services/identity/canonical";
-import type { LocalIdentityRepository } from "./localRepository";
+import type { IdentityLinkPageRecord, LocalIdentityRepository } from "./localRepository";
 
 type Scope = Pick<ApprovedLinkLookupInput, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId">;
 type SnapshotWire = { catalogVersion: string; catalogSnapshotHash: string; barcodeCandidates: Array<[string, IdentityCandidate[]]>; partNumberCandidates: Array<[string, IdentityCandidate[]]>; approvedLinks: ApprovedLinkLookupResult[] };
@@ -15,6 +15,7 @@ export interface LocalIdentityReadModel {
   lookupApprovedLinks(input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]>;
   hasCurrentTarget(input: Scope & { targetProductId: string; identifiers?: ScopedIdentifier[] }): boolean | Promise<boolean>;
   listCurrentApprovedLinks?(businessId: string): Promise<CurrentApprovedIdentityLink[]>;
+  pageCurrentApprovedLinks?(businessId: string, input: { page: number; pageSize: number }): Promise<{ items: CurrentApprovedIdentityLink[]; total: number }>;
 }
 
 export type CurrentApprovedIdentityLink = Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version"> & { predecessorFingerprint: string; predecessorSource: "configured" | "durable" };
@@ -23,6 +24,7 @@ export async function identityLinkPredecessorFingerprint(link: Pick<ApprovedLink
 
 function scopeMatches(left: Scope, right: Scope): boolean { return left.businessId === right.businessId && left.sourceSystem === right.sourceSystem && left.sourceSignature === right.sourceSignature && left.vendorId === right.vendorId; }
 function linkFamily(link: Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue">): string { return JSON.stringify([link.businessId, link.sourceSystem, link.sourceSignature, link.vendorId, link.identifierType, link.namespace, link.normalizedValue]); }
+const configuredLinksSymbol = Symbol("configuredIdentityLinks");
 function allCandidates(snapshot: LocalIdentitySnapshot): IdentityCandidate[] { return [...snapshot.barcodeCandidates.values(), ...snapshot.partNumberCandidates.values()].flatMap((rows) => [...rows]); }
 function content(entries: Array<[string, IdentityCandidate[]]>): unknown[] { return entries.map(([key, candidates]) => [key, candidates.map((candidate) => Object.fromEntries(Object.entries(candidate).filter(([property]) => property !== "catalogSnapshotHash"))).sort((a, b) => a.productId.localeCompare(b.productId))]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))); }
 export async function deriveConfiguredSnapshotHashes(wire: { catalogVersion: string; barcodeCandidates: unknown; partNumberCandidates: unknown; approvedLinks: unknown }): Promise<{ catalogSnapshotHash: string; linkSnapshotHash: string }> {
@@ -45,7 +47,7 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
   const snapshot: LocalIdentitySnapshot = { catalogVersion: wire.catalogVersion, catalogSnapshotHash: hashes.catalogSnapshotHash, barcodeCandidates: new Map(setHash(wire.barcodeCandidates)), partNumberCandidates: new Map(setHash(wire.partNumberCandidates)) };
   if (!isCompleteLocalIdentitySnapshot(snapshot)) return undefined;
   const candidates = allCandidates(snapshot);
-  return {
+  const model: LocalIdentityReadModel = {
     snapshot,
     linkSnapshotHash: hashes.linkSnapshotHash,
     async lookupApprovedLinks(input) { return wire.approvedLinks.filter((link) => scopeMatches(link, input)); },
@@ -60,6 +62,8 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
         || wire.approvedLinks.some((link) => isValidApprovedLink(link, scopedLinkInput) && link.targetProductId === input.targetProductId);
     },
   };
+  Object.defineProperty(model, configuredLinksSymbol, { value: wire.approvedLinks, enumerable: false });
+  return model;
 }
 
 /**
@@ -67,10 +71,11 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
  * This joins both before any preview/apply consumer reads them, so the link hash is an actual
  * content version rather than a configuration label.
  */
-export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<LocalIdentityRepository, "listCurrentIdentityLinks" | "listTenantProducts">): Promise<LocalIdentityReadModel | undefined> {
+export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<LocalIdentityRepository, "listCurrentIdentityLinks" | "listTenantProducts"> & Partial<Pick<LocalIdentityRepository, "pageAuthoritativeIdentityLinks">>): Promise<LocalIdentityReadModel | undefined> {
   const configured = await loadConfiguredLocalIdentityReadModel();
   if (!configured) return undefined;
   const configuredCandidates = allCandidates(configured.snapshot);
+  const configuredLinks = (configured as LocalIdentityReadModel & { [configuredLinksSymbol]?: readonly ApprovedLinkLookupResult[] })[configuredLinksSymbol] ?? [];
   // There is no cross-tenant enumeration path. The caller supplies its current tenant through lookup;
   // products are loaded lazily below and cached only for the duration of this model instance.
   const linksFor = async (input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]> => {
@@ -104,6 +109,11 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
     linkSnapshotHash: configured.linkSnapshotHash,
     lookupApprovedLinks: linksFor,
     listCurrentApprovedLinks: currentApprovedLinksFor,
+    async pageCurrentApprovedLinks(businessId, input) {
+      if (!repository.pageAuthoritativeIdentityLinks) { const all = await currentApprovedLinksFor(businessId), page = Math.max(1, input.page), pageSize = Math.min(25, Math.max(1, input.pageSize)), start = (page - 1) * pageSize; return { items: all.slice(start, start + pageSize), total: all.length }; }
+      const page = await repository.pageAuthoritativeIdentityLinks(businessId, { ...input, configured: configuredLinks as readonly IdentityLinkPageRecord[] });
+      return { items: await Promise.all(page.items.map(async (link) => ({ businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, version: link.version, predecessorSource: link.predecessorSource, predecessorFingerprint: await identityLinkPredecessorFingerprint(link) }))), total: page.total };
+    },
     async hasCurrentTarget(input) {
       const results = await linksFor({ ...input, identifiers: input.identifiers ?? [] });
       if (results.some((link) => link.status === "approved" && link.targetProductId === input.targetProductId)) return true;

@@ -130,6 +130,19 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
 });
 
 describe("UniversalImportPanelContainer - loadMapping", () => {
+  it("keeps the legacy import selected in production even when the public identity flag is set", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    const fetchMock = stubFetch({ ok: true, status: 200, body: { mapping: REMEMBERED_MAPPING } });
+
+    render(<UniversalImportPanelContainer />);
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File([CSV], "production.csv")] } });
+
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/reconcile/match"))).toBe(true));
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/identity/preview"))).toBe(false);
+    expect(screen.queryByTestId("identity-preview")).not.toBeInTheDocument();
+  });
+
   it("sends businessId and Firebase token to the reconcile match route in live auth mode", async () => {
     vi.stubEnv("NEXT_PUBLIC_AUTH_MODE", "live");
     const fetchMock = stubFetch({ ok: true, status: 200, body: { mapping: REMEMBERED_MAPPING } });

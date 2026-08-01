@@ -78,6 +78,30 @@ describe("identity review route", () => {
     expect(pageCurrentApprovedLinks).toHaveBeenCalledWith("shop-a", { page: 2, pageSize: 25 });
   });
 
+  it("bounds repository reads and responses for 100 reviews and 500 approved links", async () => {
+    const reviews = Array.from({ length: 25 }, (_, index) => ({ ...review, reviewId: `review-${index}`, rowId: `row-${index}` }));
+    const links = Array.from({ length: 25 }, (_, index) => ({ sourceSystem: "demo", sourceSignature: "v1", vendorId: "vendor", identifierType: "upc", namespace: "", normalizedValue: String(index), targetProductId: `p-${index}`, version: 1, predecessorFingerprint: `f-${index}`, predecessorSource: "configured" }));
+    const listIdentityReviews = vi.fn().mockRejectedValue(new Error("unbounded review read"));
+    const listCurrentIdentityLinks = vi.fn().mockRejectedValue(new Error("unbounded link read"));
+    const pageIdentityReviews = vi.fn().mockResolvedValue({ items: reviews, total: 100, bucketTotals: { automatic: 0, review: 100, abstain: 0, non_product: 0, invalid: 0 } });
+    const findCurrentIdentityLinks = vi.fn().mockResolvedValue([]);
+    const pageCurrentApprovedLinks = vi.fn().mockResolvedValue({ items: links, total: 500 });
+    const { handler } = route({ repository: { listIdentityReviews, listCurrentIdentityLinks, pageIdentityReviews, findCurrentIdentityLinks } as never, currentApprovedLinks: undefined, pageCurrentApprovedLinks } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&page=1&linkPage=1&pageSize=25"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.reviews).toHaveLength(25);
+    expect(body.currentApprovedLinks).toHaveLength(25);
+    expect(body).toMatchObject({ total: 100, linkTotal: 500, pageSize: 25 });
+    expect(pageIdentityReviews).toHaveBeenCalledWith("shop-a", { page: 1, pageSize: 25 });
+    expect(findCurrentIdentityLinks).toHaveBeenCalledWith("shop-a", expect.any(Array));
+    expect(pageCurrentApprovedLinks).toHaveBeenCalledWith("shop-a", { page: 1, pageSize: 25 });
+    expect(listIdentityReviews).not.toHaveBeenCalled();
+    expect(listCurrentIdentityLinks).not.toHaveBeenCalled();
+  });
+
   it("returns all queue bucket totals and the exact current approved link while paging a filtered bucket", async () => {
     const automatic = { ...review, reviewId: "automatic", rowId: "automatic", decision: { ...review.decision, kind: "automatic" as const } };
     const { handler } = route({ repository: {

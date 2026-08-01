@@ -74,7 +74,7 @@ export function UniversalImportPanelContainer() {
   const businessId = useScanStore((state) => state.businessId);
   const applyUniversalImport = useScanStore((state) => state.applyUniversalImport);
   const isLocalDemo = process.env.NEXT_PUBLIC_LOCAL_DEMO === "1";
-  const localIdentityEnabled = process.env.NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1 === "1" && !isLiveAuth();
+  const localIdentityEnabled = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1 === "1" && !isLiveAuth();
   const localRole = process.env.NEXT_PUBLIC_LOCAL_IDENTITY_ROLE;
 
   if (isLocalDemo) {

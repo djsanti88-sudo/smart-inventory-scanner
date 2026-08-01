@@ -100,7 +100,7 @@ export function ReconcilePanel() {
   const [matchError, setMatchError] = useState("");
   const [running, setRunning] = useState(false);
   const [includeUnitCost, setIncludeUnitCost] = useState(false);
-  const localIdentityEnabled = process.env.NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1 === "1" && !isLiveAuth();
+  const localIdentityEnabled = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1 === "1" && !isLiveAuth();
 
   if (localIdentityEnabled) {
     const previewIdentity = async ({ file, sheets }: { file: { name: string; size?: number }; sheets: Awaited<ReturnType<typeof readUniversalWorkbook>> }) => {
@@ -148,7 +148,7 @@ export function ReconcilePanel() {
         // place. Reuses the SAME parse + column-mapping intelligence Universal Import uses.
         // The flagged local identity path must never silently select workbook tab one. It keeps
         // every sheet in source order; legacy callers retain their single-sheet compatibility seam.
-        const sheets = process.env.NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1 === "1" && !isLiveAuth()
+        const sheets = localIdentityEnabled
           ? await readUniversalWorkbook(file)
           : [await readUniversalFile(file)];
         const mapped = sheets.map((sheet) => {
