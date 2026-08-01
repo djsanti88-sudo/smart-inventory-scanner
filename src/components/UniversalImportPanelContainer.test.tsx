@@ -133,9 +133,11 @@ describe("UniversalImportPanelContainer - loadMapping", () => {
   it("keeps the legacy import selected in production even when the public identity flag is set", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_IDENTITY_ROLE", "admin");
     const fetchMock = stubFetch({ ok: true, status: 200, body: { mapping: REMEMBERED_MAPPING } });
 
     render(<UniversalImportPanelContainer />);
+    expect(screen.queryByRole("region", { name: "Identity review queue" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File([CSV], "production.csv")] } });
 
     await waitFor(() => expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/reconcile/match"))).toBe(true));

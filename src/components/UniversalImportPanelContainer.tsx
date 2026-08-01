@@ -154,7 +154,7 @@ export function UniversalImportPanelContainer() {
       saveMapping={saveMapping}
       matchRows={matchRows}
       onApply={async (rows) => applyUniversalImport(rows)}
-      reviewSurface={businessId && (localRole === "owner" || localRole === "admin") ? <IdentityReviewTable businessId={businessId} actorRole={localRole} /> : undefined}
+      reviewSurface={localIdentityEnabled && businessId && (localRole === "owner" || localRole === "admin") ? <IdentityReviewTable businessId={businessId} actorRole={localRole} /> : undefined}
       localIdentity={localIdentityEnabled ? { enabled: true, role: localRole, mode: "physical_count", readWorkbook: readUniversalWorkbook, previewIdentity, applyIdentity } : undefined}
     />
   );

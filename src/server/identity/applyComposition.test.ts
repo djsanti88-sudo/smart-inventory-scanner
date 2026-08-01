@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createIdentityPreview } from "@/services/identity/preview";
 import type { IdentityCandidateSource } from "@/services/identity/types";
 import { setLocalIdentityApplyCompositionForTest } from "./applyComposition";
-import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
+import { createFileAtomicLocalStorage, createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalPreviewSigner } from "./previewSigner";
 import { deriveConfiguredSnapshotHashes } from "./localIdentityReadModel";
 import { POST as applyPost } from "@/app/api/identity/apply/route";
@@ -62,8 +61,8 @@ describe("local signed apply composition", () => {
     const repeatApply = await applyPost(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify(applyRequest) }));
     expect(repeatApply.status).toBe(200);
     expect(await repeatApply.json()).toMatchObject({ countedRows: 1, countQuantity: 3 });
-    const durable = JSON.parse(await readFile(path.join(process.cwd(), ".tmp", "identity-import", process.env.IDENTITY_LOCAL_RUN_ID!, "identity-local-storage.json"), "utf8")) as { values: { "aggregate-ledger": Record<string, { event: { importId: string; quantity: number } }> } };
-    const events = Object.values(durable.values["aggregate-ledger"]).filter((entry) => entry.event.importId === payload.importId);
+    const durable = await createFileAtomicLocalStorage({ root: path.join(process.cwd(), ".tmp", "identity-import", process.env.IDENTITY_LOCAL_RUN_ID!) }).transaction((transaction) => transaction.get<Record<string, { event: { importId: string; quantity: number } }>>("aggregate-ledger"));
+    const events = Object.values(durable ?? {}).filter((entry) => entry.event.importId === payload.importId);
     expect(events).toHaveLength(1);
     expect(events[0]?.event.quantity).toBe(3);
 
