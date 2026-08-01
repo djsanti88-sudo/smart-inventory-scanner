@@ -125,6 +125,8 @@ export function isValidApprovedLink(
     || typeof link.automaticEligible !== "boolean" || typeof link.namespace !== "string" || typeof link.normalizedValue !== "string" || !link.normalizedValue
     || !barcodeIdentifierTypes.has(link.identifierType as string) && link.identifierType !== "manufacturer_part_number") return false;
   if (!link.targetProductId || !isCompleteIdentityCandidate(link.currentTarget) || link.currentTarget.productId !== link.targetProductId) return false;
+  if (link.currentTarget.businessScope !== "master"
+    && (link.currentTarget.businessScope !== "tenant" || link.currentTarget.tenantBusinessId !== scope.businessId)) return false;
   return scope.identifiers.some((identifier) => identifier.type === link.identifierType
     && (identifier.namespace ?? "") === link.namespace && identifier.normalized === link.normalizedValue);
 }

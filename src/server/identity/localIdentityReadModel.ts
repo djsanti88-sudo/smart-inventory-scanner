@@ -43,7 +43,13 @@ export async function loadConfiguredLocalIdentityReadModel(): Promise<LocalIdent
   if (!wire || typeof wire !== "object" || !Array.isArray(wire.barcodeCandidates) || !Array.isArray(wire.partNumberCandidates) || !Array.isArray(wire.approvedLinks)) return undefined;
   const hashes = await deriveConfiguredSnapshotHashes(wire);
   if (wire.catalogSnapshotHash !== hashes.catalogSnapshotHash) return undefined;
-  const setHash = (entries: Array<[string, IdentityCandidate[]]>) => entries.map(([key, candidates]) => [key, candidates.map((candidate) => ({ ...candidate, catalogSnapshotHash: hashes.catalogSnapshotHash }))] as [string, IdentityCandidate[]]);
+  const setHash = (entries: Array<[string, IdentityCandidate[]]>) => {
+    const merged = new Map<string, IdentityCandidate[]>();
+    for (const [key, candidates] of entries) merged.set(key, [...(merged.get(key) ?? []), ...candidates]);
+    return [...merged.entries()].map(([key, candidates]) => [key, candidates
+      .map((candidate) => ({ ...candidate, catalogSnapshotHash: hashes.catalogSnapshotHash }))
+      .sort((left, right) => left.productId.localeCompare(right.productId) || JSON.stringify(left).localeCompare(JSON.stringify(right)))] as [string, IdentityCandidate[]]);
+  };
   const snapshot: LocalIdentitySnapshot = { catalogVersion: wire.catalogVersion, catalogSnapshotHash: hashes.catalogSnapshotHash, barcodeCandidates: new Map(setHash(wire.barcodeCandidates)), partNumberCandidates: new Map(setHash(wire.partNumberCandidates)) };
   if (!isCompleteLocalIdentitySnapshot(snapshot)) return undefined;
   const candidates = allCandidates(snapshot);
@@ -123,7 +129,7 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
   };
 }
 
-export async function deriveAuthoritativeLinkSnapshotHash(model: Pick<LocalIdentityReadModel, "linkSnapshotHash">, repository: Pick<LocalIdentityRepository, "listCurrentIdentityLinks">, businessId: string): Promise<string> {
-  const durable = await repository.listCurrentIdentityLinks(businessId);
-  return canonicalSha256({ configuredLinkSnapshotHash: model.linkSnapshotHash, businessId, currentDurableLinks: durable.map((link) => ({ businessId: link.businessId, sourceSystem: link.sourceSystem, vendorId: link.vendorId, sourceSignature: link.sourceSignature, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, status: link.status, version: link.version })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) });
+export async function deriveAuthoritativeLinkSnapshotHash(model: Pick<LocalIdentityReadModel, "linkSnapshotHash">, repository: Pick<LocalIdentityRepository, "currentIdentityLinksFingerprint">, businessId: string): Promise<string> {
+  const currentDurableLinksFingerprint = await repository.currentIdentityLinksFingerprint(businessId);
+  return canonicalSha256({ configuredLinkSnapshotHash: model.linkSnapshotHash, businessId, currentDurableLinksFingerprint });
 }

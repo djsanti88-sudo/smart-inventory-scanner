@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { access, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFileAtomicLocalStorage, createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
@@ -13,6 +14,28 @@ function testRoot(): string {
   return root;
 }
 
+function waitForChildLine(child: ChildProcessWithoutNullStreams, expected: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const onData = (chunk: Buffer) => {
+      output += chunk.toString("utf8");
+      if (output.includes(expected)) { child.stdout.off("data", onData); resolve(); }
+    };
+    child.stdout.on("data", onData);
+    child.once("error", reject);
+    child.once("exit", (code) => { if (!output.includes(expected)) reject(new Error(`child exited ${code}: ${output}`)); });
+  });
+}
+
+function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let errorOutput = "";
+    child.stderr.on("data", (chunk: Buffer) => { errorOutput += chunk.toString("utf8"); });
+    child.once("error", reject);
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`child exited ${code}: ${errorOutput}`)));
+  });
+}
+
 afterEach(async () => {
   await Promise.all(
     ownedRoots.splice(0).map(async (root) => {
@@ -23,6 +46,133 @@ afterEach(async () => {
 });
 
 describe("createFileAtomicLocalStorage", () => {
+  it("does not materialize an absent file root for a read-only preview page", async () => {
+    const root = testRoot();
+    const storage = createFileAtomicLocalStorage({ root });
+
+    await expect(storage.transaction((transaction) => transaction.scanPage!("identity-links", {
+      offset: 0,
+      limit: 25,
+      filter: () => true,
+      visible: () => true,
+      compare: () => 0,
+      physical: { kind: "identity-links", businessId: "shop-a", mode: "current" },
+    }))).resolves.toMatchObject({ items: [], total: 0 });
+
+    await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("performs an initialized-root preview read without creating a lock or cache file", async () => {
+    const root = testRoot();
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", []));
+    const before = await readdir(root);
+    const storage = createFileAtomicLocalStorage({ root });
+
+    await expect(storage.read!((transaction) => transaction.scanPage!("identity-links", {
+      offset: 0,
+      limit: 25,
+      filter: () => true,
+      compare: () => 0,
+      physical: { kind: "identity-links", businessId: "shop-a", mode: "current" },
+    }))).resolves.toMatchObject({ items: [], total: 0 });
+
+    expect(await readdir(root)).toEqual(before);
+    expect(before).not.toContain("identity-local-storage.lock");
+  });
+
+  it("serializes two independent Node writers without losing an update or deleting the live generation", async () => {
+    const root = testRoot();
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("cross-process", {}));
+    const barrier = path.join(root, "cross-process.start");
+    const modulePath = path.resolve(process.cwd(), "src/server/identity/atomicLocalStorage.ts");
+    const childProgram = `
+      import { access } from "node:fs/promises";
+      import { pathToFileURL } from "node:url";
+      const [modulePath, root, barrier, itemKey] = process.argv.slice(1);
+      const { createFileAtomicLocalStorage } = await import(pathToFileURL(modulePath).href);
+      process.stdout.write("READY\\n");
+      while (true) { try { await access(barrier); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); } }
+      await createFileAtomicLocalStorage({ root }).transaction(async (transaction) => {
+        const current = (await transaction.get("cross-process")) ?? {};
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        current[itemKey] = itemKey;
+        await transaction.set("cross-process", current);
+      });
+      process.stdout.write("DONE\\n");
+    `;
+    const children = ["first", "second"].map((itemKey) => spawn(process.execPath, ["--experimental-transform-types", "--input-type=module", "-e", childProgram, modulePath, root, barrier, itemKey], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }));
+    const exits = children.map(waitForChildExit);
+    await Promise.all(children.map((child) => waitForChildLine(child, "READY")));
+    await writeFile(barrier, "start", "utf8");
+    await Promise.all(exits);
+
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("cross-process"))).resolves.toEqual({ first: "first", second: "second" });
+    const manifest = JSON.parse(await readFile(path.join(root, "identity-local-storage.json"), "utf8"));
+    const names = await readdir(root);
+    expect(names.some((name) => name.startsWith(`identity-local-storage.${manifest.generation}.`))).toBe(true);
+    expect(names).not.toContain("identity-local-storage.lock");
+  });
+
+  it("bounds a cold 500-configured plus 500-durable authoritative page to two immutable index/data files and 25 records", async () => {
+    const root = testRoot();
+    const configured = Array.from({ length: 500 }, (_, index) => {
+      const value = `c-${String(index).padStart(3, "0")}`;
+      return { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: value, targetProductId: `configured-${value}`, status: "approved", version: 1 };
+    });
+    const durable = Array.from({ length: 500 }, (_, index) => {
+      const value = `d-${String(index).padStart(3, "0")}`;
+      return { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: value, targetProductId: `durable-${value}`, status: "approved", version: 1 };
+    });
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", durable));
+    const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); } } });
+
+    const page = await storage.read!((transaction) => transaction.scanPage!("identity-links", {
+      offset: 0,
+      limit: 25,
+      baseItems: configured,
+      filter: (link: typeof configured[number]) => link.businessId === "shop-a",
+      visible: (link) => link.status === "approved",
+      compare: (left, right) => left.normalizedValue.localeCompare(right.normalizedValue),
+      collapseBy: (link) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]),
+      versionOf: (link) => link.version,
+      physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" },
+    }));
+
+    expect(page.total).toBe(1_000);
+    expect(page.items).toHaveLength(25);
+    expect(new Set(reads.filter((read) => !read.filePath.endsWith("identity-local-storage.json")).map((read) => read.filePath)).size).toBeLessThanOrEqual(2);
+    expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(25);
+    expect(await readdir(root)).not.toContain("identity-local-storage.lock");
+  });
+
+  it("resolves 25 scattered exact link families from at most one immutable index and one data file", async () => {
+    const root = testRoot();
+    const links = Array.from({ length: 500 }, (_, index) => {
+      const value = String(index).padStart(3, "0");
+      return { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: value, targetProductId: `tire-${value}`, status: "approved", version: 1 };
+    });
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", links));
+    const families = links.filter((_link, index) => index % 20 === 0).slice(0, 25).map((link) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]));
+    const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); } } });
+
+    const page = await storage.read!((transaction) => transaction.scanPage!("identity-links", {
+      offset: 0,
+      limit: 25,
+      filter: (link: typeof links[number]) => link.businessId === "shop-a",
+      visible: (link) => families.includes(JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue])),
+      compare: (left, right) => left.normalizedValue.localeCompare(right.normalizedValue),
+      collapseBy: (link) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]),
+      versionOf: (link) => link.version,
+      physical: { kind: "identity-links", businessId: "shop-a", mode: "families", families },
+    }));
+
+    expect(page.items).toHaveLength(25);
+    expect(new Set(reads.filter((read) => !read.filePath.endsWith("identity-local-storage.json")).map((read) => read.filePath)).size).toBeLessThanOrEqual(2);
+    expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(25);
+  });
+
   it("reads only one indexed review page and its summaries for 100 durable reviews", async () => {
     const root = testRoot();
     const reviews = Array.from({ length: 100 }, (_, index) => ({
@@ -297,6 +447,26 @@ describe("createFileAtomicLocalStorage", () => {
     await expect(recovered.transaction((transaction) => transaction.get("record"))).resolves.toEqual({ value: "before" });
   });
 
+  it("rejects a manifest generation change observed immediately before swap", async () => {
+    const root = testRoot(), statePath = path.join(root, "identity-local-storage.json");
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "before" }));
+    const originalManifest = await readFile(statePath, "utf8");
+    const racingManifest = JSON.stringify({ version: 2, generation: randomUUID() });
+    const racing = createFileAtomicLocalStorage({
+      root,
+      io: {
+        writeTemp: async (tempPath, body) => {
+          await writeFile(tempPath, body, "utf8");
+          await writeFile(statePath, racingManifest, "utf8");
+        },
+      },
+    });
+
+    await expect(racing.transaction((transaction) => transaction.set("record", { value: "after" }))).rejects.toThrow("identity_storage_manifest_conflict");
+    await writeFile(statePath, originalManifest, "utf8");
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "before" });
+  });
+
   it("retains only the current and previous immutable generations after successful commits", async () => {
     const root = testRoot();
     const storage = createFileAtomicLocalStorage({ root });
@@ -307,6 +477,77 @@ describe("createFileAtomicLocalStorage", () => {
     const generations = new Set((await readdir(root)).map((name) => /^identity-local-storage\.([a-f0-9-]{36})\..+\.json$/.exec(name)?.[1]).filter(Boolean));
     expect(generations.size).toBeLessThanOrEqual(2);
     await expect(createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.get("record"))).resolves.toEqual({ value: 3 });
+  });
+
+  it("publishes explicit schema, merge, and order versions with the immutable exact-link index", async () => {
+    const root = testRoot();
+    const link = { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: "001", targetProductId: "tire-001", status: "approved", version: 1 };
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", [link]));
+    const indexName = (await readdir(root)).find((name) => name.includes(".links.") && name.endsWith(".exact.index.json"));
+
+    expect(indexName).toBeDefined();
+    const index = JSON.parse(await readFile(path.join(root, indexName!), "utf8"));
+    expect(index).toMatchObject({
+      schemaVersion: 1,
+      mergeAlgorithmVersion: "identity-links-merge-v1",
+      orderAlgorithmVersion: "identity-links-order-v1",
+      businessId: "shop-a",
+    });
+  });
+
+  it("fails an oversized exact-link record before publishing its generation", async () => {
+    const root = testRoot();
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "before" }));
+    const oversized = { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: "001", targetProductId: "tire-001", status: "approved", version: 1, evidence: "x".repeat(4_000) };
+
+    await expect(createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", [oversized]))).rejects.toThrow("identity_storage_exact_record_too_large");
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "before" });
+  });
+
+  it.each([1, 2, 3, 4])("recovers after interruption following immutable generation file write %s without publishing a partial generation", async (failAt) => {
+    const root = testRoot();
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "before" }));
+    const links = Array.from({ length: 30 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: String(index).padStart(3, "0"), targetProductId: `tire-${index}`, status: "approved", version: 1 }));
+    let writes = 0;
+    const interrupted = createFileAtomicLocalStorage({
+      root,
+      io: {
+        afterGenerationFileWrite: async () => {
+          writes += 1;
+          if (writes === failAt) throw new Error(`generation interruption ${failAt}`);
+        },
+      },
+    });
+
+    await expect(interrupted.transaction(async (transaction) => {
+      await transaction.set("record", { value: "partial" });
+      await transaction.set("identity-links", links);
+    })).rejects.toThrow(`generation interruption ${failAt}`);
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "before" });
+
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "after" }));
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "after" });
+    const liveManifest = JSON.parse(await readFile(path.join(root, "identity-local-storage.json"), "utf8"));
+    expect((await readdir(root)).some((name) => name.startsWith(`identity-local-storage.${liveManifest.generation}.`))).toBe(true);
+  });
+
+  it("reports an indeterminate committed result after a post-swap directory-sync failure and makes retry idempotent", async () => {
+    const root = testRoot();
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "before" }));
+    let syncs = 0;
+    const failing = createFileAtomicLocalStorage({
+      root,
+      io: {
+        syncDirectory: async () => {
+          syncs += 1;
+          if (syncs === 2) throw new Error("post-swap disk I/O failed");
+        },
+      },
+    });
+
+    await expect(failing.transaction((transaction) => transaction.set("record", { value: "after" }))).rejects.toThrow(/identity_storage_commit_indeterminate/);
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("record"))).resolves.toEqual({ value: "after" });
+    await expect(createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "after" }))).resolves.toBeUndefined();
   });
 
   it("propagates a real directory sync I/O error after replacement", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { deriveConfiguredSnapshotHashes, loadAuthoritativeLocalIdentityReadModel, loadConfiguredLocalIdentityReadModel } from "./localIdentityReadModel";
+import { deriveAuthoritativeLinkSnapshotHash, deriveConfiguredSnapshotHashes, loadAuthoritativeLocalIdentityReadModel, loadConfiguredLocalIdentityReadModel } from "./localIdentityReadModel";
 import { createMemoryAtomicLocalStorage } from "./atomicLocalStorage";
 import { createLocalRepository } from "./localRepository";
 
@@ -76,5 +76,18 @@ describe("configured local identity read model", () => {
     expect(page?.items.some((link) => link.normalizedValue === "000")).toBe(false);
     expect(page?.items).toContainEqual(expect.objectContaining({ normalizedValue: "000a", targetProductId: "durable-new", predecessorSource: "durable" }));
     expect(page?.items).toContainEqual(expect.objectContaining({ normalizedValue: "001", predecessorSource: "configured" }));
+  });
+
+  it("derives the authoritative snapshot hash from the committed current-link fingerprint without loading links", async () => {
+    const repository = {
+      currentIdentityLinksFingerprint: vi.fn().mockResolvedValue("committed-link-fingerprint"),
+      listCurrentIdentityLinks: vi.fn().mockRejectedValue(new Error("unbounded durable read")),
+    };
+
+    const hash = await deriveAuthoritativeLinkSnapshotHash({ linkSnapshotHash: "configured-hash" }, repository, "shop-a");
+
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(repository.currentIdentityLinksFingerprint).toHaveBeenCalledWith("shop-a");
+    expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ import { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
 import type { PreviewVerificationExpectation, SignedPreviewChunk } from "@/services/identity/preview";
 import type { AggregateLedgerPort, ExpectedInventorySession, IdentityDecision, IdentityReview, ImportRun, ScopedIdentifier } from "@/services/identity/types";
 import type { ImportOperationClaim, LocalIdentityRepository } from "./localRepository";
+import type { LocalAtomicCountedApplyInput, LocalAtomicCountedApplyResult } from "./localAtomicCountedApply";
 
 type Role = "owner" | "admin" | "counter" | "viewer";
 type Mode = "physical_count" | "reconcile";
@@ -31,6 +32,7 @@ export interface ApplyDependencies {
   repository: ApplyRepository;
   verifier: (payloads: string[], now: string, expected: PreviewVerificationExpectation) => Promise<SignedPreviewChunk[]>;
   source: ApplySource; ledger: Pick<AggregateLedgerPort, "applyOnce" | "findByIdempotencyKey">; clock: () => string; actor: ApplyActor;
+  atomicCountedRow?: (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult>;
 }
 export interface ApplyAuditRecord { action: "counted" | "reconciled" | "not_counted"; sourceQuantity: number; targetProductId?: string; decisionKind: IdentityDecision["kind"]; decisionFingerprint: string; evidenceSnapshot: IdentityDecision["decisionBasis"]; constraintSnapshot: IdentityDecision["constraintOutcomes"]; correctionTargetProductId?: string; }
 export interface ApplyResult { importId: string; mode: Mode; countedRows: number; countQuantity: number; rows: Array<{ rowId: string; status: "counted" | "reconciled" | "not_counted"; eventId?: string; audit: ApplyAuditRecord }>; reconciliation?: { expectedRows: number; expectedQuantity: number; currentInventoryStatus: "unavailable"; varianceQuantity: null }; }
@@ -78,7 +80,7 @@ async function preflightRows(chunks: SignedPreviewChunk[], input: ApplyIdentityI
     const correction = corrections.get(rowId);
     const decision: ApplyDecision = correction ? { ...original, kind: "review", approvedProductId: correction.targetProductId } : original;
     const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
-    if (input.mode === "physical_count" && targetProductId) {
+    if ((input.mode === "physical_count" || Boolean(correction)) && targetProductId) {
       if (!source.revalidateCountableTarget) throw new Error("apply_source_unavailable");
       const identifiers = Array.isArray(record.identifiers) ? record.identifiers as ScopedIdentifier[] : [];
       if (!await source.revalidateCountableTarget({ businessId: chunks[0]!.scope.businessId, sourceSystem: chunks[0]!.scope.sourceSystem, sourceSignature: chunks[0]!.scope.sourceSignature, vendorId: chunks[0]!.scope.vendorId, targetProductId, identifiers, row: record, decision: original, corrected: Boolean(correction) })) throw new Error(correction ? "apply_correction_target_invalid" : "apply_target_stale");
@@ -139,12 +141,36 @@ export async function applyIdentityImport(input: ApplyIdentityImportInput, depen
       : { ...decision };
     if (decisionProjection.kind === "review") delete (decisionProjection as { targetProductId?: string }).targetProductId;
     const payloadFingerprint = await canonicalSha256({ operationFingerprint, rowId, decision: decisionProjection });
+    const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
+    if (input.mode === "physical_count" && targetProductId && !dependencies.atomicCountedRow) {
+      if (!dependencies.source.revalidateCountableTarget) throw new Error("apply_source_unavailable");
+      const identifiers = Array.isArray(row.identifiers) ? row.identifiers as ScopedIdentifier[] : [];
+      if (!await dependencies.source.revalidateCountableTarget({ businessId: run.businessId, sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId, targetProductId, identifiers, row, decision: item.decision, corrected: Boolean(correction) })) throw new Error(correction ? "apply_correction_target_invalid" : "apply_target_stale");
+    }
+    let rowResult: ApplyResult["rows"][number] = { rowId, status: input.mode === "reconcile" ? "reconciled" : "not_counted", audit: { action: input.mode === "reconcile" ? "reconciled" : "not_counted", sourceQuantity: row.quantity as number, ...(targetProductId ? { targetProductId } : {}), decisionKind: decision.kind, decisionFingerprint: decision.decisionFingerprint, evidenceSnapshot: decision.decisionBasis, constraintSnapshot: decision.constraintOutcomes, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) } };
+    if (input.mode === "physical_count" && targetProductId && dependencies.atomicCountedRow) {
+      const event = events.get(rowId)!;
+      const counted: ApplyResult["rows"][number] = { rowId, status: "counted", eventId: event.eventId, audit: { action: "counted", sourceQuantity: row.quantity as number, targetProductId: event.productId, decisionKind: decision.kind, decisionFingerprint: decision.decisionFingerprint, evidenceSnapshot: decision.decisionBasis, constraintSnapshot: decision.constraintOutcomes, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) } };
+      const identifiers = Array.isArray(row.identifiers) ? row.identifiers as ScopedIdentifier[] : [];
+      const atomic = await dependencies.atomicCountedRow({
+        validation: { businessId: run.businessId, sourceSystem: first.scope.sourceSystem, sourceSignature: first.scope.sourceSignature, vendorId: first.scope.vendorId, targetProductId, identifiers, row, decision: item.decision, corrected: Boolean(correction) },
+        operation: { businessId: run.businessId, importId: run.importId, rowId, idempotencyKey: `identity-apply:${rowId}`, payloadFingerprint },
+        event,
+        operationFingerprint,
+        result: { row: counted } satisfies RowApplyResult,
+      });
+      if (atomic.kind === "stale") throw new Error(correction ? "apply_correction_target_invalid" : "apply_target_stale");
+      if (atomic.kind === "in_progress") throw new Error("apply_in_progress");
+      if (atomic.kind === "idempotency_conflict") throw new Error("apply_idempotency_conflict");
+      const completed = rowResultFrom(atomic.result);
+      if (!completed) throw new Error("apply_recovery_invalid");
+      rows.push(completed);
+      continue;
+    }
     const claim = await dependencies.repository.claimImportOperation({ businessId: run.businessId, importId: run.importId, rowId, idempotencyKey: `identity-apply:${rowId}`, payloadFingerprint }, 60_000) as ImportOperationClaim;
     if (claim.kind === "completed") { const completed = rowResultFrom(claim.result); if (!completed) throw new Error("apply_recovery_invalid"); rows.push(completed); continue; }
     if (claim.kind === "in_progress") throw new Error("apply_in_progress");
     if (claim.kind === "idempotency_conflict" || claim.kind === "terminal") throw new Error("apply_idempotency_conflict");
-    const targetProductId = decision.kind === "automatic" ? decision.targetProductId : decision.kind === "review" ? decision.approvedProductId : undefined;
-    let rowResult: ApplyResult["rows"][number] = { rowId, status: input.mode === "reconcile" ? "reconciled" : "not_counted", audit: { action: input.mode === "reconcile" ? "reconciled" : "not_counted", sourceQuantity: row.quantity as number, ...(targetProductId ? { targetProductId } : {}), decisionKind: decision.kind, decisionFingerprint: decision.decisionFingerprint, evidenceSnapshot: decision.decisionBasis, constraintSnapshot: decision.constraintOutcomes, ...(correction ? { correctionTargetProductId: correction.targetProductId } : {}) } };
     if (input.mode === "physical_count" && (decision.kind === "automatic" || decision.kind === "review" && decision.approvedProductId)) {
       // The run's original timestamp is part of the aggregate-event fingerprint; retries must not
       // turn a recovered post-ledger crash into a conflicting new event.

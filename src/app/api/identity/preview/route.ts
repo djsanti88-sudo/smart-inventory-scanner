@@ -3,7 +3,6 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { isLiveAuth } from "@/services/auth/authMode";
 import type { CreateIdentityPreviewInput } from "@/services/identity/preview";
-import { validateIdentityInput } from "@/services/identity/canonical";
 import { authorizeLocalIdentityPreview, createComposedIdentityPreview } from "@/server/identity/previewComposition";
 import { decodePreviewSigningKey } from "@/server/identity/previewSigner";
 
@@ -36,10 +35,16 @@ function isPreviewRequest(value: unknown): value is Omit<CreateIdentityPreviewIn
   const body = value as Record<string, unknown>;
   const allowed = new Set(["rows", "orderedMappings", "sourceFileHashes", "importerVersion"]);
   if (Object.keys(body).some((key) => !allowed.has(key)) || !Array.isArray(body.rows) || body.rows.length === 0 || body.rows.length > 5_000
-    || !body.rows.every((row) => validateIdentityInput(row).length === 0)
+    || !body.rows.every((row) => row && typeof row === "object" && !Array.isArray(row)
+      && ["businessId", "sourceSystem", "sourceSignature", "vendorId"].every((key) => {
+        const field = (row as Record<string, unknown>)[key];
+        return typeof field === "string" && field.length > 0 && field.length <= 256;
+      }))
     || !Array.isArray(body.sourceFileHashes) || !body.sourceFileHashes.every((hash) => typeof hash === "string" && hash.length > 0 && hash.length <= 256)
     || typeof body.importerVersion !== "string" || !body.importerVersion || body.importerVersion.length > 128
     || !Array.isArray(body.orderedMappings) || body.orderedMappings.length > 128) return false;
+  const first = body.rows[0] as Record<string, unknown>;
+  if (!body.rows.every((row) => ["businessId", "sourceSystem", "sourceSignature", "vendorId"].every((key) => (row as Record<string, unknown>)[key] === first[key]))) return false;
   return body.orderedMappings.every((mapping) => mapping && typeof mapping === "object" && !Array.isArray(mapping)
     && typeof (mapping as { sheetName?: unknown }).sheetName === "string" && (mapping as { sheetName: string }).sheetName.length > 0
     && (mapping as { mapping?: unknown }).mapping && typeof (mapping as { mapping: unknown }).mapping === "object" && !Array.isArray((mapping as { mapping: unknown }).mapping));

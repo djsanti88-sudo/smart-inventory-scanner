@@ -59,8 +59,8 @@ describe("local signed apply composition", () => {
     expect(firstApply.status).toBe(200);
     expect(await firstApply.json()).toMatchObject({ mode: "physical_count", countedRows: 1, countQuantity: 3, rows: [{ status: "counted", audit: { targetProductId: product.productId } }] });
     const repeatApply = await applyPost(new Request("http://localhost/api/identity/apply", { method: "POST", body: JSON.stringify(applyRequest) }));
-    expect(repeatApply.status).toBe(200);
-    expect(await repeatApply.json()).toMatchObject({ countedRows: 1, countQuantity: 3 });
+    const repeatBody = await repeatApply.json();
+    expect({ status: repeatApply.status, body: repeatBody }).toMatchObject({ status: 200, body: { countedRows: 1, countQuantity: 3 } });
     const durable = await createFileAtomicLocalStorage({ root: path.join(process.cwd(), ".tmp", "identity-import", process.env.IDENTITY_LOCAL_RUN_ID!) }).transaction((transaction) => transaction.get<Record<string, { event: { importId: string; quantity: number } }>>("aggregate-ledger"));
     const events = Object.values(durable ?? {}).filter((entry) => entry.event.importId === payload.importId);
     expect(events).toHaveLength(1);

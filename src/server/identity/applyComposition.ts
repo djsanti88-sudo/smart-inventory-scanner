@@ -10,6 +10,7 @@ import { createLocalAggregateLedger } from "./localAggregateLedger";
 import { createLocalRepository } from "./localRepository";
 import { createLocalPreviewSigner } from "./previewSigner";
 import { loadAuthoritativeLocalIdentityReadModel, deriveAuthoritativeLinkSnapshotHash } from "./localIdentityReadModel";
+import { createLocalAtomicCountedApply } from "./localAtomicCountedApply";
 
 export interface LocalIdentityApplyComposition {
   storage: AtomicLocalStorage; signingKey: () => string | undefined; versions: PreviewVersions; now?: () => Date;
@@ -61,5 +62,6 @@ export async function applyComposedIdentityImport(input: ApplyIdentityImportInpu
   const repository = createLocalRepository(current.storage);
   const linkSnapshotHash = injected ? current.versions.linkSnapshotHash : await deriveAuthoritativeLinkSnapshotHash({ linkSnapshotHash: current.versions.linkSnapshotHash }, repository, actor.businessId);
   const versions = { ...current.versions, linkSnapshotHash };
-  return applyIdentityImport(input, { repository, ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions, revalidateCountableTarget: current.revalidateCountableTarget }, clock, actor });
+  const atomicCountedRow = current.revalidateCountableTarget ? createLocalAtomicCountedApply(current.storage, current.revalidateCountableTarget) : undefined;
+  return applyIdentityImport(input, { repository, ledger: createLocalAggregateLedger(current.storage), verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected), source: { versions, revalidateCountableTarget: current.revalidateCountableTarget }, ...(atomicCountedRow ? { atomicCountedRow } : {}), clock, actor });
 }

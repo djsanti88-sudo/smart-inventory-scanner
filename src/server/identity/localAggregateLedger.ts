@@ -15,6 +15,7 @@ function entryKey(businessId: string, idempotencyKey: string): string {
 }
 
 export function createLocalAggregateLedger(storage: AtomicLocalStorage): AggregateLedgerPort {
+  const read = storage.read ? storage.read.bind(storage) : storage.transaction.bind(storage);
   async function storedResultIsValid(
     item: StoredResult,
     expectedBusinessId: string,
@@ -62,7 +63,7 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
     idempotencyKey: string;
     expectedFingerprint: string;
   }): Promise<AggregateLedgerResult | null> {
-    return storage.transaction(async (transaction) => {
+    return read(async (transaction) => {
       const entries = await transaction.get<Record<string, StoredResult>>(ledgerKey);
       const item = entries?.[entryKey(input.businessId, input.idempotencyKey)];
       return item && await storedResultIsValid(
@@ -90,7 +91,7 @@ export function createLocalAggregateLedger(storage: AtomicLocalStorage): Aggrega
       });
       if (!result || !("event" in result)) return undefined;
       return result.event.fingerprint === input.eventFingerprint &&
-        (await storage.transaction(async (transaction) => {
+        (await read(async (transaction) => {
           const entries = await transaction.get<Record<string, StoredResult>>(ledgerKey);
           return entries?.[entryKey(input.businessId, input.idempotencyKey)]?.operationFingerprint === input.operationFingerprint;
         }))

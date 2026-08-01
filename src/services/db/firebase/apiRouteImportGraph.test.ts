@@ -22,7 +22,10 @@ const FORBIDDEN = [
 ];
 
 const IDENTITY_SOURCE_FORBIDDEN = [
-  "@/server/upc/storage",
+  "@/server/upc",
+  "@/server/decode",
+  "@/server/decodeCacheStore",
+  "@/server/learnedProducts",
   "@libsql/client",
   "fetch",
   "@/server/decode/pipeline",
@@ -122,6 +125,16 @@ describe("API route import-graph guard (no client Firebase SDK in server bundle)
 });
 
 describe("read-only identity candidate-source import guard", () => {
+  it("keeps preview and default apply free of provider, decode, fetch, Turso, and ladder-storage imports", () => {
+    const routes = [
+      resolve(ROOT, "src/app/api/identity/preview/route.ts"),
+      resolve(ROOT, "src/app/api/identity/apply/route.ts"),
+    ];
+    const violations = routes.flatMap((route) => walk(route, IDENTITY_SOURCE_FORBIDDEN, true));
+
+    expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+  });
+
   it("does not import storage, providers, decode, or AI lookup paths", () => {
     const source = resolve(ROOT, "src/server/identity/readOnlyCandidateSource.ts");
     const index = resolve(ROOT, "src/server/identity/localSnapshotIndex.ts");

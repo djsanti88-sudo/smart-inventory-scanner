@@ -38,6 +38,7 @@ interface ImmutableEvidence {
   candidateEvidenceVersion: string;
   identifierEvidenceId: string;
   identifierEvidenceVersion: string;
+  identifierType: ScopedIdentifier["type"];
 }
 
 function normalizedCategory(value: string | undefined): string {
@@ -58,6 +59,7 @@ function evidenceKey(evidence: ImmutableEvidence): string {
     evidence.candidateEvidenceVersion,
     evidence.identifierEvidenceId,
     evidence.identifierEvidenceVersion,
+    evidence.identifierType,
   ].join("\u0000");
 }
 
@@ -78,7 +80,11 @@ function immutableExactEvidence(input: IdentityInput, candidate: IdentityCandida
       candidateEvidenceVersion: candidate.evidenceVersion,
       identifierEvidenceId: identifier.evidenceId,
       identifierEvidenceVersion: identifier.evidenceVersion,
+      identifierType: identifier.type,
     }))
+    .filter((evidence) => evidence.identifierType !== "manufacturer_part_number"
+      || Boolean(normalizedCategory(input.categoryHint))
+        && normalizedCategory(input.categoryHint) === normalizedCategory(candidate.category))
     .sort((left, right) => evidenceKey(left).localeCompare(evidenceKey(right)))[0];
 }
 

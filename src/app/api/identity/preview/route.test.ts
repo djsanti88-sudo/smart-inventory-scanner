@@ -1,17 +1,24 @@
+import { randomUUID } from "node:crypto";
+import { readdir, rm } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentityPreviewRoute, POST } from "./route";
 import { setLocalIdentityPreviewCompositionForTest } from "@/server/identity/previewComposition";
 import { deriveConfiguredSnapshotHashes } from "@/server/identity/localIdentityReadModel";
 import { buildLocalIdentityPreviewRequest } from "@/components/UniversalImportPanelContainer";
+import { createFileAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
+
+const ownedRoots: string[] = [];
 
 const actualBody = {
   rows: [{ businessId: "demo-shop", sourceSystem: "csv", sourceSignature: "headers-v1", vendorId: "vendor-a", sourceFileFingerprint: "file-a", sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, identifiers: [{ type: "manufacturer_part_number", namespace: "vendor-a", raw: "PN-1", normalized: "PN-1", source: "csv", evidenceAuthority: "vendor_import", evidenceId: "row-1", evidenceVersion: "1" }], attributes: {}, quantity: 1, rawRecordFingerprint: "row-1" }],
   orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN" } }], sourceFileHashes: ["file-a"], importerVersion: "v1",
 };
 
-afterEach(() => {
+afterEach(async () => {
   setLocalIdentityPreviewCompositionForTest(undefined);
   vi.unstubAllEnvs();
+  await Promise.all(ownedRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 async function configuredEmptySnapshot(): Promise<string> {
@@ -40,6 +47,29 @@ describe("POST /api/identity/preview", () => {
     expect(createPreview).toHaveBeenCalledWith(expect.objectContaining({ rows: expect.arrayContaining([
       expect.objectContaining({ sourceRowNumber: 2 }), expect.objectContaining({ sourceRowNumber: 5 }),
     ]) }), { actorId: "viewer-1", role: "viewer" });
+  });
+
+  it("routes a canonically invalid non-scope row through the real engine invalid bucket", async () => {
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", Buffer.alloc(32, 9).toString("base64url"));
+    vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", await configuredEmptySnapshot());
+    vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
+    vi.stubEnv("IDENTITY_LOCAL_RUN_ID", "route-preview-invalid-test");
+    const malformed = {
+      ...actualBody,
+      rows: [{ ...actualBody.rows[0], quantity: "not-a-number" }],
+    };
+
+    const response = await POST(new Request("http://localhost/api/identity/preview", {
+      method: "POST",
+      body: JSON.stringify(malformed),
+    }));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.preview.decisions).toEqual([expect.objectContaining({ kind: "invalid", sourceRecordFingerprint: "row-1" })]);
+    expect(JSON.parse(body.signedPayloads[0]).decisions).toEqual([expect.objectContaining({ kind: "invalid" })]);
   });
 
   it("is unavailable unless the local mock feature flag is enabled", async () => {
@@ -85,6 +115,7 @@ describe("POST /api/identity/preview", () => {
     vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
     vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", await configuredEmptySnapshot());
     vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
+    vi.stubEnv("IDENTITY_LOCAL_RUN_ID", "route-preview-configured-test");
     const fetch = vi.spyOn(globalThis, "fetch");
     const response = await POST(new Request("http://localhost/api/identity/preview", {
       method: "POST", body: JSON.stringify(actualBody),
@@ -97,12 +128,32 @@ describe("POST /api/identity/preview", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("leaves an initialized file store byte-for-byte untouched during an exported preview", async () => {
+    const runId = `route-preview-pure-${randomUUID()}`;
+    const root = path.resolve(process.cwd(), ".tmp", "identity-import", runId); ownedRoots.push(root);
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", []));
+    const before = await readdir(root);
+    vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
+    vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", Buffer.alloc(32, 7).toString("base64url"));
+    vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", await configuredEmptySnapshot());
+    vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
+    vi.stubEnv("IDENTITY_LOCAL_RUN_ID", runId);
+
+    const response = await POST(new Request("http://localhost/api/identity/preview", { method: "POST", body: JSON.stringify(actualBody) }));
+
+    expect(response.status).toBe(200);
+    expect(await readdir(root)).toEqual(before);
+    expect(before).not.toContain("identity-local-storage.lock");
+  });
+
   it("does not accept a caller-controlled actor header", async () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
     vi.stubEnv("IDENTITY_PREVIEW_SIGNING_KEY", Buffer.alloc(32, 3).toString("base64url"));
     vi.stubEnv("IDENTITY_PREVIEW_LOCAL_MEMBERSHIPS_JSON", JSON.stringify([{ actorId: "local-owner", businessId: "demo-shop", role: "owner" }]));
     vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", await configuredEmptySnapshot());
     vi.stubEnv("SCANBIN_LOCAL_ACTOR_ID", "local-owner");
+    vi.stubEnv("IDENTITY_LOCAL_RUN_ID", "route-preview-forged-header-test");
     const response = await POST(new Request("http://localhost/api/identity/preview", {
       method: "POST", headers: { "x-scanbin-local-actor": "forged-viewer" }, body: JSON.stringify(actualBody),
     }));
