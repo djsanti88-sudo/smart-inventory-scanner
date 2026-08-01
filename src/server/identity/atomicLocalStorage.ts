@@ -129,6 +129,7 @@ async function withMutex<T>(root: string, action: () => Promise<T>): Promise<T> 
 function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
 type LockOwner = { token: string; pid: number };
+type ReaderPinOwner = { token: string; pid: number; generation: string };
 function parseLockOwner(body: string | undefined): LockOwner | undefined {
   if (!body) return undefined;
   try {
@@ -183,7 +184,6 @@ async function withFileLock<T>(root: string, action: () => Promise<T>): Promise<
 
 class MapTransaction implements AtomicTransaction {
   private working: StoredRecord | undefined;
-  private readonly mutations = new Map<string, StoredValue | undefined>();
   constructor(private readonly initial: StoredRecord) {}
   private get values(): StoredRecord { return this.working ?? this.initial; }
   private writable(): StoredRecord { if (!this.working) this.working = clone(this.initial); return this.working; }
@@ -235,11 +235,10 @@ class MapTransaction implements AtomicTransaction {
         : {}),
     };
   }
-  async set<T>(key: string, value: T): Promise<void> { const stored = clone(value) as StoredValue; this.writable()[key] = stored; this.mutations.set(key, stored); }
-  async delete(key: string): Promise<void> { if (key in this.values) delete this.writable()[key]; this.mutations.set(key, undefined); }
+  async set<T>(key: string, value: T): Promise<void> { this.writable()[key] = clone(value) as StoredValue; }
+  async delete(key: string): Promise<void> { if (key in this.values) delete this.writable()[key]; }
   get changed(): boolean { return Boolean(this.working); }
   get snapshot(): StoredRecord { return this.values; }
-  get mutationEntries(): readonly [string, StoredValue | undefined][] { return [...this.mutations.entries()]; }
 }
 
 function parseJson(input: string): unknown { try { return JSON.parse(input); } catch { throw corrupt(); } }
@@ -266,6 +265,45 @@ async function readText(filePath: string, io: FileStorageHooks, { optional = fal
     if (observe) io.observeRead?.({ filePath, bytes: Buffer.byteLength(body, "utf8"), records });
     return body;
   } finally { await handle.close(); }
+}
+
+function readerPinFileName(generation: string, token: string): string {
+  if (!generationPattern.test(generation) || !generationPattern.test(token)) throw corrupt();
+  return `identity-local-storage.reader.${generation}.${token}.pin`;
+}
+function parseReaderPin(body: string | undefined): ReaderPinOwner | undefined {
+  if (!body) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return plainRecord(parsed) && typeof parsed.token === "string" && generationPattern.test(parsed.token)
+      && Number.isSafeInteger(parsed.pid) && (parsed.pid as number) > 0
+      && typeof parsed.generation === "string" && generationPattern.test(parsed.generation)
+      ? { token: parsed.token, pid: parsed.pid as number, generation: parsed.generation }
+      : undefined;
+  } catch { return undefined; }
+}
+async function createReaderPin(root: string, generation: string): Promise<{ filePath: string; body: string }> {
+  const owner: ReaderPinOwner = { token: randomUUID(), pid: process.pid, generation };
+  const filePath = path.join(root, readerPinFileName(generation, owner.token)), body = JSON.stringify(owner);
+  await syncFile(filePath, body);
+  return { filePath, body };
+}
+async function releaseReaderPin(pin: { filePath: string; body: string }, io: FileStorageHooks): Promise<void> {
+  const current = await readText(pin.filePath, io, { optional: true, maxBytes: 1_024, observe: false }).catch(() => undefined);
+  if (current === pin.body) await unlink(pin.filePath).catch(() => undefined);
+}
+async function activeReaderGenerations(root: string, io: FileStorageHooks): Promise<Set<string>> {
+  const pattern = /^identity-local-storage\.reader\.([a-f0-9-]{36})\.([a-f0-9-]{36})\.pin$/;
+  const active = new Set<string>();
+  for (const name of await readdir(root)) {
+    const match = pattern.exec(name);
+    if (!match) continue;
+    const filePath = path.join(root, name), body = await readText(filePath, io, { optional: true, maxBytes: 1_024, observe: false }).catch(() => undefined);
+    const pin = parseReaderPin(body);
+    if (pin && pin.generation === match[1] && pin.token === match[2] && processIsAlive(pin.pid)) active.add(pin.generation);
+    else if (body !== undefined) await unlink(filePath).catch(() => undefined);
+  }
+  return active;
 }
 
 const directorySyncUnsupportedCodes = new Set(["EINVAL", "ENOTSUP", "EOPNOTSUPP", "EPERM", "EISDIR"]);
@@ -384,7 +422,7 @@ async function cleanupOldGenerations(root: string, statePath: string, keep: Read
   const liveBody = await readText(statePath, io, { maxBytes: maxIndexFileBytes, observe: false });
   const liveManifest = parseManifest(liveBody!);
   if (!liveManifest) throw corrupt();
-  const protectedGenerations = new Set([...keep, liveManifest.generation]);
+  const protectedGenerations = new Set([...keep, liveManifest.generation, ...await activeReaderGenerations(root, io)]);
   const pattern = /^identity-local-storage\.([a-f0-9-]{36})\..+\.json$/;
   await Promise.all((await readdir(root)).map(async (name) => {
     const generation = pattern.exec(name)?.[1];
@@ -587,7 +625,6 @@ class FileTransaction implements AtomicTransaction {
   }
   get changed(): boolean { return this.delegate?.changed ?? false; }
   async snapshot(): Promise<StoredRecord> { return (await this.map()).snapshot; }
-  async mutationEntries(): Promise<readonly [string, StoredValue | undefined][]> { return (await this.map()).mutationEntries; }
 }
 
 async function loadOrMigrateManifest(root: string, statePath: string, io: FileStorageHooks): Promise<StorageManifest | undefined> {
@@ -617,34 +654,50 @@ export function createFileAtomicLocalStorage({ root, io = {} }: { root: string; 
         return result;
       }
       const statePath = path.join(existingRoot, "identity-local-storage.json");
-      const body = await readText(statePath, io, { optional: true, maxBytes: maxIndexFileBytes });
-      let transaction: FileTransaction | MapTransaction;
-      if (body === undefined) transaction = new FileTransaction(existingRoot, undefined, io);
-      else {
+      for (let attempt = 0; attempt < 16; attempt += 1) {
+        const body = await readText(statePath, io, { optional: true, maxBytes: maxIndexFileBytes, observe: false });
+        if (body === undefined) {
+          const transaction = new FileTransaction(existingRoot, undefined, io), result = await fn(transaction);
+          if (transaction.changed) throw new Error("identity_storage_read_only");
+          return result;
+        }
         const manifest = parseManifest(body);
-        transaction = manifest ? new FileTransaction(existingRoot, manifest, io) : new MapTransaction(parseLegacy(body));
+        if (!manifest) {
+          io.observeRead?.({ filePath: statePath, bytes: Buffer.byteLength(body, "utf8"), records: 0 });
+          const transaction = new MapTransaction(parseLegacy(body)), result = await fn(transaction);
+          if (transaction.changed) throw new Error("identity_storage_read_only");
+          return result;
+        }
+        const pin = await createReaderPin(existingRoot, manifest.generation);
+        try {
+          const confirmedBody = await readText(statePath, io, { maxBytes: maxIndexFileBytes, observe: false });
+          const confirmed = parseManifest(confirmedBody!);
+          if (!confirmed || confirmed.generation !== manifest.generation) continue;
+          io.observeRead?.({ filePath: statePath, bytes: Buffer.byteLength(body, "utf8"), records: 0 });
+          const transaction = new FileTransaction(existingRoot, manifest, io), result = await fn(transaction);
+          if (transaction.changed) throw new Error("identity_storage_read_only");
+          return result;
+        } finally { await releaseReaderPin(pin, io); }
       }
-      const result = await fn(transaction);
-      if (transaction.changed) throw new Error("identity_storage_read_only");
-      return result;
+      throw new Error("identity_storage_reader_retry_exhausted");
     },
     async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> {
     const existingRoot = await existingPhysicalRoot(safeRoot);
     // Do not create a directory merely to serve an empty preview from a root
     // that has never received a durable write.
     if (!existingRoot) {
-      const transaction = new FileTransaction(safeRoot, undefined, io), result = await fn(transaction);
-      if (!transaction.changed) return result;
+      const probe = new FileTransaction(safeRoot, undefined, io), probeResult = await fn(probe);
+      if (!probe.changed) return probeResult;
       const canonicalRoot = await recheckPhysicalRoot(safeRoot);
       return withMutex(canonicalRoot, () => withFileLock(canonicalRoot, async () => {
         const statePath = path.join(canonicalRoot, "identity-local-storage.json");
         const manifest = await loadOrMigrateManifest(canonicalRoot, statePath, io);
         const latest = new FileTransaction(canonicalRoot, manifest, io);
-        for (const [key, value] of await transaction.mutationEntries()) {
-          if (value === undefined) await latest.delete(key);
-          else await latest.set(key, value);
-        }
-        await commitGeneration(canonicalRoot, statePath, await latest.snapshot(), io, manifest?.generation);
+        // The root may have been initialized by another process after the
+        // write probe. Re-evaluate against the locked latest snapshot instead
+        // of replaying a whole stale top-level value over that committed work.
+        const result = await fn(latest);
+        if (latest.changed) await commitGeneration(canonicalRoot, statePath, await latest.snapshot(), io, manifest?.generation);
         return result;
       }));
     }

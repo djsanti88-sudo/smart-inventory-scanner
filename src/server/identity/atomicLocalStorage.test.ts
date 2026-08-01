@@ -113,6 +113,36 @@ describe("createFileAtomicLocalStorage", () => {
     expect(names).not.toContain("identity-local-storage.lock");
   });
 
+  it("re-evaluates two first writers against the locked latest snapshot so distinct updates to one key survive", async () => {
+    const root = testRoot(), barrier = path.join(storageBase, `first-writers-${randomUUID()}.start`);
+    ownedRoots.push(barrier);
+    const modulePath = path.resolve(process.cwd(), "src/server/identity/atomicLocalStorage.ts");
+    const childProgram = `
+      import { access } from "node:fs/promises";
+      import { pathToFileURL } from "node:url";
+      const [modulePath, root, barrier, itemKey] = process.argv.slice(1);
+      const { createFileAtomicLocalStorage } = await import(pathToFileURL(modulePath).href);
+      let attempts = 0;
+      await createFileAtomicLocalStorage({ root }).transaction(async (transaction) => {
+        attempts += 1;
+        const current = (await transaction.get("shared-first-write")) ?? {};
+        if (attempts === 1) {
+          process.stdout.write("READY\\n");
+          while (true) { try { await access(barrier); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); } }
+        }
+        current[itemKey] = itemKey;
+        await transaction.set("shared-first-write", current);
+      });
+    `;
+    const children = ["first", "second"].map((itemKey) => spawn(process.execPath, ["--experimental-transform-types", "--input-type=module", "-e", childProgram, modulePath, root, barrier, itemKey], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }));
+    const exits = children.map(waitForChildExit);
+    await Promise.all(children.map((child) => waitForChildLine(child, "READY")));
+    await writeFile(barrier, "start", "utf8");
+    await Promise.all(exits);
+
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.get("shared-first-write"))).resolves.toEqual({ first: "first", second: "second" });
+  });
+
   it("bounds a cold 500-configured plus 500-durable authoritative page to two immutable index/data files and 25 records", async () => {
     const root = testRoot();
     const configured = Array.from({ length: 500 }, (_, index) => {
@@ -477,6 +507,49 @@ describe("createFileAtomicLocalStorage", () => {
     const generations = new Set((await readdir(root)).map((name) => /^identity-local-storage\.([a-f0-9-]{36})\..+\.json$/.exec(name)?.[1]).filter(Boolean));
     expect(generations.size).toBeLessThanOrEqual(2);
     await expect(createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.get("record"))).resolves.toEqual({ value: 3 });
+  });
+
+  it("pins a reader generation while two writers publish and clean up newer generations", async () => {
+    const root = testRoot(), release = path.join(root, "reader.release"), resultPath = path.join(root, "reader.result.json");
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "before" }));
+    const modulePath = path.resolve(process.cwd(), "src/server/identity/atomicLocalStorage.ts");
+    const childProgram = `
+      import { access, writeFile } from "node:fs/promises";
+      import { pathToFileURL } from "node:url";
+      const [modulePath, root, release, resultPath] = process.argv.slice(1);
+      const { createFileAtomicLocalStorage } = await import(pathToFileURL(modulePath).href);
+      const storage = createFileAtomicLocalStorage({ root });
+      let result;
+      try { result = { value: await storage.read(async (transaction) => {
+        process.stdout.write("READY\\n");
+        while (true) { try { await access(release); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); } }
+        return transaction.get("record");
+      }) }; }
+      catch (error) { result = { error: error instanceof Error ? error.message : String(error) }; }
+      await writeFile(resultPath, JSON.stringify(result), "utf8");
+    `;
+    const child = spawn(process.execPath, ["--experimental-transform-types", "--input-type=module", "-e", childProgram, modulePath, root, release, resultPath], { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] });
+    const exit = waitForChildExit(child);
+    await waitForChildLine(child, "READY");
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "after-1" }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "after-2" }));
+    await writeFile(release, "continue", "utf8");
+    await exit;
+
+    expect(JSON.parse(await readFile(resultPath, "utf8"))).toEqual({ value: { value: "before" } });
+  });
+
+  it("removes an abandoned dead-process reader pin during locked generation cleanup", async () => {
+    const root = testRoot(), statePath = path.join(root, "identity-local-storage.json");
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "before" }));
+    const generation = JSON.parse(await readFile(statePath, "utf8")).generation as string, token = randomUUID();
+    const pinPath = path.join(root, `identity-local-storage.reader.${generation}.${token}.pin`);
+    await writeFile(pinPath, JSON.stringify({ token, pid: 2_147_483_647, generation }), "utf8");
+
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "after-1" }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("record", { value: "after-2" }));
+
+    await expect(access(pinPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("publishes explicit schema, merge, and order versions with the immutable exact-link index", async () => {
