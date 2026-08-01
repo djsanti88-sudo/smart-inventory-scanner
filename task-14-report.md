@@ -3,7 +3,7 @@
 ## Environment and procedure
 
 - Timestamp: 2026-07-31 local worktree run.
-- Fixture: `src/eval/identity/fixtures/frozen-5000.v1.json`, synthetic-only, deterministic seed `scanbin-local-identity-5000`, 5,000 rows, total quantity 5,000.
+- Fixture: `src/eval/identity/fixtures/frozen-5000.v1.json`, synthetic-only, deterministic seed `scanbin-local-identity-5000`, 5,000 rows, total quantity 15,000.
 - Procedure: cold preview diagnostic, warm crypto/parser/engine/signer, one warmup and three measured warm previews; decision timing uses one real `lookupBatch`, then sequential `decideIdentity` calls over `candidatesByRecord`.
 - Browser main-thread proof: **BLOCKED**. E2E/Playwright is owner-forbidden, and Node scheduling is not browser responsiveness evidence.
 
@@ -17,12 +17,11 @@
 ## Blockers
 
 - The existing exported-route purity test that initializes `.tmp/identity-import` is environment-blocked by `EPERM mkdir` under the sandbox. It is not treated as product proof or a code regression.
-- A portable baseline comparison is diagnostic only until this machine's baseline JSON is deliberately recorded; no cross-machine timing claim is made.
+- The recorded-machine baseline is checked in. Cross-machine comparisons remain diagnostic-only and must report an environment mismatch rather than claim comparable proof.
 
 ## Fix round 1
 
-- Recorded-machine baseline: Windows 10.0.26200 x64, Intel Core i7-14650HX, 24 logical CPUs, Node v24.15.0. The immutable fixture SHA-256 is `873572f1ddf8835e3e7e9dea2307aec2361c7663e2592d841a670bd5a9640c86`; snapshot hash is `frozen-local-hash-v1`.
-- Measured cold diagnostic was 3.4064 ms. Three warm runs were 398.6923, 397.5722, and 466.7902 ms; median 398.6923 ms. Sequential decision p95 was 0.0475 ms. Actual signed output: 12 chunks, maximum 479,234 bytes, aggregate 5,635,054 bytes.
+- The initial performance fixture and measurements were superseded by the canonical five-bucket fixture and baseline recorded below. They are not current acceptance evidence.
 - The offline benchmark supports `--import-performance --compare-baseline --format=json|markdown` and reports an environment mismatch rather than treating this machine baseline as portable proof.
 - DOM proof uploads through the real container/shaper into an injected preview route: service receives all 5,000 rows in source order, each of five buckets totals 1,000, and the aggregate-only UI renders only 25 review controls. Oversized or malformed chunk sets keep Apply unavailable.
 
@@ -33,3 +32,12 @@
 - Runtime fixture SHA-256 verification binds `96ead7180f18147d23ac007f9ed2b247bd5bbe260d3f166fc04980be5b1298c3`. The shared fixture contract requires 5,000 rows, total quantity 15,000, and bucket vectors: automatic 1,000/1,000; review 1,000/2,000; abstain 1,000/3,000; non-product 1,000/4,000; invalid 1,000/5,000. Performance proof sums quantities from verified signed row/decision pairs; DOM proof imports the same contract.
 - Stream enforcement proof sends 33 one-MiB chunks through a `ReadableStream` with no `Content-Length`; the route returns 413 and delegates zero times.
 - Exact build blocker: `npm.cmd run build` on Windows 10.0.26200, Node v24.15.0, Next 16.2.12. Turbopack rejected the linked-worktree symlink: `Symlink [project]/node_modules is invalid, it points out of the filesystem root`. This is distinct from the route-purity test's sandbox `EPERM` creating `.tmp/identity-import/...`.
+
+## Canonical final evidence
+
+- Frozen contract: SHA-256 `96ead7180f18147d23ac007f9ed2b247bd5bbe260d3f166fc04980be5b1298c3`; 5,000 rows; total quantity 15,000; snapshot hash `frozen-local-hash-v1`.
+- Exact terminal buckets: automatic 1,000 rows / 1,000 quantity; review 1,000 / 2,000; abstain 1,000 / 3,000; non-product 1,000 / 4,000; invalid 1,000 / 5,000.
+- Recorded baseline environment: Windows `win32` release `10.0.26200`, x64, Intel Core i7-14650HX, 24 logical CPUs, Node v24.15.0. Baseline cold diagnostic 5.9984 ms; warm runs 586.4736, 671.9426, and 576.8893 ms; median 586.4736 ms; sequential decision p95 0.0725 ms; 13 chunks; maximum 478,340 bytes; aggregate 5,970,125 bytes.
+- Fresh comparable-machine proof executes the harness rather than replaying stored metrics. It enforces warm median <=10,000 ms, decision p95 <=2 ms, and comparable-machine median <=110% of the recorded baseline. Other environments produce mismatch diagnostics.
+- Browser main-thread long-task proof remains **BLOCKED** because E2E/Playwright was explicitly forbidden. No Node timing is presented as browser responsiveness evidence.
+- Build remains environment-blocked by the exact Turbopack linked-worktree `node_modules` symlink error above. Route-purity initialization remains separately sandbox-blocked by `EPERM`; neither is recorded as a product-test failure.
