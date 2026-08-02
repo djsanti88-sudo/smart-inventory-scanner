@@ -104,7 +104,7 @@ describe("identity import authority security", () => {
     }, genericIdentityPlugin);
 
     expect(missingCategory.kind).toBe("review");
-    expect(matchingCategory.kind).toBe("automatic");
+    expect(matchingCategory.kind).toBe("review");
     expect(gtinDecision.kind).toBe("automatic");
   });
 

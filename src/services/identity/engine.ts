@@ -84,6 +84,12 @@ function immutableExactEvidence(input: IdentityInput, candidate: IdentityCandida
   const inputKeys = new Set(input.identifiers.map(identifierKey));
   return candidate.identifiers
     .filter((identifier) => inputKeys.has(identifierKey(identifier)) && immutableAuthorities.has(identifier.evidenceAuthority))
+    .filter((identifier) => identifier.type !== "manufacturer_part_number" || (
+      identifier.evidenceAuthority === "approved_tenant_link"
+      && candidate.verificationTier === "approved"
+      && candidate.businessScope === "tenant"
+      && candidate.tenantBusinessId === input.businessId
+    ))
     .map((identifier) => ({
       candidateEvidenceId: candidate.evidenceId,
       candidateEvidenceVersion: candidate.evidenceVersion,

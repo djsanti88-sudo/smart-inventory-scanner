@@ -214,6 +214,7 @@ describe("read-only local identity candidate source", () => {
 
     expect(linkCandidate).toMatchObject({
       businessScope: "tenant",
+      tenantBusinessId: "business-1",
       verificationTier: "approved",
       automaticEligible: true,
       exactCodeEvidence: true,
@@ -226,6 +227,41 @@ describe("read-only local identity candidate source", () => {
         evidenceVersion: "link-v3",
       })],
     });
+  });
+
+  it("stamps the requesting business on a tenant-backed approved-link target", async () => {
+    const tenantTarget = { ...candidate("tenant-product"), businessScope: "tenant" as const, tenantBusinessId: "business-1" };
+    const source = createReadOnlyCandidateSource({
+      snapshot: snapshot(),
+      lookupApprovedLinks: vi.fn().mockResolvedValue([approvedLink("tenant-product", { currentTarget: tenantTarget })]),
+    });
+
+    const materialized = (await source.lookupBatch([input()])).candidatesByRecord.get("row-1")!.find((entry) => entry.productId === "tenant-product");
+
+    expect(materialized).toMatchObject({ businessScope: "tenant", tenantBusinessId: "business-1", verificationTier: "approved" });
+  });
+
+  it("lets the engine abstain after a conflicting link family has no independent candidate", async () => {
+    const source = createReadOnlyCandidateSource({
+      snapshot: { ...snapshot(), barcodeCandidates: new Map(), partNumberCandidates: new Map() },
+      lookupApprovedLinks: vi.fn().mockResolvedValue([approvedLink("target-a"), approvedLink("target-b")]),
+    });
+    const row = input();
+    const candidates = (await source.lookupBatch([row])).candidatesByRecord.get(row.rawRecordFingerprint)!;
+
+    await expect(decideIdentity(row, { catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-1", candidates }, genericIdentityPlugin)).resolves.toMatchObject({ kind: "abstain" });
+  });
+
+  it("leaves an independent snapshot candidate for engine evaluation after a conflicting link family", async () => {
+    const independent = { ...candidate("snapshot-target", { evidenceAuthority: "vendor_import" }), exactCodeEvidence: false };
+    const source = createReadOnlyCandidateSource({
+      snapshot: { ...snapshot(), barcodeCandidates: new Map([["012345678905", [independent]]]) },
+      lookupApprovedLinks: vi.fn().mockResolvedValue([approvedLink("target-a"), approvedLink("target-b")]),
+    });
+    const row = input();
+    const candidates = (await source.lookupBatch([row])).candidatesByRecord.get(row.rawRecordFingerprint)!;
+
+    await expect(decideIdentity(row, { catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-1", candidates }, genericIdentityPlugin)).resolves.toMatchObject({ kind: "review", candidates: [{ productId: "snapshot-target" }] });
   });
 
   it("excludes malformed, non-approved, revoked, cross-scoped, deleted, and conflicting approved links", async () => {

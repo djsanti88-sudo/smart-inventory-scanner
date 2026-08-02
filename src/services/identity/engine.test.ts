@@ -75,6 +75,46 @@ describe("identity decision engine", () => {
   });
 
   it.each([
+    ["exact-code corpus MPN", candidate({ verificationTier: "exact_code_verified", identifiers: [identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a", evidenceAuthority: "verified_exact_code_corpus" })] }), "review"],
+    ["human master MPN", candidate({ identifiers: [identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a", evidenceAuthority: "human_verified_master" })] }), "review"],
+    ["same-business approved tenant MPN", candidate({ businessScope: "tenant", tenantBusinessId: "business-1", verificationTier: "approved", identifiers: [identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a", evidenceAuthority: "approved_tenant_link" })] }), "automatic"],
+    ["other-business approved tenant MPN", candidate({ businessScope: "tenant", tenantBusinessId: "business-2", verificationTier: "approved", identifiers: [identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a", evidenceAuthority: "approved_tenant_link" })] }), "review"],
+    ["unstamped approved tenant MPN", candidate({ businessScope: "tenant", verificationTier: "approved", identifiers: [identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a", evidenceAuthority: "approved_tenant_link" })] }), "review"],
+    ["master-scoped approved MPN", candidate({ verificationTier: "approved", identifiers: [identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a", evidenceAuthority: "approved_tenant_link" })] }), "review"],
+  ] as const)("routes %s according to tenant MPN authority", async (_name, matched, kind) => {
+    const mpn = identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a" });
+
+    await expect(decideIdentity(input({ identifiers: [mpn], categoryHint: "general" }), snapshot([matched]), genericIdentityPlugin)).resolves.toMatchObject({ kind });
+  });
+
+  it("keeps a trusted GTIN automatic when an untrusted MPN on that product is also present", async () => {
+    const gtin = identifier();
+    const mpn = identifier({ type: "manufacturer_part_number", raw: "PN-100", normalized: "PN-100", namespace: "vendor-a" });
+    const mixed = candidate({ identifiers: [
+      { ...gtin, source: "catalog", evidenceAuthority: "human_verified_master", evidenceId: "catalog-gtin" },
+      { ...mpn, source: "catalog", evidenceAuthority: "human_verified_master", evidenceId: "catalog-mpn" },
+    ] });
+
+    await expect(decideIdentity(input({ identifiers: [gtin, mpn], categoryHint: "general" }), snapshot([mixed]), genericIdentityPlugin)).resolves.toMatchObject({ kind: "automatic", targetProductId: "product-1" });
+  });
+
+  it("routes trusted GTIN and MPN evidence for different targets to review", async () => {
+    const gtin = identifier();
+    const mpn = identifier({ type: "manufacturer_part_number", raw: "PN-200", normalized: "PN-200", namespace: "vendor-a" });
+    const gtinTarget = candidate({ productId: "gtin-target", identifiers: [{ ...gtin, source: "catalog", evidenceAuthority: "human_verified_master" }] });
+    const mpnTarget = candidate({ productId: "mpn-target", identifiers: [{ ...mpn, source: "catalog", evidenceAuthority: "human_verified_master" }] });
+
+    await expect(decideIdentity(input({ identifiers: [gtin, mpn], categoryHint: "general" }), snapshot([gtinTarget, mpnTarget]), genericIdentityPlugin)).resolves.toMatchObject({ kind: "review" });
+  });
+
+  it("keeps two approved MPN targets available for human review", async () => {
+    const mpn = identifier({ type: "manufacturer_part_number", raw: "PN-300", normalized: "PN-300", namespace: "vendor-a" });
+    const approved = (productId: string) => candidate({ productId, businessScope: "tenant", tenantBusinessId: "business-1", verificationTier: "approved", identifiers: [{ ...mpn, source: "approved-tenant-link", evidenceAuthority: "approved_tenant_link", evidenceId: `link-${productId}` }] });
+
+    await expect(decideIdentity(input({ identifiers: [mpn], categoryHint: "general" }), snapshot([approved("tire-a"), approved("tire-b")]), genericIdentityPlugin)).resolves.toMatchObject({ kind: "review", candidates: [{ productId: "tire-a" }, { productId: "tire-b" }] });
+  });
+
+  it.each([
     ["exact collision", [candidate(), candidate({ productId: "product-2", evidenceId: "catalog-code-2" })]],
     ["provider candidate", [candidate({ verificationTier: "suggested", automaticEligible: false })]],
     ["unverified candidate", [candidate({ verificationTier: "suggested", automaticEligible: true })]],

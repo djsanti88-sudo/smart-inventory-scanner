@@ -6,6 +6,8 @@ import { createLocalRepository } from "./localRepository";
 import { createLocalAggregateLedger } from "./localAggregateLedger";
 import { canonicalSha256 } from "@/services/identity/canonical";
 import { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
+import { decideIdentity } from "@/services/identity/engine";
+import { genericIdentityPlugin } from "@/services/identity/plugins";
 
 const versions = { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
 const freshSource = { versions, revalidateCountableTarget: async () => true };
@@ -107,9 +109,12 @@ describe("applyIdentityImport", () => {
     expect(h.ledger.applyOnce).not.toHaveBeenCalled();
   });
 
-  it("persists the verified signed row quantity and later-count context with a physical-count review", async () => {
+  it("persists a downgraded master MPN as an unresolved physical-count review without counting its former target", async () => {
     const h = harness();
-    const unresolved = { ...chunk().decisions[0]!, kind: "review" as const, targetProductId: undefined };
+    const mpn = { type: "manufacturer_part_number" as const, raw: "PN-701", normalized: "PN-701", namespace: "vendor-a", source: "csv", evidenceAuthority: "vendor_import" as const, evidenceId: "row-mpn", evidenceVersion: "1" };
+    const unresolved = await decideIdentity({ businessId: "shop-a", sourceSystem: "csv", sourceSignature: "headers-v1", vendorId: "vendor-a", sourceFileFingerprint: "file-a", sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, categoryHint: "tire", identifiers: [mpn], attributes: {}, quantity: 7, rawRecordFingerprint: "raw-1" }, {
+      catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", candidates: [{ productId: "former-master-target", category: "tire", businessScope: "master", verificationTier: "human_verified", automaticEligible: true, evidenceId: "catalog-mpn", evidenceVersion: "1", exactCodeEvidence: true, identifiers: [{ ...mpn, source: "master", evidenceAuthority: "human_verified_master", evidenceId: "catalog-mpn" }], attributes: {}, catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1" }],
+    }, genericIdentityPlugin);
     h.verifier.mockResolvedValueOnce([{ ...chunk(), decisions: [unresolved] }]);
 
     await applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, {
@@ -117,6 +122,7 @@ describe("applyIdentityImport", () => {
     });
 
     expect(h.repository.saveIdentityReview).toHaveBeenCalledWith(expect.objectContaining({
+      decision: expect.objectContaining({ kind: "review", candidates: [expect.objectContaining({ productId: "former-master-target" })] }),
       rowId: "row-1",
       signedRowContext: {
         mode: "physical_count", quantity: 7, unitOfMeasure: "each", sourceFileOrdinal: 0,
@@ -124,6 +130,7 @@ describe("applyIdentityImport", () => {
         eventCreatedAt: "2026-07-31T00:01:00.000Z", identifiers: [],
       },
     }));
+    expect(h.ledger.applyOnce).not.toHaveBeenCalled();
   });
 
   it("rejects a correction that targets another tenant before claiming anything", async () => {

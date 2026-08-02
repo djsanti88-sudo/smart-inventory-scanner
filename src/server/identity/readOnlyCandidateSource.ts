@@ -156,6 +156,7 @@ function approvedLinkCandidates(
     return {
       ...target,
       businessScope: "tenant",
+      tenantBusinessId: scope.businessId,
       verificationTier: "approved",
       automaticEligible: link.automaticEligible,
       evidenceId: link.evidenceId,
