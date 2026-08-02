@@ -115,6 +115,24 @@ test("preloaded local-demo guard attests its immutable marker before server code
   }
 });
 
+test("instrumentation throws the stable attestation error in a spawned unguarded local-demo process", () => {
+  const result = spawnSync(process.execPath, [
+    "--input-type=module",
+    "-e",
+    `process.exit = () => {};
+     const { register } = await import(${JSON.stringify(new URL("../src/instrumentation.ts", import.meta.url).href)});
+     register();
+     console.log("instrumentation-returned");`,
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: { ...process.env, SCANBIN_LOCAL_DEMO: "1" },
+  });
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stdout, /instrumentation-returned/);
+  assert.match(result.stderr, /Error: Local demo egress guard attestation failed: start through the local-demo launcher\./);
+});
+
 test("loopback works and a blocked spawned worker shares the parent ledger", () => {
   const directory = mkdtempSync(join(tmpdir(), "scanbin-egress-worker-"));
   const ledger = join(directory, "ledger.jsonl");

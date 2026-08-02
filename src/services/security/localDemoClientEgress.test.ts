@@ -1,11 +1,22 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { register } from "../../instrumentation";
 
 const temporaryRoots: string[] = [];
+
+type PathShape = Pick<typeof posix, "isAbsolute" | "relative" | "sep">;
+
+function isPathWithin(sourceDirectory: string, candidate: string, pathShape: PathShape = { isAbsolute, relative, sep }) {
+  const relativePath = pathShape.relative(sourceDirectory, candidate);
+  return relativePath === "" || (
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${pathShape.sep}`) &&
+    !pathShape.isAbsolute(relativePath)
+  );
+}
 
 function createProject(files: Record<string, string>) {
   const root = mkdtempSync(join(tmpdir(), "scanbin-client-egress-"));
@@ -29,11 +40,17 @@ function findLiteralExternalClientEgress(sourceRoot: string): string[] {
         : null;
     if (!base) return null;
     for (const candidate of [base, ...extensions.map((extension) => `${base}${extension}`), ...extensions.map((extension) => join(base, `index${extension}`))]) {
-      if (ts.sys.fileExists(candidate) && resolve(candidate).startsWith(`${sourceDirectory}\\`)) return resolve(candidate);
+      if (ts.sys.fileExists(candidate) && isPathWithin(sourceDirectory, resolve(candidate))) return resolve(candidate);
     }
     return null;
   };
-  const isLoopback = (hostname: string) => hostname === "localhost" || hostname === "::1" || hostname.startsWith("127.");
+  const isLoopback = (hostname: string) => {
+    if (hostname === "localhost" || hostname === "::1") return true;
+    const octets = hostname.split(".");
+    return octets.length === 4 &&
+      octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255) &&
+      Number(octets[0]) === 127;
+  };
   const isExternalLiteral = (text: string) => {
     try {
       const url = new URL(text);
@@ -84,11 +101,26 @@ describe("local demo client egress scanner", () => {
     expect(() => register()).not.toThrow();
   });
 
-  it("rejects direct client literal fetch, WebSocket, and EventSource egress", () => {
+  it("rejects direct client literal fetch, WebSocket, and EventSource egress across http, https, ws, and wss", () => {
     const root = createProject({
-      "app/page.tsx": '"use client"; fetch("https://example.com"); new WebSocket("wss://example.com"); new EventSource("http://example.com");',
+      "app/page.tsx": '"use client"; fetch("https://example.com/https"); fetch("http://example.com/http"); new WebSocket("wss://example.com/wss"); new WebSocket("ws://example.com/ws"); new EventSource("https://example.com/events");',
     });
-    expect(findLiteralExternalClientEgress(root)).toHaveLength(3);
+    const findings = findLiteralExternalClientEgress(root);
+    expect(findings).toHaveLength(5);
+    for (const url of [
+      "https://example.com/https",
+      "http://example.com/http",
+      "wss://example.com/wss",
+      "ws://example.com/ws",
+    ]) {
+      expect(findings.some((finding) => finding.endsWith(url))).toBe(true);
+    }
+  });
+
+  it("treats Linux-shaped descendants as contained without accepting traversal or absolute escapes", () => {
+    expect(isPathWithin("/repo/src", "/repo/src/components/client.ts", posix)).toBe(true);
+    expect(isPathWithin("/repo/src", "/repo/src-escape/client.ts", posix)).toBe(false);
+    expect(isPathWithin("/repo/src", "/repo/outside/client.ts", posix)).toBe(false);
   });
 
   it("rejects literal external egress in imported client descendants and terminates cycles", () => {
@@ -105,6 +137,15 @@ describe("local demo client egress scanner", () => {
       "app/page.tsx": '"use client"; fetch("http://127.0.0.1:3000"); new WebSocket("ws://localhost:3000");',
     });
     expect(findLiteralExternalClientEgress(root)).toEqual([]);
+  });
+
+  it("rejects hostnames that merely begin with the 127 label", () => {
+    const root = createProject({
+      "app/page.tsx": '"use client"; fetch("https://127.example.com/not-loopback");',
+    });
+    expect(findLiteralExternalClientEgress(root)).toEqual([
+      "app/page.tsx:1 fetch https://127.example.com/not-loopback",
+    ]);
   });
 
   // This intentionally narrow static defense detects only direct literal URL calls in client-reachable TS/JS.
