@@ -148,6 +148,15 @@ describe("local demo client egress scanner", () => {
     ]);
   });
 
+  it("rejects bracketed IPv6 literals other than the exact loopback address", () => {
+    const root = createProject({
+      "app/page.tsx": '"use client"; fetch("http://[::2]:3000/not-loopback");',
+    });
+    expect(findLiteralExternalClientEgress(root)).toEqual([
+      "app/page.tsx:1 fetch http://[::2]:3000/not-loopback",
+    ]);
+  });
+
   // This intentionally narrow static defense detects only direct literal URL calls in client-reachable TS/JS.
   // Dynamic URLs, indirect wrappers, SDKs, CSS, and DOM resource loading require separate runtime controls.
   it("finds no direct literal external egress in the actual client-reachable source graph", () => {
