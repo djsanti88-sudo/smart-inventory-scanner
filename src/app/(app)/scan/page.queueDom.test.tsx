@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe("ScanPage queued scanner DOM proof", () => {
-  it("uses the actual scanner input, serializes a camera scan at a chunk boundary, and counts all 101 pasted codes", async () => {
+  it("keeps the actual scanner input live and serializes hardware and camera scans at separate chunk boundaries", async () => {
     vi.useFakeTimers();
     const processScan = resetStore();
     const codes = Array.from({ length: 101 }, (_, index) => `bulk-${index + 1}`);
@@ -89,17 +89,27 @@ describe("ScanPage queued scanner DOM proof", () => {
     expect(processScan).toHaveBeenCalledTimes(20);
     expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("20 of 101");
 
+    fireEvent.change(input, { target: { value: "hardware-1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveAttribute("aria-busy", "false");
+    expect(input.value).toBe("");
+    expect(document.activeElement).toBe(input);
     fireEvent.click(screen.getByTestId("camera-queue-probe"));
     expect(processScan).toHaveBeenCalledTimes(20);
+
     await releaseNextChunk();
     expect(processScan.mock.calls.map(([code]) => code)).toEqual([
-      ...codes.slice(0, 20), "camera-1", ...codes.slice(20, 40),
+      ...codes.slice(0, 20), "hardware-1", ...codes.slice(20, 40),
     ]);
-
-    for (let batch = 0; batch < 4; batch += 1) await releaseNextChunk();
-    expect(processScan.mock.calls.map(([code]) => code)).toEqual([...codes.slice(0, 20), "camera-1", ...codes.slice(20)]);
-    expect(processScan).toHaveBeenCalledTimes(102);
-    expect(new Set(processScan.mock.calls.map(([code]) => code)).size).toBe(102);
+    for (let release = 0; processScan.mock.calls.length < 103 && release < 5; release += 1) {
+      await releaseNextChunk();
+    }
+    expect(processScan.mock.calls.map(([code]) => code)).toEqual([
+      ...codes.slice(0, 20), "hardware-1", ...codes.slice(20, 40), "camera-1", ...codes.slice(40),
+    ]);
+    expect(processScan).toHaveBeenCalledTimes(103);
+    expect(new Set(processScan.mock.calls.map(([code]) => code)).size).toBe(103);
     expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
   });
 
