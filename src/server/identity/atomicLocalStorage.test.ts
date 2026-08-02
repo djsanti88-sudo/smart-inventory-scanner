@@ -319,7 +319,8 @@ describe("createFileAtomicLocalStorage", () => {
     }));
     await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-reviews", reviews));
     const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
-    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); } } });
+    const probes: number[] = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); }, observeSeek: (probe) => { probes.push(probe.pageNumber); } } });
 
     const page = await storage.transaction(async (transaction) => transaction.scanPage!("identity-reviews", {
       offset: 25,
@@ -378,7 +379,8 @@ describe("createFileAtomicLocalStorage", () => {
     }));
     await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-reviews", reviews));
     const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
-    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); } } });
+    const probes: number[] = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); }, observeSeek: (probe) => { probes.push(probe.pageNumber); } } });
 
     const page = await storage.read!((transaction) => transaction.scanPage!("identity-reviews", {
       after: { reviewId: "review-499" },
@@ -394,6 +396,8 @@ describe("createFileAtomicLocalStorage", () => {
     expect(page.items.map((review) => review.reviewId)).toEqual(Array.from({ length: 26 }, (_, index) => `review-${String(index + 500).padStart(3, "0")}`));
     expect(reads.some((read) => read.filePath.endsWith(".state.json"))).toBe(false);
     expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(50);
+    expect(probes).toHaveLength(4);
+    expect(probes).toEqual([11, 17, 20, 19]);
   });
 
   it("seeks current and authoritative link cursors near row 500 without state fallback", async () => {
@@ -761,11 +765,24 @@ describe("createFileAtomicLocalStorage", () => {
     expect(indexName).toBeDefined();
     const index = JSON.parse(await readFile(path.join(root, indexName!), "utf8"));
     expect(index).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       mergeAlgorithmVersion: "identity-links-merge-v1",
       orderAlgorithmVersion: "identity-links-order-v1",
       businessId: "shop-a",
     });
+  });
+
+  it("keeps the prior five-field exact-family index readable for exact lookup", async () => {
+    const root = testRoot();
+    const link = { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: "001", targetProductId: "tire-001", status: "approved", version: 1 };
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", [link]));
+    const indexName = (await readdir(root)).find((name) => name.includes(".links.") && name.endsWith(".exact.index.json"));
+    const indexPath = path.join(root, indexName!);
+    const current = JSON.parse(await readFile(indexPath, "utf8"));
+    await writeFile(indexPath, JSON.stringify({ ...current, schemaVersion: 1, entries: current.entries.map((entry: [string, string, string, string, number, number]) => [entry[0], entry[2], entry[3], entry[4], entry[5]]) }), "utf8");
+    const family = JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+    const found = await createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, filter: (item: typeof link) => item.businessId === "shop-a", visible: () => true, compare: (left, right) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : 0, collapseBy: () => family, versionOf: (item) => item.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "families", families: [family] } }));
+    expect(found.items).toEqual([link]);
   });
 
   it("fails an oversized exact-link record before publishing its generation", async () => {
