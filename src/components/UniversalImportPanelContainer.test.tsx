@@ -33,6 +33,15 @@ const CSV = "Part Number,Brand,Model,Size,Quantity\nABC-1,Acme,Road,225/45R18,7\
 
 const REMEMBERED_MAPPING: ColumnMapping = { partNumber: 0, brand: 1, model: 2, size: 3, quantity: 4 };
 
+function foreignRealmArrayBuffer(value: string): ArrayBuffer {
+  const frame = document.createElement("iframe");
+  document.body.append(frame);
+  const foreignWindow = frame.contentWindow!;
+  const bytes = new foreignWindow.TextEncoder().encode(value);
+  frame.remove();
+  return bytes.buffer;
+}
+
 // Route-aware fetch stub: loadMapping (GET /api/import-mapping) responds per-test via
 // `mappingResponse`; matchRows (POST /api/reconcile/match) always returns exactly one
 // "review" match per posted row (buildImportPreview throws if match count != row count), so the
@@ -92,8 +101,10 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
       const response = await handler(new Request("http://localhost/api/identity/preview", { method: "POST", body: init?.body }));
       return { ok: response.ok, status: response.status, json: () => response.json() };
     }));
+    const file = new File(["fixture"], "fixture.csv");
+    Object.defineProperty(file, "arrayBuffer", { value: async () => foreignRealmArrayBuffer("fixture") });
     render(<UniversalImportPanelContainer />);
-    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File(["fixture"], "fixture.csv")] } });
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [file] } });
     const panel = await screen.findByTestId("identity-preview");
     expect(createPreview).toHaveBeenCalledTimes(1);
     const input = createPreview.mock.calls[0]![0];

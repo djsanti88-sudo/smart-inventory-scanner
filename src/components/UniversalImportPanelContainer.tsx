@@ -9,6 +9,7 @@ import { readUniversalWorkbook } from "@/services/universalFileReader";
 import { inferColumnMapping } from "@/services/columnIntelligence";
 import { mapUniversalRows } from "@/services/universalImportPreview";
 import type { IdentityInput, ScopedIdentifier } from "@/services/identity/types";
+import { realmSafeBytes } from "@/services/identity/cryptoBytes";
 import type { PreviewMatchResult } from "@/services/universalImportPreview";
 import { useScanStore } from "@/stores/scanStore";
 
@@ -73,7 +74,7 @@ export function buildLocalIdentityPreviewRequest({ file, sheets, businessId }: {
 }
 
 export async function sha256UploadFile(file: UploadFileLike): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", realmSafeBytes(await file.arrayBuffer()));
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
