@@ -460,6 +460,69 @@ describe("createFileAtomicLocalStorage", () => {
     expect(probes.length).toBeLessThanOrEqual(6);
   });
 
+  it("applies an authoritative offset after interleaving configured and durable links", async () => {
+    const root = testRoot();
+    const configured = ["001", "003", "005", "007"].map((normalizedValue) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "configured", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue, targetProductId: `configured-${normalizedValue}`, status: "approved", version: 1 }));
+    const durable = ["000", "002", "004", "006", "008"].map((normalizedValue) => ({ ...configured[0]!, vendorId: "durable", normalizedValue, targetProductId: `durable-${normalizedValue}` }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", durable));
+    const family = (link: typeof configured[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+
+    const page = await createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", {
+      offset: 3, limit: 3, baseItems: configured,
+      filter: (link: typeof configured[number]) => link.businessId === "shop-a", visible: (link) => link.status === "approved",
+      compare: (left, right) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : family(left) < family(right) ? -1 : 1,
+      collapseBy: family, versionOf: (link) => link.version,
+      physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" },
+    }));
+
+    expect(page.items.map((link) => link.normalizedValue)).toEqual(["003", "004", "005"]);
+    expect(page.origins).toEqual(["base", "stored", "base"]);
+    expect(page.total).toBe(9);
+  });
+
+  it("continues through more than one lookahead page of tombstones before returning later durable approvals", async () => {
+    const root = testRoot();
+    const configured = Array.from({ length: 70 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: String(index).padStart(3, "0"), targetProductId: `configured-${index}`, status: "approved", version: 1 }));
+    const durable = configured.map((link, index) => ({ ...link, targetProductId: `durable-${index}`, status: index < 55 ? "revoked" : "approved", version: 2 }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", durable));
+    const family = (link: typeof configured[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+    const seeks: number[] = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeSeek: ({ pageNumber }) => { seeks.push(pageNumber); } } });
+    const after = { normalizedValue: "-1", familyKey: "" };
+
+    const page = await storage.read!((transaction) => transaction.scanPage!("identity-links", {
+      after, isAfter: (link: typeof configured[number], cursor: typeof after) => link.normalizedValue > cursor.normalizedValue || (link.normalizedValue === cursor.normalizedValue && family(link) > cursor.familyKey),
+      limit: 6, baseItems: configured, filter: (link: typeof configured[number]) => link.businessId === "shop-a", visible: (link) => link.status === "approved",
+      compare: (left, right) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : 0,
+      collapseBy: family, versionOf: (link) => link.version,
+      physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" },
+    }));
+
+    expect(page.items.map((link) => link.normalizedValue)).toEqual(["055", "056", "057", "058", "059", "060"]);
+    expect(page.origins).toEqual(["stored", "stored", "stored", "stored", "stored", "stored"]);
+    expect(page.total).toBe(15);
+    expect(seeks.length).toBeGreaterThan(0);
+    expect(seeks.length).toBeLessThanOrEqual(6);
+  });
+
+  it("reports the same exact authoritative total on every page", async () => {
+    const root = testRoot();
+    const configured = ["001", "002", "003", "004"].map((normalizedValue) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue, targetProductId: `configured-${normalizedValue}`, status: normalizedValue === "004" ? "revoked" : "approved", version: 1 }));
+    const durable = [{ ...configured[1]!, status: "revoked", version: 2 }, { ...configured[2]!, targetProductId: "durable-003", status: "approved", version: 2 }, { ...configured[0]!, normalizedValue: "005", targetProductId: "durable-005", status: "approved", version: 2 }];
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", durable));
+    const family = (link: typeof configured[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+    const options = { limit: 2, baseItems: configured, filter: (link: typeof configured[number]) => link.businessId === "shop-a", visible: (link: typeof configured[number]) => link.status === "approved", compare: (left: typeof configured[number], right: typeof configured[number]) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : 0, collapseBy: family, versionOf: (link: typeof configured[number]) => link.version, physical: { kind: "identity-links" as const, businessId: "shop-a", mode: "authoritative" as const } };
+    const storage = createFileAtomicLocalStorage({ root });
+    const first = await storage.read!((transaction) => transaction.scanPage!("identity-links", options));
+    const after = { normalizedValue: first.items[1]!.normalizedValue, familyKey: family(first.items[1]!) };
+    const second = await storage.read!((transaction) => transaction.scanPage!("identity-links", { ...options, after, isAfter: (link, cursor) => link.normalizedValue > cursor.normalizedValue || (link.normalizedValue === cursor.normalizedValue && family(link) > cursor.familyKey) }));
+
+    expect(first.items.map((link) => link.normalizedValue)).toEqual(["001", "003"]);
+    expect(second.items.map((link) => link.normalizedValue)).toEqual(["005"]);
+    expect(first.total).toBe(3);
+    expect(second.total).toBe(3);
+  });
+
   it("reads only one approved-link page for 500 durable approved families", async () => {
     const root = testRoot();
     const links = Array.from({ length: 500 }, (_, index) => {
@@ -816,6 +879,42 @@ describe("createFileAtomicLocalStorage", () => {
     const family = JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
     const found = await createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, filter: (item: typeof link) => item.businessId === "shop-a", visible: () => true, compare: (left, right) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : 0, collapseBy: () => family, versionOf: (item) => item.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "families", families: [family] } }));
     expect(found.items).toEqual([link]);
+  });
+
+  it.each([1, 2] as const)("uses ordered durable pages for schema-v%s authoritative reads without loading state", async (schemaVersion) => {
+    const root = testRoot();
+    const configured = { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: "001", targetProductId: "configured", status: "approved", version: 1 };
+    const durable = { ...configured, targetProductId: "durable", version: 2 };
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", [durable]));
+    const indexName = (await readdir(root)).find((name) => name.includes(".exact.index.json"));
+    const indexPath = path.join(root, indexName!);
+    const current = JSON.parse(await readFile(indexPath, "utf8"));
+    const descriptorName = (await readdir(root)).find((name) => name.includes(".exact.descriptor.0.json"));
+    const descriptor = JSON.parse(await readFile(path.join(root, descriptorName!), "utf8")).items[0] as [string, string, string, string, number, number];
+    await writeFile(indexPath, JSON.stringify({ ...current, schemaVersion, entries: schemaVersion === 1 ? [[descriptor[0], descriptor[2], descriptor[3], descriptor[4], descriptor[5]]] : [descriptor] }), "utf8");
+    const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
+    const family = (link: typeof configured) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+
+    const page = await createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); } } }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, baseItems: [configured], filter: (link: typeof configured) => link.businessId === "shop-a", visible: (link) => link.status === "approved", compare: () => 0, collapseBy: family, versionOf: (link) => link.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }));
+
+    expect(page.items).toEqual([durable]);
+    expect(reads.some((read) => read.filePath.endsWith(".state.json"))).toBe(false);
+  });
+
+  it("fails closed when a legacy exact index contains two entries for one requested hash", async () => {
+    const root = testRoot();
+    const links = ["001", "002"].map((normalizedValue) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue, targetProductId: `tire-${normalizedValue}`, status: "approved", version: 1 }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", links));
+    const indexName = (await readdir(root)).find((name) => name.includes(".exact.index.json"));
+    const indexPath = path.join(root, indexName!);
+    const current = JSON.parse(await readFile(indexPath, "utf8"));
+    const descriptorNames = (await readdir(root)).filter((name) => name.includes(".exact.descriptor."));
+    const descriptors = (await Promise.all(descriptorNames.map(async (name) => JSON.parse(await readFile(path.join(root, name), "utf8")).items as Array<[string, string, string, string, number, number]>))).flat();
+    descriptors[1]![0] = descriptors[0]![0];
+    await writeFile(indexPath, JSON.stringify({ ...current, schemaVersion: 2, entries: descriptors }), "utf8");
+    const family = JSON.stringify([links[0]!.businessId, links[0]!.sourceSystem, links[0]!.vendorId, links[0]!.sourceSignature, links[0]!.identifierType, links[0]!.namespace, links[0]!.normalizedValue]);
+
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, filter: () => true, visible: () => true, compare: () => 0, collapseBy: () => family, versionOf: () => 1, physical: { kind: "identity-links", businessId: "shop-a", mode: "families", families: [family] } }))).rejects.toThrow("identity_storage_corrupt");
   });
 
   it("fails closed when a v3 exact descriptor disagrees with its payload", async () => {
