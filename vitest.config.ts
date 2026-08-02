@@ -2,11 +2,20 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
+export const performanceSuitePaths = [
+  "src/services/import/importPerf.test.ts",
+  "src/server/identity/atomicLocalStorage.test.ts",
+  "src/server/identity/localIdentityReadModel.test.ts",
+  "src/server/identity/readOnlyCandidateSource.test.ts",
+  "src/eval/identity/importPerf.test.ts",
+  "src/eval/identity/applyPerf.test.ts",
+];
+
 // Two projects:
 //  - "unit": pure services (no React, no next/*) run in a fast node environment.
 //  - "dom":  components / hooks / store run in jsdom with the React plugin.
 // The "@/*" alias mirrors tsconfig paths so imports resolve identically in tests.
-export default defineConfig({
+export const makeVitestConfig = (unitExtraExcludes: string[] = []) => defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
@@ -56,6 +65,7 @@ export default defineConfig({
             "scripts/tire-db-repair/12_same_uid_blank_propagation.test.mjs",
             "scripts/tire-db-repair/model_styling.test.mjs",
             "scripts/tire-db-repair/validate.test.mjs",
+            ...unitExtraExcludes,
           ],
         },
       },
@@ -71,3 +81,5 @@ export default defineConfig({
     ],
   },
 });
+
+export default makeVitestConfig();

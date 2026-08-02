@@ -21,15 +21,6 @@ name: CI
 # `npm run build:knowledge-db` (or `node scripts/provision-worktree.mjs` to copy from a known-good
 # checkout) if you need to exercise the DB path.
 #
-# STRESS FIXTURES NOTE (unit-tests job): src/components/UniversalImportPanel.fixtures.test.tsx reads
-# real CSV fixtures from .superpowers/stress/fixtures/, which is entirely gitignored (see .gitignore:
-# "Agent/session scratch") and has no build-time generator in this repo - scripts/provision-worktree.mjs
-# only copies it from a known-good LOCAL checkout path (C:/Users/djsan/inventory), which does not exist
-# in a clean CI runner. Verified locally: on a fresh worktree checkout this file fails all 6 tests with
-# ENOENT (ADR verified 2026-07-27 at commit e5f0157). Excluded below rather than left to flake red on
-# every CI run; the same coverage intent (CSV parsing edge cases, mapping inference, error surfacing) is
-# still exercised by non-fixture-dependent tests elsewhere in the import test suite.
-
 on:
   push:
     branches: [master]
@@ -96,14 +87,11 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      # See the corpus-DB and stress-fixtures notes at the top of this file: the real
-      # knowledge.generated.db is not built in CI, and .superpowers/stress/fixtures/ is gitignored
-      # local-only scratch data with no CI-reachable generator.
-      - name: Run unit + dom tests (excluding local-only DB/fixture-dependent suites)
-        run: >
-          npx vitest run
-          --exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"
-          --exclude "src/components/UniversalImportPanel.fixtures.test.tsx"
+      - name: Run broad unit + dom tests (excluding dtHarvestIntegration)
+        run: npm run test:ci:parallel
+
+      - name: Run serial performance suites
+        run: npm run test:perf:serial
 
       - name: Run local-demo proof suite
         run: npm run test:local-demo
