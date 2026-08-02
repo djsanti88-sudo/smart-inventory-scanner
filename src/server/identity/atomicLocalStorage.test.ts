@@ -369,6 +369,62 @@ describe("createFileAtomicLocalStorage", () => {
     expect(reads).toHaveLength(3);
   });
 
+  it("seeks a review cursor near row 500 through its file directory without reading state", async () => {
+    const root = testRoot();
+    const reviews = Array.from({ length: 550 }, (_, index) => ({
+      reviewId: `review-${String(index).padStart(3, "0")}`,
+      businessId: "shop-a",
+      decision: { kind: "review" },
+    }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-reviews", reviews));
+    const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); } } });
+
+    const page = await storage.read!((transaction) => transaction.scanPage!("identity-reviews", {
+      after: { reviewId: "review-499" },
+      isAfter: (review: typeof reviews[number], after) => review.reviewId.localeCompare(after.reviewId) > 0,
+      limit: 26,
+      filter: (review: typeof reviews[number]) => review.businessId === "shop-a",
+      visible: (review) => review.decision.kind === "review",
+      compare: (left, right) => left.reviewId.localeCompare(right.reviewId),
+      groupBy: (review) => review.decision.kind,
+      physical: { kind: "identity-reviews", businessId: "shop-a", bucket: "review" },
+    }));
+
+    expect(page.items.map((review) => review.reviewId)).toEqual(Array.from({ length: 26 }, (_, index) => `review-${String(index + 500).padStart(3, "0")}`));
+    expect(reads.some((read) => read.filePath.endsWith(".state.json"))).toBe(false);
+    expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(50);
+  });
+
+  it("seeks current and authoritative link cursors near row 500 without state fallback", async () => {
+    const root = testRoot();
+    const links = Array.from({ length: 550 }, (_, index) => {
+      const value = String(index).padStart(3, "0");
+      return { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: value, targetProductId: `durable-${value}`, status: "approved", version: 1 };
+    });
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", links));
+    const familyKey = (link: typeof links[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+    const after = { normalizedValue: "499", familyKey: familyKey(links[499]!) };
+    const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); } } });
+    const options = {
+      after,
+      isAfter: (link: typeof links[number], cursor: typeof after) => link.normalizedValue.localeCompare(cursor.normalizedValue) > 0 || (link.normalizedValue === cursor.normalizedValue && familyKey(link).localeCompare(cursor.familyKey) > 0),
+      limit: 26,
+      filter: (link: typeof links[number]) => link.businessId === "shop-a",
+      visible: (link: typeof links[number]) => link.status === "approved",
+      compare: (left: typeof links[number], right: typeof links[number]) => left.normalizedValue.localeCompare(right.normalizedValue) || familyKey(left).localeCompare(familyKey(right)),
+      collapseBy: familyKey,
+      versionOf: (link: typeof links[number]) => link.version,
+    };
+    const current = await storage.read!((transaction) => transaction.scanPage!("identity-links", { ...options, physical: { kind: "identity-links", businessId: "shop-a", mode: "current" } }));
+    const authoritative = await storage.read!((transaction) => transaction.scanPage!("identity-links", { ...options, baseItems: [{ ...links[500]!, targetProductId: "configured-ignored" }], physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }));
+    expect(current.items.map((link) => link.normalizedValue)).toEqual(Array.from({ length: 26 }, (_, index) => String(index + 500).padStart(3, "0")));
+    expect(authoritative.items[0]).toMatchObject({ normalizedValue: "500", targetProductId: "durable-500" });
+    expect(reads.some((read) => read.filePath.endsWith(".state.json"))).toBe(false);
+    expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(78);
+  });
+
   it("reads only one approved-link page for 500 durable approved families", async () => {
     const root = testRoot();
     const links = Array.from({ length: 500 }, (_, index) => {
