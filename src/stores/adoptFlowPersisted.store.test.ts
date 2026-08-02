@@ -9,6 +9,11 @@ const durable = vi.hoisted(() => {
       get: async (key: string) => values.get(key) ?? null,
       set: async (key: string, value: string) => { values.set(key, value); },
       remove: async (key: string) => { values.delete(key); },
+      createNamespaceIfAbsent: async (key: string, value: string, occupiedMetadataKeys: string[]) => {
+        if (values.has(key) || occupiedMetadataKeys.some((metadataKey) => values.has(metadataKey))) return "exists" as const;
+        values.set(key, value);
+        return "created" as const;
+      },
     },
   };
 });

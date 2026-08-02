@@ -7,6 +7,11 @@ class Db implements AsyncKeyValueDatabase {
   async get(k: string) { return this.values.get(k) ?? null; }
   async set(k: string, v: string) { if (this.fail) throw new Error("blocked"); this.values.set(k, v); }
   async remove(k: string) { if (this.fail) throw new Error("blocked"); this.values.delete(k); }
+  async createNamespaceIfAbsent(key: string, value: string, occupiedMetadataKeys: string[]) {
+    if (this.values.has(key) || occupiedMetadataKeys.some((metadataKey) => this.values.has(metadataKey))) return "exists" as const;
+    await this.set(key, value);
+    return "created" as const;
+  }
 }
 function legacy() { const values = new Map<string, string>(); return { values, getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => values.set(k, v), removeItem: (k: string) => values.delete(k) }; }
 
@@ -1013,6 +1018,54 @@ describe("durable legacy adoption", () => {
     });
 
     await expect(operations.adopt("owner")).resolves.toEqual({ status: "target-exists" });
+    expect(await db.get("sis-scan-owner")).toBeNull();
+    expect(await db.get("sis-scan-v1")).toBe(source);
+  });
+
+  it("fails closed when a main-only CAS can interleave a target tombstone", async () => {
+    class TombstoneInterleavingDb extends Db {
+      async createIfAbsent(key: string, value: string): Promise<"created" | "exists"> {
+        await this.set(`${key}::scanbin-cleared-v1`, JSON.stringify({ __scanPersistClear: 1, version: 1, id: "racing-clear" }));
+        if (await this.get(key) !== null) return "exists";
+        await this.set(key, value);
+        return "created";
+      }
+    }
+    const db = new TombstoneInterleavingDb();
+    Object.assign(db, { createNamespaceIfAbsent: undefined });
+    const source = JSON.stringify({ state: { scanFeed: [{ id: "legacy" }] }, version: 8 });
+    await db.set("sis-scan-v1", source);
+    const operations = createLegacyAdoptionOperations({
+      database: db,
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "unavailable" });
+    expect(await db.get("sis-scan-owner")).toBeNull();
+    expect(await db.get("sis-scan-v1")).toBe(source);
+  });
+
+  it("fails closed when a main-only CAS can interleave target recovery metadata", async () => {
+    class RecoveryInterleavingDb extends Db {
+      async createIfAbsent(key: string, value: string): Promise<"created" | "exists"> {
+        await this.set(`${key}::scanbin-recovery-v1`, JSON.stringify({ __scanPersistRecovery: 1, payload: "racing-recovery" }));
+        if (await this.get(key) !== null) return "exists";
+        await this.set(key, value);
+        return "created";
+      }
+    }
+    const db = new RecoveryInterleavingDb();
+    Object.assign(db, { createNamespaceIfAbsent: undefined });
+    const source = JSON.stringify({ state: { scanFeed: [{ id: "legacy" }] }, version: 8 });
+    await db.set("sis-scan-v1", source);
+    const operations = createLegacyAdoptionOperations({
+      database: db,
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "unavailable" });
     expect(await db.get("sis-scan-owner")).toBeNull();
     expect(await db.get("sis-scan-v1")).toBe(source);
   });

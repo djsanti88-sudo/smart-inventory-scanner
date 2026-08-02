@@ -9,6 +9,11 @@ class MemStorage implements AsyncKeyValueDatabase {
   async get(k: string) { return this.m.get(k) ?? null; }
   async set(k: string, v: string) { this.m.set(k, v); }
   async remove(k: string) { this.m.delete(k); }
+  async createNamespaceIfAbsent(key: string, value: string, occupiedMetadataKeys: string[]) {
+    if (this.m.has(key) || occupiedMetadataKeys.some((metadataKey) => this.m.has(metadataKey))) return "exists" as const;
+    this.m.set(key, value);
+    return "created" as const;
+  }
 }
 
 describe("adopt-flow replay: owner data intact after the owner-initiated adopt", () => {
