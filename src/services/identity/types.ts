@@ -257,6 +257,8 @@ export interface ReviewAction {
   action: "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
   targetProductId?: string;
   productId?: string;
+  /** Snapshot makes a create-product retry independent of a new random product proposal. */
+  product?: TenantIdentityProduct;
   link?: IdentityLink;
   previousTargetProductId?: string;
   outcome: "confirmed" | "rejected" | "create_product" | "revoked";
