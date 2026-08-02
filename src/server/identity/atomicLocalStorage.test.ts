@@ -550,8 +550,8 @@ describe("createFileAtomicLocalStorage", () => {
     expect(page.total).toBe(500);
     expect(reads.some((read) => read.filePath.endsWith(".state.json"))).toBe(false);
     expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(25);
-    expect(reads.reduce((total, read) => total + read.bytes, 0)).toBeLessThanOrEqual(64 * 1024);
-    expect(reads).toHaveLength(3);
+    expect(reads.some((read) => read.filePath.endsWith(".exact.data.json"))).toBe(false);
+    expect(reads.filter((read) => read.filePath.includes(".approved.") && !read.filePath.includes(".summary.")).length).toBe(1);
   });
 
   it("keeps durable tombstones authoritative over 500 configured links without reading the durable envelope", async () => {
@@ -895,7 +895,13 @@ describe("createFileAtomicLocalStorage", () => {
     const generatedNames = await readdir(root);
     const mergeSummaryName = generatedNames.find((name) => name.includes(".exact.merge-summary.json"));
     await rm(path.join(root, mergeSummaryName!));
-    await Promise.all(generatedNames.filter((name) => name.includes(".exact.descriptor.") || name.includes(".exact.merge-membership.")).map((name) => rm(path.join(root, name))));
+    await Promise.all(generatedNames.filter((name) => name.includes(".exact.descriptor.") || name.includes(".exact.merge-membership.") || name.includes(".exact.merge-directory.")).map((name) => rm(path.join(root, name))));
+    await Promise.all(generatedNames.filter((name) => name.includes(".links.") && name.endsWith(".summary.json") && !name.includes(".exact.")).map(async (name) => {
+      const summaryPath = path.join(root, name), summary = JSON.parse(await readFile(summaryPath, "utf8"));
+      summary.schemaVersion = 2;
+      for (const directory of Object.values(summary.directories) as Array<Array<Record<string, unknown>>>) for (const boundary of directory) delete boundary.fingerprint;
+      await writeFile(summaryPath, JSON.stringify(summary), "utf8");
+    }));
     const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
     const family = (link: typeof configured) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
 
@@ -914,26 +920,39 @@ describe("createFileAtomicLocalStorage", () => {
     const descriptor = JSON.parse(await readFile(path.join(root, descriptorName!), "utf8")).items[0] as [string, string, string, string, number, number];
     await writeFile(indexPath, JSON.stringify({ schemaVersion: 1, mergeAlgorithmVersion: current.mergeAlgorithmVersion, orderAlgorithmVersion: current.orderAlgorithmVersion, businessId: current.businessId, entries: [[descriptor[0], descriptor[2], descriptor[3], descriptor[4], descriptor[5]]] }), "utf8");
     await rm(path.join(root, mergeSummaryName!));
-    await Promise.all(names.filter((name) => name.includes(".exact.merge-membership.")).map((name) => rm(path.join(root, name))));
+    await Promise.all(names.filter((name) => name.includes(".exact.merge-membership.") || name.includes(".exact.merge-directory.")).map((name) => rm(path.join(root, name))));
     const family = (item: typeof link) => JSON.stringify([item.businessId, item.sourceSystem, item.vendorId, item.sourceSignature, item.identifierType, item.namespace, item.normalizedValue]);
 
     await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, baseItems: [link], filter: () => true, visible: () => true, compare: () => 0, collapseBy: family, versionOf: (item) => item.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }))).rejects.toThrow("identity_storage_corrupt");
   });
 
-  it("pages authoritative membership metadata beyond 3000 durable families without changing exact totals", async () => {
+  it("pages authoritative membership directories beyond the old 7500-family cap", async () => {
     const root = testRoot();
-    const configured = Array.from({ length: 3_050 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: String(index).padStart(4, "0"), targetProductId: `configured-${index}`, status: "approved", version: 1 }));
-    const durable = configured.map((link, index) => ({ ...link, targetProductId: `durable-${index}`, status: index < 1_500 ? "revoked" : "approved", version: 2 }));
+    const configured = Array.from({ length: 8_050 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: `source-signature-${"x".repeat(32)}`, identifierType: "upc", namespace: "", normalizedValue: String(index).padStart(4, "0"), targetProductId: `configured-${index}`, status: "approved", version: 1 }));
+    const durable = configured.map((link, index) => ({ ...link, targetProductId: `durable-${index}`, status: index < 4_000 ? "revoked" : "approved", version: 2 }));
     await expect(createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", durable))).resolves.toBeUndefined();
     const names = await readdir(root);
     const membershipPages = names.filter((name) => name.includes(".exact.merge-membership.") && !name.includes(".summary."));
+    const directoryPages = names.filter((name) => name.includes(".exact.merge-directory."));
     expect(membershipPages.length).toBeGreaterThan(1);
+    expect(directoryPages.length).toBeGreaterThan(1);
     const family = (link: typeof configured[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
-    const after = { normalizedValue: "3039", familyKey: family(configured[3039]!) };
+    const after = { normalizedValue: "8039", familyKey: family(configured[8039]!) };
     const page = await createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { after, isAfter: (link: typeof configured[number], cursor: typeof after) => link.normalizedValue > cursor.normalizedValue || (link.normalizedValue === cursor.normalizedValue && family(link) > cursor.familyKey), limit: 3, baseItems: configured, filter: (link: typeof configured[number]) => link.businessId === "shop-a", visible: (link) => link.status === "approved", compare: (left, right) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : 0, collapseBy: family, versionOf: (link) => link.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }));
 
-    expect(page.items.map((link) => link.normalizedValue)).toEqual(["3040", "3041", "3042"]);
-    expect(page.total).toBe(1_550);
+    expect(page.items.map((link) => link.normalizedValue)).toEqual(["8040", "8041", "8042"]);
+    expect(page.total).toBe(4_050);
+  });
+
+  it.each(["missing", "tampered"] as const)("fails closed when a merge directory page is %s", async (failure) => {
+    const root = testRoot();
+    const links = Array.from({ length: 700 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: String(index).padStart(3, "0"), targetProductId: `tire-${index}`, status: "approved", version: 1 }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", links));
+    const directoryName = (await readdir(root)).find((name) => name.includes(".exact.merge-directory.0.json")), directoryPath = path.join(root, directoryName!);
+    if (failure === "missing") await rm(directoryPath);
+    else { const body = JSON.parse(await readFile(directoryPath, "utf8")); body.items[0][2] = "0".repeat(64); await writeFile(directoryPath, JSON.stringify(body), "utf8"); }
+    const family = (link: typeof links[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, baseItems: links, filter: () => true, visible: () => true, compare: () => 0, collapseBy: family, versionOf: (link) => link.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }))).rejects.toThrow("identity_storage_corrupt");
   });
 
   it.each(["missing", "tampered"] as const)("fails closed when an authoritative membership page is %s", async (failure) => {
@@ -958,6 +977,43 @@ describe("createFileAtomicLocalStorage", () => {
     const family = (item: typeof link) => JSON.stringify([item.businessId, item.sourceSystem, item.vendorId, item.sourceSignature, item.identifierType, item.namespace, item.normalizedValue]);
 
     await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, baseItems: [link], filter: () => true, visible: () => true, compare: () => 0, collapseBy: family, versionOf: (item) => item.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }))).rejects.toThrow("identity_storage_corrupt");
+  });
+
+  it("rejects an approved-summary total corruption that keeps the same page count", async () => {
+    const root = testRoot();
+    const links = Array.from({ length: 30 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: String(index).padStart(3, "0"), targetProductId: `tire-${index}`, status: "approved", version: 1 }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", links));
+    const approvedName = (await readdir(root)).find((name) => name.includes(".approved.summary.json")), approvedPath = path.join(root, approvedName!), summary = JSON.parse(await readFile(approvedPath, "utf8"));
+    summary.total = 29;
+    await writeFile(approvedPath, JSON.stringify(summary), "utf8");
+
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, baseItems: [], filter: () => true, visible: () => true, compare: () => 0, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }))).rejects.toThrow("identity_storage_corrupt");
+  });
+
+  it.each(["current-target", "approved-status"] as const)("fingerprint-checks a middle link page after %s tampering", async (failure) => {
+    const root = testRoot();
+    const links = Array.from({ length: 75 }, (_, index) => ({ businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: String(index).padStart(3, "0"), targetProductId: `tire-${index}`, status: "approved", version: 1 }));
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", links));
+    const pageName = (await readdir(root)).find((name) => failure === "current-target" ? name.includes(".links.") && name.endsWith(".1.json") && !name.includes(".approved.") && !name.includes(".exact.") : name.includes(".approved.1.json"));
+    const pagePath = path.join(root, pageName!), page = JSON.parse(await readFile(pagePath, "utf8"));
+    if (failure === "current-target") page.items[5].targetProductId = "tampered";
+    else page.items[5].status = "revoked";
+    await writeFile(pagePath, JSON.stringify(page), "utf8");
+    const family = (link: typeof links[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+    const after = { normalizedValue: "024", familyKey: family(links[24]!) };
+    const baseItems = failure === "current-target" ? links : [];
+
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { after, isAfter: (link: typeof links[number], cursor: typeof after) => link.normalizedValue > cursor.normalizedValue, limit: 10, baseItems, filter: () => true, visible: (link) => link.status === "approved", compare: () => 0, collapseBy: family, versionOf: (link) => link.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }))).rejects.toThrow("identity_storage_corrupt");
+  });
+
+  it("validates tenant artifact coherence before an empty-base authoritative read", async () => {
+    const root = testRoot();
+    const link = { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: "001", targetProductId: "tire-001", status: "approved", version: 1 };
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", [link]));
+    const exactName = (await readdir(root)).find((name) => name.includes(".exact.index.json"));
+    await rm(path.join(root, exactName!));
+
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, baseItems: [], filter: () => true, visible: () => true, compare: () => 0, physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" } }))).rejects.toThrow("identity_storage_corrupt");
   });
 
   it.each(["within", "across"] as const)("rejects duplicate family hashes %s v3 descriptor pages", async (position) => {

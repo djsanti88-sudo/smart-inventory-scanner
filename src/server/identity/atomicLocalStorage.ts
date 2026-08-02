@@ -345,6 +345,7 @@ function exactLinkIndexPath(root: string, generation: string, businessId: string
 function exactLinkDescriptorPagePath(root: string, generation: string, businessId: string, pageNumber: number): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.descriptor.${pageNumber}`); }
 function exactLinkMergeSummaryPath(root: string, generation: string, businessId: string): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.merge-summary`); }
 function exactLinkMergeMembershipPagePath(root: string, generation: string, businessId: string, pageNumber: number): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.merge-membership.${pageNumber}`); }
+function exactLinkMergeDirectoryPagePath(root: string, generation: string, businessId: string, pageNumber: number): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.merge-directory.${pageNumber}`); }
 function exactLinkDataPath(root: string, generation: string, businessId: string): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.data`); }
 
 type ExactLinkIndexEntry = { familyHash: string; familyKey?: string; status: string; normalizedValue: string; offset: number; length: number };
@@ -358,8 +359,8 @@ type ExactLinkIndex = {
   mergeSummaryFingerprint?: string;
 };
 type Tuple = readonly string[];
-type PageBoundary = { first: string[]; last: string[] };
-type IndexedSummary = { schemaVersion: 2; kind: "identity-reviews" | "identity-links"; businessId: string; total: number; bucketTotals: Record<string, number>; directories: Record<string, PageBoundary[]>; fingerprint?: string };
+type PageBoundary = { first: string[]; last: string[]; fingerprint?: string };
+type IndexedSummary = { schemaVersion: 2 | 3; kind: "identity-reviews" | "identity-links"; businessId: string; total: number; bucketTotals: Record<string, number>; directories: Record<string, PageBoundary[]>; fingerprint?: string };
 
 function pageBody(items: readonly unknown[]): string {
   const body = JSON.stringify({ version: 1, items });
@@ -370,7 +371,7 @@ function chunks<T>(items: readonly T[]): T[][] { const pages: T[][] = []; for (l
 function tupleCompare(left: Tuple, right: Tuple): number { for (let index = 0; index < Math.max(left.length, right.length); index += 1) { const compared = compareOrdinal(left[index] ?? "", right[index] ?? ""); if (compared) return compared; } return 0; }
 function reviewTuple(record: IndexedRecord): string[] { return [stringField(record, "reviewId")]; }
 function linkTuple(record: IndexedRecord): string[] { return [stringField(record, "normalizedValue"), linkFamily(record)]; }
-function pageBoundaries(pages: readonly IndexedRecord[][], tuple: (record: IndexedRecord) => string[]): PageBoundary[] { return pages.map((page) => ({ first: tuple(page[0]!), last: tuple(page.at(-1)!) })); }
+function pageBoundaries(pages: readonly IndexedRecord[][], tuple: (record: IndexedRecord) => string[], bodies?: readonly string[]): PageBoundary[] { return pages.map((page, index) => ({ first: tuple(page[0]!), last: tuple(page.at(-1)!), ...(bodies ? { fingerprint: fullDigest(bodies[index]!) } : {}) })); }
 async function writeImmutable(filePath: string, body: string, io: FileStorageHooks): Promise<void> {
   await syncFile(filePath, body);
   await io.afterGenerationFileWrite?.(filePath);
@@ -420,12 +421,14 @@ function currentLinks(values: StoredRecord): Map<string, IndexedRecord[]> {
 async function writeLinkIndexes(root: string, generation: string, values: StoredRecord, io: FileStorageHooks): Promise<void> {
   for (const [businessId, links] of currentLinks(values)) {
     const pages = chunks(links);
-    await writeIndexSummary(linkSummaryPath(root, generation, businessId), { schemaVersion: 2, kind: "identity-links", businessId, total: links.length, bucketTotals: {}, directories: { current: pageBoundaries(pages, linkTuple) }, fingerprint: fullDigest(JSON.stringify(links)) }, io);
-    for (let index = 0; index < pages.length; index += 1) await writeImmutable(linkPagePath(root, generation, businessId, index), pageBody(pages[index]!), io);
+    const pageBodies = pages.map((page) => pageBody(page));
+    await writeIndexSummary(linkSummaryPath(root, generation, businessId), { schemaVersion: 3, kind: "identity-links", businessId, total: links.length, bucketTotals: {}, directories: { current: pageBoundaries(pages, linkTuple, pageBodies) }, fingerprint: fullDigest(JSON.stringify(links)) }, io);
+    for (let index = 0; index < pages.length; index += 1) await writeImmutable(linkPagePath(root, generation, businessId, index), pageBodies[index]!, io);
     const approved = links.filter((link) => stringField(link, "status") === "approved");
     const approvedPages = chunks(approved);
-    await writeIndexSummary(approvedLinkSummaryPath(root, generation, businessId), { schemaVersion: 2, kind: "identity-links", businessId, total: approved.length, bucketTotals: {}, directories: { approved: pageBoundaries(approvedPages, linkTuple) } }, io);
-    for (let index = 0; index < approvedPages.length; index += 1) await writeImmutable(approvedLinkPagePath(root, generation, businessId, index), pageBody(approvedPages[index]!), io);
+    const approvedPageBodies = approvedPages.map((page) => pageBody(page));
+    await writeIndexSummary(approvedLinkSummaryPath(root, generation, businessId), { schemaVersion: 3, kind: "identity-links", businessId, total: approved.length, bucketTotals: {}, directories: { approved: pageBoundaries(approvedPages, linkTuple, approvedPageBodies) } }, io);
+    for (let index = 0; index < approvedPages.length; index += 1) await writeImmutable(approvedLinkPagePath(root, generation, businessId, index), approvedPageBodies[index]!, io);
     let offset = 0;
     const dataParts: string[] = [];
     const entries: ExactLinkIndexEntry[] = [];
@@ -444,7 +447,9 @@ async function writeLinkIndexes(root: string, generation: string, values: Stored
     const memberships = [...entries].sort((left, right) => compareOrdinal(left.familyHash, right.familyHash) || compareOrdinal(left.familyKey!, right.familyKey!));
     const membershipPages = chunks(memberships);
     const membershipBodies = membershipPages.map((page) => pageBody(page.map((entry) => [entry.familyHash, entry.familyKey!, entry.status])));
-    const mergeSummaryBody = JSON.stringify({ schemaVersion: 2, businessId, total: memberships.length, directory: membershipPages.map((page, pageNumber) => ({ first: [page[0]!.familyHash, page[0]!.familyKey!], last: [page.at(-1)!.familyHash, page.at(-1)!.familyKey!], fingerprint: fullDigest(membershipBodies[pageNumber]!) })) });
+    const membershipDescriptors = membershipPages.map((page, pageNumber) => [page[0]!.familyHash, page.at(-1)!.familyHash, fullDigest(membershipBodies[pageNumber]!) ]);
+    const directoryPages = chunks(membershipDescriptors), directoryBodies = directoryPages.map((page) => pageBody(page));
+    const mergeSummaryBody = JSON.stringify({ schemaVersion: 3, businessId, total: memberships.length, membershipPageCount: membershipPages.length, directoryPageCount: directoryPages.length, directoryFingerprint: fullDigest(directoryBodies.join("")) });
     if (Buffer.byteLength(mergeSummaryBody, "utf8") > maxIndexFileBytes) throw new Error("identity_storage_index_summary_too_large");
     const index = {
       schemaVersion: 3,
@@ -459,6 +464,7 @@ async function writeLinkIndexes(root: string, generation: string, values: Stored
     await writeImmutable(exactLinkDataPath(root, generation, businessId), dataParts.join(""), io);
     for (let pageNumber = 0; pageNumber < descriptorPages.length; pageNumber += 1) await writeImmutable(exactLinkDescriptorPagePath(root, generation, businessId, pageNumber), pageBody(descriptorPages[pageNumber]!.map((entry) => [entry.familyHash, entry.familyKey!, entry.status, entry.normalizedValue, entry.offset, entry.length])), io);
     for (let pageNumber = 0; pageNumber < membershipBodies.length; pageNumber += 1) await writeImmutable(exactLinkMergeMembershipPagePath(root, generation, businessId, pageNumber), membershipBodies[pageNumber]!, io);
+    for (let pageNumber = 0; pageNumber < directoryBodies.length; pageNumber += 1) await writeImmutable(exactLinkMergeDirectoryPagePath(root, generation, businessId, pageNumber), directoryBodies[pageNumber]!, io);
     await writeImmutable(exactLinkMergeSummaryPath(root, generation, businessId), mergeSummaryBody, io);
     await writeImmutable(exactLinkIndexPath(root, generation, businessId), indexBody, io);
   }
@@ -524,14 +530,14 @@ async function loadState(root: string, manifest: StorageManifest, io: FileStorag
 function parseSummary(body: string | undefined, businessId: string): IndexedSummary {
   if (body === undefined) return { schemaVersion: 2, kind: "identity-reviews", businessId, total: 0, bucketTotals: {}, directories: {} };
   const parsed = parseJson(body);
-  if (!plainRecord(parsed) || parsed.schemaVersion !== 2 || (parsed.kind !== "identity-reviews" && parsed.kind !== "identity-links") || parsed.businessId !== businessId || typeof parsed.total !== "number" || !Number.isSafeInteger(parsed.total) || parsed.total < 0 || !plainRecord(parsed.bucketTotals) || !plainRecord(parsed.directories) || (parsed.fingerprint !== undefined && (typeof parsed.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(parsed.fingerprint)))) throw corrupt();
+  if (!plainRecord(parsed) || (parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3) || (parsed.kind !== "identity-reviews" && parsed.kind !== "identity-links") || (parsed.schemaVersion === 3 && parsed.kind !== "identity-links") || parsed.businessId !== businessId || typeof parsed.total !== "number" || !Number.isSafeInteger(parsed.total) || parsed.total < 0 || !plainRecord(parsed.bucketTotals) || !plainRecord(parsed.directories) || (parsed.fingerprint !== undefined && (typeof parsed.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(parsed.fingerprint)))) throw corrupt();
   const bucketTotals: Record<string, number> = {}, directories: Record<string, PageBoundary[]> = {};
   for (const [bucket, total] of Object.entries(parsed.bucketTotals)) { if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw corrupt(); bucketTotals[bucket] = total; }
   for (const [selector, raw] of Object.entries(parsed.directories)) {
     if (!Array.isArray(raw)) throw corrupt(); let previous: string[] | undefined;
-    directories[selector] = raw.map((entry) => { if (!plainRecord(entry) || !Array.isArray(entry.first) || !Array.isArray(entry.last) || entry.first.length < 1 || entry.first.length > 2 || entry.last.length !== entry.first.length || !entry.first.every((value) => typeof value === "string") || !entry.last.every((value) => typeof value === "string") || tupleCompare(entry.first as string[], entry.last as string[]) > 0 || (previous && tupleCompare(previous, entry.first as string[]) >= 0)) throw corrupt(); previous = entry.last as string[]; return { first: [...entry.first] as string[], last: [...entry.last] as string[] }; });
+    directories[selector] = raw.map((entry) => { if (!plainRecord(entry) || !Array.isArray(entry.first) || !Array.isArray(entry.last) || entry.first.length < 1 || entry.first.length > 2 || entry.last.length !== entry.first.length || !entry.first.every((value) => typeof value === "string") || !entry.last.every((value) => typeof value === "string") || (parsed.schemaVersion === 3 ? typeof entry.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(entry.fingerprint) : entry.fingerprint !== undefined) || tupleCompare(entry.first as string[], entry.last as string[]) > 0 || (previous && tupleCompare(previous, entry.first as string[]) >= 0)) throw corrupt(); previous = entry.last as string[]; return { first: [...entry.first] as string[], last: [...entry.last] as string[], ...(typeof entry.fingerprint === "string" ? { fingerprint: entry.fingerprint } : {}) }; });
   }
-  return { schemaVersion: 2, kind: parsed.kind, businessId, total: parsed.total, bucketTotals, directories, ...(typeof parsed.fingerprint === "string" ? { fingerprint: parsed.fingerprint } : {}) };
+  return { schemaVersion: parsed.schemaVersion, kind: parsed.kind, businessId, total: parsed.total, bucketTotals, directories, ...(typeof parsed.fingerprint === "string" ? { fingerprint: parsed.fingerprint } : {}) };
 }
 function parsePage<T>(body: string | undefined): T[] {
   if (body === undefined) return [];
@@ -638,19 +644,29 @@ async function readExactMergeMembership(root: string, generation: string, busine
   if (body === undefined) {
     const membershipPrefix = path.basename(exactLinkMergeMembershipPagePath(root, generation, businessId, 0)).replace(/0\.json$/, "");
     const descriptorPrefix = path.basename(exactLinkDescriptorPagePath(root, generation, businessId, 0)).replace(/0\.json$/, "");
-    if ((await readdir(root)).some((name) => name.startsWith(membershipPrefix) || name.startsWith(descriptorPrefix))) throw corrupt();
+    const directoryPrefix = path.basename(exactLinkMergeDirectoryPagePath(root, generation, businessId, 0)).replace(/0\.json$/, "");
+    if ((await readdir(root)).some((name) => name.startsWith(membershipPrefix) || name.startsWith(descriptorPrefix) || name.startsWith(directoryPrefix))) throw corrupt();
     if (index?.schemaVersion === 3) throw corrupt(); return index ? undefined : [];
   }
   if (!index || index.schemaVersion !== 3 || !index.mergeSummaryFingerprint || fullDigest(body) !== index.mergeSummaryFingerprint) throw corrupt();
   const parsed = parseJson(body);
-  if (!plainRecord(parsed) || parsed.schemaVersion !== 2 || parsed.businessId !== businessId || !Number.isSafeInteger(parsed.total) || (parsed.total as number) < 0 || !Array.isArray(parsed.directory)) throw corrupt();
-  type MembershipBoundary = PageBoundary & { fingerprint: string };
-  let previous: string[] | undefined;
-  const directory: MembershipBoundary[] = parsed.directory.map((entry) => {
-    if (!plainRecord(entry) || !Array.isArray(entry.first) || !Array.isArray(entry.last) || entry.first.length !== 2 || entry.last.length !== 2 || !entry.first.every((value) => typeof value === "string") || !entry.last.every((value) => typeof value === "string") || !/^[a-f0-9]{32}$/.test(entry.first[0] as string) || !/^[a-f0-9]{32}$/.test(entry.last[0] as string) || typeof entry.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(entry.fingerprint) || tupleCompare(entry.first as string[], entry.last as string[]) > 0 || (previous && (tupleCompare(previous, entry.first as string[]) >= 0 || previous[0] === entry.first[0]))) throw corrupt();
-    previous = entry.last as string[]; return { first: [...entry.first] as string[], last: [...entry.last] as string[], fingerprint: entry.fingerprint as string };
-  });
-  if (Math.ceil((parsed.total as number) / recordsPerPage) !== directory.length) throw corrupt();
+  if (!plainRecord(parsed) || parsed.schemaVersion !== 3 || parsed.businessId !== businessId || !Number.isSafeInteger(parsed.total) || (parsed.total as number) < 0 || !Number.isSafeInteger(parsed.membershipPageCount) || (parsed.membershipPageCount as number) < 0 || !Number.isSafeInteger(parsed.directoryPageCount) || (parsed.directoryPageCount as number) < 0 || typeof parsed.directoryFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(parsed.directoryFingerprint)) throw corrupt();
+  if (Math.ceil((parsed.total as number) / recordsPerPage) !== parsed.membershipPageCount || Math.ceil((parsed.membershipPageCount as number) / recordsPerPage) !== parsed.directoryPageCount) throw corrupt();
+  type MembershipBoundary = { firstHash: string; lastHash: string; fingerprint: string };
+  const directory: MembershipBoundary[] = [], directoryBodies: string[] = [];
+  let previousHash = "";
+  for (let directoryPageNumber = 0; directoryPageNumber < (parsed.directoryPageCount as number); directoryPageNumber += 1) {
+    const directoryBody = await readText(exactLinkMergeDirectoryPagePath(root, generation, businessId, directoryPageNumber), io, { optional: false, maxBytes: maxIndexFileBytes, observe: false });
+    if (directoryBody === undefined) throw corrupt();
+    directoryBodies.push(directoryBody);
+    const rawDirectory = parsePage<unknown[]>(directoryBody);
+    for (const entry of rawDirectory) {
+      if (!Array.isArray(entry) || entry.length !== 3 || typeof entry[0] !== "string" || !/^[a-f0-9]{32}$/.test(entry[0]) || typeof entry[1] !== "string" || !/^[a-f0-9]{32}$/.test(entry[1]) || typeof entry[2] !== "string" || !/^[a-f0-9]{64}$/.test(entry[2]) || compareOrdinal(entry[0], entry[1]) > 0 || (previousHash && compareOrdinal(previousHash, entry[0]) >= 0)) throw corrupt();
+      previousHash = entry[1]; directory.push({ firstHash: entry[0], lastHash: entry[1], fingerprint: entry[2] });
+    }
+    io.observeRead?.({ filePath: exactLinkMergeDirectoryPagePath(root, generation, businessId, directoryPageNumber), bytes: Buffer.byteLength(directoryBody, "utf8"), records: 0 });
+  }
+  if (fullDigest(directoryBodies.join("")) !== parsed.directoryFingerprint || directory.length !== parsed.membershipPageCount) throw corrupt();
   const result: MergeMembership[] = [];
   for (let pageNumber = 0; pageNumber < directory.length; pageNumber += 1) {
     const filePath = exactLinkMergeMembershipPagePath(root, generation, businessId, pageNumber);
@@ -662,7 +678,7 @@ async function readExactMergeMembership(root: string, generation: string, busine
       return { familyHash: entry[0], familyKey: entry[1], status: entry[2] };
     });
     const boundary = directory[pageNumber]!;
-    if (page.length === 0 || tupleCompare([page[0]!.familyHash, page[0]!.familyKey], boundary.first) !== 0 || tupleCompare([page.at(-1)!.familyHash, page.at(-1)!.familyKey], boundary.last) !== 0 || page.some((entry, position) => position > 0 && (tupleCompare([page[position - 1]!.familyHash, page[position - 1]!.familyKey], [entry.familyHash, entry.familyKey]) >= 0 || page[position - 1]!.familyHash === entry.familyHash))) throw corrupt();
+    if (page.length === 0 || page[0]!.familyHash !== boundary.firstHash || page.at(-1)!.familyHash !== boundary.lastHash || page.some((entry, position) => position > 0 && (tupleCompare([page[position - 1]!.familyHash, page[position - 1]!.familyKey], [entry.familyHash, entry.familyKey]) >= 0 || page[position - 1]!.familyHash === entry.familyHash))) throw corrupt();
     io.observeRead?.({ filePath, bytes: Buffer.byteLength(pageBodyText!, "utf8"), records: 0 }); result.push(...page);
   }
   if (result.length !== parsed.total) throw corrupt();
@@ -686,6 +702,7 @@ async function readIndexedPage<T, After = never>({ businessId, selector, options
   const loaded: T[] = [];
   for (let pageNumber = firstPage; pageNumber < directory.length && loaded.length < (options.after === undefined ? options.limit : options.limit + recordsPerPage); pageNumber += 1) {
     const filePath = pagePath(pageNumber), body = await readText(filePath, io, { optional: false, maxBytes: maxIndexFileBytes, observe: false });
+    if (directory[pageNumber]!.fingerprint && fullDigest(body!) !== directory[pageNumber]!.fingerprint) throw corrupt();
     const page = parsePage<T>(body);
     if (page.length === 0 || tupleCompare(tuple(page[0]!), directory[pageNumber]!.first) !== 0 || tupleCompare(tuple(page.at(-1)!), directory[pageNumber]!.last) !== 0 || page.some((item, index) => index > 0 && tupleCompare(tuple(page[index - 1]!), tuple(item)) >= 0)) throw corrupt();
     io.observeRead?.({ filePath, bytes: Buffer.byteLength(body!, "utf8"), records: page.length });
@@ -713,6 +730,7 @@ async function openIndexedStream<T, After = never>({ businessId, selector, optio
   const loadNextPage = async (): Promise<boolean> => {
     if (pageNumber >= directory.length) return false;
     const filePath = pagePath(pageNumber), body = await readText(filePath, io, { optional: false, maxBytes: maxIndexFileBytes, observe: false });
+    if (directory[pageNumber]!.fingerprint && fullDigest(body!) !== directory[pageNumber]!.fingerprint) throw corrupt();
     const loaded = parsePage<T>(body), boundary = directory[pageNumber]!;
     if (loaded.length === 0 || tupleCompare(tuple(loaded[0]!), boundary.first) !== 0 || tupleCompare(tuple(loaded.at(-1)!), boundary.last) !== 0 || loaded.some((item, index) => index > 0 && tupleCompare(tuple(loaded[index - 1]!), tuple(item)) >= 0)) throw corrupt();
     io.observeRead?.({ filePath, bytes: Buffer.byteLength(body!, "utf8"), records: loaded.length });
@@ -794,14 +812,20 @@ class FileTransaction implements AtomicTransaction {
     return (await this.map()).scanPage(key, options);
   }
   private async authoritative<T, After = never>(options: AtomicPageOptions<T, After>, businessId: string): Promise<AtomicPage<T>> {
-    if ((options.baseItems?.length ?? 0) === 0) {
-      return readIndexedPage({ businessId, selector: "approved", options, io: this.io, summaryPath: approvedLinkSummaryPath(this.root, this.manifest!.generation, businessId), pagePath: (pageNumber) => approvedLinkPagePath(this.root, this.manifest!.generation, businessId, pageNumber), tuple: (item) => linkTuple(item as IndexedRecord), afterTuple: (after) => [stringField(after as unknown as IndexedRecord, "normalizedValue"), stringField(after as unknown as IndexedRecord, "familyKey")] });
-    }
-    if (!options.collapseBy) return (await this.map()).scanPage("identity-links", options);
     const index = await loadExactLinkIndex(this.root, this.manifest!.generation, businessId, this.io);
     const hasCurrentSummary = await assertRegularFile(linkSummaryPath(this.root, this.manifest!.generation, businessId));
     const hasApprovedSummary = await assertRegularFile(approvedLinkSummaryPath(this.root, this.manifest!.generation, businessId));
     if ((index !== undefined) !== hasCurrentSummary || hasCurrentSummary !== hasApprovedSummary) throw corrupt();
+    let memberships = await readExactMergeMembership(this.root, this.manifest!.generation, businessId, this.io, index);
+    if (memberships === undefined) memberships = await readLegacyMergeMembership(this.root, this.manifest!.generation, businessId, this.io);
+    const currentSummary = parseSummary(await readText(linkSummaryPath(this.root, this.manifest!.generation, businessId), this.io, { optional: true, maxBytes: maxIndexFileBytes }), businessId);
+    const approvedSummary = parseSummary(await readText(approvedLinkSummaryPath(this.root, this.manifest!.generation, businessId), this.io, { optional: true, maxBytes: maxIndexFileBytes }), businessId);
+    const membershipApprovedTotal = memberships.reduce((total, membership) => total + (membership.status === "approved" ? 1 : 0), 0);
+    if (memberships.length !== currentSummary.total || membershipApprovedTotal !== approvedSummary.total) throw corrupt();
+    if ((options.baseItems?.length ?? 0) === 0) {
+      return readIndexedPage({ businessId, selector: "approved", options, io: this.io, summaryPath: approvedLinkSummaryPath(this.root, this.manifest!.generation, businessId), pagePath: (pageNumber) => approvedLinkPagePath(this.root, this.manifest!.generation, businessId, pageNumber), tuple: (item) => linkTuple(item as IndexedRecord), afterTuple: (after) => [stringField(after as unknown as IndexedRecord, "normalizedValue"), stringField(after as unknown as IndexedRecord, "familyKey")] });
+    }
+    if (!options.collapseBy) return (await this.map()).scanPage("identity-links", options);
     const configured = new Map<string, T>();
     for (const item of options.baseItems ?? []) {
       if (options.filter && !options.filter(item)) continue;
@@ -820,12 +844,9 @@ class FileTransaction implements AtomicTransaction {
     const after = options.after as unknown as IndexedRecord | undefined;
     const strict = after === undefined ? candidates : candidates.filter((candidate) => tupleCompare([candidate.normalizedValue, candidate.familyKey], [stringField(after, "normalizedValue"), stringField(after, "familyKey")]) > 0);
     const durable = await openIndexedStream<T, After>({ businessId, selector: "current", options: { ...options, offset: undefined }, io: this.io, summaryPath: linkSummaryPath(this.root, this.manifest!.generation, businessId), pagePath: (pageNumber) => linkPagePath(this.root, this.manifest!.generation, businessId, pageNumber), tuple: (item) => linkTuple(item as IndexedRecord), afterTuple: (cursor) => [stringField(cursor as unknown as IndexedRecord, "normalizedValue"), stringField(cursor as unknown as IndexedRecord, "familyKey")] });
-    let memberships = await readExactMergeMembership(this.root, this.manifest!.generation, businessId, this.io, index);
-    if (memberships === undefined) memberships = await readLegacyMergeMembership(this.root, this.manifest!.generation, businessId, this.io);
     const configuredFamilies = new Set(candidates.map((candidate) => candidate.familyKey));
     const durableFamilies = new Set(memberships.map((membership) => membership.familyKey));
-    const approvedSummary = parseSummary(await readText(approvedLinkSummaryPath(this.root, this.manifest!.generation, businessId), this.io, { optional: true, maxBytes: maxIndexFileBytes }), businessId);
-    const total = approvedSummary.total + [...configuredFamilies].filter((familyKey) => !durableFamilies.has(familyKey)).length;
+    const total = membershipApprovedTotal + [...configuredFamilies].filter((familyKey) => !durableFamilies.has(familyKey)).length;
     const items: T[] = [], origins: PageOrigin[] = [];
     const offset = options.offset ?? 0;
     let skipped = 0, configuredIndex = 0, stored = await durable.next();
