@@ -40,6 +40,8 @@ export type FileStorageHooks = {
   replace?: (tempPath: string, statePath: string) => Promise<void>;
   syncDirectory?: (directory: string) => Promise<void>;
   observeRead?: (observation: FileReadObservation) => void;
+  beforeMutexAcquire?: (root: string) => void;
+  afterMutexAcquire?: (root: string) => void;
   afterGenerationFileWrite?: (filePath: string) => Promise<void>;
   beforeReaderPinPublish?: (filePath: string) => Promise<void>;
 };
@@ -696,7 +698,10 @@ export function createFileAtomicLocalStorage({ root, io = {} }: { root: string; 
     },
     async transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T> {
     const canonicalRoot = await recheckPhysicalRoot(safeRoot);
-    return withMutex(canonicalRoot, () => withFileLock(canonicalRoot, async () => {
+    io.beforeMutexAcquire?.(canonicalRoot);
+    return withMutex(canonicalRoot, () => {
+      io.afterMutexAcquire?.(canonicalRoot);
+      return withFileLock(canonicalRoot, async () => {
       const statePath = path.join(canonicalRoot, "identity-local-storage.json");
       await recheckPhysicalRoot(canonicalRoot);
       const manifest = await loadOrMigrateManifest(canonicalRoot, statePath, io);
@@ -707,7 +712,8 @@ export function createFileAtomicLocalStorage({ root, io = {} }: { root: string; 
         await commitGeneration(canonicalRoot, statePath, await transaction.snapshot(), io, manifest?.generation);
       }
       return result;
-    }));
+      });
+    });
     },
   };
 }

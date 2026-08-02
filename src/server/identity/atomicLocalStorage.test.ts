@@ -36,6 +36,15 @@ function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<void> 
   });
 }
 
+async function withHangGuard<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const guard = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`${label} did not occur`)), 1_000);
+  });
+  try { return await Promise.race([promise, guard]); }
+  finally { if (timeout) clearTimeout(timeout); }
+}
+
 afterEach(async () => {
   await Promise.all(
     ownedRoots.splice(0).map(async (root) => {
@@ -89,6 +98,19 @@ describe("createFileAtomicLocalStorage", () => {
     await expect(first.read!((transaction) => transaction.get("second"))).resolves.toEqual({ value: 2 });
     await expect(second.read!((transaction) => transaction.get("first"))).resolves.toEqual({ value: 1 });
 
+    let signalSecondMutexAttempted: (() => void) | undefined;
+    const secondMutexAttempted = new Promise<void>((resolve) => { signalSecondMutexAttempted = resolve; });
+    let signalSecondMutexAcquired: (() => void) | undefined;
+    const secondMutexAcquired = new Promise<void>((resolve) => { signalSecondMutexAcquired = resolve; });
+    let secondHasMutex = false;
+    const overlappingSecond = createFileAtomicLocalStorage({
+      root: alias,
+      io: {
+        beforeMutexAcquire: () => { signalSecondMutexAttempted?.(); },
+        afterMutexAcquire: () => { secondHasMutex = true; signalSecondMutexAcquired?.(); },
+      },
+    });
+
     let signalFirstEntered: (() => void) | undefined;
     const firstEntered = new Promise<void>((resolve) => { signalFirstEntered = resolve; });
     let releaseFirst: (() => void) | undefined;
@@ -103,17 +125,25 @@ describe("createFileAtomicLocalStorage", () => {
     await firstEntered;
 
     let secondCallbackEntered = false;
-    const secondAttempt = second.transaction(async (transaction) => {
+    const secondAttempt = overlappingSecond.transaction(async (transaction) => {
       secondCallbackEntered = true;
       const shared = (await transaction.get<Record<string, string>>("overlap")) ?? {};
       shared.second = "second";
       await transaction.set("overlap", shared);
     });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const secondWasBlocked = !secondCallbackEntered;
+    let hookFailure: unknown;
+    try {
+      await withHangGuard(secondMutexAttempted, "second beforeMutexAcquire hook");
+      expect(secondHasMutex).toBe(false);
+      expect(secondCallbackEntered).toBe(false);
+    } catch (error) {
+      hookFailure = error;
+    }
     releaseFirst?.();
     await Promise.all([firstAttempt, secondAttempt]);
-    expect(secondWasBlocked).toBe(true);
+    if (hookFailure) throw hookFailure;
+    await withHangGuard(secondMutexAcquired, "second afterMutexAcquire hook");
+    expect(secondHasMutex).toBe(true);
     expect(secondCallbackEntered).toBe(true);
     await expect(first.read!((transaction) => transaction.get("overlap"))).resolves.toEqual({ first: "first", second: "second" });
 
