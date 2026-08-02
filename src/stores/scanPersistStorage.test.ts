@@ -971,6 +971,50 @@ describe("active async persistence adapter", () => {
 });
 
 describe("persistence context generations", () => {
+  it("does not create a write intent when the captured context is already stale", async () => {
+    const database = new Db();
+    let context = "A";
+    const storage = createAsyncDurableStorage({ database, getLegacyStorage: () => legacy(), getWriteContext: () => context, isWriteContextCurrent: (token) => token === context });
+    const write = storage.setItem("sis-scan-owner", "stale");
+    context = "B";
+    await write;
+    // Intent creation is synchronous ordering evidence; the stale context must block its payload.
+    expect(await database.get("sis-scan-owner::scanbin-write-intent-v1")).toBeTruthy();
+    expect(await database.get("sis-scan-owner")).toBeNull();
+  });
+
+  it("does not write a pagehide fallback after its captured context becomes stale", async () => {
+    const database = new Db();
+    const local = legacy();
+    let context = "A";
+    const storage = createAsyncDurableStorage({ database, getLegacyStorage: () => local, getWriteContext: () => context, isWriteContextCurrent: (token) => token === context });
+    const pending = storage.setItem("sis-scan-owner", "stale-pagehide");
+    context = "B";
+    window.dispatchEvent(new Event("pagehide"));
+    await pending;
+    expect(local.values.get("sis-scan-owner")).toBeUndefined();
+    expect(await database.get("sis-scan-owner")).toBeNull();
+  });
+
+  it("does not perform recovery, tombstone cleanup, or main writes after context changes at a durable boundary", async () => {
+    let context = "A";
+    class SwitchingDb extends Db {
+      override async get(key: string) {
+        const value = await super.get(key);
+        if (key === "sis-scan-owner::scanbin-recovery-v1") context = "B";
+        return value;
+      }
+    }
+    const database = new SwitchingDb();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({ database, getLegacyStorage: () => local, getWriteContext: () => context, isWriteContextCurrent: (token) => token === context });
+    await storage.setItem("sis-scan-owner", "A-main");
+    expect(await database.get("sis-scan-owner")).toBeNull();
+    expect(await database.get("sis-scan-owner::scanbin-recovery-v1")).toBeNull();
+    expect(await database.get("sis-scan-owner::scanbin-cleared-v1")).toBeNull();
+    expect(local.values.get("sis-scan-owner")).toBeUndefined();
+  });
+
   it("rejects an A snapshot delayed before durable commit after the same uid switches to B", async () => {
     const database = new Db();
     let context = "A";

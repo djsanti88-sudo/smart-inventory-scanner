@@ -63,6 +63,17 @@ afterEach(() => {
 });
 
 describe("BusinessContextGate durable UID namespace safety", () => {
+  it("waits for UID hydration before activating the selected business", async () => {
+    mocks.getPersistedStatePresence.mockResolvedValue("found");
+    let release!: () => void;
+    mocks.rehydrateForUid.mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+    render(<BusinessContextGate><div data-testid="scanner">scanner</div></BusinessContextGate>);
+    await waitFor(() => expect(mocks.rehydrateForUid).toHaveBeenCalledWith("user-1"));
+    expect(mocks.setBusinessContext).not.toHaveBeenCalled();
+    release();
+    await waitFor(() => expect(mocks.setBusinessContext).toHaveBeenCalledWith("shop-1", "user-1"));
+  });
+
   it("offers explicit adoption for a durable-only anonymous candidate", async () => {
     mocks.getPersistedStatePresence.mockResolvedValue("absent");
 

@@ -18,6 +18,7 @@ const LOCAL_DEMO_KEY = "sis-local-demo-scan-v1";
 // One in-tab linearization point for durable adoption and destructive store operations.
 // It is intentionally transient: IndexedDB remains the cross-tab authority.
 let persistenceMutationBarrier: symbol | null = null;
+const persistenceMutationWaiters: Array<(token: symbol) => void> = [];
 export function tryAcquirePersistenceMutationBarrier(): symbol | null {
   if (persistenceMutationBarrier) return null;
   const token = Symbol("scan-persist-mutation");
@@ -25,10 +26,21 @@ export function tryAcquirePersistenceMutationBarrier(): symbol | null {
   return token;
 }
 export function releasePersistenceMutationBarrier(token: symbol): void {
-  if (persistenceMutationBarrier === token) persistenceMutationBarrier = null;
+  if (persistenceMutationBarrier !== token) return;
+  const next = persistenceMutationWaiters.shift();
+  if (!next) { persistenceMutationBarrier = null; return; }
+  const replacement = Symbol("scan-persist-mutation");
+  persistenceMutationBarrier = replacement;
+  next(replacement);
 }
 export function ownsPersistenceMutationBarrier(token: symbol): boolean {
   return persistenceMutationBarrier === token;
+}
+/** Hydration must serialize rather than silently proceeding without its required namespace lease. */
+export function acquirePersistenceMutationBarrier(): Promise<symbol> {
+  const token = tryAcquirePersistenceMutationBarrier();
+  if (token) return Promise.resolve(token);
+  return new Promise((resolve) => persistenceMutationWaiters.push(resolve));
 }
 
 export type LegacyAdoptionResult =
@@ -162,9 +174,25 @@ export async function inspectLegacyAdoptionCandidate(): Promise<PersistedStatePr
   return getBrowserLegacyAdoptionOperations()?.inspect() ?? "unavailable";
 }
 
-export async function adoptLegacyPersistedState(uid: string, ownedBarrier?: symbol): Promise<LegacyAdoptionResult> {
+export async function adoptLegacyPersistedState(uid: string): Promise<LegacyAdoptionResult> {
   if (isLocalDemoPersistence()) return { status: "absent" };
-  return (await getBrowserLegacyAdoptionOperations()?.adopt(uid, ownedBarrier)) ?? { status: "unavailable" };
+  return (await getBrowserLegacyAdoptionOperations()?.adopt(uid)) ?? { status: "unavailable" };
+}
+
+/** Own the transient lease internally across durable adoption and caller-provided in-memory handoff. */
+export async function adoptLegacyPersistedStateWithHandoff(
+  uid: string,
+  onAdopted: () => Promise<LegacyAdoptionResult>,
+): Promise<LegacyAdoptionResult> {
+  if (isLocalDemoPersistence()) return { status: "absent" };
+  const barrier = await acquirePersistenceMutationBarrier();
+  try {
+    const operations = getBrowserLegacyAdoptionOperations();
+    const result = (await operations?.adopt(uid, barrier)) ?? { status: "unavailable" };
+    return result.status === "adopted" ? await onAdopted() : result;
+  } finally {
+    releasePersistenceMutationBarrier(barrier);
+  }
 }
 
 export function persistKeyForUid(uid: string | null): string {
