@@ -10,7 +10,7 @@ import { test, expect, type Page, type Route } from "./fixtures";
 // Falken, size LT275/70R18) hits the part-number-exact path in identityMatcher.ts (AM-R4: brand AND
 // size both corroborate) -> status "exact" - verified directly against a live local dev server before
 // this fixture was finalized (see the Task 11 report for the curl proof). Row 2 (PN WIDGET-100, no
-// size, brand Acme) has no corpus hit and no tire signal -> "unmatched" -> "review". So the real
+// size, brand Acme) receives the deterministic mocked "unmatched" result -> "review". So the
 // headline is deterministically "Matched 1 of 2 automatically".
 
 const PROOF = "e2e/proof";
@@ -32,11 +32,23 @@ async function runImportFlow(page: Page, viewportLabel: string) {
   await mockAiLookup(page);
   await page.route("**/api/reconcile/match", async (route: Route) => {
     const body = route.request().postDataJSON() as { rows?: unknown[] };
-    expect(body.rows).toHaveLength(2);
-    return route.fulfill({ json: { matches: [
+    expect(body.rows).toEqual([
+      {
+        externalId: "28030703", partNumbers: ["28030703"], brand: "Falken",
+        sizeText: "LT275/70R18", specs: "Falken LT275/70R18", name: "Falken LT275/70R18", qty: 6,
+        raw: { "Tire Size": "LT275/70R18", PN: "28030703", QOH: "6", Make: "Falken", "Junk Column": "ignore-me" },
+      },
+      {
+        externalId: "WIDGET-100", partNumbers: ["WIDGET-100"], brand: "Acme",
+        specs: "Acme", name: "Acme", qty: 3,
+        raw: { "Tire Size": "", PN: "WIDGET-100", QOH: "3", Make: "Acme", "Junk Column": "ignore-me" },
+      },
+    ]);
+    const matches = [
       { status: "matched", matchBasis: "part_number_exact", confidence: 1, candidate: { uid: "falken-28030703", brand: "Falken", model: "Wildpeak A/T3W", size: "LT275/70R18" } },
       { status: "unmatched", reason: "No corpus candidate found.", confidence: 0 },
-    ] } });
+    ];
+    return route.fulfill({ json: { matches } });
   });
   await page.goto("/products");
 

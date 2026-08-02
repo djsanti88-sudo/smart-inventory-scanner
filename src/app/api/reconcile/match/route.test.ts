@@ -270,21 +270,21 @@ describe("POST /api/reconcile/match - validation (400 on garbage)", () => {
 });
 
 describe("POST /api/reconcile/match - matching through the mocked local corpus", () => {
-  it("keeps the two-row universal-import fixture deterministic: Falken matches and WIDGET-100 is unmatched", async () => {
+  it("matches the real fixture's Falken row and honestly classifies its signal-free WIDGET-100 row", async () => {
     mockLookupAll.mockImplementation(async (key: string) => (key === "28030703" ? [FALKEN_IMPORT_ROW] : []));
 
     const response = await POST(makeRequest({ rows: [
-      validRow({ externalId: "28030703", partNumbers: ["28030703"], brand: "Falken", model: "Wildpeak A/T3W", sizeText: "LT275/70R18" }),
-      // Give the otherwise unknown row a tire signal. Without one the matcher
-      // correctly classifies it as non_tire, which is a different contract.
-      validRow({ externalId: "WIDGET-100", partNumbers: ["WIDGET-100"], brand: "Acme", model: "Widget tire", sizeText: undefined }),
+      validRow({ externalId: "28030703", partNumbers: ["28030703"], brand: "Falken", model: undefined, sizeText: "LT275/70R18", qty: 6 }),
+      validRow({ externalId: "WIDGET-100", partNumbers: ["WIDGET-100"], brand: "Acme", model: undefined, sizeText: undefined, qty: 3 }),
     ] }));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.matches).toMatchObject([
       { status: "matched", matchBasis: "part_number_exact", candidate: { uid: "falken-28030703", brand: "Falken" } },
-      { status: "unmatched" },
+      // The browser contract mocks this as unmatched so the row exercises Needs
+      // Review. The real matcher more specifically identifies it as non-tire.
+      { status: "non_tire" },
     ]);
   });
 

@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildLocalIdentityPreviewRequest, sha256UploadFile, UniversalImportPanelContainer } from "@/components/UniversalImportPanelContainer";
 import { useScanStore } from "@/stores/scanStore";
-import type { ColumnMapping, UniversalSheet } from "@/services/importSchema";
+import type { ColumnMapping, ImportPreviewRow, UniversalSheet } from "@/services/importSchema";
 import type { Product, Alias } from "@/types";
 import { createIdentityPreviewRoute } from "@/server/identity/previewRoute";
 import fixture from "@/eval/identity/fixtures/frozen-5000.v1.json";
@@ -307,17 +307,23 @@ describe("UniversalImportPanelContainer - loadMapping", () => {
   it("uploads the two-row TSV through the deterministic reconcile contract and hands its exact rows to the store", async () => {
     const applyUniversalImport = vi.fn().mockResolvedValue({ applied: 1, queuedForReview: 1, rejected: 0 });
     useScanStore.setState({ applyUniversalImport });
+    const fixtureMapping: ColumnMapping = { size: 0, partNumber: 1, quantity: 2, brand: 3 };
     const fetchMock = vi.fn().mockImplementation(async (input: unknown, init?: { body?: string }) => {
       const url = String(input);
-      if (url.includes("/api/import-mapping")) return { ok: true, status: 200, json: async () => ({ mapping: REMEMBERED_MAPPING }) };
+      if (url.includes("/api/import-mapping")) return { ok: true, status: 200, json: async () => ({ mapping: fixtureMapping }) };
       if (url.includes("/api/reconcile/match")) {
-        expect(JSON.parse(init?.body ?? "{}")).toMatchObject({
-          businessId: "biz-test",
-          rows: [
-            { partNumbers: ["28030703"], brand: "Falken", sizeText: "LT275/70R18" },
-            { partNumbers: ["WIDGET-100"], brand: "Acme" },
-          ],
-        });
+        expect(JSON.parse(init?.body ?? "{}")).toEqual({ businessId: "biz-test", rows: [
+          {
+            externalId: "28030703", partNumbers: ["28030703"], brand: "Falken",
+            sizeText: "LT275/70R18", specs: "Falken LT275/70R18", name: "Falken LT275/70R18", qty: 6,
+            raw: { "Tire Size": "LT275/70R18", PN: "28030703", QOH: "6", Make: "Falken", "Junk Column": "ignore-me" },
+          },
+          {
+            externalId: "WIDGET-100", partNumbers: ["WIDGET-100"], brand: "Acme",
+            specs: "Acme", name: "Acme", qty: 3,
+            raw: { "Tire Size": "", PN: "WIDGET-100", QOH: "3", Make: "Acme", "Junk Column": "ignore-me" },
+          },
+        ] });
         return {
           ok: true, status: 200,
           json: async () => ({ matches: [
@@ -331,16 +337,18 @@ describe("UniversalImportPanelContainer - loadMapping", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<UniversalImportPanelContainer />);
-    const tsv = "Part Number\tBrand\tModel\tSize\tQuantity\n28030703\tFalken\tWildpeak A/T3W\tLT275/70R18\t3\nWIDGET-100\tAcme\tWidget\t\t2\n";
-    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File([tsv], "two-rows.tsv", { type: "text/tab-separated-values" })] } });
+    // Byte-for-byte textual representation of reordered-renamed.tsv, including
+    // its leading blank line and deliberately irrelevant final column.
+    const tsv = "\nTire Size\tPN\tQOH\tMake\tJunk Column\nLT275/70R18\t28030703\t6\tFalken\tignore-me\n\tWIDGET-100\t3\tAcme\tignore-me\n";
+    fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [new File([tsv], "reordered-renamed.tsv", { type: "text/tab-separated-values" })] } });
 
     expect(await screen.findByTestId("import-headline")).toHaveTextContent("Matched 1 of 2 automatically");
     fireEvent.click(screen.getByTestId("import-apply"));
     await waitFor(() => expect(applyUniversalImport).toHaveBeenCalledTimes(1));
     // Exact ordered handoff: this catches dropped rows, reordered counts, and an
     // accidental promotion of the unmatched widget as well as the visible headline.
-    const handedOff = applyUniversalImport.mock.calls[0]?.[0] ?? [];
-    expect(handedOff.map((row) => ({
+    const handedOff = (applyUniversalImport.mock.calls[0]?.[0] ?? []) as ImportPreviewRow[];
+    expect(handedOff.map((row: ImportPreviewRow) => ({
       line: row.line,
       status: row.status,
       quantity: row.source?.quantity,
@@ -348,12 +356,12 @@ describe("UniversalImportPanelContainer - loadMapping", () => {
       expected: row.source?.expected,
     }))).toEqual([
       {
-        line: 2, status: "exact", quantity: 3, partNumber: "28030703",
-        expected: expect.objectContaining({ externalId: "28030703", partNumbers: ["28030703"], brand: "Falken", model: "Wildpeak A/T3W", sizeText: "LT275/70R18", qty: 3 }),
+        line: 3, status: "exact", quantity: 6, partNumber: "28030703",
+        expected: expect.objectContaining({ externalId: "28030703", partNumbers: ["28030703"], brand: "Falken", sizeText: "LT275/70R18", qty: 6 }),
       },
       {
-        line: 3, status: "review", quantity: 2, partNumber: "WIDGET-100",
-        expected: expect.objectContaining({ externalId: "WIDGET-100", partNumbers: ["WIDGET-100"], brand: "Acme", model: "Widget", qty: 2 }),
+        line: 4, status: "review", quantity: 3, partNumber: "WIDGET-100",
+        expected: expect.objectContaining({ externalId: "WIDGET-100", partNumbers: ["WIDGET-100"], brand: "Acme", qty: 3 }),
       },
     ]);
     expect(screen.getByTestId("import-summary")).toHaveTextContent("Applied 1. Needs Review 1. Rejected 0.");
