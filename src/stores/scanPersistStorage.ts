@@ -23,6 +23,8 @@ export interface AsyncKeyValueDatabase {
   get: (key: string) => Promise<string | null>;
   set: (key: string, value: string) => Promise<void>;
   remove: (key: string) => Promise<void>;
+  /** Atomically reserve a previously absent key. Native IndexedDB implements this in one readwrite transaction. */
+  createIfAbsent?: (key: string, value: string) => Promise<"created" | "exists">;
 }
 
 export type PersistenceClearResult = { cleared: boolean; authority: "durable" | "local" | "none" };
@@ -980,6 +982,41 @@ export function createAsyncDurablePersistStorage<S>(options: AsyncDurablePersist
 
 /** Exact durable namespace probe result for a shared-browser adoption decision. */
 export type PersistedStatePresence = "found" | "absent" | "unavailable";
+export type DurableCreateIfAbsentResult = "created" | "exists" | "unavailable";
+
+const createIfAbsentQueues = new WeakMap<AsyncKeyValueDatabase, Promise<void>>();
+
+/**
+ * Durable-only create-if-absent with exact readback. This deliberately bypasses the fail-soft
+ * adapter: a local fallback is never authority to consume an anonymous durable namespace.
+ */
+export async function createDurableIfAbsentAndVerify(
+  database: AsyncKeyValueDatabase,
+  key: string,
+  value: string,
+): Promise<DurableCreateIfAbsentResult> {
+  try {
+    let created = false;
+    if (database.createIfAbsent) {
+      created = (await database.createIfAbsent(key, value)) === "created";
+    } else {
+      // Test/seam databases without a native transaction still serialize reservations per backing
+      // database object. Browser production always uses the native transactional implementation.
+      const prior = createIfAbsentQueues.get(database) ?? Promise.resolve();
+      const reservation = prior.catch(() => undefined).then(async () => {
+        if (await database.get(key) !== null) return false;
+        await database.set(key, value);
+        return true;
+      });
+      createIfAbsentQueues.set(database, reservation.then(() => undefined, () => undefined));
+      created = await reservation;
+    }
+    if (!created) return "exists";
+    return (await database.get(key)) === value ? "created" : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
 
 export async function getPersistedStatePresenceFromDatabase(
   name: string,
@@ -1063,5 +1100,20 @@ export function createNativeIndexedDbDatabase(): AsyncKeyValueDatabase | null {
     },
     set: async (key, value) => { await run("readwrite", (store) => store.put(value, key)); },
     remove: async (key) => { await run("readwrite", (store) => store.delete(key)); },
+    createIfAbsent: (key, value) => open().then((db) => new Promise<"created" | "exists">((resolve, reject) => {
+      const transaction = db.transaction("scan-state", "readwrite");
+      const store = transaction.objectStore("scan-state");
+      const read = store.get(key);
+      let created = false;
+      read.onsuccess = () => {
+        if (read.result !== undefined) return;
+        created = true;
+        const write = store.put(value, key);
+        write.onerror = () => reject(write.error ?? new Error("IndexedDB create failed"));
+      };
+      read.onerror = () => reject(read.error ?? new Error("IndexedDB create read failed"));
+      transaction.oncomplete = () => resolve(created ? "created" : "exists");
+      transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+    })),
   };
 }

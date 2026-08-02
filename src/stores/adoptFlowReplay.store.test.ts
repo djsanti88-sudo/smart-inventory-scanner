@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createLegacyAdoptionOperations } from "./scanPersistNamespace";
 import { createAsyncDurableStorage, getPersistedStatePresenceFromDatabase, type AsyncKeyValueDatabase } from "./scanPersistStorage";
+import { replayLedgerCounts } from "@/services/inventory.replay";
+import { createTestScanStore, scanStoreMigrate } from "./scanStore";
 
 class MemStorage implements AsyncKeyValueDatabase {
   m = new Map<string, string>();
@@ -9,40 +11,34 @@ class MemStorage implements AsyncKeyValueDatabase {
   async remove(k: string) { this.m.delete(k); }
 }
 
-// Sums feed deltas per product, the same invariant P1's ledger tooling asserts.
-function quantitiesByProduct(feed: Array<{ productId?: string; quantityDelta?: number }>) {
-  const out: Record<string, number> = {};
-  for (const r of feed) {
-    if (!r.productId) continue;
-    out[r.productId] = (out[r.productId] ?? 0) + (r.quantityDelta === 0 ? 1 : r.quantityDelta ?? 1);
-  }
-  return out;
-}
-
 describe("adopt-flow replay: owner data intact after the owner-initiated adopt", () => {
-  it("preserves scan IDs and per-product quantities; durable source is consumed", async () => {
+  it("rehydrates the durable adopted snapshot and replays its physical scan IDs exactly once", async () => {
     const s = new MemStorage();
     const legacyFeed = [
-      { id: "e1", productId: "p1", quantityDelta: 1 },
-      { id: "e2", productId: "p1", quantityDelta: 1 },
-      { id: "e3", productId: "p2", quantityDelta: 3 },
-      { id: "e4", productId: "p2", quantityDelta: 0 }, // pre-D1 ghost -> normalizes to 1
+      { id: "e1", businessId: "b1", sessionId: "s1", matchedProductId: "p1", quantityDelta: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "e2", businessId: "b1", sessionId: "s1", matchedProductId: "p1", quantityDelta: 1, createdAt: "2026-01-01T00:01:00.000Z" },
+      { id: "e3", businessId: "b1", sessionId: "s1", matchedProductId: "p2", quantityDelta: 3, createdAt: "2026-01-01T00:02:00.000Z" },
+      { id: "e4", businessId: "b1", sessionId: "s1", matchedProductId: "p2", quantityDelta: 0, createdAt: "2026-01-01T00:03:00.000Z" },
     ];
     await s.set("sis-scan-v1", JSON.stringify({ state: { scanFeed: legacyFeed, businessId: "b1" }, version: 8 }));
 
-    const before = quantitiesByProduct(legacyFeed); // p1:2, p2:4 (0 counted as 1 by the invariant helper)
     const operations = createLegacyAdoptionOperations({
+      database: s,
       createStorage: () => createAsyncDurableStorage({ database: s, getLegacyStorage: () => null }),
       getPresence: (name) => getPersistedStatePresenceFromDatabase(name, s),
     });
     await expect(operations.adopt("owner-uid")).resolves.toEqual({ status: "adopted" });
-    const migrated = JSON.parse((await s.get("sis-scan-owner-uid"))!).state.scanFeed;
-    const after = quantitiesByProduct(migrated);
+    const adopted = JSON.parse((await s.get("sis-scan-owner-uid"))!);
+    const store = createTestScanStore();
+    store.setState(scanStoreMigrate(adopted.state, adopted.version) as never);
+    const hydratedFeed = store.getState().scanFeed;
+    const replayed = replayLedgerCounts(hydratedFeed, "s1");
 
-    expect(after).toEqual(before);
-    expect(after.p1).toBe(2);
-    expect(after.p2).toBe(4);
-    expect(migrated.map((event: { id: string }) => event.id)).toEqual(["e1", "e2", "e3", "e4"]);
+    expect(hydratedFeed.map((event) => event.id)).toEqual(["e1", "e2", "e3", "e4"]);
+    expect(replayed.map((count) => [count.productId, count.quantity, count.scanEventIds])).toEqual([
+      ["p1", 2, ["e1", "e2"]],
+      ["p2", 4, ["e3", "e4"]],
+    ]);
     expect(await operations.inspect()).toBe("absent"); // adopt CONSUMES the legacy blob (no double-inherit)
     await expect(operations.adopt("owner-uid")).resolves.toEqual({ status: "absent" });
   });
