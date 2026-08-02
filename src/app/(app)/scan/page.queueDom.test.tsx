@@ -10,8 +10,8 @@ const mocks = vi.hoisted(() => ({
 function eventFor(code: string, quantity: number): ScanEvent {
   return {
     id: `event-${quantity}`, businessId: "local-demo", sessionId: "session", rawCode: code, cleanCode: code,
-    normalizedCandidates: [code], matchedProductId: null, matchType: "none", status: "unknown",
-    resolverStatus: "unknown", codeType: "unknown", reason: "", quantityDelta: 1, quantityAfterScan: quantity,
+    normalizedCandidates: [code], matchedProductId: null, matchType: "unknown", status: "unknown",
+    resolverStatus: "needs_review", codeType: "messy", reason: "", quantityDelta: 1, quantityAfterScan: quantity,
     createdAt: "2026-08-02T00:00:00.000Z", source: "scan", notes: "", syncStatus: "pending",
     syncError: null, idempotencyKey: `key-${quantity}`,
   };
