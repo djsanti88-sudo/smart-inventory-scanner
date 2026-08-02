@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
+import type Database from "better-sqlite3";
+import { createTireKnowledgeDbFixture } from "@/test/createTireKnowledgeDbFixture";
 import { lookupByExactBarcode, lookupByExactPartNumber, getTireKnowledgeMeta, __resetTireKnowledgeCacheForTests } from "@/server/tire-knowledge/tireKnowledgeIndex";
 import { resolveExactBarcode, resolveExactPartNumber } from "@/server/tire-knowledge/TireKnowledgeProvider";
 import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
@@ -7,9 +9,37 @@ import { isTireContext, hasRequiredTireSpecs } from "@/services/ai/tireSpecs";
 // poison + near-matches return null (fall through to the existing AI path). Runs against the REAL committed
 // generated index (Cooper 029142869870 + Falken 848983006165 from the bootstrap seed).
 
-beforeEach(() => __resetTireKnowledgeCacheForTests());
+const fixture = vi.hoisted(() => ({ db: undefined as Database.Database | undefined }));
+vi.mock("@/server/knowledgeDb", () => ({ getKnowledgeDb: () => fixture.db }));
+
+const rows = [
+  { canonical_product_uid: "TIRE_2A3B66D9145A3CA4988B", brand: "cooper", brand_normalized: "cooper", model: "discoverer_srx", model_normalized: "discoverer srx", model_display: "Discoverer SRX", size: "265/70R17", raw_size_text: "265/70R17", load_index: "115", speed_rating: "T", type: "passenger", season: "highway", manufacturer_part_number: "90000027117", barcode: "029142869870", barcode_type: "upc", confidence: "verified_1src_strong", current_status: "active_retail", usable_for: "auto_count_candidate", field_completeness_score: "100", source_count: 0 },
+  { canonical_product_uid: "TIRE_519C1EBA8A0D68DF4287", brand: "falken", brand_normalized: "falken", model: "wildpeak_a_t3w", model_normalized: "wildpeak a t3w", model_display: "Wildpeak A/T3W", size: "245/75R17", manufacturer_part_number: "28034764", barcode: "848983006165", barcode_type: "upc", confidence: "verified_1src_strong", current_status: "active_retail", usable_for: "auto_count_candidate", field_completeness_score: "73", source_count: 0 },
+  { canonical_product_uid: "TIRE_91AA4F4FBCB614BE62A9", brand: "cooper", brand_normalized: "cooper", model: "zeon_crossrange", model_normalized: "zeon crossrange", model_display: "ZEON Crossrange", size: "255/45R20", raw_size_text: "255/45R20", load_index: "105", speed_rating: "H", season: "all_season", manufacturer_part_number: "160085014", barcode: "029142980407", barcode_type: "upc", confidence: "verified_1src_strong", current_status: "active_retail", usable_for: "auto_count_candidate", field_completeness_score: "93", source_count: 0 },
+  { canonical_product_uid: "TIRE_AMBIGUOUS", brand: "cooper", brand_normalized: "cooper", model: "ambiguous", model_normalized: "ambiguous", size: "255/45R20", manufacturer_part_number: "90000027117", barcode: "029142980408", barcode_type: "upc", confidence: "verified_1src_strong", current_status: "active_retail", usable_for: "auto_count_candidate", field_completeness_score: "93", source_count: 0 },
+];
+
+beforeEach(() => {
+  __resetTireKnowledgeCacheForTests();
+  fixture.db = createTireKnowledgeDbFixture(rows);
+});
+afterEach(() => {
+  __resetTireKnowledgeCacheForTests();
+  fixture.db?.close();
+  fixture.db = undefined;
+});
 
 describe("tireKnowledgeIndex - exact lookup", () => {
+  it("creates an owned in-memory tires table from explicitly supplied rows", () => {
+    const db = createTireKnowledgeDbFixture([{
+      canonical_product_uid: "fixture:cooper:1", brand: "Cooper", brand_normalized: "cooper", model: "Discoverer AT3", model_normalized: "discovererat3", size: "245/75R16", barcode: "029142712886", barcode_type: "upc", confidence: "verified", current_status: "active_retail", usable_for: "auto_count_candidate", field_completeness_score: "100", source_count: 2,
+    }]);
+    try {
+      expect(db.prepare("SELECT brand FROM tires WHERE barcode = ?").get("029142712886")).toEqual({ brand: "Cooper" });
+    } finally {
+      db.close();
+    }
+  });
   it("resolves an exact trusted barcode (leading-zero UPC preserved as string)", async () => {
     const row = await lookupByExactBarcode("029142869870");
     expect(row?.brand).toBe("cooper");
