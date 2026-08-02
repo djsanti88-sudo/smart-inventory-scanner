@@ -25,6 +25,8 @@ export interface AsyncKeyValueDatabase {
   remove: (key: string) => Promise<void>;
   /** Atomically reserve a previously absent key. Native IndexedDB implements this in one readwrite transaction. */
   createIfAbsent?: (key: string, value: string) => Promise<"created" | "exists">;
+  /** Atomically reserve a complete namespace when its main value and metadata are all absent. */
+  createNamespaceIfAbsent?: (key: string, value: string, occupiedMetadataKeys: string[]) => Promise<"created" | "exists">;
 }
 
 export type PersistenceClearResult = { cleared: boolean; authority: "durable" | "local" | "none" };
@@ -997,7 +999,14 @@ export async function createDurableIfAbsentAndVerify(
 ): Promise<DurableCreateIfAbsentResult> {
   try {
     let created = false;
-    if (database.createIfAbsent) {
+    const occupiedMetadataKeys = [`${key}${TOMBSTONE_SUFFIX}`, `${key}${RECOVERY_SUFFIX}`];
+    if (database.createNamespaceIfAbsent) {
+      created = (await database.createNamespaceIfAbsent(key, value, occupiedMetadataKeys)) === "created";
+    } else if (database.createIfAbsent) {
+      // A primitive that reserves only the main key cannot safely write behind a tombstone.
+      if ((await Promise.all(occupiedMetadataKeys.map((metadataKey) => database.get(metadataKey)))).some((raw) => raw !== null)) {
+        return "exists";
+      }
       created = (await database.createIfAbsent(key, value)) === "created";
     } else {
       // Test/seam databases without a native transaction still serialize reservations per backing
@@ -1005,6 +1014,7 @@ export async function createDurableIfAbsentAndVerify(
       const prior = createIfAbsentQueues.get(database) ?? Promise.resolve();
       const reservation = prior.catch(() => undefined).then(async () => {
         if (await database.get(key) !== null) return false;
+        if ((await Promise.all(occupiedMetadataKeys.map((metadataKey) => database.get(metadataKey)))).some((raw) => raw !== null)) return false;
         await database.set(key, value);
         return true;
       });
@@ -1112,6 +1122,28 @@ export function createNativeIndexedDbDatabase(): AsyncKeyValueDatabase | null {
         write.onerror = () => reject(write.error ?? new Error("IndexedDB create failed"));
       };
       read.onerror = () => reject(read.error ?? new Error("IndexedDB create read failed"));
+      transaction.oncomplete = () => resolve(created ? "created" : "exists");
+      transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+    })),
+    createNamespaceIfAbsent: (key, value, occupiedMetadataKeys) => open().then((db) => new Promise<"created" | "exists">((resolve, reject) => {
+      const transaction = db.transaction("scan-state", "readwrite");
+      const store = transaction.objectStore("scan-state");
+      const keys = [key, ...occupiedMetadataKeys];
+      let pending = keys.length;
+      let occupied = false;
+      let created = false;
+      for (const candidate of keys) {
+        const read = store.get(candidate);
+        read.onsuccess = () => {
+          occupied ||= read.result !== undefined;
+          pending -= 1;
+          if (pending !== 0 || occupied) return;
+          created = true;
+          const write = store.put(value, key);
+          write.onerror = () => reject(write.error ?? new Error("IndexedDB namespace create failed"));
+        };
+        read.onerror = () => reject(read.error ?? new Error("IndexedDB namespace create read failed"));
+      }
       transaction.oncomplete = () => resolve(created ? "created" : "exists");
       transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
     })),

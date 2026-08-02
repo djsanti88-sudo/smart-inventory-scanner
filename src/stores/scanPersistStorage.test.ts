@@ -1001,6 +1001,22 @@ describe("durable legacy adoption", () => {
     expect(await db.get("sis-scan-v1")).not.toBeNull();
   });
 
+  it("treats target tombstone metadata as occupied and never writes behind it", async () => {
+    const db = new Db();
+    const source = JSON.stringify({ state: { scanFeed: [{ id: "legacy" }] }, version: 8 });
+    await db.set("sis-scan-v1", source);
+    await db.set("sis-scan-owner::scanbin-cleared-v1", JSON.stringify({ __scanPersistClear: 1, version: 1, id: "owner-clear" }));
+    const operations = createLegacyAdoptionOperations({
+      database: db,
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+
+    await expect(operations.adopt("owner")).resolves.toEqual({ status: "target-exists" });
+    expect(await db.get("sis-scan-owner")).toBeNull();
+    expect(await db.get("sis-scan-v1")).toBe(source);
+  });
+
   it("treats tombstoned anonymous state as absent", async () => {
     const db = new Db();
     await db.set("sis-scan-v1", JSON.stringify({ state: { scanFeed: [{ id: "stale" }] }, version: 8 }));
