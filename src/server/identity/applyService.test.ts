@@ -9,14 +9,14 @@ import { MAX_IMPORT_QUANTITY } from "@/services/importQuantity";
 import { decideIdentity } from "@/services/identity/engine";
 import { genericIdentityPlugin } from "@/services/identity/plugins";
 
-const versions = { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
+const versions = { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
 const freshSource = { versions, revalidateCountableTarget: async () => true };
 const chunk = (): SignedPreviewChunk => ({
   manifestVersion: "identity-preview-v1", chunkIndex: 0, chunkCount: 1, sanitizedContentRootHash: "root", importId: "import-1", previewFingerprint: "preview-1",
   scope: { businessId: "shop-a", sourceSystem: "csv", sourceSignature: "headers-v1", vendorId: "vendor-a" }, actorId: "owner-a", versions,
   orderedMappings: [{ sheetName: "Stock", mapping: { quantity: "Qty" } }], importerVersion: "v1", sourceFileHashes: ["file-a"], issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z",
   rows: [{ businessId: "shop-a", sourceSystem: "csv", sourceSignature: "headers-v1", vendorId: "vendor-a", sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, quantity: 7, rawRecordFingerprint: "raw-1" }],
-  decisions: [{ kind: "automatic", targetProductId: "product-1", candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot-v1", engineVersion: "identity-engine-v1", pluginVersion: "identity-generic-v1", sourceRecordFingerprint: "raw-1", decisionFingerprint: "decision-1" }], rowIds: ["row-1"], signature: "signature",
+  decisions: [{ kind: "automatic", targetProductId: "product-1", candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot-v1", engineVersion: "identity-engine-v2", pluginVersion: "identity-generic-v1", sourceRecordFingerprint: "raw-1", decisionFingerprint: "decision-1" }], rowIds: ["row-1"], signature: "signature",
 });
 
 function harness() {
@@ -182,7 +182,7 @@ describe("applyIdentityImport", () => {
 
   it("does not complete or count against an invalidated import run", async () => {
     const storage = createMemoryAtomicLocalStorage(); const repository = createLocalRepository(storage);
-    await repository.createImportRun({ importId: "import-1", businessId: "shop-a", sourceFingerprint: "root", mappingFingerprint: await canonicalSha256(chunk().orderedMappings), previewFingerprint: "preview-1", actorId: "owner-a", engineVersion: "identity-engine-v1", pluginVersion: "identity-generic-v1", catalogVersion: "catalog-v1", createdAt: "2026-07-31T00:00:00.000Z" });
+    await repository.createImportRun({ importId: "import-1", businessId: "shop-a", sourceFingerprint: "root", mappingFingerprint: await canonicalSha256(chunk().orderedMappings), previewFingerprint: "preview-1", actorId: "owner-a", engineVersion: "identity-engine-v2", pluginVersion: "identity-generic-v1", catalogVersion: "catalog-v1", createdAt: "2026-07-31T00:00:00.000Z" });
     await repository.transitionImportRun("shop-a", "import-1", "invalidated");
     const ledger = createLocalAggregateLedger(storage); const dependencies = { repository, ledger, verifier: async () => [chunk()], source: freshSource, clock: () => "2026-07-31T00:01:00.000Z", actor: { actorId: "owner-a", businessId: "shop-a", role: "owner" as const } };
     await expect(applyIdentityImport({ signedPayloads: ["token"], mode: "physical_count", corrections: [] }, dependencies)).rejects.toThrow("apply_preview_invalidated");

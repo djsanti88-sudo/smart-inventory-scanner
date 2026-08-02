@@ -40,7 +40,7 @@ async function configured(): Promise<LocalIdentityApplyComposition | undefined> 
   const model = await loadAuthoritativeLocalIdentityReadModel(repository); if (!model) return undefined;
   const catalogVersion = model.snapshot.catalogVersion, catalogSnapshotHash = model.snapshot.catalogSnapshotHash;
   const linkVersion = "local-snapshot-links-v1", linkSnapshotHash = model.linkSnapshotHash;
-  return { storage, signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v1", pluginVersions: [...identityPluginVersions], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async (input) => {
+  return { storage, signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY, versions: { engineVersion: "identity-engine-v2", pluginVersions: [...identityPluginVersions], catalogVersion, catalogSnapshotHash, linkVersion, linkSnapshotHash }, revalidateCountableTarget: async (input) => {
     const current = await loadAuthoritativeLocalIdentityReadModel(repository);
     return Boolean(current && await current.hasCurrentTarget({ businessId: input.businessId, sourceSystem: input.sourceSystem, sourceSignature: input.sourceSignature, vendorId: input.vendorId, targetProductId: input.targetProductId, identifiers: input.identifiers }));
   }, authenticate: async (_request, businessId) => { const actorId = process.env.SCANBIN_LOCAL_ACTOR_ID; if (!actorId) return undefined; const member = configuredMemberships.find((membership) => membership.actorId === actorId && membership.businessId === businessId); if (!member) throw new Error("apply_nonmember"); return member; } };

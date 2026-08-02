@@ -15,7 +15,7 @@ export interface IdentityCandidateSnapshot {
   candidates: IdentityCandidate[];
 }
 
-const engineVersion = "identity-engine-v1";
+const engineVersion = "identity-engine-v2";
 const nonProductCategories = new Set(["labor", "service", "fee", "subtotal", "header"]);
 const immutableAuthorities = new Set<EvidenceAuthority>([
   "approved_tenant_link",
@@ -40,6 +40,29 @@ interface ImmutableEvidence {
   identifierEvidenceId: string;
   identifierEvidenceVersion: string;
   identifierType: ScopedIdentifier["type"];
+}
+
+const displayAttributeKeys = ["size", "season", "loadIndex", "speedRating", "sidewall"] as const;
+
+function displayText(value: string | undefined): string {
+  return (value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().slice(0, 128);
+}
+
+/** Returns only the fixed, tire-safe snapshot which may cross the signed/UI boundary. */
+function safeCandidateDisplay(candidate: IdentityCandidate): IdentityDecision["candidates"][number]["display"] {
+  const brand = displayText(candidate.brand);
+  const title = displayText(candidate.title);
+  const category = displayText(candidate.category);
+  const attributes: IdentityDecision["candidates"][number]["display"]["attributes"] = {};
+  for (const key of displayAttributeKeys) {
+    const value = displayText(candidate.attributes[key]);
+    if (value) attributes[key] = value;
+  }
+  return { label: displayText([brand, title].filter(Boolean).join(" ")) || candidate.productId.slice(0, 128), category, attributes };
+}
+
+function groupDisplay(group: CandidateGroup): IdentityDecision["candidates"][number]["display"] {
+  return group.candidates.map(safeCandidateDisplay).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))[0]!;
 }
 
 function normalizedCategory(value: string | undefined): string {
@@ -294,6 +317,7 @@ export async function decideIdentity(
     evidence: uniqueSorted(group.evidence),
     missingFields: uniqueSorted(group.missing),
     contradictions: [],
+    display: groupDisplay(group),
   }));
   const automatic = groups.length === 1 && groups[0]?.exactImmutable;
   const selected = groups[0]!;

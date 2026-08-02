@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createIdentityReviewRoute } from "@/server/identity/reviewRoute";
+import { canonicalSha256 } from "@/services/identity/canonical";
 
 const review = {
   reviewId: "review-1", businessId: "shop-a", importId: "import-1", rowId: "row-1",
@@ -75,6 +76,19 @@ describe("identity review route", () => {
       event: expect.objectContaining({ kind: "aggregate_import", quantity: 7, productId: "tire-a", sessionId: "identity-import:import-1" }),
       operation: expect.objectContaining({ idempotencyKey: "identity-review-count:review-1" }),
     }));
+  });
+
+  it("returns an exact durable replay before calling current-model freshness", async () => {
+    const payloadFingerprint = await canonicalSha256({ reviewId: "review-1", action: "confirm_candidate", targetProductId: "tire-a", name: "" });
+    const stored = { ...review, resolution: "confirmed" as const, reviewAction: { actionId: "same-key", payloadFingerprint, action: "confirm_candidate" as const, targetProductId: "tire-a", outcome: "confirmed" as const, resolvedBy: "manager", resolvedAt: "2026-08-02T00:00:00.000Z", countResult: { kind: "applied" as const, eventId: "event-1", quantity: 7 } } };
+    const getIdentityReview = vi.fn().mockResolvedValue(stored);
+    const currentModel = vi.fn();
+    const { handler } = route({ repository: { listIdentityReviews: vi.fn(), getIdentityReview } as never, currentModel } as never);
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", headers: { "Idempotency-Key": "same-key" }, body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ action: { actionId: "same-key" }, laterCount: { eventId: "event-1", quantity: 7 } });
+    expect(currentModel).not.toHaveBeenCalled();
   });
 
   it("derives authorization from the server and refuses a counter action even when the request claims admin", async () => {

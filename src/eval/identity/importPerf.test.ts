@@ -17,7 +17,7 @@ const snapshot: LocalIdentitySnapshot = {
   barcodeCandidates: new Map(fixture.snapshot.barcodeCandidates as unknown as Array<[string, IdentityCandidate[]]>),
   partNumberCandidates: new Map(fixture.snapshot.partNumberCandidates as unknown as Array<[string, IdentityCandidate[]]>),
 };
-const versions = { engineVersion: "identity-engine-v1", pluginVersions: [...identityPluginVersions], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion: "frozen-links-v1", linkSnapshotHash: "frozen-links-hash-v1" };
+const versions = { engineVersion: "identity-engine-v2", pluginVersions: [...identityPluginVersions], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion: "frozen-links-v1", linkSnapshotHash: "frozen-links-hash-v1" };
 const approvedLinkReads = vi.fn(async () => []);
 const source = createReadOnlyCandidateSource({ snapshot, lookupApprovedLinks: approvedLinkReads });
 

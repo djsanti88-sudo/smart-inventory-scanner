@@ -82,6 +82,12 @@ export interface IdentityDecision {
     evidence: string[];
     missingFields: string[];
     contradictions: string[];
+    /** Signed, presentation-safe candidate data. This is deliberately not a catalog record. */
+    display: {
+      label: string;
+      category: string;
+      attributes: Partial<Record<"size" | "season" | "loadIndex" | "speedRating" | "sidewall", string>>;
+    };
   }>;
   selectedCandidateId?: string;
   decisionBasis: Array<{ rule: string; evidenceId: string; evidenceVersion: string }>;
@@ -256,6 +262,8 @@ export interface ReviewAction {
   outcome: "confirmed" | "rejected" | "create_product" | "revoked";
   resolvedBy: string;
   resolvedAt: string;
+  /** Immutable response material for an exact later-count replay. */
+  countResult?: { kind: "applied" | "completed"; eventId: string; quantity: number };
 }
 
 export interface TenantIdentityProduct { productId: string; businessId: string; name: string; createdBy: string; createdAt: string; }

@@ -20,7 +20,7 @@ const create = async (overrides: Partial<Parameters<typeof createIdentityPreview
   const baseline: Parameters<typeof createIdentityPreview>[0] = {
     rows: [row()], orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN", quantity: "Qty" } }],
     sourceFileHashes: ["file-a"], importerVersion: "v1", issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z",
-    actorId: "actor-1", versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
+    actorId: "actor-1", versions: { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
   };
   return createIdentityPreview({ ...baseline, ...overrides }, { source, signer: await createHmacPreviewSigner("local-test-key") });
 };
@@ -50,7 +50,7 @@ describe("signed identity preview", () => {
       rows: [row(), row({ sourceRowNumber: 3, rawRecordFingerprint: "row-2" })],
       orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN" } }], sourceFileHashes: ["file-a"], importerVersion: "v1",
       issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z", maxChunkBytes: 2_000, actorId: "actor-1",
-      versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
+      versions: { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
     }, { source, signer });
     expect(preview.signedPayloads).toHaveLength(2);
     await expect(verifySignedPreviewChunks([...preview.signedPayloads].reverse(), signer)).rejects.toThrow("preview_chunks_out_of_order");
@@ -73,7 +73,7 @@ describe("signed identity preview", () => {
       rows: [row(), row({ sourceRowNumber: 3, rawRecordFingerprint: "row-2" })],
       orderedMappings: [{ sheetName: "Stock", mapping: { partNumber: "PN" } }], sourceFileHashes: ["file-a"], importerVersion: "v1",
       issuedAt: "2026-07-31T00:00:00.000Z", expiresAt: "2026-07-31T00:10:00.000Z", maxChunkBytes: 2_000, actorId: "actor-1",
-      versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
+      versions: { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
     }, { source, signer });
     const chunks = preview.signedPayloads.map((payload) => JSON.parse(payload) as Record<string, unknown>);
     expect(chunks).toHaveLength(2);
@@ -108,18 +108,18 @@ describe("signed identity preview", () => {
   it("binds actor and a homogeneous explicit versions envelope while stable versions affect identity", async () => {
     const first = await create();
     const changedActor = await create({ actorId: "actor-2" });
-    const changedVersions = await create({ versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v2", linkSnapshotHash: "links-snapshot-v2" } });
+    const changedVersions = await create({ versions: { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v2", linkSnapshotHash: "links-snapshot-v2" } });
     expect(changedActor.preview).toMatchObject(first.preview);
     expect(changedActor.signedPayloads).not.toEqual(first.signedPayloads);
     expect(changedVersions.preview.importId).not.toBe(first.preview.importId);
-    expect(JSON.parse(first.signedPayloads[0]!).versions).toEqual({ engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" });
+    expect(JSON.parse(first.signedPayloads[0]!).versions).toEqual({ engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" });
     expect(JSON.parse(first.signedPayloads[0]!).actorId).toBe("actor-1");
   });
 
   it("checks the current actor, business, and read-model versions when requested", async () => {
     const signer = await createHmacPreviewSigner("local-test-key");
     const preview = await create();
-    const expected = { actorId: "actor-1", businessId: "demo-shop", versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" } };
+    const expected = { actorId: "actor-1", businessId: "demo-shop", versions: { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" } };
     await expect(verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z", expected)).resolves.toHaveLength(1);
     await expect(verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z", { ...expected, actorId: "other" })).rejects.toThrow("preview_actor_mismatch");
     await expect(verifySignedPreviewChunks(preview.signedPayloads, signer, "2026-07-31T00:01:00.000Z", { ...expected, businessId: "other-shop" })).rejects.toThrow("preview_business_mismatch");

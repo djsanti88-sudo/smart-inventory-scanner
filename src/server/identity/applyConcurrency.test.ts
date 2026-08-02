@@ -15,7 +15,7 @@ import { readLocalInventoryProjection } from "./localInventoryProjection";
 import { replayInventoryEvents } from "@/services/inventory.replay";
 
 const versions = {
-  engineVersion: "identity-engine-v1",
+  engineVersion: "identity-engine-v2",
   pluginVersions: ["identity-generic-v1"],
   catalogVersion: "catalog-v1",
   catalogSnapshotHash: "snapshot-v1",
@@ -59,7 +59,7 @@ function chunk(): SignedPreviewChunk {
       normalizedKeys: [],
       constraintOutcomes: [],
       candidateSnapshotHash: "snapshot-v1",
-      engineVersion: "identity-engine-v1",
+      engineVersion: "identity-engine-v2",
       pluginVersion: "identity-generic-v1",
       sourceRecordFingerprint: "raw-1",
       decisionFingerprint: "decision-1",

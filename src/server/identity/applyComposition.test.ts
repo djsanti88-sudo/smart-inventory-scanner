@@ -17,7 +17,7 @@ import { POST as previewPost } from "@/app/api/identity/preview/route";
 
 beforeEach(() => { vi.stubEnv("IDENTITY_LOCAL_RUN_ID", `vitest-run-${randomUUID()}`); });
 
-const versions = { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
+const versions = { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" };
 const signingKey = Buffer.alloc(32, 9).toString("base64url");
 
 async function token(): Promise<string> {

@@ -65,7 +65,7 @@ async function configuredLocalComposition(): Promise<LocalIdentityPreviewComposi
       return membership ? { actorId: membership.actorId, role: membership.role } : undefined;
     },
     signingKey: () => process.env.IDENTITY_PREVIEW_SIGNING_KEY,
-    versions: { engineVersion: "identity-engine-v1", pluginVersions: [...identityPluginVersions], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion, linkSnapshotHash },
+    versions: { engineVersion: "identity-engine-v2", pluginVersions: [...identityPluginVersions], catalogVersion: snapshot.catalogVersion, catalogSnapshotHash: snapshot.catalogSnapshotHash, linkVersion, linkSnapshotHash },
   };
 }
 

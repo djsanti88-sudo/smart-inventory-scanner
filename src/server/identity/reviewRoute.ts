@@ -13,7 +13,7 @@ import type { IdentityLink, IdentityReview, TenantIdentityProduct } from "@/serv
 import { canonicalSha256, isValidIdentityNamespace } from "@/services/identity/canonical";
 
 type ReviewRole = ApplyActor["role"];
-type ReviewRepository = Pick<LocalIdentityRepository, "listIdentityReviews"> & Partial<Pick<LocalIdentityRepository, "pageIdentityReviews" | "listCurrentIdentityLinks" | "pageCurrentIdentityLinks" | "findCurrentIdentityLinks" | "applyReviewAction" | "resolveIdentityReview" | "saveIdentityLink" | "createTenantProduct" | "revokeIdentityLink">>;
+type ReviewRepository = Pick<LocalIdentityRepository, "listIdentityReviews"> & Partial<Pick<LocalIdentityRepository, "getIdentityReview" | "pageIdentityReviews" | "listCurrentIdentityLinks" | "pageCurrentIdentityLinks" | "findCurrentIdentityLinks" | "applyReviewAction" | "resolveIdentityReview" | "saveIdentityLink" | "createTenantProduct" | "revokeIdentityLink">>;
 type Versions = { catalogVersion: string; linkVersion: string };
 const roles: ReviewRole[] = ["owner", "admin", "counter", "viewer"];
 
@@ -123,10 +123,20 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
       const link: IdentityLink = { businessId: scope, sourceSystem: predecessor.sourceSystem, sourceSignature: predecessor.sourceSignature, vendorId: predecessor.vendorId, identifierType: predecessor.identifierType, namespace: predecessor.namespace, rawValue: predecessor.normalizedValue, normalizedValue: predecessor.normalizedValue, targetProductId: predecessor.targetProductId, status: "revoked", evidence: [`links:${(await dependencies.currentVersions(scope)).linkVersion}`], createdBy: actor.actorId, createdAt: new Date().toISOString(), version: 0 };
       return json({ link: await dependencies.repository.revokeIdentityLink({ link, predecessor: { source: predecessor.predecessorSource, fingerprint: predecessor.predecessorFingerprint, version: predecessor.version } }) });
     }
-    const review = (await dependencies.repository.listIdentityReviews(scope)).find((item) => item.reviewId === body!.reviewId);
+    const review = dependencies.repository.getIdentityReview
+      ? await dependencies.repository.getIdentityReview(scope, body!.reviewId!)
+      : (await dependencies.repository.listIdentityReviews(scope)).find((item) => item.reviewId === body!.reviewId);
     if (!review) return json({ error: "Identity review was not found." }, 404);
     const actionId = request.headers.get("Idempotency-Key") ?? `review:${review.reviewId}:${body.action}`;
     const payloadFingerprint = await canonicalSha256({ reviewId: review.reviewId, action: body.action, targetProductId: body.targetProductId ?? "", name: body.name?.trim() ?? "" });
+    // Durable replay authority comes before every freshness/model read. A retry must not be
+    // invalidated by catalog/link changes after the original committed decision.
+    if (review.reviewAction) {
+      if (review.reviewAction.actionId !== actionId || review.reviewAction.payloadFingerprint !== payloadFingerprint) {
+        return json({ error: "The identity review changed before this action could be applied." }, 409);
+      }
+      return json({ review, ...(review.reviewAction.link ? { link: review.reviewAction.link } : {}), action: review.reviewAction, ...(review.reviewAction.countResult ? { laterCount: review.reviewAction.countResult } : {}) });
+    }
     const apply = async (resolution: NonNullable<IdentityReview["resolution"]>, link?: IdentityLink, product?: TenantIdentityProduct) => {
       if (dependencies.repository.applyReviewAction) return dependencies.repository.applyReviewAction({ businessId: scope, reviewId: review.reviewId, actionId, payloadFingerprint, action: body!.action, resolution, resolvedBy: actor.actorId, ...(link ? { link } : {}), ...(product ? { product } : {}) });
       if (product) await dependencies.repository.createTenantProduct?.(product); if (link) await dependencies.repository.saveIdentityLink?.(link);

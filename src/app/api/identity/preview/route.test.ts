@@ -118,14 +118,14 @@ describe("POST /api/identity/preview", () => {
     setLocalIdentityPreviewCompositionForTest({
       snapshot: { catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", barcodeCandidates: new Map(), partNumberCandidates: new Map() },
       lookupApprovedLinks: async () => [], signingKey: () => signingKey,
-      versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
+      versions: { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
       authenticate: async () => undefined,
     });
     expect((await POST(new Request("http://localhost/api/identity/preview", { method: "POST", body: JSON.stringify(actualBody) }))).status).toBe(403);
     setLocalIdentityPreviewCompositionForTest({
       snapshot: { catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", barcodeCandidates: new Map(), partNumberCandidates: new Map() },
       lookupApprovedLinks: async () => [], signingKey: () => signingKey,
-      versions: { engineVersion: "identity-engine-v1", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
+      versions: { engineVersion: "identity-engine-v2", pluginVersions: ["identity-generic-v1"], catalogVersion: "catalog-v1", catalogSnapshotHash: "snapshot-v1", linkVersion: "links-v1", linkSnapshotHash: "links-snapshot-v1" },
       authenticate: async () => ({ actorId: "member-1", role: "viewer" }),
     });
     const response = await POST(new Request("http://localhost/api/identity/preview", { method: "POST", body: JSON.stringify(actualBody) }));

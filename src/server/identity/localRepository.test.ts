@@ -210,6 +210,17 @@ describe("local identity repository", () => {
     await expect(repository.resolveIdentityReview("shop-a", "review-a", "rejected", "manager-a", "2026-07-31T00:00:00.000Z")).rejects.toThrow(/terminal|conflict/i);
   });
 
+  it("gets a tenant review after it has been resolved while the queue remains unresolved-only", async () => {
+    const repository = createLocalRepository(createMemoryAtomicLocalStorage());
+    const review = { reviewId: "review-resolved", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "abstain" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };
+    await repository.saveIdentityReview(review);
+    await repository.resolveIdentityReview("shop-a", review.reviewId, "rejected", "manager", "now");
+
+    await expect(repository.getIdentityReview("shop-a", review.reviewId)).resolves.toMatchObject({ reviewId: review.reviewId, resolution: "rejected" });
+    await expect(repository.listIdentityReviews("shop-a")).resolves.toEqual([]);
+    await expect(repository.getIdentityReview("shop-b", review.reviewId)).resolves.toBeUndefined();
+  });
+
   it("atomically refuses to repoint a current approved link and returns a complete idempotent action result", async () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
     const review = { reviewId: "review-action", businessId: "shop-a", importId: "import-a", rowId: "row-a", decision: { kind: "review" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" } };

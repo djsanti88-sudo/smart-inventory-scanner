@@ -147,6 +147,29 @@ describe("identity decision engine", () => {
     });
   });
 
+  it("signs a bounded tire-safe display and excludes imported and catalog-sensitive fields", async () => {
+    const decision = await decideIdentity(
+      input({ description: "RAW IMPORTED DESCRIPTION", attributes: { notes: "import note", cost: "12", quantity: "4", size: "bad input" } }),
+      snapshot([candidate({
+        brand: "Roadmaster",
+        title: "All Season",
+        category: "Tire",
+        attributes: { size: "205/55R16", season: "All Season", loadIndex: "91", speedRating: "V", sidewall: "Black", cost: "12", quantity: "4", notes: "private", unknown: "nope" },
+      })]),
+      genericIdentityPlugin,
+    );
+
+    expect(decision.candidates[0]).toMatchObject({ display: { label: "Roadmaster All Season", category: "Tire", attributes: { size: "205/55R16", season: "All Season", loadIndex: "91", speedRating: "V", sidewall: "Black" } } });
+    expect(JSON.stringify(decision.candidates[0])).not.toMatch(/RAW IMPORTED|private|\"cost\"|\"quantity\"|unknown/);
+  });
+
+  it("changes the signed fingerprint when safe candidate display changes", async () => {
+    const first = await decideIdentity(input(), snapshot([candidate({ brand: "Roadmaster", title: "All Season" })]), genericIdentityPlugin);
+    const changed = await decideIdentity(input(), snapshot([candidate({ brand: "Roadmaster", title: "Winter" })]), genericIdentityPlugin);
+
+    expect(first.decisionFingerprint).not.toBe(changed.decisionFingerprint);
+  });
+
   it("rejects hard contradictions and abstains when none remain", async () => {
     const decision = await decideIdentity(
       input({ categoryHint: "hardware" }),
