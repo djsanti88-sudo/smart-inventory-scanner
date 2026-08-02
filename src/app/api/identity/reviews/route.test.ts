@@ -4,6 +4,7 @@ import { canonicalSha256 } from "@/services/identity/canonical";
 import { createMemoryAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
 import { createLocalAtomicReviewCountedApply } from "@/server/identity/localAtomicReviewCountedApply";
 import { createLocalRepository } from "@/server/identity/localRepository";
+import { encodeReviewCursor } from "@/server/identity/reviewCursor";
 
 const review = {
   reviewId: "review-1", businessId: "shop-a", importId: "import-1", rowId: "row-1",
@@ -20,6 +21,25 @@ function route(overrides: Partial<Parameters<typeof createIdentityReviewRoute>[0
 }
 
 describe("identity review route", () => {
+  it("rejects a noncanonical opaque review cursor before any repository read", async () => {
+    const pageIdentityReviews = vi.fn();
+    const { handler } = route({ repository: { listIdentityReviews: vi.fn(), pageIdentityReviews } as never });
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&afterReview=eyJ2ZXJzaW9uIjoxLCJraW5kIjoicmV2aWV3IiwiYnVzaW5lc3NJZCI6InNob3AtYSIsImJ1Y2tldCI6InJldmlldyIsInJldmlld0lkIjoicmV2aWV3LTEifQ=="));
+
+    expect(response.status).toBe(400);
+    expect(pageIdentityReviews).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-tenant and wrong-bucket review cursors before any repository read", async () => {
+    const pageIdentityReviews = vi.fn();
+    const { handler } = route({ repository: { listIdentityReviews: vi.fn(), pageIdentityReviews } as never });
+    for (const cursor of [encodeReviewCursor("shop-b", "review", { reviewId: "review-1" }), encodeReviewCursor("shop-a", "automatic", { reviewId: "review-1" })]) {
+      const response = await handler(new Request(`http://local/api/identity/reviews?businessId=shop-a&bucket=review&afterReview=${cursor}`));
+      expect(response.status).toBe(400);
+    }
+    expect(pageIdentityReviews).not.toHaveBeenCalled();
+  });
+
   it("confirms an in-scope candidate as an approved tenant link without a count or catalog promotion", async () => {
     const { handler, repository } = route();
     const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
@@ -234,7 +254,7 @@ describe("identity review route", () => {
     const { handler, repository } = route();
     const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a"));
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ reviews: [review], page: 1, pageSize: 25, total: 1, bucketTotals: { review: 1 } });
+    expect(await response.json()).toMatchObject({ reviews: [review], pageSize: 25, total: 1, bucketTotals: { review: 1 }, nextReviewCursor: null, nextLinkCursor: null });
     expect(repository.listIdentityReviews).toHaveBeenCalledWith("shop-a");
   });
 
@@ -250,9 +270,9 @@ describe("identity review route", () => {
   it("bounds GET pagination and maps repository errors without exposing internals", async () => {
     const reviews = Array.from({ length: 27 }, (_, index) => ({ ...review, reviewId: `review-${index}`, rowId: `row-${index}` }));
     const { handler } = route({ repository: { listIdentityReviews: vi.fn().mockResolvedValue(reviews) } as never });
-    const paged = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&page=2&pageSize=1000"));
+    const paged = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&pageSize=1000"));
     expect(paged.status).toBe(200);
-    expect(await paged.json()).toMatchObject({ page: 2, pageSize: 25, total: 27, reviews: [expect.objectContaining({ reviewId: "review-25" }), expect.objectContaining({ reviewId: "review-26" })] });
+    expect(await paged.json()).toMatchObject({ pageSize: 25, total: 27, reviews: expect.arrayContaining([expect.objectContaining({ reviewId: "review-0" }), expect.objectContaining({ reviewId: "review-24" })]) });
     const failing = route({ repository: { listIdentityReviews: vi.fn().mockRejectedValue(new Error("filesystem internals")) } as never }).handler;
     const response = await failing(new Request("http://local/api/identity/reviews?businessId=shop-a"));
     expect(response.status).toBe(500);
@@ -263,11 +283,11 @@ describe("identity review route", () => {
     const links = Array.from({ length: 500 }, (_, index) => ({ sourceSystem: "demo", sourceSignature: "v1", vendorId: "vendor", identifierType: "upc", namespace: "", normalizedValue: String(index), targetProductId: `p-${index}`, version: 1, predecessorFingerprint: `f-${index}`, predecessorSource: "configured" }));
     const pageCurrentApprovedLinks = vi.fn().mockResolvedValue({ items: links.slice(25, 50), total: 500 });
     const { handler } = route({ currentApprovedLinks: undefined, pageCurrentApprovedLinks } as never);
-    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&linkPage=2&pageSize=25"));
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&pageSize=25"));
     const body = await response.json();
     expect(body.currentApprovedLinks).toHaveLength(25);
-    expect(body).toMatchObject({ linkPage: 2, linkTotal: 500, pageSize: 25 });
-    expect(pageCurrentApprovedLinks).toHaveBeenCalledWith("shop-a", { page: 2, pageSize: 25 });
+    expect(body).toMatchObject({ linkTotal: 500, pageSize: 25 });
+    expect(pageCurrentApprovedLinks).toHaveBeenCalledWith("shop-a", { pageSize: 25 });
   });
 
   it("bounds repository reads and responses for 100 reviews and 500 approved links", async () => {
@@ -280,16 +300,16 @@ describe("identity review route", () => {
     const pageCurrentApprovedLinks = vi.fn().mockResolvedValue({ items: links, total: 500 });
     const { handler } = route({ repository: { listIdentityReviews, listCurrentIdentityLinks, pageIdentityReviews, findCurrentIdentityLinks } as never, currentApprovedLinks: undefined, pageCurrentApprovedLinks } as never);
 
-    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&page=1&linkPage=1&pageSize=25"));
+    const response = await handler(new Request("http://local/api/identity/reviews?businessId=shop-a&pageSize=25"));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.reviews).toHaveLength(25);
     expect(body.currentApprovedLinks).toHaveLength(25);
     expect(body).toMatchObject({ total: 100, linkTotal: 500, pageSize: 25 });
-    expect(pageIdentityReviews).toHaveBeenCalledWith("shop-a", { page: 1, pageSize: 25 });
+    expect(pageIdentityReviews).toHaveBeenCalledWith("shop-a", { pageSize: 25 });
     expect(findCurrentIdentityLinks).toHaveBeenCalledWith("shop-a", expect.any(Array));
-    expect(pageCurrentApprovedLinks).toHaveBeenCalledWith("shop-a", { page: 1, pageSize: 25 });
+    expect(pageCurrentApprovedLinks).toHaveBeenCalledWith("shop-a", { pageSize: 25 });
     expect(listIdentityReviews).not.toHaveBeenCalled();
     expect(listCurrentIdentityLinks).not.toHaveBeenCalled();
   });

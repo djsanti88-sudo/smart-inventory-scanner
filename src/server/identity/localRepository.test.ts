@@ -167,36 +167,44 @@ describe("local identity repository", () => {
     await expect(repository.saveIdentityReview({ ...review, rowId: "row-b" })).rejects.toThrow(/idempotency.*conflict/i);
   });
 
-  it("pages 100 reviews without calling the full-list repository path", async () => {
+  it("pages reviews strictly after the typed review cursor through a pre-cursor resolution", async () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
     const decision = { kind: "review" as const, candidates: [], decisionBasis: [], normalizedKeys: [], constraintOutcomes: [], candidateSnapshotHash: "snapshot", engineVersion: "engine", pluginVersion: "plugin", sourceRecordFingerprint: "source", decisionFingerprint: "decision" };
-    for (let index = 0; index < 100; index += 1) {
+    for (let index = 0; index < 26; index += 1) {
       await repository.saveIdentityReview({ reviewId: `review-${String(index).padStart(3, "0")}`, businessId: "shop-a", importId: "import-a", rowId: `row-${index}`, decision });
     }
     repository.listIdentityReviews = vi.fn().mockRejectedValue(new Error("unbounded review read"));
 
-    const page = await repository.pageIdentityReviews("shop-a", { bucket: "review", page: 2, pageSize: 25 });
+    const first = await repository.pageIdentityReviews("shop-a", { bucket: "review", pageSize: 10 });
+    await repository.resolveIdentityReview("shop-a", "review-000", "rejected", "manager", "now");
+    const page = await repository.pageIdentityReviews("shop-a", { bucket: "review", pageSize: 25, after: first.nextAfter! });
 
     expect(repository.listIdentityReviews).not.toHaveBeenCalled();
-    expect(page.items).toHaveLength(25);
-    expect(page.items[0]?.reviewId).toBe("review-025");
-    expect(page).toMatchObject({ total: 100, bucketTotals: { review: 100 } });
+    expect(first.items.map((item) => item.reviewId)).toEqual(Array.from({ length: 10 }, (_, index) => `review-${String(index).padStart(3, "0")}`));
+    expect(page.items).toHaveLength(16);
+    expect(page.items[0]?.reviewId).toBe("review-010");
+    expect(page.items.at(-1)?.reviewId).toBe("review-025");
+    expect(page).toMatchObject({ total: 25, bucketTotals: { review: 25 }, nextAfter: null });
   });
 
-  it("pages 500 current links without calling the full-list repository path", async () => {
+  it("pages current links strictly after an immutable family cursor through replacement and revocation", async () => {
     const repository = createLocalRepository(createMemoryAtomicLocalStorage());
-    for (let index = 0; index < 500; index += 1) {
+    for (let index = 0; index < 26; index += 1) {
       const value = String(index).padStart(3, "0");
       await repository.saveIdentityLink({ ...approvedLink, rawValue: value, normalizedValue: value, targetProductId: `tire-${value}` });
     }
     repository.listCurrentIdentityLinks = vi.fn().mockRejectedValue(new Error("unbounded link read"));
 
-    const page = await repository.pageCurrentIdentityLinks("shop-a", { page: 2, pageSize: 25 });
+    const first = await repository.pageCurrentIdentityLinks("shop-a", { pageSize: 10 });
+    await repository.saveIdentityLink({ ...approvedLink, rawValue: "000", normalizedValue: "000", targetProductId: "tire-replacement", version: 2, status: "revoked" });
+    const page = await repository.pageCurrentIdentityLinks("shop-a", { pageSize: 25, after: first.nextAfter! });
 
     expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
-    expect(page.items).toHaveLength(25);
-    expect(page.items[0]?.normalizedValue).toBe("025");
-    expect(page.total).toBe(500);
+    expect(first.items.map((item) => item.normalizedValue)).toEqual(Array.from({ length: 10 }, (_, index) => String(index).padStart(3, "0")));
+    expect(page.items).toHaveLength(16);
+    expect(page.items[0]?.normalizedValue).toBe("010");
+    expect(page.items.at(-1)?.normalizedValue).toBe("025");
+    expect(page.nextAfter).toBeNull();
   });
 
   it("allows one terminal review resolution and rejects a conflicting rewrite", async () => {

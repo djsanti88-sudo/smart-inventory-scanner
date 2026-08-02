@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { isLocalIdentityApplyEnabled, localIdentityStorageRoot } from "@/server/identity/applyComposition";
 import { createFileAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
 import { createLocalRepository, type LocalIdentityRepository } from "@/server/identity/localRepository";
+import { decodeLinkCursor, decodeReviewCursor, encodeLinkCursor, encodeReviewCursor } from "@/server/identity/reviewCursor";
 import { deriveAuthoritativeLinkSnapshotHash, loadAuthoritativeLocalIdentityReadModel, loadConfiguredLocalIdentityReadModel, type CurrentApprovedIdentityLink } from "@/server/identity/localIdentityReadModel";
 import type { ApplyActor } from "@/server/identity/applyService";
 import { createLocalAtomicCountedApply, type LocalAtomicCountedApplyInput, type LocalAtomicCountedApplyResult } from "@/server/identity/localAtomicCountedApply";
@@ -39,13 +40,14 @@ const defaultAtomicCountedRow = createLocalAtomicCountedApply(defaultStorage, as
 }, { allowedRunStates: ["completed"] });
 const defaultAtomicReviewApply = createLocalAtomicReviewCountedApply(defaultStorage);
 
-type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: (businessId?: string) => Promise<Versions>; currentModel?: () => ReturnType<typeof loadAuthoritativeLocalIdentityReadModel>; configuredModel?: () => ReturnType<typeof loadConfiguredLocalIdentityReadModel>; currentApprovedLinks?: (businessId: string) => Promise<CurrentApprovedIdentityLink[]>; pageCurrentApprovedLinks?: (businessId: string, input: { page: number; pageSize: number }) => Promise<{ items: CurrentApprovedIdentityLink[]; total: number }>; atomicCountedRow?: (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult>; atomicReviewApply?: (input: LocalAtomicReviewCountedApplyInput) => Promise<LocalAtomicReviewCountedApplyResult> };
+type Dependencies = { enabled: () => boolean; authorize: (request: Request, businessId: string) => Promise<ApplyActor | undefined>; repository: ReviewRepository; currentVersions: (businessId?: string) => Promise<Versions>; currentModel?: () => ReturnType<typeof loadAuthoritativeLocalIdentityReadModel>; configuredModel?: () => ReturnType<typeof loadConfiguredLocalIdentityReadModel>; currentApprovedLinks?: (businessId: string) => Promise<CurrentApprovedIdentityLink[]>; pageCurrentApprovedLinks?: (businessId: string, input: { pageSize: number; after?: { normalizedValue: string; familyKey: string } }) => Promise<{ items: CurrentApprovedIdentityLink[]; total: number; nextAfter: { normalizedValue: string; familyKey: string } | null }>; atomicCountedRow?: (input: LocalAtomicCountedApplyInput) => Promise<LocalAtomicCountedApplyResult>; atomicReviewApply?: (input: LocalAtomicReviewCountedApplyInput) => Promise<LocalAtomicReviewCountedApplyResult> };
 type Action = "confirm_candidate" | "reject" | "create_tenant_product" | "revoke_link";
 type Bucket = "automatic" | "review" | "abstain" | "non_product" | "invalid";
 const bucketValues = new Set<Bucket>(["automatic", "review", "abstain", "non_product", "invalid"]);
 const maxBodyBytes = 16 * 1024;
 function positiveInteger(value: string | null, fallback: number, maximum: number): number { const parsed = Number(value); return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback; }
 type StandaloneLink = Pick<CurrentApprovedIdentityLink, "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version" | "predecessorFingerprint" | "predecessorSource">;
+function currentLinkFamilyKey(link: Pick<CurrentApprovedIdentityLink, "businessId" | "sourceSystem" | "vendorId" | "sourceSignature" | "identifierType" | "namespace" | "normalizedValue">): string { return JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]); }
 function standaloneLink(value: unknown): value is StandaloneLink { if (!value || typeof value !== "object" || Array.isArray(value)) return false; const link = value as Record<string, unknown>; return Object.keys(link).every((key) => ["sourceSystem", "sourceSignature", "vendorId", "identifierType", "namespace", "normalizedValue", "targetProductId", "version", "predecessorFingerprint", "predecessorSource"].includes(key)) && ["sourceSystem", "sourceSignature", "vendorId", "identifierType", "normalizedValue", "targetProductId", "predecessorFingerprint"].every((key) => typeof link[key] === "string" && Boolean((link[key] as string).trim())) && isValidIdentityNamespace(link.identifierType, link.namespace) && Number.isSafeInteger(link.version) && (link.predecessorSource === "configured" || link.predecessorSource === "durable"); }
 function requestBody(value: unknown): value is { businessId: string; reviewId?: string; action: Action; targetProductId?: string; name?: string; link?: StandaloneLink } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -87,14 +89,17 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
         const requestedBucket = url.searchParams.get("bucket");
         if (requestedBucket && !bucketValues.has(requestedBucket as Bucket)) return json({ error: "Identity review filter was invalid." }, 400);
         const pageSize = positiveInteger(url.searchParams.get("pageSize"), 25, 25);
-        const requestedPage = positiveInteger(url.searchParams.get("page"), 1, Number.MAX_SAFE_INTEGER);
-        const linkPage = positiveInteger(url.searchParams.get("linkPage"), 1, Number.MAX_SAFE_INTEGER);
+        let reviewAfter;
+        let linkAfter;
+        try {
+          reviewAfter = decodeReviewCursor(url.searchParams.get("afterReview"), scope, requestedBucket ?? undefined);
+          linkAfter = decodeLinkCursor(url.searchParams.get("afterLink"), scope);
+        } catch { return json({ error: "Identity review cursor was invalid." }, 400); }
         const all = dependencies.repository.pageIdentityReviews ? undefined : await dependencies.repository.listIdentityReviews(scope);
-        const filtered = all?.filter((review) => !requestedBucket || review.decision.kind === requestedBucket) ?? [];
+        const filtered = all?.filter((review) => (!requestedBucket || review.decision.kind === requestedBucket) && (!reviewAfter || review.reviewId.localeCompare(reviewAfter.reviewId) > 0)) ?? [];
         const reviewPage = dependencies.repository.pageIdentityReviews
-          ? await dependencies.repository.pageIdentityReviews(scope, { ...(requestedBucket ? { bucket: requestedBucket } : {}), page: requestedPage, pageSize })
-          : { items: filtered.slice((requestedPage - 1) * pageSize, requestedPage * pageSize), total: filtered.length, bucketTotals: Object.fromEntries([...bucketValues].map((bucket) => [bucket, all!.filter((review) => review.decision.kind === bucket).length])) };
-        const page = Math.min(requestedPage, Math.max(1, Math.ceil(reviewPage.total / pageSize)));
+          ? await dependencies.repository.pageIdentityReviews(scope, { ...(requestedBucket ? { bucket: requestedBucket } : {}), pageSize, ...(reviewAfter ? { after: reviewAfter } : {}) })
+          : { items: filtered.slice(0, pageSize), total: all!.filter((review) => !requestedBucket || review.decision.kind === requestedBucket).length, bucketTotals: Object.fromEntries([...bucketValues].map((bucket) => [bucket, all!.filter((review) => review.decision.kind === bucket).length])), nextAfter: filtered.length > pageSize ? { reviewId: filtered[pageSize - 1]!.reviewId } : null };
         const lookups = reviewPage.items.flatMap((review) => review.scope ? candidateFamilies(review).map((family) => ({
           businessId: scope, sourceSystem: review.scope!.sourceSystem, vendorId: review.scope!.vendorId,
           sourceSignature: review.scope!.sourceSignature, identifierType: family.type,
@@ -104,10 +109,10 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
           ? await dependencies.repository.findCurrentIdentityLinks(scope, lookups)
           : dependencies.repository.listCurrentIdentityLinks ? await dependencies.repository.listCurrentIdentityLinks(scope) : [];
         const approvedPage = dependencies.pageCurrentApprovedLinks
-          ? await dependencies.pageCurrentApprovedLinks(scope, { page: linkPage, pageSize })
+          ? await dependencies.pageCurrentApprovedLinks(scope, { pageSize, ...(linkAfter ? { after: linkAfter } : {}) })
           : dependencies.currentApprovedLinks
-            ? dependencies.currentApprovedLinks(scope).then((items) => ({ items: items.slice((linkPage - 1) * pageSize, linkPage * pageSize), total: items.length }))
-            : Promise.resolve({ items: [] as CurrentApprovedIdentityLink[], total: 0 });
+            ? dependencies.currentApprovedLinks(scope).then((items) => { const sorted = [...items].sort((left, right) => left.normalizedValue.localeCompare(right.normalizedValue) || currentLinkFamilyKey(left).localeCompare(currentLinkFamilyKey(right))); const visible = linkAfter ? sorted.filter((item) => item.normalizedValue.localeCompare(linkAfter!.normalizedValue) > 0 || (item.normalizedValue === linkAfter!.normalizedValue && currentLinkFamilyKey(item).localeCompare(linkAfter!.familyKey) > 0)) : sorted; return { items: visible.slice(0, pageSize), total: sorted.length, nextAfter: visible.length > pageSize ? { normalizedValue: visible[pageSize - 1]!.normalizedValue, familyKey: currentLinkFamilyKey(visible[pageSize - 1]!) } : null }; })
+            : Promise.resolve({ items: [] as CurrentApprovedIdentityLink[], total: 0, nextAfter: null });
         const approved = await approvedPage;
         const enrich = (review: IdentityReview) => {
           const families = candidateFamilies(review);
@@ -117,7 +122,7 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
               entry.identifierType === family.type && entry.namespace === (family.namespace ?? "") && entry.normalizedValue === family.value)) : undefined;
           return link ? { ...review, currentApprovedLink: { targetProductId: link.targetProductId, version: link.version } } : review;
         };
-        return json({ reviews: reviewPage.items.map(enrich), currentApprovedLinks: approved.items, page, linkPage, pageSize, total: reviewPage.total, linkTotal: approved.total, bucketTotals: reviewPage.bucketTotals });
+        return json({ reviews: reviewPage.items.map(enrich), currentApprovedLinks: approved.items, pageSize, total: reviewPage.total, linkTotal: approved.total, bucketTotals: reviewPage.bucketTotals, nextReviewCursor: reviewPage.nextAfter ? encodeReviewCursor(scope, requestedBucket ?? "", reviewPage.nextAfter) : null, nextLinkCursor: approved.nextAfter ? encodeLinkCursor(scope, approved.nextAfter) : null });
       } catch { return json({ error: "Unable to load identity reviews." }, 500); }
     }
     if (request.method !== "POST" || !body) return json({ error: "Method not allowed." }, 405);
@@ -246,5 +251,5 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
 }
 
 async function defaultCurrentApprovedLinks(businessId: string): Promise<CurrentApprovedIdentityLink[]> { const model = await defaultModel(); return model?.listCurrentApprovedLinks ? model.listCurrentApprovedLinks(businessId) : []; }
-async function defaultPageCurrentApprovedLinks(businessId: string, input: { page: number; pageSize: number }) { const model = await defaultModel(); if (!model?.pageCurrentApprovedLinks) return { items: [] as CurrentApprovedIdentityLink[], total: 0 }; return model.pageCurrentApprovedLinks(businessId, input); }
+async function defaultPageCurrentApprovedLinks(businessId: string, input: { pageSize: number; after?: { normalizedValue: string; familyKey: string } }) { const model = await defaultModel(); if (!model?.pageCurrentApprovedLinks) return { items: [] as CurrentApprovedIdentityLink[], total: 0, nextAfter: null }; return model.pageCurrentApprovedLinks(businessId, input); }
 export const defaultIdentityReviewRoute = createIdentityReviewRoute({ enabled: isLocalIdentityApplyEnabled, authorize: async (_request, businessId) => actorFromEnvironment(businessId), repository: defaultRepository, currentVersions: defaultVersions, currentModel: defaultModel, configuredModel: loadConfiguredLocalIdentityReadModel, currentApprovedLinks: defaultCurrentApprovedLinks, pageCurrentApprovedLinks: defaultPageCurrentApprovedLinks, atomicCountedRow: defaultAtomicCountedRow, atomicReviewApply: defaultAtomicReviewApply });

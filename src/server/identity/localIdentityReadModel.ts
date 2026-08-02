@@ -4,7 +4,7 @@ import { isValidApprovedLink, type ApprovedLinkLookupInput, type ApprovedLinkLoo
 import { isCompleteLocalIdentitySnapshot, type LocalIdentitySnapshot } from "./localSnapshotIndex";
 import type { IdentityCandidate, ScopedIdentifier, TenantIdentityProduct } from "@/services/identity/types";
 import { canonicalSha256 } from "@/services/identity/canonical";
-import type { IdentityLinkPageRecord, LinkLookup, LocalIdentityRepository } from "./localRepository";
+import type { IdentityLinkAfter, IdentityLinkPageRecord, LinkLookup, LocalIdentityRepository } from "./localRepository";
 
 type Scope = Pick<ApprovedLinkLookupInput, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId">;
 type SnapshotWire = { catalogVersion: string; catalogSnapshotHash: string; barcodeCandidates: Array<[string, IdentityCandidate[]]>; partNumberCandidates: Array<[string, IdentityCandidate[]]>; approvedLinks: ApprovedLinkLookupResult[] };
@@ -15,7 +15,7 @@ export interface LocalIdentityReadModel {
   lookupApprovedLinks(input: ApprovedLinkLookupInput): Promise<ApprovedLinkLookupResult[]>;
   hasCurrentTarget(input: Scope & { targetProductId: string; identifiers?: ScopedIdentifier[] }): boolean | Promise<boolean>;
   listCurrentApprovedLinks?(businessId: string): Promise<CurrentApprovedIdentityLink[]>;
-  pageCurrentApprovedLinks?(businessId: string, input: { page: number; pageSize: number }): Promise<{ items: CurrentApprovedIdentityLink[]; total: number }>;
+  pageCurrentApprovedLinks?(businessId: string, input: { pageSize: number; after?: IdentityLinkAfter }): Promise<{ items: CurrentApprovedIdentityLink[]; total: number; nextAfter: IdentityLinkAfter | null }>;
 }
 
 export type CurrentApprovedIdentityLink = Pick<ApprovedLinkLookupResult, "businessId" | "sourceSystem" | "sourceSignature" | "vendorId" | "identifierType" | "namespace" | "normalizedValue" | "targetProductId" | "version"> & { predecessorFingerprint: string; predecessorSource: "configured" | "durable" };
@@ -140,9 +140,9 @@ export async function loadAuthoritativeLocalIdentityReadModel(repository: Pick<L
     lookupApprovedLinks: linksFor,
     listCurrentApprovedLinks: currentApprovedLinksFor,
     async pageCurrentApprovedLinks(businessId, input) {
-      if (!repository.pageAuthoritativeIdentityLinks) { const all = await currentApprovedLinksFor(businessId), page = Math.max(1, input.page), pageSize = Math.min(25, Math.max(1, input.pageSize)), start = (page - 1) * pageSize; return { items: all.slice(start, start + pageSize), total: all.length }; }
+      if (!repository.pageAuthoritativeIdentityLinks) { const all = await currentApprovedLinksFor(businessId), pageSize = Math.min(25, Math.max(1, input.pageSize)), visible = input.after ? all.filter((link) => link.normalizedValue.localeCompare(input.after!.normalizedValue) > 0 || (link.normalizedValue === input.after!.normalizedValue && linkFamily(link).localeCompare(input.after!.familyKey) > 0)) : all, items = visible.slice(0, pageSize); return { items, total: all.length, nextAfter: visible.length > pageSize ? { normalizedValue: items.at(-1)!.normalizedValue, familyKey: linkFamily(items.at(-1)!) } : null }; }
       const page = await repository.pageAuthoritativeIdentityLinks(businessId, { ...input, configured: configuredLinks as readonly IdentityLinkPageRecord[] });
-      return { items: await Promise.all(page.items.map(async (link) => ({ businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, version: link.version, predecessorSource: link.predecessorSource, predecessorFingerprint: await identityLinkPredecessorFingerprint(link) }))), total: page.total };
+      return { items: await Promise.all(page.items.map(async (link) => ({ businessId: link.businessId, sourceSystem: link.sourceSystem, sourceSignature: link.sourceSignature, vendorId: link.vendorId, identifierType: link.identifierType, namespace: link.namespace, normalizedValue: link.normalizedValue, targetProductId: link.targetProductId, version: link.version, predecessorSource: link.predecessorSource, predecessorFingerprint: await identityLinkPredecessorFingerprint(link) }))), total: page.total, nextAfter: page.nextAfter };
     },
     async hasCurrentTarget(input) {
       const results = await linksFor({ ...input, identifiers: input.identifiers ?? [] });

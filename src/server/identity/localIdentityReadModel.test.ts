@@ -69,7 +69,7 @@ describe("configured local identity read model", () => {
     repository.listCurrentIdentityLinks = vi.fn().mockRejectedValue(new Error("unbounded durable read"));
 
     const model = await loadAuthoritativeLocalIdentityReadModel(repository);
-    const page = await model?.pageCurrentApprovedLinks?.("shop-a", { page: 1, pageSize: 25 });
+    const page = await model?.pageCurrentApprovedLinks?.("shop-a", { pageSize: 25 });
 
     expect(repository.listCurrentIdentityLinks).not.toHaveBeenCalled();
     expect(page?.items).toHaveLength(25);

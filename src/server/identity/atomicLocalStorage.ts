@@ -15,8 +15,11 @@ export type AtomicPhysicalPage =
   | { kind: "identity-links"; businessId: string; mode: "current" }
   | { kind: "identity-links"; businessId: string; mode: "families"; families: readonly string[] }
   | { kind: "identity-links"; businessId: string; mode: "authoritative" };
-export type AtomicPageOptions<T> = {
-  offset: number;
+export type AtomicPageOptions<T, After = never> = {
+  /** Legacy file-index support only; new repository callers use `after`. */
+  offset?: number;
+  after?: After;
+  isAfter?: (item: T, after: After) => boolean;
   limit: number;
   filter?: (item: T) => boolean;
   visible?: (item: T) => boolean;
@@ -28,7 +31,7 @@ export type AtomicPageOptions<T> = {
   physical?: AtomicPhysicalPage;
 };
 export type AtomicPage<T> = { items: T[]; origins: PageOrigin[]; total: number; groupTotals: Record<string, number>; fingerprint?: string };
-export interface AtomicTransaction { get<T>(key: string): Promise<T | undefined>; scanPage?<T>(key: string, options: AtomicPageOptions<T>): Promise<AtomicPage<T>>; set<T>(key: string, value: T): Promise<void>; delete(key: string): Promise<void> }
+export interface AtomicTransaction { get<T>(key: string): Promise<T | undefined>; scanPage?<T, After = never>(key: string, options: AtomicPageOptions<T, After>): Promise<AtomicPage<T>>; set<T>(key: string, value: T): Promise<void>; delete(key: string): Promise<void> }
 export interface AtomicLocalStorage {
   transaction<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T>;
   read?<T>(fn: (transaction: AtomicTransaction) => Promise<T>): Promise<T>;
@@ -71,7 +74,7 @@ function stringField(record: IndexedRecord, key: string): string { return typeof
 function numberField(record: IndexedRecord, key: string): number { return typeof record[key] === "number" && Number.isFinite(record[key]) ? record[key] : 0; }
 function linkFamily(record: IndexedRecord): string { return JSON.stringify(["businessId", "sourceSystem", "vendorId", "sourceSignature", "identifierType", "namespace", "normalizedValue"].map((key) => stringField(record, key))); }
 function compareIndexedLinks(left: IndexedRecord, right: IndexedRecord): number { return stringField(left, "normalizedValue").localeCompare(stringField(right, "normalizedValue")) || linkFamily(left).localeCompare(linkFamily(right)) || numberField(left, "version") - numberField(right, "version"); }
-function assertBounds(options: { offset: number; limit: number }): void { if (!Number.isSafeInteger(options.offset) || options.offset < 0 || !Number.isSafeInteger(options.limit) || options.limit <= 0 || options.limit > 1_000) throw new Error("atomic page bounds are invalid"); }
+function assertBounds(options: { offset?: number; limit: number }): void { if (options.offset !== undefined && (!Number.isSafeInteger(options.offset) || options.offset < 0)) throw new Error("atomic page bounds are invalid"); if (!Number.isSafeInteger(options.limit) || options.limit <= 0 || options.limit > 1_000) throw new Error("atomic page bounds are invalid"); }
 
 function assertConfiguredRoot(root: string): string {
   const base = storageRoot();
@@ -193,7 +196,7 @@ class MapTransaction implements AtomicTransaction {
   private get values(): StoredRecord { return this.working ?? this.initial; }
   private writable(): StoredRecord { if (!this.working) this.working = clone(this.initial); return this.working; }
   async get<T>(key: string): Promise<T | undefined> { return clone(this.values[key]) as T | undefined; }
-  async scanPage<T>(key: string, options: AtomicPageOptions<T>): Promise<AtomicPage<T>> {
+  async scanPage<T, After = never>(key: string, options: AtomicPageOptions<T, After>): Promise<AtomicPage<T>> {
     assertBounds(options);
     const stored = Array.isArray(this.values[key]) ? this.values[key] as T[] : [];
     type PageEntry = { item: T; origin: PageOrigin };
@@ -216,7 +219,7 @@ class MapTransaction implements AtomicTransaction {
     } else {
       source = (function* () { for (const item of options.baseItems ?? []) yield { item, origin: "base" as const }; for (const item of stored) yield { item, origin: "stored" as const }; })();
     }
-    const groupTotals: Record<string, number> = {}, retained: PageEntry[] = [], fingerprintItems: T[] = [], retainCount = options.offset + options.limit;
+    const groupTotals: Record<string, number> = {}, retained: PageEntry[] = [], fingerprintItems: T[] = [], retainCount = (options.offset ?? 0) + options.limit;
     let total = 0;
     for (const entry of source) {
       const item = entry.item;
@@ -225,11 +228,12 @@ class MapTransaction implements AtomicTransaction {
       const group = options.groupBy?.(item); if (group !== undefined) groupTotals[group] = (groupTotals[group] ?? 0) + 1;
       if (options.visible && !options.visible(item)) continue;
       total += 1;
+      if (options.after !== undefined && (!options.isAfter || !options.isAfter(item, options.after))) continue;
       let low = 0, high = retained.length;
       while (low < high) { const middle = (low + high) >>> 1; if (options.compare(retained[middle]!.item, item) <= 0) low = middle + 1; else high = middle; }
       retained.splice(low, 0, entry); if (retained.length > retainCount) retained.pop();
     }
-    const selected = retained.slice(options.offset, options.offset + options.limit);
+    const selected = retained.slice(options.offset ?? 0, (options.offset ?? 0) + options.limit);
     return {
       items: clone(selected.map((entry) => entry.item)),
       origins: selected.map((entry) => entry.origin),
@@ -549,17 +553,17 @@ async function loadExactLinkIndex(root: string, generation: string, businessId: 
   return parseExactLinkIndex(await readText(exactLinkIndexPath(root, generation, businessId), io, { optional: true, maxBytes: maxIndexFileBytes }), businessId);
 }
 
-async function readIndexedPage<T>({ businessId, selector, options, io, summaryPath, pagePath }: { businessId: string; selector?: string; options: AtomicPageOptions<T>; io: FileStorageHooks; summaryPath: string; pagePath: (pageNumber: number) => string }): Promise<AtomicPage<T>> {
+async function readIndexedPage<T, After = never>({ businessId, selector, options, io, summaryPath, pagePath }: { businessId: string; selector?: string; options: AtomicPageOptions<T, After>; io: FileStorageHooks; summaryPath: string; pagePath: (pageNumber: number) => string }): Promise<AtomicPage<T>> {
   const summaryBody = await readText(summaryPath, io, { optional: true, maxBytes: maxIndexFileBytes });
   const summary = parseSummary(summaryBody, businessId), total = selector && selector !== "*" ? summary.bucketTotals[selector] ?? 0 : summary.total;
-  const firstPage = Math.floor(options.offset / recordsPerPage), lastPage = Math.floor((options.offset + options.limit - 1) / recordsPerPage), loaded: T[] = [];
+  const offset = options.offset ?? 0, firstPage = Math.floor(offset / recordsPerPage), lastPage = Math.floor((offset + options.limit - 1) / recordsPerPage), loaded: T[] = [];
   for (let pageNumber = firstPage; pageNumber <= lastPage && pageNumber * recordsPerPage < total; pageNumber += 1) {
     const filePath = pagePath(pageNumber), body = await readText(filePath, io, { optional: false, maxBytes: maxIndexFileBytes, observe: false });
     const page = parsePage<T>(body);
     io.observeRead?.({ filePath, bytes: Buffer.byteLength(body!, "utf8"), records: page.length });
     loaded.push(...page);
   }
-  const withinFirst = options.offset - firstPage * recordsPerPage;
+  const withinFirst = offset - firstPage * recordsPerPage;
   const items = loaded.slice(withinFirst, withinFirst + options.limit);
   return { items: clone(items), origins: items.map(() => "stored"), total, groupTotals: summary.bucketTotals, ...(summary.fingerprint ? { fingerprint: summary.fingerprint } : {}) };
 }
@@ -571,9 +575,11 @@ class FileTransaction implements AtomicTransaction {
   async get<T>(key: string): Promise<T | undefined> { return (await this.map()).get<T>(key); }
   async set<T>(key: string, value: T): Promise<void> { return (await this.map()).set(key, value); }
   async delete(key: string): Promise<void> { return (await this.map()).delete(key); }
-  async scanPage<T>(key: string, options: AtomicPageOptions<T>): Promise<AtomicPage<T>> {
+  async scanPage<T, After = never>(key: string, options: AtomicPageOptions<T, After>): Promise<AtomicPage<T>> {
     assertBounds(options);
-    if (!this.manifest || !options.physical || this.delegate?.changed) return (await this.map()).scanPage(key, options);
+    // The existing file indexes are offset directories. Cursor seeking is deliberately
+    // delegated to the memory path until phase 2 adds tuple page boundaries.
+    if (!this.manifest || !options.physical || this.delegate?.changed || options.after !== undefined) return (await this.map()).scanPage(key, options);
     const physical = options.physical;
     if (physical.kind === "identity-reviews" && key === "identity-reviews") {
       const selector = physical.bucket ?? "*";
@@ -597,13 +603,13 @@ class FileTransaction implements AtomicTransaction {
         found.push(item);
       }
       found.sort(options.compare);
-      const selected = found.slice(options.offset, options.offset + options.limit);
+      const selected = found.slice(options.offset ?? 0, (options.offset ?? 0) + options.limit);
       return { items: clone(selected), origins: selected.map(() => "stored"), total: found.length, groupTotals: {} };
     }
     if (physical.kind === "identity-links" && key === "identity-links" && physical.mode === "authoritative") return this.authoritative(options, physical.businessId);
     return (await this.map()).scanPage(key, options);
   }
-  private async authoritative<T>(options: AtomicPageOptions<T>, businessId: string): Promise<AtomicPage<T>> {
+  private async authoritative<T, After = never>(options: AtomicPageOptions<T, After>, businessId: string): Promise<AtomicPage<T>> {
     if ((options.baseItems?.length ?? 0) === 0) {
       return readIndexedPage({ businessId, options, io: this.io, summaryPath: approvedLinkSummaryPath(this.root, this.manifest!.generation, businessId), pagePath: (pageNumber) => approvedLinkPagePath(this.root, this.manifest!.generation, businessId, pageNumber) });
     }
@@ -627,7 +633,7 @@ class FileTransaction implements AtomicTransaction {
     }
     for (const entry of index?.entries ?? []) if (entry.status === "approved") descriptors.push({ familyHash: entry.familyHash, normalizedValue: entry.normalizedValue, origin: "stored", entry });
     descriptors.sort((left, right) => left.normalizedValue.localeCompare(right.normalizedValue) || left.familyHash.localeCompare(right.familyHash));
-    const selected = descriptors.slice(options.offset, options.offset + options.limit);
+    const selected = descriptors.slice(options.offset ?? 0, (options.offset ?? 0) + options.limit);
     const storedEntries = selected.flatMap((descriptor) => descriptor.entry ? [descriptor.entry] : []);
     const records = await readExactLinkRecords<T>(this.root, this.manifest!.generation, businessId, storedEntries, this.io);
     const items: T[] = [], origins: PageOrigin[] = [];
