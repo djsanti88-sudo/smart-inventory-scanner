@@ -92,7 +92,7 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
         let reviewAfter;
         let linkAfter;
         try {
-          reviewAfter = decodeReviewCursor(url.searchParams.get("afterReview"), scope, requestedBucket ?? undefined);
+          reviewAfter = decodeReviewCursor(url.searchParams.get("afterReview"), scope, requestedBucket ?? "all");
           linkAfter = decodeLinkCursor(url.searchParams.get("afterLink"), scope);
         } catch { return json({ error: "Identity review cursor was invalid." }, 400); }
         const all = dependencies.repository.pageIdentityReviews ? undefined : await dependencies.repository.listIdentityReviews(scope);
@@ -122,7 +122,7 @@ export function createIdentityReviewRoute(dependencies: Dependencies): (request:
               entry.identifierType === family.type && entry.namespace === (family.namespace ?? "") && entry.normalizedValue === family.value)) : undefined;
           return link ? { ...review, currentApprovedLink: { targetProductId: link.targetProductId, version: link.version } } : review;
         };
-        return json({ reviews: reviewPage.items.map(enrich), currentApprovedLinks: approved.items, pageSize, total: reviewPage.total, linkTotal: approved.total, bucketTotals: reviewPage.bucketTotals, nextReviewCursor: reviewPage.nextAfter ? encodeReviewCursor(scope, requestedBucket ?? "", reviewPage.nextAfter) : null, nextLinkCursor: approved.nextAfter ? encodeLinkCursor(scope, approved.nextAfter) : null });
+        return json({ reviews: reviewPage.items.map(enrich), currentApprovedLinks: approved.items, pageSize, total: reviewPage.total, linkTotal: approved.total, bucketTotals: reviewPage.bucketTotals, nextReviewCursor: reviewPage.nextAfter ? encodeReviewCursor(scope, requestedBucket ?? "all", reviewPage.nextAfter) : null, nextLinkCursor: approved.nextAfter ? encodeLinkCursor(scope, approved.nextAfter) : null });
       } catch { return json({ error: "Unable to load identity reviews." }, 500); }
     }
     if (request.method !== "POST" || !body) return json({ error: "Method not allowed." }, 405);

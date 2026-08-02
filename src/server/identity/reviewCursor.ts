@@ -6,7 +6,14 @@ type ReviewCursor = { version: 1; kind: "review"; businessId: string; bucket: st
 type LinkCursor = { version: 1; kind: "link"; businessId: string; normalizedValue: string; familyKey: string };
 
 function validTuple(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 256 && !value.includes("\0");
+  return typeof value === "string" && value.length > 0 && !value.includes("\0");
+}
+
+function encode(value: Record<string, unknown>): string {
+  const body = JSON.stringify(value);
+  const raw = Buffer.from(body, "utf8").toString("base64url");
+  if (Buffer.byteLength(body, "utf8") > maxCursorBytes || raw.length > maxCursorBytes || !cursorPattern.test(raw)) throw new Error("invalid_identity_cursor");
+  return raw;
 }
 
 function decode(raw: string): unknown | undefined {
@@ -25,11 +32,13 @@ function exact(raw: string, value: Record<string, unknown>, keys: readonly strin
 }
 
 export function encodeReviewCursor(businessId: string, bucket: string, after: IdentityReviewAfter): string {
-  return Buffer.from(JSON.stringify({ version: 1, kind: "review", businessId, bucket, reviewId: after.reviewId } satisfies ReviewCursor), "utf8").toString("base64url");
+  if (!validTuple(businessId) || !validTuple(bucket) || !validTuple(after.reviewId)) throw new Error("invalid_identity_cursor");
+  return encode({ version: 1, kind: "review", businessId, bucket, reviewId: after.reviewId } satisfies ReviewCursor);
 }
 
 export function encodeLinkCursor(businessId: string, after: IdentityLinkAfter): string {
-  return Buffer.from(JSON.stringify({ version: 1, kind: "link", businessId, normalizedValue: after.normalizedValue, familyKey: after.familyKey } satisfies LinkCursor), "utf8").toString("base64url");
+  if (!validTuple(businessId) || !validTuple(after.normalizedValue) || !validTuple(after.familyKey)) throw new Error("invalid_identity_cursor");
+  return encode({ version: 1, kind: "link", businessId, normalizedValue: after.normalizedValue, familyKey: after.familyKey } satisfies LinkCursor);
 }
 
 export function decodeReviewCursor(raw: string | null, businessId: string, bucket: string | undefined): IdentityReviewAfter | undefined {

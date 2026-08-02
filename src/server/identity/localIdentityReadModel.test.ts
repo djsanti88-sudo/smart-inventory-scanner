@@ -79,6 +79,22 @@ describe("configured local identity read model", () => {
     expect(page?.items).toContainEqual(expect.objectContaining({ normalizedValue: "001", predecessorSource: "configured" }));
   });
 
+  it("fallback pages equal normalized values by the full family tuple, not JSON object order", async () => {
+    const configuredLinks = [
+      { businessId: "shop-a", sourceSystem: "z-source", sourceSignature: "v1", vendorId: "z-vendor", identifierType: "upc" as const, namespace: "", rawValue: "same", normalizedValue: "same", targetProductId: "z", status: "approved" as const, version: 1, evidenceId: "z", evidenceVersion: "v1", automaticEligible: true, currentTarget: { ...candidate, productId: "z" }, createdBy: "snapshot-builder" },
+      { businessId: "shop-a", sourceSystem: "a-source", sourceSignature: "v1", vendorId: "a-vendor", identifierType: "upc" as const, namespace: "", rawValue: "same", normalizedValue: "same", targetProductId: "a", status: "approved" as const, version: 1, evidenceId: "a", evidenceVersion: "v1", automaticEligible: true, currentTarget: { ...candidate, productId: "a" }, createdBy: "snapshot-builder" },
+    ];
+    const wire = { catalogVersion: "catalog-v1", catalogSnapshotHash: "", barcodeCandidates: [], partNumberCandidates: [], approvedLinks: configuredLinks };
+    wire.catalogSnapshotHash = (await deriveConfiguredSnapshotHashes(wire)).catalogSnapshotHash;
+    vi.stubEnv("IDENTITY_LOCAL_SNAPSHOT_JSON", JSON.stringify(wire));
+    const model = await loadAuthoritativeLocalIdentityReadModel({ findCurrentIdentityLinks: vi.fn().mockResolvedValue([]), listCurrentIdentityLinks: vi.fn().mockResolvedValue([]), listTenantProducts: vi.fn().mockResolvedValue([]) } as never);
+    const first = await model!.pageCurrentApprovedLinks!("shop-a", { pageSize: 1 });
+    const second = await model!.pageCurrentApprovedLinks!("shop-a", { pageSize: 1, after: first.nextAfter! });
+
+    expect(first.items[0]?.targetProductId).toBe("a");
+    expect(second.items[0]?.targetProductId).toBe("z");
+  });
+
   it("derives the authoritative snapshot hash from the committed current-link fingerprint without loading links", async () => {
     const repository = {
       currentIdentityLinksFingerprint: vi.fn().mockResolvedValue("committed-link-fingerprint"),

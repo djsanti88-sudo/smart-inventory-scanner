@@ -40,6 +40,15 @@ describe("identity review route", () => {
     expect(pageIdentityReviews).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid review and link cursors before every model, version, and repository dependency", async () => {
+    const listIdentityReviews = vi.fn(); const pageIdentityReviews = vi.fn(); const listCurrentIdentityLinks = vi.fn(); const findCurrentIdentityLinks = vi.fn(); const currentVersions = vi.fn(); const currentModel = vi.fn(); const configuredModel = vi.fn(); const pageCurrentApprovedLinks = vi.fn(); const { handler } = route({ repository: { listIdentityReviews, pageIdentityReviews, listCurrentIdentityLinks, findCurrentIdentityLinks } as never, currentVersions, currentModel, configuredModel, pageCurrentApprovedLinks } as never);
+    for (const query of ["afterReview=bad%3D", "afterLink=bad%3D"]) {
+      const response = await handler(new Request(`http://local/api/identity/reviews?businessId=shop-a&${query}`));
+      expect(response.status).toBe(400);
+    }
+    for (const dependency of [listIdentityReviews, pageIdentityReviews, listCurrentIdentityLinks, findCurrentIdentityLinks, currentVersions, currentModel, configuredModel, pageCurrentApprovedLinks]) expect(dependency).not.toHaveBeenCalled();
+  });
+
   it("confirms an in-scope candidate as an approved tenant link without a count or catalog promotion", async () => {
     const { handler, repository } = route();
     const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
