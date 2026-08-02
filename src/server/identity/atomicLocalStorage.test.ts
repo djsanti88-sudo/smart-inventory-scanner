@@ -89,25 +89,32 @@ describe("createFileAtomicLocalStorage", () => {
     await expect(first.read!((transaction) => transaction.get("second"))).resolves.toEqual({ value: 2 });
     await expect(second.read!((transaction) => transaction.get("first"))).resolves.toEqual({ value: 1 });
 
-    let arriveAtStart: (() => void) | undefined;
-    const start = new Promise<void>((resolve) => { arriveAtStart = resolve; });
-    let waiting = 0;
-    let confirmBothWaiting: (() => void) | undefined;
-    const bothWaiting = new Promise<void>((resolve) => { confirmBothWaiting = resolve; });
-    const overlap = async (storage: typeof first, key: string) => {
-      waiting += 1;
-      if (waiting === 2) confirmBothWaiting?.();
-      await start;
-      await storage.transaction(async (transaction) => {
-        const shared = (await transaction.get<Record<string, string>>("overlap")) ?? {};
-        shared[key] = key;
-        await transaction.set("overlap", shared);
-      });
-    };
-    const both = Promise.all([overlap(first, "first"), overlap(second, "second")]);
-    await bothWaiting;
-    arriveAtStart?.();
-    await both;
+    let signalFirstEntered: (() => void) | undefined;
+    const firstEntered = new Promise<void>((resolve) => { signalFirstEntered = resolve; });
+    let releaseFirst: (() => void) | undefined;
+    const firstRelease = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstAttempt = first.transaction(async (transaction) => {
+      const shared = (await transaction.get<Record<string, string>>("overlap")) ?? {};
+      signalFirstEntered?.();
+      await firstRelease;
+      shared.first = "first";
+      await transaction.set("overlap", shared);
+    });
+    await firstEntered;
+
+    let secondCallbackEntered = false;
+    const secondAttempt = second.transaction(async (transaction) => {
+      secondCallbackEntered = true;
+      const shared = (await transaction.get<Record<string, string>>("overlap")) ?? {};
+      shared.second = "second";
+      await transaction.set("overlap", shared);
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const secondWasBlocked = !secondCallbackEntered;
+    releaseFirst?.();
+    await Promise.all([firstAttempt, secondAttempt]);
+    expect(secondWasBlocked).toBe(true);
+    expect(secondCallbackEntered).toBe(true);
     await expect(first.read!((transaction) => transaction.get("overlap"))).resolves.toEqual({ first: "first", second: "second" });
 
     if (process.platform !== "win32") {
