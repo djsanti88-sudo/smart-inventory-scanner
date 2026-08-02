@@ -164,6 +164,56 @@ describe("IdentityReviewTable", () => {
     expect(screen.getByRole("button", { name: /revoke approved link sku-2/i })).toBeInTheDocument();
   });
 
+  it("does not navigate reviews while a Confirm POST is unresolved and reloads committed heads", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    let resolveConfirm: (value: unknown) => void = () => undefined;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: "review-1", nextLinkCursor: "link-1" }) })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveConfirm = resolve; }))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [approvedLink], nextReviewCursor: null, nextLinkCursor: "link-1" }) });
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("row-1");
+    fireEvent.click(screen.getByRole("button", { name: /confirm tire-a/i }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/submitting/i));
+    const next = screen.getByRole("button", { name: /next reviews/i });
+    expect(next).toBeDisabled();
+    fireEvent.click(next);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i);
+
+    resolveConfirm({ ok: true, json: async () => ({ review: { ...review, resolution: "confirmed" } }) });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const reload = new URL(fetchMock.mock.calls[2]![0] as string, "http://local").searchParams;
+    expect(reload.get("afterReview")).toBeNull();
+    expect(reload.get("afterLink")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i);
+  });
+
+  it("does not navigate links while a Revoke POST is unresolved and reloads committed heads", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    let resolveRevoke: (value: unknown) => void = () => undefined;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: "review-1", nextLinkCursor: "link-1" }) })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRevoke = resolve; }))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [], nextReviewCursor: "review-1", nextLinkCursor: null }) });
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByRole("button", { name: /revoke approved link sku-1/i });
+    fireEvent.click(screen.getByRole("button", { name: /revoke approved link sku-1/i }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/submitting/i));
+    const next = screen.getByRole("button", { name: /next approved links/i });
+    expect(next).toBeDisabled();
+    fireEvent.click(next);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i);
+
+    resolveRevoke({ ok: true, json: async () => ({ link: { ...approvedLink, status: "revoked" } }) });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const reload = new URL(fetchMock.mock.calls[2]![0] as string, "http://local").searchParams;
+    expect(reload.get("afterReview")).toBeNull();
+    expect(reload.get("afterLink")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i);
+  });
+
   it("resets only the review head on a bucket switch from non-root combined cursors", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: "review-1", nextLinkCursor: "link-1" }) })
