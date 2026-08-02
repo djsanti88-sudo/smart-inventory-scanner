@@ -40,7 +40,7 @@ export type LegacyAdoptionResult =
 
 type LegacyAdoptionOperations = {
   inspect: () => Promise<PersistedStatePresence>;
-  adopt: (uid: string) => Promise<LegacyAdoptionResult>;
+  adopt: (uid: string, ownedBarrier?: symbol) => Promise<LegacyAdoptionResult>;
 };
 
 /** Narrow test seam: production creates one adapter backed by the browser's IndexedDB authority. */
@@ -86,13 +86,15 @@ export function createLegacyAdoptionOperations(options: LegacyAdoptionOptions): 
     if (localDemo()) return "absent";
     return options.getPresence(LEGACY_KEY);
   };
-  const adopt = (uid: string): Promise<LegacyAdoptionResult> => {
+  const adopt = (uid: string, ownedBarrier?: symbol): Promise<LegacyAdoptionResult> => {
     if (localDemo()) return Promise.resolve({ status: "absent" });
     const existing = inFlight.get(uid);
     if (existing) return existing;
     const operation = (async (): Promise<LegacyAdoptionResult> => {
-      const barrier = tryAcquirePersistenceMutationBarrier();
+      const barrier = ownedBarrier ?? tryAcquirePersistenceMutationBarrier();
       if (!barrier) return { status: "target-exists" };
+      if (ownedBarrier && !ownsPersistenceMutationBarrier(ownedBarrier)) return { status: "target-exists" };
+      const releaseBarrier = ownedBarrier === undefined;
       try {
       const sourcePresence = await inspect();
       if (sourcePresence === "unavailable") return { status: "unavailable" };
@@ -126,7 +128,7 @@ export function createLegacyAdoptionOperations(options: LegacyAdoptionOptions): 
       }
       return { status: "adopted" };
       } finally {
-        releasePersistenceMutationBarrier(barrier);
+        if (releaseBarrier) releasePersistenceMutationBarrier(barrier);
       }
     })();
     inFlight.set(uid, operation);
@@ -160,9 +162,9 @@ export async function inspectLegacyAdoptionCandidate(): Promise<PersistedStatePr
   return getBrowserLegacyAdoptionOperations()?.inspect() ?? "unavailable";
 }
 
-export async function adoptLegacyPersistedState(uid: string): Promise<LegacyAdoptionResult> {
+export async function adoptLegacyPersistedState(uid: string, ownedBarrier?: symbol): Promise<LegacyAdoptionResult> {
   if (isLocalDemoPersistence()) return { status: "absent" };
-  return (await getBrowserLegacyAdoptionOperations()?.adopt(uid)) ?? { status: "unavailable" };
+  return (await getBrowserLegacyAdoptionOperations()?.adopt(uid, ownedBarrier)) ?? { status: "unavailable" };
 }
 
 export function persistKeyForUid(uid: string | null): string {

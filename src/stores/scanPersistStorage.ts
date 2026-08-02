@@ -498,9 +498,10 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     intentWrite: Promise<boolean>,
     context: unknown,
   ) => {
+    const contextStillCurrent = () => !options.isWriteContextCurrent || options.isWriteContextCurrent(context);
     // Context is an authority boundary, not just a durable-commit guard: a stale snapshot must
     // not update the local fallback either, or it can resurrect after a clear or tenant switch.
-    if (options.isWriteContextCurrent && !options.isWriteContextCurrent(context)) return;
+    if (!contextStillCurrent()) return;
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
     const existingLocalFallback = decodeAuthoritativePersistFallback(legacyGet(name));
@@ -534,6 +535,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       return;
     }
     const removeMatchingIntent = async (): Promise<void> => {
+      if (!contextStillCurrent()) return;
       if (!options.database) return;
       try {
         const currentIntent = decodeWriteIntent(await options.database.get(writeIntentKey(name)));
@@ -543,6 +545,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       }
     };
     if (options.database && !tombstoneState.durableKnown) {
+      if (!contextStillCurrent()) return;
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
       legacySet(name, encodeAuthoritativePersistFallback(value, {
@@ -563,6 +566,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       if (!options.database) { reportDegraded(); return; }
       const recoveryToken = encodeClearToken(tombstoneState.maxVersion + 1, causalNow());
       try {
+        if (!contextStillCurrent()) return;
         // The full payload is durable before either conflicting clear is reconciled. Its strictly
         // newer generation then provides the only safe ordering point for all tabs.
         await options.database.set(
@@ -574,15 +578,18 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         reportDegraded();
         return;
       }
+      if (!contextStillCurrent()) return;
       writeTombstone(name, recoveryToken);
       await persistTombstone(name, recoveryToken);
       let mainWritten = false;
       try {
+        if (!contextStillCurrent()) return;
         await options.database.set(name, value);
         mainWritten = true;
         reportAvailable();
       } catch { reportDegraded(); }
       if (!mainWritten || generationFor(name) !== token) return;
+      if (!contextStillCurrent()) return;
       const localRetired = retireAuthoritativeLocalFallback(name);
       const tombstoneCleared = await clearTombstone(name, token, recoveryToken);
       if (localRetired && tombstoneCleared) {
@@ -596,6 +603,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     }
     const tombstoneToken = tombstoneState.token;
     if (!options.database) {
+      if (!contextStillCurrent()) return;
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
       legacySet(name, encodeAuthoritativePersistFallback(value, {
@@ -614,6 +622,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
         // An unknown candidate cannot be allowed to survive and outrank a newer main write. Replace
         // it journal-first; if that also fails, keep the current in-memory state and retry later.
         try {
+          if (!contextStillCurrent()) return;
           await options.database.set(
             recoveryKey(name),
             encodeRecoveryCandidate({ payload: value, supersedesTombstone: tombstoneToken }),
@@ -623,6 +632,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
           reportAvailable();
         } catch {
           reportDegraded();
+          if (!contextStillCurrent()) return;
           legacySnapshotsCleaned.delete(name);
           legacyMarkersEnsured.delete(name);
           legacySet(name, encodeAuthoritativePersistFallback(value, {
@@ -637,6 +647,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       || tombstoneToken !== null
       || existingLocalFallback?.invalidatesRecovery === true;
     const shouldWriteLocalFallback = hadFallback || causalityRequiresRecovery;
+    if (!contextStillCurrent()) return;
     const localFallbackUpdated = !shouldWriteLocalFallback || legacySet(name, encodeAuthoritativePersistFallback(value, {
       invalidatesRecovery: causalityRequiresRecovery,
       supersedesTombstone: tombstoneToken,
@@ -645,6 +656,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     if (needsRecovery && !existingRecovery) {
       if (!options.database) { reportDegraded(); return; }
       try {
+        if (!contextStillCurrent()) return;
         await options.database.set(
           recoveryKey(name),
           encodeRecoveryCandidate({ payload: value, supersedesTombstone: tombstoneToken }),
@@ -659,6 +671,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     }
     if (existingRecovery && !recoveryWritten) {
       try {
+        if (!contextStillCurrent()) return;
         await options.database!.set(
           recoveryKey(name),
           encodeRecoveryCandidate({ payload: value, supersedesTombstone: tombstoneToken }),
@@ -672,18 +685,20 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     }
     let durableWritten = false;
     if (options.database) {
-      try { await options.database.set(name, value); durableWritten = true; reportAvailable(); } catch { reportDegraded(); }
+      try { if (!contextStillCurrent()) return; await options.database.set(name, value); durableWritten = true; reportAvailable(); } catch { reportDegraded(); }
     } else reportDegraded();
     // A successful write after an intentional clear supersedes its tombstone. An older in-flight
     // write is deliberately ignored: it may have reached IndexedDB, but the newer tombstone wins.
     if (generationFor(name) !== token) return;
     if (durableWritten) {
+      if (!contextStillCurrent()) return;
       const localRetired = recoveryWritten
         ? retireAuthoritativeLocalFallback(name)
         : (removeLegacySnapshotOnce(name), true);
       const tombstoneCleared = await clearTombstone(name, token, tombstoneToken);
       if (recoveryWritten && localRetired && tombstoneCleared && options.database) {
         try {
+          if (!contextStillCurrent()) return;
           await options.database.remove(recoveryKey(name));
           reportAvailable();
         } catch {
@@ -695,6 +710,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     } else {
       // Payload and authority metadata are one localStorage value, so an interrupted write cannot
       // leave newer bytes looking like an ambiguous legacy snapshot.
+      if (!contextStillCurrent()) return;
       legacySnapshotsCleaned.delete(name);
       legacyMarkersEnsured.delete(name);
       if (!hadFallback && !recoveryWritten) legacySet(name, encodeAuthoritativePersistFallback(value));
@@ -715,6 +731,10 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       return;
     }
     if (persistUnloadFallback) {
+      if (options.isWriteContextCurrent && !options.isWriteContextCurrent(pending.context)) {
+        pending.resolvers.forEach((resolve) => resolve());
+        return;
+      }
       // IndexedDB work cannot be awaited during pagehide. Atomically preserve the newest serialized
       // snapshot locally first; its precedence flag prevents an older recovery candidate winning if
       // the page closes before the async journal/main commit completes.
@@ -765,7 +785,9 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     let intentWrite = Promise.resolve(false);
     if (options.database) {
       try {
-        intentWrite = options.database.set(writeIntentKey(name), encodeWriteIntent({
+        intentWrite = (options.isWriteContextCurrent && !options.isWriteContextCurrent(context))
+          ? Promise.resolve(false)
+          : options.database.set(writeIntentKey(name), encodeWriteIntent({
           id: intentId,
           scheduledAt,
           observedToken: observation.token,

@@ -987,6 +987,31 @@ describe("persistence context generations", () => {
 
     expect(await database.get("sis-scan-owner")).toBeNull();
   });
+
+  it("stops before fallback, recovery, and main writes when context changes after an awaited read", async () => {
+    let context = "A";
+    class ContextSwitchingRecoveryReadDb extends Db {
+      override async get(key: string): Promise<string | null> {
+        const value = await super.get(key);
+        if (key === "sis-scan-owner::scanbin-recovery-v1") context = "B";
+        return value;
+      }
+    }
+    const database = new ContextSwitchingRecoveryReadDb();
+    const local = legacy();
+    const storage = createAsyncDurableStorage({
+      database,
+      getLegacyStorage: () => local,
+      getWriteContext: () => context,
+      isWriteContextCurrent: (token) => token === context,
+    });
+
+    await storage.setItem("sis-scan-owner", "A-raw-code");
+
+    expect(await database.get("sis-scan-owner")).toBeNull();
+    expect(await database.get("sis-scan-owner::scanbin-recovery-v1")).toBeNull();
+    expect(local.values.get("sis-scan-owner")).toBeUndefined();
+  });
 });
 
 describe("durable legacy adoption", () => {

@@ -14,7 +14,7 @@ export function StoreHydrator({ children }: { children: React.ReactNode }) {
   const persistenceStatus = useSyncExternalStore(subscribeBrowserPersistenceStatus, getBrowserPersistenceStatus, getBrowserPersistenceStatus);
 
   useEffect(() => {
-    void useScanStore.persist.rehydrate();
+    void useScanStore.getState().rehydrateActivePersistedState();
   }, []);
 
   if (!hasHydrated) {

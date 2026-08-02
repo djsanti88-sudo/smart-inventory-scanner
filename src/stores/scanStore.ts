@@ -89,7 +89,7 @@ import { buildPersistedScanState, type PersistableScanState } from "@/stores/sca
 import { createAsyncDurablePersistStorage, createNativeIndexedDbDatabase, setBrowserPersistenceStatus, type PersistenceClearResult } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
-import { adoptLegacyPersistedState, persistKeyForUid, releasePersistenceMutationBarrier, tryAcquirePersistenceMutationBarrier, type LegacyAdoptionResult } from "@/stores/scanPersistNamespace";
+import { adoptLegacyPersistedState, ownsPersistenceMutationBarrier, persistKeyForUid, releasePersistenceMutationBarrier, tryAcquirePersistenceMutationBarrier, type LegacyAdoptionResult } from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
@@ -738,6 +738,8 @@ export interface ScanState {
   /** Re-point persist at this uid's key and rehydrate (no legacy-blob migration). Returns a promise
    *  that resolves once rehydrate has applied, so callers can await it before reading state. */
   rehydrateForUid: (uid: string) => Promise<void>;
+  /** Rehydrate the already-selected namespace under the shared persistence mutation barrier. */
+  rehydrateActivePersistedState: () => Promise<void>;
   /** Owner-initiated: migrate the legacy pre-account blob into this uid's key, then rehydrate. */
   adoptLegacyLocalData: (uid: string) => Promise<LegacyAdoptionResult>;
   startSession: (name: string, location: string) => void;
@@ -1855,26 +1857,68 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // adopting the pre-account blob is an explicit owner action (adoptLegacyLocalData), never an
         // automatic side effect of signing in (shared-browser inheritance hazard).
         if (!deps.persistName) return Promise.resolve(); // non-persisted test store: nothing to re-point
-        appPersistContextEpoch += 1;
+        const barrier = tryAcquirePersistenceMutationBarrier();
+        if (!barrier) return Promise.resolve();
+        const contextEpoch = appPersistContextEpoch;
         const persistApi = (useScanStore as unknown as {
           persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
         }).persist;
-        if (persistApi) {
+        if (persistApi && ownsPersistenceMutationBarrier(barrier) && appPersistContextEpoch === contextEpoch) {
+          appPersistContextEpoch += 1;
           persistApi.setOptions({ name: persistKeyForUid(uid) });
           // Returned so callers (BusinessContextGate) can AWAIT rehydrate before calling
           // setBusinessContext - only then does the store's businessId/userId reflect the persisted
           // state, letting the same-tenant refresh guard above actually match on a real refresh.
-          return Promise.resolve(persistApi.rehydrate());
+          return Promise.resolve(persistApi.rehydrate()).finally(() => releasePersistenceMutationBarrier(barrier));
         }
+        releasePersistenceMutationBarrier(barrier);
         return Promise.resolve();
       },
 
+      rehydrateActivePersistedState: () => {
+        if (typeof window === "undefined" || !deps.persistName) return Promise.resolve();
+        const barrier = tryAcquirePersistenceMutationBarrier();
+        if (!barrier) return Promise.resolve();
+        const persistApi = (useScanStore as unknown as {
+          persist?: { rehydrate: () => Promise<void> | void };
+        }).persist;
+        if (!persistApi || !ownsPersistenceMutationBarrier(barrier)) {
+          releasePersistenceMutationBarrier(barrier);
+          return Promise.resolve();
+        }
+        return Promise.resolve(persistApi.rehydrate()).finally(() => releasePersistenceMutationBarrier(barrier));
+      },
+
       adoptLegacyLocalData: async (uid: string) => {
-        // OWNER-INITIATED adopt through the durable persistence authority. Context activation is the
-        // caller's responsibility and must happen only after this returns adopted.
-        const result = await adoptLegacyPersistedState(uid);
-        if (result.status === "adopted") await get().rehydrateForUid(uid);
-        return result;
+        // Keep one barrier across durable adoption and the persist-name/rehydrate handoff. Otherwise
+        // a destructive operation can win after source consumption but before this store activates it.
+        const barrier = tryAcquirePersistenceMutationBarrier();
+        if (!barrier) return { status: "target-exists" } as const;
+        const mutationEpoch = appPersistMutationEpoch;
+        const contextEpoch = appPersistContextEpoch;
+        const { businessId, userId } = get();
+        try {
+          const result = await adoptLegacyPersistedState(uid, barrier);
+          if (result.status !== "adopted") return result;
+          // Do not switch a persist name or replace memory if anything else changed the active tenant
+          // while reservation/source consumption was awaiting durable authority.
+          const current = get();
+          if (!ownsPersistenceMutationBarrier(barrier)
+            || appPersistMutationEpoch !== mutationEpoch
+            || appPersistContextEpoch !== contextEpoch
+            || current.businessId !== businessId
+            || current.userId !== userId) return { status: "target-exists" };
+          const persistApi = (useScanStore as unknown as {
+            persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
+          }).persist;
+          if (!persistApi || !ownsPersistenceMutationBarrier(barrier)) return { status: "target-exists" };
+          appPersistContextEpoch += 1;
+          persistApi.setOptions({ name: persistKeyForUid(uid) });
+          await Promise.resolve(persistApi.rehydrate());
+          return result;
+        } finally {
+          releasePersistenceMutationBarrier(barrier);
+        }
       },
 
       recordFeedback: (type, payload) =>

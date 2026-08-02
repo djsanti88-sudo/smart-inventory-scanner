@@ -19,10 +19,13 @@ afterEach(() => {
 describe("StoreHydrator persistence status", () => {
   it("does not hydrate reconcile data during app-wide scan startup", async () => {
     const rehydrate = vi.spyOn(useReconcileStore.persist, "rehydrate");
+    const scanRehydrate = vi.spyOn(useScanStore.getState(), "rehydrateActivePersistedState");
     render(<StoreHydrator><div>Scanner stays ready</div></StoreHydrator>);
 
     await waitFor(() => expect(useScanStore.persist.hasHydrated()).toBe(true));
+    expect(scanRehydrate).toHaveBeenCalledOnce();
     expect(rehydrate).not.toHaveBeenCalled();
+    scanRehydrate.mockRestore();
     rehydrate.mockRestore();
   });
 

@@ -29,7 +29,7 @@ describe("local-demo scan persistence isolation", () => {
     await useScanStore.getState().rehydrateForUid("shop-owner");
     expect(useScanStore.persist.getOptions().name).toBe(DEMO_KEY);
 
-    useScanStore.getState().resetForSignOut();
+    await useScanStore.getState().resetForSignOut();
     window.dispatchEvent(new Event("pagehide"));
     expect(useScanStore.persist.getOptions().name).toBe(DEMO_KEY);
     expect(window.localStorage.getItem(NORMAL_KEY)).toBe(normalShopBlob);
