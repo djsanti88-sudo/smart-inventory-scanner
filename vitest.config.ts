@@ -44,6 +44,7 @@ export default defineConfig({
             "scripts/local-demo-environment.test.mjs",
             "scripts/local-demo-preflight.test.mjs",
             "scripts/local-demo-sampler.test.mjs",
+            "scripts/runtime-contract.test.mjs",
             "scripts/refresh-tire-meta.test.mjs",
             "scripts/tire-demo-proof/generate-manifest.test.mjs",
             "scripts/tire-demo-proof/summarize.test.mjs",

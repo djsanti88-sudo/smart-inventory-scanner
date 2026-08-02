@@ -1,7 +1,7 @@
 name: CI
 
 # Required-check gate for branch protection on master: typecheck, unit tests, build, lint.
-# Mirrors the setup conventions of .github/workflows/playwright.yml (Node 20, npm ci, actions/setup-node
+# Mirrors the setup conventions of .github/workflows/playwright.yml (Node 22, npm ci, actions/setup-node
 # npm cache). This workflow intentionally does NOT run Playwright E2E, Firebase emulator tests, or QA
 # bots - those stay in their own dedicated workflows/local runs (they need emulators / real backends /
 # owner-gated live keys). This is the fast, always-green-or-honestly-red correctness gate.
@@ -51,7 +51,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -101,11 +101,14 @@ jobs:
           --exclude "src/server/tire-knowledge/dtHarvestIntegration.test.ts"
           --exclude "src/components/UniversalImportPanel.fixtures.test.tsx"
 
+      - name: Run local-demo proof suite
+        run: npm run test:local-demo
+
+      - name: Run tire-demo proof suite
+        run: npm run test:tire-demo-proof
+
       - name: Verify tire metadata refresh preserves the generated payload
         run: npm run test:refresh-tire-meta
-
-      - name: Attest local-demo egress containment
-        run: npm run test:local-demo-egress
 
   build:
     name: build
@@ -116,7 +119,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -138,7 +141,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -151,3 +154,21 @@ jobs:
       # either fix the 46 errors or accept the narrower gate permanently.
       - name: Lint (eslint src, excluding test files)
         run: npx eslint src --ignore-pattern "**/*.test.ts" --ignore-pattern "**/*.test.tsx" --ignore-pattern "**/*.test.mjs"
+
+  identity-apply-perf:
+    name: identity-apply-perf
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run identity apply performance proof
+        run: npm run test:identity-apply-perf
