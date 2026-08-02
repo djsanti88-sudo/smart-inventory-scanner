@@ -37,12 +37,14 @@ describe("IdentityReviewTable", () => {
     await screen.findByText("review-root");
     fireEvent.click(screen.getByRole("button", { name: /next reviews/i }));
     await screen.findByText("review-next");
+    expect(screen.queryByRole("alert")).toBeNull();
     const reviewNext = new URL(fetchMock.mock.calls[1]![0] as string, "http://local");
     expect(reviewNext.searchParams.get("afterReview")).toBe("review-1");
     expect(reviewNext.searchParams.get("afterLink")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /next approved links/i }));
     await screen.findByRole("button", { name: /revoke approved link link-next/i });
+    expect(screen.queryByRole("alert")).toBeNull();
     const linkNext = new URL(fetchMock.mock.calls[2]![0] as string, "http://local");
     expect(linkNext.searchParams.get("afterReview")).toBe("review-1");
     expect(linkNext.searchParams.get("afterLink")).toBe("link-1");
@@ -74,6 +76,56 @@ describe("IdentityReviewTable", () => {
     expect(screen.getByRole("button", { name: /next approved links/i })).toBeEnabled();
   });
 
+  it("rolls back a rejected review Next and retries the same cursor exactly once", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [{ ...review, rowId: "review-root" }], currentApprovedLinks: [{ ...approvedLink, normalizedValue: "LINK-ROOT" }], nextReviewCursor: "review-1", nextLinkCursor: "link-1" }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Review page failed." }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [{ ...review, rowId: "review-next" }], currentApprovedLinks: [{ ...approvedLink, normalizedValue: "LINK-ROOT" }], nextReviewCursor: null, nextLinkCursor: "link-1" }) });
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("review-root");
+    fireEvent.click(screen.getByRole("button", { name: /next reviews/i }));
+    await screen.findByRole("alert");
+    expect(screen.getByText("review-root")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i);
+    expect(screen.getByRole("button", { name: /next reviews/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /next reviews/i }));
+    await screen.findByText("review-next");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(new URL(fetchMock.mock.calls[1]![0] as string, "http://local").searchParams.getAll("afterReview")).toEqual(["review-1"]);
+    expect(new URL(fetchMock.mock.calls[2]![0] as string, "http://local").searchParams.getAll("afterReview")).toEqual(["review-1"]);
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 2\. Link page 1\./i);
+  });
+
+  it("rolls back only a rejected link Next while preserving the advanced review page", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [{ ...review, rowId: "review-root" }], currentApprovedLinks: [{ ...approvedLink, normalizedValue: "LINK-ROOT" }], nextReviewCursor: "review-1", nextLinkCursor: "link-1" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [{ ...review, rowId: "review-next" }], currentApprovedLinks: [{ ...approvedLink, normalizedValue: "LINK-ROOT" }], nextReviewCursor: null, nextLinkCursor: "link-1" }) })
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: "Link page failed." }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [{ ...review, rowId: "review-next" }], currentApprovedLinks: [{ ...approvedLink, normalizedValue: "LINK-NEXT" }], nextReviewCursor: null, nextLinkCursor: null }) });
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("review-root");
+    fireEvent.click(screen.getByRole("button", { name: /next reviews/i }));
+    await screen.findByText("review-next");
+    fireEvent.click(screen.getByRole("button", { name: /next approved links/i }));
+    await screen.findByRole("alert");
+    expect(screen.getByText("review-next")).toBeInTheDocument();
+    expect(screen.getAllByText(/LINK-ROOT/).length).toBeGreaterThan(0);
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 2\. Link page 1\./i);
+
+    fireEvent.click(screen.getByRole("button", { name: /next approved links/i }));
+    await screen.findByRole("button", { name: /revoke approved link link-next/i });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    for (const call of [2, 3]) {
+      const query = new URL(fetchMock.mock.calls[call]![0] as string, "http://local").searchParams;
+      expect(query.getAll("afterReview")).toEqual(["review-1"]);
+      expect(query.getAll("afterLink")).toEqual(["link-1"]);
+    }
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 2\. Link page 2\./i);
+  });
+
   it("keeps a non-root link cursor when revocation refreshes the combined page", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
     const secondLink = { ...approvedLink, normalizedValue: "SKU-2", predecessorFingerprint: "link-2" };
@@ -91,6 +143,48 @@ describe("IdentityReviewTable", () => {
     expect(new URL(fetchMock.mock.calls[3]![0] as string, "http://local").searchParams.get("afterLink")).toBe("link-1");
   });
 
+  it("keeps the non-root link page visible when a review mutation refreshes", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    const secondLink = { ...approvedLink, normalizedValue: "SKU-2", predecessorFingerprint: "link-2" };
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: null, nextLinkCursor: "link-1" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [secondLink], nextReviewCursor: null, nextLinkCursor: null }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ review: { ...review, resolution: "confirmed" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [secondLink], nextReviewCursor: null, nextLinkCursor: null }) });
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("row-1");
+    fireEvent.click(screen.getByRole("button", { name: /next approved links/i }));
+    await screen.findByRole("button", { name: /revoke approved link sku-2/i });
+    fireEvent.click(screen.getByRole("button", { name: /confirm tire-a/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    const refresh = new URL(fetchMock.mock.calls[3]![0] as string, "http://local");
+    expect(refresh.searchParams.get("afterReview")).toBeNull();
+    expect(refresh.searchParams.get("afterLink")).toBe("link-1");
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 2\./i);
+    expect(screen.getByRole("button", { name: /revoke approved link sku-2/i })).toBeInTheDocument();
+  });
+
+  it("resets only the review head on a bucket switch from non-root combined cursors", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: "review-1", nextLinkCursor: "link-1" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: null, nextLinkCursor: "link-1" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: null, nextLinkCursor: null }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [approvedLink], nextReviewCursor: null, nextLinkCursor: null }) });
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("row-1");
+    fireEvent.click(screen.getByRole("button", { name: /next reviews/i }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Review page 2\. Link page 1\./i));
+    fireEvent.click(screen.getByRole("button", { name: /next approved links/i }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Review page 2\. Link page 2\./i));
+    fireEvent.click(screen.getByRole("button", { name: /automatic/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    const switched = new URL(fetchMock.mock.calls[3]![0] as string, "http://local");
+    expect(switched.searchParams.get("afterReview")).toBeNull();
+    expect(switched.searchParams.get("afterLink")).toBe("link-1");
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 2\./i);
+  });
+
   it("latches navigation before a bucket reset can accept a stale Next click", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
     let resolveBucket: (value: unknown) => void = () => undefined;
@@ -105,6 +199,26 @@ describe("IdentityReviewTable", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     resolveBucket({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [], nextReviewCursor: null, nextLinkCursor: null }) });
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i));
+  });
+
+  it("aborts and ignores a stale combined-head response after a bucket switch", async () => {
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+    let resolveStale: (value: unknown) => void = () => undefined;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review], currentApprovedLinks: [approvedLink], nextReviewCursor: "review-1", nextLinkCursor: "link-1" }) })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveStale = resolve; }))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [], currentApprovedLinks: [approvedLink], nextReviewCursor: null, nextLinkCursor: "link-1" }) });
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+    await screen.findByText("row-1");
+    fireEvent.click(screen.getByRole("button", { name: /next reviews/i }));
+    fireEvent.click(screen.getByRole("button", { name: /automatic/i }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect((fetchMock.mock.calls[1]![1] as RequestInit).signal).toHaveProperty("aborted", true);
+    resolveStale({ ok: true, json: async () => ({ reviews: [{ ...review, rowId: "stale-review" }], currentApprovedLinks: [{ ...approvedLink, normalizedValue: "STALE-LINK" }], nextReviewCursor: null, nextLinkCursor: null }) });
+    await waitFor(() => expect(screen.queryByText("stale-review")).toBeNull());
+    expect(screen.queryByText(/STALE-LINK/)).toBeNull();
+    expect(screen.getByRole("button", { name: /automatic/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status")).toHaveTextContent(/Review page 1\. Link page 1\./i);
   });
 
   it("renders the signed candidate display with product id secondary and never renders unallowlisted fields", async () => {
