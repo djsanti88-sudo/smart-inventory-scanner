@@ -278,8 +278,8 @@ describe("createFileAtomicLocalStorage", () => {
 
     expect(page.total).toBe(1_000);
     expect(page.items).toHaveLength(25);
-    expect(new Set(reads.filter((read) => !read.filePath.endsWith("identity-local-storage.json")).map((read) => read.filePath)).size).toBeLessThanOrEqual(2);
-    expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(25);
+    expect(reads.some((read) => read.filePath.includes("exact.descriptor"))).toBe(false);
+    expect(reads.filter((read) => read.filePath.endsWith(".exact.data.json")).reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(25);
     expect(await readdir(root)).not.toContain("identity-local-storage.lock");
   });
 
@@ -306,8 +306,8 @@ describe("createFileAtomicLocalStorage", () => {
     }));
 
     expect(page.items).toHaveLength(25);
-    expect(new Set(reads.filter((read) => !read.filePath.endsWith("identity-local-storage.json")).map((read) => read.filePath)).size).toBeLessThanOrEqual(2);
-    expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(25);
+    expect(reads.some((read) => read.filePath.includes("exact.descriptor"))).toBe(true);
+    expect(reads.filter((read) => read.filePath.endsWith(".exact.data.json")).reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(25);
   });
 
   it("reads only one indexed review page and its summaries for 100 durable reviews", async () => {
@@ -426,7 +426,38 @@ describe("createFileAtomicLocalStorage", () => {
     expect(current.items.map((link) => link.normalizedValue)).toEqual(Array.from({ length: 26 }, (_, index) => String(index + 500).padStart(3, "0")));
     expect(authoritative.items[0]).toMatchObject({ normalizedValue: "500", targetProductId: "durable-500" });
     expect(reads.some((read) => read.filePath.endsWith(".state.json"))).toBe(false);
-    expect(reads.reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(78);
+    expect(reads.filter((read) => read.filePath.endsWith(".exact.data.json")).reduce((total, read) => total + read.records, 0)).toBeLessThanOrEqual(26);
+  });
+
+  it("merges configured links after a cursor with durable tombstones through bounded hash probes", async () => {
+    const root = testRoot();
+    const configured = Array.from({ length: 550 }, (_, index) => {
+      const value = String(index).padStart(3, "0");
+      return { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: value, targetProductId: `configured-${value}`, status: "approved", version: 1 };
+    });
+    const durable = configured.map((link) => ({ ...link, targetProductId: `durable-${link.normalizedValue}`, version: 2 }));
+    durable[500] = { ...durable[500]!, status: "revoked" };
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", durable));
+    const reads: Array<{ filePath: string; bytes: number; records: number }> = [];
+    const probes: number[] = [];
+    const storage = createFileAtomicLocalStorage({ root, io: { observeRead: (read) => { reads.push(read); }, observeSeek: (probe) => { probes.push(probe.pageNumber); } } });
+    const familyKey = (link: typeof configured[number]) => JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+    const after = { normalizedValue: "499", familyKey: familyKey(configured[499]!) };
+
+    const page = await storage.read!((transaction) => transaction.scanPage!("identity-links", {
+      after, limit: 26, baseItems: configured,
+      isAfter: (link: typeof configured[number], cursor: typeof after) => link.normalizedValue > cursor.normalizedValue || (link.normalizedValue === cursor.normalizedValue && familyKey(link) > cursor.familyKey),
+      filter: (link: typeof configured[number]) => link.businessId === "shop-a", visible: (link) => link.status === "approved",
+      compare: (left, right) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : familyKey(left) < familyKey(right) ? -1 : familyKey(left) > familyKey(right) ? 1 : 0,
+      collapseBy: familyKey, versionOf: (link) => link.version,
+      physical: { kind: "identity-links", businessId: "shop-a", mode: "authoritative" },
+    }));
+
+    expect(page.items.map((link: typeof configured[number]) => link.normalizedValue)).toEqual(Array.from({ length: 26 }, (_, index) => String(index + 501).padStart(3, "0")));
+    expect(page.origins).toEqual(Array.from({ length: 26 }, () => "stored"));
+    expect(reads.some((read) => read.filePath.endsWith(".state.json"))).toBe(false);
+    expect(reads.filter((read) => read.filePath.includes("exact.data"))).toHaveLength(0);
+    expect(probes.length).toBeLessThanOrEqual(6);
   });
 
   it("reads only one approved-link page for 500 durable approved families", async () => {
@@ -765,7 +796,7 @@ describe("createFileAtomicLocalStorage", () => {
     expect(indexName).toBeDefined();
     const index = JSON.parse(await readFile(path.join(root, indexName!), "utf8"));
     expect(index).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       mergeAlgorithmVersion: "identity-links-merge-v1",
       orderAlgorithmVersion: "identity-links-order-v1",
       businessId: "shop-a",
@@ -779,10 +810,26 @@ describe("createFileAtomicLocalStorage", () => {
     const indexName = (await readdir(root)).find((name) => name.includes(".links.") && name.endsWith(".exact.index.json"));
     const indexPath = path.join(root, indexName!);
     const current = JSON.parse(await readFile(indexPath, "utf8"));
-    await writeFile(indexPath, JSON.stringify({ ...current, schemaVersion: 1, entries: current.entries.map((entry: [string, string, string, string, number, number]) => [entry[0], entry[2], entry[3], entry[4], entry[5]]) }), "utf8");
+    const descriptorName = (await readdir(root)).find((name) => name.includes(".exact.descriptor.0.json"));
+    const descriptors = JSON.parse(await readFile(path.join(root, descriptorName!), "utf8")).items as Array<[string, string, string, string, number, number]>;
+    await writeFile(indexPath, JSON.stringify({ ...current, schemaVersion: 1, entries: descriptors.map((entry) => [entry[0], entry[2], entry[3], entry[4], entry[5]]) }), "utf8");
     const family = JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
     const found = await createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, filter: (item: typeof link) => item.businessId === "shop-a", visible: () => true, compare: (left, right) => left.normalizedValue < right.normalizedValue ? -1 : left.normalizedValue > right.normalizedValue ? 1 : 0, collapseBy: () => family, versionOf: (item) => item.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "families", families: [family] } }));
     expect(found.items).toEqual([link]);
+  });
+
+  it("fails closed when a v3 exact descriptor disagrees with its payload", async () => {
+    const root = testRoot();
+    const link = { businessId: "shop-a", sourceSystem: "csv", vendorId: "vendor-a", sourceSignature: "v1", identifierType: "upc", namespace: "", normalizedValue: "001", targetProductId: "tire-001", status: "approved", version: 1 };
+    await createFileAtomicLocalStorage({ root }).transaction((transaction) => transaction.set("identity-links", [link]));
+    const descriptorName = (await readdir(root)).find((name) => name.includes(".exact.descriptor.0.json"));
+    const descriptorPath = path.join(root, descriptorName!);
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.items[0][3] = "wrong-value";
+    await writeFile(descriptorPath, JSON.stringify(descriptor), "utf8");
+    const family = JSON.stringify([link.businessId, link.sourceSystem, link.vendorId, link.sourceSignature, link.identifierType, link.namespace, link.normalizedValue]);
+
+    await expect(createFileAtomicLocalStorage({ root }).read!((transaction) => transaction.scanPage!("identity-links", { limit: 1, filter: (item: typeof link) => item.businessId === "shop-a", visible: () => true, compare: () => 0, collapseBy: () => family, versionOf: (item) => item.version, physical: { kind: "identity-links", businessId: "shop-a", mode: "families", families: [family] } }))).rejects.toThrow("identity_storage_corrupt");
   });
 
   it("fails an oversized exact-link record before publishing its generation", async () => {

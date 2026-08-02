@@ -342,17 +342,18 @@ function linkPagePath(root: string, generation: string, businessId: string, page
 function approvedLinkSummaryPath(root: string, generation: string, businessId: string): string { return generationPath(root, generation, `links.${businessToken(businessId)}.approved.summary`); }
 function approvedLinkPagePath(root: string, generation: string, businessId: string, pageNumber: number): string { return generationPath(root, generation, `links.${businessToken(businessId)}.approved.${pageNumber}`); }
 function exactLinkIndexPath(root: string, generation: string, businessId: string): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.index`); }
+function exactLinkDescriptorPagePath(root: string, generation: string, businessId: string, pageNumber: number): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.descriptor.${pageNumber}`); }
 function exactLinkDataPath(root: string, generation: string, businessId: string): string { return generationPath(root, generation, `links.${businessToken(businessId)}.exact.data`); }
 
 type ExactLinkIndexEntry = { familyHash: string; familyKey?: string; status: string; normalizedValue: string; offset: number; length: number };
 type ExactLinkIndex = {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   mergeAlgorithmVersion: "identity-links-merge-v1";
   orderAlgorithmVersion: "identity-links-order-v1";
   businessId: string;
   entries: ExactLinkIndexEntry[];
+  descriptorDirectory?: PageBoundary[];
 };
-type ExactLinkIndexDisk = Omit<ExactLinkIndex, "entries"> & { entries: Array<[string, string, string, string, number, number]> };
 type Tuple = readonly string[];
 type PageBoundary = { first: string[]; last: string[] };
 type IndexedSummary = { schemaVersion: 2; kind: "identity-reviews" | "identity-links"; businessId: string; total: number; bucketTotals: Record<string, number>; directories: Record<string, PageBoundary[]>; fingerprint?: string };
@@ -435,16 +436,19 @@ async function writeLinkIndexes(root: string, generation: string, values: Stored
       dataParts.push(body);
       offset += length;
     }
-    const index: ExactLinkIndexDisk = {
-      schemaVersion: 2,
+    const descriptors = [...entries].sort((left, right) => compareOrdinal(left.familyHash, right.familyHash) || compareOrdinal(left.familyKey!, right.familyKey!));
+    const descriptorPages = chunks(descriptors);
+    const index = {
+      schemaVersion: 3,
       mergeAlgorithmVersion: "identity-links-merge-v1",
       orderAlgorithmVersion: "identity-links-order-v1",
       businessId,
-      entries: entries.map((entry) => [entry.familyHash, entry.familyKey!, entry.status, entry.normalizedValue, entry.offset, entry.length]),
+      descriptorDirectory: descriptorPages.map((page) => ({ first: [page[0]!.familyHash, page[0]!.familyKey!], last: [page.at(-1)!.familyHash, page.at(-1)!.familyKey!] })),
     };
     const indexBody = JSON.stringify(index);
     if (Buffer.byteLength(indexBody, "utf8") > maxIndexFileBytes) throw new Error("identity_storage_exact_index_too_large");
     await writeImmutable(exactLinkDataPath(root, generation, businessId), dataParts.join(""), io);
+    for (let pageNumber = 0; pageNumber < descriptorPages.length; pageNumber += 1) await writeImmutable(exactLinkDescriptorPagePath(root, generation, businessId, pageNumber), pageBody(descriptorPages[pageNumber]!.map((entry) => [entry.familyHash, entry.familyKey!, entry.status, entry.normalizedValue, entry.offset, entry.length])), io);
     await writeImmutable(exactLinkIndexPath(root, generation, businessId), indexBody, io);
   }
 }
@@ -528,8 +532,19 @@ function parsePage<T>(body: string | undefined): T[] {
 function parseExactLinkIndex(body: string | undefined, businessId: string): ExactLinkIndex | undefined {
   if (body === undefined) return undefined;
   const parsed = parseJson(body);
-  if (!plainRecord(parsed) || (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) || parsed.mergeAlgorithmVersion !== "identity-links-merge-v1"
-    || parsed.orderAlgorithmVersion !== "identity-links-order-v1" || parsed.businessId !== businessId || !Array.isArray(parsed.entries)) throw corrupt();
+  if (!plainRecord(parsed) || (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3) || parsed.mergeAlgorithmVersion !== "identity-links-merge-v1"
+    || parsed.orderAlgorithmVersion !== "identity-links-order-v1" || parsed.businessId !== businessId) throw corrupt();
+  if (parsed.schemaVersion === 3) {
+    if (!Array.isArray(parsed.descriptorDirectory)) throw corrupt();
+    let previous: string[] | undefined;
+    const descriptorDirectory = parsed.descriptorDirectory.map((raw) => {
+      if (!plainRecord(raw) || !Array.isArray(raw.first) || !Array.isArray(raw.last) || raw.first.length !== 2 || raw.last.length !== 2 || !raw.first.every((value) => typeof value === "string") || !raw.last.every((value) => typeof value === "string") || !/^[a-f0-9]{32}$/.test(raw.first[0] as string) || !/^[a-f0-9]{32}$/.test(raw.last[0] as string) || tupleCompare(raw.first as string[], raw.last as string[]) > 0 || (previous && tupleCompare(previous, raw.first as string[]) >= 0)) throw corrupt();
+      previous = raw.last as string[];
+      return { first: [...raw.first] as string[], last: [...raw.last] as string[] };
+    });
+    return { schemaVersion: 3, mergeAlgorithmVersion: "identity-links-merge-v1", orderAlgorithmVersion: "identity-links-order-v1", businessId, entries: [], descriptorDirectory };
+  }
+  if (!Array.isArray(parsed.entries)) throw corrupt();
   const entries: ExactLinkIndexEntry[] = [];
   let previousEnd = 0;
   for (const raw of parsed.entries) {
@@ -542,6 +557,35 @@ function parseExactLinkIndex(body: string | undefined, businessId: string): Exac
     previousEnd = (raw[v2 ? 4 : 3] as number) + (raw[v2 ? 5 : 4] as number);
   }
   return { schemaVersion: parsed.schemaVersion as 1 | 2, mergeAlgorithmVersion: "identity-links-merge-v1", orderAlgorithmVersion: "identity-links-order-v1", businessId, entries };
+}
+
+function parseDescriptorPage(body: string | undefined): ExactLinkIndexEntry[] {
+  const raw = parsePage<unknown[]>(body);
+  return raw.map((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 6 || typeof entry[0] !== "string" || !/^[a-f0-9]{32}$/.test(entry[0]) || typeof entry[1] !== "string" || typeof entry[2] !== "string" || typeof entry[3] !== "string" || !Number.isSafeInteger(entry[4]) || (entry[4] as number) < 0 || !Number.isSafeInteger(entry[5]) || (entry[5] as number) <= 0 || (entry[5] as number) > maxExactRecordBytes) throw corrupt();
+    return { familyHash: entry[0], familyKey: entry[1], status: entry[2], normalizedValue: entry[3], offset: entry[4] as number, length: entry[5] as number };
+  });
+}
+
+async function findExactLinkDescriptor(root: string, generation: string, businessId: string, index: ExactLinkIndex | undefined, familyKey: string, io: FileStorageHooks, cache?: Map<number, ExactLinkIndexEntry[]>): Promise<ExactLinkIndexEntry | undefined> {
+  if (!index) return undefined;
+  const familyHash = digest(familyKey);
+  if (index.schemaVersion !== 3) return index.entries.find((entry) => entry.familyHash === familyHash && entry.familyKey === familyKey);
+  const directory = index.descriptorDirectory ?? [];
+  let low = 0, high = directory.length;
+  while (low < high) { const mid = Math.floor((low + high) / 2); io.observeSeek?.({ pageNumber: mid, tuple: directory[mid]!.last }); if (tupleCompare(directory[mid]!.last, [familyHash, familyKey]) < 0) low = mid + 1; else high = mid; }
+  if (low >= directory.length || tupleCompare(directory[low]!.first, [familyHash, familyKey]) > 0) return undefined;
+  const filePath = exactLinkDescriptorPagePath(root, generation, businessId, low);
+  let entries = cache?.get(low);
+  let body: string | undefined;
+  if (!entries) {
+    body = await readText(filePath, io, { optional: false, maxBytes: maxIndexFileBytes, observe: false });
+    entries = parseDescriptorPage(body);
+    cache?.set(low, entries);
+  }
+  if (entries.length === 0 || entries.some((entry, position) => position > 0 && tupleCompare([entries[position - 1]!.familyHash, entries[position - 1]!.familyKey!], [entry.familyHash, entry.familyKey!]) >= 0) || tupleCompare([entries[0]!.familyHash, entries[0]!.familyKey!], directory[low]!.first) !== 0 || tupleCompare([entries.at(-1)!.familyHash, entries.at(-1)!.familyKey!], directory[low]!.last) !== 0) throw corrupt();
+  if (body !== undefined) io.observeRead?.({ filePath, bytes: Buffer.byteLength(body, "utf8"), records: 0 });
+  return entries.find((entry) => entry.familyHash === familyHash && entry.familyKey === familyKey);
 }
 
 async function readExactLinkRecords<T>(root: string, generation: string, businessId: string, entries: readonly ExactLinkIndexEntry[], io: FileStorageHooks): Promise<Map<string, T>> {
@@ -560,7 +604,7 @@ async function readExactLinkRecords<T>(root: string, generation: string, busines
       if (read.bytesRead !== entry.length) throw corrupt();
       const text = buffer.toString("utf8");
       const parsed = parseJson(text.trim());
-      if (!plainRecord(parsed) || digest(linkFamily(parsed as IndexedRecord)) !== entry.familyHash) throw corrupt();
+      if (!plainRecord(parsed) || digest(linkFamily(parsed as IndexedRecord)) !== entry.familyHash || (entry.familyKey !== undefined && (linkFamily(parsed as IndexedRecord) !== entry.familyKey || stringField(parsed as IndexedRecord, "normalizedValue") !== entry.normalizedValue || stringField(parsed as IndexedRecord, "status") !== entry.status))) throw corrupt();
       io.observeRead?.({ filePath, bytes: entry.length, records: 1 });
       result.set(entry.familyHash, parsed as T);
     }
@@ -622,7 +666,9 @@ class FileTransaction implements AtomicTransaction {
       const index = await loadExactLinkIndex(this.root, this.manifest.generation, physical.businessId, this.io);
       if (!index) return { items: [], origins: [], total: 0, groupTotals: {} };
       const requestedByHash = new Map(physical.families.slice(0, recordsPerPage).map((family) => [digest(family), family]));
-      const selectedEntries = index.entries.filter((entry) => requestedByHash.has(entry.familyHash)).slice(0, recordsPerPage);
+      const selectedEntries = index.schemaVersion === 3
+        ? (await Promise.all([...requestedByHash.values()].map((family) => findExactLinkDescriptor(this.root, this.manifest!.generation, physical.businessId, index, family, this.io)))).filter((entry): entry is ExactLinkIndexEntry => entry !== undefined)
+        : index.entries.filter((entry) => requestedByHash.has(entry.familyHash)).slice(0, recordsPerPage);
       const records = await readExactLinkRecords<T>(this.root, this.manifest.generation, physical.businessId, selectedEntries, this.io);
       const found: T[] = [];
       for (const entry of selectedEntries) {
@@ -645,37 +691,54 @@ class FileTransaction implements AtomicTransaction {
     }
     if (!options.collapseBy) return (await this.map()).scanPage("identity-links", options);
     const index = await loadExactLinkIndex(this.root, this.manifest!.generation, businessId, this.io);
-    if (index?.schemaVersion === 1) return (await this.map()).scanPage("identity-links", options);
-    const durableFamilies = new Set(index?.entries.map((entry) => entry.familyKey) ?? []);
+    if (index && index.schemaVersion !== 3) return (await this.map()).scanPage("identity-links", options);
     const configured = new Map<string, T>();
     for (const item of options.baseItems ?? []) {
       if (options.filter && !options.filter(item)) continue;
       const family = options.collapseBy(item);
-      if (durableFamilies.has(family)) continue;
       const current = configured.get(family);
       if (!current || (options.versionOf?.(item) ?? 0) > (options.versionOf?.(current) ?? 0)) configured.set(family, item);
     }
-    type Descriptor = { familyHash: string; familyKey: string; normalizedValue: string; origin: PageOrigin; item?: T; entry?: ExactLinkIndexEntry };
-    const descriptors: Descriptor[] = [];
+    type Candidate = { familyKey: string; normalizedValue: string; item: T };
+    const candidates: Candidate[] = [];
     for (const [familyKey, item] of configured) {
       if (options.visible && !options.visible(item)) continue;
       const normalizedValue = plainRecord(item) ? stringField(item as IndexedRecord, "normalizedValue") : "";
-      descriptors.push({ familyHash: digest(familyKey), familyKey, normalizedValue, origin: "base", item });
+      candidates.push({ familyKey, normalizedValue, item });
     }
-    for (const entry of index?.entries ?? []) if (entry.status === "approved" && entry.familyKey !== undefined) descriptors.push({ familyHash: entry.familyHash, familyKey: entry.familyKey, normalizedValue: entry.normalizedValue, origin: "stored", entry });
-    descriptors.sort((left, right) => compareOrdinal(left.normalizedValue, right.normalizedValue) || compareOrdinal(left.familyKey, right.familyKey));
+    candidates.sort((left, right) => compareOrdinal(left.normalizedValue, right.normalizedValue) || compareOrdinal(left.familyKey, right.familyKey));
     const after = options.after as unknown as IndexedRecord | undefined;
-    const strict = after === undefined ? descriptors : descriptors.filter((descriptor) => tupleCompare([descriptor.normalizedValue, descriptor.familyKey], [stringField(after, "normalizedValue"), stringField(after, "familyKey")]) > 0);
-    const selected = strict.slice(options.after === undefined ? options.offset ?? 0 : 0, (options.after === undefined ? options.offset ?? 0 : 0) + options.limit);
-    const storedEntries = selected.flatMap((descriptor) => descriptor.entry ? [descriptor.entry] : []);
-    const records = await readExactLinkRecords<T>(this.root, this.manifest!.generation, businessId, storedEntries, this.io);
+    const strict = after === undefined ? candidates : candidates.filter((candidate) => tupleCompare([candidate.normalizedValue, candidate.familyKey], [stringField(after, "normalizedValue"), stringField(after, "familyKey")]) > 0);
+    const configuredStart = options.after === undefined ? options.offset ?? 0 : 0;
+    // The current-link directory is the authoritative ordered stream: it includes
+    // tombstones, so a configured approval can be suppressed without probing every
+    // configured family through the hash table.
+    const durable = await readIndexedPage<T, After>({ businessId, selector: "current", options: { ...options, limit: options.limit + 1 }, io: this.io, summaryPath: linkSummaryPath(this.root, this.manifest!.generation, businessId), pagePath: (pageNumber) => linkPagePath(this.root, this.manifest!.generation, businessId, pageNumber), tuple: (item) => linkTuple(item as IndexedRecord), afterTuple: (cursor) => [stringField(cursor as unknown as IndexedRecord, "normalizedValue"), stringField(cursor as unknown as IndexedRecord, "familyKey")] });
+    const approvedSummary = parseSummary(await readText(approvedLinkSummaryPath(this.root, this.manifest!.generation, businessId), this.io, { optional: true, maxBytes: maxIndexFileBytes }), businessId);
     const items: T[] = [], origins: PageOrigin[] = [];
-    for (const descriptor of selected) {
-      const item = descriptor.item ?? records.get(descriptor.familyHash);
-      if (!item || (options.filter && !options.filter(item)) || (options.visible && !options.visible(item))) throw corrupt();
-      items.push(item); origins.push(descriptor.origin);
+    let suppressedConfigured = 0;
+    let configuredIndex = configuredStart, durableIndex = 0;
+    while (items.length < options.limit && (configuredIndex < strict.length || durableIndex < durable.items.length)) {
+      const base = strict[configuredIndex];
+      const stored = durable.items[durableIndex];
+      const baseTuple: string[] | undefined = base ? [base.normalizedValue, base.familyKey] : undefined;
+      const storedTuple: string[] | undefined = stored && plainRecord(stored) ? linkTuple(stored as IndexedRecord) : undefined;
+      const order = baseTuple && storedTuple ? tupleCompare(baseTuple, storedTuple) : baseTuple ? -1 : 1;
+      if (base && order <= 0) {
+        if (order < 0) { items.push(base.item); origins.push("base"); configuredIndex += 1; continue; }
+        configuredIndex += 1; durableIndex += 1; suppressedConfigured += 1;
+        if (options.visible && !options.visible(stored!)) continue;
+        if (options.filter && !options.filter(stored!)) throw corrupt();
+        items.push(stored!); origins.push("stored");
+        continue;
+      }
+      if (!stored || !storedTuple) throw corrupt();
+      durableIndex += 1;
+      if (options.filter && !options.filter(stored)) throw corrupt();
+      if (options.visible && !options.visible(stored)) continue;
+      items.push(stored); origins.push("stored");
     }
-    return { items: clone(items), origins, total: descriptors.length, groupTotals: {} };
+    return { items: clone(items), origins, total: configured.size + approvedSummary.total - suppressedConfigured, groupTotals: {} };
   }
   get changed(): boolean { return this.delegate?.changed ?? false; }
   async snapshot(): Promise<StoredRecord> { return (await this.map()).snapshot; }
