@@ -66,4 +66,14 @@ describe("createLocalAtomicReviewCountedApply", () => {
     await expect(createFileAtomicLocalStorage({ root }).read!(async (tx) => tx.get<Record<string, unknown>>("aggregate-ledger"))).resolves.toSatisfy((ledger) => Object.keys(ledger ?? {}).length === 1);
   });
 
+  it("fails closed when a counted replay has no matching durable ledger and operation", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    const action = { actionId: "corrupt-key", payloadFingerprint: "payload", action: "confirm_candidate" as const, targetProductId: "tire-a", outcome: "confirmed" as const, resolvedBy: "owner", resolvedAt: "2026-08-02T00:00:00.000Z", countResult: { kind: "applied" as const, eventId: "event-1", quantity: 2, result: { row: { eventId: "event-1" } }, eventFingerprint: "event-fingerprint", operationFingerprint: "operation-fingerprint", eventIdempotencyKey: "event-key", operationIdempotencyKey: "identity-review-count:review-corrupt" } };
+    await storage.transaction((tx) => tx.set("identity-reviews", [{ reviewId: "review-corrupt", businessId: "shop-a", importId: "import-1", rowId: "row-1", resolution: "confirmed", reviewAction: action, decision: { kind: "review", candidates: [], decisionFingerprint: "decision", decisionBasis: [], constraintOutcomes: [] } } ]));
+
+    const replay = await createLocalAtomicReviewCountedApply(storage)({ businessId: "shop-a", reviewId: "review-corrupt", actionId: "corrupt-key", payloadFingerprint: "payload", action: "confirm_candidate", resolution: "confirmed", resolvedBy: "owner" });
+
+    expect(replay).toEqual({ kind: "idempotency_conflict" });
+  });
+
 });

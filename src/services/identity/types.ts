@@ -265,7 +265,17 @@ export interface ReviewAction {
   resolvedBy: string;
   resolvedAt: string;
   /** Immutable response material for an exact later-count replay. */
-  countResult?: { kind: "applied" | "completed"; eventId: string; quantity: number; /** Exact immutable API result for an idempotent replay. */ result: unknown };
+  countResult?: {
+    kind: "applied" | "completed";
+    eventId: string;
+    quantity: number;
+    /** Exact immutable API result and fingerprints required to validate a durable replay. */
+    result: unknown;
+    eventFingerprint: string;
+    operationFingerprint: string;
+    eventIdempotencyKey: string;
+    operationIdempotencyKey: string;
+  };
 }
 
 export interface TenantIdentityProduct { productId: string; businessId: string; name: string; createdBy: string; createdAt: string; }

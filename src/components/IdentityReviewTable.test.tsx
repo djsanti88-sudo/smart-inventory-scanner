@@ -26,6 +26,20 @@ describe("IdentityReviewTable", () => {
     expect(screen.getByRole("button", { name: /next page/i })).toBeTruthy();
   });
 
+  it("renders the signed candidate display with product id secondary and never renders unallowlisted fields", async () => {
+    const displayed = { ...review, cost: "999.00", quantity: 44, notes: "secret note", decision: { ...review.decision, candidates: [{ ...review.decision.candidates[0]!, display: { label: "Roadmaster RM234", category: "Tire", attributes: { size: "225/65R17", season: "All Season", cost: "999.00", quantity: "44", notes: "secret note", unknown: "private" } } }] } };
+    vi.mocked(global.fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [displayed] }) } as Response);
+
+    render(<IdentityReviewTable businessId="shop-a" actorRole="admin" />);
+
+    expect(await screen.findByText("Roadmaster RM234")).toBeInTheDocument();
+    expect(screen.getByText("Tire")).toBeInTheDocument();
+    expect(screen.getByText(/size: 225\/65R17/i)).toBeInTheDocument();
+    expect(screen.getByText(/season: All Season/i)).toBeInTheDocument();
+    expect(screen.getByText("tire-a")).toBeInTheDocument();
+    expect(screen.queryByText(/999\.00|secret note|private|quantity: 44/i)).toBeNull();
+  });
+
   it("lets an admin confirm the selected candidate and reports completion", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
     fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ reviews: [review] }) }).mockResolvedValueOnce({ ok: true, json: async () => ({ review: { ...review, resolution: "confirmed" } }) });

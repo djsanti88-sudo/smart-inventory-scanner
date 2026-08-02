@@ -3,6 +3,7 @@ import { createIdentityReviewRoute } from "@/server/identity/reviewRoute";
 import { canonicalSha256 } from "@/services/identity/canonical";
 import { createMemoryAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
 import { createLocalAtomicReviewCountedApply } from "@/server/identity/localAtomicReviewCountedApply";
+import { createLocalRepository } from "@/server/identity/localRepository";
 
 const review = {
   reviewId: "review-1", businessId: "shop-a", importId: "import-1", rowId: "row-1",
@@ -95,6 +96,7 @@ describe("identity review route", () => {
     const { handler } = route({
       repository: { listIdentityReviews: vi.fn().mockResolvedValue([countedReview]), applyReviewAction } as never,
       atomicReviewApply,
+      configuredModel: vi.fn().mockResolvedValue({ hasCurrentTarget: vi.fn().mockResolvedValue(true), lookupApprovedLinks: vi.fn().mockResolvedValue([]) }),
     } as never);
 
     const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", headers: { "Idempotency-Key": "atomic-confirm" }, body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
@@ -115,6 +117,103 @@ describe("identity review route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ action: { actionId: "same-key" }, laterCount: { eventId: "event-1", quantity: 7 } });
     expect(currentModel).not.toHaveBeenCalled();
+  });
+
+  it("returns the persisted create product at the top level on an exact replay", async () => {
+    const payloadFingerprint = await canonicalSha256({ reviewId: "review-1", action: "create_tenant_product", targetProductId: "", name: "Roadmaster tire" });
+    const product = { productId: "tenant:stable", businessId: "shop-a", name: "Roadmaster tire", createdBy: "manager", createdAt: "2026-08-02T00:00:00.000Z" };
+    const stored = { ...review, resolution: "create_product" as const, reviewAction: { actionId: "create-key", payloadFingerprint, action: "create_tenant_product" as const, targetProductId: product.productId, productId: product.productId, product, outcome: "create_product" as const, resolvedBy: "manager", resolvedAt: product.createdAt } };
+    const currentVersions = vi.fn();
+    const { handler } = route({ repository: { listIdentityReviews: vi.fn(), getIdentityReview: vi.fn().mockResolvedValue(stored) } as never, currentVersions } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", headers: { "Idempotency-Key": "create-key" }, body: JSON.stringify({ businessId: "shop-a", action: "create_tenant_product", reviewId: "review-1", name: "Roadmaster tire" }) }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ product, action: { product } });
+    expect(currentVersions).not.toHaveBeenCalled();
+  });
+
+  it("returns a byte-for-byte stable create response from a fresh route without freshness reads", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    await storage.transaction((tx) => tx.set("identity-reviews", [review]));
+    const currentVersions = vi.fn().mockResolvedValue({ catalogVersion: "catalog-v1", linkVersion: "links-v1" });
+    const configuredModel = vi.fn().mockResolvedValue({ hasCurrentTarget: vi.fn().mockResolvedValue(false), lookupApprovedLinks: vi.fn().mockResolvedValue([]) });
+    const makeHandler = () => createIdentityReviewRoute({ enabled: () => true, authorize: vi.fn().mockResolvedValue({ actorId: "manager", businessId: "shop-a", role: "admin" }), repository: createLocalRepository(storage), currentVersions, configuredModel, atomicReviewApply: createLocalAtomicReviewCountedApply(storage, { writeProjection: async () => {} }) });
+    const request = () => new Request("http://local/api/identity/reviews", { method: "POST", headers: { "Idempotency-Key": "stable-create" }, body: JSON.stringify({ businessId: "shop-a", action: "create_tenant_product", reviewId: "review-1", name: "Stable tire" }) });
+
+    const first = await makeHandler()(request());
+    const firstBody = await first.json();
+    const retry = await makeHandler()(request());
+    const retryBody = await retry.json();
+
+    expect(first.status).toBe(200);
+    expect(retry.status).toBe(200);
+    expect(retryBody).toEqual(firstBody);
+    expect(retryBody.product).toEqual(firstBody.action.product);
+    expect(currentVersions).toHaveBeenCalledTimes(1);
+    expect(configuredModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a durable tombstone win a confirm race against configured authority", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    await storage.transaction(async (tx) => {
+      await tx.set("identity-reviews", [review]);
+      await tx.set("identity-links", [{ businessId: "shop-a", sourceSystem: "demo", sourceSignature: "demo-v1", vendorId: "vendor-a", identifierType: "vendor_sku", namespace: "vendor", rawValue: "SKU-1", normalizedValue: "SKU-1", targetProductId: "tire-a", status: "revoked", evidence: [], createdBy: "manager", createdAt: "2026-08-02T00:00:00.000Z", version: 2 }]);
+    });
+    const repository = createLocalRepository(storage);
+    const configuredModel = vi.fn().mockResolvedValue({ hasCurrentTarget: vi.fn().mockResolvedValue(true), lookupApprovedLinks: vi.fn().mockResolvedValue([{ businessId: "shop-a", sourceSystem: "demo", sourceSignature: "demo-v1", vendorId: "vendor-a", identifierType: "vendor_sku", namespace: "vendor", normalizedValue: "SKU-1", targetProductId: "tire-a", status: "approved", version: 1 }]) });
+    const { handler } = route({ repository, configuredModel, atomicReviewApply: createLocalAtomicReviewCountedApply(storage, { writeProjection: async () => {} }) } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "confirm_candidate", reviewId: "review-1", targetProductId: "tire-a" }) }));
+
+    expect(response.status).toBe(409);
+    await expect(repository.getIdentityReview("shop-a", "review-1")).resolves.not.toHaveProperty("resolution");
+  });
+
+  it("does not create a tenant product over a configured approved family", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    await storage.transaction((tx) => tx.set("identity-reviews", [review]));
+    const repository = createLocalRepository(storage);
+    const configuredModel = vi.fn().mockResolvedValue({ hasCurrentTarget: vi.fn().mockResolvedValue(false), lookupApprovedLinks: vi.fn().mockResolvedValue([{ businessId: "shop-a", sourceSystem: "demo", sourceSignature: "demo-v1", vendorId: "vendor-a", identifierType: "vendor_sku", namespace: "vendor", normalizedValue: "SKU-1", targetProductId: "configured-owner", status: "approved", version: 4 }]) });
+    const { handler } = route({ repository, configuredModel, atomicReviewApply: createLocalAtomicReviewCountedApply(storage, { writeProjection: async () => {} }) } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "create_tenant_product", reviewId: "review-1", name: "New tire" }) }));
+
+    expect(response.status).toBe(409);
+    await expect(repository.listTenantProducts("shop-a")).resolves.toEqual([]);
+  });
+
+  it("rolls a create back when a conflicting durable link wins the transaction race", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    await storage.transaction((tx) => tx.set("identity-reviews", [review]));
+    const repository = createLocalRepository(storage);
+    const currentVersions = vi.fn(async () => {
+      await storage.transaction((tx) => tx.set("identity-links", [{ businessId: "shop-a", sourceSystem: "demo", sourceSignature: "demo-v1", vendorId: "vendor-a", identifierType: "vendor_sku", namespace: "vendor", rawValue: "SKU-1", normalizedValue: "SKU-1", targetProductId: "race-winner", status: "approved", evidence: [], createdBy: "other", createdAt: "2026-08-02T00:00:00.000Z", version: 1 }]));
+      return { catalogVersion: "catalog-v1", linkVersion: "links-raced" };
+    });
+    const configuredModel = vi.fn().mockResolvedValue({ hasCurrentTarget: vi.fn().mockResolvedValue(false), lookupApprovedLinks: vi.fn().mockResolvedValue([]) });
+    const { handler } = route({ repository, currentVersions, configuredModel, atomicReviewApply: createLocalAtomicReviewCountedApply(storage, { writeProjection: async () => {} }) } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "create_tenant_product", reviewId: "review-1", name: "Racing tire" }) }));
+
+    expect(response.status).toBe(409);
+    await expect(repository.listTenantProducts("shop-a")).resolves.toEqual([]);
+    await expect(repository.getIdentityReview("shop-a", "review-1")).resolves.not.toHaveProperty("resolution");
+  });
+
+  it("resolves a review-bound revoke without writing a count operation, ledger, or projection", async () => {
+    const storage = createMemoryAtomicLocalStorage();
+    const counted = { ...review, signedRowContext: { mode: "physical_count" as const, quantity: 5, unitOfMeasure: "each" as const, sourceFileOrdinal: 0, sheetName: "Stock", sourceRowNumber: 2, sessionId: "session", eventCreatedAt: "2026-08-02T00:00:00.000Z", identifiers: [] } };
+    await storage.transaction(async (tx) => { await tx.set("identity-reviews", [counted]); await tx.set("identity-links", [{ businessId: "shop-a", sourceSystem: "demo", sourceSignature: "demo-v1", vendorId: "vendor-a", identifierType: "vendor_sku", namespace: "vendor", rawValue: "SKU-1", normalizedValue: "SKU-1", targetProductId: "tire-a", status: "approved", evidence: [], createdBy: "manager", createdAt: "2026-08-02T00:00:00.000Z", version: 1 }]); });
+    const repository = createLocalRepository(storage);
+    const writeProjection = vi.fn();
+    const { handler } = route({ repository, atomicReviewApply: createLocalAtomicReviewCountedApply(storage, { writeProjection }), currentModel: vi.fn().mockResolvedValue({ hasCurrentTarget: vi.fn().mockResolvedValue(true), lookupApprovedLinks: vi.fn().mockResolvedValue([]) }) } as never);
+
+    const response = await handler(new Request("http://local/api/identity/reviews", { method: "POST", body: JSON.stringify({ businessId: "shop-a", action: "revoke_link", reviewId: "review-1", targetProductId: "tire-a" }) }));
+
+    expect(response.status).toBe(200);
+    await expect(storage.read!(async (tx) => ({ operations: await tx.get("identity-operations"), ledger: await tx.get("aggregate-ledger") }))).resolves.toEqual({ operations: undefined, ledger: undefined });
+    expect(writeProjection).not.toHaveBeenCalled();
   });
 
   it("derives authorization from the server and refuses a counter action even when the request claims admin", async () => {
