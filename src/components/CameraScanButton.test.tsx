@@ -28,12 +28,7 @@ function onUnhandledRejection(event: PromiseRejectionEvent) {
   event.preventDefault();
 }
 
-function mockStream(): MediaStream {
-  const track = { stop: vi.fn(), kind: "video" } as unknown as MediaStreamTrack;
-  return { getTracks: () => [track] } as unknown as MediaStream;
-}
-
-// Same as mockStream(), but also returns the track so the test can assert track.stop() was called.
+// Also returns the track so the test can assert the camera hardware was released.
 function mockStreamWithTrack(): { stream: MediaStream; track: MediaStreamTrack } {
   const track = { stop: vi.fn(), kind: "video" } as unknown as MediaStreamTrack;
   const stream = { getTracks: () => [track] } as unknown as MediaStream;
@@ -80,7 +75,7 @@ describe("CameraScanButton", () => {
       capturedOnDetect!("6419440485331");
     });
 
-    expect(onScan).toHaveBeenCalledWith("6419440485331");
+    await waitFor(() => expect(onScan).toHaveBeenCalledWith("6419440485331"));
     expect(stopMock).toHaveBeenCalledTimes(1);
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -90,6 +85,23 @@ describe("CameraScanButton", () => {
 
     const input = screen.getByLabelText("Scan a code") as HTMLInputElement;
     await waitFor(() => expect(document.activeElement).toBe(input));
+  });
+
+  it("contains a rejected scan callback while closing the overlay and releasing the camera", async () => {
+    const { stream, track } = mockStreamWithTrack();
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: vi.fn(async () => stream) }, configurable: true });
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<><input id="scanner-input" aria-label="Scan a code" /><CameraScanButton onScan={() => Promise.reject(new Error("queue failed"))} /></>);
+
+    await userEvent.setup().click(screen.getByRole("button", { name: /scan with camera/i }));
+    await waitFor(() => expect(capturedOnDetect).not.toBeNull());
+    act(() => capturedOnDetect!("rejected-code"));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(report).toHaveBeenCalledWith("Camera scan submission failed.", expect.any(Error)));
+    expect(track.stop).toHaveBeenCalledTimes(1);
+    expect(unhandledRejections).toEqual([]);
+    report.mockRestore();
   });
 
   it("shows a plain-language message and releases the camera when the detector fails to load (e.g. offline polyfill fetch failure)", async () => {

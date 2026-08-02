@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useScanStore } from "@/stores/scanStore";
 import { useIsPlatformOwner } from "@/services/security/useAccessLevel";
@@ -14,7 +14,8 @@ import { VarianceReport } from "@/components/VarianceReport";
 import { SessionLockControl } from "@/components/SessionLockControl";
 import { SessionsList } from "@/components/SessionsList";
 import { planScanBatch } from "./planScan";
-import { runScanBatch, type ScanBatchProgress } from "./runScanBatch";
+import { type ScanBatchProgress } from "./runScanBatch";
+import { createScanSubmissionQueue } from "./scanSubmissionQueue";
 import { resolveRawScan } from "@/services/resolver";
 import { computeMoatStats } from "@/services/moatStats";
 
@@ -37,7 +38,19 @@ function ScanPageContent() {
 
   const [name, setName] = useState("");
   const [batchProgress, setBatchProgress] = useState<ScanBatchProgress | null>(null);
-  const mountedRef = useRef(true);
+  const [queueHolder] = useState(() => {
+    const holder: { mounted: boolean; queue?: ReturnType<typeof createScanSubmissionQueue<ReturnType<typeof processScan>>> } = { mounted: true };
+    holder.queue = createScanSubmissionQueue({
+      processScan,
+      chunkSize: 20,
+      onBulkStart: (progress) => { if (holder.mounted) setBatchProgress(progress); },
+      onBulkProgress: (progress) => { if (holder.mounted) setBatchProgress(progress); },
+      onBulkComplete: () => { if (holder.mounted) setBatchProgress(null); },
+      onError: ({ code, error }) => console.error(`Bulk scan failed for ${code}.`, error),
+    });
+    return holder;
+  });
+  const scanQueue = queueHolder.queue!;
   const location = useScanStore((s) => s.location);
   const setLocation = useScanStore((s) => s.setLocation);
   const recentLocations = useScanStore((s) => s.recentLocations);
@@ -64,20 +77,8 @@ function ScanPageContent() {
   const handleScan = (raw: string) => {
     const resolvesAsSingleCode = (code: string) => resolveRawScan(code, products, aliases, businessId).resolverStatus === "known";
     const codes = planScanBatch(raw, resolvesAsSingleCode);
-    if (codes.length === 0) return processScan(raw);
-    if (codes.length === 1) return processScan(codes[0]);
-    if (mountedRef.current) setBatchProgress({ processed: 0, total: codes.length });
-    return runScanBatch(codes, processScan, {
-      chunkSize: 1,
-      onProgress: (progress) => {
-        if (mountedRef.current) setBatchProgress(progress);
-      },
-      onError: ({ code, error }) => {
-        console.error(`Bulk scan failed for ${code}.`, error);
-      },
-    }).finally(() => {
-      if (mountedRef.current) setBatchProgress(null);
-    });
+    if (codes.length <= 1) return scanQueue.enqueueSingle(codes[0] ?? raw);
+    return scanQueue.enqueueBulk(codes);
   };
 
   // Learn which provider keys are configured (server-side) so unknown scans can auto-decode.
@@ -86,11 +87,10 @@ function ScanPageContent() {
   // session. A lightweight 60s poll lets a transient failure self-heal without user action; the
   // interval is cleared on unmount so it never leaks past this page.
   useEffect(() => {
-    mountedRef.current = true;
     return () => {
-      mountedRef.current = false;
+      queueHolder.mounted = false;
     };
-  }, []);
+  }, [queueHolder]);
 
   useEffect(() => {
     void refreshAiStatus();
@@ -183,18 +183,18 @@ function ScanPageContent() {
           <div className="grow">
             <ScannerInput onScan={handleScan} submitMode={settings.scannerSubmitMode} debounceMs={settings.scannerDebounceMs} />
             {batchProgress && (
-              <p
-                data-testid="bulk-scan-progress"
-                role="status"
-                aria-live="polite"
-                className="mt-2 text-sm font-semibold text-blue-800"
-              >
-                Processing {batchProgress.processed} of {batchProgress.total} scans...
-              </p>
+              <div className="mt-2 flex items-center gap-3">
+                <p data-testid="bulk-scan-progress" role="status" aria-live="polite" className="text-sm font-semibold text-blue-800">
+                  Processing {batchProgress.processed} of {batchProgress.total} scans...
+                </p>
+                <button type="button" data-testid="stop-bulk-scan" onClick={() => scanQueue.stopActiveBulk()} className="min-h-11 rounded border border-zinc-300 px-2 py-1 text-sm text-zinc-700 hover:bg-zinc-50">
+                  Stop remaining
+                </button>
+              </div>
             )}
           </div>
           <div className="shrink-0">
-            <CameraScanButton onScan={processScan} />
+            <CameraScanButton onScan={handleScan} />
           </div>
           {SHOW_CATEGORY && (
             <div className="flex flex-col gap-1">

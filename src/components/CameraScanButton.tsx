@@ -10,7 +10,7 @@ import { createCameraScanner } from "@/services/camera/cameraScanner";
 // scan path, never a separate one. Multi-trade copy: talks about "products", not any one trade.
 
 export interface CameraScanButtonProps {
-  onScan: (raw: string) => ScanEvent | null;
+  onScan: (raw: string) => void | ScanEvent | null | Promise<unknown>;
   // Element id to refocus after the overlay closes (defaults to the app's scan input id).
   refocusTargetId?: string;
 }
@@ -83,7 +83,9 @@ export function CameraScanButton({ onScan, refocusTargetId = "scanner-input" }: 
     }
 
     const scanner = createCameraScanner(video, (raw) => {
-      onScan(raw);
+      void Promise.resolve().then(() => onScan(raw)).catch((error: unknown) => {
+        console.error("Camera scan submission failed.", error);
+      });
       closeOverlay();
     });
     scannerRef.current = scanner;
@@ -154,7 +156,6 @@ export function CameraScanButton({ onScan, refocusTargetId = "scanner-input" }: 
             )}
 
             {state === "streaming" && (
-              // eslint-disable-next-line jsx-a11y/media-has-caption
               <video
                 ref={videoRef}
                 data-testid="camera-scan-video"

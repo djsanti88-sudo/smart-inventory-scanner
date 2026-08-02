@@ -33,9 +33,10 @@ describe("runScanBatch", () => {
       if (!release) throw new Error("batch did not request the next browser yield");
       release();
       await Promise.resolve();
+      await Promise.resolve();
     }
 
-    await expect(completion).resolves.toBe("code-101");
+    await expect(completion).resolves.toMatchObject({ last: "code-101", processed: 101, total: 101, cancelled: false });
     expect(processed).toEqual(codes);
     expect(new Set(processed).size).toBe(101);
     expect(progress.at(-1)).toEqual({ processed: 101, total: 101 });
@@ -46,7 +47,7 @@ describe("runScanBatch", () => {
     const processOne = vi.fn();
     const onProgress = vi.fn();
 
-    await expect(runScanBatch([], processOne, { onProgress })).resolves.toBeNull();
+    await expect(runScanBatch([], processOne, { onProgress })).resolves.toMatchObject({ last: null, processed: 0, total: 0, cancelled: false });
 
     expect(processOne).not.toHaveBeenCalled();
     expect(onProgress).toHaveBeenCalledWith({ processed: 0, total: 0 });
@@ -71,12 +72,31 @@ describe("runScanBatch", () => {
     );
 
     expect(processed).toEqual(["good-1", "good-2"]);
-    expect(result).toBe("good-2");
+    expect(result).toMatchObject({ last: "good-2", processed: 3, total: 3, cancelled: false });
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({
       code: "bad",
       index: 1,
       error: expect.any(Error),
     }));
+  });
+
+  it("stops future work after aborting at a chunk boundary without rolling back completed codes", async () => {
+    const controller = new AbortController();
+    const processed: string[] = [];
+    const completion = runScanBatch(
+      Array.from({ length: 101 }, (_, index) => `code-${index + 1}`),
+      (code) => processed.push(code),
+      {
+        chunkSize: 20,
+        signal: controller.signal,
+        yieldToBrowser: async () => {
+          if (processed.length >= 40) controller.abort();
+        },
+      },
+    );
+
+    await expect(completion).resolves.toMatchObject({ processed: 40, total: 101, cancelled: true });
+    expect(processed).toHaveLength(40);
   });
 });

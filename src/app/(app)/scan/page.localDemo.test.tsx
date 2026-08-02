@@ -97,14 +97,15 @@ describe("ScanPage local demo proof batch", () => {
       await Promise.resolve();
     });
 
-    expect(processScan).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("1 of 101");
+    expect(processScan).toHaveBeenCalledTimes(20);
+    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("20 of 101");
+    expect(screen.getByTestId("stop-bulk-scan")).toHaveAttribute("type", "button");
     expect(screen.getByTestId("start-session")).toBeDisabled();
     expect(screen.getByTestId("finish-session")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Clear session" })).toBeDisabled();
 
     await act(async () => {
-      for (let index = 0; index < 100; index += 1) {
+      for (let index = 0; index < 5; index += 1) {
         await vi.advanceTimersToNextTimerAsync();
       }
       await completion;

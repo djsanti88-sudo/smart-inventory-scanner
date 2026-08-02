@@ -30,7 +30,7 @@ const PANEL_STYLES: Record<ScanStatus, { border: string; bg: string; heading: st
 // that do not send Enter.
 
 export interface ScannerInputProps {
-  onScan: (raw: string) => ScanEvent | null | Promise<ScanEvent | null>;
+  onScan: (raw: string) => ScanEvent | null | void | Promise<unknown>;
   submitMode?: "enter" | "debounce" | "both";
   debounceMs?: number;
   disabled?: boolean;
@@ -50,9 +50,7 @@ export function ScannerInput({
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const readyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const submittingRef = useRef(false);
   const [lastResult, setLastResult] = useState<ScanEvent | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   // Brief green border flash on a successful (counted) scan; red shake on unknown/error.
   const [flash, setFlash] = useState<false | "success" | "error">(false);
   // Role-aware scan confirmation. platformOwner sees the technical detail (clean code + match type);
@@ -117,7 +115,6 @@ export function ScannerInput({
   }
 
   function submit() {
-    if (submittingRef.current) return;
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
       debounceTimer.current = null;
@@ -129,24 +126,19 @@ export function ScannerInput({
 
     el.value = "";
     const result = onScan(raw); // preserve the raw value exactly; cleaning happens downstream
-    if (result instanceof Promise) {
-      submittingRef.current = true;
-      setIsSubmitting(true);
-      void result
-        .then(showResult)
+    el.focus(); // Accept the next physical scan before queued work settles.
+    if (result && typeof (result as { then?: unknown }).then === "function") {
+      void Promise.resolve(result)
+        .then((value) => {
+          if (value && typeof value === "object" && "status" in value) showResult(value as ScanEvent);
+        })
         .catch((error: unknown) => {
           console.error("Bulk scan failed.", error);
-        })
-        .finally(() => {
-          submittingRef.current = false;
-          setIsSubmitting(false);
-          inputRef.current?.focus();
         });
       return;
     }
 
-    showResult(result);
-    el.focus(); // refocus so the next scan lands here
+    showResult(result as ScanEvent | null);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -199,8 +191,8 @@ export function ScannerInput({
         inputMode="text"
         autoComplete="off"
         spellCheck={false}
-        disabled={disabled || isSubmitting}
-        aria-busy={isSubmitting}
+        disabled={disabled}
+        aria-busy={false}
         autoFocus={autoFocus}
         placeholder="Scan or type a code"
         onKeyDown={handleKeyDown}

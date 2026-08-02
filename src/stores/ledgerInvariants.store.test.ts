@@ -3,6 +3,7 @@ import { createTestScanStore } from "@/stores/scanStore";
 import { MockDb } from "@/services/mockDb";
 import { replayLedgerCounts } from "@/services/inventory.replay";
 import type { ScanEvent } from "@/types";
+import { runScanBatch } from "@/app/(app)/scan/runScanBatch";
 
 type Store = ReturnType<typeof createTestScanStore>;
 
@@ -66,6 +67,31 @@ function aiOffStore(): Store {
 
 // ---- The paths -----------------------------------------------------------------------------------
 describe("Ledger invariant suite (books balance on every path)", () => {
+  it("keeps 101 physical bulk scans as distinct counted events and preserves the first 40 on Stop", async () => {
+    const complete = aiOffStore();
+    const code = "888888888882"; // unresolved identity still must count.
+    const completeResult = await runScanBatch(Array.from({ length: 101 }, () => code), complete.getState().processScan, {
+      chunkSize: 20,
+      yieldToBrowser: async () => {},
+    });
+    expect(completeResult).toMatchObject({ processed: 101, cancelled: false });
+    expect(complete.getState().scanFeed).toHaveLength(101);
+    expect(new Set(complete.getState().scanFeed.map((event) => event.id))).toHaveLength(101);
+    expect(complete.getState().finalCounts.reduce((sum, count) => sum + count.quantity, 0)).toBe(101);
+    assertBooksBalance(complete);
+
+    const stopped = aiOffStore();
+    const controller = new AbortController();
+    const stoppedResult = await runScanBatch(Array.from({ length: 101 }, () => code), stopped.getState().processScan, {
+      chunkSize: 20,
+      signal: controller.signal,
+      yieldToBrowser: async () => { if (stopped.getState().scanFeed.length >= 40) controller.abort(); },
+    });
+    expect(stoppedResult).toMatchObject({ processed: 40, cancelled: true });
+    expect(stopped.getState().scanFeed).toHaveLength(40);
+    expect(stopped.getState().finalCounts.reduce((sum, count) => sum + count.quantity, 0)).toBe(40);
+    assertBooksBalance(stopped);
+  });
   it("path: KNOWN (verified seed) scan", async () => {
     const store = aiOffStore();
     const s = store.getState();

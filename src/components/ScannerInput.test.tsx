@@ -63,7 +63,7 @@ describe("ScannerInput buffer", () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("keeps the page responsive and prevents duplicate submits while an async bulk scan is running", async () => {
+  it("stays enabled and accepts the next scan immediately while queued work is pending", async () => {
     let finishBatch!: (event: ScanEvent) => void;
     const onScan = vi.fn(
       () => new Promise<ScanEvent>((resolve) => {
@@ -77,10 +77,12 @@ describe("ScannerInput buffer", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(input.value).toBe("");
-    expect(input.disabled).toBe(true);
-    expect(input.getAttribute("aria-busy")).toBe("true");
+    expect(input.disabled).toBe(false);
+    expect(input.getAttribute("aria-busy")).toBe("false");
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "NEXT" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onScan).toHaveBeenCalledTimes(1);
+    expect(onScan).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       finishBatch(fakeEvent("CODE2"));
@@ -93,7 +95,7 @@ describe("ScannerInput buffer", () => {
     expect(screen.getByText("Added.")).toBeTruthy();
   });
 
-  it("consumes an async batch failure and re-enables the scanner", async () => {
+  it("contains an async batch failure without disabling or stealing scanner focus", async () => {
     const error = new Error("batch failed");
     const report = vi.spyOn(console, "error").mockImplementation(() => {});
     const onScan = vi.fn(() => Promise.reject(error));
@@ -102,7 +104,8 @@ describe("ScannerInput buffer", () => {
 
     fireEvent.change(input, { target: { value: "CODE1 CODE2" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(input.disabled).toBe(true);
+    expect(input.disabled).toBe(false);
+    expect(document.activeElement).toBe(input);
 
     await act(async () => {
       await Promise.resolve();
