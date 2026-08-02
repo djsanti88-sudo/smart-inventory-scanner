@@ -124,7 +124,11 @@ describe("ScanPage local demo proof batch", () => {
     vi.useFakeTimers();
     const processScan = mocks.storeState.processScan as ReturnType<typeof vi.fn>;
     processScan.mockReset();
-    processScan.mockImplementation((code: string) => ({ cleanCode: code }));
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    processScan.mockImplementation((code: string) => {
+      if (code === "cancel-3") throw new Error("not added");
+      return { cleanCode: code };
+    });
 
     render(<ScanPage />);
     if (!mocks.scannerOnScan) throw new Error("scanner callback was not mounted");
@@ -142,7 +146,7 @@ describe("ScanPage local demo proof batch", () => {
     });
 
     expect(screen.getByTestId("bulk-scan-outcome")).toHaveTextContent(
-      "Stopped after 20 of 101 scans. 81 remaining scans were not added.",
+      "Stopped after 20 of 101 scans. 19 were added, 1 failed, and 81 remaining scans were not added.",
     );
     expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
 
@@ -159,5 +163,31 @@ describe("ScanPage local demo proof batch", () => {
       await vi.advanceTimersToNextTimerAsync();
       await next;
     });
+    report.mockRestore();
+  });
+
+  it("announces the exact added and failed totals after a completed bulk", async () => {
+    vi.useFakeTimers();
+    const processScan = mocks.storeState.processScan as ReturnType<typeof vi.fn>;
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    processScan.mockReset();
+    processScan.mockImplementation((code: string) => {
+      if (code === "failed") throw new Error("not added");
+      return { cleanCode: code };
+    });
+
+    render(<ScanPage />);
+    if (!mocks.scannerOnScan) throw new Error("scanner callback was not mounted");
+    let completion!: Promise<unknown>;
+    await act(async () => {
+      completion = mocks.scannerOnScan!([...Array.from({ length: 20 }, (_, index) => `ok-${index}`), "failed"].join(" ")) as Promise<unknown>;
+      await vi.advanceTimersToNextTimerAsync();
+      await completion;
+    });
+
+    expect(screen.getByTestId("bulk-scan-outcome")).toHaveTextContent(
+      "Added 20 of 21 scans. 1 scan failed and was not added.",
+    );
+    report.mockRestore();
   });
 });

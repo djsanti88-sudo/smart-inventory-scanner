@@ -54,9 +54,17 @@ function ScanPageContent() {
         if (!holder.mounted) return;
         setBatchProgress(null);
         const remaining = result.total - result.processed;
-        setBatchOutcome(result.cancelled
-          ? `Stopped after ${result.processed} of ${result.total} scans. ${remaining} remaining scans were not added.`
-          : `Completed ${result.processed} scans.`);
+        const added = result.processed - result.failed;
+        if (result.cancelled) {
+          setBatchOutcome(result.failed > 0
+            ? `Stopped after ${result.processed} of ${result.total} scans. ${added} were added, ${result.failed} failed, and ${remaining} remaining scans were not added.`
+            : `Stopped after ${result.processed} of ${result.total} scans. ${remaining} remaining scans were not added.`);
+        } else {
+          const scanLabel = result.failed === 1 ? "scan" : "scans";
+          setBatchOutcome(result.failed > 0
+            ? `Added ${added} of ${result.total} scans. ${result.failed} ${scanLabel} failed and ${result.failed === 1 ? "was" : "were"} not added.`
+            : `Completed ${result.processed} scans.`);
+        }
       },
       onError: ({ code, error }) => console.error(`Bulk scan failed for ${code}.`, error),
     });
