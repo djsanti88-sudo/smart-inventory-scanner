@@ -2,12 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { rename, rm } from "node:fs/promises";
 import path from "node:path";
-import { applyIdentityImport } from "@/server/identity/applyService";
 import { createFileAtomicLocalStorage } from "@/server/identity/atomicLocalStorage";
 import { createLocalAtomicBatchApply } from "@/server/identity/localAtomicBatchApply";
 import { writeLocalInventoryProjection } from "@/server/identity/localInventoryProjection";
-import { createLocalAggregateLedger } from "@/server/identity/localAggregateLedger";
-import { createLocalRepository } from "@/server/identity/localRepository";
+import { applyComposedIdentityImport, setLocalIdentityApplyCompositionForTest } from "@/server/identity/applyComposition";
 import { createLocalPreviewSigner } from "@/server/identity/previewSigner";
 import { createIdentityPreview, verifySignedPreviewChunks } from "@/services/identity/preview";
 import type { IdentityCandidate, IdentityCandidateSource, IdentityInput } from "@/services/identity/types";
@@ -26,6 +24,7 @@ const signingKey = Buffer.alloc(32, 17).toString("base64url");
 const roots: string[] = [];
 
 afterEach(async () => {
+  setLocalIdentityApplyCompositionForTest(undefined);
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -77,7 +76,6 @@ describe("durable local identity apply scale", () => {
         replace: async (tempPath, statePath) => { generationCommits += 1; await rename(tempPath, statePath); },
       },
     });
-    const repository = createLocalRepository(storage);
     const signer = await createLocalPreviewSigner(signingKey);
     const rows = Array.from({ length: 3_000 }, (_, index) => input(index));
     const source: IdentityCandidateSource = {
@@ -104,28 +102,31 @@ describe("durable local identity apply scale", () => {
     const signedChunks = await verifySignedPreviewChunks(preview.signedPayloads, signer, signedAt, { actorId: actor.actorId, businessId: actor.businessId, versions });
     const firstSignedRowId = signedChunks[0]?.rowIds[0];
     expect(firstSignedRowId).toBeTypeOf("string");
-    const atomic = createLocalAtomicBatchApply(storage, async (row) => {
-      revalidations += 1;
-      const validation = row.validation as { targetProductId?: string } | undefined;
-      return validation?.targetProductId === target.productId;
-    }, {
-      writeProjection: async (transaction, entries, businessId, sessionId) => {
-        projectionWrites += 1;
-        return writeLocalInventoryProjection(transaction, entries, businessId, sessionId);
+    setLocalIdentityApplyCompositionForTest({
+      storage,
+      signingKey: () => signingKey,
+      versions,
+      now: () => new Date(signedAt),
+      authenticate: async () => actor,
+      // Fixed server-owned target read model: every new row must validate this exact product.
+      revalidateCountableTarget: async (validation) => {
+        revalidations += 1;
+        return validation.targetProductId === target.productId;
+      },
+      createAtomicBatchForTest: (composedStorage, revalidate) => {
+        const atomic = createLocalAtomicBatchApply(composedStorage, revalidate, {
+          writeProjection: async (transaction, entries, businessId, sessionId) => {
+            projectionWrites += 1;
+            return writeLocalInventoryProjection(transaction, entries, businessId, sessionId);
+          },
+        });
+        return async (batch) => {
+          batchCommits += 1;
+          return atomic(batch);
+        };
       },
     });
-    const apply = async () => applyIdentityImport({ signedPayloads: preview.signedPayloads, mode: "physical_count", corrections: [] }, {
-      repository,
-      ledger: createLocalAggregateLedger(storage),
-      verifier: (payloads, now, expected) => verifySignedPreviewChunks(payloads, signer, now, expected),
-      source: { versions, revalidateCountableTarget: async () => true },
-      atomicBatch: async (batch) => {
-        batchCommits += 1;
-        return atomic(batch);
-      },
-      clock: () => signedAt,
-      actor,
-    });
+    const apply = () => applyComposedIdentityImport({ signedPayloads: preview.signedPayloads, mode: "physical_count", corrections: [] }, actor);
 
     const started = performance.now();
     const first = await apply();
@@ -142,6 +143,9 @@ describe("durable local identity apply scale", () => {
     await storage.read!(async (transaction) => {
       const ledger = await transaction.get<Record<string, unknown>>("aggregate-ledger");
       expect(Object.keys(ledger ?? {})).toHaveLength(3_000);
+      const projections = await transaction.get<Record<string, Array<{ productId: string; quantity: number }>>>("inventory-count-projection");
+      const projection = Object.values(projections ?? {}).flat();
+      expect(projection).toEqual([expect.objectContaining({ productId: target.productId, quantity: 3_000 })]);
     });
 
     const beforeReplay = { generationCommits, revalidations, projectionWrites, batchCommits };
