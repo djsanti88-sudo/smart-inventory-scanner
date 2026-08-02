@@ -45,7 +45,7 @@ function findLiteralExternalClientEgress(sourceRoot: string): string[] {
     return null;
   };
   const isLoopback = (hostname: string) => {
-    if (hostname === "localhost" || hostname === "::1") return true;
+    if (hostname === "localhost" || hostname === "::1" || hostname === "[::1]") return true;
     const octets = hostname.split(".");
     return octets.length === 4 &&
       octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255) &&
@@ -134,7 +134,7 @@ describe("local demo client egress scanner", () => {
 
   it("allows loopback literals and has no broad allowlist escape", () => {
     const root = createProject({
-      "app/page.tsx": '"use client"; fetch("http://127.0.0.1:3000"); new WebSocket("ws://localhost:3000");',
+      "app/page.tsx": '"use client"; fetch("http://127.0.0.1:3000"); fetch("http://[::1]:3000"); new WebSocket("ws://localhost:3000");',
     });
     expect(findLiteralExternalClientEgress(root)).toEqual([]);
   });
