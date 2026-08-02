@@ -89,7 +89,7 @@ import { buildPersistedScanState, type PersistableScanState } from "@/stores/sca
 import { createAsyncDurablePersistStorage, createNativeIndexedDbDatabase, setBrowserPersistenceStatus, type PersistenceClearResult } from "@/stores/scanPersistStorage";
 import { emptyTenantState } from "@/stores/scanReset";
 import { clearSelectedBusinessId } from "@/lib/selectedBusiness";
-import { adoptLegacyPersistedState, persistKeyForUid, type LegacyAdoptionResult } from "@/stores/scanPersistNamespace";
+import { adoptLegacyPersistedState, persistKeyForUid, releasePersistenceMutationBarrier, tryAcquirePersistenceMutationBarrier, type LegacyAdoptionResult } from "@/stores/scanPersistNamespace";
 import { getOrCreateDeviceId } from "@/services/deviceIdentity";
 import { shouldReuseSession, buildAutoSessionName } from "@/services/sessions/autoSession";
 import { buildDiscoveredIdentifiers } from "@/services/discoveredIdentifiers";
@@ -553,6 +553,9 @@ const enrichInFlight = new Set<string>();
 // schedule a persisted snapshot. resetForSignOut uses this generation to detect more than feed edits:
 // async product enrichment, queue reconciliation, settings, and every other persisted-state update.
 let appPersistMutationEpoch = 0;
+// UID names are intentionally stable across a shop/business switch. This separate in-memory
+// context token prevents a queued old-business snapshot from committing under that same UID key.
+let appPersistContextEpoch = 0;
 
 function provisionalPlaceholderName(code: string): string {
   const ct = detectCodeType(code);
@@ -1571,6 +1574,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
             lastSyncError: null,
           });
         } else {
+          appPersistContextEpoch += 1;
           // Isolation: settings/needsReviewQueue/scanFeed are NOT returned by loadBusinessData and
           // finalCounts linger when no session restores, so a context switch must REPLACE all four or
           // the previous tenant's rows bleed through (two users OR one user with two businesses).
@@ -1770,6 +1774,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       resetForSignOut: () => {
+        const barrier = tryAcquirePersistenceMutationBarrier();
+        if (!barrier) return Promise.resolve({ cleared: false, authority: "none" } as const);
         const finishReset = () => {
           // Re-point persist at the anon key only AFTER the signed-in namespace has been authoritatively
           // cleared. Firebase's own SDK auth persistence is cleared by fbSignOut (auth.ts:66-69) in the
@@ -1825,6 +1831,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // switch to anon or discard its in-memory tenant state.
         if (!deps.persistName) {
           finishReset();
+          releasePersistenceMutationBarrier(barrier);
           return Promise.resolve({ cleared: true, authority: "none" } as const);
         }
         const persistMutationEpochAtClearStart = appPersistMutationEpoch;
@@ -1839,7 +1846,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           }
           finishReset();
           return persistenceClear;
-        });
+        }).finally(() => releasePersistenceMutationBarrier(barrier));
       },
 
       rehydrateForUid: (uid: string) => {
@@ -1848,6 +1855,7 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         // adopting the pre-account blob is an explicit owner action (adoptLegacyLocalData), never an
         // automatic side effect of signing in (shared-browser inheritance hazard).
         if (!deps.persistName) return Promise.resolve(); // non-persisted test store: nothing to re-point
+        appPersistContextEpoch += 1;
         const persistApi = (useScanStore as unknown as {
           persist?: { setOptions: (o: { name: string }) => void; rehydrate: () => Promise<void> | void };
         }).persist;
@@ -6849,6 +6857,8 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
       },
 
       clearLocalCache: () => {
+        const barrier = tryAcquirePersistenceMutationBarrier();
+        if (!barrier) return Promise.resolve({ cleared: false, authority: "none" } as const);
         // Clear ONLY browser-local data. In CLOUD mode we must NEVER call db.reset() (FirebaseSyncTarget
         // guards against a destructive cloud wipe and throws) and must NEVER reseed mock data over the
         // real cloud catalog - the cloud data re-loads on the next page load. In MOCK mode, reset the
@@ -6890,6 +6900,10 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
           const fresh = getSeed();
           set({ ...common, products: fresh.products, aliases: fresh.aliases });
         }
+        // The reset schedules a persistence snapshot synchronously. Invalidate that snapshot before
+        // the destructive clear so it cannot recreate this namespace after the clear completes.
+        // Any later deliberate mutation captures the new context and is allowed to persist normally.
+        appPersistContextEpoch += 1;
         // Remove the fallback copy synchronously for immediate Clear-local-cache feedback. The durable
         // remove just below remains the authority for IndexedDB and is serialized after this reset write.
         if (typeof window !== "undefined") {
@@ -6901,7 +6915,13 @@ export function buildScanInitializer(deps: ScanStoreDeps) {
         }
         // The reset above invokes Zustand persistence. Clear LAST so that reset snapshot cannot
         // resurrect the namespace after an otherwise successful clear.
-        return get().clearPersistedState();
+        const epochAfterIntentionalReset = appPersistMutationEpoch;
+        return get().clearPersistedState().then((result) => {
+          if (!result.cleared || appPersistMutationEpoch !== epochAfterIntentionalReset) {
+            return { ...result, cleared: false };
+          }
+          return result;
+        }).finally(() => releasePersistenceMutationBarrier(barrier));
       },
 
       applyCleanupSelections: (selectedCountIds) => {
@@ -7493,6 +7513,8 @@ const scanPersistStorage = createAsyncDurablePersistStorage<Record<string, unkno
     try { return window.localStorage; } catch { return null; }
   },
   onStatusChange: setBrowserPersistenceStatus,
+  getWriteContext: () => appPersistContextEpoch,
+  isWriteContextCurrent: (context) => context === appPersistContextEpoch,
 });
 
 export const useScanStore = create<ScanState>()(

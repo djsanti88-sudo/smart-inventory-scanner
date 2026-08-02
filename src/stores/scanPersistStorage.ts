@@ -33,6 +33,10 @@ type AsyncDurableStorageOptions = {
   database: AsyncKeyValueDatabase | null;
   getLegacyStorage: () => Backing | null;
   onStatusChange?: (status: PersistenceStatus) => void;
+  /** Store-owned tenant/context generation captured with each scheduled snapshot. */
+  getWriteContext?: () => unknown;
+  /** Reject a snapshot when its tenant context was replaced before durable commit. */
+  isWriteContextCurrent?: (context: unknown) => boolean;
 };
 
 type AsyncDurablePersistStorageOptions = AsyncDurableStorageOptions & {
@@ -237,6 +241,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     scheduledAt: number;
     intentId: string;
     intentWrite: Promise<boolean>;
+    context: unknown;
     resolvers: Array<() => void>;
     scheduled: boolean;
   }>();
@@ -491,7 +496,11 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     scheduledAt: number,
     intentId: string,
     intentWrite: Promise<boolean>,
+    context: unknown,
   ) => {
+    // Context is an authority boundary, not just a durable-commit guard: a stale snapshot must
+    // not update the local fallback either, or it can resurrect after a clear or tenant switch.
+    if (options.isWriteContextCurrent && !options.isWriteContextCurrent(context)) return;
     // When recovering from a prior fallback, update its payload first. A crash on either side of the
     // IndexedDB commit then leaves the same newest snapshot authoritative in at least one store.
     const existingLocalFallback = decodeAuthoritativePersistFallback(legacyGet(name));
@@ -724,6 +733,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       pending.scheduledAt,
       pending.intentId,
       pending.intentWrite,
+      pending.context,
     ))
       .then(() => pending.resolvers.forEach((resolve) => resolve()));
   };
@@ -737,6 +747,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
     // Capture authority evidence at the same moment as the snapshot. A coalesced newer snapshot
     // replaces both fields, so a delayed pre-clear payload can never borrow post-clear evidence.
     const observation = getSynchronousTombstoneEvidence(name);
+    const context = options.getWriteContext?.();
     const scheduledAt = causalNow();
     const pending = pendingWrites.get(name);
     if (pending) {
@@ -746,6 +757,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       pending.serialize = serialize;
       pending.observation = observation;
       pending.scheduledAt = scheduledAt;
+      pending.context = context;
       pending.resolvers.push(resolve);
       return;
     }
@@ -776,6 +788,7 @@ export function createAsyncDurableStorage(options: AsyncDurableStorageOptions): 
       scheduledAt,
       intentId,
       intentWrite,
+      context,
       resolvers: [resolve],
       scheduled: true,
     };

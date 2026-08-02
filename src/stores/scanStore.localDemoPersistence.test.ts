@@ -34,7 +34,7 @@ describe("local-demo scan persistence isolation", () => {
     expect(useScanStore.persist.getOptions().name).toBe(DEMO_KEY);
     expect(window.localStorage.getItem(NORMAL_KEY)).toBe(normalShopBlob);
 
-    useScanStore.getState().clearLocalCache();
+    await useScanStore.getState().clearLocalCache();
     expect(window.localStorage.getItem(NORMAL_KEY)).toBe(normalShopBlob);
     expect(window.localStorage.getItem(DEMO_KEY)).toBeNull();
   });

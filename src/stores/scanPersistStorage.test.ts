@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAsyncDurablePersistStorage, createAsyncDurableStorage, createNativeIndexedDbDatabase, getAuthoritativePersistFallback, getPersistedStatePresence, getPersistedStatePresenceFromDatabase, type AsyncKeyValueDatabase } from "@/stores/scanPersistStorage";
-import { createLegacyAdoptionOperations } from "@/stores/scanPersistNamespace";
+import { createLegacyAdoptionOperations, releasePersistenceMutationBarrier, tryAcquirePersistenceMutationBarrier } from "@/stores/scanPersistNamespace";
 
 class Db implements AsyncKeyValueDatabase {
   values = new Map<string, string>(); fail = false;
@@ -970,7 +970,46 @@ describe("active async persistence adapter", () => {
   });
 });
 
+describe("persistence context generations", () => {
+  it("rejects an A snapshot delayed before durable commit after the same uid switches to B", async () => {
+    const database = new Db();
+    let context = "A";
+    const storage = createAsyncDurableStorage({
+      database,
+      getLegacyStorage: () => legacy(),
+      getWriteContext: () => context,
+      isWriteContextCurrent: (token) => token === context,
+    });
+
+    const stale = storage.setItem("sis-scan-owner", "A feed A-count A-review A-raw-code");
+    context = "B";
+    await stale;
+
+    expect(await database.get("sis-scan-owner")).toBeNull();
+  });
+});
+
 describe("durable legacy adoption", () => {
+  it("does not consume the anonymous snapshot while a destructive clear owns the mutation barrier", async () => {
+    const db = new Db();
+    const source = JSON.stringify({ state: { scanFeed: [{ id: "legacy" }] }, version: 8 });
+    await db.set("sis-scan-v1", source);
+    const operations = createLegacyAdoptionOperations({
+      database: db,
+      createStorage: () => createAsyncDurableStorage({ database: db, getLegacyStorage: () => null }),
+      getPresence: (name) => getPersistedStatePresenceFromDatabase(name, db),
+    });
+    const clearBarrier = tryAcquirePersistenceMutationBarrier();
+    expect(clearBarrier).not.toBeNull();
+    try {
+      await expect(operations.adopt("owner")).resolves.toEqual({ status: "target-exists" });
+      expect(await db.get("sis-scan-v1")).toBe(source);
+      expect(await db.get("sis-scan-owner")).toBeNull();
+    } finally {
+      releasePersistenceMutationBarrier(clearBarrier!);
+    }
+  });
+
   it("adopts a durable-only anonymous snapshot after normalizing zero-delta scans", async () => {
     const db = new Db();
     const source = JSON.stringify({

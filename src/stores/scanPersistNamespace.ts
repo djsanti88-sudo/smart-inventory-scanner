@@ -15,6 +15,22 @@ import {
 const LEGACY_KEY = "sis-scan-v1";
 const LOCAL_DEMO_KEY = "sis-local-demo-scan-v1";
 
+// One in-tab linearization point for durable adoption and destructive store operations.
+// It is intentionally transient: IndexedDB remains the cross-tab authority.
+let persistenceMutationBarrier: symbol | null = null;
+export function tryAcquirePersistenceMutationBarrier(): symbol | null {
+  if (persistenceMutationBarrier) return null;
+  const token = Symbol("scan-persist-mutation");
+  persistenceMutationBarrier = token;
+  return token;
+}
+export function releasePersistenceMutationBarrier(token: symbol): void {
+  if (persistenceMutationBarrier === token) persistenceMutationBarrier = null;
+}
+export function ownsPersistenceMutationBarrier(token: symbol): boolean {
+  return persistenceMutationBarrier === token;
+}
+
 export type LegacyAdoptionResult =
   | { status: "adopted" }
   | { status: "absent" }
@@ -75,6 +91,9 @@ export function createLegacyAdoptionOperations(options: LegacyAdoptionOptions): 
     const existing = inFlight.get(uid);
     if (existing) return existing;
     const operation = (async (): Promise<LegacyAdoptionResult> => {
+      const barrier = tryAcquirePersistenceMutationBarrier();
+      if (!barrier) return { status: "target-exists" };
+      try {
       const sourcePresence = await inspect();
       if (sourcePresence === "unavailable") return { status: "unavailable" };
       if (sourcePresence === "absent") return { status: "absent" };
@@ -97,12 +116,18 @@ export function createLegacyAdoptionOperations(options: LegacyAdoptionOptions): 
         if (await options.getPresence(targetKey) !== "found" || await options.database.get(targetKey) !== normalized) {
           return { status: "unavailable" };
         }
+        // A destructive operation may have won after a delayed reservation. Never consume
+        // anonymous source unless this adoption still owns the shared linearization point.
+        if (!ownsPersistenceMutationBarrier(barrier)) return { status: "unavailable" };
         await storage.removeItem(LEGACY_KEY);
         if (await storage.getItem(LEGACY_KEY) !== null || await inspect() !== "absent") return { status: "unavailable" };
       } catch {
         return { status: "unavailable" };
       }
       return { status: "adopted" };
+      } finally {
+        releasePersistenceMutationBarrier(barrier);
+      }
     })();
     inFlight.set(uid, operation);
     void operation.finally(() => inFlight.delete(uid));
