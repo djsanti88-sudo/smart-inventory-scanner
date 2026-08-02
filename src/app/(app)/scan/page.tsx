@@ -38,14 +38,26 @@ function ScanPageContent() {
 
   const [name, setName] = useState("");
   const [batchProgress, setBatchProgress] = useState<ScanBatchProgress | null>(null);
+  const [batchOutcome, setBatchOutcome] = useState<string | null>(null);
   const [queueHolder] = useState(() => {
     const holder: { mounted: boolean; queue?: ReturnType<typeof createScanSubmissionQueue<ReturnType<typeof processScan>>> } = { mounted: true };
     holder.queue = createScanSubmissionQueue({
       processScan,
       chunkSize: 20,
-      onBulkStart: (progress) => { if (holder.mounted) setBatchProgress(progress); },
+      onBulkStart: (progress) => {
+        if (!holder.mounted) return;
+        setBatchOutcome(null);
+        setBatchProgress(progress);
+      },
       onBulkProgress: (progress) => { if (holder.mounted) setBatchProgress(progress); },
-      onBulkComplete: () => { if (holder.mounted) setBatchProgress(null); },
+      onBulkComplete: (result) => {
+        if (!holder.mounted) return;
+        setBatchProgress(null);
+        const remaining = result.total - result.processed;
+        setBatchOutcome(result.cancelled
+          ? `Stopped after ${result.processed} of ${result.total} scans. ${remaining} remaining scans were not added.`
+          : `Completed ${result.processed} scans.`);
+      },
       onError: ({ code, error }) => console.error(`Bulk scan failed for ${code}.`, error),
     });
     return holder;
@@ -191,6 +203,16 @@ function ScanPageContent() {
                   Stop remaining
                 </button>
               </div>
+            )}
+            {batchOutcome && (
+              <p
+                data-testid="bulk-scan-outcome"
+                role="status"
+                aria-live="polite"
+                className="mt-2 text-sm font-semibold text-zinc-700"
+              >
+                {batchOutcome}
+              </p>
             )}
           </div>
           <div className="shrink-0">

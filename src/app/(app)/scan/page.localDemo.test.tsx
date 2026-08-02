@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -114,7 +114,50 @@ describe("ScanPage local demo proof batch", () => {
     expect(processScan).toHaveBeenCalledTimes(101);
     expect(processScan.mock.calls.map(([code]) => code)).toEqual(codes);
     expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
+    expect(screen.getByTestId("bulk-scan-outcome")).toHaveTextContent("Completed 101 scans.");
+    expect(screen.getByTestId("bulk-scan-outcome")).toHaveAttribute("aria-live", "polite");
     expect(screen.getByTestId("start-session")).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Clear session" })).not.toBeDisabled();
+  });
+
+  it("persists an exact cancellation announcement and clears it when the next bulk starts", async () => {
+    vi.useFakeTimers();
+    const processScan = mocks.storeState.processScan as ReturnType<typeof vi.fn>;
+    processScan.mockReset();
+    processScan.mockImplementation((code: string) => ({ cleanCode: code }));
+
+    render(<ScanPage />);
+    if (!mocks.scannerOnScan) throw new Error("scanner callback was not mounted");
+
+    let cancelled!: Promise<unknown>;
+    await act(async () => {
+      cancelled = mocks.scannerOnScan!(Array.from({ length: 101 }, (_, index) => `cancel-${index}`).join(" ")) as Promise<unknown>;
+      await Promise.resolve();
+    });
+    expect(processScan).toHaveBeenCalledTimes(20);
+    fireEvent.click(screen.getByRole("button", { name: "Stop remaining" }));
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+      await cancelled;
+    });
+
+    expect(screen.getByTestId("bulk-scan-outcome")).toHaveTextContent(
+      "Stopped after 20 of 101 scans. 81 remaining scans were not added.",
+    );
+    expect(screen.queryByTestId("bulk-scan-progress")).toBeNull();
+
+    let next!: Promise<unknown>;
+    await act(async () => {
+      next = mocks.scannerOnScan!(Array.from({ length: 21 }, (_, index) => `next-${index}`).join(" ")) as Promise<unknown>;
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId("bulk-scan-outcome")).toBeNull();
+    expect(screen.getByTestId("bulk-scan-progress")).toHaveTextContent("20 of 21");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop remaining" }));
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+      await next;
+    });
   });
 });
