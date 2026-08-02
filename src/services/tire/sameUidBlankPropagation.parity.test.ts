@@ -54,7 +54,7 @@ describe("same-UID repair size normalizer parity", () => {
     try {
       const tableNames = ["tires", "canonical_tire_products", "remaining_blank_fill_audit", "provenance", "tire_part_numbers", "tire_product_part_number_aliases", "tire_barcode_aliases"];
       for (const db of [source, repaired]) {
-        expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row: { name: string }) => row.name)).toEqual(expect.arrayContaining(tableNames));
+        expect(db.prepare<[], { name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => row.name)).toEqual(expect.arrayContaining(tableNames));
       }
       expect(source.prepare("SELECT brand, model, size FROM tires WHERE barcode='blank'").get()).toEqual({ brand: "", model: "", size: "" });
       const result = runSameUidBlankPropagation(repaired.name);
@@ -71,7 +71,7 @@ describe("same-UID repair size normalizer parity", () => {
         { action: "backfill_from_same_canonical_uid_unique_value_v1:model", canonical_product_uid: "U1", barcode: "blank", previous_value: "", new_value: "Tormenta R/T", candidate_count: 1 },
         { action: "backfill_from_same_canonical_uid_unique_value_v1:size", canonical_product_uid: "U1", barcode: "blank", previous_value: "", new_value: "35x12.50r17", candidate_count: 1 },
       ]);
-      const donorSizes = source.prepare(`SELECT DISTINCT s.size FROM tires t JOIN tires s ON s.canonical_product_uid=t.canonical_product_uid WHERE TRIM(COALESCE(t.size,''))='' AND TRIM(COALESCE(s.size,''))<>'' ORDER BY s.size`).all().map((row: { size: string }) => row.size);
+      const donorSizes = source.prepare<[], { size: string }>(`SELECT DISTINCT s.size FROM tires t JOIN tires s ON s.canonical_product_uid=t.canonical_product_uid WHERE TRIM(COALESCE(t.size,''))='' AND TRIM(COALESCE(s.size,''))<>'' ORDER BY s.size`).all().map((row) => row.size);
       for (const value of [...donorSizes, "not a tire", "35X12.50R17JUNK", "235/40R19XL", "265/70R17", "245/65-17", "99X12.50R20", "11R99"]) {
         expect(nodeNormalize(value), value).toBe(normalizeTireSize(value));
       }

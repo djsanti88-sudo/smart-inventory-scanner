@@ -36,7 +36,7 @@ const REMEMBERED_MAPPING: ColumnMapping = { partNumber: 0, brand: 1, model: 2, s
 function foreignRealmArrayBuffer(value: string): ArrayBuffer {
   const frame = document.createElement("iframe");
   document.body.append(frame);
-  const foreignWindow = frame.contentWindow!;
+  const foreignWindow = frame.contentWindow! as Window & typeof globalThis;
   const bytes = new foreignWindow.TextEncoder().encode(value);
   frame.remove();
   return bytes.buffer;
