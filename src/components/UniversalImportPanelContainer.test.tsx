@@ -42,6 +42,25 @@ function foreignRealmArrayBuffer(value: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+function enforceCurrentRealmDigestBoundary(): void {
+  const realCrypto = crypto;
+  const realDigest = realCrypto.subtle.digest.bind(realCrypto.subtle);
+  const currentRealmArrayBuffer = ArrayBuffer;
+  const strictSubtle = Object.create(realCrypto.subtle) as SubtleCrypto;
+  Object.defineProperty(strictSubtle, "digest", {
+    value: async (algorithm: AlgorithmIdentifier, data: BufferSource) => {
+      const backingBuffer = ArrayBuffer.isView(data) ? data.buffer : data;
+      if (!(backingBuffer instanceof currentRealmArrayBuffer)) {
+        throw new TypeError("Failed to execute 'digest' on 'SubtleCrypto': second argument is not a current-realm BufferSource");
+      }
+      return realDigest(algorithm, data);
+    },
+  });
+  const strictCrypto = Object.create(realCrypto) as Crypto;
+  Object.defineProperty(strictCrypto, "subtle", { value: strictSubtle });
+  vi.stubGlobal("crypto", strictCrypto);
+}
+
 // Route-aware fetch stub: loadMapping (GET /api/import-mapping) responds per-test via
 // `mappingResponse`; matchRows (POST /api/reconcile/match) always returns exactly one
 // "review" match per posted row (buildImportPreview throws if match count != row count), so the
@@ -88,7 +107,7 @@ beforeEach(() => {
 });
 
 describe("UniversalImportPanelContainer - empty businessId (fresh signup, no membership yet)", () => {
-  it("DOM upload shapes all 5,000 rows then delegates once through the injected preview route without rendering 5,000 rows", async () => {
+  it("normalizes a foreign-realm upload before hashing and renders the 5,000-row identity preview", async () => {
     vi.stubEnv("NEXT_PUBLIC_LOCAL_HYBRID_IDENTITY_V1", "1");
     vi.stubEnv("NEXT_PUBLIC_LOCAL_IDENTITY_ROLE", "owner");
     const rows = Array.from({ length: fixture.rowCount }, (_, index) => [`PN-${index}`, String((index % fixture.buckets.length) + 1)]);
@@ -103,6 +122,7 @@ describe("UniversalImportPanelContainer - empty businessId (fresh signup, no mem
     }));
     const file = new File(["fixture"], "fixture.csv");
     Object.defineProperty(file, "arrayBuffer", { value: async () => foreignRealmArrayBuffer("fixture") });
+    enforceCurrentRealmDigestBoundary();
     render(<UniversalImportPanelContainer />);
     fireEvent.change(screen.getByTestId("universal-import-file"), { target: { files: [file] } });
     const panel = await screen.findByTestId("identity-preview");
